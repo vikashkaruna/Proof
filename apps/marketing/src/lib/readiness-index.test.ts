@@ -22,7 +22,7 @@ describe('Quarterly Readiness Index', () => {
     expect(index.sectorBenchmarkScore).toBe(72);
     expect(index.percentileRank).toBeLessThan(50);
     expect(index.status).toBe('lagging');
-    expect(index.quarterlyRoadmap[0].quarter).toContain('Q1');
+    expect(index.quarterlyRoadmap[0]?.quarter).toContain('Q1');
   });
 
   it('handles unknown or empty sector gracefully', () => {
