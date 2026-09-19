@@ -18,6 +18,9 @@ echo "1. Building static export for @axiom/marketing..."
 if [ -d "apps/marketing/src/app/api" ]; then
   mv "apps/marketing/src/app/api" "apps/marketing/src/app/_api_temp"
 fi
+if [ -d "apps/marketing/src/app/gap-scan/report" ]; then
+  mv "apps/marketing/src/app/gap-scan/report" "apps/marketing/src/app/gap-scan/_report_temp"
+fi
 
 BUILD_SUCCESS=0
 if pnpm --filter @axiom/marketing build:export; then
@@ -26,6 +29,9 @@ fi
 
 if [ -d "apps/marketing/src/app/_api_temp" ]; then
   mv "apps/marketing/src/app/_api_temp" "apps/marketing/src/app/api"
+fi
+if [ -d "apps/marketing/src/app/gap-scan/_report_temp" ]; then
+  mv "apps/marketing/src/app/gap-scan/_report_temp" "apps/marketing/src/app/gap-scan/report"
 fi
 
 if [ "$BUILD_SUCCESS" -ne 1 ]; then

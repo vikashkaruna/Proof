@@ -18,9 +18,8 @@ import { BRAND } from '@axiom/config';
 import { CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
 import { EmailReportAction } from '../email-report-action';
 
-export async function generateStaticParams() {
-  return [{ id: 'preview' }];
-}
+export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
 
 export default async function GapScanReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
