@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { GapScanSubmitSchema } from '@axiom/types';
 import { computeGapScanReport } from '@/lib/gap-scan-scoring';
+import { computeQuarterlyReadinessIndex } from '@/lib/readiness-index';
 import { saveGapScanSubmission } from '@/lib/gap-scan-store';
+import { sendGapScanReportEmail } from '@/lib/gap-scan-email';
 import { createHash, randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -9,7 +11,8 @@ export const runtime = 'nodejs';
 /**
  * Public gap-scan endpoint — anonymous, no auth required.
  * Computes a posture score + estimated exposure against the v0.1.0 control
- * library, persists the response, and returns the report ID.
+ * library, computes quarterly readiness index if requested, persists to database,
+ * sends transactional notification email, and returns report ID.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -44,6 +47,14 @@ export async function POST(request: Request) {
   const report = await computeGapScanReport(input.answers);
   const scanId = randomUUID();
 
+  // If user selected "Send me the quarterly readiness index (optional)", generate index
+  if (input.marketingConsent) {
+    report.readinessIndex = computeQuarterlyReadinessIndex(
+      input.sector || 'Other',
+      report.postureScore,
+    );
+  }
+
   const savedId = await saveGapScanSubmission({
     id: scanId,
     session_id: sessionHash,
@@ -58,18 +69,37 @@ export async function POST(request: Request) {
     estimated_exposure_inr: report.estimatedExposureInr,
     contact_name: input.contactName,
     contact_email: input.contactEmail,
+    contact_phone: input.contactPhone,
     contact_company: input.contactCompany,
     follow_up_requested: input.followUpRequested,
     marketing_consent: input.marketingConsent,
     created_at: new Date().toISOString(),
   });
 
+  // Automatically send report email if contactEmail was provided
+  let emailSent = false;
+  if (input.contactEmail?.trim()) {
+    const emailResult = await sendGapScanReportEmail({
+      report,
+      readinessIndex: report.readinessIndex,
+      contactName: input.contactName,
+      contactEmail: input.contactEmail.trim(),
+      contactPhone: input.contactPhone,
+      contactCompany: input.contactCompany,
+      reportId: savedId,
+    });
+    emailSent = emailResult.success;
+  }
+
   const response = NextResponse.json({
     id: savedId,
     postureScore: report.postureScore,
     estimatedExposureInr: report.estimatedExposureInr,
     findingsCount: report.findings.length,
+    readinessIndexGenerated: Boolean(report.readinessIndex),
+    emailSent,
   });
+
   const isLocalOrInsecure =
     process.env.ENVIRONMENT === 'local' ||
     process.env.ENVIRONMENT === 'development' ||

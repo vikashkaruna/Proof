@@ -24,7 +24,10 @@ export async function POST(request: Request) {
 
   const { name, email, company, message } = parsed.data;
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
-  const fromEmail = process.env.RESEND_FROM_EMAIL || 'Axiom Proof <onboarding@resend.dev>';
+  const fromEmail =
+    process.env.AXIOM_FROM_EMAIL ||
+    process.env.RESEND_FROM_EMAIL ||
+    'Axiom Proof <platform@axiomproof.ai>';
   const recipientEmail = process.env.CONTACT_RECIPIENT_EMAIL || BRAND.contactEmail;
 
   // If no Resend API key is configured (e.g. preprod, staging, demo, or local development)

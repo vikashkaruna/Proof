@@ -105,6 +105,7 @@ export function GapScanForm() {
   const [answers, setAnswers] = useState<Record<string, boolean>>({});
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [contactCompany, setContactCompany] = useState('');
   const [followUp, setFollowUp] = useState(true);
   const [marketingConsent, setMarketingConsent] = useState(false);
@@ -130,6 +131,7 @@ export function GapScanForm() {
           answers,
           contactName: followUp ? contactName : undefined,
           contactEmail: followUp ? contactEmail : undefined,
+          contactPhone: followUp ? contactPhone : undefined,
           contactCompany: followUp ? contactCompany : undefined,
           followUpRequested: followUp,
           marketingConsent,
@@ -337,6 +339,16 @@ export function GapScanForm() {
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                   placeholder="you@company.com"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cp">Phone</Label>
+                <Input
+                  id="cp"
+                  type="tel"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  placeholder="+91 98765 43210"
                 />
               </div>
               <div className="flex flex-col gap-1.5">

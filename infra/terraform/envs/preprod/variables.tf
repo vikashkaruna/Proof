@@ -120,6 +120,24 @@ variable "resend_api_key" {
   sensitive   = true
 }
 
+variable "axiom_from_email" {
+  description = "Sender email for automated notifications and reports"
+  type        = string
+  default     = "Axiom Proof <platform@axiomproof.ai>"
+}
+
+variable "axiom_sales_email" {
+  description = "Axiom sales recipient email"
+  type        = string
+  default     = "sales@axiomproof.ai"
+}
+
+variable "axiom_founder_email" {
+  description = "Axiom founder recipient email"
+  type        = string
+  default     = "founder@axiomminds.ai"
+}
+
 variable "contact_recipient_email" {
   description = "Recipient email address for founder contact inquiries"
   type        = string

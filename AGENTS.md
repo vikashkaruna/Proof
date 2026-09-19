@@ -142,3 +142,4 @@ terraform init && terraform plan && terraform apply
 | How does evidence sealing work?          | `packages/evidence/src/index.ts` + `infra/terraform/envs/prod/s3.tf`                            |
 | How does the model gateway decide?       | `services/model-gateway/src/model_gateway/router.py`                                            |
 | How do the E2E tests work?               | `tests/e2e/tests/*.spec.ts`                                                                     |
+| What is the architectural segregation?   | `.agents/skills/proof-architecture-segregation/SKILL.md`                                        |

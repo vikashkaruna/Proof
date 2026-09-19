@@ -87,9 +87,12 @@ const EnvSchema = z
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
     SENTRY_DSN: z.string().url().optional(),
 
-    // Resend Email Delivery
+    // Email Delivery (Resend)
     RESEND_API_KEY: z.string().optional(),
-    RESEND_FROM_EMAIL: z.string().default('Axiom Proof <onboarding@resend.dev>'),
+    AXIOM_FROM_EMAIL: z.string().default('Axiom Proof <platform@axiomproof.ai>'),
+    RESEND_FROM_EMAIL: z.string().default('Axiom Proof <platform@axiomproof.ai>'),
+    AXIOM_SALES_EMAIL: z.string().email().default('sales@axiomproof.ai'),
+    AXIOM_FOUNDER_EMAIL: z.string().email().default('founder@axiomminds.ai'),
     CONTACT_RECIPIENT_EMAIL: z.string().email().default('hello@axiomminds.ai'),
 
     // Feature flags
@@ -247,6 +250,18 @@ function normalizeEnv(source: NodeJS.ProcessEnv = process.env): Record<string, u
     norm.GCP_PROJECT_NUMBER = projectNumber;
   }
 
+  const fromEmail =
+    norm.AXIOM_FROM_EMAIL || norm.RESEND_FROM_EMAIL || 'Axiom Proof <platform@axiomproof.ai>';
+  norm.AXIOM_FROM_EMAIL = fromEmail;
+  norm.RESEND_FROM_EMAIL = fromEmail;
+
+  if (!norm.AXIOM_SALES_EMAIL && norm.SALES_EMAIL) {
+    norm.AXIOM_SALES_EMAIL = norm.SALES_EMAIL;
+  }
+  if (!norm.AXIOM_FOUNDER_EMAIL && norm.FOUNDER_EMAIL) {
+    norm.AXIOM_FOUNDER_EMAIL = norm.FOUNDER_EMAIL;
+  }
+
   return norm;
 }
 
@@ -279,6 +294,9 @@ export const BRAND = {
   productDomain: 'app.axiomproof.ai',
   companyDomain: 'axiomminds.ai',
   contactEmail: 'hello@axiomminds.ai',
+  salesEmail: 'sales@axiomproof.ai',
+  founderEmail: 'founder@axiomminds.ai',
+  platformEmail: 'platform@axiomproof.ai',
   privacyEmail: 'privacy@axiomminds.ai',
   copyright: `© ${new Date().getFullYear()} Axiom Minds Private Limited. All rights reserved.`,
   jurisdiction: 'India',

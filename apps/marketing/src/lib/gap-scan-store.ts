@@ -15,6 +15,7 @@ export interface GapScanRecord {
   estimated_exposure_inr: number;
   contact_name?: string;
   contact_email?: string;
+  contact_phone?: string;
   contact_company?: string;
   follow_up_requested?: boolean;
   marketing_consent?: boolean;
@@ -120,28 +121,48 @@ export async function saveGapScanSubmission(record: GapScanRecord): Promise<stri
   // Attempt database persistence
   try {
     const supabase = createSupabaseAdmin();
-    const { data, error } = await supabase
+    const insertPayload: Record<string, unknown> = {
+      id: record.id,
+      session_id: record.session_id,
+      sector: record.sector,
+      employee_band: record.employee_band,
+      processes_children_data: record.processes_children_data,
+      is_sdf: record.is_sdf,
+      answers: {
+        ...record.answers,
+        ...(record.contact_phone ? { _contact_phone: record.contact_phone } : {}),
+      },
+      report_snapshot: record.report_snapshot,
+      library_version: record.library_version,
+      posture_score: record.posture_score,
+      estimated_exposure_inr: record.estimated_exposure_inr,
+      contact_name: record.contact_name,
+      contact_email: record.contact_email,
+      contact_company: record.contact_company,
+      follow_up_requested: record.follow_up_requested,
+      marketing_consent: record.marketing_consent,
+    };
+    if (record.contact_phone) {
+      insertPayload.contact_phone = record.contact_phone;
+    }
+
+    let { data, error } = await supabase
       .from('gap_scan_responses')
-      .insert({
-        id: record.id,
-        session_id: record.session_id,
-        sector: record.sector,
-        employee_band: record.employee_band,
-        processes_children_data: record.processes_children_data,
-        is_sdf: record.is_sdf,
-        answers: record.answers,
-        report_snapshot: record.report_snapshot,
-        library_version: record.library_version,
-        posture_score: record.posture_score,
-        estimated_exposure_inr: record.estimated_exposure_inr,
-        contact_name: record.contact_name,
-        contact_email: record.contact_email,
-        contact_company: record.contact_company,
-        follow_up_requested: record.follow_up_requested,
-        marketing_consent: record.marketing_consent,
-      })
+      .insert(insertPayload)
       .select('id')
       .single();
+
+    // If database does not yet have contact_phone column, retry without it
+    if (error && error.message.includes('contact_phone')) {
+      delete insertPayload.contact_phone;
+      const retry = await supabase
+        .from('gap_scan_responses')
+        .insert(insertPayload)
+        .select('id')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.warn(

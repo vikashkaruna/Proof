@@ -64,12 +64,33 @@ export const GapScanSubmitSchema = z.object({
   ),
   contactName: z.string().min(2).max(120).optional(),
   contactEmail: z.string().email().optional(),
+  contactPhone: z.string().max(40).optional(),
   contactCompany: z.string().max(200).optional(),
   followUpRequested: z.boolean().default(false),
   marketingConsent: z.boolean().default(false),
   source: z.string().max(100).optional(),
 });
 export type GapScanSubmit = z.infer<typeof GapScanSubmitSchema>;
+
+export const ReadinessIndexSchema = z.object({
+  sector: z.string(),
+  companyScore: z.number(),
+  sectorBenchmarkScore: z.number(),
+  percentileRank: z.number(),
+  status: z.enum(['leading', 'on_track', 'lagging']),
+  exposureMultiplier: z.number(),
+  sectorTopRisks: z.array(z.string()),
+  quarterlyRoadmap: z.array(
+    z.object({
+      quarter: z.string(),
+      targetScore: z.number(),
+      milestone: z.string(),
+      statutoryDeadline: z.string(),
+    }),
+  ),
+  generatedAt: z.string(),
+});
+export type ReadinessIndex = z.infer<typeof ReadinessIndexSchema>;
 
 export const GapScanReportSchema = z.object({
   postureScore: z.number().min(0).max(100),
@@ -93,6 +114,7 @@ export const GapScanReportSchema = z.object({
     }),
   ),
   libraryVersion: z.string(),
+  readinessIndex: ReadinessIndexSchema.optional(),
 });
 export type GapScanReport = z.infer<typeof GapScanReportSchema>;
 

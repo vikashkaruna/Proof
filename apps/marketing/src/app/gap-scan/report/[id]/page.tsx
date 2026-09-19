@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { getGapScanReport } from '@/lib/gap-scan-store';
+import { getGapScanReport, SAMPLE_GAP_SCAN_RECORD } from '@/lib/gap-scan-store';
 import {
   Card,
   CardContent,
@@ -16,6 +16,7 @@ import {
 import { GapScanReportSchema } from '@axiom/types';
 import { BRAND } from '@axiom/config';
 import { CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
+import { EmailReportAction } from '../email-report-action';
 
 export async function generateStaticParams() {
   return [{ id: 'preview' }];
@@ -24,39 +25,21 @@ export async function generateStaticParams() {
 export default async function GapScanReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  if (id === 'preview' || process.env.NEXT_OUTPUT === 'export') {
-    return (
-      <div className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6">
-        <Link href="/" className="text-sm text-slate-500 hover:text-indigo-500">
-          ← Back to home
-        </Link>
-        <div>
-          <Badge variant="indigo">Statutory Gap-Scan Report</Badge>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-            Interactive Assessment Preview
-          </h1>
-          <p className="mt-2 text-slate-600">
-            Take the live assessment at{' '}
-            <Link href="/gap-scan" className="text-teal-600 underline">
-              /gap-scan
-            </Link>{' '}
-            to generate your personalized compliance scorecard.
-          </p>
-        </div>
-      </div>
-    );
+  let scan;
+  if (id === 'preview') {
+    scan = SAMPLE_GAP_SCAN_RECORD;
+  } else {
+    const access = (await cookies()).get('gap_scan_access')?.value;
+    const isLocal =
+      process.env.ENVIRONMENT === 'local' ||
+      process.env.ENVIRONMENT === 'development' ||
+      process.env.ENVIRONMENT === 'preprod' ||
+      process.env.ENVIRONMENT === 'staging' ||
+      process.env.NODE_ENV !== 'production';
+
+    scan = await getGapScanReport(id, access, isLocal);
   }
 
-  const access = (await cookies()).get('gap_scan_access')?.value;
-
-  const isLocal =
-    process.env.ENVIRONMENT === 'local' ||
-    process.env.ENVIRONMENT === 'development' ||
-    process.env.ENVIRONMENT === 'preprod' ||
-    process.env.ENVIRONMENT === 'staging' ||
-    process.env.NODE_ENV !== 'production';
-
-  const scan = await getGapScanReport(id, access, isLocal);
   if (!scan) {
     console.error(`Gap scan report fetch failed for id: ${id}`);
     notFound();
@@ -68,6 +51,7 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
     notFound();
   }
   const report = reportResult.data;
+  const readinessIndex = report.readinessIndex;
 
   return (
     <div className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6">
@@ -76,9 +60,9 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
       </Link>
 
       <div>
-        <Badge variant="indigo">Free gap-scan</Badge>
+        <Badge variant="indigo">Statutory Gap-Scan Assessment</Badge>
         <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight text-indigo-500 sm:text-4xl">
-          Your DPDPA readiness report
+          Your DPDPA Readiness Report
         </h1>
         <p className="mt-2 text-slate-600">
           Scored against {CONTROL_LIBRARY_COUNT} controls from {BRAND.name} Control Library v
@@ -98,6 +82,113 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
           <PostureScore score={scan.posture_score} exposureInr={scan.estimated_exposure_inr} />
         </CardContent>
       </Card>
+
+      {/* Interactive Email Dispatch Card */}
+      <EmailReportAction
+        reportId={scan.id}
+        defaultEmail={scan.contact_email}
+        defaultName={scan.contact_name}
+        defaultPhone={scan.contact_phone}
+        defaultCompany={scan.contact_company}
+        hasReadinessIndex={Boolean(readinessIndex)}
+      />
+
+      {/* Quarterly DPDPA Readiness Index Card (if requested) */}
+      {readinessIndex && (
+        <Card className="border-teal-300 bg-white shadow-sm">
+          <CardHeader className="border-b border-slate-100 bg-mist-50/50 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <Badge variant="info">Quarterly Research Benchmark</Badge>
+                <CardTitle className="mt-2 text-xl text-indigo-500">
+                  The Axiom Proof DPDPA Readiness Index — {readinessIndex.sector}
+                </CardTitle>
+                <CardDescription>
+                  Sector peer standing and quarterly statutory compliance progression milestones.
+                </CardDescription>
+              </div>
+              <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-right">
+                <span className="text-xs uppercase font-medium text-teal-700">Peer Standing</span>
+                <p className="text-lg font-bold text-teal-900">
+                  Top {100 - readinessIndex.percentileRank}%
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-2 gap-4 rounded-lg bg-slate-50 p-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-slate-500">Your Score</p>
+                <p className="text-xl font-bold text-teal-600">{readinessIndex.companyScore}/100</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Sector Benchmark</p>
+                <p className="text-xl font-bold text-slate-700">
+                  {readinessIndex.sectorBenchmarkScore}/100
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Status</p>
+                <span className="mt-1 inline-block rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-semibold uppercase text-teal-800">
+                  {readinessIndex.status.replace('_', ' ')}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Statutory Risk Weight</p>
+                <p className="text-xl font-bold text-indigo-900">
+                  {readinessIndex.exposureMultiplier}x Exposure
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
+                Top Statutory Risk Factors in {readinessIndex.sector}
+              </h4>
+              <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+                {readinessIndex.sectorTopRisks.map((risk, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-ember-500 font-bold">•</span>
+                    <span>{risk}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mt-6">
+              <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
+                Quarterly Readiness Roadmap
+              </h4>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-mist-100 text-xs uppercase text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2">Quarter</th>
+                      <th className="px-3 py-2">Target Score</th>
+                      <th className="px-3 py-2">Core Milestone</th>
+                      <th className="px-3 py-2">Statutory Gate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {readinessIndex.quarterlyRoadmap.map((q) => (
+                      <tr key={q.quarter} className="hover:bg-slate-50">
+                        <td className="px-3 py-2.5 font-medium text-indigo-700">{q.quarter}</td>
+                        <td className="px-3 py-2.5 font-mono text-teal-600 font-semibold">
+                          {q.targetScore}/100
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700">{q.milestone}</td>
+                        <td className="px-3 py-2.5 text-xs text-slate-500">
+                          {q.statutoryDeadline}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {report.recommendations?.length > 0 && (
         <Card>

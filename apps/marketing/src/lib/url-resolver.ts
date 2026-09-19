@@ -37,6 +37,23 @@ export function resolveAppUrl(): string {
       return 'https://app-staging.axiomproof.ai';
     }
 
+    // Firebase Hosting preprod site (axiom-proof.web.app / axiom-proof.firebaseapp.com)
+    if (
+      host.includes('axiom-proof') &&
+      (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com'))
+    ) {
+      return (
+        process.env.NEXT_PUBLIC_APP_URL ||
+        'https://axiom-web-preprod-188516662106.asia-south1.run.app'
+      );
+    }
+    if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) {
+      return (
+        process.env.NEXT_PUBLIC_APP_URL ||
+        'https://axiom-web-preprod-188516662106.asia-south1.run.app'
+      );
+    }
+
     // Explicit env variable if valid and not localhost when running in a remote browser
     if (
       process.env.NEXT_PUBLIC_APP_URL &&
@@ -47,7 +64,10 @@ export function resolveAppUrl(): string {
     }
 
     // On-Premise / LAN IP deployment (e.g. http://192.168.x.x:3000 -> http://192.168.x.x:3001)
-    if (window.location.port === '3000' || window.location.port === String(process.env.MARKETING_PORT || '3000')) {
+    if (
+      window.location.port === '3000' ||
+      window.location.port === String(process.env.MARKETING_PORT || '3000')
+    ) {
       const targetPort = String(process.env.WEB_PORT || '3001');
       return `${window.location.protocol}//${window.location.hostname}:${targetPort}`;
     }

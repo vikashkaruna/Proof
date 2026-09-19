@@ -704,6 +704,22 @@ resource "google_cloud_run_v2_service" "marketing" {
         name  = "CONTACT_RECIPIENT_EMAIL"
         value = var.contact_recipient_email
       }
+      env {
+        name  = "AXIOM_FROM_EMAIL"
+        value = var.axiom_from_email
+      }
+      env {
+        name  = "RESEND_FROM_EMAIL"
+        value = var.axiom_from_email
+      }
+      env {
+        name  = "AXIOM_SALES_EMAIL"
+        value = var.axiom_sales_email
+      }
+      env {
+        name  = "AXIOM_FOUNDER_EMAIL"
+        value = var.axiom_founder_email
+      }
 
       startup_probe {
         http_get {

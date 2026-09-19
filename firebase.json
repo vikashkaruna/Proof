@@ -5,6 +5,22 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "cleanUrls": true,
     "trailingSlash": false,
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "axiom-marketing-preprod",
+          "region": "asia-south1"
+        }
+      },
+      {
+        "source": "/gap-scan/report/**",
+        "run": {
+          "serviceId": "axiom-marketing-preprod",
+          "region": "asia-south1"
+        }
+      }
+    ],
     "headers": [
       {
         "source": "**",

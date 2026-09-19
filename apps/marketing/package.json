@@ -8,6 +8,7 @@
     "build:export": "NEXT_OUTPUT=export next build",
     "start": "next start --port 3000",
     "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf .next .turbo coverage"
   },
@@ -33,6 +34,7 @@
     "eslint-config-next": "^16.3.5",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
   }
 }
