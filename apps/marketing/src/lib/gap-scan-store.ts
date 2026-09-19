@@ -202,7 +202,7 @@ export async function getGapScanReport(
       query = query.eq('session_id', accessHash);
     }
     const { data, error } = await query.single();
-    if (data && !error) {
+    if (data && !error && (data as GapScanRecord).report_snapshot) {
       return data as GapScanRecord;
     }
   } catch (err) {

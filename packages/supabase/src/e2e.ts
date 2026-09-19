@@ -100,9 +100,22 @@ type QueryBuilder = {
   then: Promise<QueryResult>['then'];
 };
 
+const e2eInMemoryTableStore = new Map<string, Map<string, Record<string, unknown>>>();
+
+function getTableStore(table: string): Map<string, Record<string, unknown>> {
+  let store = e2eInMemoryTableStore.get(table);
+  if (!store) {
+    store = new Map();
+    e2eInMemoryTableStore.set(table, store);
+  }
+  return store;
+}
+
 function createQuery(table: string): QueryBuilder {
   let mutatedData: unknown = null;
-  const resultData =
+  const filters: Array<{ field: string; value: unknown }> = [];
+
+  const defaultRows =
     table === 'users'
       ? [E2E_USER_PROFILE]
       : table === 'remediation_plans'
@@ -112,7 +125,8 @@ function createQuery(table: string): QueryBuilder {
           : table === 'audit_ledger'
             ? [E2E_LEDGER_ENTRY]
             : [];
-  const singleData =
+
+  const defaultSingle =
     table === 'users'
       ? E2E_USER_PROFILE
       : table === 'remediation_plans'
@@ -121,26 +135,43 @@ function createQuery(table: string): QueryBuilder {
           ? E2E_TENANT
           : table === 'audit_ledger'
             ? E2E_LEDGER_ENTRY
-            : { id: '00000000-0000-0000-0000-000000000001' };
-
-  const result: QueryResult = {
-    data: resultData,
-    error: null,
-    count: resultData.length,
-  };
+            : null;
 
   const query = {} as QueryBuilder;
   query.select = () => query;
   query.order = () => query;
   query.limit = () => query;
-  query.eq = () => query;
+  query.eq = (field: unknown, value: unknown) => {
+    if (typeof field === 'string') {
+      filters.push({ field, value });
+    }
+    return query;
+  };
   query.in = () => query;
   query.insert = (values: unknown) => {
-    mutatedData = Array.isArray(values) ? values[0] : values;
+    const arr = Array.isArray(values) ? values : [values];
+    const store = getTableStore(table);
+    for (const v of arr) {
+      if (v && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        const id = (rec.id as string) || '00000000-0000-0000-0000-000000000001';
+        store.set(id, rec);
+        mutatedData = rec;
+      }
+    }
     return query;
   };
   query.upsert = (values: unknown) => {
-    mutatedData = Array.isArray(values) ? values[0] : values;
+    const arr = Array.isArray(values) ? values : [values];
+    const store = getTableStore(table);
+    for (const v of arr) {
+      if (v && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        const id = (rec.id as string) || '00000000-0000-0000-0000-000000000001';
+        store.set(id, rec);
+        mutatedData = rec;
+      }
+    }
     return query;
   };
   query.update = (values: unknown) => {
@@ -148,26 +179,65 @@ function createQuery(table: string): QueryBuilder {
     return query;
   };
   query.delete = () => query;
-  query.single = async () => ({
-    data:
-      mutatedData && typeof mutatedData === 'object'
-        ? {
-            id: '00000000-0000-0000-0000-000000000001',
-            ...(mutatedData as Record<string, unknown>),
-          }
-        : singleData,
+  query.single = async () => {
+    if (mutatedData && typeof mutatedData === 'object') {
+      return {
+        data: {
+          id: '00000000-0000-0000-0000-000000000001',
+          ...(mutatedData as Record<string, unknown>),
+        },
+        error: null,
+      };
+    }
+    const store = getTableStore(table);
+    if (store.size > 0) {
+      for (const item of store.values()) {
+        const matches = filters.every((f) => item[f.field] === f.value);
+        if (matches) {
+          return { data: item, error: null };
+        }
+      }
+    }
+    if (defaultSingle) {
+      return { data: defaultSingle, error: null };
+    }
+    return { data: null, error: { message: 'Row not found', code: 'PGRST116' } as unknown as null };
+  };
+  query.maybeSingle = async () => {
+    if (mutatedData && typeof mutatedData === 'object') {
+      return {
+        data: {
+          id: '00000000-0000-0000-0000-000000000001',
+          ...(mutatedData as Record<string, unknown>),
+        },
+        error: null,
+      };
+    }
+    const store = getTableStore(table);
+    if (store.size > 0) {
+      for (const item of store.values()) {
+        const matches = filters.every((f) => item[f.field] === f.value);
+        if (matches) {
+          return { data: item, error: null };
+        }
+      }
+    }
+    return { data: defaultSingle, error: null };
+  };
+
+  const storeItems = Array.from(getTableStore(table).values());
+  const allData = storeItems.length > 0 ? storeItems : defaultRows;
+  const filteredData =
+    filters.length > 0
+      ? allData.filter((item) => filters.every((f) => (item as Record<string, unknown>)[f.field] === f.value))
+      : allData;
+
+  const result: QueryResult = {
+    data: filteredData,
     error: null,
-  });
-  query.maybeSingle = async () => ({
-    data:
-      mutatedData && typeof mutatedData === 'object'
-        ? {
-            id: '00000000-0000-0000-0000-000000000001',
-            ...(mutatedData as Record<string, unknown>),
-          }
-        : singleData,
-    error: null,
-  });
+    count: filteredData.length,
+  };
+
   query.then = Promise.resolve(result).then.bind(Promise.resolve(result));
   return query;
 }
