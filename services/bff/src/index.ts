@@ -19,4 +19,7 @@ serve({ fetch: app.fetch, port }, (info) =>
   log.info({ addr: info.address, port: info.port }, 'BFF listening'),
 );
 
-export default { port, fetch: app.fetch };
+// Named before exporting: an anonymous default is harder to trace from a
+// stack frame back to the module that produced it.
+const server = { port, fetch: app.fetch };
+export default server;

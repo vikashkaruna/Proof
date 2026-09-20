@@ -49,6 +49,15 @@ export interface SealEvidenceInput {
   metadata?: Record<string, string>;
 }
 
+/**
+ * How far a retention claim has been established. See `SealedEvidence`.
+ *
+ * Deliberately three values rather than a boolean: "we checked and it holds"
+ * and "we cannot check from here" are different facts, and collapsing them is
+ * what produced a COMPLIANCE label on storage nobody had probed.
+ */
+export type RetentionAssurance = 'verified' | 'asserted' | 'unverified';
+
 export interface SealedEvidence {
   /** SHA-256 of the content — the canonical identifier. */
   contentHash: string;
@@ -61,8 +70,31 @@ export interface SealedEvidence {
   byteSize: number;
   /** When the object becomes eligible for deletion (retention end). */
   retainUntil: string;
-  /** The applied object-lock mode. Always 'COMPLIANCE' for sealed evidence. */
-  lockMode: ObjectLockMode;
+  /**
+   * The object-lock mode actually applied.
+   *
+   * This used to be the literal 'COMPLIANCE' on every path, including the GCS
+   * path where no lock header is sent and nothing is probed (R-10). A sealed
+   * artifact asserting compliance-mode retention nobody verified is a false
+   * assurance printed on the evidence itself, which is the one place a
+   * compliance product cannot afford one.
+   */
+  lockMode: ObjectLockMode | 'NONE';
+  /**
+   * How far the retention claim has actually been established (R-10).
+   *
+   *   `verified`  the provider confirmed object lock and we applied it here
+   *   `asserted`  retention is configured at the bucket, and the S3 XML API
+   *               this client speaks cannot read it back — true of GCS Bucket
+   *               Lock. Believed, not proven.
+   *   `unverified` neither. Test and development storage.
+   *
+   * Anything short of `verified` must not be presented to an auditor as WORM
+   * evidence without naming which of these it is.
+   */
+  retentionAssurance: RetentionAssurance;
+  /** Why the assurance is what it is, in words an auditor can read. */
+  retentionAssuranceReason: string;
   /** Version ID (S3 returns this; for true immutability we use the content hash). */
   versionId: string | undefined;
   /** Server-side encryption applied. */
@@ -100,9 +132,10 @@ export class EvidenceVault {
 
     const contentHash = createHash('sha256').update(body).digest('hex');
 
-    // The bucket must be created with ObjectLockConfiguration / Bucket Lock enabled.
-    // We verify that here so a misconfigured bucket fails fast.
-    await this.assertObjectLockEnabled(input.bucket);
+    // The bucket must be created with ObjectLockConfiguration / Bucket Lock
+    // enabled. We verify what we can here so a misconfigured bucket fails
+    // fast, and record what we could NOT verify rather than assuming it.
+    const assurance = await this.assertObjectLockEnabled(input.bucket);
 
     const retainUntilDate = new Date(Date.now() + input.retentionDays * 24 * 60 * 60 * 1000);
 
@@ -122,6 +155,9 @@ export class EvidenceVault {
         'axiom-engagement-id': input.engagementId ?? '',
         'axiom-collected-by-agent': input.collectedByAgent,
         'axiom-sealed-at': new Date().toISOString(),
+        // Travels with the object, so an auditor reading the artifact sees the
+        // same caveat as the caller who sealed it.
+        'axiom-retention-assurance': assurance.level,
         ...input.metadata,
       },
       ServerSideEncryption: input.encryption ?? 'AES256',
@@ -148,7 +184,11 @@ export class EvidenceVault {
       key: input.key,
       byteSize: body.byteLength,
       retainUntil: retainUntilDate.toISOString(),
-      lockMode: 'COMPLIANCE',
+      // What was applied, not what we would like to claim. The GCS path sends
+      // no lock header at all, so reporting COMPLIANCE there was untrue.
+      lockMode: this.isGcs ? 'NONE' : 'COMPLIANCE',
+      retentionAssurance: assurance.level,
+      retentionAssuranceReason: assurance.reason,
       versionId: result.VersionId,
       encryption: input.encryption ?? 'AES256',
     };
@@ -222,12 +262,26 @@ export class EvidenceVault {
     return this.s3.send(cmd);
   }
 
-  private async assertObjectLockEnabled(bucket: string): Promise<void> {
+  private async assertObjectLockEnabled(
+    bucket: string,
+  ): Promise<{ level: RetentionAssurance; reason: string }> {
     if (this.isGcs) {
-      // In Google Cloud Storage, WORM is enforced at the bucket level via Bucket Lock
-      // (Retention Policy) or Object Retention Lock. The HMAC S3 XML API does not support
-      // probing x-amz-object-lock headers.
-      return;
+      // In Google Cloud Storage, WORM is enforced at the bucket level via
+      // Bucket Lock (Retention Policy) or Object Retention Lock. The HMAC S3
+      // XML API this client speaks cannot probe it.
+      //
+      // This branch used to `return` and the caller then reported COMPLIANCE
+      // regardless (R-10). Silence is not confirmation: the retention may well
+      // be configured, but from here it is believed rather than proven, and
+      // `infra/terraform/envs/preprod/storage.tf` deliberately sets
+      // `is_locked = false`, so on preprod it is not even that.
+      return {
+        level: 'asserted',
+        reason:
+          'Google Cloud Storage: retention is configured on the bucket and cannot be ' +
+          'read back through the S3 XML API. Verify Bucket Lock directly before ' +
+          'presenting this artifact as WORM evidence.',
+      };
     }
     try {
       const head = await this.s3.send(
@@ -256,6 +310,12 @@ export class EvidenceVault {
         throw err;
       }
     }
+    // The probe did not report a bucket without Object Lock, and this path
+    // applies the COMPLIANCE headers itself.
+    return {
+      level: 'verified',
+      reason: 'S3 Object Lock is enabled on the bucket and COMPLIANCE retention was applied.',
+    };
   }
 }
 

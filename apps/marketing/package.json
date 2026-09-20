@@ -8,7 +8,7 @@
     "build:export": "NEXT_OUTPUT=export next build",
     "start": "next start --port 3000",
     "lint": "axiom-lint",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf .next .turbo coverage"
   },
