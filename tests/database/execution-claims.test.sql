@@ -150,7 +150,12 @@ select pg_temp.assert_eq(
      '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
      '00000000-0000-0000-0000-0000000000e1',
      array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[],
-     'req-batch-retry')->>'decision'),
+     'req-batch-retry',
+     '55555555-5555-4555-8555-555555555555'::uuid,
+     jsonb_build_object(
+       'contract_version', 1,
+       'plan_id', '00000000-0000-0000-0000-0000000000c3',
+       'action_ids', jsonb_build_array('00000000-0000-0000-0000-0000000000d1')))->>'decision'),
   'claimed', 'actions released by a failed dispatch can be claimed again');
 
 select pg_temp.assert_true(
@@ -162,6 +167,60 @@ select pg_temp.assert_true(
   (select count(*) = 2 from public.remediation_actions
     where dispatch_reference = 'workflow-abc' and execution_status = 'executing'),
   'accepted work stays executing with a durable reference');
+
+-- ─── W5 · the durable outbox ─────────────────────────────────────────
+-- The intent is written in the SAME transaction as the token consumption, so
+-- a process that dies between claiming and dispatching leaves a record of
+-- what it owed rather than actions in `executing` with nothing behind them.
+select pg_temp.assert_true(
+  (select count(*) = 1 from public.execution_dispatch_outbox
+    where request_key = 'req-batch-retry' and status = 'pending'),
+  'claiming writes a pending outbox intent');
+
+select pg_temp.assert_true(
+  (select payload->>'plan_id' = '00000000-0000-0000-0000-0000000000c3'
+     from public.execution_dispatch_outbox where request_key = 'req-batch-retry'),
+  'the outbox carries what the runtime was promised');
+
+-- The operator's reconciliation query.
+select pg_temp.assert_true(
+  (select count(*) >= 1 from public.pending_execution_dispatches),
+  'a promised-but-unconfirmed dispatch is visible to an operator');
+
+select pg_temp.assert_true(
+  public.settle_execution_dispatch(
+    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+    'req-batch-retry', 'delivered', null),
+  'a delivered dispatch settles the intent');
+select pg_temp.assert_true(
+  (select count(*) = 0 from public.pending_execution_dispatches
+    where request_key = 'req-batch-retry'),
+  'a settled intent leaves the reconciliation queue');
+
+-- A failed delivery keeps the row. It is the evidence that a token was spent
+-- on work that did not run; deleting it erases what reconciliation needs.
+select pg_temp.assert_true(
+  public.settle_execution_dispatch(
+    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+    'req-batch-001', 'failed', 'runtime unreachable'),
+  'a failed dispatch settles too');
+select pg_temp.assert_true(
+  (select status = 'failed' and last_error = 'runtime unreachable'
+     from public.execution_dispatch_outbox where request_key = 'req-batch-001'),
+  'a failed intent is retained with its reason');
+
+-- Redelivery is idempotent: one intent per request, whatever happens.
+select pg_temp.assert_eq(
+  (select public.claim_plan_execution(
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+     '00000000-0000-0000-0000-0000000000e1',
+     array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[],
+     'req-batch-retry')->>'decision'),
+  'already_claimed', 'a replay does not write a second intent');
+select pg_temp.assert_true(
+  (select count(*) = 1 from public.execution_dispatch_outbox
+    where request_key = 'req-batch-retry'),
+  'exactly one outbox row per request');
 
 -- ─── The schema now catches the original regression ──────────────────
 -- Writing a bare request key across a batch is exactly what broke before.
@@ -180,6 +239,8 @@ end $$;
 set local role authenticated;
 select pg_temp.denied($q$select public.claim_plan_execution('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000e1',array['00000000-0000-0000-0000-0000000000d1']::uuid[],'x')$q$);
 select pg_temp.denied($q$select public.record_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','accepted',null,null)$q$);
+select pg_temp.denied($q$select * from public.execution_dispatch_outbox$q$);
+select pg_temp.denied($q$select public.settle_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','delivered',null)$q$);
 reset role;
 
 rollback;

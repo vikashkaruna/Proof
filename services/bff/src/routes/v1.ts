@@ -1260,16 +1260,35 @@ export function v1Routes(deps: Deps) {
     // `claim_plan_execution` (migration 0019) does both halves atomically and
     // writes a per-action scoped key, so the constraint is satisfied by
     // construction and still catches a regression.
+    // Declared before the claim: the outbox row carries it, so the
+    // correlation id has to exist before the transaction that writes it.
+    const correlationId = randomUUID();
     const requestKey = c.get('idempotencyKey');
     let claimedActions: string[] = [];
 
     if (accepted.length > 0) {
+      // W5: the outbox row is written inside this same transaction, so "we
+      // spent the token" and "we owe a dispatch" cannot disagree. If the
+      // process dies before the runtime hears anything, the intent survives
+      // and `pending_execution_dispatches` shows it.
       const { data: claim, error: claimErr } = await admin.rpc('claim_plan_execution', {
         p_tenant_id: tenantId,
         p_plan_id: planId,
         p_token_id: persistedToken.id,
         p_action_ids: accepted,
         p_request_key: requestKey,
+        p_correlation_id: correlationId,
+        p_payload: buildExecutionDispatchPayload({
+          tenantId,
+          planId,
+          correlationId,
+          actionIds: accepted,
+          requestKey,
+          mode: signedMode ?? input.mode,
+          concurrency: signedConcurrency ?? input.concurrency,
+          stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+          approvalToken: signedToken,
+        }),
       });
 
       if (claimErr) {
@@ -1330,7 +1349,6 @@ export function v1Routes(deps: Deps) {
           );
       }
     }
-    const correlationId = randomUUID();
     await deps.ledger.append({
       tenantId,
       correlationId,
@@ -1442,6 +1460,21 @@ export function v1Routes(deps: Deps) {
       });
       if (dispatchErr) {
         logger.error({ err: dispatchErr.message, planId }, 'could not record dispatch outcome');
+      }
+
+      // Settle the outbox intent. A failure leaves the row `failed` with its
+      // error rather than removing it — the row is the evidence that a token
+      // was spent on work that did not run, and deleting it would erase
+      // exactly what reconciliation needs.
+      const { error: settleErr } = await admin.rpc('settle_execution_dispatch', {
+        p_tenant_id: tenantId,
+        p_plan_id: planId,
+        p_request_key: requestKey,
+        p_status: dispatch.status === 'accepted' ? 'delivered' : 'failed',
+        p_error: dispatch.error,
+      });
+      if (settleErr) {
+        logger.error({ err: settleErr.message, planId }, 'could not settle dispatch outbox');
       }
 
       if (dispatch.status === 'failed') {
