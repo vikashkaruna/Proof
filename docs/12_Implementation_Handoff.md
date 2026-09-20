@@ -1,5 +1,7 @@
 # Axiom Proof — implementation handoff
 
+> Current status is [Doc 11 Revision 10](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [audit 06](audits/06-resumed-implementation-review-2026-09-20.md). The original snapshot below predates the resumed staging work. Analyst is committed, email OTP is explicitly deferred, and R01–R11 have mixed closure status rather than blanket completion.
+
 **As of 20 September 2026 · reviewed source: `2c54fcd` plus three uncommitted analyst files.**
 
 W1 has substantial committed implementation but is **not complete**. Resolve the P0 review findings before declaring multi-client readiness. This document is a handoff for another implementing model; no further product implementation was performed during this review.

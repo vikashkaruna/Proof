@@ -10,9 +10,8 @@ analyst work and pending implementation, start with
 [the implementation handoff](../docs/12_Implementation_Handoff.md),
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
-The current plan is [Doc 11, Revision 9](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Reviewed implementation is in Claude's worktree at `2c54fcd`, not the older
-root checkout. W1 is partial; mock UI and route existence do not prove release readiness.
+The current plan is [Doc 11, Revision 10](../docs/11_Phase0-5_Gap_Closure_Plan.md).
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with the [resumed review](../docs/audits/06-resumed-implementation-review-2026-09-20.md) covering staging `5a4d6a0` and follow-up corrections. W0/W1/W2 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds

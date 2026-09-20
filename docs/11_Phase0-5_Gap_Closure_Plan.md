@@ -22,7 +22,7 @@ Accepted decisions: TOTP and recovery codes only; **email OTP deferred**. Approv
 | R-07 | MFA secret wiring/config validation implemented | Live deployment and key rotation verification pending |
 | R-08 | TOTP/recovery, session MFA, account budgets, plan revision binding and signed execution settings implemented | Action/diff/rollback hashes, session/IP abuse controls, policy operations and full persona E2E pending |
 | R-09 | Shared runtime checks implemented; follow-up closes constructor/localhost fail-open paths | Temporal chunk checks, queued cancellation, connector interruption and live halt evidence pending |
-| R-10 | GCS no longer labelled COMPLIANCE; partial assurance metadata implemented | Current native probe does not prove retention; GCS assertion is not verification; deployed WORM proof pending |
+| R-10 | TS and Python sealing now require bucket lock and uploaded-version COMPLIANCE retention readback; failed uploads cannot produce mock proof | GCS verified adapter and deployed WORM proof remain pending; GCS sealing fails closed |
 | R-11 | Real migration/RLS/Auth parity, lint and control drift lanes green | Browser journeys, eight PRD B.10 scenarios, release/restore/performance gates pending |
 
 **R01–R11 are not blanket closed.** Green CI verifies its configured assertions; review reproduced a double claim outside the old assertions and found false stub acceptance, ambiguous-delivery retry and a kill-reader fallback. Regression tests accompany the follow-up fixes.

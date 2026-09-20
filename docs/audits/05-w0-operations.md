@@ -1,6 +1,6 @@
 # W0 operational handoff
 
-These steps accompany migrations 0016–0018. They do not attest that a deployment has been migrated or that W0 is complete. Preserve migration 0015 for the analyst enum patch carried in Claude's worktree.
+These steps accompany migrations 0016–0018. They do not attest that a deployment has been migrated or that W0 is complete. Migration 0015 analyst is now committed; execution corrections extend the series through 0021.
 
 ## Organization creation entitlements
 
@@ -56,3 +56,15 @@ Run `./scripts/test-strict-parity.sh` from the repository root. It starts the de
 `./scripts/start-parity-supabase.sh` starts/migrates without running the persona requests. Restarting it does not replay already-applied migrations. `.axiom-runtime/parity/status.json` holds the local keys with mode 0600; never commit or paste it into handoffs. Synthetic fixtures persist for inspection. To stop only this project, use `supabase stop --workdir .axiom-runtime/parity`; do not run a blanket Docker cleanup.
 
 The migration runner does not adopt untracked existing schemas or ignore duplicate-table errors. For a fresh Supabase stack it records each source file and SHA-256 in `axiom_migrations.applied`, and it fails if a previously applied file changes. An existing environment must reconcile its prior migration history before switching runners; do not delete its tables to make the runner pass. These checks do not make legacy `migrate-cloudsql.sh` safe until that script is replaced/integrated.
+
+## Execution dispatch reconciliation
+
+Read the service-only `public.pending_execution_dispatches` view for pending, failed and unknown deliveries. `unknown` means the request may have reached the runtime: its action claims remain held. Never clear those claims, reuse the token, reset an idempotency key or start a replacement batch based solely on a lost acknowledgement. `failed` means an explicit refusal (or no request was attempted); the token is still spent and any later execution needs fresh authority. There is no automatic drain/retry worker yet.
+
+`finish_execution_dispatch` atomically records action/outbox outcomes. Repeated/late settlement cannot downgrade a delivered intent. Historical 0019/0020 RPCs remain for migration compatibility, but new callers must use the atomic finalizer. A settlement-storage failure returns 503 with a correlation id and leaves reconciliation necessary. The current runtime stub explicitly refuses execution; no row is evidence that connector effects actually occurred.
+
+## Evidence retention verification
+
+The native S3/MinIO sealing path requires `s3:GetBucketObjectLockConfiguration`, `s3:GetObjectRetention` and, when requested, `s3:GetObjectLegalHold`, in addition to existing write permissions. Apply the reviewed IAM change through the deployment process. A successful seal includes the uploaded version id and confirmed retention date. If upload succeeded but readback failed, an object may remain stored: reconcile it by content hash/key/version; do not automatically upload a replacement or delete evidence.
+
+GCS sealing is blocked until a native adapter establishes locked retention and the requested duration/hold. Do not bypass the failure or claim that a URL/configuration string verifies Bucket Lock. Creating or irreversibly locking a real bucket still needs the concrete deployment decision. The runtime no longer invents local COMPLIANCE proof when storage fails; test/demo callers must inject test storage explicitly and cannot export it as live evidence.

@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { S3Client, GetObjectRetentionCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { EvidenceVault, contentKey } from './index';
 
 describe('contentKey', () => {
@@ -39,44 +40,102 @@ describe('EvidenceVault', () => {
   });
 });
 
-/**
- * W8 · R-10 — a seal must not claim retention nobody verified.
- *
- * `seal()` returned `lockMode: 'COMPLIANCE'` on every path, including the GCS
- * path where no object-lock header is sent and the S3 XML API cannot read the
- * bucket's retention policy back. The artifact carried a compliance-mode
- * assurance that had never been established, which on a product whose
- * proposition is tamper-evident evidence is the one place a false claim is
- * least affordable.
- *
- * These assert the distinction the vault now draws, without reaching storage:
- * a claim it can prove, a claim it merely believes, and the difference being
- * visible to whoever reads the artifact.
- */
-describe('R-10 · retention assurance', () => {
-  it('treats a GCS endpoint as asserted, never verified', () => {
-    const vault = new EvidenceVault('asia-south1', 'https://storage.googleapis.com');
-    // `isGcs` is private, so drive it the way production does: the endpoint.
-    expect(
-      (vault as unknown as { isGcs: boolean }).isGcs,
-      'a googleapis endpoint must be recognised as GCS',
-    ).toBe(true);
-  });
+const input = {
+  bucket: 'evidence',
+  key: 'key',
+  body: 'proof',
+  contentType: 'text/plain',
+  retentionDays: 1,
+  tenantId: 'tenant-a',
+  collectedByAgent: 'saakshi',
+};
+const future = new Date('2099-01-01T00:00:00Z');
+afterEach(() => vi.restoreAllMocks());
+// Narrow the SDK's callback/promise overloads to the promise form used here.
+const sendClient = S3Client.prototype as unknown as { send(command: unknown): Promise<unknown> };
 
-  it('treats a native S3 endpoint as a lock-capable provider', () => {
-    const vault = new EvidenceVault('ap-south-1');
-    expect((vault as unknown as { isGcs: boolean }).isGcs).toBe(false);
+describe('seal verifies the uploaded version', () => {
+  function provider(retention: object = { Mode: 'COMPLIANCE', RetainUntilDate: future }) {
+    return vi
+      .spyOn(sendClient, 'send')
+      .mockResolvedValueOnce({ ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' } })
+      .mockResolvedValueOnce({ VersionId: 'immutable-version' })
+      .mockResolvedValueOnce({ Retention: retention });
+  }
+  it('returns verified only after retention readback for the uploaded version', async () => {
+    const send = provider();
+    const sealed = await new EvidenceVault('ap-south-1').seal({
+      ...input,
+      metadata: { 'axiom-tenant-id': 'foreign', 'AXIOM-RETENTION-ASSURANCE': 'verified' },
+    });
+    expect(sealed).toMatchObject({
+      versionId: 'immutable-version',
+      lockMode: 'COMPLIANCE',
+      retentionAssurance: 'verified',
+      retainUntil: future.toISOString(),
+    });
+    expect(send.mock.calls[2]?.[0]).toBeInstanceOf(GetObjectRetentionCommand);
+    expect((send.mock.calls[2]?.[0] as GetObjectRetentionCommand).input).toEqual({
+      Bucket: 'evidence',
+      Key: 'key',
+      VersionId: 'immutable-version',
+    });
+    const metadata = (send.mock.calls[1]?.[0] as PutObjectCommand).input.Metadata;
+    expect(metadata?.['axiom-tenant-id']).toBe('tenant-a');
+    expect(metadata?.['axiom-retention-assurance']).toBe('unverified');
+    expect(metadata).not.toHaveProperty('AXIOM-RETENTION-ASSURANCE');
   });
-
-  it('offers exactly three assurance levels, so "cannot check" stays distinct', () => {
-    // Collapsing `asserted` into `verified` is what produced the COMPLIANCE
-    // label on storage nobody had probed; collapsing it into `unverified`
-    // would understate a correctly locked production bucket.
-    const levels: Array<'verified' | 'asserted' | 'unverified'> = [
-      'verified',
-      'asserted',
-      'unverified',
-    ];
-    expect(new Set(levels).size).toBe(3);
+  it.each([
+    {},
+    { Mode: 'GOVERNANCE', RetainUntilDate: future },
+    { Mode: 'COMPLIANCE', RetainUntilDate: new Date(0) },
+  ])('refuses insufficient retention %j', async (retention) => {
+    provider(retention);
+    await expect(new EvidenceVault('ap-south-1').seal(input)).rejects.toThrow(
+      'COMPLIANCE retention',
+    );
   });
+  it('does not mistake a missing probe object for bucket lock verification', async () => {
+    vi.spyOn(sendClient, 'send').mockRejectedValue({
+      name: 'NoSuchKey',
+      $metadata: { httpStatusCode: 404 },
+    });
+    await expect(new EvidenceVault('ap-south-1').seal(input)).rejects.toMatchObject({
+      name: 'NoSuchKey',
+    });
+  });
+  it('refuses missing lock configuration before uploading', async () => {
+    const send = vi.spyOn(sendClient, 'send').mockResolvedValue({});
+    await expect(new EvidenceVault('ap-south-1').seal(input)).rejects.toThrow('Object Lock');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it('never fabricates successful evidence after an upload failure', async () => {
+    vi.spyOn(sendClient, 'send')
+      .mockResolvedValueOnce({ ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' } })
+      .mockRejectedValueOnce(new Error('upload failed'));
+    await expect(new EvidenceVault('ap-south-1').seal(input)).rejects.toThrow('upload failed');
+  });
+  it('refuses a GCS seal until a provider verifier exists, without uploading', async () => {
+    const send = vi.spyOn(sendClient, 'send');
+    await expect(
+      new EvidenceVault('asia-south1', 'https://storage.googleapis.com').seal(input),
+    ).rejects.toThrow('GCS sealing requires');
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('refuses unconfirmed legal hold', async () => {
+    provider().mockResolvedValueOnce({ LegalHold: { Status: 'OFF' } });
+    await expect(
+      new EvidenceVault('ap-south-1').seal({ ...input, legalHold: true }),
+    ).rejects.toThrow('legal hold');
+  });
+  it.each([0, -1, 0.5, Number.NaN])(
+    'refuses invalid retention %s before upload',
+    async (retentionDays) => {
+      const send = vi.spyOn(sendClient, 'send');
+      await expect(
+        new EvidenceVault('ap-south-1').seal({ ...input, retentionDays }),
+      ).rejects.toThrow('positive integer');
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
 });

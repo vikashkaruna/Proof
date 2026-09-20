@@ -105,6 +105,9 @@ data "aws_iam_policy_document" "evidence_access" {
       "s3:PutObjectRetention",
       "s3:GetObject",
       "s3:GetObjectVersion",
+      "s3:GetObjectRetention",
+      "s3:GetObjectLegalHold",
+      "s3:GetBucketObjectLockConfiguration",
       "s3:ListBucket",
     ]
     resources = [

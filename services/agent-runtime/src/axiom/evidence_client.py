@@ -5,7 +5,7 @@ agent) and by any agent that needs to capture audit artifacts.
 
 The evidence vault is the product's trust claim. Per Doc 04 §6.2 and
 Doc 05 §5, this is plain S3 API (no AWS-proprietary conveniences) so
-the bucket can move to MinIO or GCS-interop without a rewrite.
+the bucket can use compatible S3/MinIO providers. GCS needs a verified provider adapter.
 
 Object Lock with Compliance mode retention means:
   - Object cannot be deleted by ANY user, including root, until
@@ -38,6 +38,7 @@ class SealedEvidence:
     lock_mode: Literal["COMPLIANCE", "GOVERNANCE"] = "COMPLIANCE"
     version_id: str | None = None
     encryption: str = "AES256"
+    retention_assurance: Literal["verified"] = "verified"
 
 
 @dataclass(frozen=True)
@@ -77,19 +78,27 @@ class EvidenceVault:
         self._s3 = boto3.client("s3", **kwargs)
 
     def seal(self, input: SealInput) -> SealedEvidence:
+        if type(input.retention_days) is not int or input.retention_days <= 0:
+            raise ValueError("retention_days must be a positive integer")
+        if self._is_gcs:
+            raise RuntimeError("GCS sealing requires a verified Bucket/Object Retention Lock adapter")
+        configuration = self._s3.get_object_lock_configuration(Bucket=input.bucket)
+        if configuration.get("ObjectLockConfiguration", {}).get("ObjectLockEnabled") != "Enabled":
+            raise RuntimeError("Bucket does not have verified Object Lock enabled")
         body = input.body
         content_hash = hashlib.sha256(body).hexdigest()
-        retain_until = datetime.now(timezone.utc) + timedelta(days=input.retention_days)
+        retain_until = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=input.retention_days, seconds=1)
 
         metadata = {
+            **{k: v for k, v in (input.metadata or {}).items() if not k.lower().startswith("axiom-")},
+            "axiom-retention-assurance": "unverified",
+            "axiom-retention-request": "COMPLIANCE",
             "axiom-content-sha256": content_hash,
             "axiom-tenant-id": input.tenant_id,
             "axiom-engagement-id": input.engagement_id or "",
             "axiom-collected-by-agent": input.collected_by_agent,
             "axiom-sealed-at": datetime.now(timezone.utc).isoformat(),
         }
-        if input.metadata:
-            metadata.update(input.metadata)
 
         put_kwargs: dict[str, Any] = {
             "Bucket": input.bucket,
@@ -109,17 +118,20 @@ class EvidenceVault:
             put_kwargs["ObjectLockLegalHoldStatus"] = "ON" if input.legal_hold else "OFF"
             put_kwargs["ChecksumAlgorithm"] = "SHA256"
 
-        version_id = None
-        try:
-            result = self._s3.put_object(**put_kwargs)
-            version_id = result.get("VersionId")
-        except Exception as e:
-            if self._settings.environment in ("development", "local", "test"):
-                import structlog
-                structlog.get_logger().warn("s3.local_mock_fallback", error=str(e))
-                version_id = "v-local-dev-mock"
-            else:
-                raise
+        result = self._s3.put_object(**put_kwargs)
+        version_id = result.get("VersionId")
+        if not isinstance(version_id, str) or not version_id or version_id == "null":
+            raise RuntimeError("Uploaded evidence has no immutable version; seal not verified")
+        object_ref = {"Bucket": input.bucket, "Key": input.key, "VersionId": version_id}
+        retention = self._s3.get_object_retention(**object_ref).get("Retention", {})
+        confirmed_until = retention.get("RetainUntilDate")
+        if (retention.get("Mode") != "COMPLIANCE" or not isinstance(confirmed_until, datetime)
+                or confirmed_until.tzinfo is None or confirmed_until < retain_until):
+            raise RuntimeError("Provider did not confirm required COMPLIANCE retention")
+        if input.legal_hold:
+            hold = self._s3.get_object_legal_hold(**object_ref)
+            if hold.get("LegalHold", {}).get("Status") != "ON":
+                raise RuntimeError("Provider did not confirm legal hold")
 
         return SealedEvidence(
             content_hash=content_hash,
@@ -127,7 +139,7 @@ class EvidenceVault:
             bucket=input.bucket,
             key=input.key,
             byte_size=len(body),
-            retain_until=retain_until,
+            retain_until=confirmed_until,
             version_id=version_id,
         )
 
