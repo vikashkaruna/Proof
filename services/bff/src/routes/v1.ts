@@ -24,19 +24,8 @@ import { requireCapability } from '../middleware/authorize.js';
 import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
-import { loadEnv, BRAND } from '@axiom/config';
-
-/**
- * How many organizations one user may own (SEC-5).
- *
- * `/organizations/onboard` is exempt from tenant resolution — it runs before
- * the caller has a tenant — and had no entitlement check of any kind, so a
- * single account could create tenants without limit. A quota is the control
- * that matches the abuse: it bounds the durable resource rather than the
- * request rate. Raising it for a genuine multi-entity customer is a
- * deliberate act, which is the point.
- */
-const MAX_TENANTS_PER_USER = Number(process.env.AXIOM_MAX_TENANTS_PER_USER ?? 5);
+import { loadEnv } from '@axiom/config';
+import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
@@ -1483,25 +1472,29 @@ export function v1Routes(deps: Deps) {
     const body = await c.req.json().catch(() => ({}));
 
     const OnboardSchema = z.object({
-      name: z.string().min(2).max(100),
+      name: z.string().trim().min(2).max(100),
       slug: z.string().min(2).max(60).optional(),
       tier: z.enum(['essential', 'growth', 'enterprise']).default('growth'),
       is_sdf: z.boolean().default(false),
       processes_health_data: z.boolean().default(false),
       processes_children_data: z.boolean().default(false),
-      dpo_name: z.string().optional(),
+      dpo_name: z.string().trim().min(1).max(200).optional(),
       dpo_email: z.string().email().optional(),
       systems: z
         .array(
           z.object({
-            name: z.string(),
-            type: z.string(),
-            description: z.string().optional(),
+            name: z.string().trim().min(1).max(200),
+            type: z.string().min(1).max(100),
+            description: z.string().max(2000).optional(),
             hosts_personal_data: z.boolean().default(true),
-            region: z.string().default('ap-south-1'),
-            data_categories: z.array(z.string()).default(['contact', 'identity']),
+            region: z.string().min(1).max(100).default('ap-south-1'),
+            data_categories: z
+              .array(z.string().min(1).max(100))
+              .max(50)
+              .default(['contact', 'identity']),
           }),
         )
+        .max(100)
         .optional(),
     });
 
@@ -1511,209 +1504,120 @@ export function v1Routes(deps: Deps) {
     }
 
     const admin = createSupabaseAdmin();
-
-    // SEC-5: this endpoint is exempt from tenant resolution — it legitimately
-    // runs before the caller has a tenant — and it then inserted a tenant and
-    // self-assigned `owner` with no entitlement check, no quota and no rate
-    // limit. Any authenticated user could create unlimited tenants; combined
-    // with SEC-1 it was reachable unauthenticated in staging.
-    //
-    // The quota is the meaningful control here: it bounds the total a user can
-    // own, which is the actual abuse vector. General per-request rate limiting
-    // across the API is PERF-3 / W9.6.
-    const { count: ownedCount, error: quotaErr } = await admin
-      .from('tenant_users')
-      .select('tenant_id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .eq('role', 'owner');
-
-    if (quotaErr) {
-      logger.error({ error: quotaErr.message, userId: user.id }, 'tenant quota check failed');
+    // A durable counter shared by every BFF replica. Counting outside the
+    // creation transaction means failed attempts are throttled too.
+    const { data: rateData, error: rateError } = await admin.rpc('take_rate_limit', {
+      p_bucket: 'organization-onboarding',
+      p_subject: user.id,
+      p_limit: 5,
+      p_window_seconds: 3600,
+    });
+    const rate = z
+      .object({ allowed: z.boolean(), retry_after: z.number().int().positive() })
+      .safeParse(rateData);
+    if (rateError || !rate.success) {
       return c.json(
         {
-          error: {
-            code: 'quota_check_failed',
-            message: 'Could not verify organization quota. Please try again.',
-          },
+          error: { code: 'rate_limit_unavailable', message: 'Could not verify the request limit.' },
         },
         503,
       );
     }
-
-    if ((ownedCount ?? 0) >= MAX_TENANTS_PER_USER) {
-      logger.warn({ userId: user.id, ownedCount }, 'tenant creation refused: quota exceeded');
+    if (!rate.data.allowed) {
+      c.header('Retry-After', String(rate.data.retry_after));
       return c.json(
         {
           error: {
-            code: 'tenant_quota_exceeded',
-            message:
-              `You already own ${ownedCount} organizations, which is the limit of ` +
-              `${MAX_TENANTS_PER_USER}. Contact ${BRAND.salesEmail} to raise it.`,
+            code: 'rate_limited',
+            message: 'Too many onboarding attempts. Try again later.',
           },
         },
         429,
       );
     }
-
-    const {
-      name,
-      tier,
-      is_sdf,
-      processes_health_data,
-      processes_children_data,
-      dpo_name,
-      dpo_email,
-      systems,
-    } = parsed.data;
-
-    // Generate unique slug if not supplied
-    const baseSlug = (
-      parsed.data.slug ||
-      name
+    const input = parsed.data;
+    const baseSlug =
+      (input.slug ?? input.name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
-    ).slice(0, 45);
-    // `Math.random()` gave 5 base-36 characters from a predictable PRNG —
-    // collision-prone at scale and guessable, on a value that appears in URLs.
-    const uniqueSlug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
-
-    // 1. Insert into public.tenants
-    const { data: tenant, error: tenantErr } = await admin
-      .from('tenants')
-      .insert({
-        slug: uniqueSlug,
-        name,
-        tier,
-        data_residency_region: 'ap-south-1',
-        is_sdf,
-        processes_health_data,
-        processes_children_data,
-      })
-      .select()
-      .single();
-
-    if (tenantErr || !tenant) {
-      logger.error({ error: tenantErr }, 'failed to create tenant');
-      return c.json(
-        {
-          error: {
-            code: 'tenant_creation_failed',
-            message: tenantErr?.message || 'Failed to create organization',
-          },
-        },
-        500,
-      );
-    }
-
-    // 2. Add user as 'owner' in tenant_users
-    const { error: memberErr } = await admin.from('tenant_users').insert({
-      tenant_id: tenant.id,
-      user_id: user.id,
-      role: 'owner',
-      accepted_at: new Date().toISOString(),
+        .slice(0, 45) || 'organization';
+    const { data, error } = await admin.rpc('onboard_organization', {
+      p_user_id: user.id,
+      p_slug: `${baseSlug}-${randomUUID()}`,
+      p_name: input.name,
+      p_tier: input.tier,
+      p_is_sdf: input.is_sdf,
+      p_processes_health_data: input.processes_health_data,
+      p_processes_children_data: input.processes_children_data,
+      p_dpo_name: input.dpo_name ?? null,
+      p_dpo_email: input.dpo_email ?? null,
+      p_systems: input.systems ?? [],
+      p_library_version: LIBRARY_VERSION,
+      p_correlation_id: randomUUID(),
     });
-
-    // A tenant with no owner row is unreachable: nobody can resolve it, nobody
-    // can administer it, and it cannot be deleted through the product. This
-    // was logged and ignored, leaving orphans behind on every partial failure.
-    if (memberErr) {
-      logger.error({ error: memberErr, tenantId: tenant.id }, 'failed to link tenant owner');
-      await admin.from('tenants').delete().eq('id', tenant.id);
+    if (error) {
+      logger.error({ code: error.code, userId: user.id }, 'atomic onboarding failed');
       return c.json(
         {
           error: {
-            code: 'tenant_creation_failed',
-            message: 'Could not establish ownership of the new organization. Nothing was created.',
-          },
-        },
-        500,
-      );
-    }
-
-    // 3. Create initial engagement in engagements table
-    const { data: engagement, error: engErr } = await admin
-      .from('engagements')
-      .insert({
-        tenant_id: tenant.id,
-        library_version: '0.1.0',
-        title: `${name} — DPDPA Statutory Assessment`,
-        lead_reviewer_id: user.id,
-        status: 'intake',
-        started_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (engErr) {
-      logger.warn({ error: engErr }, 'failed to create initial engagement for new tenant');
-    }
-
-    // 4. Record to immutable audit ledger.
-    //
-    // SEC-10: this was `appendAndForget`, contradicting the rule stated in
-    // `packages/ledger/src/append.ts`: per BR-3 no action bypasses the ledger,
-    // so a ledger write failure must fail the parent operation. Tenant
-    // creation is exactly such a path — an organization that exists with no
-    // audit entry for its creation is a hole in the chain the product sells.
-    const correlationId = randomUUID();
-    try {
-      await deps.ledger.append({
-        tenantId: tenant.id,
-        correlationId,
-        actorType: ActorType.HUMAN,
-        actorId: user.id,
-        actionType: LedgerActionType.TENANT_CREATED,
-        targetRef: `tenant:${tenant.id}`,
-        result: LedgerResult.SUCCESS,
-        detail: {
-          name,
-          slug: uniqueSlug,
-          tier,
-          is_sdf,
-          dpo_name: dpo_name || user.user_metadata?.full_name || 'Compliance Officer',
-          dpo_email: dpo_email || user.email,
-          systems_count: systems?.length || 0,
-        },
-      });
-    } catch (ledgerErr: any) {
-      // Unwind rather than leave a tenant whose creation is not in the chain.
-      logger.error(
-        { error: ledgerErr?.message, tenantId: tenant.id },
-        'ledger append failed during onboarding; rolling back tenant',
-      );
-      await admin.from('tenant_users').delete().eq('tenant_id', tenant.id);
-      await admin.from('tenants').delete().eq('id', tenant.id);
-      return c.json(
-        {
-          error: {
-            code: 'ledger_append_failed',
+            code: 'onboarding_failed',
             message:
-              'The organization could not be recorded to the audit ledger, so it was not ' +
-              'created. No action bypasses the ledger.',
+              'Organization creation could not be confirmed. Keep the request key and check its outcome.',
           },
         },
-        500,
+        503,
       );
     }
-
-    return c.json(
-      {
-        tenant,
-        engagement,
-        systems: systems || [
-          {
-            name: `${uniqueSlug}-core-db`,
-            type: 'postgres',
-            description: `Primary customer datastore in ap-south-1 for ${name}`,
-            hosts_personal_data: true,
-            region: 'ap-south-1',
-            data_categories: ['identity', 'contact', 'financial'],
+    const outcome = z
+      .union([
+        z.object({
+          error: z.enum([
+            'onboarding_not_entitled',
+            'tier_not_entitled',
+            'tenant_quota_exceeded',
+            'library_not_published',
+          ]),
+        }),
+        z.object({
+          tenant: z.object({ id: z.uuid() }).passthrough(),
+          engagement: z.object({ id: z.uuid() }).passthrough(),
+          intake: z.object({
+            proposed_system_count: z.number().int().nonnegative(),
+            status: z.literal('pending_estate_setup'),
+          }),
+        }),
+      ])
+      .safeParse(data);
+    if (!outcome.success) {
+      return c.json(
+        {
+          error: {
+            code: 'onboarding_failed',
+            message:
+              'Organization creation could not be confirmed. Keep the request key and check its outcome.',
           },
-        ],
-      },
-      201,
-    );
+        },
+        503,
+      );
+    }
+    if ('error' in outcome.data) {
+      const code = outcome.data.error;
+      const status =
+        code === 'library_not_published' ? 503 : code === 'tenant_quota_exceeded' ? 409 : 403;
+      return c.json(
+        {
+          error: {
+            code,
+            message: 'The onboarding prerequisites are not satisfied. Contact your administrator.',
+          },
+        },
+        status,
+      );
+    }
+    // The submitted inventory is preserved as intake. W3 will create verified
+    // estate records; do not echo invented systems as if they were connected.
+    return c.json({ ...outcome.data, systems: [] }, 201);
   });
 
   // ─── Agent Invocation & Audit Pipeline ───────────────────────────

@@ -39,4 +39,5 @@ for suite in tests/database/*.test.sql; do
   sql < "$suite"
 done
 bash tests/database/concurrent-idempotency.sh "$container"
+bash tests/database/concurrent-onboarding.sh "$container"
 echo "Database migrations and security assertions passed."

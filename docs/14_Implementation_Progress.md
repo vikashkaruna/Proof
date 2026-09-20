@@ -24,13 +24,21 @@ Local evidence: BFF 127 tests pass; BFF typecheck passes; real PostgreSQL fresh 
 
 ## W0 milestone: durable idempotency
 
+Committed as `2834f9d` and pushed to staging. CI [35507335231](https://github.com/vikashkaruna/Proof/actions/runs/35507335231) is green for the full configured lane (including database security, lint/typecheck, TS/Python tests and security scan). The eight-session database race admits exactly one claim.
+
 Migration 0017 adds the previously missing request-claim store and service-only RPCs. The BFF now claims a key before running a mutation, binds it to user/tenant/route/body/query/role/scopes/session, rejects competing or conflicting uses, and replays only completed results. Database failure cannot silently disable this gate. Expired or interrupted claims are retained and refused, not automatically re-executed; operational reconciliation of interrupted requests remains necessary. Response bodies may contain sensitive results and require the planned retention/cleanup policy.
 
 Verification: 132 BFF tests and typecheck pass. Fresh PostgreSQL migrations, client-authority and claim/replay assertions pass. The database runner now uses the pinned Docker Hub image with the same-version ECR mirror as a download fallback, addressing the first milestone's infrastructure-only CI failure. This suite uses real PostgreSQL roles/RLS with Auth schema fixtures; real JWT/E2E parity remains open.
 
+## W0 milestone: atomic, entitled onboarding
+
+Migration 0018 adds service-only, time-bound onboarding entitlements, a shared fixed-window rate limiter and saved DPO/proposed-system intake. The BFF calls an atomic transaction for tier/quota checks, tenant + owner + initial assessment + intake + genesis ledger. The published library must match the BFF version and contain the declared control count. No live entitlements were granted. [Operator setup and interrupted-request handling](audits/05-w0-operations.md) are documented for deployment.
+
+Verification: 141 BFF tests and typecheck pass; real PostgreSQL tests prove entitlement/tier/expiry/revocation refusal, completeness checks, saved intake, quota/rate limits and full rollback when the ledger fails. W3 estate normalization remains pending; submitted systems are retained as proposals and no longer echoed as connected inventory.
+
 ## Remaining acceptance work — do not mark whole workstreams complete yet
 
-**W0:** finish strict environment/real-auth parity, missing operational tables/atomic idempotency, onboarding entitlement/quota/rate limits, deployed secret wiring, expiry edge cases, shared in-flight halt/guard tests, verified evidence retention and all required security regressions. Preserve the complete W0 exit criteria; local policy tests alone do not prove deployed parity.
+**W0:** finish strict environment/real-auth parity, deployed verification of the new operational tables/idempotency/onboarding controls, deployed secret wiring, expiry edge cases, shared in-flight halt/guard tests, verified evidence retention and all required security regressions. Preserve the complete W0 exit criteria; local policy tests alone do not prove deployed parity.
 
 **W1 (after W0):** incorporate analyst WIP coherently with tests/seeds, complete role enforcement and RLS/session-MFA boundaries, TOTP + email OTP/recovery delivery, deployment/key rotation and persona E2E. Default analyst access remains assigned tenants; email OTP remains planned until explicitly deferred.
 
