@@ -153,3 +153,123 @@ describe('verification budget', () => {
     expect(result).toMatchObject({ ok: false, reason: 'rate_limited' });
   });
 });
+
+/**
+ * W1 · R-08 — the same budgets, per session.
+ *
+ * The account budgets above stop a brute force. On their own they hand over a
+ * different attack: someone holding a stolen session spends the whole account
+ * allowance and the legitimate user, whose credentials are fine, cannot
+ * approve anything for an hour. The per-session budget is tighter, and is
+ * charged first, so the attacker's own session runs out while the real user
+ * keeps headroom.
+ */
+const SESSION_A = 'sess-stolen-aaaa';
+const SESSION_B = 'sess-legitimate-bbbb';
+
+const openChallengeAs = (sessionId: string | null, userId = USER) =>
+  mfa.issueChallenge({ userId, tenantId: TENANT, purpose: 'login', sessionId });
+
+describe('per-session challenge budget', () => {
+  it('refuses a session that opens challenges without limit', async () => {
+    await enrol();
+    let refused = false;
+    for (let i = 0; i < 12; i++) {
+      const issued = await openChallengeAs(SESSION_A);
+      if (!issued.ok && issued.reason === 'rate_limited') {
+        refused = true;
+        break;
+      }
+    }
+    expect(refused, 'one session must not open challenges without limit').toBe(true);
+  });
+
+  it('leaves the account headroom for another session — the lockout this prevents', async () => {
+    await enrol();
+    // Burn the stolen session's allowance.
+    for (let i = 0; i < 12; i++) await openChallengeAs(SESSION_A);
+    expect(await openChallengeAs(SESSION_A)).toMatchObject({ ok: false, reason: 'rate_limited' });
+
+    // The real user, on their own session, is unaffected. Without the session
+    // budget the attacker would have spent the account's 20 and this would
+    // be refused too.
+    const legitimate = await openChallengeAs(SESSION_B);
+    expect(legitimate.ok, 'the account budget must not have been drained').toBe(true);
+  });
+
+  it('charges the session before the account, so an over-limit session stops drawing it down', async () => {
+    await enrol();
+    for (let i = 0; i < 40; i++) await openChallengeAs(SESSION_A);
+    // If the account budget were charged first, forty attempts would have
+    // spent all twenty of them and no session could issue.
+    expect((await openChallengeAs(SESSION_B)).ok).toBe(true);
+  });
+
+  it('still applies the account budget when no session can be identified', async () => {
+    await enrol();
+    let refused = false;
+    for (let i = 0; i < 40; i++) {
+      const issued = await openChallengeAs(null);
+      if (!issued.ok && issued.reason === 'rate_limited') {
+        refused = true;
+        break;
+      }
+    }
+    // An unidentifiable session is not a waiver.
+    expect(refused).toBe(true);
+  });
+
+  it('refuses when the session budget cannot be read', async () => {
+    await enrol();
+    db.failNextRpc('take_rate_limit');
+    expect(await openChallengeAs(SESSION_A)).toMatchObject({ ok: false, reason: 'rate_limited' });
+  });
+});
+
+describe('per-session verification budget', () => {
+  it('bounds guessing from one session and spares the account', async () => {
+    await enrol();
+    const issued = await openChallengeAs(SESSION_B);
+    if (!issued.ok) throw new Error('challenge not issued');
+
+    let refused = false;
+    for (let i = 0; i < 12 && !refused; i++) {
+      const result = await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        code: '000000',
+        atMs: T0,
+        sessionId: SESSION_A,
+      });
+      if (!result.ok && result.reason === 'rate_limited') refused = true;
+    }
+    expect(refused, 'one session must not guess without limit').toBe(true);
+
+    // A different session still has account budget left to verify with.
+    const other = await mfa.verifyChallenge({
+      challengeId: issued.challengeId,
+      userId: USER,
+      code: '000000',
+      atMs: T0,
+      sessionId: SESSION_B,
+    });
+    expect(other.ok).toBe(false);
+    expect((other as { reason: string }).reason).not.toBe('rate_limited');
+  });
+
+  it('refuses a verification when the session budget cannot be read', async () => {
+    await enrol();
+    const issued = await openChallengeAs(SESSION_B);
+    if (!issued.ok) throw new Error('challenge not issued');
+
+    db.failNextRpc('take_rate_limit');
+    const result = await mfa.verifyChallenge({
+      challengeId: issued.challengeId,
+      userId: USER,
+      code: '000000',
+      atMs: T0,
+      sessionId: SESSION_A,
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'rate_limited' });
+  });
+});

@@ -456,6 +456,8 @@ export function v1Routes(deps: Deps) {
       purpose: input.purpose,
       boundResourceRef,
       boundPayloadSha256,
+      // From the verified access token, not the request.
+      sessionId: c.get('sessionId') ?? null,
     });
 
     if (!issued.ok) {
@@ -521,6 +523,7 @@ export function v1Routes(deps: Deps) {
       challengeId,
       userId: user.id,
       code: parsed.data.code,
+      sessionId: c.get('sessionId') ?? null,
     });
 
     if (!result.ok) {

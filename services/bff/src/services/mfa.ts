@@ -92,6 +92,22 @@ const TOTP_CODE_PATTERN = /^\d{6}$/;
 const CHALLENGE_ISSUE_BUDGET = { limit: 20, windowSeconds: 3600 } as const;
 const VERIFY_ATTEMPT_BUDGET = { limit: 20, windowSeconds: 3600 } as const;
 
+/**
+ * The same budgets again, per session, and deliberately tighter (W1 · R-08).
+ *
+ * The account budgets stop a brute force. On their own they hand over a
+ * different attack: someone holding a stolen session spends the whole account
+ * allowance, and the legitimate user — whose credentials are fine — can no
+ * longer approve anything for an hour. A cap the attacker reaches first, in
+ * the session they actually hold, keeps headroom for the real user, so the
+ * worst case is a degraded session rather than a locked-out account.
+ *
+ * The session id comes from the verified access token, so unlike a client
+ * address it cannot be chosen by the caller.
+ */
+const SESSION_CHALLENGE_ISSUE_BUDGET = { limit: 10, windowSeconds: 3600 } as const;
+const SESSION_VERIFY_ATTEMPT_BUDGET = { limit: 10, windowSeconds: 3600 } as const;
+
 export type MfaChallengePurpose = 'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation';
 
 export interface ApprovalBinding {
@@ -206,6 +222,13 @@ export interface IssueChallengeOptions {
   boundResourceRef?: string;
   boundPayloadSha256?: string;
   ttlMs?: number;
+  /**
+   * The GoTrue session this request arrived on, when it can be identified.
+   * Absent means the account budget alone applies — never that the session
+   * budget is waived for a caller who simply declined to name one, because
+   * this is read from the verified token rather than from the request.
+   */
+  sessionId?: string | null;
 }
 
 export type IssueChallengeResult =
@@ -218,6 +241,8 @@ export interface VerifyChallengeOptions {
   userId: string;
   code: string;
   atMs?: number;
+  /** See `IssueChallengeOptions.sessionId`. */
+  sessionId?: string | null;
 }
 
 export type VerifyChallengeResult =
@@ -789,6 +814,24 @@ export function createMfaService(
     async issueChallenge(opts) {
       // Budget first. Otherwise an attacker refreshes the per-challenge
       // attempt counter for free by opening challenge after challenge.
+      //
+      // The session budget is charged BEFORE the account one on purpose: a
+      // session already over its own limit must stop drawing down the
+      // allowance the legitimate user still needs.
+      if (opts.sessionId) {
+        const sessionBudget = await takeBudget(
+          'mfa_challenge_issue_session',
+          opts.sessionId,
+          SESSION_CHALLENGE_ISSUE_BUDGET,
+        );
+        if (!sessionBudget.allowed) {
+          return {
+            ok: false,
+            reason: 'rate_limited',
+            retryAfterSeconds: sessionBudget.retryAfterSeconds,
+          };
+        }
+      }
       const budget = await takeBudget('mfa_challenge_issue', opts.userId, CHALLENGE_ISSUE_BUDGET);
       if (!budget.allowed) {
         return { ok: false, reason: 'rate_limited', retryAfterSeconds: budget.retryAfterSeconds };
@@ -830,7 +873,24 @@ export function createMfaService(
       };
     },
 
-    async verifyChallenge({ challengeId, userId, code, atMs }) {
+    async verifyChallenge({ challengeId, userId, code, atMs, sessionId }) {
+      // Per-session first, for the reason given on the budget constants: a
+      // stolen session must exhaust its own guesses before it can exhaust the
+      // account's and lock the real user out.
+      if (sessionId) {
+        const sessionBudget = await takeBudget(
+          'mfa_verify_attempt_session',
+          sessionId,
+          SESSION_VERIFY_ATTEMPT_BUDGET,
+        );
+        if (!sessionBudget.allowed) {
+          return {
+            ok: false,
+            reason: 'rate_limited',
+            retryAfterSeconds: sessionBudget.retryAfterSeconds,
+          };
+        }
+      }
       // The account-wide guess budget. `max_attempts` bounds guesses against
       // one challenge; this one survives opening a new challenge, which is
       // what made the per-challenge limit escapable.
