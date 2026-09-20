@@ -18,6 +18,7 @@ import type { KillSwitchService } from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
 import type { MfaService } from '../services/mfa.js';
 import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
+import { ACTION_CONTENT_COLUMNS, actionSetDigestSha256 } from '../services/action-digest.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -372,6 +373,36 @@ export function v1Routes(deps: Deps) {
       if (!plan) {
         return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
       }
+      // R-08: the challenge binds the CONTENT of each action, not just its id.
+      // Read from the database, never from the request — a caller that could
+      // name its own digest could name the one for content it already
+      // replaced. See `action-digest.ts`.
+      const { data: boundActions, error: boundActionsErr } = await admin
+        .from('remediation_actions')
+        .select(ACTION_CONTENT_COLUMNS)
+        .eq('plan_id', input.planId!)
+        .eq('tenant_id', tenantId)
+        .in('id', input.actionIds!);
+      if (boundActionsErr) {
+        return c.json({ error: { code: 'lookup_failed', message: boundActionsErr.message } }, 500);
+      }
+      // Binding to an action that does not exist would compute the digest over
+      // a smaller set than the one being approved.
+      const boundFound = new Set((boundActions ?? []).map((a) => a.id));
+      const boundMissing = input.actionIds!.filter((id) => !boundFound.has(id));
+      if (boundMissing.length > 0) {
+        return c.json(
+          {
+            error: {
+              code: 'actions_not_found',
+              message: 'Every action in a challenge must belong to this tenant and plan',
+              details: { missing: boundMissing },
+            },
+          },
+          404,
+        );
+      }
+
       boundResourceRef = input.planId!;
       boundPayloadSha256 = approvalBindingSha256({
         planId: input.planId!,
@@ -381,6 +412,7 @@ export function v1Routes(deps: Deps) {
         // between satisfying the challenge and issuing the approval no longer
         // matches.
         planVersion: (plan as { version?: number }).version ?? null,
+        actionsDigest: actionSetDigestSha256(boundActions ?? []),
       });
     } else if (input.purpose === 'login') {
       // Bound to the session it will vouch for. Without this a challenge
@@ -659,7 +691,7 @@ export function v1Routes(deps: Deps) {
     const { data: actions, error: actErr } = await admin
       .from('remediation_actions')
       .select(
-        'id, tenant_id, plan_id, action_type, dry_run_status, rollback_validated, dry_run_expires_at',
+        'id, tenant_id, plan_id, action_type, dry_run_status, rollback_validated, dry_run_expires_at, parameters, rollback_definition, closes_finding_ids, dry_run_result',
       )
       .eq('plan_id', input.planId)
       .eq('tenant_id', tenantId)
@@ -771,6 +803,11 @@ export function v1Routes(deps: Deps) {
       actionIds: input.actionIds,
       mode: input.mode,
       planVersion: (plan as { version?: number }).version ?? null,
+      // Recomputed from the rows as they stand NOW. If an action's definition
+      // or its dry-run diff changed after the challenge was raised, this no
+      // longer matches what the challenge was bound to and the step-up is
+      // refused — which is the whole point of binding it.
+      actionsDigest: actionSetDigestSha256(actions ?? []),
     });
 
     if (!input.mfaChallengeId) {
@@ -841,7 +878,8 @@ export function v1Routes(deps: Deps) {
 
       const message =
         stepUp.reason === 'binding_mismatch'
-          ? 'That challenge was satisfied for a different plan or action set. Request one for this approval.'
+          ? 'That challenge was satisfied for a different plan, action set, or action content. ' +
+            'If an action was edited after you reviewed it, re-read it and request a fresh challenge.'
           : stepUp.reason === 'challenge_already_consumed'
             ? 'That challenge has already authorised an approval. Each step-up authorises exactly one.'
             : stepUp.reason === 'challenge_expired'

@@ -112,6 +112,18 @@ export interface ApprovalBinding {
    * version we cannot read binds as unversioned rather than failing shut.
    */
   planVersion?: number | null;
+  /**
+   * SHA-256 over the content of every action in the set (W1 · R-08).
+   *
+   * `planVersion` catches a plan that was revised. It cannot catch an action
+   * rewritten in place while the plan's version stands still, which is the
+   * available window: the immutability trigger only locks an action's
+   * definition once it is already approved, so everything the approver is
+   * reading stays writable right up until the approval lands.
+   *
+   * See `action-digest.ts` for what goes into it and why.
+   */
+  actionsDigest?: string | null;
 }
 
 /**
@@ -136,6 +148,7 @@ export function approvalBindingSha256(binding: ApprovalBinding): string {
     actionIds: [...binding.actionIds].sort(),
     mode: binding.mode,
     planVersion: binding.planVersion ?? null,
+    actionsDigest: binding.actionsDigest ?? null,
   });
 }
 

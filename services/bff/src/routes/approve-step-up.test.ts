@@ -422,3 +422,141 @@ describe('dry-run expiry at both safety gates', () => {
     },
   );
 });
+
+/**
+ * W1 · R-08 — the step-up binds the action CONTENT, not only its id.
+ *
+ * `planVersion` closed the case where the plan was revised. It cannot close
+ * the case where the version never moves and an action is rewritten in place,
+ * and that window is wide open by design: `trg_actions_approved_immutable`
+ * only locks an action's definition once `approval_status` is already
+ * approved/executing/succeeded, so everything the approver is reading stays
+ * writable right up until the approval lands.
+ *
+ * Each test here edits an action AFTER the challenge has been satisfied — the
+ * exact moment the approver has already decided — and requires the approval to
+ * be refused with nothing issued.
+ */
+describe('POST /v1/plans/approve — the binding covers action content', () => {
+  /** Satisfy a challenge, then mutate action A the way an attacker would. */
+  async function stepUpThenEdit(
+    app: Hono<{ Variables: Variables }>,
+    edit: (row: Record<string, unknown>) => void,
+  ) {
+    const challengeId = await freshStepUp(app);
+    const row = fake.rows('remediation_actions').find((r) => r.id === ACTION_A);
+    expect(row, 'action A should be seeded').toBeTruthy();
+    edit(row as Record<string, unknown>);
+    return post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+  }
+
+  it.each([
+    [
+      'parameters rewritten after review',
+      (row: Record<string, unknown>) => {
+        row.parameters = { columns: ['email', 'phone', 'aadhaar'], scope: 'all_records' };
+      },
+    ],
+    [
+      'the rollback definition swapped for an empty one',
+      (row: Record<string, unknown>) => {
+        row.rollback_definition = {};
+      },
+    ],
+    [
+      'the dry-run diff replaced with a different simulated outcome',
+      (row: Record<string, unknown>) => {
+        row.dry_run_result = { recordsAffected: 4_000_000, systems: ['crm', 'warehouse'] };
+      },
+    ],
+    [
+      'the action retyped entirely',
+      (row: Record<string, unknown>) => {
+        row.action_type = 'data.delete';
+      },
+    ],
+    [
+      'a different finding claimed as the justification',
+      (row: Record<string, unknown>) => {
+        row.closes_finding_ids = ['44444444-4444-4444-8444-444444444444'];
+      },
+    ],
+  ])('refuses the approval when %s', async (_label, edit) => {
+    const app = await buildApp();
+    const res = await stepUpThenEdit(app, edit);
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('binding_mismatch');
+    // The decisive assertion: no signed authority came out of this.
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it('still approves when nothing changed, so the digest is not simply refusing everything', async () => {
+    const app = await buildApp();
+    const res = await stepUpThenEdit(app, () => {
+      /* no edit */
+    });
+    expect(res.status).toBe(201);
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+  });
+
+  it('is unmoved by a reordering of closes_finding_ids, which is a set', async () => {
+    const app = await buildApp();
+    const f1 = '44444444-4444-4444-8444-44444444000f';
+    const f2 = '44444444-4444-4444-8444-44444444000e';
+    const row = fake.rows('remediation_actions').find((r) => r.id === ACTION_A)!;
+    row.closes_finding_ids = [f1, f2];
+
+    const res = await stepUpThenEdit(app, (r) => {
+      r.closes_finding_ids = [f2, f1];
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('refuses when an action is edited between the challenge and a RETRY of the approval', async () => {
+    // The first approval fails for an unrelated reason, the caller fixes it and
+    // retries with the same challenge — and the content moved in between. A
+    // challenge is single-use, so this must not be the way back in.
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+
+    const first = await post(
+      app,
+      '/v1/plans/approve',
+      approveBody({ mfaChallengeId: challengeId }),
+    );
+    expect(first.status).toBe(201);
+
+    const row = fake.rows('remediation_actions').find((r) => r.id === ACTION_B)!;
+    row.parameters = { scope: 'everything' };
+
+    const second = await post(
+      app,
+      '/v1/plans/approve',
+      approveBody({ mfaChallengeId: challengeId }),
+    );
+    expect(second.status).toBe(401);
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+  });
+
+  it('refuses a challenge raised for an action that does not exist', async () => {
+    // Otherwise the digest is computed over a smaller set than the one being
+    // approved, and the missing action rides in unbound.
+    const app = await buildApp();
+    const res = await post(
+      app,
+      '/v1/mfa/challenge',
+      JSON.stringify({
+        purpose: 'approval_issuance',
+        planId: PLAN,
+        actionIds: [ACTION_A, '33333333-3333-4333-8333-3333333900ff'],
+        mode: 'batch',
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: 'actions_not_found' },
+    });
+  });
+});
