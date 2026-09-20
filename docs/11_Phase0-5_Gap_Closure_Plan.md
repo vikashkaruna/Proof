@@ -1,0 +1,1267 @@
+# Axiom Proof — Phase 0–5 Gap Closure Plan
+
+### Axiom Minds Private Limited · https://axiomminds.ai
+
+**Document:** 11 · **Revision 8 — FINAL** (20 Sep 2026) · **Status:** Approved scope. Ready for implementation in a fresh session.
+**Baseline commit:** `9575205` (main == staging == origin/main == origin/staging)
+**Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests
+
+> **Revision 8 (final) changes:** **Inbound MCP dropped** from scope entirely. **Outbound MCP kept flexible** — an optional transport behind the existing interface, enabled per-descriptor, never the primary path. **Per-agent OAuth client registration dropped**: one connector identity per tenant, with `connector.write` requestable only by Karya's SVID plus a valid approval token. Rationale — only one of ten agents writes to external systems, that is a static architectural fact, and ten registrations per connector is authentication surface the ICP should not have to onboard. Per-agent registration remains documented as optional hardening. REST/OpenAPI is the primary transport.
+>
+> **Revision 7 changes:** **MCP posture settled.** Revision 3 conflated two opposite directions; separated now. **Outbound** MCP (Axiom → client MCP servers) is **deferred** — it was justified on general MCP adoption, but the ICP does not run MCP servers today, so it was building for a customer we do not have. **Inbound** MCP (external → Axiom) is **read-only permanently** and scheduled only after W0 + W1, because write-via-MCP contradicts the approval-console design rather than merely risking it. MCP otherwise stays inside the Axiom Proof perimeter. Also corrects a Revision 3 over-claim: **SPIFFE does not reach across to a client's IdP** without federation; the honest split is SPIFFE intra-perimeter, OAuth grants inter-perimeter, with the JWT-SVID as the `private_key_jwt` bridge. **REST/OpenAPI becomes the primary transport.** No delivered feature is lost; item 15 moves to W4.7 descriptors.
+>
+> **Revision 6 changes:** **Full ten-agent identity and estate-access matrix** added to W4.3, reconciled across all three declaration sites. Result: **only 2 of 10 agents touch a client estate** (Drishti reads, Karya writes); five handle estate-derived personal data with no connector access; three never see client data. Five declaration discrepancies found and scheduled. Two new findings: **SEC-14** (tool scopes are declarative only — read in exactly one place, enforced nowhere) and **SEC-15** (Nazar holds `control_library.write`, contradicting the architecture and dangerous under W7.0). Scopes gain tenant/estate structure.
+>
+> **Revision 5 changes:** **W7.0 added — regulatory baseline and library versioning.** The control library gets a recorded relationship to the law it implements: content-hashed `regulatory_instruments` with an amendment chain, a frozen named baseline (**`IN-DPDP@2026-09-20`** = Act 22 of 2023 + G.S.R. 846(E) + corrigendum **G.S.R. 892(E)**, 11 Dec 2025), per-control provenance with `verified_on`/`verified_by`, a typed change log, and semver whose bumps are defined by **assessment comparability**. Consequence: the CTL-1 citation fix is a **PATCH**, so existing client assessments stay valid. Nazar (M2.9) closes the loop from gazette signal to reviewed baseline delta.
+>
+> **Revision 4 changes:** **preprod becomes an exact replica of production** — same codebase, same ruleset, differing only in topology. New finding **SEC-13**: preprod currently bypasses auth, tenancy and idempotency in nine places and **runs on an in-memory mock database**, so nothing verified there says anything about production. **SEC-2 upgraded** to a full unauthenticated founder-owner takeover chain after tracing the `axiom_e2e_bypass` cookie end to end. W0 re-scoped M → L and restructured around one governing principle: environment identity must never determine security posture.
+>
+> **Revision 3 changes:** **W4 re-architected** from "build adapters" to a **Universal Connection Framework** — SPIFFE workload identity, a four-grant credential broker (OAuth 2.0/2.1 Client Credentials, RFC 8693 Token Exchange, RFC 7522 SAML Assertion, RFC 7523 JWT Assertion), pluggable transports with **MCP as the primary path**, and declarative per-system capability descriptors. Adding a target system becomes a config file, not an integration. Seven chunks; W5 now unblocks at W4.4.
+>
+> **Revision 2 changes:** all seven decisions in Part E resolved and folded into the workstreams. Added **W3.5** (Entity Relationship Graph page) and **W10** (on-prem deploy environment). **W7 re-scoped upward** following new finding **CTL-1** — verification against the notified Gazette showed the control library cites the *draft* Rules numbering, so nearly every statutory citation in client-facing reports is wrong.
+
+---
+
+## START HERE — kickoff for a fresh implementation session
+
+**Baseline:** `9575205` · main == staging == origin/main == origin/staging · working tree clean
+**Test baseline (verified):** TypeScript 11/11 task passes · Python 38/38 pass · `services/bff` and `apps/web` have **zero tests** behind `--passWithNoTests`
+**Environment:** work in the Axiom Proof repo. Staging and preprod **cannot validate auth, tenancy or RBAC today** — see SEC-1 and SEC-13. W0 fixes that first.
+
+### Order of work
+
+| Order | Workstream | Why first |
+| ----- | ---------- | --------- |
+| **1 — parallel** | **W0** Security & environment parity | Blocks everything. Until it lands, nothing is verifiable in any non-local environment |
+| **1 — parallel** | **W7.0 + W7.1** Regulatory baseline, then citation re-map | Independent of W0. The product cites the wrong law in client reports today; the fix is a PATCH so no assessment is invalidated |
+| 2 | **W2** Data model | Unblocks W1, W3, W4 |
+| 3 | **W1** Tenancy, RBAC, MFA, personas | Makes staging a real test bed |
+| 4 | **W3 → W3.5** Estate, then ER graph | |
+| 5 | **W4.1 → W4.7** Universal Connection Framework | W5 unblocks at W4.4 |
+| 6 | **W5** Phase 3 execution loop | The core product |
+| 7 | W6 · W8 · W10 | |
+| — | **W9** Tests & audits | Continuous. Gates every merge from day one |
+
+### First three things to do
+
+1. **W0.0** — build `resolveAuthMode()` in `@axiom/config` (`AXIOM_AUTH_MODE`, default `strict`, `e2e-bypass` refused at boot outside `local`/`test`), then delete all nine preprod/staging security branches listed in SEC-13 plus the `isDevOrTest` chains in SEC-1 and the cookie clauses in SEC-2. Acceptance: `grep -rn "ENVIRONMENT === 'preprod'\|ENVIRONMENT === 'staging'" apps packages services` returns zero security-relevant hits.
+2. **W9 seed** — stand up the `services/bff` test suite *before* touching its middleware, so W0's changes are verified as they land rather than after.
+3. **W7.1** — declare baseline `IN-DPDP@2026-09-20` and re-map all 24 `DPDPR-2025` citations against G.S.R. 846(E) + corrigendum G.S.R. 892(E). Publish as `0.1.1`.
+
+### Two open decisions (neither blocks the above)
+
+- **Sectoral pack #1** — Healthcare (ABDM/NHA retention vs DPDPA erasure) or BFSI (RBI / Account Aggregator)? Needed only when W7 reaches pack work.
+- **Mock-data line** — proposed: permitted only behind a `demo` tenant flag, never hardcoded in a page component, carrying the same provenance labelling as non-production connector bindings. Proceeding on this basis unless changed.
+
+### Findings index
+
+**P0:** SEC-1 (staging/preprod auth bypass) · SEC-2 (cookie takeover chain) · SEC-3 (cross-tenant leak, 17 pages) · SEC-13 (preprod runs on a mock DB) · CTL-1 (draft Rules citations)
+**P1:** SEC-4 (kill switch process-local) · SEC-5 (unbounded tenant creation) · SEC-6 (stale dry-run) · SEC-7 (blast radius unenforced at execution) · SEC-8 (no MFA) · SEC-9 (RBAC) · SEC-14 (tool scopes unenforced) · SEC-15 (Nazar can write the control library)
+**P2:** SEC-10 · SEC-11 · SEC-12 · QUA-1 (no BFF tests) · QUA-2 (ten shell modules) · QUA-3 (control count) · PERF-1 · PERF-2 · PERF-3
+
+---
+
+## 0. How to read this document
+
+Part A is what is **broken or unsafe today** and must be fixed before anything else.
+Part B is what is **missing** against the PRD and the phase plan.
+Part C is the **sequenced plan** to close both.
+Part D is the **test and verification strategy**.
+Part E records the **decisions taken** (E.1, resolved) and the two still open (E.2, non-blocking).
+
+Every claim in Parts A and B is anchored to a file and line in the repo at `9575205`. Where I say something is absent, I ran the search and report the count.
+
+---
+
+## 1. Staging status — done, no action needed
+
+| Ref              | SHA       |
+| ---------------- | --------- |
+| `main`           | `9575205` |
+| `staging`        | `9575205` |
+| `origin/main`    | `9575205` |
+| `origin/staging` | `9575205` |
+
+`git rev-list --count staging..main` = 0, and `main..staging` = 0. Staging is already identical to main. Working tree clean. Nothing to sync.
+
+**However** — see **SEC-1** and **SEC-13**. In staging *and* preprod as currently configured, authentication, tenancy, role resolution and idempotency are all bypassed, and preprod additionally runs on an in-memory mock database rather than a real one. Neither environment can validate multi-tenancy, RBAC or MFA today. That reorders the plan: **W0 must land before any other workstream can be verified anywhere.**
+
+---
+
+## 2. Verdict
+
+The **spine is real and well built**. The parts that carry the trust proposition — the hash-chained ledger, the HMAC approval-token engine, the per-action execution gate, the DB-level RLS design, the agent separation-of-duties contract — are genuinely good and match the architecture document. `services/bff/src/routes/v1.ts:319-470` is a careful, correct execution gate: signature → plan binding → DB-persisted token lookup → status → scope cross-check → per-action approval/dry-run/rollback preconditions → atomic single-use consumption via conditional update. That is the hard part and it is done properly.
+
+The **body is not attached to the spine**. Three structural problems:
+
+1. **The web application bypasses the tenancy model entirely.** 17 of 22 authenticated pages query with the Supabase service-role key and no tenant filter. RLS is correct in the database and irrelevant in practice.
+2. **Phase 3 — "the core product" — is a stub.** Karya returns `status="skipped"`. There is no connector framework, no dry-run simulator, no rollback engine, no verification agent, no execution-time blast-radius enforcement.
+3. **Phase 4 is absent, not partial.** Standing approval policies, multi-regulator reuse, TPRM, DPIA automation, sectoral packs, partner portal: zero implementation references each.
+4. **The non-production environments do not run the production code path.** Preprod diverges in nine places and is backed by an in-memory mock (SEC-13); staging bypasses auth wholesale (SEC-1). The environments meant to de-risk a release are currently incapable of doing so.
+
+And one defect that is not architectural but is arguably the most commercially dangerous: **CTL-1** — the control library cites the *draft* DPDP Rules numbering, not the Rules as notified on 13 Nov 2025. Reports the product generates today cite the wrong rule for breach notification, cross-border transfer, notice, retention and data-principal rights.
+
+Prior grade in `Axiom-Proof_Readiness_Matrix.md` was **B+ / "Advanced Pilot"**. That assessment is infrastructure-focused and did not surface the tenancy defect, the auth bypasses, or CTL-1. On a security basis I would not put the current build in front of two clients at once; on a CTL-1 basis I would not send a generated report to a regulator.
+
+---
+
+# PART A — Findings to fix first
+
+Severity: **P0** = exploitable or data-exposing now · **P1** = violates a stated absolute requirement · **P2** = correctness/quality.
+
+## SEC-1 · P0 · Authentication is bypassable in staging, preprod, and any container without `NODE_ENV`
+
+`services/bff/src/middleware/auth.ts:18-28`
+
+```ts
+const isDevOrTest =
+  env.ENVIRONMENT === 'development' ||
+  env.ENVIRONMENT === 'local' ||
+  env.ENVIRONMENT === 'preprod' ||
+  env.ENVIRONMENT === 'staging' ||
+  process.env.NODE_ENV !== 'production' ||        // ← unset NODE_ENV ⇒ true
+  process.env.AXIOM_E2E_BYPASS_AUTH === 'true';
+
+let token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+if (!token && isDevOrTest) token = 'dev-token';   // ← no credential ⇒ synthesised one
+```
+
+When `isDevOrTest` is true, a request with **no `Authorization` header at all** is assigned `dev-token`, which resolves (`auth.ts:36-46`) to the founder identity `00000000-…-0001`. `tenantResolver` (`services/bff/src/middleware/tenant.ts:47-51`) then accepts **any** `X-Tenant-Id` the caller supplies and assigns `role: 'owner'` with no membership check.
+
+Net effect in staging: an unauthenticated caller is founder-owner of any tenant they name.
+
+Compounding: `auth.ts:60-75` and `auth.ts:83-96` **fail open** — if Supabase returns an error or is unreachable, the request is granted the founder identity rather than rejected.
+
+`.env.staging.example` sets `ENVIRONMENT=staging` **and** `NODE_ENV=staging`, so both clauses fire. Production sets both correctly, but the `NODE_ENV !== 'production'` clause means any deploy that forgets to set `NODE_ENV` silently opens the door.
+
+## SEC-2 · P0 · Cookie-controlled authentication bypass in the web app
+
+`apps/web/src/middleware.ts:37-56`
+
+```ts
+const isPreprodOrMock =
+  process.env.ENVIRONMENT === 'preprod' ||
+  supabaseUrl.includes('preprod-supabase') ||
+  supabaseUrl.includes('placeholder') ||
+  request.cookies.get('axiom_e2e_bypass')?.value === 'true' ||   // ← no env guard
+  (process.env.NODE_ENV === 'test' && …);
+
+if (isPreprodOrMock) {
+  …
+  return NextResponse.next();   // ← auth skipped
+}
+```
+
+The `axiom_e2e_bypass` cookie clause has **no environment guard**, unlike the `AXIOM_E2E_BYPASS_AUTH` clause beside it. Any visitor who sets `axiom_e2e_bypass=true` in their browser skips the session check on every non-public route — in production.
+
+**It is worse than a page-auth skip. It is a complete takeover chain**, and every link is in the production code path:
+
+| # | Where | What happens |
+| - | ----- | ------------ |
+| 1 | attacker's browser | sets `axiom_e2e_bypass=true` — no credentials needed |
+| 2 | `apps/web/src/middleware.ts:41` | cookie clause, **no env guard** ⇒ page session check skipped |
+| 3 | `apps/web/src/app/api/bff/[...path]/route.ts:35` | same cookie, **no env guard** ⇒ injects `accessToken = 'test-access-token'` |
+| 4 | `services/bff/src/middleware/auth.ts:36-46` | `test-access-token` ⇒ founder identity `00000000-…-0001` |
+| 5 | `services/bff/src/middleware/tenant.ts:47-51` | any `X-Tenant-Id` accepted, `role: 'owner'` assigned |
+
+Result: **unauthenticated founder-owner access to any tenant, from a cookie alone.**
+
+And the cookie is not obscure — the app sets it itself. `apps/web/src/app/(auth)/login/actions.ts:55-63` writes `axiom_e2e_bypass=true` (plus a `test-access-token` session cookie) as a "sovereign session" fallback whenever login hits a network or 5xx failure and `NODE_ENV !== 'production'`. A transient Supabase outage hands a real user the bypass cookie; the cookie then works everywhere, forever, including against production.
+
+Also here: a live anon JWT is hardcoded as a fallback at `apps/web/src/middleware.ts:33`.
+
+## SEC-3 · P0 · Cross-tenant data exposure — service-role client used on 17 pages with no tenant filter
+
+`packages/supabase/src/admin.ts:7-13` states the invariant plainly:
+
+> "The Next.js apps NEVER use this — they go through the user-scoped client and rely on RLS to enforce tenancy."
+
+22 files in `apps/web/src` call `createSupabaseAdmin()`. The service-role key bypasses RLS by design. Of those, these query tenant-scoped tables with **zero** occurrences of `tenant_id`/`tenantId` anywhere in the file:
+
+`approval/page.tsx` · `assessment/page.tsx` · `breaches/page.tsx` · `classification/page.tsx` · `connectors/page.tsx` · `controls/page.tsx` · `dashboard/page.tsx` · `datamap/page.tsx` · `discovery/page.tsx` · `dsars/page.tsx` · `evidence/page.tsx` · `execution/page.tsx` · `monitoring/page.tsx` · `partner/page.tsx` · `policies/page.tsx` · `reports/page.tsx` · `workbench/page.tsx`
+
+Any authenticated user of any tenant sees every tenant's findings, evidence, DSARs, breaches, reports, plans, approvals and ledger entries. This makes **NFR-2 "Tenant isolation — Absolute"** false in the running product despite the database policies being correct.
+
+Only `ledger/page.tsx`, `portal/page.tsx`, `plans/page.tsx` and `api/ledger/route.ts` filter by tenant.
+
+## SEC-13 · P0 · Preprod is not a pre-production environment — it is a mock
+
+*Raised from your instruction that preprod must authenticate exactly as production does.*
+
+Preprod does not run the production code path. It runs a different one, in **nine** places, and the most consequential is that **it does not use a real database**.
+
+| # | Location | What preprod does instead of production behaviour |
+| - | -------- | -------------------------------------------------- |
+| 1 | `services/bff/src/middleware/auth.ts:20` | Authentication bypassed; missing token ⇒ founder identity |
+| 2 | `services/bff/src/middleware/tenant.ts:20` | Tenant membership check skipped; `role` forced to `owner` |
+| 3 | `services/bff/src/middleware/idempotency.ts:29-36` | `Idempotency-Key` auto-generated when absent — FR-8.3 never exercised |
+| 4 | `apps/web/src/middleware.ts:38` | Page session check skipped entirely |
+| 5 | `apps/web/src/app/api/bff/[...path]/route.ts:31` | Injects `test-access-token` with no session |
+| 6 | `apps/web/src/app/(auth)/login/actions.ts:48-63` | "Sovereign session" issued without credentials; sets the SEC-2 bypass cookie |
+| 7 | **`packages/supabase/src/admin.ts:20-27`** | **Returns the in-memory E2E mock client instead of connecting to Supabase** |
+| 8 | **`packages/supabase/src/server.ts:21-28`** | **Same substitution on the user-scoped client** |
+| 9 | `packages/config/src/index.ts:117-122` | All production credential validation skipped |
+
+Rows 7 and 8 are the ones that matter most. `createE2ESupabaseClient()` (`packages/supabase/src/e2e.ts`) serves **hardcoded fixtures** — `E2E_USER`, `E2E_PLAN` and an in-memory table store. In preprod, every page, every query and every agent read is answered from constants compiled into the bundle.
+
+The consequence is blunt: **nothing verified in preprod today tells you anything about production.** Not auth, not tenancy, not RLS, not idempotency, not query correctness, not performance, not migrations. A green preprod run is evidence about a fixture file.
+
+Note also that `isE2EBypassEnabled()` (`e2e.ts:245-251`) is itself correctly scoped — `NODE_ENV === 'test'`, or local plus an explicit flag. It is defeated by `admin.ts:20-27` ORing it together with `ENVIRONMENT === 'preprod'` and two `SUPABASE_URL` substring checks. The guard was written correctly and then bypassed around.
+
+**There is already a correct precedent in this repo.** `services/model-gateway/src/model_gateway/config.py:93-99` treats preprod at production strictness — it *enforces* Mumbai region and refuses to let PII redaction be disabled in `("production", "preprod")`. The Python services got this right. The TypeScript layer did not. Making preprod a true replica means bringing the TS layer up to the standard the model gateway already sets.
+
+---
+
+## SEC-14 · P1 · Agent tool scopes are declarative only — nothing enforces them
+
+*Raised from your question about the full agent roster.*
+
+`04_Solution_Architecture.md §5.2` describes the agent permission model and calls separation of duties "a genuine security property, not a talking point". Today it is a talking point.
+
+`tool_scopes` is declared on all ten agents in `packages/types/src/agents.ts` and again in `services/agent-runtime/src/axiom/agents/*.py`. Repo-wide, it is **read in exactly one place**:
+
+```
+services/agent-runtime/src/axiom/app.py:146    "tool_scopes": list(a.tool_scopes),
+```
+
+That serialises it into an API response for display. There is no scope-checking middleware, no enforcement at tool invocation, no gate between a declared scope and an actual capability. The permission model is a set of strings rendered as JSON.
+
+The one property that *is* genuinely enforced is Karya's approval-token gate (`services/bff/src/routes/v1.ts:319-470`) — and it is enforced by the BFF and the token, not by `tool_scopes`. So the headline claim ("Sudhaar can never execute") holds today only because Sudhaar has no code path that calls an executor, not because a permission system prevents it.
+
+## SEC-15 · P1 · Nazar holds `control_library.write` — an L1 agent can rewrite the definition of compliance
+
+`packages/types/src/agents.ts` and `services/agent-runtime/src/axiom/agents/nazar.py` both declare:
+
+```
+nazar → ('http.read.government_sources', 'control_library.write')
+```
+
+`04_Solution_Architecture.md §5.2` says Nazar's permission is **"External sources read"**. The implementation grants it write access to the control library; the architecture does not.
+
+This matters far more after W7.0. The control library is the definition of what compliance *means* — the baseline every assessment, finding, penalty estimate and client report is computed against. Granting an **L1 agent that ingests untrusted external web content** write access to that baseline is the wrong shape: a poisoned or misread gazette page becomes a silent change to every client's posture, with no human in the loop and no `regulatory_signals` review step.
+
+Per W7.0, Nazar's correct scope is `regulatory_signal.write` — it **proposes** a baseline delta, a human accepts it, and only then is a new library version cut. That is the same maker-checker pattern as Sudhaar/Karya, applied to the rulebook. Fixed in W4.3 and W7.0 together.
+
+---
+
+## SEC-4 · P1 · Global kill switch is process-local — FR-8.6 not met
+
+`services/bff/src/services/kill-switch.ts:32-67`. In-memory object, acknowledged in its own docstring as single-replica-only. The deployment target is Cloud Run / EKS with multiple replicas. Engaging the kill switch on one instance leaves every other instance executing. FR-8.6 requires "immediately effective".
+
+Second defect: `release()` (`:57-64`) ignores scope. A **tenant owner** can release a founder-engaged **global** kill switch — `v1.ts:629` permits `role === 'owner'`.
+
+## SEC-5 · P1 · Any authenticated user can create unlimited tenants and self-assign `owner`
+
+`services/bff/src/routes/v1.ts:780-790`. `/organizations/onboard` is exempted from tenant resolution (`tenant.ts:28-32`, which hands it `role: 'owner'`), then uses `createSupabaseAdmin()` to insert a tenant and a `tenant_users` row with `role: 'owner'` for the caller. No entitlement check, no quota, no rate limit. Combined with SEC-1 this is reachable unauthenticated in staging.
+
+Minor, same route: `Math.random()` used for slug uniqueness (`v1.ts:827`).
+
+## SEC-6 · P1 · Stale dry-runs can back an execution — FR-6.3 half-enforced
+
+`dry_run_expires_at` is checked at **approve** time (`v1.ts:141`) but not at **execute** time (`v1.ts:440-446` checks only `dry_run_status` and `rollback_validated`). Time passes between approval and execution. FR-6.3 says a stale dry-run cannot back an approval; the execute path should re-assert it.
+
+## SEC-7 · P1 · Blast-radius caps are not enforced at execution — FR-8.5 not met
+
+The only enforcement is inside the **planner**, `services/agent-runtime/src/axiom/agents/sudhaar.py:209-217`, as a plan-generation escalation. Nothing in the BFF execute path or in Karya re-checks the cap against actual affected records at execution time, and there is no halt-and-escalate path. FR-8.5 requires enforcement at execution with a breach halt.
+
+## SEC-8 · P1 · No MFA anywhere
+
+Repo-wide search for `mfa|2fa|totp|otp|authenticator|second factor|verifyOtp|signInWithOtp` across `apps`, `packages`, `services`, `infra` returns **only** UI copy strings and one control-library description. `04_Solution_Architecture.md §4.1` specifies "email+MFA in Phase 1". Not implemented. This is item 3 of your brief.
+
+## SEC-9 · P1 · RBAC is four inline string comparisons; the web app has none
+
+BFF role checks exist at exactly four places: `v1.ts:571`, `:596`, `:629`, `:714`. Everything else is role-agnostic. `apps/web/src` contains **zero** role checks — every page renders for every authenticated user. The `tenant_users.approval_scopes` column (`0001_init_tenants_users.sql:96`) is defined and never read. There are no persona views.
+
+## SEC-10 · P2 · Ledger writes are fire-and-forget on a path that must not be
+
+`v1.ts:900` uses `deps.ledger.appendAndForget(...)` for tenant creation. `packages/ledger/src/append.ts:50-56` documents the opposite rule: "per BR-3, no action bypasses the ledger, so a ledger write failure must fail the parent operation."
+
+## SEC-11 · P2 · Hardcoded placeholder secret in the Temporal activity
+
+`services/temporal-workers/src/temporal_workers/workflows.py:47` sends the literal string `"{{AGENT_RUNTIME_INTERNAL_TOKEN}}"` as the internal auth header — the template is never substituted. Cluster URL is hardcoded at `:39`.
+
+## SEC-12 · P2 · Approval-engine nonce set grows without bound
+
+`packages/approval-engine/src/index.ts:57` — `usedNonces: Set<string>` is never pruned. Unbounded memory growth in a long-lived process. Functionally harmless (DB is the source of truth) but it is a slow leak.
+
+## QUA-1 · P2 · The security-critical service has no tests
+
+`services/bff` — `vitest run --passWithNoTests`, **zero test files**. Turbo reports `@axiom/bff:test: No test files found, exiting with code 0`. `apps/web` likewise. The BFF holds auth, tenancy, RBAC, idempotency and the entire execution gate. CI is green on an untested attack surface.
+
+Current baseline: TS **11/11 task-level passes** (all cached, mostly trivial package tests), Python **38/38 pass**, Playwright **4 spec files**.
+
+## QUA-2 · P2 · Ten modules are display-only shells
+
+`apps/web/src/app/(app)/generic-module-view.tsx` is a presentational template. These pages pass it hardcoded figures and render a ledger tail — they have no functionality:
+
+`connectors` · `discovery` · `classification` · `datamap` · `execution` · `monitoring` · `policies` · `partner` · `controls` · `plans`
+
+Example, `discovery/page.tsx:47-96`: `"12.4M rows"`, `"47 tables"`, `"8,210 files"`, `"6 vendors"` are string literals. The `"Run Discovery Scan"` button label has no backing endpoint.
+
+This is fine as demo furniture — you said mock data may stay — but these are currently counted as delivered modules and they are not.
+
+## QUA-3 · P2 · Control-library count is inconsistent in six places
+
+Canonical is **46**, asserted at runtime: `packages/control-library/src/controls.ts:1640` `CONTROL_LIBRARY_COUNT = 46`, validated at `:1661`. 46 unique IDs across 13 domains (GOV 5, CNS 5, DAT 6, RCD 3, RTN 3, SEC 7, BRCH 3, XBR 3, CHD 2, SDF 3, DPF 2, DPIA 2, AUD 2).
+
+Contradictions:
+
+| Location                                  | Says            |
+| ----------------------------------------- | --------------- |
+| `apps/web/.../dashboard/page.tsx:336`     | 43              |
+| `apps/web/.../reports/reports-client.tsx:46` | 48           |
+| `docs/03_BRD_PRD.md:15` (§A.1)            | "forty-three"   |
+| `docs/LOCAL_CHECKS.md:180,204`            | 43              |
+| `VK_QUICK_REF_PROOF_MODULES_SETUP.md:1115`| 43              |
+| Everywhere else (24 refs)                 | 46              |
+
+The stray "47" you may have seen is `discovery/page.tsx:73` — "47 tables", not controls.
+
+## CTL-1 · **P0 for a compliance product** · Control library cites the *draft* Rules numbering — nearly every Rules citation points at the wrong rule
+
+Upgraded from P2 after verification. This is the most client-damaging defect in the repo.
+
+The DPDP Rules 2025 were notified **13 November 2025** via Gazette **G.S.R. 846(E)** — **23 rules and 7 schedules**. The control library's `DPDPR-2025` citations were authored against an earlier draft numbering and were never re-mapped. Reports generated today cite the wrong law.
+
+Extracted every `DPDPR-2025` citation and compared to the notified text:
+
+| Control(s)                | Library cites   | What that rule **actually is** when notified | Correct rule              |
+| ------------------------- | --------------- | -------------------------------------------- | ------------------------- |
+| `GOV-002`, `CNS-002`      | Rule 5          | Processing by the State for subsidies        | **Rule 3** (Notice)       |
+| `CNS-001`                 | Rule 5, 6       | State processing / security safeguards       | **Rule 3**                |
+| `CNS-003` (7-yr consent)  | Rule 5(3)       | State processing                             | **Rule 4 + First Schedule** |
+| `DAT-001/002/003/005`     | Rule 16, 17, 18 | Research exemption / Board appointment / Board salary | **Rule 14** (Rights of Data Principals) |
+| `RCD-001/002/003`         | Rule 21         | Terms of service of Board *officers*         | **Rule 8** / **Rule 13**  |
+| `BRCH-001/002`            | Rule 19, 20     | Board meetings / Board as digital office     | **Rule 7** (Intimation of breach) |
+| `XBR-001`                 | Rule 13         | Additional obligations of SDFs               | **Rule 15** (Transfer outside India) |
+| `SDF-001`                 | Rule 11         | Verifiable consent — persons with disabilities | **Rule 13**             |
+| `SDF-002/003`, `DPIA-001/002` | Rule 12     | Exemptions for certain child-data processing | **Rule 13(2)**            |
+| `SEC-001`                 | Rule 14, 15     | Rights of Data Principals / Transfer outside India | **Rule 6** (Reasonable security safeguards) |
+| `CHD-001/002`             | Rule 10         | Verifiable consent for a child's data        | **Rule 10** ✅ *(the only correct one)* |
+
+**Coverage gaps on top of the mis-citations.** Rules never cited at all: **1, 2, 3, 4, 7, 8, 9, 15, 22, 23** — 10 of 23. Named-Schedule references anywhere in the library: **zero** (verified: `grep -ioE "(first|second|third|fourth|fifth|sixth|seventh) schedule"` → no matches).
+
+Operationally significant omissions:
+
+- **Rule 3** — mandatory notice content and itemised-purpose presentation
+- **Rule 7** — breach intimation particulars and the 72-hour Board report
+- **Rule 8 + Third Schedule** — class-based retention (e-commerce ≥2cr users, online gaming ≥50L, social media ≥2cr → 3-year erasure) and the pre-erasure notice
+- **Rule 9** — published contact information for processing questions
+- **Rule 11** — verifiable consent for persons with disabilities (**no control exists in any domain**)
+- **Rule 12 + Fourth Schedule** — child-data exemption classes (healthcare, education, childcare, transport safety)
+- **Rule 15** — conditions on transfer outside India, including foreign-state requirements
+- **Rule 16** — research/archiving/statistics exemption
+- **Rules 22–23 + Seventh Schedule** — appeal to the Appellate Tribunal; calling for information
+- **Rule 1** — the phased commencement itself (13 Nov 2025 / 13 Nov 2026 / **13 May 2027**), which is the readiness clock the whole product sells against
+
+Fixing this is W7 and it is no longer a recount — it is a full re-map plus roughly 46 → ~65 controls.
+
+Sources: [dpdp.ind.in/rules.php](https://dpdp.ind.in/rules.php) · [Shardul Amarchand Mangaldas — enforcement & notification](https://www.amsshardul.com/insight/enforcement-of-the-dpdp-act-and-notification-of-the-dpdp-rules/)
+
+## PERF-1 · P2 · Per-action sequential DB round-trips in the execute path
+
+`v1.ts:425-448` issues one `select().single()` per action inside a `for` loop. A 200-action batch is 200 sequential round-trips before execution starts. Should be a single `.in('id', actionIds)` fetch. Same pattern in the approve path.
+
+## PERF-2 · P2 · Module pages are `force-dynamic` with uncached service-role queries
+
+Every shell page sets `export const dynamic = 'force-dynamic'` and issues a fresh unindexed `audit_ledger` query with `count: 'exact'` on render. `count: 'exact'` on an append-only ledger is a full scan that grows forever. No caching, no `count: 'estimated'`.
+
+## PERF-3 · P2 · No rate limiting
+
+One reference repo-wide. `04_Solution_Architecture.md §4.1` lists rate limiting as an API Gateway responsibility. The public gap-scan endpoint and `/organizations/onboard` are both unthrottled.
+
+---
+
+# PART B — Capability gap register
+
+Status key: **✅ built** · **🟡 partial** · **🔴 absent**
+
+## B.1 Phase 0 — Foundation
+
+| Module                          | Status | Evidence                                                                           |
+| ------------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| M0.2 Control Library v0         | 🟡     | 46 controls real and well-formed; Rules-2025 conformance pass outstanding (QUA-4)  |
+| M0.3 Parikshan Assessment v0    | ✅     | `agents/parikshan.py` (167 ln), 3 tests pass                                        |
+| M0.4 Prativedan Report v0       | 🟡     | `agents/prativedan.py` (185 ln) emits JSON/HTML; `pdf.render` scope declared, no PDF engine |
+| M0.5 Free Gap-Scan              | ✅     | `apps/marketing/src/app/gap-scan/**`, scoring lib, report route, email dispatch     |
+| M0.6 Agent Workbench            | 🟡     | `workbench-client.tsx` (438 ln) real; prompt/version registry tables exist, no UI   |
+
+## B.2 Phase 1 — First cash
+
+| Module                       | Status | Evidence                                                                 |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| M1.1 Drishti Discovery v0    | 🟡     | Interview-driven only; `/discovery` page is a shell (QUA-2)              |
+| M1.2 Vibhaag Classification  | 🟡     | Agent real (172 ln); **no `classification_reviews` table, no review UI** — FR-2.3/2.4 unmet |
+| M1.3 RoPA Generator          | 🟡     | `ropa_generator.py` (96 ln) exists; **no `ropa_records` table**, nothing persists |
+| M1.4 Sudhaar Planner v0      | ✅     | 227 ln, typed actions, rollback definitions, blast-radius escalation      |
+| M1.5 Saakshi Evidence v0     | ✅     | 152 ln + `packages/evidence` content-addressed store                      |
+| M1.6 Policy & Notice Gen     | 🟡     | `policy_generator.py` (51 ln); **no `policy_drafts` table**               |
+| M1.7 Human Review Console    | 🟡     | Approval console exists; no generalised review queue with reason capture  |
+| M1.8 Delivery Playbook       | 🟡     | `playbook.py` (27 ln); **no `playbook_entries` table**                    |
+
+## B.3 Phase 2 — Repeatability
+
+| Module                      | Status | Evidence                                                                            |
+| --------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| **M2.1 Connector Framework**| 🔴     | **Zero implementation.** 46 repo references = 2 enum strings, 1 feature flag, tool-scope labels, UI copy. No adapter interface, no registry table, no credential vault, no health checks |
+| M2.2 Drishti Live Discovery | 🔴     | Depends on M2.1                                                                      |
+| M2.3 Vibhaag Automated      | 🟡     | LLM path exists; review queue absent                                                 |
+| M2.4 Evidence Vault v1      | 🟡     | `packages/evidence` + storage buckets real; **WORM/Object-Lock unverified; no evidence-pack assembly or export** (FR-4.4) |
+| M2.5 Lekha Ledger v1        | ✅     | Hash-chained, `append_ledger()` SECURITY DEFINER RPC, counters, verify endpoint. Strong. |
+| M2.6 Approval Workflow v1   | ✅     | Approval engine + execution gate. Strong.                                            |
+| M2.7 Prativedan Multi-Format| 🟡     | HTML only; no auditor pack, no DPB submission format, no signed PDF                  |
+| M2.8 DSAR Tracker           | 🟡     | `dsars` table + `dsar-client.tsx` (517 ln); identity verification is UI copy, statutory clock not enforced server-side |
+| M2.9 Nazar Regulatory Watch | 🟡     | Agent (83 ln) + `regwatch-client.tsx` (481 ln); no scheduler, no control-impact mapping |
+
+## B.4 Phase 3 — Agentic execution ⭐ the core product
+
+| Module                          | Status | Evidence                                                              |
+| ------------------------------- | ------ | --------------------------------------------------------------------- |
+| M3.1 Sudhaar v1 Structured      | ✅     | Typed, parameterised, risk-scored, rollback definitions               |
+| **M3.2 Dry-Run / Simulation**   | 🔴     | `feature_dry_run_engine: bool = True` flag only. **No engine, no diff renderer.** The approval gate checks a status column nothing ever sets from a real simulation |
+| M3.3 Approval Console v1        | ✅     | `approval-client.tsx` (857 ln) + `plans/[id]/` — the strongest surface in the app |
+| **M3.4 Karya Execution v1**     | 🔴     | `agents/karya.py:120-130` returns `status="skipped"`, "execution deferred until Phase 3 connector framework is online". **Stub.** |
+| **M3.5 Rollback Engine**        | 🔴     | Rollback *definitions* generated by Sudhaar; **no engine executes them** |
+| M3.6 Blast-Radius Guardrails    | 🟡     | Planner-side only (SEC-7); kill switch process-local (SEC-4)           |
+| **M3.7 Post-Exec Verification** | 🔴     | No agent, no module, no endpoint                                       |
+| M3.8 Consent Management v1      | 🟡     | `consent/page.tsx` (334 ln) UI; **no consent tables, no ledger, no withdrawal workflow**. FR-12.2 and the 7-year retention rule unmet |
+| M3.9 Breach & Incident v1       | 🟡     | `breaches` table + `breach-client.tsx` (331 ln); 72-hour clock is display-only, no notification generation |
+| M3.10 Continuous Monitoring     | 🔴     | **No scheduler at all** — `grep -E "schedule\|cron"` = 0 hits. Page is a shell |
+| M3.11 Client Portal             | 🟡     | `portal-client.tsx` (938 ln), tenant-filtered. Best-scoped page. No persona views |
+
+## B.5 Phase 4 — Scale & continuous compliance
+
+| Module                             | Status | Reference count |
+| ---------------------------------- | ------ | --------------- |
+| M4.1 Standing Approval Policies    | 🔴     | 0               |
+| M4.2 Multi-Regulator Control Reuse | 🔴     | 0 (`RBI\|SEBI\|IRDAI\|CERT-In`) |
+| M4.3 Connector Framework v2        | 🔴     | 0 (v1 absent)   |
+| M4.4 Self-Serve SMB Tier           | 🔴     | 0               |
+| M4.5 Vendor / Processor Risk       | 🔴     | 0 (`vendor\|TPRM`) |
+| M4.6 DPIA Automation               | 🔴     | Control text only — no generator |
+| M4.7 Partner / White-Label Portal  | 🔴     | Shell page; `tenants.partner_tenant_id` column exists, unused |
+| M4.8 Sectoral Pack #1              | 🔴     | 0               |
+| M4.9 Sanket Market Signal          | ✅     | 72 ln, functional |
+
+## B.6 Phase 5 — Maturity
+
+All 🔴 except the Terraform skeletons. M5.3 Enterprise Tier (SSO/SAML, granular RBAC) is the one item inside your stated scope and depends on W1 + W2 below.
+
+## B.7 Your fifteen observations — where each lands
+
+| #   | Your observation                                          | Verdict  | Addressed in |
+| --- | --------------------------------------------------------- | -------- | ------------ |
+| 1   | Client onboarding & sustenance, continuous monitoring      | Confirmed: onboarding is one endpoint that discards its input; no scheduler | W3, W6 |
+| 2   | Multi-tenancy, RBAC, persona views                         | Confirmed: DB correct, app bypasses it (SEC-3); RBAC 4 checks (SEC-9) | **W0, W1** |
+| 3   | Client estate/targets, multiple systems                    | Confirmed: `/organizations/onboard` accepts `systems[]` at `v1.ts:794-805` and **never persists it** — echoed back in the response at `:915`. No table, no model, no UI | **W3** |
+| 4   | Connector definition, read/write grants to agents          | Confirmed absent (M2.1). Now solved by standards, not adapters — grants map to the target's own OAuth scopes, enforced at the client's IdP | **W4.1–W4.4** |
+| 5   | Control count 46/47/48 + Rules conformance                 | Confirmed — and **worse than you flagged**: the count is inconsistent (QUA-3) *and* the citations point at draft rule numbers (CTL-1) | **W7** |
+| 6/7 | Agents on different estates; multiple estates per client   | Confirmed: no estate dimension anywhere in the domain model | **W3** + **W3.5** (ER graph) |
+| 8   | Progress monitoring before/during/after agent tasks        | Partial: `agent_runs` table + realtime channel exist; no per-task progress, no pre/post task record | W5 |
+| 9   | **Reconcile Karya's work vs Sudhaar's approved plan (maker-checker)** | **Confirmed absent — `grep -iE "reconcil\|maker.check"` = 0 hits.** The separation of duties is designed; the *checker* half is not built | **W5** |
+| 10  | Approval records and post-approval trail                   | Partial: tokens + usages + ledger are solid; no approval-record export, no post-execution closure pack | W5, W8 |
+| 11  | Reports branded to Axiom Proof / Axiom Minds               | Partial: present in `reports-client.tsx:214,271,345-353` only. **Absent from Prativedan's own output, evidence packs and the gap-scan report** | **W8** |
+| 12  | Evidence storage, retrieval, review                        | Partial: content-addressed store real; no pack assembly, no export, no verification UI | W8 |
+| 13  | Monitor the continuous-monitoring setup; re-assess; auto-remediate | Confirmed absent (M3.10, M4.1) | **W6** |
+| 14  | Multi-regulator reuse with indicative mappings             | Confirmed absent | **W7** |
+| 15  | Connectors to CRM/HRMS/DWH/ticketing/code repo             | Confirmed absent. Delivered as **REST/OpenAPI descriptors** — declarative config per system, one descriptor each (Rev 7: MCP auto-discovery deferred) | **W4.7** |
+| 16  | Sectoral packs                                             | Confirmed absent | W7 |
+| —   | Multi-tenant + MFA (your item 3)                           | Tenancy partially real, MFA absent (SEC-8) | **W0, W1** |
+
+---
+
+# PART C — The plan
+
+Ten workstreams. **W0 is a hard prerequisite for everything** — not because of ceremony, but because staging currently authenticates nobody and isolates nothing, so no other workstream can be verified there.
+
+Sizing is relative (S/M/L/XL), not calendar. I have deliberately not invented day counts.
+
+---
+
+## W0 · Security remediation & environment parity — **P0, blocking** · size L
+
+Nothing else ships until this lands. Size raised from M to L in Revision 4: preprod parity is not a config change, it is the removal of an entire class of code.
+
+### W0.0 · The governing principle — one codebase, one ruleset
+
+*Your instruction: preprod must authenticate exactly as production does, as an exact replica of the prod codebase and ruleset.*
+
+The root cause of SEC-1, SEC-2 and SEC-13 is a single conflation: **environment identity has been used as a proxy for security posture.** `ENVIRONMENT === 'preprod'` is read in nine places to mean "relax the rules", and each site invented its own OR-chain to decide what relaxing means.
+
+The fix is to separate the two concepts permanently:
+
+| Concept | May vary by environment? | Examples |
+| ------- | ------------------------ | -------- |
+| **Topology** | **Yes** — this is what environments are for | Cluster, URLs, GCP project, bucket names, Supabase instance, replica count, log level |
+| **Security ruleset** | **No — never** | Authentication, tenant resolution, RBAC, idempotency, RLS enforcement, credential validation, which database client is used |
+
+Concretely:
+
+1. **Delete every environment-conditional security branch in the codebase.** All nine sites in SEC-13, plus the `isDevOrTest` chains in SEC-1 and the cookie clauses in SEC-2. Not re-scoped — *deleted*. `grep -rn "ENVIRONMENT === 'preprod'" apps packages services` returning zero security-relevant hits is the acceptance test.
+
+2. **One switch, defaulting to secure.** A single `resolveAuthMode()` in `@axiom/config`:
+   - `AXIOM_AUTH_MODE` ∈ `{ strict, e2e-bypass }`, **default `strict`**.
+   - `e2e-bypass` is **refused at boot** unless `ENVIRONMENT ∈ {local, test}`. The process exits with a clear error rather than degrading.
+   - No other code anywhere reads `ENVIRONMENT` to make a security decision. Enforced by an ESLint rule plus a CI grep gate, so the pattern cannot grow back.
+
+3. **`preprod`, `staging`, `production` and `onprem` all run `strict`.** Identical code path, identical rules. The only thing preprod does differently is point at different infrastructure.
+
+4. **Fail closed, everywhere.** Supabase error or unreachable ⇒ `401`/`503`. Never a founder identity (SEC-1), never a "sovereign session" (SEC-13 row 6), never a cached bypass cookie.
+
+5. **Legitimate preprod references stay.** `apps/marketing/src/lib/url-resolver.ts` and the GCP project/bucket naming are *topology* — they route to the right host. Those are correct and untouched. The distinction is exactly the table above.
+
+### W0.1 · Making preprod a real replica
+
+Code parity alone is not enough — preprod currently has no database to be strict against.
+
+- **Provision a real Supabase/Postgres for preprod** and run the full migration series against it. Remove the `admin.ts` / `server.ts` mock substitution so preprod connects to it like production does.
+- **Seed representative data, not fixtures** — multiple tenants, users across every persona, so RLS and RBAC are genuinely exercised. Never client production data.
+- **Real auth**: real Supabase Auth users, real JWTs, real MFA enrolment once W1 lands.
+- **Idempotency enforced** — remove the auto-key generation at `idempotency.ts:34` so FR-8.3 is actually tested.
+- **Parity CI lane**: the same E2E suite runs against preprod and against a production-configured stack, and **any behavioural divergence fails the build**. That is what keeps parity true after this workstream ends.
+- Same treatment for **staging** and **onprem** (W10) — all four strict, differing only in topology.
+
+### W0.2 · The remaining findings
+
+6. **Ban the service-role client from the web app** (SEC-3) — ESLint `no-restricted-imports` blocking `createSupabaseAdmin` inside `apps/web/**` plus a CI grep gate; migrate all 17 pages to the user-scoped client in W1.
+7. **Distributed kill switch** (SEC-4) — Redis-backed with short-TTL local cache; `release()` becomes scope-aware; global release restricted to `founder`.
+8. **Gate `/organizations/onboard`** (SEC-5) — entitlement check, per-user tenant quota, rate limit, `randomUUID()` slug suffix.
+9. **Re-assert `dry_run_expires_at` in the execute path** (SEC-6).
+10. **Fix** the Temporal placeholder token (SEC-11), bound the nonce set with a TTL map (SEC-12), make the onboarding ledger write blocking (SEC-10).
+
+### Exit criteria
+
+- `grep -rn "ENVIRONMENT === 'preprod'\|ENVIRONMENT === 'staging'" apps packages services` returns **zero** security-relevant hits.
+- An unauthenticated request returns **401 in every environment**, verified by test in each.
+- Setting `axiom_e2e_bypass=true` has **no effect anywhere**.
+- Preprod runs on a real database, real auth, enforced idempotency, with the parity CI lane green.
+- SEC-1 … SEC-13 closed, each with a regression test (W9).
+
+---
+
+## W1 · Tenancy, RBAC, MFA, personas — **P0** · size L
+
+*Your brief items 2 and 3.*
+
+**Tenancy.** Single `requireTenantContext()` server helper returning `{ tenantId, userId, role, scopes }` from the session + active-tenant cookie. Every page and route handler goes through it. All 17 pages migrated to the user-scoped client. Add a tenant-switcher for founder/partner multi-tenant users (the `user/tenants` endpoint already exists).
+
+**Personas.** Define them once in `packages/types` as a capability matrix, not scattered strings. Proposed set, extending the existing `user_role` enum:
+
+| Persona | Surface | Core capability |
+| --- | --- | --- |
+| `founder` | Workbench, all tenants | Everything; only role that can globally kill-switch |
+| `axiom_analyst` | Workbench, assigned tenants | Run agents, review outputs; cannot approve client-side |
+| `owner` | Portal | Tenant admin, billing, user management, approve |
+| `approver` | Portal | Approve/reject/defer within `approval_scopes` |
+| `reviewer` | Portal | Review agent output, comment, cannot approve |
+| `viewer` | Portal | Read-only posture, reports, evidence |
+| `partner` | Partner portal | Multi-client read + branded export |
+| `agent` | Service | Machine identity, token-gated |
+
+**RBAC.** Central policy module — `can(role, action, resource, scopes)` — replacing the four inline comparisons. Enforced in three places: BFF middleware, web server components (render gating), and RLS (already partly there). `tenant_users.approval_scopes` finally read: an approver may be scoped to specific action classes, which is also what makes W6 standing policies safe later.
+
+**MFA — decided: TOTP + email OTP, SMS deferred.** Supabase Auth TOTP enrolment (authenticator app) as the primary factor, email OTP as fallback and recovery. New tables: `user_mfa_factors`, `mfa_challenges`. The factor type is an enum with `sms` defined-but-disabled so adding a provider later is a config change, not a migration — but no SMS provider is integrated and no SMS code ships.
+
+Enforcement is **step-up, not blanket**: required at login for `founder` / `owner` / `approver`, and **re-challenged at the moment of approval-token issuance**. That second challenge is the one that matters — it binds a fresh, strong authentication to the exact act of approving, which is what FR-7.3 ("approver identity, timestamp, scope recorded") actually needs to mean in front of an auditor. Recovery codes issued at enrolment, single-use, hashed at rest.
+
+**Exit:** a `viewer` in tenant A cannot see tenant B, cannot reach an approve button, and cannot call the approve endpoint. Proven by test, not inspection.
+
+---
+
+## W2 · Data model completion — **P0** · size M
+
+One migration series `0009`–`0014`. New tables:
+
+```
+-- Estate (W3)
+estates, estate_systems, system_data_categories, estate_scans
+
+-- Universal Connection Framework (W4)
+connectors,                    -- registered target instances + targetBinding
+connector_descriptors,         -- capability descriptors (versioned, hash-pinned)
+connector_credentials,         -- envelope-encrypted grant config, never raw tokens
+connector_grants,              -- internal scope ↔ target OAuth scope, expires_at, revoked_at
+connector_health_checks,
+workload_identities,           -- SPIFFE IDs per agent workload
+mcp_tool_registry              -- discovered tools, read/write class, description hash
+
+-- Execution (W5)
+dry_runs, rollback_executions, execution_batches, verification_results,
+plan_reconciliations
+
+-- Monitoring & policy (W6)
+monitoring_schedules, drift_events, standing_approval_policies, policy_evaluations
+
+-- Regulatory baseline & versioning (W7.0)
+regulatory_instruments,        -- content-hashed, with amends/supersedes chain
+regulatory_provisions,         -- addressable: 'Rule 7(1)', 'Third Schedule'
+regulatory_baselines,          -- frozen named set: 'IN-DPDP@2026-09-20'
+control_provenance,            -- control <- provision, with verified_on/by
+control_change_log,            -- typed diffs driving the semver bump
+regulatory_signals,            -- Nazar watch output, triaged to baseline deltas
+
+-- Multi-regulator & sector (W7.3/7.4)
+frameworks, framework_controls, control_mappings, sector_packs
+
+-- Phase 1/2 parity (Readiness Matrix §5.2)
+ropa_records, policy_drafts, playbook_entries, classification_reviews
+
+-- Rights & consent (W8)
+consent_purposes, consent_records, consent_withdrawals, evidence_packs
+
+-- Auth (W1)
+user_mfa_factors, mfa_challenges
+```
+
+Every table: `tenant_id` FK + RLS from day one, following the `0003`/`0004` pattern. Indexes on `(tenant_id, …)` for every access path. Retention: `consent_records` 7-year minimum per FR-4.5.
+
+---
+
+## W3 · Client estate & onboarding — **P1** · size M
+
+*Your brief items 1, 3, 6, 7.*
+
+Today `/organizations/onboard` takes a `systems[]` array, validates it, and throws it away (`v1.ts:794-805` → `:915`).
+
+- **Model:** tenant → **estates** (1:N) → **systems** (1:N) → connectors (1:N). An estate is the unit an assessment binds to, so one client can run separate Axiom-Proof-bound assessments on, say, "India production" and "Singapore subsidiary" independently.
+- **Engagements bind to an estate**, not just a tenant — `engagements.estate_id`, with the control-library version already pinned.
+- **Onboarding wizard** (real, replacing the single endpoint): company profile → estate definition → system inventory → connector registration → scope & access grants → readiness confirmation. Resumable; each step a ledger event.
+- **Sustenance:** estate drift detection, re-onboarding for new systems, periodic access-grant re-attestation.
+
+### W3.5 · Entity Relationship Graph page — *new, your item 5*
+
+A first-class page (`/estate/graph`) rendering the live domain as an interactive node-edge graph, not a static diagram.
+
+**Nodes:** tenant → estates → systems → connectors → data categories, plus the control/finding/evidence/plan objects bound to them, and the **ten agents** as first-class nodes.
+
+**Edges carry meaning, and access is the point:**
+
+| Edge style       | Meaning                                              |
+| ---------------- | ---------------------------------------------------- |
+| Solid teal       | Agent holds a **read** grant on that connector/system; hover shows grant type (`client_credentials`, `token_exchange`, …) and assurance level |
+| Solid gold + lock| Agent holds a **write** grant — scoped, time-bound; hover shows `expires_at` |
+| Dashed grey      | Structural containment (estate → system)             |
+| *no edge*        | The default — eight of ten agents have no client-system access at all |
+| Thin indigo      | Derivation (finding → control, evidence → finding)    |
+
+Because only Karya can ever carry a write edge, the graph makes the separation-of-duties property **visually obvious** — one gold edge on the whole canvas, and Sudhaar demonstrably has none. That is a far better artifact for a sceptical CISO (persona P2, "will not grant access without understanding blast radius and access scope") than a paragraph claiming it.
+
+**Icons — reuse what exists, build nothing new.** `packages/ui/src/components/AgentIcon.tsx` (877 ln) already ships bespoke icons for all ten agents plus `policy`, `policy_engine`, `incident`, `dsar`, `consent` — 15 keys, with `idle | thinking | working` states and `xs|sm|md|lg` sizing already wired. The graph uses `AgentIcon` directly as the node glyph, and drives the `working` state from the live agent-run channel so the canvas animates while agents are actually running. New icons needed only for infrastructure node types (system/connector/datastore), which follow the same SVG conventions.
+
+**Interactions:** click a node → side panel with its records, grants and recent ledger entries; filter by agent, by estate, by access type; "show me everything Karya can write to" as a one-click view; export to PNG/SVG for board packs (branded per W8).
+
+---
+
+## W4 · Universal Connection Framework — **P1** · size XL
+
+*Your brief items 4 and 15, re-architected. This is the single largest gap and it gates Phase 3.*
+
+> **Revision 3 — direction change.** Do **not** build connectors one system at a time. Implement a small number of **standards** and describe each target system declaratively. `04_Solution_Architecture.md §5.2` already calls for a "Tool/MCP Server registry" — this is that design finally built, not a new one.
+>
+> The unit of work stops being "an adapter" and becomes "a grant handler, a transport, and a descriptor". Adding Salesforce should be a config file and a capability test, not a sprint.
+
+### W4.0 · The layering
+
+Four layers, each independently testable. The bottom two are the reusable framework; the top one is per-system configuration.
+
+```
+┌─ L4 · CAPABILITY DESCRIPTORS ──────────────────────────────┐
+│  Declarative per target system (YAML, not code)            │
+│  salesforce · workday · snowflake · jira · github · …      │
+└───────────────────────────┬────────────────────────────────┘
+┌─ L3 · TRANSPORTS ─────────▼────────────────────────────────┐
+│  REST/OpenAPI (primary) · SQL catalogue · GraphQL          │
+│  MCP — internal registry; outbound optional per-descriptor  │
+│  all implement: enumerate → sample → read → (write)        │
+└───────────────────────────┬────────────────────────────────┘
+┌─ L2 · CREDENTIAL BROKER ──▼────────────────────────────────┐
+│  oauth2.client_credentials   (RFC 6749 §4.4 / 2.1)         │
+│  oauth2.token_exchange       (RFC 8693)                    │
+│  oauth2.saml2_bearer         (RFC 7522)                    │
+│  oauth2.jwt_bearer           (RFC 7523)                    │
+│  + legacy lane (static key / DB auth) — lower assurance    │
+│  issues SHORT-LIVED, SCOPE-NARROWED tokens. Never raw creds│
+└───────────────────────────┬────────────────────────────────┘
+┌─ L1 · WORKLOAD IDENTITY ──▼────────────────────────────────┐
+│  SPIFFE / SPIRE — X.509-SVID & JWT-SVID per agent workload │
+│  INTRA-PERIMETER only. All 10 agents; Karya's ID ≠ Sudhaar's│
+│  Crosses to client systems as private_key_jwt assertion     │
+└────────────────────────────────────────────────────────────┘
+```
+
+### L1 · Workload identity (SPIFFE)
+
+Each agent runtime workload receives its own SVID. Karya, Sudhaar and Drishti are **distinct cryptographic identities**, not one service account with different code paths.
+
+The benefit is real but its boundary matters, and Revision 3 drew it too generously — see **the workload-identity correction** under the MCP posture below. Precisely:
+
+- **Inside Axiom's perimeter**, SVIDs give per-agent identity with a single trust domain and no federation. Sudhaar's workload is structurally incapable of presenting Karya's identity to the broker, so `connector.write` cannot be acquired on its behalf. This is enforceable and it ships in W4.3.
+- **Across to the client**, SPIFFE does not reach without federation the client will not run. The SVID crosses the boundary as a `private_key_jwt` **client assertion** against **one** connector identity per tenant — see *External-system authentication* below. Per-agent registration at the client's IdP is available as **optional hardening**, not the default.
+
+It is also the enabling primitive for **M5.1 split-plane** and **W10 on-prem** — an in-perimeter data plane proves its identity without a shared secret crossing the boundary.
+
+### The full agent roster — identity and estate access for all ten
+
+*Your question: the plan named Karya, Sudhaar and Drishti. What about the rest?*
+
+Every agent gets its own SVID, not just the three I used as examples. Here is the complete roster, reconciled across all three places permissions are declared (`packages/types/src/agents.ts`, `services/agent-runtime/src/axiom/agents/*.py`, and `04_Solution_Architecture.md §5.2`).
+
+**Estate access classes:**
+**D** = direct — reaches client systems through a connector ·
+**I** = indirect — never touches client systems, but processes estate-derived data including personal data ·
+**N** = none — Axiom-internal or external-web only, never sees client data
+
+| Agent | Autonomy | `canMutate` | Declared scopes | Estate | Needs a connector grant? |
+| ----- | -------- | ----------- | --------------- | ------ | ------------------------ |
+| **Drishti** | L1 | false | `connector.read`, `inventory.write`, `evidence.write` | **D** | **Yes — read**, per estate |
+| **Karya** | L2 | **true** | `connector.write`, `evidence.write`, `rollback.execute` | **D** | **Yes — write**, per estate, approval-token gated |
+| **Vibhaag** | L1 | false | *(none)* | I | No |
+| **Parikshan** | L1 | false | `control_library.read`, `findings.write` | I | No |
+| **Sudhaar** | L1 | false | `findings.read`, `control_library.read`, `plan.propose` | I | **No — never** |
+| **Saakshi** | L1 | false | `evidence.write`, `s3.write_worm` | I | No |
+| **Prativedan** | L1 | false | `report.write`, `pdf.render` | I | No |
+| **Lekha** | L1 | false | `ledger.append`, `ledger.read` | N | No |
+| **Nazar** | L1 | false | `http.read.government_sources`, ~~`control_library.write`~~ → `regulatory_signal.write` (SEC-15) | N | No |
+| **Sanket** | L1 | false | `http.read.public_sources` | N | No |
+
+**So: only two of ten agents ever touch a client estate.** Drishti reads it; Karya writes to it. Five more handle estate-*derived* data — including personal data — without any connector access at all. Three never see client data in any form.
+
+That concentration is the real security story, and it is a good one. It means connector grants (W4.4) only ever need to be issued to two workload identities, and the client's IdP can be configured to refuse a connector token to any of the other eight outright.
+
+#### Discrepancies found while reconciling — all fixed in this chunk
+
+1. **Nazar** holds `control_library.write`; the architecture says "External sources read". See **SEC-15** — downgraded to `regulatory_signal.write`.
+2. **Prativedan has no read scope at all**, yet the architecture describes it as "Read all". It assembles client-facing reports containing findings, evidence and personal data — so it has the **broadest de facto data access of any agent and the thinnest declared permissions**. Its reads are currently ungoverned. Gets explicit, tenant-and-estate-scoped read scopes.
+3. **`canMutate` does not mean "read-only"** and is documented nowhere. Six of ten agents with `canMutate: false` hold a `.write` scope. It actually means "mutates *client* systems". A contributor reading `canMutate: false` as "harmless" would be wrong about Drishti, Parikshan, Saakshi, Lekha, Nazar and Prativedan. Renamed `mutatesClientEstate`, with `writesAxiomState` added alongside it.
+4. **Saakshi's "write-once"** (architecture) is expressed as ordinary `evidence.write` + `s3.write_worm` strings with nothing enforcing append-only. WORM must be enforced at the object store (Object Lock / MinIO compliance mode), not asserted by a scope name.
+5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture doc corrected to match.
+
+#### The missing dimension: scopes have no estate
+
+This is the gap your question exposes most sharply. Every scope today is **global to the agent**: `connector.read` means *all connectors, everywhere*, not *connector X in estate Y for tenant Z*.
+
+Under W3's multi-estate model — one client running separate assessments on "India production" and "Singapore subsidiary" — an agent authorised for one estate must not be able to read the other. **That is currently inexpressible.** Scopes become structured rather than flat:
+
+```
+connector.read:<tenant>:<estate>:<connector>
+connector.write:<tenant>:<estate>:<connector>    # Karya only, approval-token bound
+findings.write:<tenant>:<engagement>
+```
+
+Resolved at token-acquisition time by the credential broker (W4.2) and mapped onto the target's own OAuth scopes by the grant model (W4.4), so narrowing is enforced by the client's authorization server rather than by our string comparison.
+
+#### Enforcement — making SEC-14 false
+
+Declared scopes become checked scopes, at three layers:
+
+1. **Workload identity (L1)** — each agent's SVID carries its permitted scope set. Karya's identity is the only one that can ever be issued a `connector.write` token; Sudhaar's identity is structurally incapable of holding one, enforced by the client's IdP rather than by our code.
+2. **Broker (L2)** — refuses to acquire a token for a scope the requesting SVID does not hold. Over-broad requests are rejected and logged as a security event, not silently narrowed.
+3. **Runtime (agent-runtime)** — every tool invocation checks the scope before dispatch. An undeclared scope raises and is written to the ledger. This is the piece that makes `tool_scopes` load-bearing instead of decorative.
+
+A conformance test per agent asserts its declared set matches its enforced set, so the three declaration sites cannot drift apart again — which is how discrepancies 1–5 arose.
+
+#### The ER graph makes this legible
+
+W3.5 renders exactly this matrix. With ten agent nodes on the canvas, the whole access story is one glance: **eight agents with no edge to any client system, one teal read edge from Drishti, one gold write edge from Karya.** For persona P2 (Rajan, the CISO who "will not grant access without understanding blast radius and access scope"), that picture is the answer to his question.
+
+### L2 · Credential broker — the four grants
+
+Every handler implements one interface: `acquire(grantConfig, requestedScopes) → { token, scopes, expiresAt, binding }`. Agents never see a credential; they receive a short-lived, scope-narrowed token.
+
+| Grant | Spec | When it is the right choice |
+| ----- | ---- | --------------------------- |
+| **Client Credentials** | RFC 6749 §4.4, OAuth 2.1 | Axiom Proof is a registered app in the client's tenant. The common SaaS case. Prefer **`private_key_jwt`** (RFC 7523) or **mTLS** (RFC 8705) client auth over `client_secret` |
+| **Token Exchange** | RFC 8693 | Agent acts *on behalf of* the tenant with constrained scope. `subject_token` = tenant delegation, `actor_token` = agent JWT-SVID |
+| **SAML 2.0 Assertion** | RFC 7522, `urn:ietf:params:oauth:grant-type:saml2-bearer` | Enterprise has a SAML IdP and no OIDC M2M path. Common in Indian BFSI and large enterprises |
+| **JWT Assertion** | RFC 7523, `…:grant-type:jwt-bearer` | The OIDC-native sibling of the SAML grant. Included because it is frequently the only thing a modern IdP exposes |
+
+**Token Exchange deserves special attention — it upgrades the audit ledger.** RFC 8693's `act` claim carries a verifiable **delegation chain**. Today a ledger entry *asserts* "Karya did this under Priya's approval". With token exchange, the access token itself carries that chain, and **the client's own IdP logs corroborate it independently of us**. That is a materially stronger answer to FR-10.5 ("ledger integrity verifiable independently") and to a DPB inquiry — the evidence no longer rests solely on Axiom Proof's own record. Ledger entries will therefore also record the token `jti` and `act` chain.
+
+Where the target supports it, tokens are **sender-constrained** — DPoP (RFC 9449) or mTLS binding — so a leaked token is not replayable.
+
+**Honest limits.** Not everything speaks OAuth, and pretending otherwise would be a design lie:
+
+- **Databases** (PostgreSQL/MySQL — our W4.4 target) generally use native auth. The path there is workload identity → **cloud IAM** (RDS IAM auth, Cloud SQL IAM) → short-lived DB token. Where the client runs self-hosted Postgres with password auth, it falls to the legacy lane.
+- **Legacy Indian enterprise estate** — on-prem HRMS, custom ERP, file drops — frequently has none of these. There is an explicit **legacy lane** with static credentials, marked `assurance: 'low'` in the registry, surfaced as such in the UI and the estate graph, and barred from write scopes without additional per-action human confirmation.
+
+### L3 · Transports
+
+Each implements the same `enumerate → sample → read → (write)` contract, so descriptors are portable across transports.
+
+- **REST / OpenAPI** — **the primary path.** Descriptor-driven from the target's OpenAPI document. This is what most SaaS in an Indian mid-market estate actually exposes.
+- **SQL catalogue** — `information_schema` and equivalents, for data stores.
+- **GraphQL** — introspection-driven.
+- **MCP** — **scoped to the Axiom Proof perimeter only.** See the MCP posture below.
+
+---
+
+### MCP posture — internal only, outbound optional, inbound dropped
+
+*Final. Revision 8.*
+
+Revision 3 conflated two opposite directions. Separated and settled:
+
+| | Direction | Decision |
+| --- | --------- | -------- |
+| **A** | **Outbound** — Axiom's agents → a client's MCP server | **Optional transport, not the primary path.** Implemented behind the same transport interface as REST/OpenAPI, enabled per-descriptor when a client actually runs an MCP server. Not built as part of the W4 critical path |
+| **B** | **Inbound** — external systems → Axiom Proof | **Dropped.** Not in scope |
+| — | **Internal MCP tool registry** — Axiom's own agents and tools, inside the perimeter | **Built in W4.5.** Delivers `04_Solution_Architecture.md §5.2`'s "Tool/MCP Server registry" as specified |
+
+**Why outbound stays flexible rather than deleted.** Your read is right — most 50–200 employee companies have nothing in front of their systems, let alone an MCP server. So MCP cannot be the primary transport. But the transport layer is an interface, and the descriptor already names its transport, so an MCP-capable client is a one-line descriptor change rather than a re-architecture. Keeping the seam costs nothing; assuming the adoption would have cost a lot.
+
+**Why inbound is dropped rather than deferred.** Two independent reasons, either sufficient:
+
+1. It is another read surface, and **SEC-3 means we currently leak across tenants on the read surfaces we already have.** Adding one before isolation is enforced is indefensible.
+2. Writes could never be offered over it anyway. An external MCP client performing a write would have to bypass the approval console — breaking AP-1 and BR-1 — or re-implement it over MCP, which cannot work: `§3.2` requires the approver see the action, statutory citation, **dry-run diff**, blast radius, risk reasoning and rollback plan, under the rule that *"an approver must never have to trust the agent to approve safely."* **An MCP tool call cannot show a human a diff.** The approval surface is a human review surface by design, not an API.
+
+So inbound MCP would have been read-only forever, delivering a convenience feature onto an unresolved isolation problem. Dropped.
+
+### External-system authentication — one connector identity, not ten
+
+*Your call, and it is the right simplification.*
+
+Revisions 3 and 7 proposed registering a **separate OAuth client per agent** at the client's IdP, so their authorization server could refuse a write-scoped token to anything but Karya. That bought defence-in-depth at a real cost: ten client registrations per connector, ten credential rotations, ten sets of scopes for a client's IT team to validate — a large authentication surface for a mid-market client to onboard, and one more thing to get wrong.
+
+It is also largely redundant, because the fact it was protecting is **known statically**:
+
+> Of ten agents, exactly one — **Karya** — writes to external systems. The other nine are read-only against client estates, and five of them never touch a client system at all.
+
+That is not a runtime property needing an external authority to adjudicate. It is a fixed property of the architecture, enforced at three points inside our own perimeter.
+
+**Final model:**
+
+| Layer | What it holds | Enforcement |
+| ----- | ------------- | ----------- |
+| **Per tenant-connector** | **One** registered OAuth client identity, with read and write scopes available | Client's IdP |
+| **Read scope** | Requested by any agent holding `connector.read:<tenant>:<estate>` | Broker (W4.2), SPIFFE-authenticated |
+| **Write scope** | Requested **only** when the caller's SVID is Karya's **and** a valid approval token exists | Broker + approval gate (`v1.ts:319-470`) |
+
+One registration, one rotation, one scope set to validate. Onboarding friction drops sharply, which matters for the ICP.
+
+**The honest trade.** Enforcement of "only Karya writes" now lives entirely **inside Axiom's perimeter** — SPIFFE workload identity plus the broker plus the approval-token gate. A total compromise of Axiom Proof could, in principle, request a write token. Previously the client's IdP would also have refused it.
+
+Three things make that acceptable:
+
+1. The approval-token gate is independent of identity — a write still requires a signed, scope-bound, single-use token issued against a specific plan version and action set. Compromising the workload does not produce one.
+2. Write scope is time-bound and revocable per grant (W4.4), and the client can revoke from their side at any moment.
+3. Every token acquisition is a ledger event with the SVID and `act` chain recorded, so an anomalous write-scope request is visible rather than silent.
+
+**Per-agent OAuth registration remains documented as optional hardening** for security-mature clients who ask for it. The framework supports it; we do not require it. That is the right default: available for the client who wants belt-and-braces, not imposed on the client who just wants to connect a database.
+
+### Workload identity — the corrected boundary
+
+Revision 3 claimed a client's IdP could refuse a write-scoped token to any identity but Karya's, on the strength of SPIFFE. **That was over-claimed**, and the decision above supersedes it anyway. The accurate position:
+
+| Boundary | Mechanism | Status |
+| -------- | --------- | ------ |
+| **Inside Axiom's perimeter** — agent-runtime, BFF, model-gateway, temporal-workers, agent-to-agent, internal MCP registry | **SPIFFE/SPIRE SVIDs** for all ten agents. Single trust domain, one root of trust, no federation | **Real, enforceable, ships in W4.3** |
+| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The agent's JWT-SVID is the `private_key_jwt` client assertion | Real. The client validates a JWT signed by a key it trusts, not a SPIFFE identity |
+
+SPIFFE never reaches into a client's infrastructure without federation the client would have to run SPIRE for — which no mid-market client will. Scoping it intra-perimeter is what makes W4.3 something that actually ships rather than an aspiration.
+
+### Safety rules — retained for the internal registry
+
+Unchanged from Revision 3, now applying to the internal tool registry and to outbound MCP if a client ever enables it:
+
+1. **Tool classification is mandatory and deny-by-default.** Every registered tool is classified read or write. An unclassified tool is refused, not guessed.
+2. **Tool output is data, never instruction.** Descriptions are hash-pinned at registration and re-verified each session.
+3. **Karya's parameters come only from the approved plan** — bound by the approval token, so no connector or tool response can redirect execution.
+
+### Scope impact — what changed, what did not
+
+**Unaffected:** W0 · W1 · W2 · W3 · W3.5 · W4.1 · W4.2 · W4.4 · W4.6 · **W5 entire execution loop** · W6 · W7 · W8 · W9 · W10.
+
+| Item | Final position |
+| ---- | -------------- |
+| W4.3 | **Simpler** — SPIFFE intra-perimeter only; no per-agent client registration to design or document |
+| W4.5 | Internal MCP tool registry only |
+| W4.7 | REST/OpenAPI primary; **absorbs item 15** via OpenAPI descriptors |
+| Inbound MCP server | **Dropped from scope** |
+| Outbound MCP client | Optional transport behind the existing interface; enabled per-descriptor |
+
+**Nothing is lost from the delivered feature set.** Item 15's connectors use hand-written OpenAPI descriptors instead of MCP tool discovery — work always required for any target without an MCP server, which is nearly all of them.
+
+### L4 · Capability descriptors — config, not code
+
+Adding a system becomes a file:
+
+```yaml
+target: salesforce
+transport: mcp
+auth: oauth2.client_credentials      # private_key_jwt
+assurance: high
+capabilities:
+  enumerate: { tool: list_objects }
+  sample:    { tool: query_records, mutating: false }
+  read:      { tool: query_records, mutating: false }
+  write:     { tool: update_record, mutating: true, requiresApprovalToken: true }
+dataCategoryHints: [contact, identity, financial]
+rateLimit: { rps: 5, burst: 20 }
+```
+
+`connector_grants` maps Axiom's internal scope (`connector.read`) onto the **target's own OAuth scopes**, so scope is enforced at the client's IdP rather than only by our code — and a write scope is requested *only* when a valid approval token already exists.
+
+### W4 chunking — seven sequential chunks
+
+Each independently mergeable, tested and staging-deployable. **W5 unblocks at W4.4**, once a grant-enforced transport contract is stable.
+
+| Chunk | Deliverable | Gate for |
+| ----- | ----------- | -------- |
+| **W4.1** | Registry + contract: `ReadConnector`/`WriteConnector` (TS + Python), capability-descriptor schema and loader, `connectors` / `connector_health_checks` tables, lifecycle | — |
+| **W4.2** | **Credential broker core** + `client_credentials` and `jwt_bearer` handlers; per-tenant envelope-encrypted vault; rotation; zero plaintext in Postgres | — |
+| **W4.3** | **SPIFFE workload identity, intra-perimeter** — SPIRE deployment, **SVIDs for all ten agents**, scope enforcement at identity/broker/runtime (closes SEC-14), Nazar downgraded to `regulatory_signal.write` (closes SEC-15), `token_exchange` handler with `act`-chain capture | Enforced SoD + W10 |
+| **W4.4** | **Grant model** — `connector_grants` with scope/`expires_at`/`revoked_at`, mapped to target OAuth scopes; enforced per invocation; portal grant/revoke UI; ledger event per change | **W5 unblocks here** |
+| **W4.5** | **Internal MCP tool registry** — perimeter-scoped, hash-pinned descriptions, deny-by-default read/write classification. Delivers §5.2's "Tool/MCP Server registry" | Governed agent tooling |
+| **W4.6** | **First live binding — PostgreSQL/MySQL** via SQL transport + cloud-IAM credential path, end to end against a live staging database | Real Drishti discovery |
+| **W4.7** | `saml2_bearer` handler + **REST/OpenAPI (primary)** and GraphQL transports; OpenAPI descriptor pack for CRM / HRMS / DWH / ticketing / code repo | Phase 4 surface, **absorbs item 15** |
+
+### What "simulated" now means — and why this is a better position
+
+The previous plan said one real adapter plus simulated bespoke adapters. That distinction largely dissolves under this architecture, and in your favour.
+
+Because transports and grants are shared, a descriptor for an unconnected system still runs the **real transport, real grant handler and real scope enforcement**. Only the endpoint is synthetic. So instead of simulated *code*, we have real code pointed at a **sandbox or reference target**.
+
+`targetBinding: 'production' | 'sandbox' | 'reference-mock'` replaces `implementation: 'live' | 'simulated'`. The labelling rules from Revision 2 carry over unchanged and still apply to anything not `production`:
+
+1. **Type-level** — `targetBinding` is required on every descriptor; no default; omission fails the build.
+2. **Runtime** — a non-`production` binding cannot be granted a write scope. Structurally incapable of reaching W5 execution.
+3. **UI** — persistent amber chip on the connector card, the estate-graph node, discovery headers, and any derived finding or evidence.
+4. **Evidence & reports** — `provenance` recorded, visible watermark, **excluded from auditor packs and DPB submissions by default**.
+5. **Ledger** — `connector.targetBinding` on every entry, so the trail stays honest retrospectively.
+6. **Code & docs** — `TODO(W4.x)` header on every non-production descriptor; CI regenerates `docs/CONNECTOR_STATUS.md` so the live/sandbox split can never drift from the code.
+
+Promoting a system to production becomes **changing an endpoint and a binding flag**, not rewriting an adapter — which is the whole point of the change you asked for.
+
+---
+
+## W5 · Phase 3 execution loop — **P1** · size XL
+
+*Your brief items 8, 9, 10. This is "the core product" per the phase plan.*
+
+1. **Dry-Run / Simulation Engine (M3.2).** Per action type, a simulator that produces a **structured diff** (before/after), not prose. Writes `dry_runs` with a TTL. The design rule from `04 §3.2` is load-bearing: *if the diff cannot be rendered legibly, the action is not eligible for agent execution and routes to manual handling* — so the engine must be able to refuse.
+2. **Karya v1 (M3.4).** Replace the stub. Typed action catalogue → connector dispatch. Idempotent, pre/post state captured to evidence, configurable concurrency, stop-on-failure, per-action token re-validation (the gate already exists — wire the executor behind it).
+3. **Rollback Engine (M3.5).** Executes the Sudhaar-generated rollback definitions. Itself dry-run-able. Auto-trigger on failure threshold within a batch.
+4. **Execution-time blast-radius governor (SEC-7).** Re-check actual affected counts against the cap mid-batch; breach ⇒ halt + escalate.
+5. **Post-Execution Verification Agent (M3.7).** Re-runs the specific Parikshan checks the remediation targeted; emits closure evidence.
+6. **Reconciliation / maker-checker (your item 9 — currently zero implementation).** A `plan_reconciliations` record produced after every batch, comparing **approved scope** vs **executed reality**:
+   - actions approved but not executed, and why
+   - actions executed — parameter-level diff against the approved parameters
+   - anything executed outside approved scope (must be structurally impossible; the reconciler asserts it and screams if not)
+   - verification outcome per action
+   - a signed reconciliation statement sealed into evidence
+
+   This is the *checker* half of the maker-checker design. The architecture separates Sudhaar (maker) from Karya (doer); the reconciler is the independent third role that proves they agreed. It is also the artifact an auditor will actually ask for.
+7. **Progress telemetry (your item 8).** Per-task lifecycle events — queued → started → progress% → completed — over the existing WebSocket channel, with pre-task and post-task records in `agent_runs`.
+
+---
+
+## W6 · Continuous compliance — **P1** · size L
+
+*Your brief items 1, 13.*
+
+- **Scheduler.** Nothing exists today. Temporal is already deployed and is the right home — durable, survives restarts, handles human-approval waits. Cron-style `monitoring_schedules` per estate driving re-discovery and re-assessment.
+- **Drift detection** against the last sealed baseline; `drift_events` with severity; alerting on newly-introduced gaps.
+- **Standing approval policies (M4.1).** Human-authored, scope-bounded — *"auto-remediate expired-retention deletions under 1,000 records in non-production"*. Evaluated by a policy engine that issues a **scoped approval token automatically** when an action falls inside policy, and escalates otherwise. Critically: this reuses the existing token gate rather than bypassing it, so L3 autonomy inherits the same architectural guarantee as L2.
+- **Monitoring-of-the-monitoring (your specific ask).** A meta-health surface: are schedules firing, are connectors healthy, when did each estate last get assessed, which policies fired and what did they do. This is what makes "continuous" defensible rather than assumed.
+
+---
+
+## W7 · Control library & multi-regulator — **P0-adjacent, starts day one** · size L
+
+*Your brief items 5, 14, 16.*
+
+Re-scoped upward after CTL-1. This is now **P0-adjacent** — the product currently cites the wrong law in client-facing reports — and it runs from day one in parallel with W0.
+
+### W7.0 · Regulatory baseline & library versioning — *the foundation for everything else in W7*
+
+*Your instruction: version the library properly, with today's gazette position as the baseline, and track inclusions, changes and sources over time.*
+
+The current model is a good skeleton that stops one level short. `control_libraries` already treats a version as an immutable **publication event**, `controls` is keyed `(id, library_version)`, each control carries `introducedInVersion` / `revisedInVersion`, and assessments pin `library_version` (FR-3.5). What is missing is the thing underneath: **the library has no recorded relationship to the law it claims to implement.** There is one free-text `change_log` string and no way to answer "which gazette text was this control verified against, by whom, when?"
+
+That is also why CTL-1 went unnoticed for a year.
+
+#### The baseline chain, as of today
+
+Verified for this document:
+
+| Instrument | Gazette | Date | Status | Effect |
+| ---------- | ------- | ---- | ------ | ------ |
+| DPDP Act, 2023 | Act 22 of 2023 | 11 Aug 2023 | In force (phased) | Primary |
+| **DPDP Rules, 2025** | **G.S.R. 846(E)** | **13 Nov 2025** | Notified | 23 rules, 7 schedules |
+| **Corrigendum** | **G.S.R. 892(E)** | **11 Dec 2025** | Notified | Amends Rule 1(3) & 1(4) — wording only, **non-substantive**; commencement dates unchanged |
+| MeitY proposal — 18 months → 12 months | — | — | **Proposed, not notified** | Would move 13 May 2027 → 13 Nov 2026 |
+
+Commencement under Rule 1 as corrected:
+
+- **13 Nov 2025** — Rules 1, 2, 17–21 *(in force now)*
+- **13 Nov 2026** — Rule 4, Consent Managers *(~2 months away)*
+- **13 May 2027** — Rules 3, 5–16, 22, 23 — the core compliance set *(~8 months away)*
+
+Baseline declared as **`IN-DPDP@2026-09-20`** = { Act 22 of 2023, G.S.R. 846(E), G.S.R. 892(E) }, with the MeitY proposal tracked as `proposed` and excluded from compliance scoring.
+
+The corrigendum is a neat proof of why this matters: it *did* amend the Rules, and it *should not* invalidate a single assessment, because it changed grammar and not obligation. Only a model that records change **type** can tell those apart. A free-text changelog cannot.
+
+#### Semver, with defined meaning
+
+"Major / minor / revision" has to mean something specific or the numbers are decoration. The rule is **assessment comparability**:
+
+| Bump | Trigger | Effect on existing assessments |
+| ---- | ------- | ------------------------------- |
+| **MAJOR** | Scoring model, domain taxonomy, or control-identity changes | **Not comparable.** Posture scores cannot be compared across a major. Re-assessment required |
+| **MINOR** | Controls added, removed or **materially** reworded; a new instrument enters the baseline | Still comparable, with deltas shown. Re-assessment recommended, not forced |
+| **PATCH** | Citation corrections, typos, clarified guidance, non-substantive corrigenda — **what is tested does not change** | Fully valid. No re-assessment |
+
+This immediately resolves a commercial question in W7: **the CTL-1 citation fix is a PATCH.** The controls test exactly what they tested before; they now cite the right rule. Existing client assessments stay valid and do not need re-running — which would have been an awkward conversation. Adding the ~19 controls for uncited rules is a separate MINOR.
+
+So W7 ships as a sequence, each step independently releasable:
+
+| Version | Content | Bump rationale |
+| ------- | ------- | -------------- |
+| `0.1.0` → **`0.1.1`** | W7.1 citation re-map against G.S.R. 846(E) + 892(E); fix the header's factual errors | PATCH — same tests, correct law |
+| `0.1.1` → **`0.2.0`** | W7.2 new controls for the 10 uncited rules and all 7 schedules; new domains `NTC`/`PWD`/`CMG`/`APL` | MINOR — ~46 → ~65 controls |
+| `0.2.0` → **`1.0.0`** | Scoring recalibration, `effectiveFrom` per control, baseline formally declared, multi-framework mappings | MAJOR — scoring model changes |
+
+#### Schema (extends `0002_control_library.sql` rather than replacing it)
+
+```sql
+regulatory_instruments     -- the law itself, as retrieved
+  id, jurisdiction, short_code,          -- 'GSR-846E'
+  title, gazette_ref, published_on, effective_from,
+  status,                                -- notified | corrigendum | proposed | draft | repealed
+  source_url, retrieved_at, content_sha256,
+  amends_id, supersedes_id               -- the chain
+
+regulatory_provisions      -- addressable units
+  id, instrument_id, provision_ref,      -- 'Rule 7(1)', 'Third Schedule'
+  heading, text_sha256
+
+regulatory_baselines       -- a frozen, named instrument set
+  id, code,                              -- 'IN-DPDP@2026-09-20'
+  declared_on, declared_by, instrument_ids[], baseline_sha256
+
+control_libraries          -- EXTEND existing table
+  + baseline_id, semver_major, semver_minor, semver_patch,
+    content_sha256, supersedes_version,
+    status                               -- draft | published | deprecated
+
+control_provenance         -- the missing link: control ← provision
+  control_id, library_version, provision_id,
+  mapping_type,                          -- derives_from | supports | informational
+  verified_on, verified_by, verification_method, note
+
+control_change_log         -- typed, per-control diffs between versions
+  from_version, to_version, control_id,
+  change_type,                           -- added | removed | reworded_material
+                                         -- | citation_corrected | scoring_changed
+                                         -- | severity_changed | evidence_changed
+                                         -- | deprecated | superseded_by
+  rationale, source_instrument_id, diff jsonb
+
+regulatory_signals         -- Nazar's output, triaged
+  id, source_url, detected_at, retrieved_sha256,
+  signal_type, summary,
+  status,                                -- new | triaged | accepted | rejected
+  proposed_instrument_id, affected_control_ids[]
+```
+
+Two properties fall out of this:
+
+- **Content-hashed and tamper-evident.** `content_sha256` on instruments, baselines and library versions means a published version is verifiable the same way sealed evidence is. A report can state *"assessed against control library 1.0.0, baseline `IN-DPDP@2026-09-20`, hash `abc…`"* and a third party can check it. That is the same trust model as the audit ledger, applied to the rulebook.
+- **`verified_on` / `verified_by` is the CTL-1 vaccine.** A citation now carries provenance of the *source*, not just the version it appeared in. A citation never verified against a notified instrument is visible as such, and CI can fail on any control whose provenance is missing or older than its baseline.
+
+#### Closing the loop with Nazar (M2.9)
+
+This is what turns regulatory watch from a feed into a workflow. Nazar monitors MeitY / DPB / gazette sources; on detecting a new or amended instrument it writes a `regulatory_signals` row with the source URL and retrieved hash, maps it to affected controls through `control_provenance`, and opens a **proposed baseline delta** for human review. On approval, a new baseline and library version are cut, with the change type determining the semver bump. Nothing enters the compliance baseline without a human accepting it — consistent with BR-1.
+
+`proposed` instruments are the other half. The MeitY 12-month proposal is live right now and clients need to plan for it, but it is not law. Proposed instruments drive a **"what-if" posture view** — *"here is your position if the deadline moves to 13 Nov 2026"* — without contaminating the compliance baseline. For a product whose whole pitch is readiness against a deadline, that view is close to a feature in its own right.
+
+#### Also fix, while in here
+
+The current library header (`controls.ts:6-28`) contains factual errors: it dates notification to **14 November 2025** (it was the 13th), refers to **"rules 5–24"** (there are 23), and maps children's-data controls to "Rules 9–10" and SDF to "Rules 11–12" (correctly Rule 10 and Rule 13). All corrected in `0.1.1`.
+
+Sources: [dpdprules.org — Rule 1 commencement](https://dpdprules.org/rules/1) · [dpdp.ind.in — all 23 rules and 7 schedules](https://dpdp.ind.in/rules.php) · [Shardul Amarchand Mangaldas — notification & enforcement](https://www.amsshardul.com/insight/enforcement-of-the-dpdp-act-and-notification-of-the-dpdp-rules/)
+
+---
+
+**W7.1 · Citation re-map (do this first, it is a correctness fix, not a feature).** Re-map all 24 `DPDPR-2025` citations against G.S.R. 846(E). Verify the 12 `DPDPA-2023` Act-section citations in the same pass. Add a `citations.verifiedAgainst` field recording the gazette reference and verification date, so this class of drift is detectable next time rather than invisible.
+
+**W7.2 · Close the coverage gaps (your item 4 — "all missing controls in any form, including schedules").** New controls for the 10 uncited rules and all 7 schedules:
+
+| New control area                    | Instrument                          |
+| ----------------------------------- | ----------------------------------- |
+| Notice content & itemised purposes  | Rule 3                              |
+| Consent Manager engagement duties   | Rule 4 + **First Schedule**         |
+| State-processing standards          | Rule 5 + **Second Schedule** *(conditional — applies only to State-instrumentality tenants; gated by a tenant flag so it never fires spuriously)* |
+| Reasonable security safeguards      | Rule 6 *(re-anchors `SEC-001`)*     |
+| Breach intimation particulars + 72h | Rule 7                              |
+| Retention, erasure & pre-erasure notice; class-based periods | Rule 8 + **Third Schedule** (e-commerce ≥2cr users, online gaming ≥50L, social media ≥2cr → 3-year erasure) |
+| Published contact for processing Qs | Rule 9                              |
+| **Verifiable consent — persons with disabilities** *(no control exists today, in any domain)* | Rule 11 |
+| Child-data exemption classes        | Rule 12 + **Fourth Schedule**       |
+| Transfer outside India, incl. foreign-state requirements | Rule 15 *(re-anchors `XBR-001`)* |
+| Research / archiving / statistics exemption | Rule 16                     |
+| Appeal to Appellate Tribunal        | Rule 22                             |
+| Responding to a call for information | Rule 23 + **Seventh Schedule**     |
+| Board-procedure awareness           | Rules 17–21 + **Fifth/Sixth Schedules** *(informational domain — these bind the Board, not the fiduciary; included as `informational: true` so they inform readiness without polluting the posture score)* |
+| **Phased commencement clock**       | Rule 1 — 13 Nov 2025 / 13 Nov 2026 / **13 May 2027** |
+
+Expected: **46 → ~65 controls**. New domains: `NTC` (notice), `PWD` (persons with disabilities), `CMG` (consent manager), `APL` (appeal/regulatory response).
+
+**Rule 1 is more than a control.** The staggered commencement is the readiness clock the product sells against. It becomes a first-class field — every control carries `effectiveFrom`, and the posture score can answer *"compliant as of today"* versus *"compliant as of 13 May 2027"*. That distinction is the entire mid-market sales conversation.
+
+**W7.3 · Single-source the count (QUA-3).** `CONTROL_LIBRARY_COUNT` derived from the array, not asserted against a literal. Every UI and doc reference reads from it. CI test fails the build on any hardcoded control count anywhere in the repo.
+
+**W7.4 · Release the version sequence.** `0.1.0 → 0.1.1 → 0.2.0 → 1.0.0` per the W7.0 table, each published as an immutable, content-hashed version bound to baseline `IN-DPDP@2026-09-20`. Because the citation fix is a PATCH, engagements pinned to `0.1.0` need **no re-assessment** — they are offered a free re-issued report carrying corrected citations against the same results. Only the `1.0.0` scoring recalibration triggers a re-assessment prompt.
+3. **Multi-regulator reuse (M4.2).** `frameworks` + `control_mappings` with an explicit `mapping_strength` ∈ `{equivalent, partial, indicative}` — **indicative mappings labelled as such**, per your wording. RBI, SEBI, IRDAI, CERT-In overlays. One evidence artifact satisfies N controls across M frameworks; cross-framework coverage map in the portal.
+4. **Sectoral packs (M4.8).** Pack = control subset + overlay mappings + sector-specific evidence requirements + remediation patterns. Pack #1 per your choice (see Part E).
+
+---
+
+## W8 · Reporting, evidence, branding — **P1** · size L
+
+*Your brief items 10, 11, 12.*
+
+- **Branding by default (your item 11).** Today branding lives only in `reports-client.tsx`. Move it into a shared `@axiom/report-kit` — Axiom Proof lockup, "Axiom Minds Private Limited", `https://axiomminds.ai`, agent attribution and named human approver (FR-11.4) — applied to **every** generated artifact: Prativedan output, evidence packs, DSAR responses, breach notifications, the gap-scan report. Tenant/partner white-label becomes an *override* of this default, never a replacement of the Axiom Minds attribution.
+- **Server-side PDF** (Readiness Matrix §5.1.3): headless Chromium in the agent-runtime image; content-hash each PDF into the evidence vault.
+- **Evidence retrieval & review (your item 12).** Evidence explorer with full-text + control + agent + date filters; **evidence-pack assembly and export** (FR-4.4) for auditors/DPB; independent hash verification UI so a reviewer can check a seal without trusting the platform; evidence-to-control linkage shown both directions.
+- **Report formats** (FR-11.1): board report, auditor pack, DPB-ready submission, technical remediation register. Every claim traceable to an artifact (FR-11.3).
+- **Approval records** (your item 10): exportable approval history — who approved what, when, under which scope, backed by which dry-run, with the reconciliation statement attached.
+
+---
+
+## W9 · Test, audit and performance — **P0, runs alongside everything** · size L
+
+Current state: BFF and web have **zero tests** behind `--passWithNoTests`.
+
+1. **Remove `--passWithNoTests`** from `services/bff` and `apps/web` once suites exist. Add a coverage floor to CI.
+2. **BFF suite — highest priority.** The execution gate, auth, tenancy, RBAC, idempotency. Including explicit adversarial cases:
+   - unauthenticated request ⇒ 401 in every environment
+   - tenant A token + tenant B `X-Tenant-Id` ⇒ 403
+   - `axiom_e2e_bypass` cookie ⇒ no effect, on page routes **and** the BFF proxy
+   - login-time service failure ⇒ 503, never a "sovereign session"
+   - mutating request with no `Idempotency-Key` ⇒ 400 in every environment
+   - forged / expired / replayed / scope-mismatched approval token ⇒ rejected
+   - stale dry-run ⇒ execution refused
+   - partial batch approval executes **exactly** the approved subset (PRD §B.10.4)
+   - kill switch halts in-flight execution across replicas
+3. **RLS integration tests** against a real Postgres — the policies are good and completely untested.
+4. **E2E (Playwright)** for each persona: founder, owner, approver, reviewer, viewer, partner — asserting both visibility and action-level authorisation.
+5. **PRD §B.10 acceptance suite** — all eight Phase 3 acceptance criteria as executable tests. That is the definition of "Phase 3 done".
+6. **Performance:** fix PERF-1 (batch the per-action fetch), PERF-2 (`count: 'estimated'` + caching + ledger indexes), PERF-3 (rate limiting). Load-test discovery against NFR-7 (1M records/hour/connector) once W4 lands.
+7. **Standing audits:** `pnpm audit` + secret scanning + the `no-restricted-imports` tenancy gate in CI.
+
+**Connection-framework coverage (W4).** Each grant handler gets a conformance suite against a reference authorization server — token acquisition, scope narrowing, expiry, refusal on over-broad scope request, `act`-chain capture for RFC 8693. MCP transport gets adversarial tests: unclassified tool ⇒ refused; tool description hash changed after registration ⇒ session refused; connector output attempting to alter Karya's action parameters ⇒ no effect, because parameters are bound by the approval token.
+
+**Scope confirmed (your item 7): comprehensive, not selective.** Every package, app and service gets a suite — including the ones that have none today (`services/bff`, `apps/web`) and every new module added by W1–W8 and W10. No new module merges without tests. `--passWithNoTests` is removed everywhere once suites exist, and a coverage floor gates CI thereafter.
+
+---
+
+## W10 · On-prem deployment environment — **P2** · size M
+
+*Your brief item 3. This is the slice of Phase 5 (M5.2) you asked to pull in.*
+
+Rather than deferring on-prem to a future packaging project, `onprem` becomes a **first-class deploy environment alongside local / staging / preprod / production**, so it is exercised continuously instead of discovered late.
+
+- **Config.** Extend the `ENVIRONMENT` enum at `packages/config/src/index.ts:12` — currently `['development','staging','preprod','production','local']` — to include `onprem`. Per the W0.0 principle this is purely a **topology** value: like `preprod` and `staging` after W0, `onprem` runs `AXIOM_AUTH_MODE=strict` and inherits every production credential check. No environment is ever a relaxed mode.
+
+  This also closes a latent W0 issue: the `superRefine` at `packages/config/src/index.ts:117-122` currently **skips all production credential validation** whenever `ENVIRONMENT` is `staging` or `preprod`. Same fail-open family as SEC-1 and fixed in the same pass.
+
+- **Artifacts.** `infra/docker/docker-compose.onprem.yml` + Helm values for a self-contained stack: Postgres, MinIO (S3-compatible, Object Lock for WORM), Temporal, Redis, all four services. No dependency on Supabase Cloud, GCP or AWS.
+- **Sovereignty.** No outbound egress required by default. Model Gateway configured for a self-hosted model endpoint (NFR-10, "self-hosted model support by Phase 5"); any outbound LLM call is explicit opt-in and allowlisted.
+- **Licence & identity.** Offline licence token; local admin bootstrap; MFA via TOTP works fully air-gapped, which is precisely why TOTP-first (W1) is the right call — email OTP degrades gracefully where there is no mail relay.
+- **Evidence.** MinIO Object Lock in compliance mode to satisfy FR-4.1 WORM semantics without AWS.
+- **Verification.** An `onprem` CI lane that boots the full stack from scratch and runs the E2E suite against it — the only way this stays real.
+
+---
+
+## C.1 Sequencing
+
+```
+W0  Security ───────────────────────────────────────────┐ blocks everything
+     │                                                  │
+W2  Data model ──┬── W1 Tenancy / RBAC / MFA ───────────┤ makes staging testable
+                 │                                      │
+                 ├── W3 Estate ──── W3.5 ER graph ──────┤
+                 │        │                             │
+                 │   W4 Universal Connection Framework  │
+                 │    4.1 registry+descriptors                 │
+                 │    4.2 credential broker (CC, JWT-bearer)   │
+                 │    4.3 SPIFFE identity + token exchange     │
+                 │    4.4 grant model ─────────────────────────┐
+                 │    4.5 internal MCP tool registry           │
+                 │    4.6 live binding: PostgreSQL/MySQL       │
+                 │    4.7 SAML grant + REST/GraphQL + packs    │
+                 │                                      │      │
+                 │   W5 Execution loop ◀────────────────┼──────┘ starts at W4.4
+                 │    dry-run ─ Karya ─ rollback ─ verify ─ reconcile
+                 │                                      │
+                 ├── W6 Continuous / standing policies ─┤ Phase 4 L3
+                 └── W8 Reporting / evidence / branding ┘
+
+W7  Control library ──── starts day one, parallel to W0   (CTL-1 is a correctness fix)
+W10 On-prem environment ── parallel from W0; shares the config hardening
+W9  Tests & audits ────── continuous, gates every merge
+```
+
+**Two things start immediately alongside W0:** W7.1 (citation re-map — the product cites wrong law today) and W10's config hardening (it fixes the same fail-open family as SEC-1). W5 no longer waits for all of W4 — it unblocks at **W4.3**, once the grant-enforced interface is stable.
+
+---
+
+# PART D — Verification strategy
+
+**Definition of done for each workstream:** tests written first where the behaviour is security-relevant, suite green, no `--passWithNoTests`, deployed to staging with `AXIOM_AUTH_MODE=strict`, and exercised through the UI as each persona.
+
+**Per-merge gate:** typecheck · lint · unit · RLS integration · E2E · no-service-role-in-web grep · secret scan · control-count consistency check.
+
+**Phase 3 sign-off** is the eight PRD §B.10 criteria as passing tests, plus a live rollback exercised in a controlled staging estate.
+
+I will report failures with the actual output rather than summarising them, and will not call a workstream done until its suite is green.
+
+---
+
+# PART E — Decisions
+
+These change the shape of the work, so I would rather ask than assume.
+
+## E.1 Resolved — 20 Sep 2026
+
+| # | Decision | Resolution | Lands in |
+| - | -------- | ---------- | -------- |
+| 1 | MFA second factor | **TOTP + email OTP. SMS deferred** — enum slot reserved, no provider, no code | W1 |
+| 2 | Connector depth | ~~One real adapter, rest simulated~~ — **superseded by Rev 3.** No bespoke per-system connectors. A **Universal Connection Framework**: SPIFFE workload identity → four-grant credential broker (Client Credentials / Token Exchange / SAML Assertion / JWT Assertion) → pluggable transports with **MCP primary** → declarative capability descriptors. One live binding (PostgreSQL/MySQL); everything else runs the same real code against a sandbox or reference target, labelled `targetBinding` | W4.1–W4.7 |
+| 3 | Phase 5 on-prem | **In scope** as a dedicated `onprem` deploy environment, validated at production strictness | **W10** |
+| 8 | Preprod authentication | **Exact replica of production — same codebase, same ruleset.** Environment determines topology only, never security posture. Real database, real auth, enforced idempotency, parity CI lane | **W0.0, W0.1** |
+| 9 | Control library versioning | **Versioned against a declared regulatory baseline** — `IN-DPDP@2026-09-20`, content-hashed, with per-control source provenance, a typed change log, and semver defined by assessment comparability. Future revisions enter via Nazar → human review → new baseline | **W7.0** |
+| 10 | Agent access rights | **All ten agents** get SVIDs and enforced, tenant/estate-scoped permissions. Only Drishti (read) and Karya (write) ever reach a client estate; Nazar loses `control_library.write` | **W4.3**, W7.0 |
+| 11 | MCP scope | **Inbound dropped.** Outbound kept **flexible** — optional transport, enabled per-descriptor when a client has an MCP server. Internal tool registry in W4.5. **REST/OpenAPI is the primary transport** | **W4.5, W4.7** |
+| 12 | External-system auth | **One connector identity per tenant**, not per agent. `connector.write` requestable only by Karya's SVID + valid approval token. Per-agent OAuth registration available as optional hardening | **W4.2, W4.3, W4.4** |
+| 4 | Control library | **Add every missing control in any form, including all 7 Schedules** — plus the citation re-map forced by CTL-1 | W7 |
+| 5 | Client estate | **Build all missing pieces**, plus a new **Entity Relationship Graph** page showing entities, relationships and agent read/write access, reusing the existing `AgentIcon` set | W3, **W3.5** |
+| 6 | Maker-checker | **Build it** — Sudhaar cannot execute, Karya cannot plan, reconciliation proves they agreed | W5.6 |
+| 7 | Tests | **Comprehensive across every package/app/service**, including `services/bff` and all new modules | W9 |
+
+## E.2 Still open — not blocking, needed before the workstream that uses it
+
+1. **Sectoral pack #1 (needed before W7's pack work).** Healthcare (ABDM/NHA retention vs DPDPA erasure conflict) or BFSI (RBI / Account Aggregator overlay)? Pick whichever is closest to your live pipeline — everything before it proceeds regardless.
+
+2. **Mock-data line (needed before W3/W4 UI work).** You said mock may stay for demo. My proposal: permitted **only** behind an explicit `demo` tenant flag, never hardcoded in a page component (QUA-2), and subject to the same `provenance: 'simulated'` labelling as simulated connectors. Everything else reads real tables, empty states included. I will proceed on this basis unless you say otherwise.
+
+---
+
+## Appendix — evidence commands
+
+Reproduce any claim in Parts A/B:
+
+```bash
+# Control count discrepancies
+grep -rnoE "\b(4[0-9]|5[0-9])\s*controls" --include="*.ts" --include="*.tsx" --include="*.md" . | grep -v node_modules | grep -v "^./.kilo"
+
+# Service-role pages with no tenant filter
+for f in $(grep -rl createSupabaseAdmin apps/web/src); do echo "$(grep -c 'tenant_id\|tenantId' "$f")  $f"; done | sort -n
+
+# Absent capabilities
+grep -rniE "reconcil|maker.check|RBI|SEBI|IRDAI|standing.approval|TPRM|sectoral" --include="*.ts" --include="*.py" apps packages services | grep -v node_modules | wc -l
+
+# Test baseline
+pnpm test && (cd services/agent-runtime && uv run pytest -q)
+```
