@@ -131,20 +131,40 @@ select pg_temp.assert_eq(
   'missing_request_key', 'an empty request key claims nothing');
 
 -- ─── Dispatch outcome is durable ─────────────────────────────────────
-select pg_temp.assert_true(
-  public.record_execution_dispatch(
-    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-    'req-batch-001', 'failed', null, 'runtime returned 422') = 2,
-  'a failed dispatch is recorded against every action in the batch');
+-- `finish_execution_dispatch` settles the actions AND the outbox intent in one
+-- transaction, under the plan lock. 0019's `record_execution_dispatch` and
+-- 0020's `settle_execution_dispatch` settled them separately; 0022 drops both,
+-- because the assertions that used to stand here pinned the semantics 0021
+-- corrected — that any 'failed' status may release a claim.
 
--- R-05: work the runtime never accepted must not read as running, and must
--- stay retryable rather than stranded in 'executing' with nothing behind it.
+-- An EXPLICIT refusal is a definite negative, so it releases the claim. It is
+-- the only outcome that may; `unknown` is tested below and must not.
+select pg_temp.assert_true(
+  public.finish_execution_dispatch(
+    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+    'req-batch-001', 'failed', null, 'runtime returned 422'),
+  'a refused dispatch settles');
+
+-- R-05: work the runtime refused must not read as running, and must stay
+-- retryable rather than stranded in 'executing' with nothing behind it.
 select pg_temp.assert_true(
   (select count(*) = 2 from public.remediation_actions
     where plan_id = '00000000-0000-0000-0000-0000000000c3'
       and dispatch_status = 'failed' and execution_status = 'approved'
       and execution_request_key is null),
-  'a failed dispatch returns the actions to approved and clears the claim');
+  'a refused dispatch returns the actions to approved and clears the claim');
+
+-- The intent is retained with its reason by the SAME call. It is the evidence
+-- that a token was spent on work that did not run, and deleting it would erase
+-- exactly what reconciliation needs.
+select pg_temp.assert_true(
+  (select status = 'failed' and last_error = 'runtime returned 422'
+     from public.execution_dispatch_outbox where request_key = 'req-batch-001'),
+  'the refused intent is retained with its reason');
+select pg_temp.assert_true(
+  (select count(*) = 1 from public.pending_execution_dispatches
+    where request_key = 'req-batch-001' and status = 'failed'),
+  'a refused intent stays visible until an operator reconciles it');
 
 -- Retryable means retryable: a fresh key can claim them again.
 update public.approval_tokens set status = 'issued' where id = '00000000-0000-0000-0000-0000000000e1';
@@ -159,22 +179,12 @@ select pg_temp.assert_eq(
        'contract_version', 1,
        'plan_id', '00000000-0000-0000-0000-0000000000c3',
        'action_ids', jsonb_build_array('00000000-0000-0000-0000-0000000000d1')))->>'decision'),
-  'claimed', 'actions released by a failed dispatch can be claimed again');
-
-select pg_temp.assert_true(
-  public.record_execution_dispatch(
-    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-    'req-batch-retry', 'accepted', 'workflow-abc', null) = 2,
-  'an accepted dispatch records the runtime reference');
-select pg_temp.assert_true(
-  (select count(*) = 2 from public.remediation_actions
-    where dispatch_reference = 'workflow-abc' and execution_status = 'executing'),
-  'accepted work stays executing with a durable reference');
+  'claimed', 'actions released by a refused dispatch can be claimed again');
 
 -- ─── W5 · the durable outbox ─────────────────────────────────────────
 -- The intent is written in the SAME transaction as the token consumption, so
--- a process that dies between claiming and dispatching leaves a record of
--- what it owed rather than actions in `executing` with nothing behind them.
+-- a process that dies between claiming and dispatching leaves a record of what
+-- it owed rather than actions in `executing` with nothing behind them.
 select pg_temp.assert_true(
   (select count(*) = 1 from public.execution_dispatch_outbox
     where request_key = 'req-batch-retry' and status = 'pending'),
@@ -191,26 +201,26 @@ select pg_temp.assert_true(
   'a promised-but-unconfirmed dispatch is visible to an operator');
 
 select pg_temp.assert_true(
-  public.settle_execution_dispatch(
+  public.finish_execution_dispatch(
     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-    'req-batch-retry', 'delivered', null),
-  'a delivered dispatch settles the intent');
+    'req-batch-retry', 'accepted', 'workflow-abc', null),
+  'an accepted dispatch settles the intent and records the runtime reference');
+select pg_temp.assert_true(
+  (select count(*) = 2 from public.remediation_actions
+    where dispatch_reference = 'workflow-abc' and execution_status = 'executing'),
+  'accepted work stays executing with a durable reference');
 select pg_temp.assert_true(
   (select count(*) = 0 from public.pending_execution_dispatches
     where request_key = 'req-batch-retry'),
-  'a settled intent leaves the reconciliation queue');
+  'a delivered intent leaves the reconciliation queue');
 
--- A failed delivery keeps the row. It is the evidence that a token was spent
--- on work that did not run; deleting it erases what reconciliation needs.
+-- 0022: the superseded RPCs are gone, not merely unused. A dead grant on a
+-- security-definer function that can release a running claim is still a way in.
 select pg_temp.assert_true(
-  public.settle_execution_dispatch(
-    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-    'req-batch-001', 'failed', 'runtime unreachable'),
-  'a failed dispatch settles too');
-select pg_temp.assert_true(
-  (select status = 'failed' and last_error = 'runtime unreachable'
-     from public.execution_dispatch_outbox where request_key = 'req-batch-001'),
-  'a failed intent is retained with its reason');
+  (select count(*) = 0 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('record_execution_dispatch', 'settle_execution_dispatch')),
+  'the superseded dispatch RPCs are dropped, so the corrected path is the only path');
 
 -- Redelivery is idempotent: one intent per request, whatever happens.
 select pg_temp.assert_eq(
@@ -276,9 +286,7 @@ select pg_temp.assert_eq((select status::text from public.approval_tokens
 -- ─── Browser clients cannot claim executions ─────────────────────────
 set local role authenticated;
 select pg_temp.denied($q$select public.claim_plan_execution('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000e1',array['00000000-0000-0000-0000-0000000000d1']::uuid[],'x')$q$);
-select pg_temp.denied($q$select public.record_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','accepted',null,null)$q$);
 select pg_temp.denied($q$select * from public.execution_dispatch_outbox$q$);
-select pg_temp.denied($q$select public.settle_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','delivered',null)$q$);
 select pg_temp.denied($q$select public.finish_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','accepted',null,null)$q$);
 reset role;
 
