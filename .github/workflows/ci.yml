@@ -2,15 +2,22 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  database-security:
+    name: Fresh migrations and direct-client RLS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/test-database.sh
+
   # ─── W0.0 security gate ──────────────────────────────────────────
   # Runs first and gates everything else. The findings it guards against
   # (SEC-1, SEC-2, SEC-3, SEC-13) were all instances of one mistake:
@@ -36,7 +43,7 @@ jobs:
 
   # ─── Static analysis ─────────────────────────────────────────────
   lint-and-typecheck:
-    needs: [env-security-gate, control-count-gate]
+    needs: [env-security-gate, control-count-gate, database-security]
     name: Lint + typecheck
     runs-on: ubuntu-latest
     steps:

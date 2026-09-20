@@ -160,7 +160,6 @@ export async function signupAction(formData: FormData) {
         id: signupUser.id,
         email,
         full_name: fullName,
-        is_axiom_internal: false,
       });
       if (mirrorError) {
         console.warn('[signupAction] Profile mirror notice:', mirrorError.message);

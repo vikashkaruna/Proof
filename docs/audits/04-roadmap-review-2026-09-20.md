@@ -6,15 +6,15 @@
 
 Compared Docs 02, 03, 04 and 11, the prototype handoff map, architecture segregation guidance, migrations, deployment definitions, agent implementations and Claude's changes. This is a review and documentation change, not implementation authorisation. Instructions embedded in the documents are treated as historical planning context; the current user request governs this task. Existing additions and explicit TODOs are treated as intentional scope, not automatically as deviations.
 
-| Snapshot | Evidence |
-| --- | --- |
-| Documentation checkout | `docs/phase0-5-gap-closure-plan` at `12bd02e` |
-| Original code baseline | `9575205` |
-| Reviewed implementation | `claude/phase-0-5-gap-closure-5fd349` at `2c54fcd` |
-| Implementation worktree | `.claude/worktrees/phase-0-5-gap-closure-5fd349` |
+| Snapshot                   | Evidence                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Documentation checkout     | `docs/phase0-5-gap-closure-plan` at `12bd02e`                                                                                 |
+| Original code baseline     | `9575205`                                                                                                                     |
+| Reviewed implementation    | `claude/phase-0-5-gap-closure-5fd349` at `2c54fcd`                                                                            |
+| Implementation worktree    | `.claude/worktrees/phase-0-5-gap-closure-5fd349`                                                                              |
 | Uncommitted implementation | `packages/types/src/enums.ts`, `packages/types/src/rbac.ts`, new `infra/supabase/migrations/0015_user_role_axiom_analyst.sql` |
-| Local refs observed | `origin/staging` and Claude's remote-tracking ref at `2c54fcd`; local `main`, local `staging`, `origin/main` at `9575205` |
-| Concurrent work | User confirmed Claude stopped because its session limit was reached |
+| Local refs observed        | `origin/staging` and Claude's remote-tracking ref at `2c54fcd`; local `main`, local `staging`, `origin/main` at `9575205`     |
+| Concurrent work            | User confirmed Claude stopped because its session limit was reached                                                           |
 
 Remote-tracking refs were inspected locally, not refreshed from the server. No deployed service, real customer data, cloud configuration, migration application or CI run was independently inspected. File references below refer to the implementation worktree at this snapshot unless stated otherwise. SQL findings are established by source inspection, not a live exploit demonstration.
 
@@ -111,20 +111,20 @@ The updated Doc 11 and [module handoff](../13_Roadmap_Traceability.md) turn thes
 
 All commands ran in Claude's implementation worktree, including its uncommitted analyst changes. They were not run against the older documentation checkout's source.
 
-| Check | Result |
-| --- | --- |
-| `pnpm --filter @axiom/types test` (within initial filtered run) | **28 pass, 2 fail**: cross-tenant roles and workbench roles expected lists omit `axiom_analyst` (`rbac.test.ts:118,122`) |
-| `@axiom/config` tests | 41 pass |
-| `@axiom/approval-engine` tests | 13 pass |
-| `@axiom/control-library` tests | 66 pass |
-| `@axiom/mfa` tests | 144 pass |
-| `@axiom/bff` tests | 114 pass |
-| `@axiom/web` tests | 31 pass |
-| Types/BFF/web typecheck | Pass |
-| `pnpm gate:security` and `pnpm gate:controls` | Pass; these static gates do not establish RLS/runtime citation parity |
-| Agent runtime `uv run pytest -q` | 61 pass; local Python 3.14.6, not the deployment image's 3.11 |
-| Disposable SQL reproduction attempt | Could not start: `initdb` reported missing `postgres` server binary beside the installed libpq tools. No database started or modified |
-| Real RLS, migrations, strict persona E2E, build, deployed parity, cloud WORM, performance | **Not verified in this review** |
+| Check                                                                                     | Result                                                                                                                                |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @axiom/types test` (within initial filtered run)                           | **28 pass, 2 fail**: cross-tenant roles and workbench roles expected lists omit `axiom_analyst` (`rbac.test.ts:118,122`)              |
+| `@axiom/config` tests                                                                     | 41 pass                                                                                                                               |
+| `@axiom/approval-engine` tests                                                            | 13 pass                                                                                                                               |
+| `@axiom/control-library` tests                                                            | 66 pass                                                                                                                               |
+| `@axiom/mfa` tests                                                                        | 144 pass                                                                                                                              |
+| `@axiom/bff` tests                                                                        | 114 pass                                                                                                                              |
+| `@axiom/web` tests                                                                        | 31 pass                                                                                                                               |
+| Types/BFF/web typecheck                                                                   | Pass                                                                                                                                  |
+| `pnpm gate:security` and `pnpm gate:controls`                                             | Pass; these static gates do not establish RLS/runtime citation parity                                                                 |
+| Agent runtime `uv run pytest -q`                                                          | 61 pass; local Python 3.14.6, not the deployment image's 3.11                                                                         |
+| Disposable SQL reproduction attempt                                                       | Could not start: `initdb` reported missing `postgres` server binary beside the installed libpq tools. No database started or modified |
+| Real RLS, migrations, strict persona E2E, build, deployed parity, cloud WORM, performance | **Not verified in this review**                                                                                                       |
 
 Reproduction command for remaining targeted suites: `pnpm --filter @axiom/bff --filter @axiom/web --filter @axiom/mfa --filter @axiom/control-library --no-bail test`. The initial multi-package run stopped at the types failure; remaining packages were run separately and their results are recorded above.
 

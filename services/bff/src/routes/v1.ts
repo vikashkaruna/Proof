@@ -1737,6 +1737,24 @@ export function v1Routes(deps: Deps) {
 
   app.post('/agents/:name/run', async (c) => {
     const name = c.req.param('name').toLowerCase();
+    const invokeRefusal = requireCapability(c, Capability.AGENT_INVOKE);
+    if (invokeRefusal) return invokeRefusal;
+    // Karya is dispatched only by the persisted approval/execution gate.
+    if (name === 'karya') {
+      return c.json(
+        {
+          error: {
+            code: 'execution_gate_required',
+            message: 'Use the approved plan execution endpoint.',
+          },
+        },
+        403,
+      );
+    }
+    if (['sanket', 'nazar', 'lekha'].includes(name)) {
+      const internalRefusal = requireCapability(c, Capability.WORKBENCH_ACCESS);
+      if (internalRefusal) return internalRefusal;
+    }
     const validAgents = [
       'drishti',
       'vibhaag',
@@ -1754,24 +1772,74 @@ export function v1Routes(deps: Deps) {
     }
 
     const tenantId = c.get('tenantId');
-    const body = ((await c.req.json().catch(() => ({}))) || {}) as Record<string, any>;
-    const runtimeUrl = process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:8000';
-    const runtimeToken =
-      process.env.AGENT_RUNTIME_INTERNAL_TOKEN || 'dev-agent-runtime-token-axiom';
-
-    const correlationId = c.req.header('x-correlation-id') || body.correlation_id || randomUUID();
-
-    const input = {
-      tenant_id: tenantId,
-      engagement_id: body.engagement_id || '00000000-0000-0000-0000-000000000001',
-      ...body,
-    };
-
+    const parsed = z
+      .object({
+        tenant_id: z.uuid().optional(),
+        tenantId: z.uuid().optional(),
+        engagement_id: z.uuid().optional(),
+        correlation_id: z.uuid().optional(),
+      })
+      .catchall(z.unknown())
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid agent input.' } }, 400);
+    }
+    const body = parsed.data;
+    if (
+      (body.tenant_id && body.tenant_id !== tenantId) ||
+      (body.tenantId && body.tenantId !== tenantId)
+    ) {
+      return c.json(
+        {
+          error: {
+            code: 'tenant_forbidden',
+            message: 'Agent input must belong to the active tenant.',
+          },
+        },
+        403,
+      );
+    }
+    const runtimeUrl = env.AGENT_RUNTIME_URL;
+    const runtimeToken = env.AGENT_RUNTIME_INTERNAL_TOKEN;
+    if (!runtimeUrl || !runtimeToken) {
+      return c.json(
+        { error: { code: 'runtime_unavailable', message: 'Agent runtime is not configured.' } },
+        503,
+      );
+    }
+    const requestedCorrelation = c.req.header('x-correlation-id') ?? body.correlation_id;
+    if (requestedCorrelation && !z.uuid().safeParse(requestedCorrelation).success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid correlation ID.' } },
+        400,
+      );
+    }
+    const correlationId = requestedCorrelation ?? randomUUID();
     const admin = createSupabaseAdmin();
+    if (body.engagement_id) {
+      const { data: engagement, error } = await admin
+        .from('engagements')
+        .select('id')
+        .eq('id', body.engagement_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error)
+        return c.json(
+          { error: { code: 'lookup_failed', message: 'Could not validate engagement.' } },
+          503,
+        );
+      if (!engagement)
+        return c.json(
+          { error: { code: 'engagement_not_found', message: 'Engagement is not in this tenant.' } },
+          404,
+        );
+    }
+    // Assign the authority last; untrusted input never overrides it.
+    const input = { ...body, tenant_id: tenantId };
     let runId: string | null = null;
 
     try {
-      const { data: runRow } = await admin
+      const { data: runRow, error: runError } = await admin
         .from('agent_runs')
         .insert({
           tenant_id: tenantId,
@@ -1779,16 +1847,27 @@ export function v1Routes(deps: Deps) {
           correlation_id: correlationId,
           status: 'running',
           started_at: new Date().toISOString(),
-          metadata: { input: body },
+          metadata: { requested_by: c.get('user').id },
         })
         .select('id')
         .maybeSingle();
 
-      if (runRow?.id) {
-        runId = runRow.id;
+      if (runError || !runRow?.id) {
+        return c.json(
+          { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
+          503,
+        );
       }
-    } catch (e: any) {
-      logger.warn({ error: e.message }, 'could not record initial agent_run row');
+      runId = runRow.id;
+    } catch (e: unknown) {
+      logger.error(
+        { error: e instanceof Error ? e.message : 'unknown' },
+        'could not record initial agent_run row',
+      );
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
+        503,
+      );
     }
 
     deps.realtime.broadcast({
@@ -1815,7 +1894,17 @@ export function v1Routes(deps: Deps) {
         }),
       });
 
-      const data = (await res.json()) as Record<string, any>;
+      const data = z
+        .object({
+          status: z.string().optional(),
+          latency_ms: z.number().optional(),
+          input_tokens: z.number().optional(),
+          output_tokens: z.number().optional(),
+          cost_usd: z.number().optional(),
+          error: z.string().nullable().optional(),
+        })
+        .catchall(z.unknown())
+        .parse(await res.json());
 
       if (runId) {
         await admin
@@ -1844,24 +1933,25 @@ export function v1Routes(deps: Deps) {
         occurredAt: new Date().toISOString(),
       });
 
-      return c.json(data, res.status as any);
-    } catch (err: any) {
+      return c.json(data, res.ok ? 200 : 502);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown runtime error';
       if (runId) {
         await admin
           .from('agent_runs')
           .update({
             status: 'failed',
             completed_at: new Date().toISOString(),
-            error: err.message,
+            error: message,
           })
           .eq('id', runId);
       }
-      logger.error({ agent: name, error: err.message }, 'failed to call agent runtime');
+      logger.error({ agent: name, error: message }, 'failed to call agent runtime');
       return c.json(
         {
           error: {
             code: 'agent_invocation_failed',
-            message: `Could not invoke agent ${name}: ${err.message}`,
+            message: `Could not invoke agent ${name}.`,
           },
         },
         502,

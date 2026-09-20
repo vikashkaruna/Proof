@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Disposable, real PostgreSQL integration tests. Never connects to an existing DB.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+container="axiom-db-test-$$"
+image="${AXIOM_TEST_POSTGRES_IMAGE:-public.ecr.aws/supabase/postgres:17.6.1.127}"
+test_log=$(mktemp)
+cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; }
+trap cleanup EXIT
+docker run --rm -d --name "$container" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
+for attempt in $(seq 1 60); do
+  if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null
+docker exec "$container" createdb -U postgres axiom_policy_test
+sql() {
+  if ! docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -q >"$test_log" 2>&1; then
+    cat "$test_log"
+    return 1
+  fi
+}
+sql < tests/database/bootstrap.sql
+for migration in infra/supabase/migrations/*.sql; do
+  echo "Applying $(basename "$migration")"
+  sql < "$migration"
+done
+for suite in tests/database/*.test.sql; do
+  echo "Testing $(basename "$suite")"
+  sql < "$suite"
+done
+echo "Database migrations and security assertions passed."

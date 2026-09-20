@@ -15,13 +15,13 @@ The HTML handoff map is a design reference with mock examples, not completion ev
 
 ## Workspace and branch handoff
 
-| Item | Location/state |
-| --- | --- |
-| Review documentation | Repository root checkout `/Users/vikash/Axiom Proof`, branch `docs/phase0-5-gap-closure-plan`, based on `12bd02e` |
-| Claude implementation | `/Users/vikash/Axiom Proof/.claude/worktrees/phase-0-5-gap-closure-5fd349`, branch `claude/phase-0-5-gap-closure-5fd349`, HEAD `2c54fcd` |
-| Unfinished role work | Modified `packages/types/src/enums.ts` and `packages/types/src/rbac.ts`; untracked `infra/supabase/migrations/0015_user_role_axiom_analyst.sql` |
-| Other pre-existing dirty files | Root checkout's `apps/marketing/next-env.d.ts` and `apps/web/next-env.d.ts`; untouched by review |
-| Remote-tracking state observed | `origin/staging` at `2c54fcd`; `origin/main` at `9575205`; this is not a cloud deployment or fresh remote verification |
+| Item                           | Location/state                                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review documentation           | Repository root checkout `/Users/vikash/Axiom Proof`, branch `docs/phase0-5-gap-closure-plan`, based on `12bd02e`                               |
+| Claude implementation          | `/Users/vikash/Axiom Proof/.claude/worktrees/phase-0-5-gap-closure-5fd349`, branch `claude/phase-0-5-gap-closure-5fd349`, HEAD `2c54fcd`        |
+| Unfinished role work           | Modified `packages/types/src/enums.ts` and `packages/types/src/rbac.ts`; untracked `infra/supabase/migrations/0015_user_role_axiom_analyst.sql` |
+| Other pre-existing dirty files | Root checkout's `apps/marketing/next-env.d.ts` and `apps/web/next-env.d.ts`; untouched by review                                                |
+| Remote-tracking state observed | `origin/staging` at `2c54fcd`; `origin/main` at `9575205`; this is not a cloud deployment or fresh remote verification                          |
 
 Resume in the implementation worktree, not the old root source. Read the review docs from the root checkout or incorporate their eventual documentation commit intentionally. The reviewer did not copy them over Claude's files, cherry-pick commits, stash changes, reset branches or push anything. Recheck status and migration numbers on resumption; do not overwrite WIP.
 
@@ -29,21 +29,21 @@ Resume in the implementation worktree, not the old root source. Read the review 
 
 “Completed source” means the change exists in a commit. It does not assert migration application, release readiness or live acceptance.
 
-| Commit | Delivered source | Remaining boundary |
-| --- | --- | --- |
-| `25e3bc5` | W0.0 strict auth mode and removal of topology-based bypasses; BFF test foundation | Real strict environment and complete RLS policy verification |
-| `7b4db2c` | CI/lint/format groundwork | Not every package lints; parity/RLS/E2E release gates still missing |
-| `1c244e0` | Strict staging credential validation; Temporal configuration instead of placeholder | Boot/migrate from documented configuration and prove secret injection |
-| `3b47fbc` | Shared kill state, tenant quota, execute-time dry-run expiry, awaited ledger, bounded nonce cache, batch fetch | In-flight halt, atomic durable execution and database constraints |
-| `9d6e2a5` | TS 0.1.1 citation mapping and count consistency work | Runtime bundle/publication/provenance parity; R-06 |
-| `cc3fcee` | W7.0 schema/metadata; Nazar loses control-library write declaration | Hashed baseline publication and runtime scope enforcement |
-| `443a06a` | Central capability matrix, approval scope checking and selected route gates | Agent/execute/read route enforcement and RLS alignment; R-01–R-03 |
-| `5018188` | UI persisted-state hydration fix | Not evidence of a roadmap module completing |
-| `8fe16ce` | User-scoped pages/tenant helper; removal of auto-owner fallback | SQL authority paths remain vulnerable |
-| `898ede6` | TOTP/recovery primitives and schema; per-tenant demo flag | Email OTP pending decision, secret wiring and abuse controls |
-| `c814f7b` | MFA service/endpoints and approval step-up | Full content binding, direct-access enforcement and live acceptance |
-| `9be5ffd` | Login MFA attestations and enforcement | Role policy/rotation/revocation/strict persona acceptance |
-| `2c54fcd` | Real membership-based switcher and capability-based navigation/rendering | Analyst WIP and backend/database matrix parity |
+| Commit    | Delivered source                                                                                               | Remaining boundary                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `25e3bc5` | W0.0 strict auth mode and removal of topology-based bypasses; BFF test foundation                              | Real strict environment and complete RLS policy verification          |
+| `7b4db2c` | CI/lint/format groundwork                                                                                      | Not every package lints; parity/RLS/E2E release gates still missing   |
+| `1c244e0` | Strict staging credential validation; Temporal configuration instead of placeholder                            | Boot/migrate from documented configuration and prove secret injection |
+| `3b47fbc` | Shared kill state, tenant quota, execute-time dry-run expiry, awaited ledger, bounded nonce cache, batch fetch | In-flight halt, atomic durable execution and database constraints     |
+| `9d6e2a5` | TS 0.1.1 citation mapping and count consistency work                                                           | Runtime bundle/publication/provenance parity; R-06                    |
+| `cc3fcee` | W7.0 schema/metadata; Nazar loses control-library write declaration                                            | Hashed baseline publication and runtime scope enforcement             |
+| `443a06a` | Central capability matrix, approval scope checking and selected route gates                                    | Agent/execute/read route enforcement and RLS alignment; R-01–R-03     |
+| `5018188` | UI persisted-state hydration fix                                                                               | Not evidence of a roadmap module completing                           |
+| `8fe16ce` | User-scoped pages/tenant helper; removal of auto-owner fallback                                                | SQL authority paths remain vulnerable                                 |
+| `898ede6` | TOTP/recovery primitives and schema; per-tenant demo flag                                                      | Email OTP pending decision, secret wiring and abuse controls          |
+| `c814f7b` | MFA service/endpoints and approval step-up                                                                     | Full content binding, direct-access enforcement and live acceptance   |
+| `9be5ffd` | Login MFA attestations and enforcement                                                                         | Role policy/rotation/revocation/strict persona acceptance             |
+| `2c54fcd` | Real membership-based switcher and capability-based navigation/rendering                                       | Analyst WIP and backend/database matrix parity                        |
 
 ## In progress — resume without duplicating
 
@@ -59,18 +59,18 @@ Before accepting the patch:
 
 ## Pending — concrete next work
 
-| Priority | Work | Definition of the next acceptable result |
-| --- | --- | --- |
-| P0 | R-01/R-02 SQL authority closure | No self-promotion, target-row tenant binding, safe privileged role assignment; direct Postgres/PostgREST tests including analyst/owner/viewer and multiple tenants |
-| P0 | R-03 generic invocation | Typed payload, role gate, trusted tenant binding, engagement ownership, internal agent policy; Karya cannot bypass execute gate |
-| P1 | R-07/R-08 MFA closure | Key provisioned without leakage, clean strict boot, policy clarified, shared abuse budget, revocation and reviewed-content step-up tests |
-| P1 | R-06 regulatory publication | TS/Python parity, immutable old/new library versions, official source hashes, real reviewer provenance; corrected reports remain traceable |
-| P1 | W2 model slices | Existing schema normalised intentionally; request/batch/action keys fixed; fresh and upgrade migrations pass; table ownership classification documented |
-| P1 | W3/W4 | Estate onboarding then real connector/grant/identity contracts and binding proofs; three live connector types required for Phase 2 exit |
-| P1 | W5 | Durable approved-subset execution, contract-compatible dispatch, actual dry-run/rollback, in-flight caps/kill, verification and reconciliation |
-| P1 | W8.1–W8.3 / W3.1 | Rights/consent, breaches, founder output release, persistent review/generator/playbook journeys |
-| Continuous | W9 / W9.1 | Release-path CI, strict persona E2E, real SQL and operational evidence rather than mock-only assertions |
-| Later / gated | W6, W7 overlays, W10 | Use Doc 11 packages and roadmap commercial gates; retain intentional scope additions |
+| Priority      | Work                            | Definition of the next acceptable result                                                                                                                           |
+| ------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P0            | R-01/R-02 SQL authority closure | No self-promotion, target-row tenant binding, safe privileged role assignment; direct Postgres/PostgREST tests including analyst/owner/viewer and multiple tenants |
+| P0            | R-03 generic invocation         | Typed payload, role gate, trusted tenant binding, engagement ownership, internal agent policy; Karya cannot bypass execute gate                                    |
+| P1            | R-07/R-08 MFA closure           | Key provisioned without leakage, clean strict boot, policy clarified, shared abuse budget, revocation and reviewed-content step-up tests                           |
+| P1            | R-06 regulatory publication     | TS/Python parity, immutable old/new library versions, official source hashes, real reviewer provenance; corrected reports remain traceable                         |
+| P1            | W2 model slices                 | Existing schema normalised intentionally; request/batch/action keys fixed; fresh and upgrade migrations pass; table ownership classification documented            |
+| P1            | W3/W4                           | Estate onboarding then real connector/grant/identity contracts and binding proofs; three live connector types required for Phase 2 exit                            |
+| P1            | W5                              | Durable approved-subset execution, contract-compatible dispatch, actual dry-run/rollback, in-flight caps/kill, verification and reconciliation                     |
+| P1            | W8.1–W8.3 / W3.1                | Rights/consent, breaches, founder output release, persistent review/generator/playbook journeys                                                                    |
+| Continuous    | W9 / W9.1                       | Release-path CI, strict persona E2E, real SQL and operational evidence rather than mock-only assertions                                                            |
+| Later / gated | W6, W7 overlays, W10            | Use Doc 11 packages and roadmap commercial gates; retain intentional scope additions                                                                               |
 
 ## W2 migration design constraints
 
