@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient, sessionIdFromAccessToken } from '@axiom/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Capability, authorize, type UserRole } from '@axiom/types';
+import { Capability, authorize, can, type UserRole } from '@axiom/types';
 
 /**
  * The single entry point for tenant-scoped data access in the web app (W1).
@@ -166,12 +166,15 @@ export interface TenantContextOptions {
 }
 
 /**
- * Roles the platform requires a factor from regardless of tenant policy.
- * Mirrors `ALWAYS_MFA_REQUIRED` in the BFF — the BFF is the authoritative
- * gate, and this copy exists so the browser is redirected rather than shown a
- * page that will fail every call it makes.
+ * Roles the platform requires a factor from regardless of tenant policy —
+ * Axiom Minds staff, whose accounts cross tenants, so no single tenant gets to
+ * decide how strongly they are authenticated.
+ *
+ * Mirrors `ALWAYS_MFA_REQUIRED` in the BFF, which is the authoritative gate;
+ * this copy exists so the browser is redirected rather than shown a page that
+ * will fail every call it makes.
  */
-const ALWAYS_MFA_REQUIRED = new Set<string>(['founder']);
+const ALWAYS_MFA_REQUIRED = new Set<string>(['founder', 'axiom_analyst']);
 
 export async function requireTenantContext(
   requestedSlug?: string,
@@ -261,7 +264,13 @@ export async function requireCapabilityContext(
  */
 export async function requireInternalContext(requestedSlug?: string): Promise<TenantContext> {
   const ctx = await requireTenantContext(requestedSlug);
+  // Two separate questions, and before the analyst persona existed they were
+  // conflated. `is_axiom_internal` marks who employs you; WORKBENCH_ACCESS
+  // says what you may do. Migration 0016 stripped the flag of its RLS powers
+  // precisely so it would stop standing in for authority, and a page that
+  // still gated on the flag alone would be the last place it did.
   if (!ctx.isAxiomInternal) redirect('/portal');
+  if (!can(Capability.WORKBENCH_ACCESS, { role: ctx.role })) redirect('/portal');
   return ctx;
 }
 

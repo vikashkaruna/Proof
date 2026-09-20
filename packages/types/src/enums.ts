@@ -13,6 +13,13 @@ export const UserRole = {
   AGENT: 'agent',
   PARTNER: 'partner',
   FOUNDER: 'founder',
+  /**
+   * Axiom Minds operator working across assigned client tenants: runs the
+   * agents, reviews what they produce, and prepares plans. Deliberately
+   * cannot approve on the client's behalf — the whole proposition is that a
+   * human at the *client* authorises the change.
+   */
+  AXIOM_ANALYST: 'axiom_analyst',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 

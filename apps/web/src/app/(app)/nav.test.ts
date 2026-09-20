@@ -123,8 +123,8 @@ describe('the partner persona', () => {
 });
 
 describe('internal surfaces', () => {
-  it('offers the workbench to the founder alone', () => {
-    const roles = [
+  it('offers the workbench to Axiom staff and to no client role', () => {
+    const clientRoles = [
       UserRole.OWNER,
       UserRole.ADMIN,
       UserRole.APPROVER,
@@ -132,10 +132,22 @@ describe('internal surfaces', () => {
       UserRole.VIEWER,
       UserRole.PARTNER,
     ];
-    expect(routesFor(UserRole.FOUNDER)).toContain('/workbench');
-    for (const role of roles) {
+    for (const role of [UserRole.FOUNDER, UserRole.AXIOM_ANALYST]) {
+      expect(routesFor(role), `${role} should see /workbench`).toContain('/workbench');
+    }
+    for (const role of clientRoles) {
       expect(routesFor(role), `${role} should not see /workbench`).not.toContain('/workbench');
     }
+  });
+
+  it('offers an analyst no approval console and no execution', () => {
+    // Render gating agreeing with the matrix: Axiom prepares, the client
+    // authorises. An analyst seeing an Approve button would be the first sign
+    // that boundary had slipped.
+    const routes = routesFor(UserRole.AXIOM_ANALYST);
+    expect(routes).not.toContain('/approval');
+    expect(routes).not.toContain('/execution');
+    expect(routes).toContain('/plans');
   });
 
   it('gives the agent identity no navigation at all', () => {
@@ -147,6 +159,7 @@ describe('internal surfaces', () => {
 describe('every persona', () => {
   const personas = [
     UserRole.FOUNDER,
+    UserRole.AXIOM_ANALYST,
     UserRole.OWNER,
     UserRole.ADMIN,
     UserRole.APPROVER,

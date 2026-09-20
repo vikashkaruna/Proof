@@ -1,0 +1,33 @@
+-- ─────────────────────────────────────────────────────────────────────
+-- 0015_user_role_axiom_analyst.sql
+-- Adds the `axiom_analyst` persona to `user_role` (W1).
+--
+-- The gap-closure plan defines eight personas and the enum shipped with
+-- seven: `axiom_analyst` — the Axiom Minds operator who runs agents and
+-- reviews their output across assigned client tenants — was specified
+-- and never created. Its absence was not cosmetic. `WORKBENCH_ACCESS`
+-- had exactly one holder (founder), so every analyst either worked as
+-- the founder or did not work at all, and the ledger recorded the
+-- founder's identity for work they did not do.
+--
+-- No policy changes accompany this, and deliberately none are needed.
+-- Migration 0016 made every client-side tenant read membership-bound and
+-- removed the blanket `is_axiom_internal` RLS bypass, so an analyst
+-- reaches a client exactly the way anyone else does: by holding a
+-- `tenant_users` row in that tenant. That is the assigned-tenant
+-- boundary the plan specifies, and it now holds in the database rather
+-- than only in the capability matrix.
+--
+-- (An earlier draft of this comment said the opposite — that the
+-- policies already carried an `is_axiom_internal` clause the analyst
+-- could rely on. That was true of the pre-0016 schema and is the exact
+-- bypass R-01/R-02 closed.)
+--
+-- Keeping the enum addition in a migration of its own also respects the
+-- Postgres rule that a new enum value cannot be USED in the transaction
+-- that adds it; nothing here uses it. The runner tracks each file
+-- independently, so this applies cleanly on a database that already has
+-- 0016-0018.
+-- ─────────────────────────────────────────────────────────────────────
+
+alter type user_role add value if not exists 'axiom_analyst';

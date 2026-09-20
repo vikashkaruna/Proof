@@ -60,12 +60,15 @@ const DEFAULT_CHALLENGE_TTL_MS = 10 * 60_000;
 const SESSION_ATTESTATION_TTL_MS = (env.AXIOM_MFA_SESSION_TTL_HOURS ?? 12) * 60 * 60_000;
 
 /**
- * The founder is always required to hold a factor, whatever a tenant's
- * `mfa_required_roles` says. It is the only role that can engage a global kill
- * switch and the only one that crosses every tenant, so it is not a setting a
- * tenant gets to relax — and `mfa_required_roles` is tenant-owned data.
+ * Roles the platform requires a factor from regardless of tenant policy.
+ *
+ * Both are Axiom Minds staff who reach client estates. `mfa_required_roles` is
+ * tenant-owned data, and a client should be able to tighten their own policy —
+ * not to exempt OUR people from a second factor on THEIR estate. The analyst
+ * is here for the same reason the founder is: the account crosses tenants, so
+ * no single tenant gets to decide how strongly it is authenticated.
  */
-const ALWAYS_MFA_REQUIRED: ReadonlySet<string> = new Set(['founder']);
+const ALWAYS_MFA_REQUIRED: ReadonlySet<string> = new Set(['founder', 'axiom_analyst']);
 
 /** A TOTP code is six digits. Anything else is treated as a recovery code. */
 const TOTP_CODE_PATTERN = /^\d{6}$/;

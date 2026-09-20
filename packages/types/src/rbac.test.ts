@@ -21,7 +21,8 @@ describe('the approval chain — the capabilities that matter', () => {
     );
   });
 
-  it.each(['viewer', 'reviewer', 'partner', 'agent'] as const)(
+  const approvers = new Set<string>(rolesWith(Capability.PLAN_APPROVE));
+  it.each(ALL_ROLES.filter((role) => !approvers.has(role)))(
     'refuses plan approval to %s',
     (role) => {
       expect(can(Capability.PLAN_APPROVE, { role })).toBe(false);
@@ -118,12 +119,77 @@ describe('tenant isolation and surfaces', () => {
     expect(rolesWith(Capability.MULTI_TENANT_READ).sort()).toEqual(['founder', 'partner'].sort());
   });
 
-  it('grants workbench access only to the founder', () => {
-    expect(rolesWith(Capability.WORKBENCH_ACCESS)).toEqual(['founder']);
+  it('grants workbench access to Axiom staff only', () => {
+    // The analyst persona exists for this surface. Before it was added,
+    // WORKBENCH_ACCESS had exactly one holder, so every analyst either worked
+    // as the founder or did not work at all — and the ledger recorded the
+    // founder's identity for work they did not do.
+    expect(rolesWith(Capability.WORKBENCH_ACCESS).sort()).toEqual(
+      ['axiom_analyst', 'founder'].sort(),
+    );
   });
 
   it('grants the partner portal only to a partner', () => {
     expect(rolesWith(Capability.PARTNER_PORTAL_ACCESS)).toEqual(['partner']);
+  });
+});
+
+describe('the Axiom analyst — an internal role is not client authority', () => {
+  it('cannot approve, reject or execute on a client\u2019s behalf', () => {
+    // The whole proposition is that Axiom prepares the change and a human at
+    // the CLIENT authorises it. An analyst who could approve their own plan
+    // would collapse BR-1's maker-checker into one party, and it would be us.
+    for (const capability of [
+      Capability.PLAN_APPROVE,
+      Capability.PLAN_REJECT,
+      Capability.PLAN_EXECUTE,
+    ]) {
+      expect(
+        can(capability, { role: UserRole.AXIOM_ANALYST }),
+        `analyst must not hold ${capability}`,
+      ).toBe(false);
+    }
+  });
+
+  it('can produce the work: run assessments, invoke agents, draft plans', () => {
+    for (const capability of [
+      Capability.ASSESSMENT_RUN,
+      Capability.AGENT_INVOKE,
+      Capability.PLAN_CREATE,
+      Capability.PLAN_COMMENT,
+    ]) {
+      expect(can(capability, { role: UserRole.AXIOM_ANALYST })).toBe(true);
+    }
+  });
+
+  it('reaches clients by membership, not by a cross-tenant capability', () => {
+    // R-01/R-02: the employee flag is not a key. Migration 0016 made every
+    // client read membership-bound; this keeps the matrix saying the same.
+    expect(can(Capability.MULTI_TENANT_READ, { role: UserRole.AXIOM_ANALYST })).toBe(false);
+  });
+
+  it('may halt a tenant but may not resume it', () => {
+    // Stopping must never need an escalation. Resuming execution against a
+    // client estate is the tenant's decision or the founder's.
+    expect(can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role: UserRole.AXIOM_ANALYST })).toBe(true);
+    expect(can(Capability.KILL_SWITCH_RELEASE_TENANT, { role: UserRole.AXIOM_ANALYST })).toBe(
+      false,
+    );
+    expect(can(Capability.KILL_SWITCH_ENGAGE_GLOBAL, { role: UserRole.AXIOM_ANALYST })).toBe(false);
+  });
+
+  it('holds no commercial or tenant-administration authority', () => {
+    for (const capability of [
+      Capability.TENANT_SETTINGS_WRITE,
+      Capability.USER_MANAGE,
+      Capability.BILLING_MANAGE,
+      Capability.TENANT_CREATE,
+    ]) {
+      expect(
+        can(capability, { role: UserRole.AXIOM_ANALYST }),
+        `analyst must not hold ${capability}`,
+      ).toBe(false);
+    }
   });
 });
 

@@ -108,6 +108,47 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.WORKBENCH_ACCESS,
   ],
 
+  /**
+   * Axiom Minds analyst: runs the agents and reviews what they produce, across
+   * the client tenants they are assigned to.
+   *
+   * Everything here is about *producing* the work — running assessments,
+   * invoking agents, drafting plans. Nothing here approves it. That omission
+   * is the entire proposition: Axiom prepares the change and a human at the
+   * client authorises it, so an analyst who could approve their own plan would
+   * collapse the maker-checker property (BR-1) into a single party, and it
+   * would be Axiom.
+   *
+   * Deliberately NOT `MULTI_TENANT_READ`. An analyst reaches several clients by
+   * holding a `tenant_users` row in each one — ordinary membership, several
+   * times over — and migration 0016 removed the blanket `is_axiom_internal`
+   * bypass that used to make the employee flag itself a cross-client key.
+   * `MULTI_TENANT_READ` is for surfaces that aggregate ACROSS tenants without
+   * per-tenant membership, which is the founder's and the partner's position,
+   * not an analyst's. The role says what they may do; membership says where.
+   */
+  [UserRole.AXIOM_ANALYST]: [
+    Capability.POSTURE_READ,
+    Capability.REPORT_READ,
+    Capability.REPORT_GENERATE,
+    Capability.EVIDENCE_READ,
+    Capability.EVIDENCE_EXPORT,
+    Capability.LEDGER_READ,
+    Capability.LEDGER_VERIFY,
+    Capability.ASSESSMENT_RUN,
+    Capability.AGENT_INVOKE,
+    Capability.PLAN_READ,
+    Capability.PLAN_COMMENT,
+    Capability.PLAN_CREATE,
+    Capability.ENGAGEMENT_CREATE,
+    // Stopping is safe and must never need an escalation: an analyst who set
+    // an agent running has to be able to halt it. Releasing is NOT here —
+    // resuming execution against a client estate is the tenant's decision or
+    // the founder's, and the asymmetry is deliberate.
+    Capability.KILL_SWITCH_ENGAGE_TENANT,
+    Capability.WORKBENCH_ACCESS,
+  ],
+
   /** Tenant owner: signed the contract. Full authority within their tenant. */
   [UserRole.OWNER]: [
     Capability.POSTURE_READ,
