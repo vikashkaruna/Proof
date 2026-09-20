@@ -6,7 +6,9 @@ from axiom.agents.karya import KaryaAgent, KaryaInput
 
 
 @pytest.mark.asyncio
-async def test_karya_refuses_without_approval_token():
+async def test_karya_refuses_without_approval_token(monkeypatch):
+    from axiom.kill_switch import KillSwitchReader
+    monkeypatch.setattr(KillSwitchReader, "from_settings", lambda *args: KillSwitchReader(in_memory=True))
     agent = KaryaAgent()
     # Pass a properly-shaped but invalid token (empty spec/signature)
     out = await agent.invoke(

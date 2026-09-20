@@ -214,3 +214,35 @@ async def test_karya_checks_the_switch_before_the_token() -> None:
         kill_switch=reader,
     )
     assert "kill_switch_engaged" in (result.error or "")
+
+
+@pytest.mark.parametrize("url", ["http://localhost:54321", "http://127.0.0.1:54321", "https://auth.example.test"])
+def test_constructor_failure_never_selects_a_clear_memory_switch(monkeypatch, url):
+    from types import SimpleNamespace
+    import supabase
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("client unavailable")
+
+    monkeypatch.setattr(supabase, "create_client", unavailable)
+    reader = KillSwitchReader.from_settings(SimpleNamespace(supabase_url=url, supabase_service_key="test"))
+    assert reader.is_engaged(TENANT)
+
+
+def test_local_supabase_uses_shared_state_too(monkeypatch):
+    from types import SimpleNamespace
+    import supabase
+
+    client = FakeClient()
+    client.rows = [{"scope": "global", "engaged": True, "reason": "local stop"}]
+    monkeypatch.setattr(supabase, "create_client", lambda *args: client)
+    reader = KillSwitchReader.from_settings(SimpleNamespace(supabase_url="http://localhost:54321", supabase_service_key="test"))
+    assert reader.is_engaged(TENANT)
+    assert client.reads == 1
+
+
+@pytest.mark.parametrize("rows", [None, {}, [{"scope": "unexpected", "engaged": True}]])
+def test_malformed_shared_state_is_not_a_clear_switch(rows):
+    client = FakeClient()
+    client.rows = rows
+    assert KillSwitchReader(client).is_engaged(TENANT)

@@ -17,8 +17,8 @@ That is deliberately the opposite of how authentication fails here. A failure to
 read authentication withholds authority and returns 401/503; a failure to read
 the kill switch withholds *action*. Both refuse; they refuse different things.
 
-Karya checks it before every mutating step and between bounded chunks, so the
-worst case is one action's latency rather than a whole batch.
+Karya currently checks before its stub mutation boundary. Temporal chunk
+checks and connector interruption are pending; this alone is not live-stop proof.
 """
 
 from __future__ import annotations
@@ -81,19 +81,15 @@ class KillSwitchReader:
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> KillSwitchReader:
         s = settings or get_settings()
-        if s.supabase_url.startswith("http://localhost") or s.supabase_url.startswith("http://127."):
-            return cls(in_memory=True)
         try:
             from supabase import create_client
 
             return cls(create_client(s.supabase_url, s.supabase_service_key))
         except Exception:
-            # No client means no way to verify the stop is clear. In-memory
-            # mode starts clear, which is correct for local development; a
-            # deployed runtime reaches this only if Supabase is unreachable at
-            # construction, and every later read then fails closed.
+            # Construction failure must withhold action too. Test-only memory
+            # state is available by explicit injection, never URL inference.
             log.warning("kill_switch.client_unavailable")
-            return cls(in_memory=True)
+            return cls()
 
     # ─── test helpers ────────────────────────────────────────────────
     def engage_in_memory(self, *, scope: str = GLOBAL_SCOPE, tenant_id: str | None = None,
@@ -134,13 +130,20 @@ class KillSwitchReader:
                 .eq("engaged", True)
                 .execute()
             )
-            rows = list(response.data or [])
-        except Exception as exc:
+            if not isinstance(response.data, list):
+                raise ValueError("invalid kill switch response")
+            rows = response.data
+            for row in rows:
+                if (not isinstance(row, dict) or row.get("engaged") is not True
+                        or row.get("scope") not in {"global", "tenant"}
+                        or (row.get("scope") == "tenant" and not row.get("tenant_id"))):
+                    raise ValueError("invalid kill switch row")
+        except Exception:
             # Fail SAFE. Serving a stale "clear" here would let a batch keep
             # mutating a client estate through the exact incident the switch
             # exists for.
             self._last_read_failed = True
-            log.error("kill_switch.unreadable", error=str(exc))
+            log.error("kill_switch.unreadable")
             return self._rows or []
 
         self._last_read_failed = False

@@ -49,6 +49,9 @@ values
    array['00000000-0000-0000-0000-0000000000d3']::uuid[],
    '00000000-0000-0000-0000-0000000000a9', 'batch', 'sig-2', '{}'::jsonb, 'nonce-2', now() + interval '1 hour', 'issued');
 
+update public.remediation_actions set approval_status = 'approved', dry_run_status = 'dry_run_complete', rollback_validated = true, dry_run_expires_at = now() + interval '1 hour';
+
+
 -- ─── The case that could not happen before ───────────────────────────
 select pg_temp.assert_eq(
   (select public.claim_plan_execution(
@@ -235,12 +238,48 @@ begin
 exception when unique_violation then null;
 end $$;
 
+-- An uncertain delivery never releases an action for another token.
+update public.execution_dispatch_outbox set status = 'pending' where request_key = 'req-batch-retry';
+select pg_temp.assert_true(public.finish_execution_dispatch(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  'req-batch-retry', 'unknown', null, 'acknowledgement lost'), 'record unknown outcome');
+select pg_temp.assert_true((select count(*) = 2 from public.remediation_actions
+  where execution_request_key = 'req-batch-retry' and execution_status = 'executing'
+  and dispatch_status = 'unknown'), 'unknown delivery remains claimed');
+select pg_temp.assert_true((select count(*) = 1 from public.pending_execution_dispatches
+  where request_key = 'req-batch-retry' and status = 'unknown'), 'unknown outcome visible for reconciliation');
+select pg_temp.assert_true(public.finish_execution_dispatch(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  'req-batch-retry', 'accepted', 'durable-confirmation', null), 'late acceptance settles unknown');
+select pg_temp.assert_true(not public.finish_execution_dispatch(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  'req-batch-retry', 'failed', null, 'late timeout'), 'late failure cannot downgrade acceptance');
+select pg_temp.assert_true((select count(*) = 2 from public.remediation_actions
+  where execution_request_key = 'req-batch-retry' and dispatch_status = 'accepted'),
+  'late failure does not release accepted work');
+
+-- Invalid shapes and expired authority cannot spend a token.
+select pg_temp.assert_eq(public.claim_plan_execution(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  '00000000-0000-0000-0000-0000000000e2', '{}'::uuid[], 'empty')->>'decision',
+  'invalid_actions', 'empty batches refused');
+update public.approval_tokens set status = 'issued', expires_at = now() - interval '1 hour'
+  where id = '00000000-0000-0000-0000-0000000000e2';
+select pg_temp.assert_eq(public.claim_plan_execution(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  '00000000-0000-0000-0000-0000000000e2',
+  array['00000000-0000-0000-0000-0000000000d3']::uuid[], 'expired')->>'decision',
+  'token_already_used', 'token expiry rechecked in transaction');
+select pg_temp.assert_eq((select status::text from public.approval_tokens
+  where id = '00000000-0000-0000-0000-0000000000e2'), 'issued', 'refusal leaves token untouched');
+
 -- ─── Browser clients cannot claim executions ─────────────────────────
 set local role authenticated;
 select pg_temp.denied($q$select public.claim_plan_execution('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000e1',array['00000000-0000-0000-0000-0000000000d1']::uuid[],'x')$q$);
 select pg_temp.denied($q$select public.record_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','accepted',null,null)$q$);
 select pg_temp.denied($q$select * from public.execution_dispatch_outbox$q$);
 select pg_temp.denied($q$select public.settle_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','delivered',null)$q$);
+select pg_temp.denied($q$select public.finish_execution_dispatch('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3','x','accepted',null,null)$q$);
 reset role;
 
 rollback;

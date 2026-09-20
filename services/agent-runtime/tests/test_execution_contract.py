@@ -80,3 +80,27 @@ def test_required_fields_are_required(payload: dict, missing: str) -> None:
     incomplete = {k: v for k, v in payload.items() if k != missing}
     with pytest.raises(ValidationError):
         InternalExecuteRequest(**incomplete)
+
+
+def test_stub_refuses_execution_instead_of_claiming_responsibility(payload: dict) -> None:
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from axiom.app import app
+
+    # Do not start unrelated model/storage clients: this exercises the real
+    # HTTP endpoint and its internal authentication, not just the Pydantic type.
+    app.state.settings = SimpleNamespace(internal_token="test-internal")
+    client = TestClient(app)
+    assert client.post("/internal/execute", json=payload).status_code == 401
+    response = client.post(
+        "/internal/execute", json=payload, headers={"X-Internal-Token": "test-internal"}
+    )
+    assert response.status_code == 501
+    assert response.json() == {
+        "accepted": False,
+        "contract_version": 1,
+        "correlation_id": payload["correlation_id"],
+        "reason": "execution_not_implemented",
+    }

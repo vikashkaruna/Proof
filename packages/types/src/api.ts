@@ -354,7 +354,7 @@ export const ExecutePlanResponseSchema = z.object({
       reason: z.string(),
     }),
   ),
-  status: z.enum(['accepted', 'partial', 'rejected']),
+  status: z.enum(['accepted', 'partial', 'rejected', 'dispatch_failed', 'dispatch_unknown']),
   startedAt: z.string().datetime(),
 });
 export type ExecutePlanResponse = z.infer<typeof ExecutePlanResponseSchema>;

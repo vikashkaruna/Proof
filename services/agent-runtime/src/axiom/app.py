@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from .agents import (
@@ -234,25 +235,11 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
             ),
         )
 
-    # Phase 0/1: we record the intent only. Phase 3+ dispatches to the
-    # connector framework and the action catalogue.
-    #
-    # `accepted` is the BFF's acceptance signal and must stay honest: it means
-    # this runtime has taken responsibility for the batch, not merely that the
-    # request parsed. When real execution lands, anything that cannot be
-    # enqueued must return accepted=False rather than a 200 with a stub body.
-    log = structlog.get_logger()
-    log.info(
-        "internal.execute.received",
-        plan_id=body.plan_id,
-        action_ids=body.action_ids,
-        correlation_id=body.correlation_id,
-        request_key=body.request_key,
-    )
-    return {
-        "accepted": True,
+    # No durable consumer exists yet. Logging an intent does not transfer
+    # responsibility for execution; report a refusal until enqueueing exists.
+    return JSONResponse(status_code=501, content={
+        "accepted": False,
         "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
-        "reference": body.correlation_id,
-        "phase": "0/1 stub — execution deferred to Phase 3",
-    }
+        "reason": "execution_not_implemented",
+    })

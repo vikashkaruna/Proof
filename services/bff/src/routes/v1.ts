@@ -1,3 +1,4 @@
+import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -1302,11 +1303,18 @@ export function v1Routes(deps: Deps) {
       const parsed = claim as { decision?: string; action_ids?: string[] } | null;
       switch (parsed?.decision) {
         case 'claimed':
-        case 'already_claimed':
-          // A replay under the same Idempotency-Key reports the same claim
-          // rather than executing twice or refusing a legitimate retry.
           claimedActions = parsed.action_ids ?? [];
           break;
+        case 'already_claimed':
+          return c.json(
+            {
+              error: {
+                code: 'execution_already_claimed',
+                message: 'This dispatch intent already exists; reconcile it before retrying.',
+              },
+            },
+            409,
+          );
         case 'token_already_used':
           return c.json(
             {
@@ -1378,79 +1386,31 @@ export function v1Routes(deps: Deps) {
     //
     // The payload is versioned so a future mismatch is a refusal with a reason
     // rather than a silent 422.
-    let dispatch: {
-      status: 'accepted' | 'failed';
-      reference: string | null;
-      error: string | null;
-    } = { status: 'failed', reference: null, error: 'dispatch not attempted' };
-
+    let dispatch: DispatchOutcome = {
+      status: 'failed',
+      reference: null,
+      error: 'dispatch not attempted',
+    };
     if (claimedActions.length > 0) {
-      if (!env.AGENT_RUNTIME_URL) {
-        dispatch = {
-          status: 'failed',
-          reference: null,
-          error: 'AGENT_RUNTIME_URL is not configured',
-        };
-      } else {
-        try {
-          const response = await fetch(`${env.AGENT_RUNTIME_URL}/internal/execute`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Internal-Token': env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
-            },
-            body: JSON.stringify(
-              buildExecutionDispatchPayload({
-                tenantId,
-                planId,
-                correlationId,
-                actionIds: claimedActions,
-                requestKey,
-                // The signed settings, never the request's. See R-08 above.
-                mode: signedMode ?? input.mode,
-                concurrency: signedConcurrency ?? input.concurrency,
-                stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
-                approvalToken: signedToken,
-              }),
-            ),
-          });
+      dispatch = await dispatchExecution(
+        env.AGENT_RUNTIME_URL,
+        env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+        buildExecutionDispatchPayload({
+          tenantId,
+          planId,
+          correlationId,
+          actionIds: claimedActions,
+          requestKey,
+          mode: signedMode ?? input.mode,
+          concurrency: signedConcurrency ?? input.concurrency,
+          stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+          approvalToken: signedToken,
+        }),
+      );
 
-          if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            dispatch = {
-              status: 'failed',
-              reference: null,
-              error: `runtime returned ${response.status}: ${body.slice(0, 500)}`,
-            };
-          } else {
-            const body = (await response.json().catch(() => null)) as {
-              accepted?: boolean;
-              reference?: string;
-              correlation_id?: string;
-            } | null;
-            // A 200 is not acceptance. The runtime says so explicitly, and a
-            // body we cannot read is not a yes.
-            dispatch = body?.accepted
-              ? {
-                  status: 'accepted',
-                  reference: body.reference ?? body.correlation_id ?? correlationId,
-                  error: null,
-                }
-              : { status: 'failed', reference: null, error: 'runtime did not accept the batch' };
-          }
-        } catch (err) {
-          dispatch = {
-            status: 'failed',
-            reference: null,
-            error: err instanceof Error ? err.message : 'agent runtime unreachable',
-          };
-        }
-      }
-
-      // Durable, not a log line. `record_execution_dispatch` returns a failed
-      // batch to `approved` and clears its claim, so the work stays retryable
-      // rather than stranded in `executing` with nothing behind it.
-      const { error: dispatchErr } = await admin.rpc('record_execution_dispatch', {
+      // An ambiguous acknowledgement retains the claim. Only an explicit
+      // refusal permits a fresh approval to retry the actions.
+      const { data: settled, error: settleErr } = await admin.rpc('finish_execution_dispatch', {
         p_tenant_id: tenantId,
         p_plan_id: planId,
         p_request_key: requestKey,
@@ -1458,23 +1418,19 @@ export function v1Routes(deps: Deps) {
         p_reference: dispatch.reference,
         p_error: dispatch.error,
       });
-      if (dispatchErr) {
-        logger.error({ err: dispatchErr.message, planId }, 'could not record dispatch outcome');
-      }
-
-      // Settle the outbox intent. A failure leaves the row `failed` with its
-      // error rather than removing it — the row is the evidence that a token
-      // was spent on work that did not run, and deleting it would erase
-      // exactly what reconciliation needs.
-      const { error: settleErr } = await admin.rpc('settle_execution_dispatch', {
-        p_tenant_id: tenantId,
-        p_plan_id: planId,
-        p_request_key: requestKey,
-        p_status: dispatch.status === 'accepted' ? 'delivered' : 'failed',
-        p_error: dispatch.error,
-      });
-      if (settleErr) {
-        logger.error({ err: settleErr.message, planId }, 'could not settle dispatch outbox');
+      if (settleErr || settled !== true) {
+        logger.error({ planId }, 'could not persist dispatch outcome; reconciliation required');
+        return c.json(
+          {
+            error: {
+              code: 'dispatch_reconciliation_required',
+              message:
+                'Dispatch outcome could not be persisted. Do not retry without reconciliation.',
+            },
+            correlationId,
+          },
+          503,
+        );
       }
 
       if (dispatch.status === 'failed') {
@@ -1504,11 +1460,13 @@ export function v1Routes(deps: Deps) {
     const status =
       claimedActions.length === 0
         ? 'rejected'
-        : dispatch.status === 'failed'
-          ? 'dispatch_failed'
-          : rejected.length === 0
-            ? 'accepted'
-            : 'partial';
+        : dispatch.status === 'unknown'
+          ? 'dispatch_unknown'
+          : dispatch.status === 'failed'
+            ? 'dispatch_failed'
+            : rejected.length === 0
+              ? 'accepted'
+              : 'partial';
 
     return c.json(
       {

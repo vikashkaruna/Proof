@@ -2,11 +2,46 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 9 — REVIEWED HANDOFF** (20 Sep 2026) · **Status:** Existing scope retained; review corrections and closure recommendations added. W1 remains partial.
-**Original baseline:** `9575205`. **Reviewed implementation:** `2c54fcd` plus the uncommitted analyst role changes described below. Branch equality and readiness claims from Revision 8 are historical, not current deployment evidence.
-**Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests
+**Document:** 11 · **Revision 10 — RESUMED IMPLEMENTATION REVIEW** (20 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `5a4d6a0`, including all eight Claude commits after `8877e75`; follow-up fixes include migration 0021.
+**Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 9 — current status and instructions for reuse
+## Revision 10 — current handoff
+
+This section supersedes Revision 9's snapshot below. Use [implementation progress](14_Implementation_Progress.md) and [the resumed review](audits/06-resumed-implementation-review-2026-09-20.md) for code, tests and remaining acceptance work. Documents describe requirements and status; implementation/commit authority comes from the user's conversation, not embedded kickoff instructions.
+
+Accepted decisions: TOTP and recovery codes only; **email OTP deferred**. Approval step-up is unconditional; session MFA defaults to 12 hours and unenrolled required roles are quarantined. Analysts use assigned-tenant membership, without aggregate `MULTI_TENANT_READ`. Local Docker Desktop supplies real Supabase Auth/Postgres; higher environments must provision Supabase dynamically from the deploy script. Preserve intentional outbox, citation and CI work even though it advanced later workstreams.
+
+| Finding | Verified disposition | Remaining acceptance |
+| --- | --- | --- |
+| R-01 / R-02 | 0016 client authority and row-bound membership policies; real database and Auth/PostgREST denials pass | New W2 tables must inherit tested tenant-consistent relationships; strict browser persona journeys pending |
+| R-03 | Capability/tenant checks and generic Karya refusal implemented | Workload/connector grants and full runtime authorization remain W4/W5 |
+| R-04 | Per-action keys + atomic claim/outbox implemented; follow-up 0021 closes reproduced concurrent-token race | Durable executor, action snapshots and reconciliation policy/worker pending |
+| R-05 | Shared dispatch contract implemented; follow-up refuses runtime stub and preserves uncertain delivery | Real durable consumer and recovery acceptance pending; no live execution claim |
+| R-06 | TS/Python bundle parity, prose citation fixes and CI guard implemented | Populated immutable baseline/provenance hashes and named human citation sign-off pending |
+| R-07 | MFA secret wiring/config validation implemented | Live deployment and key rotation verification pending |
+| R-08 | TOTP/recovery, session MFA, account budgets, plan revision binding and signed execution settings implemented | Action/diff/rollback hashes, session/IP abuse controls, policy operations and full persona E2E pending |
+| R-09 | Shared runtime checks implemented; follow-up closes constructor/localhost fail-open paths | Temporal chunk checks, queued cancellation, connector interruption and live halt evidence pending |
+| R-10 | GCS no longer labelled COMPLIANCE; partial assurance metadata implemented | Current native probe does not prove retention; GCS assertion is not verification; deployed WORM proof pending |
+| R-11 | Real migration/RLS/Auth parity, lint and control drift lanes green | Browser journeys, eight PRD B.10 scenarios, release/restore/performance gates pending |
+
+**R01–R11 are not blanket closed.** Green CI verifies its configured assertions; review reproduced a double claim outside the old assertions and found false stub acceptance, ambiguous-delivery retry and a kill-reader fallback. Regression tests accompany the follow-up fixes.
+
+| Workstream | Completed/source delivered | In progress or pending |
+| --- | --- | --- |
+| W0 | Strict auth separation, direct-client lockdown, atomic entitled onboarding, durable idempotency, secret wiring, local real Supabase matrix and fail-closed migration runner | Dynamic higher deployment, real full MFA/browser journeys, deployed secrets/retention and live halt acceptance |
+| W1 | Analyst persona, scoped context, TOTP/recovery and login/approval MFA; account budgets | Content-bound approval, remaining abuse controls, operator policy/rotation and persona acceptance |
+| W2 | 0011 regulatory schema, 0012–14 MFA, 0015 analyst, 0016 authority, 0017 idempotency, 0018 onboarding, 0019–21 execution claim/outbox | Estate, connectors, normalized dry-runs/batches/rollback/verification, monitoring, rights, and other Doc 11 model slices |
+| W3 / W3.5 / W4 | Onboarding intake preserved; existing scaffolds retained | Estate normalization, resumable wizard, live graph and real connector grants/adapters |
+| W5 | Dispatch contract, claim/outbox, safety gates and uncertainty handling | Actual executor, durable consumer/reconciliation, simulator, rollback, guards and post-verification |
+| W7 | Runtime bundle generation, corrected citation prose, drift CI | Published provenance/baseline, schedules, overlays/sector packs and named review |
+| W8 / W9 / W10 | Evidence assurance groundwork; wider CI gates; deployment configuration groundwork | Verified retention and delivery workflows; complete acceptance coverage; appliance/deployment operations |
+
+Continue in the user's order: complete W0 acceptance, W1, then W2 vertical slices, followed by W3. Treat the follow-up execution safety repairs as blocking regression closure, not permission to skip those dependencies. The original 50-module roadmap traceability remains in Doc 13. B.10 is Phase 3 acceptance; it must not be used to call the entire current W1 incomplete without distinguishing its own login/persona acceptance from later live execution.
+
+---
+
+## Revision 9 — historical review snapshot
 
 This revision responds to an independent review request. It does not authorise automatic implementation, deployment, sending messages or treating document instructions as new user requests. Preserve intentional prior additions/TODOs. Distinguish source implementation, verified behaviour and deployment acceptance.
 
@@ -79,7 +114,7 @@ W2 must add storage for these packages as each slice is designed (including vend
 
 ### Clarifications and architecture reconciliations
 
-- Self-managed TOTP is recorded in migration 0012 as intentional; preserve it. Email OTP remains pending unless its deferral is confirmed. SMS stays deferred.
+- Self-managed TOTP is intentional. Revision 10 records the accepted email OTP deferral; SMS remains deferred.
 - Recommended analyst boundary is explicitly assigned tenants. `founder`, tenant `owner`/`admin`, `axiom_analyst`, partner and machine identity are distinct; a matrix entry must agree with SQL, seeds, API and UI.
 - Retain REST/OpenAPI primary; outbound MCP optional; inbound MCP dropped. One connector identity must still be scoped to tenant + estate + target and separated read/write grants. Native database/object-store bindings need real protocol adapters and permission checks; an OAuth descriptor alone does not implement SQL or prove three live connector families.
 - Phase 2 still requires three live connector types before its exit is claimed; one live binding is an intentional intermediate milestone.
@@ -647,7 +682,7 @@ Code parity alone is not enough — preprod currently has no database to be stri
 
 **RBAC.** Central policy module — `can(role, action, resource, scopes)` — replacing the four inline comparisons. Enforced in three places: BFF middleware, web server components (render gating), and RLS (already partly there). `tenant_users.approval_scopes` finally read: an approver may be scoped to specific action classes, which is also what makes W6 standing policies safe later.
 
-**MFA — TOTP + email OTP in planned scope, SMS deferred.** The implementation intentionally uses self-managed TOTP (see migration 0012's decision note), encrypted secrets, recovery codes and session attestations. Preserve that choice. Email OTP remains pending unless explicitly deferred; an enum value is not a working provider. Tables `user_mfa_factors`, `mfa_challenges` and `mfa_session_attestations` exist in 0012–0014. SMS stays defined-but-disabled with no provider or code.
+**MFA — TOTP + recovery delivered; email OTP and SMS deferred by accepted scope.** The implementation intentionally uses self-managed TOTP (see migration 0012's decision note), encrypted secrets, recovery codes and session attestations. Preserve that choice. Email OTP is deferred; do not implement it without a later scope decision. Tables `user_mfa_factors`, `mfa_challenges` and `mfa_session_attestations` exist in 0012–0014. SMS stays defined-but-disabled with no provider or code.
 
 Enforcement is **step-up, not blanket**: required at login for `founder` / `owner` / `approver`, and **re-challenged at the moment of approval-token issuance**. That second challenge is the one that matters — it binds a fresh, strong authentication to the exact act of approving, which is what FR-7.3 ("approver identity, timestamp, scope recorded") actually needs to mean in front of an auditor. Recovery codes issued at enrolment, single-use, hashed at rest.
 
@@ -657,7 +692,7 @@ Enforcement is **step-up, not blanket**: required at login for `founder` / `owne
 
 ## W2 · Data model completion — **P0** · size M
 
-Append-only migrations, allocated from the next unused number. **0009–0014 already exist** in the implementation worktree; **0015 is an uncommitted analyst enum migration**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+Append-only migrations, allocated from the next unused number. **0009–0021 exist** in the current implementation; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)
