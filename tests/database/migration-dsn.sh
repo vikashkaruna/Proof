@@ -84,7 +84,11 @@ echo '  ✓ Edited history refused'
 # ─── A failing migration exits non-zero ──────────────────────────────
 # The defect this whole file exists for: migrate-cloudsql.sh ran each file,
 # swallowed the error twice, and printed a tick regardless.
-git checkout -- infra/supabase/migrations 2>/dev/null || true
+#
+# Nothing here touches infra/supabase/migrations. An earlier version ran
+# `git checkout --` on it to undo the tampering above, which was unnecessary —
+# the tampering is applied to the temp copy — and destructive, because it
+# silently reverted whatever uncommitted migration the developer was testing.
 rm -rf "$workdir/migrations"; cp -R infra/supabase/migrations "$workdir/migrations"
 printf '\nselect 1/0;\n' >> "$workdir/migrations/9999_deliberate_failure.sql"
 if python3 scripts/migrate-database.py --dsn "$dsn" --migrations "$workdir/migrations" >/dev/null 2>&1; then
