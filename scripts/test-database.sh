@@ -32,6 +32,9 @@ sql() {
 sql < tests/database/bootstrap.sql
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
+# Prove the ordinary managed service role, not the Supabase image's implicit
+# superuser-like RLS bypass. Only this disposable container is modified.
+docker exec "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q -c "alter role service_role nobypassrls;"
 for suite in tests/database/*.test.sql; do
   echo "Testing $(basename "$suite")"
   sql < "$suite"

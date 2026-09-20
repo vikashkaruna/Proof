@@ -75,7 +75,20 @@ async function main() {
     assert.equal(login.status, 200, 'Real password sign-in');
     const session = (await login.json()) as { access_token: string };
     assert.equal(session.access_token.split('.').length, 3);
-    return { id: user.id, token: session.access_token };
+    return {
+      id: user.id,
+      token: session.access_token,
+      async newSession() {
+        const response = await apiRequest(
+          '/auth/v1/token?grant_type=password',
+          'POST',
+          { email, password },
+          status.ANON_KEY!,
+        );
+        assert.equal(response.status, 200);
+        return ((await response.json()) as { access_token: string }).access_token;
+      },
+    };
   }
   const viewer = await createUser();
   const owner = await createUser();
@@ -203,11 +216,246 @@ async function main() {
     ...onboard,
     body: JSON.stringify({ name: 'Different payload' }),
   });
+
+  // Full MFA round trips against actual Auth sessions and persisted factors.
+  // Credentials remain in memory and are never written to parity reports.
+  const ownerHeaders = { Authorization: `Bearer ${owner.token}`, 'x-tenant-id': tenantB };
+  const ownerPost = (body: unknown): RequestInit => ({
+    method: 'POST',
+    headers: {
+      ...ownerHeaders,
+      'idempotency-key': randomUUID(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const enrol = await check('mfa_begin_enrolment', '/v1/mfa/enrol', 201, ownerPost({}));
+  const factor = (await enrol.json()) as { factorId: string; secret: string };
+  const { generateTotp } = await import('../packages/mfa/src/index.js');
+  const activate = await check(
+    'mfa_activate_totp',
+    '/v1/mfa/enrol/activate',
+    200,
+    ownerPost({ code: generateTotp(factor.secret) }),
+  );
+  const { recoveryCodes } = (await activate.json()) as { recoveryCodes: string[] };
+  assert(recoveryCodes.length >= 4);
+  const encryptedFactor = await apiRequest(
+    `/rest/v1/user_mfa_factors?id=eq.${factor.factorId}&select=secret_encrypted`,
+  );
+  assert.equal(encryptedFactor.status, 200);
+  const factorRows = (await encryptedFactor.json()) as Array<{ secret_encrypted: string }>;
+  assert.equal(factorRows.length, 1);
+  assert(
+    factorRows[0]!.secret_encrypted && !factorRows[0]!.secret_encrypted.includes(factor.secret),
+    'TOTP secret must not be plaintext at rest',
+  );
+  const beforeLogin = await check('enrolled_owner_still_needs_login_mfa', '/v1/engagements', 401, {
+    headers: ownerHeaders,
+  });
+  assert.equal(
+    ((await beforeLogin.json()) as { error: { code: string } }).error.code,
+    'mfa_verification_required',
+  );
+  async function challenge(name: string, body: unknown, code: string) {
+    const issued = await check(`${name}_issued`, '/v1/mfa/challenge', 201, ownerPost(body));
+    const { challengeId } = (await issued.json()) as { challengeId: string };
+    await check(
+      `${name}_verified`,
+      `/v1/mfa/challenge/${challengeId}/verify`,
+      200,
+      ownerPost({ code }),
+    );
+    return challengeId;
+  }
+  await challenge('login_recovery', { purpose: 'login' }, recoveryCodes[0]!);
+  const unlocked = await check('attested_owner_can_read', '/v1/engagements', 200, {
+    headers: ownerHeaders,
+  });
+  assert.deepEqual(
+    ((await unlocked.json()) as { engagements: Array<{ id: string }> }).engagements.map(
+      (e) => e.id,
+    ),
+    [engagementB],
+  );
+
+  await check('login_attestation_cannot_move_to_another_session', '/v1/engagements', 401, {
+    headers: { ...ownerHeaders, Authorization: `Bearer ${await owner.newSession()}` },
+  });
+
+  const replayChallenge = await check(
+    'recovery_reuse_challenge',
+    '/v1/mfa/challenge',
+    201,
+    ownerPost({ purpose: 'login' }),
+  );
+  const replayId = ((await replayChallenge.json()) as { challengeId: string }).challengeId;
+  await check(
+    'recovery_code_single_use',
+    `/v1/mfa/challenge/${replayId}/verify`,
+    401,
+    ownerPost({ code: recoveryCodes[0] }),
+  );
+
+  const planId = randomUUID();
+  const actionId = randomUUID();
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/remediation_plans', 'POST', {
+        id: planId,
+        tenant_id: tenantB,
+        engagement_id: engagementB,
+        library_version: library,
+        title: 'Parity approval only — no execution',
+        status: 'review',
+        version: 1,
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/remediation_actions', 'POST', {
+        id: actionId,
+        tenant_id: tenantB,
+        plan_id: planId,
+        sequence: 1,
+        action_type: 'data.mask',
+        description: 'Synthetic approval fixture',
+        risk_score: 10,
+        rollback_definition: { fixture: true },
+        rollback_validated: true,
+        dry_run_status: 'dry_run_complete',
+        dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      })
+    ).status,
+    201,
+  );
+  const approval = { planId, actionIds: [actionId], mode: 'batch' };
+  await check(
+    'session_mfa_does_not_replace_approval_step_up',
+    '/v1/plans/approve',
+    401,
+    ownerPost(approval),
+  );
+  const staleChallenge = await challenge(
+    'approval_revision_one',
+    { ...approval, purpose: 'approval_issuance' },
+    recoveryCodes[1]!,
+  );
+  assert.equal(
+    (await apiRequest(`/rest/v1/remediation_plans?id=eq.${planId}`, 'PATCH', { version: 2 }))
+      .status,
+    200,
+  );
+  await check(
+    'changed_plan_invalidates_step_up',
+    '/v1/plans/approve',
+    401,
+    ownerPost({ ...approval, mfaChallengeId: staleChallenge }),
+  );
+  const validChallenge = await challenge(
+    'approval_revision_two',
+    { ...approval, purpose: 'approval_issuance' },
+    recoveryCodes[2]!,
+  );
+  assert.equal(
+    (
+      await apiRequest(`/rest/v1/remediation_actions?id=eq.${actionId}`, 'PATCH', {
+        parameters: { changedAfterStepUp: true },
+      })
+    ).status,
+    200,
+  );
+  await check(
+    'changed_action_content_invalidates_step_up',
+    '/v1/plans/approve',
+    401,
+    ownerPost({ ...approval, mfaChallengeId: validChallenge }),
+  );
+  const freshContentChallenge = await challenge(
+    'approval_current_content',
+    { ...approval, purpose: 'approval_issuance' },
+    recoveryCodes[3]!,
+  );
+  const approved = await check(
+    'fresh_bound_step_up_issues_token',
+    '/v1/plans/approve',
+    201,
+    ownerPost({ ...approval, mfaChallengeId: freshContentChallenge }),
+  );
+  const approvalResult = (await approved.json()) as {
+    approvalTokenId: string;
+    token: { spec: { actionIds: string[] } };
+  };
+  assert.deepEqual(approvalResult.token.spec.actionIds, [actionId]);
+  await check(
+    'approval_step_up_single_use',
+    '/v1/plans/approve',
+    401,
+    ownerPost({ ...approval, mfaChallengeId: freshContentChallenge }),
+  );
+  const recorded = await apiRequest(
+    `/rest/v1/approval_tokens?id=eq.${approvalResult.approvalTokenId}&select=status`,
+  );
+  assert.deepEqual(
+    await recorded.json(),
+    [{ status: 'issued' }],
+    'Test only approves; no execution is attempted',
+  );
+
+  // Even possession of a valid token cannot grant an unprivileged member
+  // the separate capability to start estate execution.
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/tenant_users', 'POST', {
+        tenant_id: tenantB,
+        user_id: viewer.id,
+        role: 'viewer',
+      })
+    ).status,
+    201,
+  );
+  await check('viewer_with_valid_token_cannot_execute', `/v1/plans/${planId}/execute`, 403, {
+    ...ownerPost({ ...approval, approvalToken: JSON.stringify(approvalResult.token) }),
+    headers: {
+      Authorization: `Bearer ${viewer.token}`,
+      'x-tenant-id': tenantB,
+      'idempotency-key': randomUUID(),
+      'content-type': 'application/json',
+    },
+  });
+
+  for (const operation of ['issue', 'verify'] as const) {
+    let limited = false;
+    for (let attempt = 0; attempt < 21; attempt++) {
+      const response = await app.request(
+        operation === 'issue' ? '/v1/mfa/challenge' : `/v1/mfa/challenge/${randomUUID()}/verify`,
+        ownerPost(operation === 'issue' ? { purpose: 'login' } : { code: '000000' }),
+      );
+      if (response.status === 429) {
+        assert(Number(response.headers.get('Retry-After')) > 0);
+        assert.equal(
+          ((await response.json()) as { error: { code: string } }).error.code,
+          'rate_limited',
+        );
+        limited = true;
+        break;
+      }
+      assert.equal(
+        response.status,
+        operation === 'issue' ? 201 : 404,
+        `MFA ${operation} budget response`,
+      );
+    }
+    assert(limited, `MFA ${operation} must be bounded across fresh challenges`);
+    outcomes[`mfa_${operation}_budget`] = true;
+  }
   await writeFile(`${stateDir}/${environment}.json`, JSON.stringify(outcomes, null, 2), {
     mode: 0o600,
   });
   console.log(
-    `${environment}: real Auth, tenant RLS, RBAC, MFA quarantine and durable idempotency passed.`,
+    `${environment}: real Auth, tenant RLS, RBAC, MFA enrolment/login/bound approval and durable idempotency passed.`,
   );
 }
 main().catch((error: unknown) => {

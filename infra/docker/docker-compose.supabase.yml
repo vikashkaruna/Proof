@@ -74,7 +74,8 @@ services:
       # malformed query rather than a misconfigured claim.
       - GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
       - GOTRUE_EXTERNAL_EMAIL_ENABLED=true
-      - GOTRUE_MAILER_AUTOCONFIRM=true
+      - GOTRUE_MAILER_AUTOCONFIRM=false
+      - GOTRUE_DISABLE_SIGNUP=true
     networks:
       - axiom-network
 

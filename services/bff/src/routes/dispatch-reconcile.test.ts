@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
-import { UserRole, LedgerActionType } from '@axiom/types';
+import { UserRole } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
 
@@ -85,6 +85,7 @@ beforeEach(() => {
   fake.onRpc('reconcile_execution_dispatch', (args) => ({
     decision: args.p_decision,
     released_action_count: args.p_decision === 'released' ? 2 : 0,
+    correlation_id: '55555555-5555-4555-8555-555555555555',
   }));
 });
 
@@ -141,19 +142,14 @@ describe('POST /v1/execution/dispatches/reconcile — outcomes', () => {
     });
   });
 
-  it('writes the judgement to the ledger, which an operator cannot edit afterwards', async () => {
+  it('returns the database transaction correlation without a separate ledger write', async () => {
     const app = await buildApp();
-    await reconcile(app, validBody());
-    expect(ledgerAppend).toHaveBeenCalledTimes(1);
-    expect(ledgerAppend.mock.calls[0]?.[0]).toMatchObject({
-      tenantId: TENANT,
-      actorId: USER,
-      actionType: LedgerActionType.EXECUTION_DISPATCH_RECONCILED,
-      targetRef: PLAN,
-      detail: { decision: 'released', releasedActionCount: 2 },
+    const response = await reconcile(app, validBody());
+    expect(await response.json()).toMatchObject({
+      correlationId: '55555555-5555-4555-8555-555555555555',
     });
-    // The reason is the judgement; a ledger entry without it records nothing.
-    expect(ledgerAppend.mock.calls[0]?.[0].detail.reason).toContain('never received');
+    // Atomic ledger/failure behavior is proved against real PostgreSQL.
+    expect(ledgerAppend).not.toHaveBeenCalled();
   });
 
   it('releases nothing when the decision is to abandon', async () => {
