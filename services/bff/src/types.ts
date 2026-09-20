@@ -16,4 +16,11 @@ export type Variables = {
    */
   approvalScopes: readonly string[];
   idempotencyKey: string;
+  /**
+   * GoTrue's `session_id` claim (W1 · SEC-8). What a login MFA attestation is
+   * bound to — stable across access-token refresh, gone when the session ends.
+   * Empty when it could not be read, which every consumer treats as
+   * "not attested".
+   */
+  sessionId: string;
 };

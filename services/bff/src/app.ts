@@ -6,6 +6,7 @@ import { loadEnv } from '@axiom/config';
 import { authMiddleware } from './middleware/auth.js';
 import { tenantResolver } from './middleware/tenant.js';
 import { idempotency } from './middleware/idempotency.js';
+import { requireSessionMfa } from './middleware/session-mfa.js';
 import { errorHandler } from './middleware/error.js';
 import { v1Routes } from './routes/v1.js';
 import { publicRoutes } from './routes/public.js';
@@ -66,6 +67,9 @@ export function createApp() {
   // Authenticated routes
   app.use('/v1/*', authMiddleware);
   app.use('/v1/*', tenantResolver);
+  // Before idempotency, so a quarantined request does not burn a key it will
+  // never get to use.
+  app.use('/v1/*', requireSessionMfa(mfa));
   app.use('/v1/*', idempotency);
 
   app.route('/v1', v1Routes({ approvalEngine, killSwitch, ledger, mfa, realtime }));

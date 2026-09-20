@@ -4,6 +4,10 @@ import { MfaEnrolment } from './mfa-enrolment';
 
 export const dynamic = 'force-dynamic';
 
+interface PageProps {
+  searchParams: Promise<{ enrol?: string }>;
+}
+
 /**
  * Account security — MFA enrolment (W1 · SEC-8).
  *
@@ -13,8 +17,12 @@ export const dynamic = 'force-dynamic';
  * owner knowing which of their approvers lack a factor is not worth the
  * precedent of letting one user read another's credential metadata.
  */
-export default async function SecuritySettingsPage() {
-  const ctx = await requireTenantContext();
+export default async function SecuritySettingsPage({ searchParams }: PageProps) {
+  const { enrol } = await searchParams;
+  const sentHere = enrol === 'required';
+  // Reachable while quarantined — this is the page a user with no factor is
+  // sent to, so gating it on having a factor would be a closed loop.
+  const ctx = await requireTenantContext(undefined, { allowUnverifiedMfa: true });
 
   // Read the initial state on the server. The RLS policy `user_mfa_factors_self`
   // (migration 0012) permits exactly this — a user reading their own factors —
@@ -51,6 +59,15 @@ export default async function SecuritySettingsPage() {
         title="Account security"
         description="Your second factor. Required before you can issue an approval token, and re-checked at the moment of every approval."
       />
+
+      {sentHere && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <strong>Enrol before continuing.</strong> Your role requires a second factor, and you have
+          none yet. This page is the only one reachable until an authenticator is active — not to be
+          obstructive, but because the alternative is a role that can change a client&apos;s
+          production estate protected by a password alone.
+        </div>
+      )}
 
       <Card>
         <CardHeader>

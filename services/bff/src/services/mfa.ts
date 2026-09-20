@@ -52,6 +52,21 @@ const env = loadEnv();
 const APPROVAL_CHALLENGE_TTL_MS = 5 * 60_000;
 const DEFAULT_CHALLENGE_TTL_MS = 10 * 60_000;
 
+/**
+ * How long a satisfied login MFA vouches for a session. Configurable because
+ * an onprem deployment may hold a different view; 12 hours by default, which
+ * is one code per working day.
+ */
+const SESSION_ATTESTATION_TTL_MS = (env.AXIOM_MFA_SESSION_TTL_HOURS ?? 12) * 60 * 60_000;
+
+/**
+ * The founder is always required to hold a factor, whatever a tenant's
+ * `mfa_required_roles` says. It is the only role that can engage a global kill
+ * switch and the only one that crosses every tenant, so it is not a setting a
+ * tenant gets to relax — and `mfa_required_roles` is tenant-owned data.
+ */
+const ALWAYS_MFA_REQUIRED: ReadonlySet<string> = new Set(['founder']);
+
 /** A TOTP code is six digits. Anything else is treated as a recovery code. */
 const TOTP_CODE_PATTERN = /^\d{6}$/;
 
@@ -155,7 +170,14 @@ export interface VerifyChallengeOptions {
 }
 
 export type VerifyChallengeResult =
-  | { ok: true; satisfiedWith: 'totp' | 'recovery_code'; challengeId: string }
+  | {
+      ok: true;
+      satisfiedWith: 'totp' | 'recovery_code';
+      challengeId: string;
+      purpose: string;
+      boundResourceRef: string | null;
+      factorId: string | null;
+    }
   | {
       ok: false;
       reason:
@@ -191,6 +213,20 @@ export type ConsumeChallengeResult =
       detail?: string;
     };
 
+export interface AttestSessionOptions {
+  userId: string;
+  sessionId: string;
+  challengeId?: string | null;
+  factorId?: string | null;
+  ttlMs?: number;
+}
+
+export interface SessionAttestation {
+  id: string;
+  satisfiedAt: string;
+  expiresAt: string;
+}
+
 export type RevokeFactorResult =
   { ok: true; factorId: string } | { ok: false; reason: 'factor_not_found' };
 
@@ -224,6 +260,20 @@ export interface MfaService {
   linkConsumption(opts: { challengeId: string; consumedFor: string }): Promise<void>;
   /** Whether the user holds an active TOTP factor. */
   isEnrolled(userId: string): Promise<boolean>;
+  /**
+   * Whether this role, in this tenant, must hold a factor to use the product.
+   * Reads `tenants.mfa_required_roles` — data rather than code, so tightening
+   * a tenant's policy is a row update, not a deploy — and unions it with the
+   * roles the platform requires regardless.
+   */
+  requiresLoginMfa(opts: { tenantId: string; role: string }): Promise<boolean>;
+  /** Record that a session met its second factor. */
+  attestSession(opts: AttestSessionOptions): Promise<SessionAttestation>;
+  /** Whether this session currently holds a live attestation. */
+  sessionAttestation(opts: {
+    userId: string;
+    sessionId: string;
+  }): Promise<SessionAttestation | null>;
   /** The user's active TOTP factor id, or null. Used to bind factor challenges. */
   activeFactorId(userId: string): Promise<string | null>;
 }
@@ -525,6 +575,87 @@ export function createMfaService(
       return (await activeTotpFactor(userId))?.id ?? null;
     },
 
+    async requiresLoginMfa({ tenantId, role }) {
+      if (ALWAYS_MFA_REQUIRED.has(role)) return true;
+
+      const supabase = clientFactory();
+      const { data, error } = await supabase
+        .from('tenants')
+        .select('mfa_required_roles')
+        .eq('id', tenantId)
+        .maybeSingle();
+
+      if (error || !data) {
+        // Fail closed. If we cannot read the policy we cannot conclude the
+        // role is exempt, and the cost of being wrong in that direction is a
+        // code prompt rather than an unprotected session.
+        logger.error({ err: error?.message, tenantId }, 'MFA policy unreadable; requiring MFA');
+        return true;
+      }
+
+      const required = (data as { mfa_required_roles: string[] | null }).mfa_required_roles ?? [];
+      return required.includes(role);
+    },
+
+    async attestSession({ userId, sessionId, challengeId, factorId, ttlMs }) {
+      const supabase = clientFactory();
+      const satisfiedAt = new Date();
+      const expiresAt = new Date(satisfiedAt.getTime() + (ttlMs ?? SESSION_ATTESTATION_TTL_MS));
+
+      const { data, error } = await supabase
+        .from('mfa_session_attestations')
+        .insert({
+          user_id: userId,
+          session_id: sessionId,
+          challenge_id: challengeId ?? null,
+          factor_id: factorId ?? null,
+          satisfied_at: satisfiedAt.toISOString(),
+          expires_at: expiresAt.toISOString(),
+        })
+        .select('id, satisfied_at, expires_at')
+        .single();
+      if (error || !data) {
+        throw new Error(`Could not record MFA attestation: ${error?.message ?? 'no row'}`);
+      }
+
+      const row = data as { id: string; satisfied_at: string; expires_at: string };
+      return { id: row.id, satisfiedAt: row.satisfied_at, expiresAt: row.expires_at };
+    },
+
+    async sessionAttestation({ userId, sessionId }) {
+      // A session id we could not read is not a session we can vouch for.
+      if (!sessionId) return null;
+
+      const supabase = clientFactory();
+      const { data, error } = await supabase
+        .from('mfa_session_attestations')
+        .select('id, satisfied_at, expires_at')
+        .eq('user_id', userId)
+        .eq('session_id', sessionId)
+        .is('revoked_at', null);
+
+      if (error) {
+        // Fail closed, as the kill switch does: an assurance we cannot verify
+        // is not an assurance. The user is asked for a code.
+        logger.error(
+          { err: error.message, userId },
+          'MFA attestation unreadable; treating as absent',
+        );
+        return null;
+      }
+
+      const now = Date.now();
+      const live = ((data ?? []) as Array<{ id: string; satisfied_at: string; expires_at: string }>)
+        .filter((row) => new Date(row.expires_at).getTime() > now)
+        // Several rows can be live at once after a re-authentication; the
+        // longest-lived is the one that governs.
+        .sort((a, b) => new Date(b.expires_at).getTime() - new Date(a.expires_at).getTime())[0];
+
+      return live
+        ? { id: live.id, satisfiedAt: live.satisfied_at, expiresAt: live.expires_at }
+        : null;
+    },
+
     async linkConsumption({ challengeId, consumedFor }) {
       const supabase = clientFactory();
       const { error } = await supabase
@@ -553,6 +684,22 @@ export function createMfaService(
         .neq('status', 'revoked')
         .select('id');
       if (error || (data ?? []).length === 0) return { ok: false, reason: 'factor_not_found' };
+
+      // End the sessions this factor vouched for. A revoked authenticator that
+      // leaves live attestations behind has not really been revoked — the
+      // sessions it authorised would run on for up to the full window.
+      const { error: revokeErr } = await supabase
+        .from('mfa_session_attestations')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('factor_id', factorId)
+        .is('revoked_at', null);
+      if (revokeErr) {
+        logger.error(
+          { err: revokeErr.message, factorId },
+          'factor revoked but its session attestations could not be ended',
+        );
+      }
+
       return { ok: true, factorId };
     },
 
@@ -667,7 +814,14 @@ export function createMfaService(
         return { ok: false, reason: 'challenge_already_satisfied' };
       }
 
-      return { ok: true, satisfiedWith, challengeId: challenge.id };
+      return {
+        ok: true,
+        satisfiedWith,
+        challengeId: challenge.id,
+        purpose: challenge.purpose,
+        boundResourceRef: challenge.bound_resource_ref,
+        factorId: challenge.factor_id,
+      };
     },
 
     async consumeChallenge(opts) {

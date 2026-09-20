@@ -123,6 +123,23 @@ const EnvSchema = z
     // mint valid codes for every enrolled user.
     AXIOM_MFA_ENCRYPTION_KEY: z.string().min(32).optional(),
 
+    /**
+     * How long a satisfied login MFA vouches for a session, in hours
+     * (W1 · SEC-8). Decided with the founder at 12: one code per working
+     * day, and a session stolen in the evening stops being usable overnight
+     * without the factor.
+     *
+     * It is deliberately independent of the Supabase session lifetime.
+     * Supabase sessions refresh indefinitely by default, so tying MFA to the
+     * session would mean "once per device, roughly forever".
+     */
+    AXIOM_MFA_SESSION_TTL_HOURS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(24 * 30)
+      .default(12),
+
     // Approval token signing
     APPROVAL_SIGNING_KEY: z.string().min(32).optional(), // per-tenant in prod
     APPROVAL_TOKEN_TTL_MINUTES: z

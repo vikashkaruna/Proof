@@ -328,6 +328,25 @@ export function v1Routes(deps: Deps) {
         actionIds: input.actionIds!,
         mode: input.mode,
       });
+    } else if (input.purpose === 'login') {
+      // Bound to the session it will vouch for. Without this a challenge
+      // satisfied in one session could be presented from another — which is
+      // precisely the position someone holding a stolen password is in.
+      const sessionId = c.get('sessionId');
+      if (!sessionId) {
+        return c.json(
+          {
+            error: {
+              code: 'session_unidentified',
+              message:
+                'This session carries no identifier, so a login challenge cannot be bound to it. Sign in again.',
+            },
+          },
+          401,
+        );
+      }
+      boundResourceRef = sessionId;
+      boundPayloadSha256 = factorBindingSha256('login', sessionId);
     } else if (input.purpose === 'enrolment' || input.purpose === 'factor_revocation') {
       const factorId = await deps.mfa.activeFactorId(user.id);
       if (!factorId) {
@@ -470,6 +489,42 @@ export function v1Routes(deps: Deps) {
       });
     }
 
+    // A satisfied `login` challenge becomes a session attestation immediately,
+    // here, rather than through a further call the client could simply not
+    // make. Consuming it first keeps the single-use property: one challenge,
+    // one attestation.
+    let attestedUntil: string | undefined;
+    if (result.purpose === 'login') {
+      const sessionId = c.get('sessionId');
+      const spend = await deps.mfa.consumeChallenge({
+        challengeId,
+        userId: user.id,
+        purpose: 'login',
+        boundResourceRef: sessionId,
+        boundPayloadSha256: factorBindingSha256('login', sessionId),
+        consumedFor: sessionId,
+      });
+      if (!spend.ok) {
+        return c.json(
+          {
+            error: {
+              code: spend.reason,
+              message: 'That challenge does not belong to this session.',
+            },
+          },
+          401,
+        );
+      }
+
+      const attestation = await deps.mfa.attestSession({
+        userId: user.id,
+        sessionId,
+        challengeId,
+        factorId: result.factorId,
+      });
+      attestedUntil = attestation.expiresAt;
+    }
+
     await deps.ledger.append({
       tenantId,
       correlationId: randomUUID(),
@@ -478,10 +533,19 @@ export function v1Routes(deps: Deps) {
       actionType: LedgerActionType.MFA_CHALLENGE_SATISFIED,
       targetRef: challengeId,
       result: 'success',
-      detail: { satisfiedWith: result.satisfiedWith },
+      detail: {
+        satisfiedWith: result.satisfiedWith,
+        purpose: result.purpose,
+        ...(attestedUntil ? { sessionAttestedUntil: attestedUntil } : {}),
+      },
     });
 
-    return c.json({ challengeId, satisfied: true, satisfiedWith: result.satisfiedWith });
+    return c.json({
+      challengeId,
+      satisfied: true,
+      satisfiedWith: result.satisfiedWith,
+      ...(attestedUntil ? { attestedUntil } : {}),
+    });
   });
 
   // ─── Plans / Approval / Execution ───────────────────────────────

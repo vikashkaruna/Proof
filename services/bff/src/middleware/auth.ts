@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import { createClient } from '@supabase/supabase-js';
+import { sessionIdFromAccessToken } from '@axiom/supabase';
 import { loadEnv, isAuthBypassEnabled } from '@axiom/config';
 import { logger } from '../lib/logger.js';
 import type { Variables } from '../types.js';
@@ -59,6 +60,11 @@ export const authMiddleware = createMiddleware<{ Variables: Variables }>(async (
   if (authBypass && SYNTHETIC_TOKENS.has(token)) {
     c.set('user', { ...E2E_IDENTITY } as never);
     c.set('token', token);
+    // The synthetic identity has no Supabase session and no enrolled factor.
+    // Under the one sanctioned bypass — which @axiom/config refuses to enable
+    // outside local/test — MFA is bypassed with the rest of authentication.
+    // This is not a second posture switch; it is the same one.
+    c.set('sessionId', '');
     return next();
   }
 
@@ -82,6 +88,11 @@ export const authMiddleware = createMiddleware<{ Variables: Variables }>(async (
 
     c.set('user', user);
     c.set('token', token);
+    // Read AFTER the token has been validated. `sessionIdFromAccessToken`
+    // decodes without verifying, so it must never be the thing that decides a
+    // token is trustworthy — only what pulls an identifier out of one we have
+    // already accepted.
+    c.set('sessionId', sessionIdFromAccessToken(token) ?? '');
     await next();
   } catch (networkErr: any) {
     // SEC-1: likewise — an outage used to grant founder access rather than

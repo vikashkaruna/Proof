@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { createSupabaseServerClient, sessionIdFromAccessToken } from '@axiom/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Capability, authorize, type UserRole } from '@axiom/types';
 
@@ -88,7 +88,95 @@ function readTenant(rel: MembershipRow['tenants']): TenantRel {
  *        Still subject to the membership check — naming a tenant is not the
  *        same as belonging to it.
  */
-export async function requireTenantContext(requestedSlug?: string): Promise<TenantContext> {
+/**
+ * Login-time MFA (W1 · SEC-8).
+ *
+ * Redirects rather than refuses, because this runs during a page render and
+ * the user needs somewhere to go. The refusal that matters is the BFF's — a
+ * caller who skips the browser entirely gets a 401 from `requireSessionMfa`,
+ * and nothing here is load-bearing for that.
+ *
+ * Every read is through the user's own client under RLS: their memberships,
+ * their factors, their attestations. No service-role key is involved, which is
+ * the SEC-3 rule and also means a bug here cannot read someone else's state.
+ */
+async function enforceLoginMfa(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  userId: string,
+  tenantId: string,
+  role: string,
+): Promise<void> {
+  let required = ALWAYS_MFA_REQUIRED.has(role);
+
+  if (!required) {
+    const { data: tenant, error } = await supabase
+      .from('tenants')
+      .select('mfa_required_roles')
+      .eq('id', tenantId)
+      .maybeSingle();
+    // Fail closed, matching the BFF: a policy we cannot read is not a policy
+    // that exempts anyone. The cost of being wrong this way is a code prompt.
+    required = error || !tenant ? true : (tenant.mfa_required_roles ?? []).includes(role);
+  }
+
+  if (!required) return;
+
+  const { data: factors } = await supabase
+    .from('user_mfa_factors')
+    .select('id')
+    .eq('factor_type', 'totp')
+    .eq('status', 'active')
+    .limit(1);
+
+  if (!factors || factors.length === 0) redirect('/settings/security?enrol=required');
+
+  // The attestation is bound to the GoTrue session id, which survives the
+  // hourly access-token refresh. Keying it on the token itself would ask the
+  // user for a code every hour and look like a bug.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const sessionId = session?.access_token ? sessionIdFromAccessToken(session.access_token) : null;
+  if (!sessionId) redirect('/verify');
+
+  const { data: attestations } = await supabase
+    .from('mfa_session_attestations')
+    .select('expires_at')
+    .eq('user_id', userId)
+    .eq('session_id', sessionId)
+    .is('revoked_at', null);
+
+  const live = (attestations ?? []).some(
+    (row) => new Date(row.expires_at as string).getTime() > Date.now(),
+  );
+  if (!live) redirect('/verify');
+}
+
+export interface TenantContextOptions {
+  /**
+   * Skip the login-MFA gate. Only the pages a quarantined user must still be
+   * able to reach pass this — enrolment and the code prompt — because a
+   * quarantine with no exit is just an outage.
+   *
+   * It is opt-out rather than opt-in so that a new page is gated by default.
+   * The reverse would mean every page added from here on is an unguarded one
+   * until somebody remembers.
+   */
+  allowUnverifiedMfa?: boolean;
+}
+
+/**
+ * Roles the platform requires a factor from regardless of tenant policy.
+ * Mirrors `ALWAYS_MFA_REQUIRED` in the BFF — the BFF is the authoritative
+ * gate, and this copy exists so the browser is redirected rather than shown a
+ * page that will fail every call it makes.
+ */
+const ALWAYS_MFA_REQUIRED = new Set<string>(['founder']);
+
+export async function requireTenantContext(
+  requestedSlug?: string,
+  options: TenantContextOptions = {},
+): Promise<TenantContext> {
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -125,6 +213,10 @@ export async function requireTenantContext(requestedSlug?: string): Promise<Tena
     .select('is_axiom_internal')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (!options.allowUnverifiedMfa) {
+    await enforceLoginMfa(supabase, user.id, selected.tenant_id, selected.role);
+  }
 
   return {
     userId: user.id,
