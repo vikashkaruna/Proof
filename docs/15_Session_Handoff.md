@@ -37,7 +37,8 @@ The eight PRD B.10 live execution scenarios belong to Phase 3 acceptance; API-le
 
 - Docker Desktop project `axiom-w0-parity`: API 56321, DB 56322. Other local Supabase projects preserved and untouched.
 - Credentials remain in ignored `.axiom-runtime/parity/status.json` and protected logs; never print or commit them. Parity reports contain outcomes only.
-- `scripts/test-database.sh` creates and removes its own container, and removes `BYPASSRLS` only inside that disposable database.
+- `scripts/test-database.sh` creates and removes its own container, and removes `BYPASSRLS` only inside that disposable database. It also runs `createdb`, so **extensions live in different schemas there than on a real Supabase stack** — pgcrypto lands in `public` rather than `extensions`. A migration that qualifies an extension function by schema can pass this suite and fail the parity lane. Prefer built-ins such as `sha256` over pgcrypto's `digest`.
+- The parity project's migration history is real and persistent. If an unreleased migration is amended after being applied there, reset it as `supabase_admin` — drop what it created and delete its `axiom_migrations.applied` row — rather than editing the file to match a stale checksum.
 - `tests/database/migration-dsn.sh` and `tests/deployment/selfhosted-supabase.sh` each create and remove their own network and containers. The latter runs real GoTrue and PostgREST and tests disabled public signup plus authenticated admin provisioning.
 - Environment files: `./scripts/sync-env.sh <env> scaffold`, then `mint`, then `verify`. `verify` is a gate and exits non-zero; `--allow-simulated` is for local, staging and onprem only. `terraform.tfvars` is **generated** — editing it has no effect.
 - No worker retries an outbox intent. Human release revokes other outstanding approvals; every redelivery needs a fresh one. Reconciliation and its ledger proof commit together, as does approval issuance.
