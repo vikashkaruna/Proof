@@ -29,6 +29,57 @@ import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
+/**
+ * Version of the BFF → agent-runtime execution payload (W5 · R-05).
+ *
+ * The two sides disagreed on casing for as long as the endpoint existed —
+ * camelCase out, snake_case required — so every dispatch was a 422 nobody saw.
+ * A version the runtime does not recognise is now a refusal with a reason,
+ * which is the failure mode a silent schema mismatch should have had from the
+ * start.
+ *
+ * Bump on any breaking payload change and update `InternalExecuteRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/execution-contract.test.ts` asserts they agree.
+ */
+export const EXECUTION_CONTRACT_VERSION = 1;
+
+export interface ExecutionDispatchInput {
+  tenantId: string;
+  planId: string;
+  correlationId: string;
+  actionIds: string[];
+  requestKey: string;
+  mode: string;
+  concurrency: number;
+  stopOnFailure: boolean;
+  approvalToken: unknown;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/execute`.
+ *
+ * Extracted so both sides of the contract can be tested against one fixture:
+ * `tests/contracts/execution-dispatch.v1.json` is asserted here to be what
+ * this function produces, and validated in
+ * `services/agent-runtime/tests/test_execution_contract.py` against the
+ * runtime's own Pydantic model. A change to either side fails the other.
+ */
+export function buildExecutionDispatchPayload(input: ExecutionDispatchInput) {
+  return {
+    contract_version: EXECUTION_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    plan_id: input.planId,
+    correlation_id: input.correlationId,
+    action_ids: input.actionIds,
+    request_key: input.requestKey,
+    mode: input.mode,
+    concurrency: input.concurrency,
+    stop_on_failure: input.stopOnFailure,
+    approval_token: input.approvalToken,
+  };
+}
+
 /** Missing, malformed and boundary-time expiry are all stale. */
 function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
   return (
@@ -1134,51 +1185,89 @@ export function v1Routes(deps: Deps) {
       accepted.push(actionId);
     }
 
-    // Mark accepted actions as executing + record idempotency key
+    // W5 · R-04 — claim the batch and consume the token in ONE transaction.
+    //
+    // These were two statements with a gap between them, and the gap was
+    // fatal: the token was consumed first, then every accepted action was
+    // stamped with the SAME request key, against a column carrying a global
+    // unique constraint. A two-action batch therefore raised a duplicate-key
+    // error after the single-use token had already been spent, leaving the
+    // plan approved, un-executable and needing a fresh approval. The one flow
+    // the product exists to make trustworthy could not run a batch at all.
+    //
+    // `claim_plan_execution` (migration 0019) does both halves atomically and
+    // writes a per-action scoped key, so the constraint is satisfied by
+    // construction and still catches a regression.
+    const requestKey = c.get('idempotencyKey');
+    let claimedActions: string[] = [];
+
     if (accepted.length > 0) {
-      const { data: consumedToken, error: consumeErr } = await admin
-        .from('approval_tokens')
-        .update({ status: 'consumed', consumed_at: new Date().toISOString() })
-        .eq('id', persistedToken.id)
-        .eq('tenant_id', tenantId)
-        .eq('status', 'issued')
-        .select('id')
-        .maybeSingle();
-      if (consumeErr) {
+      const { data: claim, error: claimErr } = await admin.rpc('claim_plan_execution', {
+        p_tenant_id: tenantId,
+        p_plan_id: planId,
+        p_token_id: persistedToken.id,
+        p_action_ids: accepted,
+        p_request_key: requestKey,
+      });
+
+      if (claimErr) {
+        logger.error({ err: claimErr.message, planId }, 'execution claim failed');
         return c.json(
-          { error: { code: 'token_consume_failed', message: consumeErr.message } },
+          { error: { code: 'execution_claim_failed', message: 'Could not claim the execution' } },
           500,
-        );
-      }
-      if (!consumedToken) {
-        return c.json(
-          {
-            error: {
-              code: 'token_already_used',
-              message: 'Approval token was consumed concurrently',
-            },
-          },
-          409,
         );
       }
 
-      const { error: executionUpdateErr } = await admin
-        .from('remediation_actions')
-        .update({
-          execution_status: 'executing',
-          idempotency_key: c.get('idempotencyKey'),
-        })
-        .eq('tenant_id', tenantId)
-        .eq('plan_id', planId)
-        .in('id', accepted);
-      if (executionUpdateErr) {
-        return c.json(
-          { error: { code: 'persistence_failed', message: 'Could not mark actions as executing' } },
-          500,
-        );
+      const parsed = claim as { decision?: string; action_ids?: string[] } | null;
+      switch (parsed?.decision) {
+        case 'claimed':
+        case 'already_claimed':
+          // A replay under the same Idempotency-Key reports the same claim
+          // rather than executing twice or refusing a legitimate retry.
+          claimedActions = parsed.action_ids ?? [];
+          break;
+        case 'token_already_used':
+          return c.json(
+            {
+              error: {
+                code: 'token_already_used',
+                message: 'Approval token was consumed concurrently',
+              },
+            },
+            409,
+          );
+        case 'already_executing':
+          return c.json(
+            {
+              error: {
+                code: 'action_already_executing',
+                message: 'Another request is already executing one of these actions',
+              },
+            },
+            409,
+          );
+        case 'actions_not_found':
+          return c.json(
+            {
+              error: {
+                code: 'actions_not_found',
+                message: 'Every action must belong to this tenant and plan',
+              },
+            },
+            404,
+          );
+        default:
+          return c.json(
+            {
+              error: {
+                code: 'execution_claim_refused',
+                message: `Execution was not claimed (${parsed?.decision ?? 'unknown'})`,
+              },
+            },
+            409,
+          );
       }
     }
-
     const correlationId = randomUUID();
     await deps.ledger.append({
       tenantId,
@@ -1196,40 +1285,133 @@ export function v1Routes(deps: Deps) {
       },
     });
 
-    // Enqueue to the agent runtime (Phase 3+). For Phase 0/1, we
-    // immediately mark the actions as succeeded (advisory only) and
-    // surface the plan via the realtime channel so the workbench
-    // shows the lifecycle.
-    if (accepted.length > 0 && env.AGENT_RUNTIME_URL) {
-      try {
-        await fetch(`${env.AGENT_RUNTIME_URL}/internal/execute`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Internal-Token': env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
-          },
-          body: JSON.stringify({
-            tenantId,
-            planId,
-            correlationId,
-            actionIds: accepted,
-            mode: input.mode,
-            concurrency: input.concurrency,
-            stopOnFailure: input.stopOnFailure,
-            approvalToken: signedToken,
-          }),
+    // W5 · R-05 — dispatch over a contract that exists.
+    //
+    // The old call sent camelCase keys to `/internal/execute`, whose Pydantic
+    // model requires snake_case and defines no aliases, so every dispatch was
+    // a 422. Nothing noticed: the response was never checked and the catch
+    // only logged, so the route returned `status: 'accepted'` for work the
+    // runtime had refused outright. An execution console showing "accepted"
+    // for a batch that never reached the executor is worse than one showing an
+    // error, because only one of those prompts anybody to look.
+    //
+    // The payload is versioned so a future mismatch is a refusal with a reason
+    // rather than a silent 422.
+    let dispatch: {
+      status: 'accepted' | 'failed';
+      reference: string | null;
+      error: string | null;
+    } = { status: 'failed', reference: null, error: 'dispatch not attempted' };
+
+    if (claimedActions.length > 0) {
+      if (!env.AGENT_RUNTIME_URL) {
+        dispatch = {
+          status: 'failed',
+          reference: null,
+          error: 'AGENT_RUNTIME_URL is not configured',
+        };
+      } else {
+        try {
+          const response = await fetch(`${env.AGENT_RUNTIME_URL}/internal/execute`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Internal-Token': env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+            },
+            body: JSON.stringify(
+              buildExecutionDispatchPayload({
+                tenantId,
+                planId,
+                correlationId,
+                actionIds: claimedActions,
+                requestKey,
+                mode: input.mode,
+                concurrency: input.concurrency,
+                stopOnFailure: input.stopOnFailure,
+                approvalToken: signedToken,
+              }),
+            ),
+          });
+
+          if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            dispatch = {
+              status: 'failed',
+              reference: null,
+              error: `runtime returned ${response.status}: ${body.slice(0, 500)}`,
+            };
+          } else {
+            const body = (await response.json().catch(() => null)) as {
+              accepted?: boolean;
+              reference?: string;
+              correlation_id?: string;
+            } | null;
+            // A 200 is not acceptance. The runtime says so explicitly, and a
+            // body we cannot read is not a yes.
+            dispatch = body?.accepted
+              ? {
+                  status: 'accepted',
+                  reference: body.reference ?? body.correlation_id ?? correlationId,
+                  error: null,
+                }
+              : { status: 'failed', reference: null, error: 'runtime did not accept the batch' };
+          }
+        } catch (err) {
+          dispatch = {
+            status: 'failed',
+            reference: null,
+            error: err instanceof Error ? err.message : 'agent runtime unreachable',
+          };
+        }
+      }
+
+      // Durable, not a log line. `record_execution_dispatch` returns a failed
+      // batch to `approved` and clears its claim, so the work stays retryable
+      // rather than stranded in `executing` with nothing behind it.
+      const { error: dispatchErr } = await admin.rpc('record_execution_dispatch', {
+        p_tenant_id: tenantId,
+        p_plan_id: planId,
+        p_request_key: requestKey,
+        p_status: dispatch.status,
+        p_reference: dispatch.reference,
+        p_error: dispatch.error,
+      });
+      if (dispatchErr) {
+        logger.error({ err: dispatchErr.message, planId }, 'could not record dispatch outcome');
+      }
+
+      if (dispatch.status === 'failed') {
+        logger.error(
+          { planId, correlationId, error: dispatch.error },
+          'execution dispatch refused by the agent runtime',
+        );
+        await deps.ledger.append({
+          tenantId,
+          correlationId,
+          actorType: 'human',
+          actorId: user.id,
+          actionType: 'execution.action.failed',
+          targetRef: planId,
+          result: 'failure',
+          detail: { stage: 'dispatch', error: dispatch.error, actionIds: claimedActions },
         });
-      } catch (err) {
-        logger.error({ err }, 'failed to enqueue execution to agent runtime');
       }
     }
-
     // Pass the token's expiry so the replay cache can drop the entry once the
     // token would fail the expiry check anyway (SEC-12).
     deps.approvalEngine.markNonceUsed(signedToken.spec.nonce, signedToken.spec.expiresAt);
 
+    // `accepted` now means the RUNTIME accepted it. Previously this said
+    // `accepted` whenever the BFF's own checks passed, whether or not anything
+    // had been dispatched.
     const status =
-      rejected.length === 0 ? 'accepted' : accepted.length === 0 ? 'rejected' : 'partial';
+      claimedActions.length === 0
+        ? 'rejected'
+        : dispatch.status === 'failed'
+          ? 'dispatch_failed'
+          : rejected.length === 0
+            ? 'accepted'
+            : 'partial';
 
     return c.json(
       {

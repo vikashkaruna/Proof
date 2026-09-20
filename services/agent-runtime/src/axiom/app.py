@@ -16,7 +16,7 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .agents import (
     DrishtiAgent,
@@ -191,11 +191,25 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 
 # ─── Internal-only: BFF calls this after a successful approval+execute
 #     to trigger the agent runtime to actually do the work.
+# W5 · R-05. The BFF sent camelCase to a model that requires snake_case and
+# defines no aliases, so every dispatch was a 422 — and the BFF never checked
+# the response, so it reported the batch as accepted. Aliases are deliberately
+# NOT added: accepting both shapes would preserve the ambiguity that caused it.
+# The contract is versioned instead, so a mismatch refuses with a reason.
+EXECUTION_CONTRACT_VERSION = 1
+
+
 class InternalExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int
     tenant_id: str
     plan_id: str
     correlation_id: str
     action_ids: list[str]
+    # The BFF's Idempotency-Key for this batch. Carried so the runtime can be
+    # made idempotent against a redelivery when W5 adds the durable outbox.
+    request_key: str
     mode: str
     concurrency: int
     stop_on_failure: bool
@@ -208,17 +222,37 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
     if not expected or req.headers.get("x-internal-token", "") != expected:
         raise HTTPException(status_code=401, detail="invalid internal token")
 
-    # Phase 0/1: we just record the intent in the ledger. Phase 3+
-    # dispatches to the connector framework and the action catalogue.
+    if body.contract_version != EXECUTION_CONTRACT_VERSION:
+        # A deployment error, and it says so. The BFF records this against the
+        # batch and returns the actions to `approved` rather than reporting
+        # work as running.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported execution contract version {body.contract_version}; "
+                f"this runtime speaks version {EXECUTION_CONTRACT_VERSION}"
+            ),
+        )
+
+    # Phase 0/1: we record the intent only. Phase 3+ dispatches to the
+    # connector framework and the action catalogue.
+    #
+    # `accepted` is the BFF's acceptance signal and must stay honest: it means
+    # this runtime has taken responsibility for the batch, not merely that the
+    # request parsed. When real execution lands, anything that cannot be
+    # enqueued must return accepted=False rather than a 200 with a stub body.
     log = structlog.get_logger()
     log.info(
         "internal.execute.received",
         plan_id=body.plan_id,
         action_ids=body.action_ids,
         correlation_id=body.correlation_id,
+        request_key=body.request_key,
     )
     return {
         "accepted": True,
+        "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
+        "reference": body.correlation_id,
         "phase": "0/1 stub — execution deferred to Phase 3",
     }
