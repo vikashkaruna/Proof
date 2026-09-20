@@ -3,7 +3,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 container="axiom-db-test-$$"
-image="${AXIOM_TEST_POSTGRES_IMAGE:-public.ecr.aws/supabase/postgres:17.6.1.127}"
+image="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
+# Public ECR can throttle clean CI runners. Prefer Docker Hub; a pinned mirror
+# is a fallback only for image acquisition, never for a failing test.
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  if ! docker pull "$image"; then
+    if [ -n "${AXIOM_TEST_POSTGRES_IMAGE:-}" ]; then exit 1; fi
+    image="public.ecr.aws/supabase/postgres:17.6.1.127"
+    docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
+  fi
+fi
 test_log=$(mktemp)
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; }
 trap cleanup EXIT
@@ -29,4 +38,5 @@ for suite in tests/database/*.test.sql; do
   echo "Testing $(basename "$suite")"
   sql < "$suite"
 done
+bash tests/database/concurrent-idempotency.sh "$container"
 echo "Database migrations and security assertions passed."

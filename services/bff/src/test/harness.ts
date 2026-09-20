@@ -67,9 +67,29 @@ export function createSupabaseDouble(options: {
     membership: options.membership ?? null,
     idempotencyHit: options.idempotencyHit ?? null,
     inserted: [] as unknown[],
+    claimDecision: null as Record<string, unknown> | null,
+    failRpc: null as string | null,
   };
 
   const createClient = vi.fn(() => ({
+    rpc: async (name: string) => {
+      if (state.failRpc === name) return { data: null, error: { message: 'database unavailable' } };
+      if (name === 'complete_request') return { data: true, error: null };
+      if (name === 'claim_request')
+        return {
+          data:
+            state.claimDecision ??
+            (state.idempotencyHit
+              ? {
+                  decision: 'replay',
+                  status: state.idempotencyHit.response_status,
+                  body: state.idempotencyHit.response_body,
+                }
+              : { decision: 'claimed', id: '44444444-4444-4444-8444-444444444444' }),
+          error: null,
+        };
+      throw new Error(`Unmocked RPC: ${name}`);
+    },
     auth: {
       getUser: async () => {
         if (state.auth.kind === 'unreachable') throw new Error(state.auth.message);

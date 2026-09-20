@@ -12,7 +12,7 @@ Implementation worktree: `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Pro
 
 ## W0 milestone: direct-client and invocation authority
 
-Implemented and locally verified; staged for incremental integration:
+Committed as `207957b` and pushed to staging. Its CI run `35506935027` failed fetching the database image from public ECR (rate limit), before database tests ran:
 
 - Append-only migration 0016 removes client write authority from domain/safety tables, protects internal identity columns, removes blanket internal cross-tenant RLS bypass and preserves safe profile bootstrap.
 - Ledger mutations remain through `append_ledger`; service-role direct writes are denied and ledger_writer retains INSERT-only privilege.
@@ -21,6 +21,12 @@ Implemented and locally verified; staged for incremental integration:
 - CI now triggers on staging as well as main and gates later jobs on database security tests. Web ESLint rejects service-role imports.
 
 Local evidence: BFF 127 tests pass; BFF typecheck passes; real PostgreSQL fresh migrations and denial assertions pass. The positive ledger-RPC regression also passes; web lint, security/control gates and diff whitespace checks pass. Historical review documents were formatted to satisfy the repository CI gate.
+
+## W0 milestone: durable idempotency
+
+Migration 0017 adds the previously missing request-claim store and service-only RPCs. The BFF now claims a key before running a mutation, binds it to user/tenant/route/body/query/role/scopes/session, rejects competing or conflicting uses, and replays only completed results. Database failure cannot silently disable this gate. Expired or interrupted claims are retained and refused, not automatically re-executed; operational reconciliation of interrupted requests remains necessary. Response bodies may contain sensitive results and require the planned retention/cleanup policy.
+
+Verification: 132 BFF tests and typecheck pass. Fresh PostgreSQL migrations, client-authority and claim/replay assertions pass. The database runner now uses the pinned Docker Hub image with the same-version ECR mirror as a download fallback, addressing the first milestone's infrastructure-only CI failure. This suite uses real PostgreSQL roles/RLS with Auth schema fixtures; real JWT/E2E parity remains open.
 
 ## Remaining acceptance work — do not mark whole workstreams complete yet
 

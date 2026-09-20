@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { createMiddleware } from 'hono/factory';
 import { createClient } from '@supabase/supabase-js';
 import { loadEnv } from '@axiom/config';
@@ -59,50 +61,102 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   const user = c.get('user');
   const tenantId = c.get('tenantId');
 
-  // Use service role to check the cache
+  // Only the BFF can claim or complete requests. Client roles have no access.
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
     auth: { persistSession: false },
   });
 
-  const { data: existing } = await supabase
-    .from('idempotency_keys')
-    .select('response_status, response_body')
-    .eq('user_id', user.id)
-    .eq('tenant_id', tenantId)
-    .eq('path', c.req.path)
-    .eq('method', c.req.method)
-    .eq('key', key)
-    .maybeSingle();
-
-  if (existing) {
+  const requestHash = createHash('sha256')
+    .update(JSON.stringify([new URL(c.req.url).search, await c.req.raw.clone().text()]))
+    .digest('hex');
+  // Do not replay privileged material after a role change or into a different
+  // login session, even when the user presents the same key and body.
+  const authorityHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        role: c.get('role') ?? null,
+        scopes: [...(c.get('approvalScopes') ?? [])].sort(),
+        session: c.get('sessionId') ?? null,
+      }),
+    )
+    .digest('hex');
+  const { data, error } = await supabase.rpc('claim_request', {
+    p_user_id: user.id,
+    p_tenant_id: tenantId ?? null,
+    p_path: c.req.path,
+    p_method: c.req.method,
+    p_key: key,
+    p_request_sha256: requestHash,
+    p_authority_sha256: authorityHash,
+  });
+  const claim = z
+    .discriminatedUnion('decision', [
+      z.object({ decision: z.literal('claimed'), id: z.uuid() }),
+      z.object({
+        decision: z.literal('replay'),
+        status: z.number().int().min(200).max(599),
+        body: z.unknown(),
+      }),
+      z.object({ decision: z.enum(['conflict', 'in_progress', 'expired']) }),
+    ])
+    .safeParse(data);
+  if (error || !claim.success) {
     return c.json(
-      existing.response_body,
-      existing.response_status as 200 | 201 | 202 | 400 | 404 | 500,
+      {
+        error: { code: 'idempotency_unavailable', message: 'Could not claim this request safely.' },
+      },
+      503,
     );
   }
-
-  c.set('idempotencyKey', key);
-  await next();
-
-  // Cache the response. We do this after the route handler runs, so
-  // successful (or expected-error) responses are stored. The route
-  // handler is responsible for NOT short-circuiting the response.
-  const response = c.res.clone();
-  const body = await response.text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    parsed = { raw: body };
+  if (claim.data.decision === 'replay') {
+    return new Response(
+      [204, 205, 304].includes(claim.data.status) ? null : JSON.stringify(claim.data.body),
+      {
+        status: claim.data.status,
+        headers: { 'content-type': 'application/json', 'idempotency-replayed': 'true' },
+      },
+    );
   }
-
-  await supabase.from('idempotency_keys').insert({
-    user_id: user.id,
-    tenant_id: tenantId,
-    path: c.req.path,
-    method: c.req.method,
-    key,
-    response_status: response.status,
-    response_body: parsed,
+  if (claim.data.decision !== 'claimed') {
+    return c.json(
+      {
+        error: {
+          code: `idempotency_${claim.data.decision}`,
+          message:
+            'The key is already claimed. Do not retry with a different key until the original outcome is known.',
+        },
+      },
+      409,
+    );
+  }
+  c.set('idempotencyKey', key);
+  // A crash/throw leaves an in-progress claim. Never automatically run a
+  // potentially mutating handler again; reconcile its durable operation first.
+  await next();
+  const response = c.res.clone();
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = { raw: text };
+  }
+  const { data: completed, error: completionError } = await supabase.rpc('complete_request', {
+    p_id: claim.data.id,
+    p_request_sha256: requestHash,
+    p_status: response.status,
+    p_body: body,
   });
+  if (completionError || completed !== true) {
+    c.res = c.json(
+      {
+        error: {
+          code: 'idempotency_outcome_unknown',
+          message:
+            'The operation may have completed. Keep this key and reconcile its status before trying again.',
+        },
+      },
+      503,
+    );
+  }
 });

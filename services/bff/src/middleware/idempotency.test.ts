@@ -56,6 +56,38 @@ afterEach(() => {
 });
 
 describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
+  it.each(['conflict', 'in_progress', 'expired'])(
+    'refuses a %s claim before the handler',
+    async (decision) => {
+      const double = createSupabaseDouble({});
+      double.state.claimDecision = { decision };
+      const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+      const res = await app.request('/v1/execute', {
+        method: 'POST',
+        headers: { 'idempotency-key': 'repeat-request-key' },
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ErrorBody).error.code).toBe(`idempotency_${decision}`);
+    },
+  );
+
+  it.each(['claim_request', 'complete_request'])(
+    'does not report success when %s fails',
+    async (rpc) => {
+      const double = createSupabaseDouble({});
+      double.state.failRpc = rpc;
+      const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+      const res = await app.request('/v1/execute', {
+        method: 'POST',
+        headers: { 'idempotency-key': 'repeat-request-key' },
+      });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as ErrorBody).error.code).toBe(
+        rpc === 'claim_request' ? 'idempotency_unavailable' : 'idempotency_outcome_unknown',
+      );
+    },
+  );
+
   it.each(DEPLOYED_ENVIRONMENTS)(
     'returns 400 for a mutating request with no Idempotency-Key in %s',
     async (environment) => {
