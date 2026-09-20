@@ -21,6 +21,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
+from ..kill_switch import KillSwitchEngaged, KillSwitchReader
 from .base import AgentName, AutonomyLevel, BaseAgent
 
 
@@ -68,6 +69,31 @@ class KaryaAgent(BaseAgent[KaryaInput, KaryaOutput]):
     async def _run(
         self, *, correlation_id: str, input: KaryaInput, **deps: Any
     ) -> KaryaOutput:
+        # SEC-4 / R-09 / FR-8.6 — the stop is checked HERE, inside the only
+        # agent that mutates a client estate, not merely where the BFF admits
+        # a request. Admission is not execution: a batch already dispatched
+        # would otherwise run to completion however many times an operator
+        # engages the switch.
+        #
+        # First of two checks. This one refuses to start; the second runs
+        # immediately before the mutating step, so the window between "clear"
+        # and "acting" is as small as the code allows.
+        kill_switch: KillSwitchReader = deps.get("kill_switch") or KillSwitchReader.from_settings(
+            self.settings
+        )
+        try:
+            kill_switch.raise_if_engaged(input.tenant_id)
+        except KillSwitchEngaged as halt:
+            return KaryaOutput(
+                action_id=input.action_id,
+                status="denied",
+                error=f"kill_switch_engaged: {halt.reason}",
+                notes=(
+                    "Execution is halted. This is a refusal to act, not a failure: "
+                    "nothing was mutated and the action remains approved and retryable."
+                ),
+            )
+
         # ADR-1 / ADR-3 Gate: unapproved mutating execution is architecturally refused
         if not input.approval_token:
             return KaryaOutput(
@@ -113,6 +139,24 @@ class KaryaAgent(BaseAgent[KaryaInput, KaryaOutput]):
                 action_id=input.action_id,
                 status="denied",
                 error="Action is not covered by the approval token",
+            )
+
+        # Second checkpoint, immediately before the mutating step.
+        #
+        # Token verification above reaches the network, so time has passed
+        # since the first check — and this is the point of no return. Anything
+        # engaged in that window must still stop the action. When Phase 3
+        # replaces the stub below with a real connector call, this check and
+        # the chunk boundary inside it are what bound the stop latency to one
+        # action rather than one batch.
+        try:
+            kill_switch.raise_if_engaged(input.tenant_id)
+        except KillSwitchEngaged as halt:
+            return KaryaOutput(
+                action_id=input.action_id,
+                status="denied",
+                error=f"kill_switch_engaged: {halt.reason}",
+                notes="Halted after token validation and before any mutation.",
             )
 
         # Token valid. Phase 3+ would now dispatch to the typed action
