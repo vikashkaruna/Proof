@@ -50,6 +50,8 @@ User direction: local Docker Desktop hosts the isolated real Supabase parity sta
 
 ## W0 milestone: real local Auth/PostgREST parity and migration runner
 
+Committed as `2a75c15` and pushed to staging. Its real Auth/PostgREST parity CI job passed. The separate migration-runner regression job exposed a missing `rg` executable on the Ubuntu runner; assertions were switched to portable `grep`, with a follow-up CI run required for the complete lane.
+
 An isolated Docker Desktop Supabase project `axiom-w0-parity` is running on API port 56321 (database 56322). Existing `axiom-proof` and other local projects were preserved. `scripts/start-parity-supabase.sh` starts this project without demo seeds; credentials/logs remain in ignored, protected `.axiom-runtime/parity` state.
 
 The real startup found an incompatibility hidden by SQL fixtures: historical migration 0000 touches Auth-owned tables and cannot run under the CLI's restricted migration role. `scripts/migrate-database.py` applies unchanged files after Supabase initializes, using its administration role. It serializes runners, records source checksums, makes each migration/tracker write atomic and refuses changed history. Database regressions prove second-run no-ops, checksum refusal and rollback of injected failing DDL. No applied migration was rewritten.
