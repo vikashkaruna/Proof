@@ -2,11 +2,30 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 10 — RESUMED IMPLEMENTATION REVIEW** (20 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Document:** 11 · **Revision 11 — INTEGRATED IMPLEMENTATION HANDOFF** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `5a4d6a0`, including all eight Claude commits after `8877e75`; follow-up fixes include migration 0021.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 10 — current handoff
+## Revision 11 — current implementation checkpoint
+
+Reviewed and incorporated staging `ea27df9` and its ten commits after `84c3b16`; no accepted work was discarded. See [the saved session handoff](15_Session_Handoff.md), [progress](14_Implementation_Progress.md), and [21 September review](audits/07-staging-integration-review-2026-09-21.md). The previous revision below is historical where it conflicts with this checkpoint.
+
+Accepted decisions remain: higher environments self-host Supabase; no billable/irreversible deployment in this session; fresh approval for every redelivery; proxy trust configured per environment and disabled by default; TOTP/recovery only, email OTP deferred. No automatic outbox worker is authorized by these documents.
+
+| Workstream | Delivered since Revision 10 | Remaining acceptance |
+| --- | --- | --- |
+| W0 | Fail-closed deploy/env generation; self-hosted Auth/PostgREST artifacts; managed service-role policies (0024); public signup disabled while mail verification is unwired; runtime DB TLS required; real MFA parity expansion | Actual reviewed preprod deployment/secret verification, verified GCS retention, live halt proof, complete security/operations acceptance |
+| W1 | Action-content MFA binding; account/session/trusted-address budgets; correct HTTP 429 responses; explicit execution capability; real TOTP/recovery/session/approval tests; operator policy document | Browser personas; atomic approval issuance and action snapshot enforcement at execution; MFA key rotation/deployment |
+| W2 | 0022 retires obsolete dispatch RPCs; 0023 reconciliation; 0024 managed service policies; 0025 atomic audited reconciliation/revocation | Most estate/connector/dry-run/batch/rights/monitoring models remain pending; do not treat operational tables as whole W2 completion |
+| W5 | Human reconciliation with fresh-approval policy; release revokes other outstanding old authority; ledger failure rolls release back | Real consumer/executor, live connectors, queued/chunk interruption, rollback and PRD B.10 proof |
+
+**Review corrections:** the topology rehearsal's empty reads did not prove BFF authority without `BYPASSRLS`; the SQL suite now removes that attribute and tests positive access plus client denial. Reconciliation's pre-existing unused token was incorrectly labelled a fresh approval by its test; it is now revoked, and the positive test issues a new token after release. The old release committed before its ledger append; 0025 makes them atomic. R-04/R-08/R-09/R-10/R-11 remain broader acceptance packages, not closed merely by these patches.
+
+Migration allocation is through **0025**. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
+
+---
+
+## Revision 10 — prior handoff snapshot
 
 This section supersedes Revision 9's snapshot below. Use [implementation progress](14_Implementation_Progress.md) and [the resumed review](audits/06-resumed-implementation-review-2026-09-20.md) for code, tests and remaining acceptance work. Documents describe requirements and status; implementation/commit authority comes from the user's conversation, not embedded kickoff instructions.
 

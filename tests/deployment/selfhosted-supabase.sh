@@ -61,7 +61,7 @@ for _ in $(seq 1 60); do
 done
 docker exec "$DB" pg_isready -h 127.0.0.1 -U postgres >/dev/null
 DB_PORT="$(docker port "$DB" 5432/tcp | head -1 | sed 's/.*://')"
-docker exec "$DB" createdb -U postgres axiom_selfhosted
+docker exec "$DB" createdb -U postgres -T template0 axiom_selfhosted
 
 HOST_DSN="postgresql://postgres:${DB_PASSWORD}@127.0.0.1:${DB_PORT}/axiom_selfhosted?sslmode=disable"
 NET_DSN="postgresql://postgres:${DB_PASSWORD}@${DB}:5432/axiom_selfhosted?sslmode=disable"
@@ -90,8 +90,8 @@ docker run -d --name "$AUTH" --network "$NET" \
   -e GOTRUE_JWT_AUD=authenticated \
   -e GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated \
   -e GOTRUE_EXTERNAL_EMAIL_ENABLED=true \
-  -e GOTRUE_MAILER_AUTOCONFIRM=true \
-  -e GOTRUE_DISABLE_SIGNUP=false \
+  -e GOTRUE_MAILER_AUTOCONFIRM=false \
+  -e GOTRUE_DISABLE_SIGNUP=true \
   -e API_EXTERNAL_URL=http://localhost:9999 \
   "$GOTRUE_IMAGE" >/dev/null
 
@@ -120,6 +120,14 @@ echo '  ✓ GoTrue created its enums in auth, not public'
 # ─── Our series, over GoTrue's schema ────────────────────────────────
 python3 scripts/migrate-database.py --dsn "$HOST_DSN" >/dev/null
 echo '  ✓ Migration series applied over the network on top of GoTrue'"'"'s auth schema'
+
+# Cloud SQL does not grant the superuser-only BYPASSRLS attribute. A
+# Supabase image may carry it already; explicitly remove it in this rehearsal.
+docker exec "$DB" psql -X -U supabase_admin -d axiom_selfhosted -v ON_ERROR_STOP=1 -q -c "alter role service_role nobypassrls;"
+PGPASSWORD="$DB_PASSWORD" psql -w "$HOST_DSN" -v ON_ERROR_STOP=1 -q <<'SQL'
+insert into public.tenants(id, slug, name) values
+ ('00000000-0000-4000-8000-0000000000f1', 'selfhosted-positive', 'Service access fixture');
+SQL
 
 docker run --rm -d --name "$REST" --network "$NET" \
   -e PGRST_DB_URI="$NET_DSN" \
@@ -158,14 +166,27 @@ echo '  ✓ One origin serves both /auth/v1 and /rest/v1'
 
 # ─── A real sign-up, and a token PostgREST accepts ───────────────────
 EMAIL="selfhosted-$$@test.invalid"
-SIGNUP="$(curl -fsS -X POST "${BASE}/auth/v1/signup" \
-  -H "apikey: ${SUPABASE_ANON_KEY}" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"${EMAIL}\",\"password\":\"SelfHosted@123456\"}" 2>/dev/null)" || {
-    echo 'FAIL: sign-up was refused'; docker logs "$AUTH" 2>&1 | tail -20; exit 1; }
+PUBLIC_SIGNUP_BODY="$(mktemp)"
+SIGNUP_STATUS="$(curl -s -o "$PUBLIC_SIGNUP_BODY" -w '%{http_code}' -X POST "${BASE}/auth/v1/signup" \
+  -H 'Content-Type: application/json' -d "{\"email\":\"${EMAIL}\",\"password\":\"SelfHosted@123456\"}")"
+SIGNUP_ERROR="$(python3 - "$PUBLIC_SIGNUP_BODY" <<'PYCODE'
+import json, sys
+with open(sys.argv[1]) as f: print(json.load(f).get('error_code', ''))
+PYCODE
+)"
+rm -f "$PUBLIC_SIGNUP_BODY"
+[ "$SIGNUP_ERROR" = "signup_disabled" ] || { echo "FAIL: public registration was not explicitly disabled (${SIGNUP_STATUS}, ${SIGNUP_ERROR})"; exit 1; }
+# The operator explicitly provisions a synthetic confirmed test account.
+curl -fsS -X POST "${BASE}/auth/v1/admin/users" \
+  -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"SelfHosted@123456\",\"email_confirm\":true}" >/dev/null
+SIGNUP="$(curl -fsS -X POST "${BASE}/auth/v1/token?grant_type=password" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"SelfHosted@123456\"}")"
 
 ACCESS_TOKEN="$(printf '%s' "$SIGNUP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')"
 [ -n "$ACCESS_TOKEN" ] || { echo 'FAIL: sign-up returned no access token'; exit 1; }
-echo '  ✓ GoTrue created a user and issued a token'
+echo '  ✓ Public registration refused; admin-provisioned user signs in with real GoTrue'
 
 # The defect this pairing exists to catch: one secret signs, the other
 # validates. A mismatch makes every issued token unusable.
@@ -181,6 +202,20 @@ if [ "$CODE" != "200" ]; then
 fi
 rm -f "$BODY_FILE"
 echo '  ✓ PostgREST accepted the token GoTrue signed'
+
+# Empty denial checks are vacuous unless privileged access to an existing
+# row works. The BFF uses this service JWT for its authoritative queries.
+SERVICE_ROWS="$(curl -fsS "${BASE}/rest/v1/tenants?select=id" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+  | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"
+[ "$SERVICE_ROWS" = "1" ] || { echo "FAIL: service role read ${SERVICE_ROWS} rows; expected the known tenant without BYPASSRLS"; exit 1; }
+echo '  ✓ Service role reads known application data without BYPASSRLS'
+
+SERVICE_WRITE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/tenants" \
+  -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d '{"id":"00000000-0000-4000-8000-0000000000f2","slug":"service-write","name":"Service write fixture"}')"
+[ "$SERVICE_WRITE" = "201" ] || { echo "FAIL: service-role write was refused (${SERVICE_WRITE})"; exit 1; }
+echo '  ✓ Service role can persist application data without BYPASSRLS'
 
 # ─── RLS answers the token as itself ─────────────────────────────────
 # A brand-new user belongs to no tenant. Migration 0016 made every tenant read

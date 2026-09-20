@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { generateTotp } from '@axiom/mfa';
-import { UserRole } from '@axiom/types';
+import { UserRole, Capability, rolesWith } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
 
@@ -75,7 +75,7 @@ function seedApprovablePlan() {
   }
 }
 
-async function buildApp() {
+async function buildApp(role: UserRole = UserRole.APPROVER) {
   const { v1Routes } = await import('./v1.js');
 
   ledgerAppend = vi.fn(async () => ({ sequenceNo: 1, entryHash: 'hash' }));
@@ -100,7 +100,7 @@ async function buildApp() {
   app.use('*', async (c, next) => {
     c.set('user', { id: USER, email: 'approver@example.com' } as never);
     c.set('tenantId', TENANT as never);
-    c.set('role', UserRole.APPROVER as never);
+    c.set('role', role);
     c.set('approvalScopes', [] as never);
     c.set('idempotencyKey', 'idem-1' as never);
     await next();
@@ -302,7 +302,7 @@ describe('dry-run expiry at both safety gates', () => {
       status: 'issued',
     });
 
-    const app = await buildApp();
+    const app = await buildApp(UserRole.OWNER);
     const response = await post(
       app,
       `/v1/plans/${PLAN}/execute`,
@@ -353,7 +353,7 @@ describe('dry-run expiry at both safety gates', () => {
       status: 'issued',
     });
 
-    const app = await buildApp();
+    const app = await buildApp(UserRole.OWNER);
     const response = await post(
       app,
       `/v1/plans/${PLAN}/execute`,
@@ -396,7 +396,7 @@ describe('dry-run expiry at both safety gates', () => {
         nonce: 'nonce-execute',
         status: 'issued',
       });
-      const app = await buildApp();
+      const app = await buildApp(UserRole.OWNER);
       const response = await post(
         app,
         `/v1/plans/${PLAN}/execute`,
@@ -558,5 +558,16 @@ describe('POST /v1/plans/approve — the binding covers action content', () => {
     expect((await res.json()) as { error: { code: string } }).toMatchObject({
       error: { code: 'actions_not_found' },
     });
+  });
+});
+
+describe('execution capability boundary', () => {
+  it.each(
+    Object.values(UserRole).filter((role) => !rolesWith(Capability.PLAN_EXECUTE).includes(role)),
+  )('refuses %s before processing an execution token', async (role) => {
+    const app = await buildApp(role);
+    const response = await post(app, `/v1/plans/${PLAN}/execute`, '{}');
+    expect(response.status).toBe(403);
+    expect(ledgerAppend).not.toHaveBeenCalled();
   });
 });

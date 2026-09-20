@@ -145,16 +145,16 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
         name  = "GOTRUE_EXTERNAL_EMAIL_ENABLED"
         value = "true"
       }
-      # Preprod has no outbound mailer wired, so a signup that waited for a
-      # confirmation link could never complete. This is deliberately NOT how
-      # production should be configured.
+      # A missing mailer must not turn an unverified address into a verified
+      # identity. Until invitations/SMTP are configured, provision test users
+      # through the authenticated admin API; public registration is disabled.
       env {
         name  = "GOTRUE_MAILER_AUTOCONFIRM"
-        value = "true"
+        value = "false"
       }
       env {
         name  = "GOTRUE_DISABLE_SIGNUP"
-        value = "false"
+        value = "true"
       }
     }
   }

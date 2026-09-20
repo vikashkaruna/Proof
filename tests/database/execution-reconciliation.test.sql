@@ -103,6 +103,30 @@ select pg_temp.assert_true(
     where execution_request_key = 'req-recon-1' and execution_status = 'executing'),
   'refused reconciliations leave the claim alone');
 
+-- Inject a ledger failure and prove the entire judgement rolls back.
+create function pg_temp.reject_reconcile_ledger() returns trigger language plpgsql as $$
+begin
+ if new.action_type = 'execution.dispatch.reconciled' then raise exception 'test ledger unavailable'; end if;
+ return new;
+end $$;
+create trigger fail_reconciliation_ledger before insert on public.audit_ledger
+ for each row execute function pg_temp.reject_reconcile_ledger();
+do $$ begin
+ perform public.reconcile_execution_dispatch(
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
+  'req-recon-1', 'released', 'test release', '00000000-0000-0000-0000-0000000000a9');
+ raise exception 'ASSERTION FAILED: release succeeded without ledger';
+exception when others then
+ if sqlerrm <> 'test ledger unavailable' then raise; end if;
+end $$;
+drop trigger fail_reconciliation_ledger on public.audit_ledger;
+select pg_temp.assert_true((select status = 'unknown' from public.execution_dispatch_outbox
+ where request_key = 'req-recon-1'), 'ledger failure preserves unresolved intent');
+select pg_temp.assert_true((select count(*) = 2 from public.remediation_actions
+ where execution_request_key = 'req-recon-1' and execution_status = 'executing'), 'ledger failure preserves claims');
+select pg_temp.assert_eq((select status::text from public.approval_tokens
+ where id = '00000000-0000-0000-0000-0000000000e3'), 'issued', 'ledger failure rolls back token revocation');
+
 -- ─── Released: the operator asserts nothing ran ──────────────────────
 select pg_temp.assert_eq(
   public.reconcile_execution_dispatch(
@@ -148,11 +172,25 @@ select pg_temp.assert_eq(
     'req-recon-1', 'released', 'again', '00000000-0000-0000-0000-0000000000a9')->>'decision',
   'not_reconcilable', 'a judgement already recorded is not revisited');
 
+-- A token issued BEFORE reconciliation is not a fresh approval, even when
+-- it was never consumed. The old suite incorrectly called this token fresh.
+select pg_temp.assert_eq((select status::text from public.approval_tokens
+ where id = '00000000-0000-0000-0000-0000000000e3'), 'revoked', 'outstanding old authority is revoked');
+select pg_temp.assert_true((select count(*) = 1 from public.audit_ledger
+ where action_type = 'execution.dispatch.reconciled' and target_ref = '00000000-0000-0000-0000-0000000000c3'),
+ 'release and ledger judgment commit together');
+
+-- Simulate a genuinely new approval, issued after reconciliation.
+insert into public.approval_tokens(id, tenant_id, plan_id, action_ids, approver_id, mode,
+ signature, signed_payload, nonce, expires_at, status)
+select '00000000-0000-0000-0000-0000000000e4', tenant_id, plan_id, action_ids, approver_id,
+ mode, 'new-sig', signed_payload, 'new-approval-after-reconcile', expires_at, 'issued'
+ from public.approval_tokens where id = '00000000-0000-0000-0000-0000000000e3';
 -- A FRESH approval can claim the released work.
 select pg_temp.assert_eq(
   public.claim_plan_execution(
     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-    '00000000-0000-0000-0000-0000000000e3',
+    '00000000-0000-0000-0000-0000000000e4',
     array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[],
     'req-recon-2')->>'decision',
   'claimed', 'released work is claimable again under a new approval');

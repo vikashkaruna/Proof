@@ -476,6 +476,18 @@ export function v1Routes(deps: Deps) {
     });
 
     if (!issued.ok) {
+      if (issued.reason === 'rate_limited') {
+        c.header('Retry-After', String(issued.retryAfterSeconds ?? 3600));
+        return c.json(
+          {
+            error: {
+              code: 'rate_limited',
+              message: 'Too many MFA challenge requests. Try again later.',
+            },
+          },
+          429,
+        );
+      }
       return c.json(
         {
           error: {
@@ -543,6 +555,18 @@ export function v1Routes(deps: Deps) {
     });
 
     if (!result.ok) {
+      if (result.reason === 'rate_limited') {
+        c.header('Retry-After', String(result.retryAfterSeconds ?? 3600));
+        return c.json(
+          {
+            error: {
+              code: 'rate_limited',
+              message: 'Too many MFA verification attempts. Try again later.',
+            },
+          },
+          429,
+        );
+      }
       await deps.ledger.append({
         tenantId,
         correlationId: randomUUID(),
@@ -1085,6 +1109,8 @@ export function v1Routes(deps: Deps) {
   // Per ADR-2 / BR-1: no mutating action executes without a valid
   // approval token. The token is validated per-action.
   app.post('/plans/:id/execute', async (c) => {
+    const executeRefusal = requireCapability(c, Capability.PLAN_EXECUTE);
+    if (executeRefusal) return executeRefusal;
     const tenantId = c.get('tenantId');
     if (await deps.killSwitch.isActive(tenantId)) {
       return c.json(
@@ -1595,7 +1621,6 @@ export function v1Routes(deps: Deps) {
     const input = parsed.data;
     const tenantId = c.get('tenantId');
     const user = c.get('user');
-    const correlationId = randomUUID();
 
     const { data, error } = await createSupabaseAdmin().rpc('reconcile_execution_dispatch', {
       p_tenant_id: tenantId,
@@ -1610,7 +1635,11 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'reconcile_failed', message: error.message } }, 500);
     }
 
-    const result = data as { decision?: string; released_action_count?: number } | null;
+    const result = data as {
+      decision?: string;
+      released_action_count?: number;
+      correlation_id?: string;
+    } | null;
     switch (result?.decision) {
       case 'released':
       case 'abandoned':
@@ -1641,31 +1670,11 @@ export function v1Routes(deps: Deps) {
         );
     }
 
-    // The row records the decision; the ledger is the copy an operator cannot
-    // edit afterwards.
-    await deps.ledger.append({
-      tenantId,
-      correlationId,
-      actorType: 'human',
-      actorId: user.id,
-      actionType: LedgerActionType.EXECUTION_DISPATCH_RECONCILED,
-      targetRef: input.planId,
-      result: 'success',
-      detail: {
-        requestKey: input.requestKey,
-        decision: input.decision,
-        reason: input.reason,
-        releasedActionCount: result.released_action_count ?? 0,
-        // Said plainly, because this is the thing a reviewer will want to
-        // know: releasing does not restore the spent approval token.
-        redeliveryRequiresFreshApproval: true,
-      },
-    });
-
+    // Migration 0025 appends the ledger inside the reconciliation transaction.
     return c.json({
       decision: input.decision,
       releasedActionCount: result.released_action_count ?? 0,
-      correlationId,
+      correlationId: result?.correlation_id,
       redeliveryRequiresFreshApproval: true,
     });
   });

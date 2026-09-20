@@ -1,6 +1,6 @@
 # Axiom Proof — implementation handoff
 
-> Current status is [Doc 11 Revision 10](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [audit 06](audits/06-resumed-implementation-review-2026-09-20.md). The original snapshot below predates the resumed staging work. Analyst is committed, email OTP is explicitly deferred, and R01–R11 have mixed closure status rather than blanket completion.
+> Current status is [Doc 11 Revision 11](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [saved session](15_Session_Handoff.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md). The original snapshot below predates the resumed staging work. Analyst is committed, email OTP is explicitly deferred, and R01–R11 have mixed closure status rather than blanket completion.
 
 **As of 20 September 2026 · reviewed source: `2c54fcd` plus three uncommitted analyst files.**
 
