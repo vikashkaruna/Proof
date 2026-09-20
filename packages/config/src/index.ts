@@ -19,6 +19,26 @@ const AUTH_BYPASS_ENVIRONMENTS = new Set<string>(['local', 'test']);
  */
 const HARDENED_ENVIRONMENTS = new Set<string>(['staging', 'preprod', 'production', 'onprem']);
 
+/**
+ * Recognises secrets that were never meant to leave a developer's machine.
+ *
+ * `.env.staging.example` shipped `APPROVAL_SIGNING_KEY=dev-signing-secret-key-…`
+ * committed to the repository. That key is the HMAC behind the approval-token
+ * gate — the one mechanism standing between a generated plan and execution
+ * against a client estate — so a published value means forgeable approvals.
+ * The length checks on these fields passed happily, because length was never
+ * the problem.
+ *
+ * Mint real values with `node scripts/mint-supabase-keys.mjs`.
+ */
+const PLACEHOLDER_SECRET_PATTERN =
+  /^(dev-|test-|changeme|placeholder|secret$|password$)|placeholder|changeme|your-|xxx|<[^>]+>/i;
+
+function isPlaceholderSecret(value: string | undefined): boolean {
+  if (!value) return false;
+  return PLACEHOLDER_SECRET_PATTERN.test(value);
+}
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
@@ -222,12 +242,29 @@ const EnvSchema = z
           path: ['APPROVAL_SIGNING_KEY'],
           message: 'Required in production; do not use a development signing fallback',
         });
+      } else if (isPlaceholderSecret(env.APPROVAL_SIGNING_KEY)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['APPROVAL_SIGNING_KEY'],
+          message:
+            'Looks like a committed development placeholder. This key signs approval ' +
+            'tokens — a known value means forgeable approvals. Mint one with ' +
+            '`node scripts/mint-supabase-keys.mjs`.',
+        });
       }
       if (!env.AGENT_RUNTIME_INTERNAL_TOKEN) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['AGENT_RUNTIME_INTERNAL_TOKEN'],
           message: 'Required in production for BFF-to-agent authentication',
+        });
+      } else if (isPlaceholderSecret(env.AGENT_RUNTIME_INTERNAL_TOKEN)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AGENT_RUNTIME_INTERNAL_TOKEN'],
+          message:
+            'Looks like a committed development placeholder. Mint one with ' +
+            '`node scripts/mint-supabase-keys.mjs`.',
         });
       }
       if (!env.AGENT_RUNTIME_URL) {
@@ -242,6 +279,14 @@ const EnvSchema = z
           code: z.ZodIssueCode.custom,
           path: ['MODEL_GATEWAY_API_KEY'],
           message: 'Required in production for model-gateway authentication',
+        });
+      } else if (isPlaceholderSecret(env.MODEL_GATEWAY_API_KEY)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['MODEL_GATEWAY_API_KEY'],
+          message:
+            'Looks like a committed development placeholder. Mint one with ' +
+            '`node scripts/mint-supabase-keys.mjs`.',
         });
       }
     }

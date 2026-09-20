@@ -46,7 +46,13 @@ services:
       - GOTRUE_DB_DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres?sslmode=disable
       - GOTRUE_SITE_URL=http://${HOST_IP:-localhost}:3000
       - GOTRUE_URI_ALLOW_LIST=http://${HOST_IP:-localhost}:3000,http://${HOST_IP:-localhost}:3001,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001
-      - GOTRUE_JWT_SECRET=1868ee2c9a5a748f35c145c4eee9edc06e8c55ef5afd6f5e974f57be0aec4eaf
+      # One secret signs tokens here and validates them in PostgREST below.
+      # These were two DIFFERENT hardcoded values, so every token GoTrue issued
+      # would have been rejected by PostgREST — real authentication could not
+      # have worked against this stack. Mint with
+      # `node scripts/mint-supabase-keys.mjs`; no default, so a missing value
+      # fails at `docker compose up` rather than at first login.
+      - GOTRUE_JWT_SECRET=${SUPABASE_JWT_SECRET:?SUPABASE_JWT_SECRET is required — run scripts/mint-supabase-keys.mjs}
       - GOTRUE_JWT_EXP=3600
       - GOTRUE_EXTERNAL_EMAIL_ENABLED=true
       - GOTRUE_MAILER_AUTOCONFIRM=true
@@ -64,7 +70,8 @@ services:
       - PGRST_DB_URI=postgresql://postgres:postgres@supabase-db:5432/postgres
       - PGRST_DB_SCHEMAS=public,graphql_public
       - PGRST_DB_ANON_ROLE=anon
-      - PGRST_JWT_SECRET=5480d1f74d325a46ac18cbd838a83e01cec9c11b3384fb4e1af9c3c9d0cc4faf
+      # Must be the same value GoTrue signs with — see the note there.
+      - PGRST_JWT_SECRET=${SUPABASE_JWT_SECRET:?SUPABASE_JWT_SECRET is required — run scripts/mint-supabase-keys.mjs}
     networks:
       - axiom-network
 

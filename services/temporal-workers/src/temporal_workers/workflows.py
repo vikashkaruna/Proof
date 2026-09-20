@@ -22,6 +22,8 @@ from typing import Any
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 
+from .config import get_settings
+
 
 # ─── Activities — thin wrappers around agent-runtime HTTP calls ──────
 
@@ -32,19 +34,22 @@ async def call_agent_runtime(
     input: dict[str, Any],
     correlation_id: str,
 ) -> dict[str, Any]:
-    """Call an agent via the agent runtime's HTTP API."""
+    """Call an agent via the agent runtime's HTTP API.
+
+    SEC-11: the auth header here was the literal string
+    "{{AGENT_RUNTIME_INTERNAL_TOKEN}}" — a template that nothing ever
+    substituted — and the cluster URL was hardcoded. Both now come from
+    settings, which refuses to start a deployed worker without a real token.
+    """
     import httpx
 
-    runtime_url = activity.info().workflow_type  # not used; for visibility
-    settings_url = "http://agent-runtime.axiom-proof:8000"  # cluster-local
+    settings = get_settings()
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         r = await client.post(
-            f"{settings_url}/agents/{agent}/invoke",
+            f"{settings.agent_runtime_url}/agents/{agent}/invoke",
             json={"correlation_id": correlation_id, "input": input},
-            headers={
-                "X-Internal-Token": "{{AGENT_RUNTIME_INTERNAL_TOKEN}}",  # injected at runtime
-            },
+            headers=settings.internal_headers,
         )
         r.raise_for_status()
         return r.json()
@@ -59,10 +64,15 @@ async def persist_finding(
     """Persist a finding to Supabase. Returns the finding ID."""
     import httpx
 
+    settings = get_settings()
+
     async with httpx.AsyncClient(timeout=30.0) as client:
+        # This call carried no credential at all. /internal endpoints are not
+        # public, and network position is not authentication.
         r = await client.post(
-            "http://agent-runtime.axiom-proof:8000/internal/persist-finding",
+            f"{settings.agent_runtime_url}/internal/persist-finding",
             json={"tenant_id": tenant_id, "engagement_id": engagement_id, "finding": finding},
+            headers=settings.internal_headers,
         )
         r.raise_for_status()
         return r.json()["id"]
@@ -84,13 +94,18 @@ async def wait_for_human_approval(
 
     import httpx
 
+    settings = get_settings()
+
     deadline_seconds = timeout_hours * 3600
     poll_interval = 30
     elapsed = 0
     async with httpx.AsyncClient(timeout=15.0) as client:
         while elapsed < deadline_seconds:
+            # Likewise unauthenticated before W0.0. Plan status discloses
+            # whether an approval token exists for a plan.
             r = await client.get(
-                f"http://agent-runtime.axiom-proof:8000/internal/plan-status/{plan_id}",
+                f"{settings.agent_runtime_url}/internal/plan-status/{plan_id}",
+                headers=settings.internal_headers,
             )
             if r.status_code == 200:
                 status = r.json()

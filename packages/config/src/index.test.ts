@@ -125,6 +125,69 @@ describe('loadEnv', () => {
   });
 });
 
+describe('placeholder secrets are refused in hardened deployments', () => {
+  const good = {
+    NODE_ENV: 'production' as const,
+    ENVIRONMENT: 'staging' as const,
+    SUPABASE_URL: 'https://staging.supabase.co',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+    APPROVAL_SIGNING_KEY: 'k'.repeat(48),
+    AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
+    AGENT_RUNTIME_URL: 'https://agent-runtime.internal',
+    MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+  };
+
+  // The exact value that shipped in .env.staging.example. It passes the length
+  // check, which is why it went unnoticed — length was never the problem.
+  it('refuses the committed dev approval signing key', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        ...good,
+        APPROVAL_SIGNING_KEY: 'dev-signing-secret-key-at-least-32-chars-long-12345',
+      }),
+    ).toThrow(/APPROVAL_SIGNING_KEY/);
+  });
+
+  it.each([
+    'dev-agent-runtime-token-axiom',
+    'changeme-please-this-is-not-a-real-token',
+    '<service-role-jwt>',
+    'placeholder-token-value-here-abcdef',
+    'your-token-goes-here-abcdefghijkl',
+  ])('refuses the placeholder-shaped secret %s', (value) => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...good, AGENT_RUNTIME_INTERNAL_TOKEN: value })).toThrow(
+      /AGENT_RUNTIME_INTERNAL_TOKEN/,
+    );
+  });
+
+  it('refuses the committed dev model-gateway key', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({ ...good, MODEL_GATEWAY_API_KEY: 'dev-model-gateway-key-axiom' }),
+    ).toThrow(/MODEL_GATEWAY_API_KEY/);
+  });
+
+  it('accepts real minted secrets', () => {
+    resetEnvCache();
+    expect(() => loadEnv(good)).not.toThrow();
+  });
+
+  // Developers keep their placeholders; only deployed environments are gated.
+  it('permits placeholder secrets in local', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        ...good,
+        ENVIRONMENT: 'local',
+        APPROVAL_SIGNING_KEY: 'dev-signing-secret-key-at-least-32-chars-long-12345',
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe('resolveAuthMode — W0.0 · SEC-1 · SEC-2 · SEC-13', () => {
   const base = {
     SUPABASE_URL: 'http://localhost:54321',

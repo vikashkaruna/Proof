@@ -74,6 +74,21 @@ jobs:
           name: coverage-agent-runtime
           path: services/agent-runtime/coverage.xml
 
+  test-python-temporal:
+    name: Python (temporal workers) tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: uv sync --extra dev
+        working-directory: services/temporal-workers
+      - run: uv run pytest
+        working-directory: services/temporal-workers
+
   test-python-gateway:
     name: Python (model gateway) tests
     runs-on: ubuntu-latest
@@ -127,7 +142,7 @@ jobs:
   build-images:
     name: Build container images
     runs-on: ubuntu-latest
-    needs: [test-ts, test-python-runtime, test-python-gateway]
+    needs: [test-ts, test-python-runtime, test-python-temporal, test-python-gateway]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
