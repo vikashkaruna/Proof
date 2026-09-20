@@ -2,10 +2,32 @@ export * from './types';
 export {
   controls,
   CONTROL_LIBRARY_COUNT,
+  CONTROL_LIBRARY_DOMAIN_COUNT,
   LIBRARY_VERSION,
   LIBRARY_PUBLISHED_AT,
   LIBRARY_PUBLISHER,
   LIBRARY_CHANGELOG,
+  LIBRARY_BASELINE,
+  LIBRARY_DEFAULT_EFFECTIVE_FROM,
   validateLibrary,
 } from './controls';
+export {
+  BASELINE_CODE,
+  BASELINE_DECLARED_ON,
+  BASELINE_DECLARED_BY,
+  BASELINE_INSTRUMENT_CODES,
+  COMMENCEMENT,
+  DPDP_RULES_2025,
+  DPDP_SCHEDULES_2025,
+  PROPOSED_INSTRUMENTS,
+  REGULATORY_INSTRUMENTS,
+  commencementFor,
+  ruleByNumber,
+  rulesCitedIn,
+} from './regulatory-baseline';
+export type {
+  InstrumentStatus,
+  RegulatoryInstrument,
+  RegulatoryProvision,
+} from './regulatory-baseline';
 export { buildLibrarySeed } from './seed';

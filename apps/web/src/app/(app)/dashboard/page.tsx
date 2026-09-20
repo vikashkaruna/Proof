@@ -1,3 +1,4 @@
+import { CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
 import Link from 'next/link';
 import { createSupabaseAdmin } from '@axiom/supabase';
 
@@ -333,7 +334,7 @@ export default async function DashboardPage() {
           },
           {
             agent: 'Parikshan',
-            text: 're-scored 43 controls after last remediation',
+            text: `re-scored ${CONTROL_LIBRARY_COUNT} controls after last remediation`,
             dot: '#1E2A4A',
             pulse: false,
             time: '12 min ago',

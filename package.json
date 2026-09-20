@@ -48,7 +48,8 @@
     "env:verify:all": "./scripts/sync-env.sh preprod verify && ./scripts/sync-env.sh staging verify && ./scripts/sync-env.sh local verify && ./scripts/sync-env.sh production verify",
     "env:tf": "./scripts/sync-env.sh preprod terraform",
     "env:secrets": "./scripts/sync-env.sh preprod secrets",
-    "env:sync": "./scripts/sync-env.sh preprod all"
+    "env:sync": "./scripts/sync-env.sh preprod all",
+    "gate:controls": "./scripts/check-control-count.sh"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

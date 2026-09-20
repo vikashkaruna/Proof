@@ -177,7 +177,7 @@ ls services/agent-runtime/src/axiom/agents/ 2>/dev/null
 #           sudhaar.py, karya.py, lekha.py, nazar.py,
 #           prativedan.py, sanket.py
 
-# Confirm 43 controls in the library
+# Confirm the control count matches CONTROL_LIBRARY_COUNT (derived, currently 46)
 grep -c "^    id: '" packages/control-library/src/controls.ts
 # Expected: 43
 ```
@@ -201,7 +201,7 @@ grep -l "10 named agents\|10 agents" \
   README.md
 
 # Control count cross-check
-echo "Doc claim: 43 controls"
+echo "Doc claim: 46 controls"
 echo "Code: $(grep -c "^    id: '" packages/control-library/src/controls.ts)"
 
 # Stray `any` (should be near zero after Phase 3 fixes)

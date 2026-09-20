@@ -1112,7 +1112,7 @@ The web application (`http://localhost:3001`) implements the authoritative styli
 #### 3. Core Application Views Implemented
 
 1. **Dashboard (`/dashboard`)**:
-   - 74/100 Posture Score hero card, progress bar, 32/43 controls passing, ▲ +6 trend.
+   - 74/100 Posture Score hero card, progress bar, 32/46 controls passing, ▲ +6 trend.
    - 6 KPI metric cards (Open gaps, Pending approvals, Evidence sealed, Open DSARs, Consents live, Ledger entries).
    - Open gaps by domain distribution bars.
    - Pending approvals quick-action cards.

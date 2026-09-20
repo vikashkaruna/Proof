@@ -10,7 +10,7 @@
 
 ## A.1 Business context
 
-India's Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025 (notified 13/14 November 2025) impose substantive obligations on every entity processing digital personal data in India, with full enforcement from **13/14 May 2027** and penalties up to **₹250 crore per contravention**. Indian mid-market enterprises — 200 to 1,000 employees, ₹50–500 crore revenue — are structurally the worst-served segment: they carry the same penalty exposure as large enterprises but have neither a privacy team nor the budget for ₹25 lakh-plus enterprise compliance suites, and existing sub-₹1 lakh tools address only consent banners, a single control out of forty-three.
+India's Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025 (G.S.R. 846(E), notified 13 November 2025) impose substantive obligations on every entity processing digital personal data in India, with full enforcement of the core obligations from **13 May 2027** and penalties up to **₹250 crore per contravention**. Indian mid-market enterprises — 200 to 1,000 employees, ₹50–500 crore revenue — are structurally the worst-served segment: they carry the same penalty exposure as large enterprises but have neither a privacy team nor the budget for ₹25 lakh-plus enterprise compliance suites, and existing sub-₹1 lakh tools address only consent banners, a single control out of forty-six.
 
 The unsolved problem is not _knowing_ what's wrong. Roughly forty vendors will run a gap assessment, most of them free. The unsolved problem is **doing the remediation work and producing continuous, defensible proof of it** — which today is done manually by expensive consultants or not at all.
 
