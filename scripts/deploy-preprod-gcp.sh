@@ -47,11 +47,15 @@ FROM_PHASE=""
 SKIP_BUILD=false
 FORCE_BUILD=false
 SKIP_MIGRATE=false
+SEED_IDENTITIES=false
 SKIP_FIREBASE=false
 DRY_RUN=false
 FORCE_HEAL=false
 
 ENV_FILE_OVERRIDE=""
+PROJECT_ID_EXPLICIT=false
+REGION_EXPLICIT=false
+ENV_EXPLICIT=false
 
 # CLI Help
 show_help() {
@@ -78,6 +82,8 @@ Options:
   --skip-build        Skip container image building (use existing Artifact Registry images)
   --force-build       Force rebuilding and pushing all container images
   --skip-migrate      Skip database migrations and seeding
+  --seed-identities   Also seed representative tenants and persona logins
+                        (fixed passwords; refused for production)
   --skip-firebase     Skip Firebase static hosting deployment
   --dry-run           Perform terraform plan without mutating infrastructure
   --heal-state        Force check and prune stale/orphaned Cloud SQL state references
@@ -122,6 +128,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-migrate)
       SKIP_MIGRATE=true
+      shift
+      ;;
+    --seed-identities)
+      SEED_IDENTITIES=true
       shift
       ;;
     --skip-firebase)
@@ -175,6 +185,16 @@ load_preprod_env() {
     fi
   done
 
+  if [ -z "$loaded_file" ]; then
+    # Previously this fell through in silence and the deploy continued on
+    # whatever happened to be in the ambient environment, which on a clean
+    # runner is nothing at all.
+    fail "No environment file found. Looked for:"
+    printf "    %s\n" "${candidate_files[@]}"
+    echo "  Create one with: ./scripts/sync-env.sh ${ENV} scaffold"
+    exit 1
+  fi
+
   if [ -n "$loaded_file" ]; then
     info "Loading preprod environment variables from: ${loaded_file}"
     # Read variables safely
@@ -190,33 +210,32 @@ load_preprod_env() {
     pass "Environment variables loaded from $(basename "$loaded_file")"
   fi
 
-  # Map preprod environment variables to Terraform TF_VAR_* equivalents
-  if [ -n "${UPSTASH_REDIS_URL:-}" ]; then export TF_VAR_upstash_redis_url="${UPSTASH_REDIS_URL}"; fi
-  if [ -n "${REDIS_URL:-}" ] && [ -z "${TF_VAR_upstash_redis_url:-}" ]; then export TF_VAR_upstash_redis_url="${REDIS_URL}"; fi
-  if [ -n "${TEMPORAL_ADDRESS:-}" ]; then export TF_VAR_temporal_address="${TEMPORAL_ADDRESS}"; fi
-  if [ -n "${TEMPORAL_NAMESPACE:-}" ]; then export TF_VAR_temporal_namespace="${TEMPORAL_NAMESPACE}"; fi
-  if [ -n "${TEMPORAL_API_KEY:-}" ]; then export TF_VAR_temporal_api_key="${TEMPORAL_API_KEY}"; fi
-  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then export TF_VAR_anthropic_api_key="${ANTHROPIC_API_KEY}"; fi
-  if [ -n "${OPENAI_API_KEY:-}" ]; then export TF_VAR_openai_api_key="${OPENAI_API_KEY}"; fi
-  if [ -n "${GEMINI_API_KEY:-}" ]; then export TF_VAR_gemini_api_key="${GEMINI_API_KEY}"; fi
-  if [ -n "${GOOGLE_API_KEY:-}" ] && [ -z "${TF_VAR_gemini_api_key:-}" ]; then export TF_VAR_gemini_api_key="${GOOGLE_API_KEY}"; fi
-  if [ -n "${APPROVAL_SIGNING_KEY:-}" ]; then export TF_VAR_approval_signing_key="${APPROVAL_SIGNING_KEY}"; fi
-  if [ -n "${AGENT_RUNTIME_INTERNAL_TOKEN:-}" ]; then export TF_VAR_agent_runtime_internal_token="${AGENT_RUNTIME_INTERNAL_TOKEN}"; fi
-  if [ -n "${MODEL_GATEWAY_API_KEY:-}" ]; then export TF_VAR_model_gateway_api_key="${MODEL_GATEWAY_API_KEY}"; fi
-  if [ -n "${RESEND_API_KEY:-}" ]; then export TF_VAR_resend_api_key="${RESEND_API_KEY}"; fi
-  if [ -n "${CONTACT_RECIPIENT_EMAIL:-}" ]; then export TF_VAR_contact_recipient_email="${CONTACT_RECIPIENT_EMAIL}"; fi
-  if [ -n "${CLOUD_SQL_TIER:-}" ]; then export TF_VAR_cloud_sql_tier="${CLOUD_SQL_TIER}"; fi
+  # Terraform variables are NOT mapped here any more.
+  #
+  # This function used to export TF_VAR_* one `if` per line. It covered 15 of
+  # the 23 variables preprod declares, so the rest silently took their
+  # Terraform defaults — including `mfa_encryption_key`, which meant an
+  # operator who set AXIOM_MFA_ENCRYPTION_KEY in .env.preprod had it ignored
+  # while Terraform minted a different random key into Secret Manager, and
+  # `retention_days`, which could put a test-length COMPLIANCE lock on an
+  # evidence bucket that documentation described as seven years.
+  #
+  # scripts/sync-env.sh now generates terraform.tfvars from the same .env,
+  # driven by variables.tf so a newly declared variable is a build failure
+  # rather than a silent default. See scripts/check-tfvars-coverage.sh.
   if [ -n "${GCP_PROJECT_ID:-}" ]; then PROJECT_ID="${GCP_PROJECT_ID}"; fi
+  if [ -n "${AXIOM_PROJECT_ID:-}" ]; then PROJECT_ID="${AXIOM_PROJECT_ID}"; fi
   if [ -n "${GCP_REGION:-}" ]; then REGION="${GCP_REGION}"; fi
+  if [ -n "${AXIOM_REGION:-}" ]; then REGION="${AXIOM_REGION}"; fi
   if [ -n "${ENVIRONMENT:-}" ]; then ENV="${ENVIRONMENT}"; fi
 }
 
 load_preprod_env
 
 # Assign positional overrides if supplied (positionals take precedence over .env)
-if [ ${#POSITIONAL_ARGS[@]} -ge 1 ]; then PROJECT_ID="${POSITIONAL_ARGS[0]}"; fi
-if [ ${#POSITIONAL_ARGS[@]} -ge 2 ]; then REGION="${POSITIONAL_ARGS[1]}"; fi
-if [ ${#POSITIONAL_ARGS[@]} -ge 3 ]; then ENV="${POSITIONAL_ARGS[2]}"; fi
+if [ ${#POSITIONAL_ARGS[@]} -ge 1 ]; then PROJECT_ID="${POSITIONAL_ARGS[0]}"; PROJECT_ID_EXPLICIT=true; fi
+if [ ${#POSITIONAL_ARGS[@]} -ge 2 ]; then REGION="${POSITIONAL_ARGS[1]}"; REGION_EXPLICIT=true; fi
+if [ ${#POSITIONAL_ARGS[@]} -ge 3 ]; then ENV="${POSITIONAL_ARGS[2]}"; ENV_EXPLICIT=true; fi
 
 # Phase Execution Order Mapping
 PHASES=("prep" "base" "db" "images" "services" "migrate" "firebase" "verify")
@@ -255,13 +274,35 @@ echo -e "  Image Tag:         ${BOLD}${CYAN}${IMAGE_TAG}${NC}"
 echo -e "  Skip Build:        ${BOLD}${CYAN}${SKIP_BUILD}${NC}"
 echo -e "  Dry Run (Plan):    ${BOLD}${CYAN}${DRY_RUN}${NC}\n"
 
+# ─── Phase 0: the configuration this deployment will use ──────────────────────
+# Runs before every phase, including a single --phase run, because no phase is
+# safe to execute on a configuration nobody checked. `verify` is a gate: a
+# missing or placeholder value stops the deployment here rather than producing
+# a half-configured environment that reports success.
+step_header "0/8" "Configuration audit and Terraform variable generation"
+if ! ./scripts/sync-env.sh "$ENV" verify; then
+  fail "Configuration for '${ENV}' is incomplete. Nothing was deployed."
+  echo "  Fix the values above in infra/docker/environments/.env.${ENV}, then re-run."
+  echo "  New keys can be pulled in with: ./scripts/sync-env.sh ${ENV} scaffold"
+  exit 1
+fi
+# Writes infra/terraform/envs/<env>/terraform.tfvars from the same .env, driven
+# by variables.tf so nothing can declare a variable this never fills.
+./scripts/sync-env.sh "$ENV" terraform
+pass "Configuration verified and propagated to Terraform"
+
 # Helper for terraform variable arguments
+# Only values a human typed on the command line are passed as -var. Everything
+# else comes from terraform.tfvars, which sync-env.sh generated from the .env.
+# Passing them unconditionally would mean this script's own defaults silently
+# overrode the configuration file it had just been told to read.
 get_tf_vars() {
-  local vars=("-var=project_id=${PROJECT_ID}" "-var=region=${REGION}" "-var=environment=${ENV}")
-  if [ -n "$CLOUD_SQL_TIER" ]; then
-    vars+=("-var=cloud_sql_tier=${CLOUD_SQL_TIER}")
-  fi
-  echo "${vars[@]}"
+  local vars=()
+  [ "$PROJECT_ID_EXPLICIT" = true ] && vars+=("-var=project_id=${PROJECT_ID}")
+  [ "$REGION_EXPLICIT" = true ] && vars+=("-var=region=${REGION}")
+  [ "$ENV_EXPLICIT" = true ] && vars+=("-var=environment=${ENV}")
+  [ -n "$CLOUD_SQL_TIER" ] && vars+=("-var=cloud_sql_tier=${CLOUD_SQL_TIER}")
+  echo "${vars[@]:-}"
 }
 
 # Self-Healing Cloud SQL State Resolver
@@ -379,9 +420,19 @@ if should_run_phase "prep"; then
     "vpcaccess.googleapis.com"
     "storage.googleapis.com"
   )
+  # `|| true` here meant a failure to enable an API surfaced three phases later
+  # as an obscure permission error from Terraform, with nothing pointing back
+  # to the cause.
+  failed_apis=()
   for api in "${REQUIRED_APIS[@]}"; do
-    gcloud services enable "$api" --project="$PROJECT_ID" --quiet 2>/dev/null || true
+    gcloud services enable "$api" --project="$PROJECT_ID" --quiet >/dev/null 2>&1 || failed_apis+=("$api")
   done
+  if [ ${#failed_apis[@]} -gt 0 ]; then
+    fail "Could not enable required Google Cloud APIs on ${PROJECT_ID}:"
+    printf "    %s\n" "${failed_apis[@]}"
+    echo "    Check the account has serviceusage.services.enable and that billing is active."
+    exit 1
+  fi
   pass "Required Google Cloud APIs enabled"
 fi
 
@@ -530,13 +581,30 @@ if should_run_phase "migrate"; then
     DB_PASSWORD=$(terraform output -raw db_password 2>/dev/null || echo "")
     cd "$REPO_ROOT"
 
-    if [ -n "$DB_PUBLIC_IP" ] && [ -n "$DB_PASSWORD" ]; then
-      CONN_STR="postgresql://axiom_admin:${DB_PASSWORD}@${DB_PUBLIC_IP}:5432/axiom_proof_preprod"
-      info "Applying sequential migrations to Cloud SQL (${DB_PUBLIC_IP})..."
-      ./scripts/migrate-cloudsql.sh "$CONN_STR" || warn "Direct migration notice — ensure your client IP is allowed in authorized networks."
-    else
-      warn "Cloud SQL public IP or password not yet resolved; skipping direct migrations."
+    # Both branches used to warn and continue, so phase 8 could report a
+    # healthy preprod on a database that had never been migrated — or had been
+    # migrated by a script that swallowed its own failures. A deployment that
+    # cannot migrate is a deployment that must stop.
+    if [ -z "$DB_PUBLIC_IP" ] || [ -z "$DB_PASSWORD" ]; then
+      fail "Cloud SQL address or password could not be read from Terraform outputs."
+      echo "    The database phase must complete before migrations can run."
+      echo "    Re-run with --from-phase db, or --skip-migrate to defer deliberately."
+      exit 1
     fi
+
+    CONN_STR="postgresql://axiom_admin:${DB_PASSWORD}@${DB_PUBLIC_IP}:5432/axiom_proof_preprod"
+    info "Applying the migration series to Cloud SQL (${DB_PUBLIC_IP})..."
+    SEED_ARGS=()
+    [ "$SEED_IDENTITIES" = true ] && SEED_ARGS+=("--seed-identities")
+    if ! ./scripts/migrate-cloudsql.sh "${SEED_ARGS[@]:-}" "$CONN_STR"; then
+      fail "Migrations failed. The deployed services are running against an"
+      echo "    unmigrated or partially migrated schema."
+      echo "    If the connection was refused, add this host to the instance's"
+      echo "    authorized networks; the runner records nothing on a failure, so"
+      echo "    re-running after fixing access is safe."
+      exit 1
+    fi
+    pass "Migration series applied"
   fi
 fi
 
@@ -550,7 +618,14 @@ if should_run_phase "firebase"; then
     pass "Firebase deployment skipped via --skip-firebase flag"
   else
     info "Deploying marketing site to Firebase Hosting..."
-    ./scripts/deploy-firebase-marketing.sh "${PROJECT_ID}" || warn "Firebase deployment skipped or requires CLI login."
+    # Was `|| warn`, so a failed hosting deploy still reached the success
+    # banner. Use --skip-firebase to leave it out deliberately.
+    if ! ./scripts/deploy-firebase-marketing.sh "${PROJECT_ID}"; then
+      fail "Firebase hosting deployment failed."
+      echo "    Run 'firebase login' if this is a CLI authentication problem,"
+      echo "    or pass --skip-firebase to deploy the backend without it."
+      exit 1
+    fi
   fi
 fi
 
@@ -565,26 +640,43 @@ if should_run_phase "verify"; then
   DB_PUBLIC_IP=$(terraform output -raw cloud_sql_public_ip 2>/dev/null || echo "")
   cd "$REPO_ROOT"
 
+  # This phase printed "PIPELINE COMPLETE" unconditionally. An unreadable BFF
+  # URL skipped the probe entirely, and a probe that exhausted all twelve
+  # attempts simply fell out of the loop — both reached the same green banner.
+  # The summary then printed a literal "<hash>" placeholder as though it were
+  # a deployed URL. A verification phase that cannot fail verifies nothing.
   if [ "$DRY_RUN" = true ]; then
     pass "Dry-run: skipping live health probes"
-  elif [ -n "$BFF_URL" ]; then
+  else
+    if [ -z "$BFF_URL" ]; then
+      fail "No BFF URL in Terraform outputs; the services phase has not completed."
+      echo "    Re-run with --from-phase services."
+      exit 1
+    fi
     info "Probing Cloud Run BFF health endpoint (${BFF_URL}/health)..."
-    for i in {1..12}; do
-      if curl -fsS "${BFF_URL}/health" >/dev/null 2>&1; then
-        pass "Cloud Run BFF is responsive and healthy"
-        break
-      fi
+    healthy=false
+    for _ in {1..12}; do
+      if curl -fsS "${BFF_URL}/health" >/dev/null 2>&1; then healthy=true; break; fi
       sleep 3
     done
+    if [ "$healthy" != true ]; then
+      fail "The BFF did not report healthy after 12 attempts."
+      echo "    The infrastructure exists but the service is not serving."
+      echo "    Check: gcloud run services logs read axiom-bff-${ENV} --region ${REGION}"
+      exit 1
+    fi
+    pass "Cloud Run BFF is responsive and healthy"
   fi
 
   echo -e "\n${BOLD}${GREEN}=================================================================${NC}"
   echo -e "${BOLD}${GREEN}  ✓ PREPROD DEPLOYMENT PIPELINE COMPLETE!                        ${NC}"
   echo -e "${BOLD}${GREEN}=================================================================${NC}"
-  echo -e "  Web Workbench:       ${CYAN}${WEB_URL:-"https://axiom-web-preprod-<hash>.a.run.app"}${NC}"
-  echo -e "  API Layer (BFF):     ${CYAN}${BFF_URL:-"https://axiom-bff-preprod-<hash>.a.run.app"}${NC}"
-  echo -e "  Cloud SQL IP:        ${CYAN}${DB_PUBLIC_IP:-"Private/Pending"}${NC}"
-  echo -e "  Marketing Site:      ${CYAN}https://${PROJECT_ID}.web.app${NC} / ${CYAN}${MARKETING_URL:-""}${NC}\n"
+  # No placeholder fallbacks: an address that was never read is reported as
+  # unavailable, not as a plausible-looking URL.
+  echo -e "  Web Workbench:       ${CYAN}${WEB_URL:-"(not available from Terraform outputs)"}${NC}"
+  echo -e "  API Layer (BFF):     ${CYAN}${BFF_URL}${NC}"
+  echo -e "  Cloud SQL IP:        ${CYAN}${DB_PUBLIC_IP:-"(not available from Terraform outputs)"}${NC}"
+  echo -e "  Marketing Site:      ${CYAN}https://${PROJECT_ID}.web.app${NC}${MARKETING_URL:+ / ${CYAN}${MARKETING_URL}}${NC}\n"
   echo -e "  ${BOLD}Run Live Functional Flow:${NC}"
   echo -e "  ${CYAN}./scripts/run-preprod-flow.sh \"${BFF_URL}\"${NC}\n"
 fi

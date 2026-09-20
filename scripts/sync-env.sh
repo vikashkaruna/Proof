@@ -45,6 +45,16 @@ info() { echo -e "\n${BOLD}${CYAN}▶ $1${NC}"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; }
 
+ALLOW_SIMULATED=false
+POSITIONAL=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --allow-simulated) ALLOW_SIMULATED=true; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+set -- "${POSITIONAL[@]:-}"
+
 TARGET_ENV="${1:-preprod}"
 ACTION="${2:-verify}"
 
@@ -174,6 +184,10 @@ do_verify() {
     "FEATURE_DRY_RUN_ENGINE:Feature Flags"
     "FEATURE_EXECUTION_ENGINE:Feature Flags"
     "FEATURE_KILL_SWITCH:Feature Flags"
+    # Security posture that varies by topology and must therefore be stated,
+    # not inherited from a default nobody looked at.
+    "AXIOM_MFA_SESSION_TTL_HOURS:Security & Tokens"
+    "AXIOM_TRUSTED_PROXY_HOPS:Security & Tokens"
   )
 
   if [[ "$TARGET_ENV" == "preprod" || "$TARGET_ENV" == "production" ]]; then
@@ -245,67 +259,168 @@ do_verify() {
   echo -e "    ${RED}✗ Missing Keys:${NC}        ${missing_count}"
   echo -e "  ─────────────────────────────────────────────────────────────────"
 
-  if [ "$missing_count" -eq 0 ]; then
-    pass "Configuration schema validation PASSED for environment '${TARGET_ENV}'."
-  else
-    warn "Configuration schema has ${missing_count} missing variables. Review above."
+  # A gate, not a report. This used to print the table and return 0 whatever it
+  # found, so every caller — including `all`, which goes on to write terraform
+  # variables and Cloud Run configuration — proceeded on a configuration it had
+  # just described as incomplete. "Progressively pull values from .env" only
+  # means anything if a value that is missing stops the deployment.
+  local blocking=$((missing_count + warn_count))
+  if [ "$simulated_count" -gt 0 ] && [ "$ALLOW_SIMULATED" != true ]; then
+    blocking=$((blocking + simulated_count))
   fi
+
+  if [ "$blocking" -eq 0 ]; then
+    pass "Configuration schema validation PASSED for environment '${TARGET_ENV}'."
+    return 0
+  fi
+
+  echo ""
+  if [ "$missing_count" -gt 0 ]; then
+    fail "${missing_count} required variable(s) are missing from ${ENV_FILE}."
+  fi
+  if [ "$warn_count" -gt 0 ]; then
+    fail "${warn_count} variable(s) still hold placeholder or ephemeral values."
+  fi
+  if [ "$simulated_count" -gt 0 ] && [ "$ALLOW_SIMULATED" != true ]; then
+    fail "${simulated_count} variable(s) are mock-only. Pass --allow-simulated to accept them."
+    echo -e "  ${DIM}Intended for local, staging and onprem, where LLM, email and Temporal"
+    echo -e "  credentials are deliberately absent. Never for preprod or production.${NC}"
+  fi
+  echo -e "  ${DIM}Nothing was written. Fill ${ENV_FILE} and run again.${NC}"
+  return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. TERRAFORM ACTION
 # ─────────────────────────────────────────────────────────────────────────────
+# Where each Terraform variable gets its value. One place, so a variable that
+# nothing fills is a build failure rather than a silent Terraform default.
+#
+# It is generated FROM variables.tf rather than written as a fixed block,
+# because the environments declare disjoint sets: preprod is GCP (23
+# variables), prod is AWS EKS (4), and emitting one shape into the other
+# produces a tfvars full of undeclared variables that Terraform rejects.
+tfvar_value() {
+  case "$1" in
+    # ── Identity and topology ──
+    project_id)                 get_val "AXIOM_PROJECT_ID" "$(get_val "GCP_PROJECT_ID" "axiom-proof")" ;;
+    region)                     get_val "AXIOM_REGION" "$(get_val "GCP_REGION" "asia-south1")" ;;
+    environment)                echo "$TARGET_ENV" ;;
+    cloud_sql_tier)             get_val "CLOUD_SQL_TIER" "db-f1-micro" ;;
+    cloud_sql_disk_size_gb)     get_val "CLOUD_SQL_DISK_SIZE_GB" "10" ;;
+    cloud_sql_instance_version) get_val "CLOUD_SQL_INSTANCE_VERSION" "POSTGRES_15" ;;
+    cluster_name)               get_val "AXIOM_CLUSTER_NAME" "axiom-proof-prod" ;;
+    vpc_cidr)                   get_val "AXIOM_VPC_CIDR" "10.10.0.0/16" ;;
+    kubernetes_version)         get_val "AXIOM_KUBERNETES_VERSION" "1.29" ;;
+    domain_name)                get_val "AXIOM_DOMAIN_NAME" "axiomproof.ai" ;;
+
+    # ── Evidence retention ──
+    # Applied as a COMPLIANCE-mode Object Lock, which nobody including the
+    # project owner can shorten or delete before it expires. It had no
+    # environment key at all and could only come from the Terraform default,
+    # so a bucket could be created with a test-length retention while the
+    # product documented seven years.
+    retention_days)             get_val "AXIOM_EVIDENCE_RETENTION_DAYS" "7" ;;
+
+    # ── Managed services ──
+    upstash_redis_url)          get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")" ;;
+    temporal_address)           get_val "TEMPORAL_ADDRESS" "axiom-proof.dkxyc.tmprl.cloud:7233" ;;
+    temporal_namespace)         get_val "TEMPORAL_NAMESPACE" "axiom-proof.dkxyc" ;;
+    temporal_api_key)           get_val "TEMPORAL_API_KEY" ;;
+
+    # ── Model providers ──
+    anthropic_api_key)          get_val "ANTHROPIC_API_KEY" ;;
+    openai_api_key)             get_val "OPENAI_API_KEY" ;;
+    gemini_api_key)             get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")" ;;
+
+    # ── Secrets ──
+    # An empty value here does NOT mean "unset": Terraform mints a stable
+    # random secret instead. That is safe, but it is only correct when the
+    # operator has not supplied one, which is why this mapping exists at all.
+    approval_signing_key)         get_val "APPROVAL_SIGNING_KEY" ;;
+    mfa_encryption_key)           get_val "AXIOM_MFA_ENCRYPTION_KEY" ;;
+    agent_runtime_internal_token) get_val "AGENT_RUNTIME_INTERNAL_TOKEN" ;;
+    model_gateway_api_key)        get_val "MODEL_GATEWAY_API_KEY" ;;
+
+    # ── Email ──
+    resend_api_key)             get_val "RESEND_API_KEY" ;;
+    contact_recipient_email)    get_val "CONTACT_RECIPIENT_EMAIL" "hello@axiomminds.ai" ;;
+    axiom_from_email)           get_val "AXIOM_FROM_EMAIL" "Axiom Proof <platform@axiomproof.ai>" ;;
+    axiom_sales_email)          get_val "AXIOM_SALES_EMAIL" "sales@axiomproof.ai" ;;
+    axiom_founder_email)        get_val "AXIOM_FOUNDER_EMAIL" "founder@axiomminds.ai" ;;
+
+    *) return 1 ;;
+  esac
+}
+
+# Numbers are written unquoted; Terraform rejects a quoted number for a
+# `type = number` variable.
+tfvar_is_number() {
+  case "$1" in
+    cloud_sql_disk_size_gb|retention_days) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 do_terraform() {
   info "Propagating ${TARGET_ENV} configuration to Terraform..."
 
-  local tf_dir="infra/terraform/envs/${TARGET_ENV}"
+  # The Terraform directory for `production` is named `prod`. Without this the
+  # lookup silently missed and production's variables were never written from
+  # its .env at all — the warning below reads as "normal for local/staging".
+  local tf_env="$TARGET_ENV"
+  [[ "$TARGET_ENV" == "production" ]] && tf_env="prod"
+
+  local tf_dir="infra/terraform/envs/${tf_env}"
   if [[ ! -d "$tf_dir" ]]; then
     warn "Terraform directory '${tf_dir}' does not exist. (Normal for local/staging/onprem)."
     return 0
   fi
 
+  local vars_file="${tf_dir}/variables.tf"
+  if [[ ! -f "$vars_file" ]]; then
+    fail "No variables.tf in ${tf_dir}; cannot tell what this environment needs."
+    return 1
+  fi
+
   local tfvars_file="${tf_dir}/terraform.tfvars"
   info "Generating ${tfvars_file} from ${ENV_FILE}..."
 
-  cat <<TFVARS > "$tfvars_file"
+  local body="" unmapped=()
+  local name value
+  while read -r name; do
+    if ! value="$(tfvar_value "$name")"; then
+      unmapped+=("$name")
+      continue
+    fi
+    if tfvar_is_number "$name"; then
+      body+="$(printf '%-28s = %s\n' "$name" "${value:-0}")"
+    else
+      body+="$(printf '%-28s = "%s"\n' "$name" "$value")"
+    fi
+    body+=$'\n'
+  done < <(grep -oE '^variable "[a-z0-9_]+"' "$vars_file" | sed 's/variable "//;s/"//')
+
+  if [ ${#unmapped[@]} -gt 0 ]; then
+    fail "${tf_dir}/variables.tf declares variables nothing fills from ${ENV_FILE}:"
+    printf "    %s\n" "${unmapped[@]}"
+    echo -e "  ${DIM}Add them to tfvar_value() in scripts/sync-env.sh. Nothing was written.${NC}"
+    return 1
+  fi
+
+  cat > "$tfvars_file" <<TFVARS
 # ==============================================================================
-# Axiom Proof — Terraform Variables for '${TARGET_ENV}'
-# Automatically generated by scripts/sync-env.sh at $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Axiom Proof — Terraform variables for '${TARGET_ENV}'
+# Generated by scripts/sync-env.sh at $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # SINGLE SOURCE OF TRUTH: ${ENV_FILE}
-# DO NOT EDIT THIS FILE DIRECTLY. EDIT ${ENV_FILE} AND RUN ./scripts/sync-env.sh ${TARGET_ENV} terraform
+# Do not edit this file. Edit ${ENV_FILE} and re-run:
+#   ./scripts/sync-env.sh ${TARGET_ENV} terraform
 # ==============================================================================
 
-project_id             = "$(get_val "AXIOM_PROJECT_ID" "$(get_val "GCP_PROJECT_ID" "axiom-proof")")"
-region                 = "$(get_val "AXIOM_REGION" "$(get_val "GCP_REGION" "asia-south1")")"
-environment            = "${TARGET_ENV}"
-cloud_sql_tier         = "$(get_val "CLOUD_SQL_TIER" "db-f1-micro")"
-cloud_sql_disk_size_gb = $(get_val "CLOUD_SQL_DISK_SIZE_GB" "10")
-
-# Upstash Redis
-upstash_redis_url = "$(get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")")"
-
-# Temporal Cloud GCP Subscription
-temporal_address   = "$(get_val "TEMPORAL_ADDRESS" "axiom-proof.dkxyc.tmprl.cloud:7233")"
-temporal_namespace = "$(get_val "TEMPORAL_NAMESPACE" "axiom-proof.dkxyc")"
-temporal_api_key   = "$(get_val "TEMPORAL_API_KEY")"
-
-# Agent Models Fallback Hierarchy (Anthropic -> OpenAI -> Gemini)
-anthropic_api_key = "$(get_val "ANTHROPIC_API_KEY")"
-openai_api_key    = "$(get_val "OPENAI_API_KEY")"
-gemini_api_key    = "$(get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")")"
-
-# Security Tokens
-approval_signing_key         = "$(get_val "APPROVAL_SIGNING_KEY")"
-mfa_encryption_key           = "$(get_val "AXIOM_MFA_ENCRYPTION_KEY")"
-agent_runtime_internal_token = "$(get_val "AGENT_RUNTIME_INTERNAL_TOKEN")"
-model_gateway_api_key        = "$(get_val "MODEL_GATEWAY_API_KEY")"
-
-# Transactional Email (Resend)
-resend_api_key          = "$(get_val "RESEND_API_KEY")"
-contact_recipient_email = "$(get_val "CONTACT_RECIPIENT_EMAIL" "vkkaruna@outlook.com")"
+${body}
 TFVARS
 
-  pass "Successfully wrote ${tfvars_file}"
+  pass "Wrote ${tfvars_file} ($(grep -cE '^[a-z]' "$tfvars_file") variables)"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -406,6 +521,49 @@ do_docker() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6. SCAFFOLD ACTION — bring an existing .env up to the template
+# ─────────────────────────────────────────────────────────────────────────────
+# Templates gain keys as the platform does: AXIOM_TRUSTED_PROXY_HOPS and
+# AXIOM_EVIDENCE_RETENTION_DAYS both arrived this way. An operator whose
+# .env.<env> predates them would otherwise fail `verify` with no hint of what
+# to add, or worse, silently take a Terraform default.
+#
+# Existing values are never touched. Only absent keys are appended, so this is
+# safe to run against a file holding real credentials.
+do_scaffold() {
+  local template="infra/docker/environments/.env.${TARGET_ENV}.example"
+  if [[ ! -f "$template" ]]; then
+    fail "No template at ${template}."
+    return 1
+  fi
+
+  info "Reconciling ${ENV_FILE} against ${template}..."
+  local added=()
+  local key
+  while read -r key; do
+    grep -qE "^[[:space:]]*${key}=" "$ENV_FILE" || added+=("$key")
+  done < <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$template" | sed 's/=$//' | sort -u)
+
+  if [ ${#added[@]} -eq 0 ]; then
+    pass "${ENV_FILE} already carries every key in the template."
+    return 0
+  fi
+
+  {
+    echo ""
+    echo "# ─── Added by sync-env.sh scaffold on $(date -u +"%Y-%m-%dT%H:%M:%SZ") ───"
+    echo "# Present in the template and absent here. Review each value."
+    for key in "${added[@]}"; do
+      grep -E "^[[:space:]]*${key}=" "$template" | head -1
+    done
+  } >> "$ENV_FILE"
+
+  pass "Appended ${#added[@]} missing key(s) to ${ENV_FILE}:"
+  printf "    %s\n" "${added[@]}"
+  warn "Values came from the template. Run './scripts/sync-env.sh ${TARGET_ENV} verify' before deploying."
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # EXECUTION ROUTER
 # ─────────────────────────────────────────────────────────────────────────────
 case "$ACTION" in
@@ -424,7 +582,11 @@ case "$ACTION" in
   docker)
     do_docker
     ;;
+  scaffold)
+    do_scaffold
+    ;;
   all)
+    do_scaffold
     do_verify
     do_terraform
     do_docker
@@ -434,7 +596,7 @@ case "$ACTION" in
     fi
     ;;
   *)
-    fail "Unknown action: '$ACTION'. Use verify, terraform, secrets, cloudrun, docker, or all."
+    fail "Unknown action: '$ACTION'. Use scaffold, verify, terraform, secrets, cloudrun, docker, or all."
     exit 1
     ;;
 esac

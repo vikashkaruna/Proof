@@ -50,6 +50,21 @@ jobs:
       - uses: actions/checkout@v5
       - run: ./scripts/check-env-security-gate.sh
 
+  # ─── W0.1 deployment configuration coverage ──────────────────────
+  # Terraform variables were mapped to .env keys by hand, one `if` per
+  # line, in a deploy script. It covered 15 of preprod's 23, so the rest
+  # silently took Terraform defaults — including the MFA encryption key,
+  # which meant an operator's configured key was ignored while Terraform
+  # minted a different one, and the evidence retention period, which could
+  # put a test-length COMPLIANCE lock on a bucket documented as seven
+  # years. Nothing failed; the values were simply not the ones configured.
+  tfvars-coverage-gate:
+    name: Deployment configuration coverage (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-tfvars-coverage.sh
+
   # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
   # The library's total is derived from the controls array. Six other
   # places carried their own literal and had drifted to 43 and 48, so a

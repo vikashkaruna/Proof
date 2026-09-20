@@ -185,15 +185,20 @@ setup_environment() {
       cp "$ENV_EXAMPLE" "$ENV_FILE"
       log_succ "Generated ${ENV_FILE}"
     else
-      log_warn "${ENV_FILE} not found; using local fallback."
-      ENV_FILE="infra/docker/environments/.env.local"
-      if [[ ! -f "$ENV_FILE" ]]; then
-        cp "infra/docker/environments/.env.local.example" "$ENV_FILE"
-      fi
+      # Silently substituting local configuration for a named environment is
+      # how a "staging" stack comes up on developer defaults — local URLs,
+      # demo keys, local feature flags — while every log line says staging.
+      log_err "No configuration for '${TARGET_ENV}': neither ${ENV_FILE} nor ${ENV_EXAMPLE} exists."
+      log_err "Create a template at ${ENV_EXAMPLE}, or choose an environment that has one."
+      exit 1
     fi
   else
     log_succ "Loaded configuration from ${ENV_FILE}"
   fi
+
+  # Bring the file up to its template before anything reads it, so a stack
+  # started after a template gained keys does not run on stale configuration.
+  ./scripts/sync-env.sh "$TARGET_ENV" scaffold >/dev/null 2>&1 || true
 
   # Compose file selection
   COMPOSE_ARGS=("-f" "docker-compose.yml")
