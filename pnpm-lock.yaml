@@ -408,6 +408,9 @@ importers:
       '@axiom/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@axiom/mfa':
+        specifier: workspace:*
+        version: link:../../packages/mfa
       '@axiom/supabase':
         specifier: workspace:*
         version: link:../../packages/supabase

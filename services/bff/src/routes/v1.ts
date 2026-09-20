@@ -4,6 +4,10 @@ import {
   IssueApprovalRequestSchema,
   ExecutePlanRequestSchema,
   type ExecutePlanRequest,
+  ActivateMfaEnrolmentRequestSchema,
+  BeginMfaEnrolmentRequestSchema,
+  IssueMfaChallengeRequestSchema,
+  VerifyMfaChallengeRequestSchema,
   ActorType,
   LedgerActionType,
   LedgerResult,
@@ -11,6 +15,8 @@ import {
 import type { ApprovalEngine } from '../services/approval.js';
 import type { KillSwitchService } from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
+import type { MfaService } from '../services/mfa.js';
+import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -38,11 +44,445 @@ interface Deps {
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
+  mfa: MfaService;
   realtime: RealtimeService;
 }
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
+
+  // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
+  //
+  // Self-managed TOTP rather than Supabase Auth factors: W10 requires onprem
+  // to run air-gapped, and binding MFA to a hosted GoTrue would mean either a
+  // second implementation for onprem or an environment that authenticates
+  // differently from the others — which is what W0.0 exists to prevent.
+  //
+  // Every route here is scoped to the calling user. None of them takes a user
+  // id from the request: a route that let one caller name another is a
+  // one-request downgrade of the whole control for a targeted approver.
+
+  // GET /v1/mfa/status — does this user hold a factor, and how many recovery
+  // codes remain. Used by the web app to decide what to show before approving.
+  app.get('/mfa/status', async (c) => {
+    return c.json(await deps.mfa.status(c.get('user').id));
+  });
+
+  // POST /v1/mfa/enrol — begin TOTP enrolment; returns the secret once.
+  app.post('/mfa/enrol', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = BeginMfaEnrolmentRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+
+    // Replacing a live factor requires proving you hold the live factor.
+    //
+    // Without this, an attacker with a stolen session has a clean bypass:
+    // enrol their own authenticator alongside the victim's, then satisfy every
+    // future step-up themselves. The recovery-code path keeps a genuinely lost
+    // device recoverable, so this costs the honest user nothing.
+    //
+    // A first enrolment needs no step-up — there is nothing yet to protect.
+    // That does mean a stolen session on a never-enrolled approver can enrol
+    // its own device, which is why enrolment is ledgered loudly rather than
+    // logged quietly.
+    const existingFactorId = await deps.mfa.activeFactorId(user.id);
+    if (existingFactorId) {
+      const challengeId = (body as { mfaChallengeId?: string } | null)?.mfaChallengeId;
+      const stepUp = await deps.mfa.consumeChallenge({
+        challengeId,
+        userId: user.id,
+        purpose: 'enrolment',
+        boundResourceRef: existingFactorId,
+        boundPayloadSha256: factorBindingSha256('enrolment', existingFactorId),
+      });
+      if (!stepUp.ok) {
+        return c.json(
+          {
+            error: {
+              code:
+                stepUp.reason === 'challenge_required' ? 'mfa_challenge_required' : stepUp.reason,
+              message:
+                'You already have an active authenticator. Satisfy an `enrolment` challenge with your current factor or a recovery code before enrolling a new one.',
+              details: { challengeEndpoint: '/v1/mfa/challenge', purpose: 'enrolment' },
+            },
+          },
+          401,
+        );
+      }
+    }
+
+    const result = await deps.mfa.beginTotpEnrolment({
+      userId: user.id,
+      accountName: user.email ?? user.id,
+      label: parsed.data.label ?? null,
+    });
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_ENROLLED,
+      targetRef: result.factorId,
+      result: 'success',
+      detail: { factorType: 'totp', label: parsed.data.label ?? null, replacing: existingFactorId },
+    });
+
+    // The secret and the URI are returned exactly once. They are not readable
+    // afterwards by any endpoint, because a TOTP secret is a standing
+    // credential: anyone who can re-read it can mint codes indefinitely.
+    return c.json(
+      {
+        factorId: result.factorId,
+        secret: result.secret,
+        provisioningUri: result.provisioningUri,
+        nextStep:
+          'Add the secret to an authenticator app, then POST the six-digit code to /v1/mfa/enrol/activate.',
+      },
+      201,
+    );
+  });
+
+  // POST /v1/mfa/enrol/activate — prove possession, activate, issue recovery codes.
+  app.post('/mfa/enrol/activate', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = ActivateMfaEnrolmentRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const result = await deps.mfa.activateTotpEnrolment({
+      userId: user.id,
+      code: parsed.data.code,
+    });
+
+    if (!result.ok) {
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: user.id,
+        result: 'failure',
+        detail: { purpose: 'enrolment', reason: result.reason, detail: result.detail },
+      });
+      return c.json(
+        {
+          error: {
+            code: result.reason,
+            message:
+              result.reason === 'no_pending_factor'
+                ? 'No enrolment is in progress. Start one at /v1/mfa/enrol.'
+                : 'That code was not accepted. Check your authenticator’s clock and try the next code.',
+          },
+        },
+        result.reason === 'no_pending_factor' ? 409 : 401,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_ACTIVATED,
+      targetRef: result.factorId,
+      result: 'success',
+      detail: { factorType: 'totp', recoveryCodesIssued: result.recoveryCodes.length },
+    });
+
+    return c.json({
+      factorId: result.factorId,
+      // Shown once. They are hashed at rest, so this response is the only time
+      // they exist in readable form anywhere.
+      recoveryCodes: result.recoveryCodes,
+      warning:
+        'Store these now. Each works once, they are not recoverable, and they are the only way back in if you lose the authenticator.',
+    });
+  });
+
+  // POST /v1/mfa/factors/:id/revoke — retire a factor, proving you hold it.
+  app.post('/mfa/factors/:id/revoke', async (c) => {
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const factorId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const challengeId = (body as { mfaChallengeId?: string } | null)?.mfaChallengeId;
+
+    // Revocation is step-up gated for the same reason enrolment is. On its own
+    // it is only self-denial — an approver with no factor cannot approve at
+    // all — but revoke-then-re-enrol is a complete bypass, and this is the
+    // cheaper of the two places to break that chain.
+    const stepUp = await deps.mfa.consumeChallenge({
+      challengeId,
+      userId: user.id,
+      purpose: 'factor_revocation',
+      boundResourceRef: factorId,
+      boundPayloadSha256: factorBindingSha256('factor_revocation', factorId),
+    });
+    if (!stepUp.ok) {
+      return c.json(
+        {
+          error: {
+            code: stepUp.reason === 'challenge_required' ? 'mfa_challenge_required' : stepUp.reason,
+            message:
+              'Revoking a factor requires proving you hold it. Satisfy a `factor_revocation` challenge with your authenticator or a recovery code.',
+            details: { challengeEndpoint: '/v1/mfa/challenge', purpose: 'factor_revocation' },
+          },
+        },
+        401,
+      );
+    }
+
+    const result = await deps.mfa.revokeFactor({ userId: user.id, factorId });
+    if (!result.ok) {
+      return c.json(
+        { error: { code: 'factor_not_found', message: 'No such active factor for this user' } },
+        404,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_REVOKED,
+      targetRef: factorId,
+      result: 'success',
+      detail: { challengeId: stepUp.challengeId },
+    });
+
+    return c.json({ factorId, status: 'revoked' });
+  });
+
+  // POST /v1/mfa/challenge — open a challenge, bound to what it may authorise.
+  app.post('/mfa/challenge', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = IssueMfaChallengeRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const input = parsed.data;
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+
+    // The binding is computed server-side from the request's own inputs, never
+    // accepted as a client-supplied digest. A client that could name its own
+    // binding could name the one it intends to spend the challenge against.
+    let boundResourceRef: string | undefined;
+    let boundPayloadSha256: string | undefined;
+
+    if (input.purpose === 'approval_issuance') {
+      // The plan must exist in this tenant before a challenge is opened
+      // against it, so the endpoint cannot be used to probe for plan ids.
+      const admin = createSupabaseAdmin();
+      const { data: plan } = await admin
+        .from('remediation_plans')
+        .select('id')
+        .eq('id', input.planId!)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (!plan) {
+        return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
+      }
+      boundResourceRef = input.planId!;
+      boundPayloadSha256 = approvalBindingSha256({
+        planId: input.planId!,
+        actionIds: input.actionIds!,
+        mode: input.mode,
+      });
+    } else if (input.purpose === 'enrolment' || input.purpose === 'factor_revocation') {
+      const factorId = await deps.mfa.activeFactorId(user.id);
+      if (!factorId) {
+        return c.json(
+          {
+            error: {
+              code: 'mfa_enrolment_required',
+              message: 'You have no active factor to act on.',
+            },
+          },
+          409,
+        );
+      }
+      boundResourceRef = factorId;
+      boundPayloadSha256 = factorBindingSha256(input.purpose, factorId);
+    }
+
+    const issued = await deps.mfa.issueChallenge({
+      userId: user.id,
+      tenantId,
+      purpose: input.purpose,
+      boundResourceRef,
+      boundPayloadSha256,
+    });
+
+    if (!issued.ok) {
+      return c.json(
+        {
+          error: {
+            code: 'mfa_enrolment_required',
+            message: 'You have no active second factor. Enrol an authenticator first.',
+            details: { enrolEndpoint: '/v1/mfa/enrol' },
+          },
+        },
+        403,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_CHALLENGE_ISSUED,
+      targetRef: boundResourceRef ?? user.id,
+      result: 'success',
+      detail: { purpose: input.purpose, challengeId: issued.challengeId, boundPayloadSha256 },
+    });
+
+    return c.json(
+      {
+        challengeId: issued.challengeId,
+        expiresAt: issued.expiresAt,
+        maxAttempts: issued.maxAttempts,
+        // Echoed so the client can confirm it is about to authenticate for the
+        // thing it thinks it is. It is a digest of inputs the client already
+        // supplied, so it discloses nothing.
+        boundPayloadSha256,
+      },
+      201,
+    );
+  });
+
+  // POST /v1/mfa/challenge/:id/verify — satisfy it with a TOTP or recovery code.
+  app.post('/mfa/challenge/:id/verify', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = VerifyMfaChallengeRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const challengeId = c.req.param('id');
+
+    const result = await deps.mfa.verifyChallenge({
+      challengeId,
+      userId: user.id,
+      code: parsed.data.code,
+    });
+
+    if (!result.ok) {
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: challengeId,
+        result: 'failure',
+        detail: { reason: result.reason, detail: result.detail },
+      });
+      // `challenge_not_found` covers both "no such id" and "not yours". The
+      // two are not distinguished on the wire: telling a caller that a
+      // challenge exists but belongs to someone else is a user-enumeration
+      // oracle for no operational benefit.
+      const status = result.reason === 'challenge_not_found' ? 404 : 401;
+      return c.json(
+        {
+          error: {
+            code: result.reason,
+            message:
+              result.reason === 'attempts_exhausted'
+                ? 'Too many attempts on this challenge. Request a new one.'
+                : result.reason === 'challenge_expired'
+                  ? 'This challenge has expired. Request a new one.'
+                  : result.reason === 'challenge_already_satisfied'
+                    ? 'This challenge has already been satisfied.'
+                    : result.reason === 'not_enrolled'
+                      ? 'You have no active second factor.'
+                      : 'That code was not accepted.',
+          },
+        },
+        status,
+      );
+    }
+
+    if (result.satisfiedWith === 'recovery_code') {
+      // Recorded distinctly. A recovery code satisfying an approval step-up is
+      // legitimate but notable: it is single-use, it means the approver did not
+      // have their authenticator, and a reviewer should be able to see that.
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_RECOVERY_CODE_CONSUMED,
+        targetRef: challengeId,
+        result: 'success',
+        detail: {},
+      });
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_CHALLENGE_SATISFIED,
+      targetRef: challengeId,
+      result: 'success',
+      detail: { satisfiedWith: result.satisfiedWith },
+    });
+
+    return c.json({ challengeId, satisfied: true, satisfiedWith: result.satisfiedWith });
+  });
 
   // ─── Plans / Approval / Execution ───────────────────────────────
 
@@ -197,6 +637,104 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    // ── W1 · SEC-8 · the step-up ───────────────────────────────────────
+    //
+    // Everything above this point decides whether the approval is *allowed*.
+    // This decides whether the person asking is really the approver. It runs
+    // last on purpose: a challenge is a scarce, single-use credential, and
+    // spending one on a request that was going to fail for an unrelated reason
+    // would force a needless re-authentication.
+    //
+    // Unconditional, and deliberately NOT gated on `tenants.mfa_required_roles`
+    // — that column governs sign-in. Making the approval step-up per-tenant
+    // configurable would turn FR-7.3 from a platform guarantee into something
+    // an auditor has to re-check for every client, and would let a tenant
+    // owner remove it for their own approvals.
+    const stepUpBinding = approvalBindingSha256({
+      planId: input.planId,
+      actionIds: input.actionIds,
+      mode: input.mode,
+    });
+
+    if (!input.mfaChallengeId) {
+      const enrolled = await deps.mfa.isEnrolled(user.id);
+      // Two genuinely different situations, and telling them apart is the
+      // difference between "tap your authenticator" and "you have no second
+      // factor and must enrol one before you can approve anything".
+      return enrolled
+        ? c.json(
+            {
+              error: {
+                code: 'mfa_challenge_required',
+                message:
+                  'Approving requires a fresh second factor. Request a challenge for this exact plan and action set, satisfy it, then retry.',
+                details: {
+                  challengeEndpoint: '/v1/mfa/challenge',
+                  purpose: 'approval_issuance',
+                  planId: input.planId,
+                  actionIds: input.actionIds,
+                  mode: input.mode,
+                },
+              },
+            },
+            401,
+          )
+        : c.json(
+            {
+              error: {
+                code: 'mfa_enrolment_required',
+                message:
+                  'You have no active second factor. Approval tokens cannot be issued without one. Enrol an authenticator, then retry.',
+                details: { enrolEndpoint: '/v1/mfa/enrol' },
+              },
+            },
+            403,
+          );
+    }
+
+    const stepUp = await deps.mfa.consumeChallenge({
+      challengeId: input.mfaChallengeId,
+      userId: user.id,
+      purpose: 'approval_issuance',
+      boundResourceRef: input.planId,
+      boundPayloadSha256: stepUpBinding,
+      consumedFor: input.planId,
+    });
+
+    if (!stepUp.ok) {
+      // A refused step-up is ledgered. A run of these against one approver is
+      // the signal that someone holds their session and is working on the
+      // factor, and that signal is worth more in the tamper-evident chain than
+      // in an application log the same operator can edit.
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: input.planId,
+        result: 'failure',
+        detail: {
+          purpose: 'approval_issuance',
+          reason: stepUp.reason,
+          challengeId: input.mfaChallengeId,
+          actionIds: input.actionIds,
+        },
+      });
+
+      const message =
+        stepUp.reason === 'binding_mismatch'
+          ? 'That challenge was satisfied for a different plan or action set. Request one for this approval.'
+          : stepUp.reason === 'challenge_already_consumed'
+            ? 'That challenge has already authorised an approval. Each step-up authorises exactly one.'
+            : stepUp.reason === 'challenge_expired'
+              ? 'That challenge has expired. Request a fresh one.'
+              : stepUp.reason === 'challenge_not_satisfied'
+                ? 'That challenge has not been satisfied yet.'
+                : 'No usable step-up challenge for this approval.';
+      return c.json({ error: { code: stepUp.reason, message } }, 401);
+    }
+
     // Issue the signed token
     const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString();
     const signed = await deps.approvalEngine.issue(tenantId, {
@@ -236,6 +774,13 @@ export function v1Routes(deps: Deps) {
         500,
       );
     }
+
+    // Point the spent challenge at the token it authorised, so the trail runs
+    // both ways: token → challenge → factor → user.
+    await deps.mfa.linkConsumption({
+      challengeId: stepUp.challengeId,
+      consumedFor: tokenRow.id,
+    });
 
     // Mark actions as approved
     const { error: actionApprovalErr } = await admin
@@ -284,6 +829,15 @@ export function v1Routes(deps: Deps) {
         stopOnFailure: input.stopOnFailure,
         expiresAt,
         reason: input.reason,
+        // FR-7.3 asks for the approver's identity to be recorded. A user id
+        // alone records who the session belonged to. These three fields record
+        // that the human re-authenticated, when, and against what — which is
+        // the question an auditor actually asks.
+        mfa: {
+          challengeId: stepUp.challengeId,
+          satisfiedAt: stepUp.satisfiedAt,
+          binding: stepUpBinding,
+        },
       },
     });
 

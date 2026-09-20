@@ -1,0 +1,266 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Hono } from 'hono';
+import { generateTotp } from '@axiom/mfa';
+import { UserRole } from '@axiom/types';
+import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
+import type { Variables } from '../types.js';
+
+/**
+ * W1 · SEC-8 · FR-7.3 — no approval token without a fresh, bound step-up.
+ *
+ * The service suite proves the challenge machinery. This proves the thing the
+ * plan actually promises: that `POST /v1/plans/approve` cannot issue a signed
+ * token unless the caller has just re-authenticated *for this approval*.
+ *
+ * It exercises the real route with a real MFA service over a real (in-memory)
+ * store, so the assertions are about behaviour rather than about which
+ * functions were called.
+ */
+
+const TENANT = '11111111-1111-4111-8111-111111111111';
+const USER = '00000000-0000-4000-8000-0000000000aa';
+const PLAN = '22222222-2222-4222-8222-222222222222';
+const ACTION_A = '33333333-3333-4333-8333-33333333000a';
+const ACTION_B = '33333333-3333-4333-8333-33333333000b';
+
+const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
+
+vi.hoisted(() => {
+  process.env.NODE_ENV = 'test';
+  process.env.SUPABASE_URL = 'https://local.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'a'.repeat(40);
+  process.env.SUPABASE_SERVICE_KEY = 'b'.repeat(40);
+  process.env.APPROVAL_SIGNING_KEY = 'k'.repeat(48);
+});
+
+vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => {
+    if (!db.current) throw new Error('fake db not installed');
+    return db.current.client;
+  },
+}));
+
+const KEY = 'route-test-encryption-key-at-least-32-chars';
+const T0 = Date.UTC(2026, 8, 20, 12, 0, 0);
+const STEP = 30_000;
+
+let fake: FakeDb;
+let mfa: Awaited<ReturnType<typeof buildMfa>>;
+let ledgerAppend: ReturnType<typeof vi.fn>;
+
+async function buildMfa() {
+  const { createMfaService } = await import('../services/mfa.js');
+  return createMfaService(() => fake.client as never, { encryptionKey: KEY });
+}
+
+/** An approvable plan: dry-run complete, rollback validated, nothing stale. */
+function seedApprovablePlan() {
+  fake.seed('remediation_plans', {
+    id: PLAN,
+    tenant_id: TENANT,
+    status: 'review',
+    library_version: '0.1.1',
+  });
+  for (const id of [ACTION_A, ACTION_B]) {
+    fake.seed('remediation_actions', {
+      id,
+      tenant_id: TENANT,
+      plan_id: PLAN,
+      action_type: 'data.mask',
+      dry_run_status: 'dry_run_complete',
+      rollback_validated: true,
+      dry_run_expires_at: null,
+    });
+  }
+}
+
+async function buildApp() {
+  const { v1Routes } = await import('./v1.js');
+
+  ledgerAppend = vi.fn(async () => ({ sequenceNo: 1, entryHash: 'hash' }));
+
+  const routes = v1Routes({
+    approvalEngine: {
+      issue: async () => ({
+        signature: 'sig',
+        spec: { nonce: 'nonce-1' },
+      }),
+    } as never,
+    killSwitch: { isActive: async () => false } as never,
+    ledger: { append: ledgerAppend } as never,
+    mfa: mfa as never,
+    realtime: { broadcast: vi.fn() } as never,
+  });
+
+  const app = new Hono<{ Variables: Variables }>();
+  app.use('*', async (c, next) => {
+    c.set('user', { id: USER, email: 'approver@example.com' } as never);
+    c.set('tenantId', TENANT as never);
+    c.set('role', UserRole.APPROVER as never);
+    c.set('approvalScopes', [] as never);
+    c.set('idempotencyKey', 'idem-1' as never);
+    await next();
+  });
+  app.route('/v1', routes);
+  return app;
+}
+
+function approveBody(extra: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    planId: PLAN,
+    actionIds: [ACTION_A, ACTION_B],
+    mode: 'batch',
+    ...extra,
+  });
+}
+
+const post = (app: Hono<{ Variables: Variables }>, path: string, body: string) =>
+  app.request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+
+/** Enrol, open an approval challenge, satisfy it. Returns the challenge id. */
+async function freshStepUp(app: Hono<{ Variables: Variables }>, actionIds = [ACTION_A, ACTION_B]) {
+  const begun = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'a@example.com' });
+  const activated = await mfa.activateTotpEnrolment({
+    userId: USER,
+    code: generateTotp(begun.secret, T0),
+    atMs: T0,
+  });
+  if (!activated.ok) throw new Error('enrolment failed');
+
+  const challengeRes = await post(
+    app,
+    '/v1/mfa/challenge',
+    JSON.stringify({ purpose: 'approval_issuance', planId: PLAN, actionIds, mode: 'batch' }),
+  );
+  expect(challengeRes.status).toBe(201);
+  const { challengeId } = (await challengeRes.json()) as { challengeId: string };
+
+  const verified = await mfa.verifyChallenge({
+    challengeId,
+    userId: USER,
+    code: generateTotp(begun.secret, T0 + STEP),
+    atMs: T0 + STEP,
+  });
+  expect(verified.ok).toBe(true);
+  return challengeId;
+}
+
+beforeEach(async () => {
+  vi.resetModules();
+  fake = createFakeDb({});
+  db.current = fake;
+  seedApprovablePlan();
+  mfa = await buildMfa();
+});
+
+describe('POST /v1/plans/approve — MFA step-up', () => {
+  it('refuses to issue a token when no challenge is presented', async () => {
+    const app = await buildApp();
+    await freshStepUp(app); // enrolled, but the approve call omits the id
+
+    const res = await post(app, '/v1/plans/approve', approveBody());
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('mfa_challenge_required');
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it('tells an unenrolled approver to enrol rather than to authenticate', async () => {
+    const app = await buildApp();
+    const res = await post(app, '/v1/plans/approve', approveBody());
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('mfa_enrolment_required');
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it('issues a token when a satisfied, correctly bound challenge is presented', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(201);
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+
+    // The challenge is spent, and points at the token it authorised.
+    const challenge = fake.rows('mfa_challenges').find((r) => r.id === challengeId);
+    expect(challenge?.consumed_at).toBeTruthy();
+    expect(challenge?.consumed_for).toBe(fake.rows('approval_tokens')[0]?.id);
+  });
+
+  it('records the step-up in the ledger entry for the approval', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+
+    const issued = ledgerAppend.mock.calls
+      .map(([arg]) => arg as { actionType: string; detail?: Record<string, unknown> })
+      .find((entry) => entry.actionType === 'approval.token.issued');
+
+    // FR-7.3: the approver's identity claim has to be more than "a session
+    // cookie was present", and the evidence for that lives in the chain.
+    expect(issued?.detail?.mfa).toMatchObject({ challengeId });
+    expect((issued?.detail?.mfa as { satisfiedAt: string }).satisfiedAt).toBeTruthy();
+  });
+
+  it('will not let one step-up authorise a second approval', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+
+    expect(
+      (await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }))).status,
+    ).toBe(201);
+
+    const second = await post(
+      app,
+      '/v1/plans/approve',
+      approveBody({ mfaChallengeId: challengeId }),
+    );
+    expect(second.status).toBe(401);
+    expect(((await second.json()) as { error: { code: string } }).error.code).toBe(
+      'challenge_already_consumed',
+    );
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+  });
+
+  it('refuses a step-up satisfied for a different action set', async () => {
+    const app = await buildApp();
+    // Satisfied for {A} alone; spent against {A, B}.
+    const challengeId = await freshStepUp(app, [ACTION_A]);
+
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('binding_mismatch');
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it('ledgers a refused step-up, so a run of them is visible to a reviewer', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app, [ACTION_A]);
+    await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+
+    const failures = ledgerAppend.mock.calls
+      .map(([arg]) => arg as { actionType: string })
+      .filter((entry) => entry.actionType === 'mfa.challenge.failed');
+    expect(failures.length).toBeGreaterThan(0);
+  });
+
+  it('does not spend the challenge when the approval fails for an unrelated reason', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+
+    // An action that is not eligible — the request fails before the step-up.
+    fake.rows('remediation_actions').find((r) => r.id === ACTION_B)!.rollback_validated = false;
+
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(422);
+
+    const challenge = fake.rows('mfa_challenges').find((r) => r.id === challengeId);
+    expect(challenge?.consumed_at).toBeFalsy();
+  });
+});

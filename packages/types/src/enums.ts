@@ -176,6 +176,21 @@ export const LedgerActionType = {
   USER_LOGIN: 'user.login',
   USER_LOGOUT: 'user.logout',
   USER_ROLE_CHANGED: 'user.role.changed',
+  // MFA (W1 · SEC-8). Enrolment and every challenge outcome are ledgered,
+  // not merely logged: FR-7.3 requires "approver identity, timestamp, scope
+  // recorded", and the step-up that binds a fresh authentication to a specific
+  // approval is part of that identity claim. A reviewer must be able to see
+  // that the approver re-authenticated, and see it in the same tamper-evident
+  // chain as the approval itself.
+  MFA_FACTOR_ENROLLED: 'mfa.factor.enrolled',
+  MFA_FACTOR_ACTIVATED: 'mfa.factor.activated',
+  MFA_FACTOR_REVOKED: 'mfa.factor.revoked',
+  MFA_CHALLENGE_ISSUED: 'mfa.challenge.issued',
+  MFA_CHALLENGE_SATISFIED: 'mfa.challenge.satisfied',
+  // Failures are recorded too. A burst of them against one approver is the
+  // signal that someone holds their password and is working on the factor.
+  MFA_CHALLENGE_FAILED: 'mfa.challenge.failed',
+  MFA_RECOVERY_CODE_CONSUMED: 'mfa.recovery_code.consumed',
   TENANT_CREATED: 'tenant.created',
   TENANT_UPDATED: 'tenant.updated',
   PLAN_PUBLISHED: 'plan.published',

@@ -12,6 +12,7 @@ import { publicRoutes } from './routes/public.js';
 import { createApprovalEngine } from './services/approval.js';
 import { createKillSwitchService } from './services/kill-switch.js';
 import { createLedgerService } from './services/ledger.js';
+import { createMfaService } from './services/mfa.js';
 import { startRealtimeChannel } from './services/realtime.js';
 
 /**
@@ -48,6 +49,7 @@ export function createApp() {
   const approvalEngine = createApprovalEngine(env);
   const killSwitch = createKillSwitchService();
   const ledger = createLedgerService();
+  const mfa = createMfaService();
   const realtime = startRealtimeChannel({ ledger, killSwitch });
 
   // Health endpoints (no auth)
@@ -66,7 +68,7 @@ export function createApp() {
   app.use('/v1/*', tenantResolver);
   app.use('/v1/*', idempotency);
 
-  app.route('/v1', v1Routes({ approvalEngine, killSwitch, ledger, realtime }));
+  app.route('/v1', v1Routes({ approvalEngine, killSwitch, ledger, mfa, realtime }));
 
   return app;
 }

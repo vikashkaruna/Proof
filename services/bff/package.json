@@ -21,6 +21,7 @@
     "@axiom/control-library": "workspace:*",
     "@axiom/evidence": "workspace:*",
     "@axiom/ledger": "workspace:*",
+    "@axiom/mfa": "workspace:*",
     "@axiom/supabase": "workspace:*",
     "@axiom/types": "workspace:*",
     "@hono/node-server": "^2.1.1",
