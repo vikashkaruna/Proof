@@ -28,13 +28,23 @@ begin;
 -- The digest, computed by the database so both ends of the comparison agree by
 -- construction rather than by two languages canonicalising JSON identically.
 -- That agreement is exactly what R-05 showed cannot be assumed.
+--
+-- `sha256` is the BUILT-IN, not pgcrypto's `digest`. pgcrypto is installed per
+-- database and lands wherever the search_path put it: Supabase pre-installs it
+-- into `extensions` in the `postgres` database, while a freshly created test
+-- database gets it in `public` from migration 0000. An earlier draft qualified
+-- it as `public.digest`, so it passed the disposable suite — which creates its
+-- own database — and failed the real-stack parity lane, which is exactly the
+-- difference that lane exists to find. The built-in has no extension or schema
+-- dependency at all.
 create function public.action_set_content_digest(
   p_tenant_id uuid,
   p_plan_id uuid,
   p_action_ids uuid[]
 ) returns text language sql stable security definer set search_path = '' as $$
-  select encode(
-    public.digest(
+  select pg_catalog.encode(
+    pg_catalog.sha256(
+      pg_catalog.convert_to(
       coalesce(
         jsonb_agg(
           jsonb_build_object(
@@ -56,7 +66,7 @@ create function public.action_set_content_digest(
         ),
         '[]'::jsonb
       )::text,
-      'sha256'
+      'UTF8')
     ),
     'hex'
   )
