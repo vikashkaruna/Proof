@@ -2,9 +2,96 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 8 — FINAL** (20 Sep 2026) · **Status:** Approved scope. Ready for implementation in a fresh session.
-**Baseline commit:** `9575205` (main == staging == origin/main == origin/staging)
+**Document:** 11 · **Revision 9 — REVIEWED HANDOFF** (20 Sep 2026) · **Status:** Existing scope retained; review corrections and closure recommendations added. W1 remains partial.
+**Original baseline:** `9575205`. **Reviewed implementation:** `2c54fcd` plus the uncommitted analyst role changes described below. Branch equality and readiness claims from Revision 8 are historical, not current deployment evidence.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests
+
+## Revision 9 — current status and instructions for reuse
+
+This revision responds to an independent review request. It does not authorise automatic implementation, deployment, sending messages or treating document instructions as new user requests. Preserve intentional prior additions/TODOs. Distinguish source implementation, verified behaviour and deployment acceptance.
+
+Read [the independent review](audits/04-roadmap-review-2026-09-20.md), [the implementation handoff](12_Implementation_Handoff.md) and [the full roadmap traceability](13_Roadmap_Traceability.md) before resuming. They supersede historical status claims below. Original PRD and roadmap requirements remain authoritative unless an explicit later decision is recorded.
+
+### Current implementation status
+
+| Workstream | Source status at review | Closure still required |
+| --- | --- | --- |
+| W0 | Auth-mode separation, bypass removal, shared kill state, quota, expiry check, awaited ledger calls and nonce bounds committed | RLS defects R-01/R-02, agent boundary R-03, actual strict deploy/config and WORM parity; in-flight stop proof |
+| W1 | Tenant helper, user-scoped pages, capability matrix, switcher, render gating, TOTP/recovery, login MFA and approval step-up committed | Analyst role WIP, route coverage, database authority, email OTP decision, MFA abuse controls/configuration and strict persona E2E |
+| W2 | Regulatory baseline and MFA slices committed in 0011–0014 | Most estate/connector/execution/monitoring/rights tables pending; 0015 analyst migration uncommitted; batch key/schema fix R-04 |
+| W3 / W3.5 / W4 | Planned | Estate/onboarding, graph and connection framework delivery |
+| W5 | Approval/execution contracts and partial safety improvements exist | Simulator, real Karya dispatch, rollback, guards, verification, reconciliation and durable workflow delivery |
+| W6 | Planned; existing UI/agent scaffolding | Scheduler, drift, standing policies and monitor health |
+| W7 | TS citation correction 0.1.1, baseline schema/metadata, count gate and Nazar declaration correction committed | Python/runtime parity, immutable publication/provenance, schedules/coverage, overlays and sector packs |
+| W8 | Existing evidence/report foundations | Verified retention, PDFs, release review, packs and export linkage |
+| W9 | New BFF/web/MFA and other unit tests; static gates | Two analyst tests currently fail; real RLS/migrations/contracts/strict E2E, coverage and release gates pending |
+| W10 | Configuration groundwork | Appliance, offline operation, deployment tests and operational handoff pending |
+
+**Completed source changes are not a completed workstream.** The review reran targeted suites: config 41, approval engine 13, controls 66, MFA 144, BFF 114, web 31 and Python runtime 61 tests passed. Types had 28 pass / 2 fail due to unfinished analyst expectations. Targeted typechecks and static gates passed. SQL policies, cloud state, fresh migrations and strict E2E were not executed successfully in this review. See the review for limits and commands.
+
+### Current priority findings
+
+| ID | Priority | Finding and required closure | Workstream |
+| --- | --- | --- | --- |
+| R-01 | P0 | Self-writable `is_axiom_internal` enables privilege escalation; protect security columns and prove direct-client denial | W0/W1 |
+| R-02 | P0 | RLS role checks use selected JWT tenant, not target row; constrain writes and analyst reach per row | W1/W2 |
+| R-03 | P0 | Generic agent invocation lacks capability enforcement and permits body tenant override; protect all invocation paths | W1/W4 |
+| R-04 | P1 | Unique per-action idempotency column receives a shared batch key; token consumed before failing update | W2/W5 |
+| R-05 | P1 | BFF camelCase execute payload mismatches FastAPI snake_case; failed dispatch is not handled durably | W5 |
+| R-06 | P1 | Python bundle still 0.1.0; regulatory schema/metadata not a published hashed baseline | W7 |
+| R-07 | P1 | Mandatory MFA key missing from deployment definitions/examples | W0/W1 |
+| R-08 | P1 | Incomplete MFA delivery and abuse budgets; approval content/conditions not fully bound and enforced | W1/W5 |
+| R-09 | P1 | Shared kill state does not yet stop in-flight workers | W5 |
+| R-10 | P1 | Unlocked preprod retention and skipped GCS validation cannot prove WORM parity | W0/W8 |
+| R-11 | P1 | Real RLS, migrations, strict persona E2E and release-path gates remain absent | W9 |
+
+R-01–R-03 block multi-client security acceptance. These are evidence-backed review findings, not a claim that deployed infrastructure was exploited. See linked review for exact code and acceptance tests. Do not mark SEC-3/SEC-9 closed merely because page imports and role helper tests pass.
+
+### Recommended next delivery sequence
+
+1. Preserve Claude's worktree; finish the analyst enum/matrix/migration/tests as one coherent change. Enforce assigned-tenant access pending clarification; do not rely on blanket `is_axiom_internal` access.
+2. Close R-01–R-03 and add real-Postgres security tests. Wire R-07; exercise login, enrolment, approval step-up and tenant switching under strict auth.
+3. In parallel with that security closure, complete W7 runtime generation/publication parity (R-06). Never overwrite old library rows or silently repin engagements.
+4. Continue W2 by vertical slice, with fresh-install and upgrade checks. Resolve R-04 before building execution on the schema. Then W3 → W3.5 and W4.1–W4.4.
+5. W5 implementation can start after **W4.4** contracts/grants are stable; live acceptance additionally requires W4.6's real binding, rollback and all PRD B.10 criteria. Close R-05/R-08/R-09 inside W5.
+6. Deliver W8.1–W8.3 and W6.1 monitoring for the Phase 3 release; only advance W6.2 standing policies to L3 after demonstrated L2 safety. Later W6.3–W6.6 and W7 overlays remain phase/cash gated. W9 runs throughout; W10 remains the intentional pulled-forward scope.
+
+### Added closure packages — requirements previously named without delivery ownership
+
+These make existing roadmap obligations actionable; they are recommendations for the implementing model, not claims of completed work or new product scope.
+
+| Package | Required implementation | Acceptance evidence |
+| --- | --- | --- |
+| W3.1 — Phase 1/2 delivery persistence | Interview/import discovery; classification review/corrections; persisted RoPA, policy/notice drafts and delivery playbook time records; prompt/version review | Resume across sessions; corrections retain provenance; measured delivery-time baseline and ranked automation backlog; FR-2.3/2.4 and M1.8 |
+| W8.1 — Rights and consent | DSAR verified identity, fulfilment, deadlines and responses; purpose/notice-version consent capture, withdrawal and downstream completion; EN/HI; retention/legal-hold policy | Full DSAR and consent-withdrawal journeys; server-owned clocks; consent history and actor evidence; FR-12.1–12.3, FR-4.5; honour existing seven-year product requirement while separately recording statutory applicability |
+| W8.2 — Breach operations | Incident state machine, triage, notification drafts, review/send authority, deadline jobs and warm forensic evidence | Timed controlled drill with DPB/affected-principal outputs, delivery/retry evidence and escalation; FR-13.1–13.4; no unapproved live notifications |
+| W8.3 — Review and release | General output review queue, reasons/diffs, explicit founder release in Phases 0–2; sealed approval artifacts; report/claim/evidence linkage | Unreviewed client output cannot be released; rejection reason and approver preserved; BR-4, UJ-1, FR-7.5/7.6. Resolve free gap-scan auto-release versus BR-4 explicitly |
+| W6.1 — Monitoring | Scheduled discovery/assessment, drift and scheduler/connector health | Restart-safe schedules, alert delivery, last-success and missed-run detection; M3.10 |
+| W6.2 — Standing policies | Human-authored/versioned/expiring scope with revocation and escalation; still requires dry-run/rollback/token checks | Boundary and revocation tests, named policy approver and policy version per execution; M4.1; no bypass of BR-1/BR-2 |
+| W6.3 — Self-service SMB | Onboarding, tier/entitlement, guided assessment/remediation and support/billing boundaries | A new client completes the supported journey without founder intervention; M4.4 |
+| W6.4 — TPRM and DPIA | Vendor inventory, DPAs, questionnaires, sub-processors; guided DPIA with risk rationale and review | Persistent tenant-scoped vendor and DPIA lifecycle with export/review; M4.5/M4.6; control text alone does not qualify |
+| W6.5 — Partner service | Explicit assigned-client access, delegated role boundaries, brand configuration and exports | Multi-client partner acceptance with cross-client denial tests; M4.7 |
+| W6.6 — Market signals | Real permitted public-source ingestion, scoring, provenance and internal-only delivery | Non-empty sourced signals and repeatable scoring; M4.9; current Sanket is a stub |
+| W10.1 — Enterprise roadmap register | Track SSO/SAML login separately from connector grants; split-plane, custom SLA/support, certification, sector #2, Consent Manager registration and L4 | Named demand/funding/certification/proven-L3 gate per module; do not implement gated items merely because they appear in the plan |
+| W9.1 — Operational acceptance | India residency of data/backups/logs/models, tenant keys/rotation, encryption, restore drills, uptime, latency/throughput, per-client cost and explanation lineage | Measured NFR-1–12 results; RPO ≤1h/RTO ≤4h restore exercise; standard report <5min; cost <15% ACV; Phase 3/5 availability targets |
+
+W2 must add storage for these packages as each slice is designed (including vendor/DPA/questionnaire, DPIA, notifications, output reviews, entitlements and partner branding). A table by itself never completes the associated journey.
+
+### Clarifications and architecture reconciliations
+
+- Self-managed TOTP is recorded in migration 0012 as intentional; preserve it. Email OTP remains pending unless its deferral is confirmed. SMS stays deferred.
+- Recommended analyst boundary is explicitly assigned tenants. `founder`, tenant `owner`/`admin`, `axiom_analyst`, partner and machine identity are distinct; a matrix entry must agree with SQL, seeds, API and UI.
+- Retain REST/OpenAPI primary; outbound MCP optional; inbound MCP dropped. One connector identity must still be scoped to tenant + estate + target and separated read/write grants. Native database/object-store bindings need real protocol adapters and permission checks; an OAuth descriptor alone does not implement SQL or prove three live connector families.
+- Phase 2 still requires three live connector types before its exit is claimed; one live binding is an intentional intermediate milestone.
+- Provider-specific AWS `ap-south-1`/S3 and GCP `asia-south1`/GCS wording needs one recorded equivalence/ownership decision. Preserve Mumbai residency and immutable evidence requirements. Preprod's unlocked retention is an explicit verification gap, not production equivalence.
+- The architecture skill puts business logic and writes in APIs; marketing still owns scoring/storage/email workflows. Track their movement to the BFF or an explicitly approved boundary decision in W0/W8. Do not confuse deliberate user-scoped SSR reads with client-side direct writes.
+- Sectoral pack #1 remains undecided. Mock data is implemented as an explicit tenant demo flag; keep provenance visible and ensure sample data never becomes live evidence.
+
+---
+
+## Revision history and original baseline assessment
+
+**Historical record:** Parts A/B and the old kickoff below describe `9575205`. Their present-tense assertions, line numbers, counts, test totals and staging status do not describe `2c54fcd`. Revision 9's current tables and linked handoff take precedence for implementation status. Historical references to "DB policies are correct", a complete execution gate and functional Sanket are specifically superseded by this review.
 
 > **Revision 8 (final) changes:** **Inbound MCP dropped** from scope entirely. **Outbound MCP kept flexible** — an optional transport behind the existing interface, enabled per-descriptor, never the primary path. **Per-agent OAuth client registration dropped**: one connector identity per tenant, with `connector.write` requestable only by Karya's SVID plus a valid approval token. Rationale — only one of ten agents writes to external systems, that is a static architectural fact, and ten registrations per connector is authentication surface the ICP should not have to onboard. Per-agent registration remains documented as optional hardening. REST/OpenAPI is the primary transport.
 >
@@ -22,7 +109,7 @@
 
 ---
 
-## START HERE — kickoff for a fresh implementation session
+## Historical kickoff — Revision 8, before implementation
 
 **Baseline:** `9575205` · main == staging == origin/main == origin/staging · working tree clean
 **Test baseline (verified):** TypeScript 11/11 task passes · Python 38/38 pass · `services/bff` and `apps/web` have **zero tests** behind `--passWithNoTests`
@@ -73,7 +160,7 @@ Every claim in Parts A and B is anchored to a file and line in the repo at `9575
 
 ---
 
-## 1. Staging status — done, no action needed
+## 1. Historical staging status at the original baseline
 
 | Ref              | SHA       |
 | ---------------- | --------- |
@@ -560,7 +647,7 @@ Code parity alone is not enough — preprod currently has no database to be stri
 
 **RBAC.** Central policy module — `can(role, action, resource, scopes)` — replacing the four inline comparisons. Enforced in three places: BFF middleware, web server components (render gating), and RLS (already partly there). `tenant_users.approval_scopes` finally read: an approver may be scoped to specific action classes, which is also what makes W6 standing policies safe later.
 
-**MFA — decided: TOTP + email OTP, SMS deferred.** Supabase Auth TOTP enrolment (authenticator app) as the primary factor, email OTP as fallback and recovery. New tables: `user_mfa_factors`, `mfa_challenges`. The factor type is an enum with `sms` defined-but-disabled so adding a provider later is a config change, not a migration — but no SMS provider is integrated and no SMS code ships.
+**MFA — TOTP + email OTP in planned scope, SMS deferred.** The implementation intentionally uses self-managed TOTP (see migration 0012's decision note), encrypted secrets, recovery codes and session attestations. Preserve that choice. Email OTP remains pending unless explicitly deferred; an enum value is not a working provider. Tables `user_mfa_factors`, `mfa_challenges` and `mfa_session_attestations` exist in 0012–0014. SMS stays defined-but-disabled with no provider or code.
 
 Enforcement is **step-up, not blanket**: required at login for `founder` / `owner` / `approver`, and **re-challenged at the moment of approval-token issuance**. That second challenge is the one that matters — it binds a fresh, strong authentication to the exact act of approving, which is what FR-7.3 ("approver identity, timestamp, scope recorded") actually needs to mean in front of an auditor. Recovery codes issued at enrolment, single-use, hashed at rest.
 
@@ -570,7 +657,7 @@ Enforcement is **step-up, not blanket**: required at login for `founder` / `owne
 
 ## W2 · Data model completion — **P0** · size M
 
-One migration series `0009`–`0014`. New tables:
+Append-only migrations, allocated from the next unused number. **0009–0014 already exist** in the implementation worktree; **0015 is an uncommitted analyst enum migration**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)
@@ -613,7 +700,7 @@ consent_purposes, consent_records, consent_withdrawals, evidence_packs
 user_mfa_factors, mfa_challenges
 ```
 
-Every table: `tenant_id` FK + RLS from day one, following the `0003`/`0004` pattern. Indexes on `(tenant_id, …)` for every access path. Retention: `consent_records` 7-year minimum per FR-4.5.
+Tenant-owned tables require `tenant_id`, row-bound RLS and tenant-consistent foreign keys. **Do not copy the existing 0003/0004 write-policy pattern unchanged** (R-02). Global regulatory/catalogue reference tables require controlled publication and explicit read policy; personal MFA records are user-scoped. Index real access paths and test missing/stale JWT tenant claims. Normalise existing inline dry-run/execution fields deliberately rather than creating a second source of truth. Separate batch/request keys from action keys (R-04). Retention: `consent_records` 7-year minimum per FR-4.5, with legal-hold and withdrawal semantics defined.
 
 ---
 
@@ -639,12 +726,12 @@ A first-class page (`/estate/graph`) rendering the live domain as an interactive
 | Edge style       | Meaning                                              |
 | ---------------- | ---------------------------------------------------- |
 | Solid teal       | Agent holds a **read** grant on that connector/system; hover shows grant type (`client_credentials`, `token_exchange`, …) and assurance level |
-| Solid gold + lock| Agent holds a **write** grant — scoped, time-bound; hover shows `expires_at` |
+| Solid indigo + lock and WRITE label | Agent holds a **write** grant — scoped, time-bound; hover shows `expires_at`; gold remains reserved for sealed evidence/attestations |
 | Dashed grey      | Structural containment (estate → system)             |
 | *no edge*        | The default — eight of ten agents have no client-system access at all |
 | Thin indigo      | Derivation (finding → control, evidence → finding)    |
 
-Because only Karya can ever carry a write edge, the graph makes the separation-of-duties property **visually obvious** — one gold edge on the whole canvas, and Sudhaar demonstrably has none. That is a far better artifact for a sceptical CISO (persona P2, "will not grant access without understanding blast radius and access scope") than a paragraph claiming it.
+Only Karya can carry client-system write edges; it may hold more than one scoped connector grant. The graph must derive those edges from enforced permissions and show Sudhaar has none. Colour and labels must distinguish write authority from sealed evidence.
 
 **Icons — reuse what exists, build nothing new.** `packages/ui/src/components/AgentIcon.tsx` (877 ln) already ships bespoke icons for all ten agents plus `policy`, `policy_engine`, `incident`, `dsar`, `consent` — 15 keys, with `idle | thinking | working` states and `xs|sm|md|lg` sizing already wired. The graph uses `AgentIcon` directly as the node glyph, and drives the `working` state from the live agent-run channel so the canvas animates while agents are actually running. New icons needed only for infrastructure node types (system/connector/datastore), which follow the same SVG conventions.
 
@@ -762,7 +849,7 @@ A conformance test per agent asserts its declared set matches its enforced set, 
 
 #### The ER graph makes this legible
 
-W3.5 renders exactly this matrix. With ten agent nodes on the canvas, the whole access story is one glance: **eight agents with no edge to any client system, one teal read edge from Drishti, one gold write edge from Karya.** For persona P2 (Rajan, the CISO who "will not grant access without understanding blast radius and access scope"), that picture is the answer to his question.
+W3.5 renders this matrix from enforced grants: **eight agents with no client-system access, teal read edges from Drishti, indigo write edges with lock/WRITE labels from Karya.** Gold is reserved for sealed evidence and attestations.
 
 ### L2 · Credential broker — the four grants
 
@@ -1203,7 +1290,7 @@ W10 On-prem environment ── parallel from W0; shares the config hardening
 W9  Tests & audits ────── continuous, gates every merge
 ```
 
-**Two things start immediately alongside W0:** W7.1 (citation re-map — the product cites wrong law today) and W10's config hardening (it fixes the same fail-open family as SEC-1). W5 no longer waits for all of W4 — it unblocks at **W4.3**, once the grant-enforced interface is stable.
+**Current dependency:** W7 publication/runtime parity and W10 configuration hardening can proceed alongside W0. W5 implementation starts after **W4.4**, once the grant model is stable; live execution acceptance also requires the real W4.6 target and W5 rollback/verification. This corrects the earlier W4.3/W4.4 contradiction.
 
 ---
 
@@ -1228,7 +1315,7 @@ These change the shape of the work, so I would rather ask than assume.
 | # | Decision | Resolution | Lands in |
 | - | -------- | ---------- | -------- |
 | 1 | MFA second factor | **TOTP + email OTP. SMS deferred** — enum slot reserved, no provider, no code | W1 |
-| 2 | Connector depth | ~~One real adapter, rest simulated~~ — **superseded by Rev 3.** No bespoke per-system connectors. A **Universal Connection Framework**: SPIFFE workload identity → four-grant credential broker (Client Credentials / Token Exchange / SAML Assertion / JWT Assertion) → pluggable transports with **MCP primary** → declarative capability descriptors. One live binding (PostgreSQL/MySQL); everything else runs the same real code against a sandbox or reference target, labelled `targetBinding` | W4.1–W4.7 |
+| 2 | Connector depth | **Latest decision, Rev 8:** Universal Connection Framework; SPIFFE identity, scoped credential broker, **REST/OpenAPI primary**, optional outbound MCP per descriptor, inbound MCP dropped. Real protocol bindings plus declarative capabilities; initial live PostgreSQL/MySQL target, other reference targets labelled by provenance. Phase 2's three-live-type exit remains separate | W4.1–W4.7 |
 | 3 | Phase 5 on-prem | **In scope** as a dedicated `onprem` deploy environment, validated at production strictness | **W10** |
 | 8 | Preprod authentication | **Exact replica of production — same codebase, same ruleset.** Environment determines topology only, never security posture. Real database, real auth, enforced idempotency, parity CI lane | **W0.0, W0.1** |
 | 9 | Control library versioning | **Versioned against a declared regulatory baseline** — `IN-DPDP@2026-09-20`, content-hashed, with per-control source provenance, a typed change log, and semver defined by assessment comparability. Future revisions enter via Nazar → human review → new baseline | **W7.0** |

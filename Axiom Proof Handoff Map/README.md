@@ -4,6 +4,21 @@ The bridge document between the design prototypes and the real build. Read this
 when changing screens in `../apps/web/` or `../apps/marketing/` and cross-check
 the prototype references in this folder before wiring real data.
 
+**Implementation review — 20 September 2026:** This folder describes target
+designs, not verified completion. For completed source changes, unfinished W1
+analyst work and pending implementation, start with
+[the implementation handoff](../docs/12_Implementation_Handoff.md),
+[roadmap traceability](../docs/13_Roadmap_Traceability.md), and
+[the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
+The current plan is [Doc 11, Revision 9](../docs/11_Phase0-5_Gap_Closure_Plan.md).
+Reviewed implementation is in Claude's worktree at `2c54fcd`, not the older
+root checkout. W1 is partial; mock UI and route existence do not prove release readiness.
+
+Route aliases in the prototype require reconciliation: `/remediation` maps to
+`/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
+`/settings/security` and `/verify`; `/estate/graph` remains planned. See the
+traceability document before introducing new routes or data entities.
+
 ## What's here
 
 - `Axiom Proof Handoff Map.dc.html` — open in a browser (self-contained with `support.js`). Contains:

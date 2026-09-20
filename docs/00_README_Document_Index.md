@@ -4,10 +4,14 @@
 
 **Compiled:** August 2026
 
-**Implementation status:** The repository is at the Phase 3 audit baseline as
-of 2026-08-16. Part A and Part B review Phases 0–3 are complete; the numbered
-strategy documents remain the product roadmap, while implementation and
-external-verification status is maintained in `docs/audits/`.
+**Implementation status (20 September 2026):** The latest review covers Claude's
+`2c54fcd` branch and unfinished analyst role changes. W1 is partially implemented;
+security closure and release verification remain. The earlier Phase 3 *audit*
+completion was not completion of the Phase 3 product. Start with
+[Doc 11 Revision 9](11_Phase0-5_Gap_Closure_Plan.md),
+[the implementation handoff](12_Implementation_Handoff.md),
+[roadmap traceability](13_Roadmap_Traceability.md), and
+[the independent review](audits/04-roadmap-review-2026-09-20.md).
 
 ---
 
@@ -24,6 +28,9 @@ external-verification status is maintained in `docs/audits/`.
 | **06**    | `06_Infrastructure_and_Lockin_Strategy.md` | Single-CSP consolidation analysis (AWS vs GCP vs Azure), lock-in scoring per service, Supabase/S3/Redis/compute alternatives, hybrid self-hosted + hosted LLM strategy, on-prem trade-off                                                                                                                                                  | Choosing the actual CSP and deploy targets, evaluating "no lock-in" trade-offs before signing up for any vendor |
 | **10**    | `10_Systems_Map.html`                      | Five grounded diagram views of the running system: the non-technical five-stage loop, the layered stack with real ports/services, a top-down module map read from the actual monorepo, the agent/subagent separation-of-duties wall (ADR-2/ADR-3), and the execution safety chain with its shared ledger rail. Open directly in a browser. | Onboarding a new engineer or stakeholder, a quick visual gut-check against the current codebase                 |
 | **Audit** | `audits/README.md` and numbered reports    | Evidence-backed repository baseline, security, module coverage, and Phase 3 quality review                                                                                                                                                                                                                                                 | Current implementation status, fixed findings, and external TODOs                                               |
+| **11** | [Phase 0–5 Gap Closure Plan](11_Phase0-5_Gap_Closure_Plan.md) | Revision 9 status, findings, scope and closure packages | Prioritise implementation without losing intentional roadmap additions |
+| **12** | [Implementation Handoff](12_Implementation_Handoff.md) | Commits, worktree, WIP, pending work and acceptance gates | Resume another model's implementation safely |
+| **13** | [Roadmap Traceability](13_Roadmap_Traceability.md) | Every phase module, BR/FR family and NFR mapped to closure work | Prevent roadmap omissions and unsupported completion claims |
 | **—**     | `DPDPA_Axiom_Minds_Strategic_Roadmap.md`   | Market sizing (TAM/SAM/SOM), competitive landscape, right-to-win, pricing, cash-flow model, revenue projections, risk register, council deliberation log                                                                                                                                                                                   | Strategic context, investor conversation (if ever), market positioning                                          |
 
 ---
