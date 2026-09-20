@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { createSupabaseServerClient } from '@axiom/supabase';
 import {
   PortalClient,
   type TenantSummary,
@@ -42,12 +42,16 @@ export default async function ClientPortalPage({
   } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, which listed EVERY tenant on the
+  // platform regardless of who was asking. The `tenants_select_member` RLS
+  // policy already expresses the correct rule — Axiom-internal users see all
+  // tenants, everyone else sees the ones they belong to — so the user-scoped
+  // client gives the right answer without a hand-written check.
 
   // 1. Fetch available tenants dynamically
   let tenants: TenantSummary[] = [];
   try {
-    const { data: dbTenants } = await admin
+    const { data: dbTenants } = await supabase
       .from('tenants')
       .select('id, name, slug, tier, is_sdf')
       .order('name');
@@ -104,24 +108,24 @@ export default async function ClientPortalPage({
       breachesRes,
       ledgerRes,
     ] = await Promise.all([
-      admin
+      supabase
         .from('engagements')
         .select('id, title, status, posture_score, estimated_exposure_inr, started_at')
         .eq('tenant_id', activeTenant.id)
         .order('started_at', { ascending: false })
         .limit(1),
-      admin.from('controls').select('id', { count: 'exact', head: true }),
-      admin.from('findings').select('id, status').eq('tenant_id', activeTenant.id),
-      admin
+      supabase.from('controls').select('id', { count: 'exact', head: true }),
+      supabase.from('findings').select('id, status').eq('tenant_id', activeTenant.id),
+      supabase
         .from('remediation_plans')
         .select('id, title, status, version, generated_by_agent, created_at')
         .eq('tenant_id', activeTenant.id)
         .order('created_at', { ascending: false })
         .limit(10),
-      admin
+      supabase
         .from('remediation_actions')
         .select('id, plan_id, description, action_type, risk_class, blast_radius, approval_status'),
-      admin
+      supabase
         .from('evidence')
         .select(
           'id, content_hash, storage_uri, evidence_type, description, collected_by_agent, collected_at, demonstrates_control_ids',
@@ -129,19 +133,19 @@ export default async function ClientPortalPage({
         .eq('tenant_id', activeTenant.id)
         .order('collected_at', { ascending: false })
         .limit(20),
-      admin
+      supabase
         .from('dsars')
         .select('id, kind, status, data_principal_name, due_by, received_at')
         .eq('tenant_id', activeTenant.id)
         .order('received_at', { ascending: false })
         .limit(15),
-      admin
+      supabase
         .from('breaches')
         .select('id, title, status, severity, dpb_notification_due_by, occurred_at, affected_count')
         .eq('tenant_id', activeTenant.id)
         .order('occurred_at', { ascending: false })
         .limit(10),
-      admin
+      supabase
         .from('audit_ledger')
         .select('sequence_no, actor_id, action_type, result, target_ref, entry_hash, occurred_at')
         .eq('tenant_id', activeTenant.id)

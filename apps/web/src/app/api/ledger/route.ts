@@ -1,12 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const admin = createSupabaseAdmin();
+    // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+    // by design, and these queries carried no tenant filter, so any
+    // authenticated user saw every tenant's data. The client below is
+    // user-scoped: RLS applies, and the explicit filters state the intent.
+    const { supabase, tenantId } = await requireTenantContext();
 
     const isExport = searchParams.get('export') === 'true';
     const agent = searchParams.get('agent');
@@ -26,7 +30,7 @@ export async function GET(request: NextRequest) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         requestedTenantId,
       );
-      const query = admin.from('tenants').select('id, name, slug');
+      const query = supabase.from('tenants').select('id, name, slug');
       const { data } = isUuid
         ? await query.eq('id', requestedTenantId).maybeSingle()
         : await query.eq('slug', requestedTenantId).maybeSingle();
@@ -36,7 +40,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (!targetTenant) {
-      const { data } = await admin.from('tenants').select('id, name, slug').limit(1).maybeSingle();
+      const { data } = await supabase
+        .from('tenants')
+        .select('id, name, slug')
+        .limit(1)
+        .maybeSingle();
       if (data) {
         targetTenant = data;
       }
@@ -44,9 +52,10 @@ export async function GET(request: NextRequest) {
 
     // ─── AUDITOR EXPORT HANDLER ──────────────────────────────────────────────
     if (isExport) {
-      let exportQuery = admin
+      let exportQuery = supabase
         .from('audit_ledger')
         .select('*')
+        .eq('tenant_id', tenantId)
         .order('sequence_no', { ascending: true })
         .limit(5000);
 
@@ -92,7 +101,7 @@ export async function GET(request: NextRequest) {
       let chainIntact = true;
       let firstBreak = null;
       if (targetTenant?.id) {
-        const { data: verifyData } = await admin.rpc('verify_ledger', {
+        const { data: verifyData } = await supabase.rpc('verify_ledger', {
           p_tenant_id: targetTenant.id,
           p_from_sequence: 1,
         });
@@ -179,9 +188,10 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(5, parseInt(searchParams.get('limit') || '25', 10)));
 
-    let query = admin
+    let query = supabase
       .from('audit_ledger')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'estimated' })
+      .eq('tenant_id', tenantId)
       .order('sequence_no', { ascending: false });
 
     if (targetTenant?.id) {

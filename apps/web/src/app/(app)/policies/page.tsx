@@ -1,10 +1,13 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PoliciesPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so RLS is the backstop it was designed
+  // to be and a missing filter is an empty result, not a leak.
+  const { supabase, tenantId } = await requireTenantContext();
   let policyRuns: any[] = [];
   let totalLedgerEntries = 0;
   let autoRemediatedCount = 42;
@@ -12,16 +15,21 @@ export default async function PoliciesPage() {
 
   try {
     const [ledgerRes, actionsRes] = await Promise.all([
-      admin
+      supabase
         .from('audit_ledger')
-        .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result', {
-          count: 'exact',
-        })
-        .order('seq', { ascending: false })
+        .select(
+          'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+          {
+            count: 'estimated',
+          },
+        )
+        .eq('tenant_id', tenantId)
+        .order('sequence_no', { ascending: false })
         .limit(6),
-      admin
+      supabase
         .from('remediation_actions')
-        .select('id, approval_status, risk_class', { count: 'exact' }),
+        .select('id, approval_status, risk_class', { count: 'estimated' })
+        .eq('tenant_id', tenantId),
     ]);
 
     policyRuns = ledgerRes.data || [];
@@ -40,10 +48,10 @@ export default async function PoliciesPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = policyRuns.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Policy Verification Audit Check',
+    seq: r.sequence_no,
+    title: r.action_type || 'Policy Verification Audit Check',
     detail: `Target: ${r.target_ref || 'Architectural Boundary'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'Security Gate',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ compliant' : r.result,

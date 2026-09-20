@@ -102,7 +102,14 @@ report "No AXIOM_E2E_BYPASS_AUTH reads outside @axiom/config (SEC-1)" \
 # The 17 offending pages are migrated to the user-scoped client in W1; until
 # then the gate's job is to stop the set growing. See the baseline file header.
 BASELINE_FILE="scripts/sec3-service-role-baseline.txt"
-current_service_role="$(grep -rln 'createSupabaseAdmin' apps/web/src --include='*.ts' --include='*.tsx' 2>/dev/null | sort)"
+# Match actual CALLS, not mentions. Each migrated file keeps a comment
+# naming `createSupabaseAdmin()` to record what used to be there and why it was
+# wrong; that documentation is the point and must not read as a violation.
+current_service_role="$(
+  grep -rn 'createSupabaseAdmin' apps/web/src --include='*.ts' --include='*.tsx' 2>/dev/null \
+  | grep -vE '^[^:]+:[0-9]+: *(//|\*|/\*)' \
+  | cut -d: -f1 | sort -u
+)"
 baseline_service_role="$(grep -vE '^\s*(#|$)' "$BASELINE_FILE" 2>/dev/null | sort)"
 new_service_role="$(comm -23 <(echo "$current_service_role") <(echo "$baseline_service_role"))"
 

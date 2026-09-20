@@ -1,23 +1,28 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ConnectorsPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so a missing tenant filter is an empty
+  // result rather than a cross-tenant leak.
+  const { supabase, tenantId } = await requireTenantContext();
   let connectorRuns: any[] = [];
   let totalConnectorEvents = 0;
 
   try {
-    const { data, count } = await admin
+    const { data, count } = await supabase
       .from('audit_ledger')
-      .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result', {
-        count: 'exact',
-      })
-      .or(
-        'action.ilike.%connect%,target_ref.ilike.%postgres%,target_ref.ilike.%s3%,actor.in.(drishti,vibhaag,samanvaya)',
+      .select(
+        'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+        {
+          count: 'estimated',
+        },
       )
-      .order('seq', { ascending: false })
+      .eq('tenant_id', tenantId)
+      .in('actor_id', ['drishti', 'vibhaag'])
+      .order('sequence_no', { ascending: false })
       .limit(6);
 
     connectorRuns = data || [];
@@ -27,10 +32,10 @@ export default async function ConnectorsPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = connectorRuns.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Connector Health & Access Verification',
+    seq: r.sequence_no,
+    title: r.action_type || 'Connector Health & Access Verification',
     detail: `Target: ${r.target_ref || 'ap-south-1 Adapter'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'ap-south-1 Connector',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ active' : r.result,
@@ -60,7 +65,7 @@ export default async function ConnectorsPage() {
                 v: 'Connected · Read-Only',
                 dot: '#0FB5A5',
                 sub: lastEvent
-                  ? `Verified in ledger entry #${lastEvent.seq}`
+                  ? `Verified in ledger entry #${lastEvent.sequence_no}`
                   : 'SSL required · 0 cross-border egress',
               },
               {

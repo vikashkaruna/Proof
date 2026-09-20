@@ -1,8 +1,7 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent, StatusBadge } from '@axiom/ui';
 import { formatDate } from '@axiom/ui';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import type { StatusKind } from '@axiom/ui';
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
 import { KillSwitchButton } from './[id]/kill-switch-button';
@@ -21,13 +20,11 @@ interface PlanListRow {
 }
 
 export default async function PlansListPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let planRows: PlanListRow[] = [];
   let recentRuns: any[] = [];
   let actionsCount = 0;
@@ -35,17 +32,22 @@ export default async function PlansListPage() {
 
   try {
     const [plansRes, ledgerRes, actionsRes] = await Promise.all([
-      admin
+      supabase
         .from('remediation_plans')
         .select('id, title, status, version, created_at, tenant_id, engagement_id, library_version')
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false }),
-      admin
+      supabase
         .from('audit_ledger')
         .select('seq, actor, action, target_ref, timestamp, entry_hash, result')
-        .eq('actor', 'sudhaar')
-        .order('seq', { ascending: false })
+        .eq('tenant_id', tenantId)
+        .eq('actor_id', 'sudhaar')
+        .order('sequence_no', { ascending: false })
         .limit(4),
-      admin.from('remediation_actions').select('id, dry_run_result, rollback_definition'),
+      supabase
+        .from('remediation_actions')
+        .select('id, dry_run_result, rollback_definition')
+        .eq('tenant_id', tenantId),
     ]);
 
     if (plansRes.data && plansRes.data.length > 0) {

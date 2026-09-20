@@ -1,21 +1,28 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClassificationPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so a missing tenant filter is an empty
+  // result rather than a cross-tenant leak.
+  const { supabase, tenantId } = await requireTenantContext();
   let vibhaagRuns: any[] = [];
   let totalVibhaagScans = 0;
 
   try {
-    const { data, count } = await admin
+    const { data, count } = await supabase
       .from('audit_ledger')
-      .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result', {
-        count: 'exact',
-      })
-      .or('actor.eq.vibhaag,action.ilike.%classification%')
-      .order('seq', { ascending: false })
+      .select(
+        'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+        {
+          count: 'estimated',
+        },
+      )
+      .eq('tenant_id', tenantId)
+      .eq('actor_id', 'vibhaag')
+      .order('sequence_no', { ascending: false })
       .limit(6);
 
     vibhaagRuns = data || [];
@@ -25,10 +32,10 @@ export default async function ClassificationPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = vibhaagRuns.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Data Field Classification',
+    seq: r.sequence_no,
+    title: r.action_type || 'Data Field Classification',
     detail: `Target: ${r.target_ref || 'Discovered Schema'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'dpdpa_schema',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ classified' : r.result,

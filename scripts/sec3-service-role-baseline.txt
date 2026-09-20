@@ -1,37 +1,17 @@
 # SEC-3 · service-role usage baseline in apps/web
 #
-# `createSupabaseAdmin()` uses the Supabase service-role key, which bypasses RLS
-# by design. `packages/supabase/src/admin.ts` states the invariant: "The Next.js
-# apps NEVER use this." These files break it, and because most of them also
-# carry no tenant filter, any authenticated user of any tenant can currently see
-# every tenant's findings, evidence, DSARs, breaches, reports and approvals.
-# NFR-2 ("tenant isolation — absolute") is false in the running product even
-# though the database policies are correct.
+# EMPTY — closed in W1. All 22 files are migrated to the user-scoped client
+# via `requireTenantContext()`, so RLS enforces tenancy for every query the
+# web app makes. NFR-2 ("tenant isolation — absolute") now holds in the
+# running product as well as in the database policies.
 #
-# This file is a RATCHET, not an allowlist. The W0.0 gate fails on any file not
-# listed here, so the set cannot grow. W1 migrates each page to the user-scoped
-# client and deletes its line. The gate passes trivially once the list is empty.
+# This file stays as a ratchet. The W0.0 gate fails on any apps/web file that
+# calls `createSupabaseAdmin()` and is not listed here, and nothing should
+# ever be listed here again: the service-role key bypasses RLS by design, and
+# `packages/supabase/src/admin.ts` states the invariant plainly — "The Next.js
+# apps NEVER use this."
+#
+# If a web-app feature genuinely needs elevated privilege, it belongs behind
+# the BFF, which authenticates the caller and checks their capability first.
 #
 # Do not add to this file.
-apps/web/src/app/(app)/approval/page.tsx
-apps/web/src/app/(app)/assessment/page.tsx
-apps/web/src/app/(app)/breaches/page.tsx
-apps/web/src/app/(app)/classification/page.tsx
-apps/web/src/app/(app)/connectors/page.tsx
-apps/web/src/app/(app)/controls/page.tsx
-apps/web/src/app/(app)/dashboard/page.tsx
-apps/web/src/app/(app)/datamap/page.tsx
-apps/web/src/app/(app)/discovery/page.tsx
-apps/web/src/app/(app)/dsars/page.tsx
-apps/web/src/app/(app)/evidence/page.tsx
-apps/web/src/app/(app)/execution/page.tsx
-apps/web/src/app/(app)/ledger/page.tsx
-apps/web/src/app/(app)/monitoring/page.tsx
-apps/web/src/app/(app)/partner/page.tsx
-apps/web/src/app/(app)/plans/page.tsx
-apps/web/src/app/(app)/policies/page.tsx
-apps/web/src/app/(app)/portal/page.tsx
-apps/web/src/app/(app)/reports/page.tsx
-apps/web/src/app/(app)/workbench/page.tsx
-apps/web/src/app/(auth)/login/actions.ts
-apps/web/src/app/api/ledger/route.ts

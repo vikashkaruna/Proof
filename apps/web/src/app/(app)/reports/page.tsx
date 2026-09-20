@@ -1,27 +1,36 @@
 import { ReportsClient } from './reports-client';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ReportsPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let totalReports = 5;
   let postureScore = 74;
   let sealedEvidenceCount = 28;
 
   try {
     const [ledgerRes, engagementRes, evidenceRes] = await Promise.all([
-      admin
+      supabase
         .from('audit_ledger')
-        .select('seq', { count: 'exact', head: true })
+        .select('seq', { count: 'estimated', head: true })
+        .eq('tenant_id', tenantId)
         .or('actor.eq.prativedan,action.ilike.%report%,action.ilike.%pack%'),
-      admin
+      supabase
         .from('engagements')
         .select('posture_score, status, title')
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
-      admin.from('evidence').select('id', { count: 'exact', head: true }),
+      supabase
+        .from('evidence')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId),
     ]);
 
     if (ledgerRes.count != null && ledgerRes.count > 0) {

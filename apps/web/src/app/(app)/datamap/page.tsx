@@ -1,26 +1,37 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DataMapPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so RLS is the backstop it was designed
+  // to be and a missing filter is an empty result, not a leak.
+  const { supabase, tenantId } = await requireTenantContext();
   let ropaEvidence: any[] = [];
   let ledgerEvents: any[] = [];
 
   try {
     const [evRes, ledgerRes] = await Promise.all([
-      admin
+      supabase
         .from('evidence')
         .select('id, title, content_hash, metadata, created_at')
-        .or('type.eq.ropa,description.ilike.%ropa%,title.ilike.%ropa%')
+        .eq('tenant_id', tenantId)
+        .ilike('title', '%ropa%')
         .order('created_at', { ascending: false })
         .limit(4),
-      admin
+      supabase
         .from('audit_ledger')
-        .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result')
-        .or('action.ilike.%ropa%,action.ilike.%datamap%')
-        .order('seq', { ascending: false })
+        .select(
+          'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+        )
+        .eq('tenant_id', tenantId)
+        .in('action_type', [
+          'classification.batch.completed',
+          'evidence.collected',
+          'evidence.sealed',
+        ])
+        .order('sequence_no', { ascending: false })
         .limit(6),
     ]);
 
@@ -31,10 +42,10 @@ export default async function DataMapPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = ledgerEvents.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'RoPA Data Flow Synchronization',
+    seq: r.sequence_no,
+    title: r.action_type || 'RoPA Data Flow Synchronization',
     detail: `Target: ${r.target_ref || 'RoPA Registry'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'ropa_register',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ sealed' : r.result,

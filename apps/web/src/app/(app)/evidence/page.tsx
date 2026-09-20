@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { EvidenceClient, type EvidenceItem } from './evidence-client';
 
 export const dynamic = 'force-dynamic';
@@ -10,13 +9,11 @@ export default async function EvidencePage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let evidenceItems: EvidenceItem[] = [];
   let totalArtifacts = 1284;
   let noticeCount = 312;
@@ -24,9 +21,10 @@ export default async function EvidencePage({
   let securityCount = 491;
 
   try {
-    const { data: dbEvidence, count } = await admin
+    const { data: dbEvidence, count } = await supabase
       .from('evidence')
       .select('*', { count: 'exact' })
+      .eq('tenant_id', tenantId)
       .order('collected_at', { ascending: false });
 
     if (dbEvidence && dbEvidence.length > 0) {

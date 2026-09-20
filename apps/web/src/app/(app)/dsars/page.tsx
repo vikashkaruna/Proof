@@ -1,17 +1,14 @@
-import { redirect } from 'next/navigation';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { DsarClient, type DsarItem } from './dsar-client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DsarPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let dsarItems: DsarItem[] = [];
   let accessCount = 6;
   let erasureCount = 3;
@@ -19,9 +16,10 @@ export default async function DsarPage() {
   let fulfilledCount = 14;
 
   try {
-    const { data: dbDsars } = await admin
+    const { data: dbDsars } = await supabase
       .from('dsars')
       .select('*')
+      .eq('tenant_id', tenantId)
       .order('received_at', { ascending: false });
 
     if (dbDsars && dbDsars.length > 0) {

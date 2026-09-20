@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { createSupabaseServerClient } from '@axiom/supabase';
-import { createSupabaseAdmin } from '@axiom/supabase';
 
 export async function loginAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim();
@@ -62,35 +61,20 @@ export async function loginAction(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent(errorMessage)}`);
   }
 
-  if (authenticatedUser) {
-    try {
-      const admin = createSupabaseAdmin();
-      const { data: membership } = await admin
-        .from('tenant_users')
-        .select('id')
-        .eq('user_id', authenticatedUser.id)
-        .maybeSingle();
-
-      if (!membership) {
-        const { data: defaultTenant } = await admin
-          .from('tenants')
-          .select('id')
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-
-        if (defaultTenant) {
-          await admin.from('tenant_users').insert({
-            tenant_id: defaultTenant.id,
-            user_id: authenticatedUser.id,
-            role: 'owner',
-          });
-        }
-      }
-    } catch (adminErr) {
-      console.warn('[loginAction] Tenant membership sync notice:', adminErr);
-    }
-  }
+  // A "tenant membership sync" block stood here. If the signing-in user held
+  // no membership, it selected the OLDEST tenant in the database and inserted
+  // them into it as `owner`, using the service-role client to bypass RLS.
+  //
+  // Signup is open — `/login?mode=signup` requires no invitation — and the
+  // same block ran there. So any person who created an account became owner of
+  // the first tenant on the platform, which on a real deployment is the
+  // flagship client. Under the W1 capability matrix that is authority to
+  // approve and execute remediation against their estate, manage their users,
+  // and see every finding, DSAR and breach they have.
+  //
+  // A user who belongs to no tenant is not an owner of someone else's.
+  // `requireTenantContext()` sends them to /onboarding, where they create
+  // their own tenant subject to the SEC-5 quota, or accept an invitation.
 
   try {
     revalidatePath('/', 'layout');
@@ -159,41 +143,30 @@ export async function signupAction(formData: FormData) {
     redirect(`/login?mode=signup&error=${encodeURIComponent(errorMessage)}`);
   }
 
-  // Mirror to public.users and ensure membership in default tenant
-  if (signupUser) {
+  // Mirror the auth user into public.users.
+  //
+  // The automatic grant of `owner` on the oldest tenant that used to follow
+  // this is removed — see the note in loginAction. Signup creates an account
+  // and nothing else; tenant membership comes from onboarding or an invitation.
+  //
+  // This runs with the user's OWN session rather than the service-role client:
+  // the `users_insert_self` RLS policy (migration 0001) permits a user to
+  // insert exactly their own row, which is all this needs. SEC-3's invariant
+  // holds — the web app never needs the service-role key.
+  if (signupUser && hasSession) {
     try {
-      const admin = createSupabaseAdmin();
-      await admin.from('users').upsert({
+      const supabase = await createSupabaseServerClient();
+      const { error: mirrorError } = await supabase.from('users').upsert({
         id: signupUser.id,
         email,
         full_name: fullName,
         is_axiom_internal: false,
       });
-
-      const { data: membership } = await admin
-        .from('tenant_users')
-        .select('id')
-        .eq('user_id', signupUser.id)
-        .maybeSingle();
-
-      if (!membership) {
-        const { data: defaultTenant } = await admin
-          .from('tenants')
-          .select('id')
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-
-        if (defaultTenant) {
-          await admin.from('tenant_users').insert({
-            tenant_id: defaultTenant.id,
-            user_id: signupUser.id,
-            role: 'owner',
-          });
-        }
+      if (mirrorError) {
+        console.warn('[signupAction] Profile mirror notice:', mirrorError.message);
       }
-    } catch (adminErr) {
-      console.warn('[signupAction] Tenant setup notice:', adminErr);
+    } catch (mirrorErr) {
+      console.warn('[signupAction] Profile mirror notice:', mirrorErr);
     }
   }
 

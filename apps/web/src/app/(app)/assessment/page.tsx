@@ -1,30 +1,39 @@
-import { redirect } from 'next/navigation';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { AssessmentClient, type ControlScore } from './assessment-client';
-import { controls as controlLib } from '@axiom/control-library';
+import { controls as controlLib, CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AssessmentPage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let controlsData: ControlScore[] = [];
   let isSdf = false;
   let exposureText = '₹18–46 cr';
-  let totalControlsCount = 43;
+  // QUA-3: was the literal 43, against a library of 46. Derived now.
+  let totalControlsCount = CONTROL_LIBRARY_COUNT;
 
   try {
     const [engRes, findingsRes, dbControlsRes, tenantRes, evidenceRes] = await Promise.all([
-      admin.from('engagements').select('*').order('created_at', { ascending: false }).limit(1),
-      admin.from('findings').select('control_id, score, status, risk_points'),
-      admin.from('controls').select('id, title, domain, citations, scoring'),
-      admin.from('tenants').select('is_sdf').limit(1),
-      admin.from('evidence').select('id, demonstrates_control_ids, filename'),
+      supabase
+        .from('engagements')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(1),
+      supabase
+        .from('findings')
+        .select('control_id, score, status, risk_points')
+        .eq('tenant_id', tenantId),
+      supabase.from('controls').select('id, title, domain, citations, scoring'),
+      supabase.from('tenants').select('is_sdf').limit(1),
+      supabase
+        .from('evidence')
+        .select('id, demonstrates_control_ids, filename')
+        .eq('tenant_id', tenantId),
     ]);
 
     if (tenantRes.data?.[0]?.is_sdf) {

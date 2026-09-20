@@ -1,23 +1,30 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PartnerPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so RLS is the backstop it was designed
+  // to be and a missing filter is an empty result, not a leak.
+  const { supabase, tenantId } = await requireTenantContext();
   let partnerRuns: any[] = [];
   let tenantCount = 4;
 
   try {
     const [ledgerRes, tenantRes] = await Promise.all([
-      admin
+      supabase
         .from('audit_ledger')
-        .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result', {
-          count: 'exact',
-        })
-        .order('seq', { ascending: false })
+        .select(
+          'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+          {
+            count: 'estimated',
+          },
+        )
+        .eq('tenant_id', tenantId)
+        .order('sequence_no', { ascending: false })
         .limit(6),
-      admin.from('tenants').select('id', { count: 'exact', head: true }),
+      supabase.from('tenants').select('id', { count: 'estimated', head: true }),
     ]);
 
     partnerRuns = ledgerRes.data || [];
@@ -29,10 +36,10 @@ export default async function PartnerPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = partnerRuns.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Multi-Tenant Governance Operation',
+    seq: r.sequence_no,
+    title: r.action_type || 'Multi-Tenant Governance Operation',
     detail: `Target: ${r.target_ref || 'Tenant Infrastructure'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'Tenant Realm',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ isolated' : r.result,
