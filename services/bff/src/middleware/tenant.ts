@@ -78,6 +78,7 @@ export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (
     }
     c.set('tenantId', tenantId);
     c.set('role', 'owner' as UserRole);
+    c.set('approvalScopes', []);
     return next();
   }
 
@@ -88,7 +89,7 @@ export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (
 
   const { data: membership, error } = await supabase
     .from('tenant_users')
-    .select('role')
+    .select('role, approval_scopes')
     .eq('tenant_id', tenantId)
     .eq('user_id', user.id)
     .single();
@@ -103,5 +104,6 @@ export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (
 
   c.set('tenantId', tenantId);
   c.set('role', membership.role as UserRole);
+  c.set('approvalScopes', (membership.approval_scopes as string[] | null) ?? []);
   await next();
 });

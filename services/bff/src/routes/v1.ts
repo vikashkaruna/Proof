@@ -14,6 +14,8 @@ import type { LedgerService } from '../services/ledger.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireCapability } from '../middleware/authorize.js';
+import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import { loadEnv, BRAND } from '@axiom/config';
@@ -72,17 +74,10 @@ export function v1Routes(deps: Deps) {
     const user = c.get('user');
     const role = c.get('role');
 
-    if (!['owner', 'admin', 'approver'].includes(role)) {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only owners, admins, and approvers can issue approval tokens',
-          },
-        },
-        403,
-      );
-    }
+    // Role first. The per-action scope check needs the actions themselves and
+    // runs once they are loaded, below.
+    const approvalRefusal = requireCapability(c, Capability.PLAN_APPROVE);
+    if (approvalRefusal) return approvalRefusal;
 
     const admin = createSupabaseAdmin();
 
@@ -105,7 +100,9 @@ export function v1Routes(deps: Deps) {
 
     const { data: actions, error: actErr } = await admin
       .from('remediation_actions')
-      .select('id, tenant_id, plan_id, dry_run_status, rollback_validated, dry_run_expires_at')
+      .select(
+        'id, tenant_id, plan_id, action_type, dry_run_status, rollback_validated, dry_run_expires_at',
+      )
       .eq('plan_id', input.planId)
       .eq('tenant_id', tenantId)
       .in('id', input.actionIds);
@@ -126,6 +123,41 @@ export function v1Routes(deps: Deps) {
         },
         404,
       );
+    }
+
+    // W1 · SEC-9: `tenant_users.approval_scopes` has existed since migration
+    // 0001 and was read by nothing. An approver scoped to `data-deletion`
+    // must not be able to approve a cross-border transfer change simply
+    // because both are "approving a plan". The scope is checked per action,
+    // because a batch can mix classes and a partial authority must not
+    // silently approve the whole batch.
+    const approvalScopes = c.get('approvalScopes');
+    if (approvalScopes.length > 0) {
+      const outOfScope = (actions ?? []).filter((a) => {
+        const decision = authorize(Capability.PLAN_APPROVE, {
+          role,
+          approvalScopes,
+          actionClass: a.action_type as string,
+        });
+        return !decision.allowed;
+      });
+      if (outOfScope.length > 0) {
+        return c.json(
+          {
+            error: {
+              code: 'scope_forbidden',
+              message:
+                'Your approval scope does not cover every action in this request. ' +
+                'Approve the covered actions separately, or ask an approver with wider scope.',
+              details: {
+                approvalScopes,
+                outOfScope: outOfScope.map((a) => ({ id: a.id, actionClass: a.action_type })),
+              },
+            },
+          },
+          403,
+        );
+      }
     }
 
     // Hard gate: every action must have a successful dry-run and a
@@ -288,12 +320,8 @@ export function v1Routes(deps: Deps) {
     const user = c.get('user');
     const role = c.get('role');
 
-    if (!['owner', 'admin', 'approver'].includes(role)) {
-      return c.json(
-        { error: { code: 'role_forbidden', message: 'Only owners/admins/approvers can reject' } },
-        403,
-      );
-    }
+    const rejectRefusal = requireCapability(c, Capability.PLAN_REJECT);
+    if (rejectRefusal) return rejectRefusal;
 
     const admin = createSupabaseAdmin();
     const { error } = await admin
@@ -604,17 +632,9 @@ export function v1Routes(deps: Deps) {
 
   // ─── Kill switch ─────────────────────────────────────────────────
   const handleKillSwitchEngage = async (c: any) => {
-    if (c.get('role') !== 'founder' && c.get('role') !== 'admin' && c.get('role') !== 'owner') {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only founders/owners can engage the kill switch',
-          },
-        },
-        403,
-      );
-    }
+    const engageRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_TENANT);
+    if (engageRefusal) return engageRefusal;
+
     const body = await c.req.json().catch(() => ({}));
     const parsedKillSwitch = z
       .object({
@@ -632,16 +652,9 @@ export function v1Routes(deps: Deps) {
     // SEC-4: a GLOBAL halt stops execution for every tenant on the platform.
     // `owner` is a per-tenant role, so it is not authority over other
     // tenants' execution. Global scope is founder-only in both directions.
-    if (scope === 'global' && c.get('role') !== 'founder') {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only a founder can engage a global kill switch',
-          },
-        },
-        403,
-      );
+    if (scope === 'global') {
+      const globalRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_GLOBAL);
+      if (globalRefusal) return globalRefusal;
     }
     await deps.killSwitch.engage({
       tenantId: c.get('tenantId'),
@@ -665,18 +678,8 @@ export function v1Routes(deps: Deps) {
   app.post('/kill-switch', handleKillSwitchEngage);
 
   app.post('/kill-switch/release', async (c) => {
-    const role = c.get('role');
-    if (role !== 'founder' && role !== 'owner') {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only founders/owners can release the kill switch',
-          },
-        },
-        403,
-      );
-    }
+    const releaseRefusal = requireCapability(c, Capability.KILL_SWITCH_RELEASE_TENANT);
+    if (releaseRefusal) return releaseRefusal;
 
     const body = await c.req.json().catch(() => ({}));
     const parsedRelease = z
@@ -695,16 +698,9 @@ export function v1Routes(deps: Deps) {
     // emergency stop, released by someone with authority over one tenant.
     // Releasing the global scope is founder-only, and the service refuses a
     // tenant release while a global halt stands.
-    if (scope === 'global' && role !== 'founder') {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only a founder can release a global kill switch',
-          },
-        },
-        403,
-      );
+    if (scope === 'global') {
+      const globalReleaseRefusal = requireCapability(c, Capability.KILL_SWITCH_RELEASE_GLOBAL);
+      if (globalReleaseRefusal) return globalReleaseRefusal;
     }
 
     const result = await deps.killSwitch.release({
@@ -802,12 +798,8 @@ export function v1Routes(deps: Deps) {
   });
 
   app.post('/engagements', async (c) => {
-    if (!['owner', 'admin', 'reviewer'].includes(c.get('role'))) {
-      return c.json(
-        { error: { code: 'role_forbidden', message: 'Only owners/admins/reviewers' } },
-        403,
-      );
-    }
+    const engagementRefusal = requireCapability(c, Capability.ENGAGEMENT_CREATE);
+    if (engagementRefusal) return engagementRefusal;
     const body = await c.req.json();
     const Schema = z.object({
       libraryVersion: z.string(),
