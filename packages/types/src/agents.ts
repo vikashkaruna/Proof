@@ -156,7 +156,18 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     canMutate: false,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
-    toolScopes: ['http.read.government_sources', 'control_library.write'],
+    // SEC-15: Nazar previously held `control_library.write`. The architecture
+    // (04 §5.2) grants it "external sources read" only, and the implementation
+    // granted more. That is the wrong shape at any time and actively dangerous
+    // after W7.0: the control library is the definition of what compliance
+    // MEANS, so letting an L1 agent that ingests untrusted government web pages
+    // write to it turns a poisoned or misread gazette page into a silent change
+    // to every client's posture, with no human in the loop.
+    //
+    // Its correct scope is to PROPOSE. It writes a `regulatory_signals` row; a
+    // human accepts it; only then is a new baseline and library version cut.
+    // Same maker-checker pattern as Sudhaar/Karya, applied to the rulebook.
+    toolScopes: ['http.read.government_sources', 'regulatory_signal.write'],
     escalationConditions: ['regulatory_change_detected'],
     phase: 2,
   },
