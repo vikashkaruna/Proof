@@ -30,10 +30,8 @@ sql() {
   fi
 }
 sql < tests/database/bootstrap.sql
-for migration in infra/supabase/migrations/*.sql; do
-  echo "Applying $(basename "$migration")"
-  sql < "$migration"
-done
+python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
+bash tests/database/migration-runner.sh "$container"
 for suite in tests/database/*.test.sql; do
   echo "Testing $(basename "$suite")"
   sql < "$suite"

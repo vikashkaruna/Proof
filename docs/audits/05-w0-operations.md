@@ -48,3 +48,11 @@ The production Compose overlay now explicitly declares production topology and r
 ## Confirmed deployment direction
 
 The user confirmed on 20 September 2026: use an isolated Supabase Auth/PostgreSQL stack in local Docker Desktop for verification; higher environments must provision their Supabase deployment dynamically through deployment scripts. Do not depend on manually supplied existing Supabase projects. The current legacy Compose and Cloud SQL migration scripts still need replacement/integration: placeholder cloud endpoints and success-on-migration-failure behavior are not accepted deployment evidence.
+
+## Local real-auth parity commands
+
+Run `./scripts/test-strict-parity.sh` from the repository root. It starts the dedicated `axiom-w0-parity` Docker project on ports 56321–56329, applies migrations with the privileged database administration role, creates synthetic test identities through real GoTrue, and compares actual BFF/PostgREST security outcomes under all four hardened environment labels. It neither reads customer data nor resets the existing local Supabase projects. Requires Docker Desktop, Supabase CLI (CI pins 2.116.0), Python 3, Node and installed pnpm dependencies.
+
+`./scripts/start-parity-supabase.sh` starts/migrates without running the persona requests. Restarting it does not replay already-applied migrations. `.axiom-runtime/parity/status.json` holds the local keys with mode 0600; never commit or paste it into handoffs. Synthetic fixtures persist for inspection. To stop only this project, use `supabase stop --workdir .axiom-runtime/parity`; do not run a blanket Docker cleanup.
+
+The migration runner does not adopt untracked existing schemas or ignore duplicate-table errors. For a fresh Supabase stack it records each source file and SHA-256 in `axiom_migrations.applied`, and it fails if a previously applied file changes. An existing environment must reconcile its prior migration history before switching runners; do not delete its tables to make the runner pass. These checks do not make legacy `migrate-cloudsql.sh` safe until that script is replaced/integrated.

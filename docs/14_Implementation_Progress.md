@@ -40,11 +40,23 @@ Verification: 141 BFF tests and typecheck pass; real PostgreSQL tests prove enti
 
 ## W0 milestone: credential wiring and expiry gates
 
+Committed as `6aff4bd` and pushed to staging. Full configured CI [35508723074](https://github.com/vikashkaruna/Proof/actions/runs/35508723074) is green.
+
 The BFF MFA encryption key is wired through Compose, Helm, Secret Manager/Terraform and environment sync. Hardened configuration refuses Supabase placeholders and MFA/signing-key reuse; preprod internal secret defaults are generated and persistent. The production Compose topology/dependency issue found during validation is corrected. Missing, malformed and expired dry-run timestamps now block approval and execution before token consumption.
 
-Verification: 44 configuration tests and 147 BFF tests pass, with BFF typecheck green. Preprod Terraform initialized with backend disabled and validates; no plan/apply or secret rotation occurred. Staging/preprod Compose configuration checks pass; production validation is rerun after correcting its pre-existing dependency on a disabled Temporal service. Helm template wiring is reviewed but Helm is not installed locally.
+Verification: 44 configuration tests and 147 BFF tests pass, with BFF typecheck green. Preprod Terraform initialized with backend disabled and validates; no plan/apply or secret rotation occurred. Staging, preprod and production Compose configuration checks pass after correcting the production overlay’s pre-existing dependency on a disabled Temporal service. Helm template wiring is reviewed but Helm is not installed locally.
 
 User direction: local Docker Desktop hosts the isolated real Supabase parity stack; higher-environment scripts must dynamically provision Supabase. Implementation of that deployment/parity path is next.
+
+## W0 milestone: real local Auth/PostgREST parity and migration runner
+
+An isolated Docker Desktop Supabase project `axiom-w0-parity` is running on API port 56321 (database 56322). Existing `axiom-proof` and other local projects were preserved. `scripts/start-parity-supabase.sh` starts this project without demo seeds; credentials/logs remain in ignored, protected `.axiom-runtime/parity` state.
+
+The real startup found an incompatibility hidden by SQL fixtures: historical migration 0000 touches Auth-owned tables and cannot run under the CLI's restricted migration role. `scripts/migrate-database.py` applies unchanged files after Supabase initializes, using its administration role. It serializes runners, records source checksums, makes each migration/tracker write atomic and refuses changed history. Database regressions prove second-run no-ops, checksum refusal and rollback of injected failing DDL. No applied migration was rewritten.
+
+`scripts/test-strict-parity.sh` passes locally across staging, preprod, production and onprem labels, using the real complete BFF middleware chain against real password sessions and PostgREST/RLS. Every label produces identical outcomes for absent/synthetic authentication, takeover cookie, own-tenant reads with real engagement rows, foreign-tenant/resource denial, direct self-promotion refusal, viewer invocation refusal, owner MFA quarantine, mandatory idempotency, durable replay/conflict and missing-entitlement refusal. This covers an API security matrix; browser persona journeys and full real MFA enrolment/step-up remain W1 acceptance work. The CLI stack is local test infrastructure, not a claim of cloud deployment.
+
+A new required CI lane runs this matrix on an isolated Supabase stack. Higher-environment dynamic provisioning and replacement of legacy fail-open deployment scripts remain next; the new local runner alone does not fulfill that part of the user's instruction.
 
 ## Remaining acceptance work — do not mark whole workstreams complete yet
 

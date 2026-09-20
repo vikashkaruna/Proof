@@ -77,3 +77,6 @@ infra/supabase/snippets/
 # Local Temporal Scratch / Tutorial
 temporal-project/
 
+
+# Isolated local deployment state, credentials and logs
+.axiom-runtime/

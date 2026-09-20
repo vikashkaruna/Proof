@@ -18,6 +18,26 @@ jobs:
       - uses: actions/checkout@v5
       - run: ./scripts/test-database.sh
 
+  strict-auth-parity:
+    name: Real Auth/PostgREST strict topology parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/test-strict-parity.sh
+      - name: Stop the isolated parity project
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
   # ─── W0.0 security gate ──────────────────────────────────────────
   # Runs first and gates everything else. The findings it guards against
   # (SEC-1, SEC-2, SEC-3, SEC-13) were all instances of one mistake:
@@ -43,7 +63,7 @@ jobs:
 
   # ─── Static analysis ─────────────────────────────────────────────
   lint-and-typecheck:
-    needs: [env-security-gate, control-count-gate, database-security]
+    needs: [env-security-gate, control-count-gate, database-security, strict-auth-parity]
     name: Lint + typecheck
     runs-on: ubuntu-latest
     steps:
