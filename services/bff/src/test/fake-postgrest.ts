@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 /**
  * A small in-memory stand-in for the PostgREST query builder.
@@ -63,6 +63,148 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     const used = (buckets.get(key) ?? 0) + 1;
     buckets.set(key, used);
     return { allowed: used <= limit, retry_after: Number(args.p_window_seconds) };
+  });
+
+  /**
+   * `action_set_content_digest` and `issue_plan_approval` (migration 0026).
+   *
+   * Modelled rather than stubbed, because what the route tests are about is
+   * the behaviour these two produce: that a content change between the
+   * step-up and the write is refused, and that the token, the actions, the
+   * plan, the challenge link and the ledger entry all appear together or not
+   * at all. A stub returning `issued` would make those tests assert nothing.
+   */
+  const contentDigest = (tenantId: string, planId: string, actionIds: string[]): string => {
+    const rows = (tables['remediation_actions'] ?? [])
+      .filter(
+        (a) =>
+          a['tenant_id'] === tenantId &&
+          a['plan_id'] === planId &&
+          actionIds.includes(a['id'] as string),
+      )
+      .sort((a, b) => String(a['id']).localeCompare(String(b['id'])))
+      .map((a) => ({
+        id: a['id'],
+        action_type: a['action_type'] ?? null,
+        parameters: a['parameters'] ?? null,
+        rollback_definition: a['rollback_definition'] ?? null,
+        closes_finding_ids: [...((a['closes_finding_ids'] as string[]) ?? [])].sort(),
+        dry_run_result: a['dry_run_result'] ?? null,
+      }));
+    return createHash('sha256').update(JSON.stringify(rows), 'utf8').digest('hex');
+  };
+
+  rpcHandlers.set('action_set_content_digest', (args) =>
+    contentDigest(
+      args['p_tenant_id'] as string,
+      args['p_plan_id'] as string,
+      (args['p_action_ids'] as string[]) ?? [],
+    ),
+  );
+
+  rpcHandlers.set('issue_plan_approval', (args) => {
+    const tenantId = args['p_tenant_id'] as string;
+    const planId = args['p_plan_id'] as string;
+    const actionIds = (args['p_action_ids'] as string[]) ?? [];
+    const approverId = args['p_approver_id'] as string;
+
+    if (actionIds.length === 0 || new Set(actionIds).size !== actionIds.length) {
+      return { decision: 'invalid_actions' };
+    }
+    const plan = (tables['remediation_plans'] ?? []).find(
+      (r) => r['id'] === planId && r['tenant_id'] === tenantId,
+    );
+    if (!plan) return { decision: 'plan_not_found' };
+
+    const actions = (tables['remediation_actions'] ?? []).filter(
+      (a) =>
+        a['tenant_id'] === tenantId &&
+        a['plan_id'] === planId &&
+        actionIds.includes(a['id'] as string),
+    );
+    if (actions.length !== actionIds.length) return { decision: 'actions_not_found' };
+    if (
+      actions.some((a) =>
+        ['executing', 'succeeded', 'failed', 'rolled_back'].includes(
+          String(a['execution_status'] ?? ''),
+        ),
+      )
+    ) {
+      return { decision: 'actions_in_flight' };
+    }
+    if (
+      actions.some(
+        (a) => a['dry_run_status'] !== 'dry_run_complete' || a['rollback_validated'] !== true,
+      )
+    ) {
+      return { decision: 'actions_not_ready' };
+    }
+
+    // Recomputed here, as the real function recomputes it under row locks.
+    if (contentDigest(tenantId, planId, actionIds) !== args['p_expected_digest']) {
+      return { decision: 'content_changed' };
+    }
+
+    const tokenId = randomUUID();
+    table('approval_tokens').push({
+      id: tokenId,
+      tenant_id: tenantId,
+      plan_id: planId,
+      action_ids: actionIds,
+      approver_id: approverId,
+      mode: args['p_mode'],
+      concurrency: args['p_concurrency'],
+      stop_on_failure: args['p_stop_on_failure'],
+      signature: args['p_signature'],
+      signed_payload: args['p_signed_payload'],
+      nonce: args['p_nonce'],
+      expires_at: args['p_expires_at'],
+      reason: args['p_reason'] ?? null,
+      conditions: args['p_conditions'] ?? {},
+      status: 'issued',
+    });
+
+    const challengeId = args['p_challenge_id'] as string | null;
+    if (challengeId) {
+      const challenge = (tables['mfa_challenges'] ?? []).find((r) => r['id'] === challengeId);
+      if (challenge) challenge['consumed_for'] = tokenId;
+    }
+
+    for (const action of actions) {
+      action['approval_status'] = 'approved';
+      action['approval_token_id'] = tokenId;
+      action['approved_by'] = approverId;
+      action['approved_at'] = new Date().toISOString();
+    }
+    plan['status'] = 'approved';
+
+    // Written in the same call, because that is the property 0026 adds.
+    table('audit_ledger').push({
+      tenant_id: tenantId,
+      correlation_id: args['p_correlation_id'],
+      actor_type: 'human',
+      actor_id: approverId,
+      action_type: 'approval.token.issued',
+      target_ref: planId,
+      approval_token_id: tokenId,
+      approver_id: approverId,
+      result: 'success',
+      detail: {
+        actionIds,
+        mode: args['p_mode'],
+        expiresAt: args['p_expires_at'],
+        contentDigest: args['p_expected_digest'],
+        mfaChallengeId: challengeId,
+        ...((args['p_mfa_detail'] as Record<string, unknown>) ?? {}),
+      },
+    });
+
+    return {
+      decision: 'issued',
+      token_id: tokenId,
+      expires_at: args['p_expires_at'],
+      content_digest: args['p_expected_digest'],
+    };
   });
 
   function table(name: string): Row[] {

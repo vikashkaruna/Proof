@@ -201,14 +201,25 @@ describe('POST /v1/plans/approve — MFA step-up', () => {
     const challengeId = await freshStepUp(app);
     await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
 
-    const issued = ledgerAppend.mock.calls
-      .map(([arg]) => arg as { actionType: string; detail?: Record<string, unknown> })
-      .find((entry) => entry.actionType === 'approval.token.issued');
+    // Migration 0026 moved this write INTO the issuing transaction, so the
+    // entry is in the ledger table rather than in a call the route made
+    // afterwards. That is the point of the change: the previous shape could
+    // issue a live token and then fail to record who granted it.
+    const issued = fake
+      .rows('audit_ledger')
+      .find((entry) => entry['action_type'] === 'approval.token.issued') as
+      { detail?: Record<string, unknown>; approval_token_id?: string } | undefined;
+
+    expect(issued, 'the issuing transaction must have written a ledger entry').toBeTruthy();
+    expect(issued?.approval_token_id).toBe(fake.rows('approval_tokens')[0]?.['id']);
 
     // FR-7.3: the approver's identity claim has to be more than "a session
     // cookie was present", and the evidence for that lives in the chain.
     expect(issued?.detail?.mfa).toMatchObject({ challengeId });
     expect((issued?.detail?.mfa as { satisfiedAt: string }).satisfiedAt).toBeTruthy();
+    // And the exact content that was approved, so a later diff has something
+    // to compare against.
+    expect(issued?.detail?.contentDigest).toEqual(expect.any(String));
   });
 
   it('will not let one step-up authorise a second approval', async () => {
@@ -538,6 +549,35 @@ describe('POST /v1/plans/approve — the binding covers action content', () => {
     );
     expect(second.status).toBe(401);
     expect(fake.rows('approval_tokens')).toHaveLength(1);
+  });
+
+  it('refuses at the database when content moves after the route has read it', async () => {
+    // The window the step-up binding cannot see. The route verifies the
+    // binding, then reads the content, then writes — and anything with update
+    // rights can change an action in between. Migration 0026 recomputes the
+    // digest under the row locks, so the issuing transaction refuses.
+    //
+    // Simulated by making the digest the route reads disagree with the one the
+    // issuing function computes, which is exactly what a concurrent edit does.
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    fake.onRpc('action_set_content_digest', () => 'digest-from-before-the-edit');
+
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { error: { code: string } }).toMatchObject({
+      error: { code: 'content_changed' },
+    });
+    // The decisive part: no signed authority came out of it, and nothing was
+    // half-written.
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+    expect(fake.rows('remediation_actions').every((a) => a['approval_status'] !== 'approved')).toBe(
+      true,
+    );
+    expect(
+      fake.rows('audit_ledger').some((e) => e['action_type'] === 'approval.token.issued'),
+    ).toBe(false);
   });
 
   it('refuses a challenge raised for an action that does not exist', async () => {
