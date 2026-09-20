@@ -70,6 +70,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-internal
                   key: approval-key
+            - name: AXIOM_MFA_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-internal
+                  key: mfa-encryption-key
+            - name: AXIOM_MFA_SESSION_TTL_HOURS
+              value: {{ .Values.config.mfaSessionTtlHours | default 12 | quote }}
           livenessProbe:
             httpGet:
               path: /health

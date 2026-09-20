@@ -143,3 +143,14 @@ variable "contact_recipient_email" {
   type        = string
   default     = "hello@axiomminds.ai"
 }
+
+variable "mfa_encryption_key" {
+  description = "Persistent BFF-only MFA encryption key, distinct from signing keys. Empty generates a stable random key."
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition     = var.mfa_encryption_key == "" || length(var.mfa_encryption_key) >= 32
+    error_message = "MFA encryption key must have at least 32 characters."
+  }
+}

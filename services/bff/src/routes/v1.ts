@@ -29,6 +29,15 @@ import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
+/** Missing, malformed and boundary-time expiry are all stale. */
+function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
+  return (
+    typeof expiresAt === 'string' &&
+    Number.isFinite(Date.parse(expiresAt)) &&
+    Date.parse(expiresAt) > now
+  );
+}
+
 interface Deps {
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
@@ -674,9 +683,7 @@ export function v1Routes(deps: Deps) {
 
     // Stale dry-run check
     const now = Date.now();
-    const stale = (actions ?? []).filter(
-      (a) => a.dry_run_expires_at && new Date(a.dry_run_expires_at).getTime() < now,
-    );
+    const stale = (actions ?? []).filter((a) => !hasFreshDryRun(a.dry_run_expires_at, now));
     if (stale.length > 0) {
       return c.json(
         {
@@ -1118,7 +1125,7 @@ export function v1Routes(deps: Deps) {
         rejected.push({ actionId, reason: 'action_not_ready' });
         continue;
       }
-      if (action.dry_run_expires_at && new Date(action.dry_run_expires_at).getTime() < executeAt) {
+      if (!hasFreshDryRun(action.dry_run_expires_at, executeAt)) {
         rejected.push({ actionId, reason: 'dry_run_expired' });
         continue;
       }

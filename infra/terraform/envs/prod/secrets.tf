@@ -11,7 +11,7 @@ resource "aws_secretsmanager_secret" "supabase" {
 
 resource "aws_secretsmanager_secret" "internal" {
   name                    = "axiom-proof/internal"
-  description             = "Approval signing key, agent-runtime internal token, model-gateway key"
+  description             = "Approval signing key, agent-runtime internal token, model-gateway key, distinct MFA encryption key"
   recovery_window_in_days = 7
   kms_key_id              = aws_kms_key.evidence.arn
 }

@@ -310,6 +310,7 @@ heal_secret_manager_state_if_needed() {
     "openai_api_key"
     "gemini_api_key"
     "approval_signing_key"
+    "mfa_encryption_key"
     "agent_runtime_internal_token"
     "model_gateway_api_key"
     "temporal_api_key"

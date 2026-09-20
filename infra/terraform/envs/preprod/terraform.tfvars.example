@@ -21,10 +21,12 @@ anthropic_api_key = "sk-ant-api03-..."
 openai_api_key    = "sk-proj-..."
 gemini_api_key    = "AIzaSy..."
 
-# Security Tokens
-approval_signing_key         = "your-preprod-hmac-sha256-signing-secret-32-chars-long"
-agent_runtime_internal_token = "your-preprod-agent-runtime-token-xyz"
-model_gateway_api_key        = "your-preprod-model-gateway-api-key-abc"
+# Security Tokens — leave blank for stable generated keys, or supply secret-manager values.
+approval_signing_key         = ""
+agent_runtime_internal_token = ""
+model_gateway_api_key        = ""
+
+mfa_encryption_key           = ""
 
 # Transactional Email (Resend)
 resend_api_key          = "re_your_resend_api_key_here"

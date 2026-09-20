@@ -239,6 +239,7 @@ const EnvSchema = z
     }
     if (
       !env.SUPABASE_SERVICE_KEY ||
+      isPlaceholderSecret(env.SUPABASE_SERVICE_KEY) ||
       env.SUPABASE_SERVICE_KEY.startsWith(
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v',
       )
@@ -247,6 +248,18 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['SUPABASE_SERVICE_KEY'],
         message: 'Valid production SUPABASE_SERVICE_KEY is required',
+      });
+    }
+    if (
+      isPlaceholderSecret(env.SUPABASE_ANON_KEY) ||
+      env.SUPABASE_ANON_KEY.startsWith(
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v',
+      )
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SUPABASE_ANON_KEY'],
+        message: 'A real deployment anon key is required; demo and placeholder keys are refused.',
       });
     }
     const effectiveRegion = env.AXIOM_REGION || env.AWS_REGION;
@@ -313,6 +326,21 @@ const EnvSchema = z
         });
       }
 
+      if (
+        env.AXIOM_MFA_ENCRYPTION_KEY &&
+        [
+          env.APPROVAL_SIGNING_KEY,
+          env.AGENT_RUNTIME_INTERNAL_TOKEN,
+          env.MODEL_GATEWAY_API_KEY,
+        ].includes(env.AXIOM_MFA_ENCRYPTION_KEY)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AXIOM_MFA_ENCRYPTION_KEY'],
+          message:
+            'MFA encryption needs a distinct key, not a reused signing or service credential.',
+        });
+      }
       if (!env.AXIOM_MFA_ENCRYPTION_KEY) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

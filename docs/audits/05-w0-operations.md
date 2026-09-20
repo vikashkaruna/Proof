@@ -36,3 +36,15 @@ Response bodies are stored in the service-only table and may include sensitive m
 `scripts/test-database.sh` creates and removes its own Docker PostgreSQL container, applies every migration and runs direct-client authority, idempotency, onboarding, ledger-failure and multi-session race tests. It never resets an existing local or hosted database. Auth/Storage schema fixtures in this suite are not evidence of real GoTrue/PostgREST or deployed parity.
 
 CI runs on staging pushes. A green staging code build is not a cloud deployment: migrations, actual secrets, real-auth E2E, storage retention verification and deployment smoke checks remain required before W0 acceptance. No cloud deployment or irreversible bucket lock has been performed in these milestones.
+
+## MFA secret deployment
+
+`AXIOM_MFA_ENCRYPTION_KEY` is now wired to the BFF through local/staging/preprod/production Compose, Helm's `<release>-internal` Secret key `mfa-encryption-key`, and preprod Cloud Run Secret Manager. Environment examples, `sync-env.sh` verification/Terraform/secret mappings and deployment secret discovery include it. Keep it distinct from approval and service tokens; hardened boot rejects reuse and known placeholder values. `AXIOM_MFA_SESSION_TTL_HOURS` remains 12 by default.
+
+Preprod Terraform generates persistent random internal/MFA secrets when no supplied value exists, replacing committed fallback signing/runtime keys. Supplied values are preserved. Plan and review key changes before rollout: replacing an MFA key without re-encrypting existing TOTP factors makes them unreadable. No key rotation or cloud apply was performed here; the re-encryption/key-version workflow remains W1 work. Keep Terraform state and environment files in their protected stores.
+
+The production Compose overlay now explicitly declares production topology and removes the worker's dependency on the disabled local Temporal service. Supply the real Temporal Cloud endpoint/credentials for that deployment.
+
+## Confirmed deployment direction
+
+The user confirmed on 20 September 2026: use an isolated Supabase Auth/PostgreSQL stack in local Docker Desktop for verification; higher environments must provision their Supabase deployment dynamically through deployment scripts. Do not depend on manually supplied existing Supabase projects. The current legacy Compose and Cloud SQL migration scripts still need replacement/integration: placeholder cloud endpoints and success-on-migration-failure behavior are not accepted deployment evidence.

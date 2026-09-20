@@ -70,7 +70,7 @@ function seedApprovablePlan() {
       action_type: 'data.mask',
       dry_run_status: 'dry_run_complete',
       rollback_validated: true,
-      dry_run_expires_at: null,
+      dry_run_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
     });
   }
 }
@@ -82,6 +82,9 @@ async function buildApp() {
 
   const routes = v1Routes({
     approvalEngine: {
+      verify: async () => ({ valid: true }),
+      isActionCovered: () => true,
+      markNonceUsed: vi.fn(),
       issue: async () => ({
         signature: 'sig',
         spec: { nonce: 'nonce-1' },
@@ -263,4 +266,61 @@ describe('POST /v1/plans/approve — MFA step-up', () => {
     const challenge = fake.rows('mfa_challenges').find((r) => r.id === challengeId);
     expect(challenge?.consumed_at).toBeFalsy();
   });
+});
+
+// A valid factor cannot rescue missing/stale safety evidence. These denials
+// precede token consumption and runtime dispatch.
+describe('dry-run expiry at both safety gates', () => {
+  it.each([null, 'not-a-date', '2000-01-01T00:00:00.000Z'])(
+    'refuses approval with expiry %s',
+    async (expiry) => {
+      fake.rows('remediation_actions')[0]!.dry_run_expires_at = expiry;
+      const app = await buildApp();
+      const response = await post(app, '/v1/plans/approve', approveBody());
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ error: { code: 'dry_run_expired' } });
+      expect(fake.rows('approval_tokens')).toHaveLength(0);
+    },
+  );
+  it.each([null, 'not-a-date', '2000-01-01T00:00:00.000Z'])(
+    'refuses execution with expiry %s without consuming the token',
+    async (expiry) => {
+      for (const action of fake.rows('remediation_actions')) {
+        action.approval_status = 'approved';
+        action.dry_run_expires_at = expiry;
+      }
+      fake.seed('approval_tokens', {
+        id: '44444444-4444-4444-8444-444444444444',
+        tenant_id: TENANT,
+        plan_id: PLAN,
+        action_ids: [ACTION_A, ACTION_B],
+        signature: 'sig',
+        nonce: 'nonce-execute',
+        status: 'issued',
+      });
+      const app = await buildApp();
+      const response = await post(
+        app,
+        `/v1/plans/${PLAN}/execute`,
+        JSON.stringify({
+          planId: PLAN,
+          actionIds: [ACTION_A, ACTION_B],
+          mode: 'batch',
+          approvalToken: JSON.stringify({
+            signature: 'sig',
+            spec: { planId: PLAN, actionIds: [ACTION_A, ACTION_B], nonce: 'nonce-execute' },
+          }),
+        }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({
+        acceptedActionIds: [],
+        rejectedActionIds: [
+          { actionId: ACTION_A, reason: 'dry_run_expired' },
+          { actionId: ACTION_B, reason: 'dry_run_expired' },
+        ],
+      });
+      expect(fake.rows('approval_tokens')[0]!.status).toBe('issued');
+    },
+  );
 });

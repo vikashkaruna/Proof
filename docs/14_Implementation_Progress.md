@@ -32,13 +32,23 @@ Verification: 132 BFF tests and typecheck pass. Fresh PostgreSQL migrations, cli
 
 ## W0 milestone: atomic, entitled onboarding
 
+Committed as `f532aae` and pushed to staging. Full configured CI [35507651395](https://github.com/vikashkaruna/Proof/actions/runs/35507651395) is green. Multi-session tests create exactly one organization at quota 1 and allow exactly three attempts at rate limit 3.
+
 Migration 0018 adds service-only, time-bound onboarding entitlements, a shared fixed-window rate limiter and saved DPO/proposed-system intake. The BFF calls an atomic transaction for tier/quota checks, tenant + owner + initial assessment + intake + genesis ledger. The published library must match the BFF version and contain the declared control count. No live entitlements were granted. [Operator setup and interrupted-request handling](audits/05-w0-operations.md) are documented for deployment.
 
 Verification: 141 BFF tests and typecheck pass; real PostgreSQL tests prove entitlement/tier/expiry/revocation refusal, completeness checks, saved intake, quota/rate limits and full rollback when the ledger fails. W3 estate normalization remains pending; submitted systems are retained as proposals and no longer echoed as connected inventory.
 
+## W0 milestone: credential wiring and expiry gates
+
+The BFF MFA encryption key is wired through Compose, Helm, Secret Manager/Terraform and environment sync. Hardened configuration refuses Supabase placeholders and MFA/signing-key reuse; preprod internal secret defaults are generated and persistent. The production Compose topology/dependency issue found during validation is corrected. Missing, malformed and expired dry-run timestamps now block approval and execution before token consumption.
+
+Verification: 44 configuration tests and 147 BFF tests pass, with BFF typecheck green. Preprod Terraform initialized with backend disabled and validates; no plan/apply or secret rotation occurred. Staging/preprod Compose configuration checks pass; production validation is rerun after correcting its pre-existing dependency on a disabled Temporal service. Helm template wiring is reviewed but Helm is not installed locally.
+
+User direction: local Docker Desktop hosts the isolated real Supabase parity stack; higher-environment scripts must dynamically provision Supabase. Implementation of that deployment/parity path is next.
+
 ## Remaining acceptance work — do not mark whole workstreams complete yet
 
-**W0:** finish strict environment/real-auth parity, deployed verification of the new operational tables/idempotency/onboarding controls, deployed secret wiring, expiry edge cases, shared in-flight halt/guard tests, verified evidence retention and all required security regressions. Preserve the complete W0 exit criteria; local policy tests alone do not prove deployed parity.
+**W0:** finish strict environment/real-auth parity, deployed verification of the new operational tables/idempotency/onboarding controls, live secret verification, shared in-flight halt/guard tests, verified evidence retention and all required security regressions. Preserve the complete W0 exit criteria; local policy tests alone do not prove deployed parity.
 
 **W1 (after W0):** incorporate analyst WIP coherently with tests/seeds, complete role enforcement and RLS/session-MFA boundaries, TOTP + email OTP/recovery delivery, deployment/key rotation and persona E2E. Default analyst access remains assigned tenants; email OTP remains planned until explicitly deferred.
 

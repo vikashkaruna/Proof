@@ -106,6 +106,15 @@ resource "google_cloud_run_v2_service" "bff" {
         value = "preprod-service-key-placeholder-length-over-forty-chars"
       }
 
+      env {
+        name = "AXIOM_MFA_ENCRYPTION_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["mfa_encryption_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
       # Secrets
       env {
         name = "APPROVAL_SIGNING_KEY"

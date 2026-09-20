@@ -189,6 +189,22 @@ describe('placeholder secrets are refused in hardened deployments', () => {
     ).toThrow(/AXIOM_MFA_ENCRYPTION_KEY/);
   });
 
+  it.each(['SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY'] as const)(
+    'refuses Terraform placeholders in %s',
+    (key) => {
+      resetEnvCache();
+      expect(() =>
+        loadEnv({ ...good, [key]: 'preprod-service-key-placeholder-length-over-forty-chars' }),
+      ).toThrow(new RegExp(key));
+    },
+  );
+  it('refuses reusing the approval signing key to encrypt MFA factors', () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...good, AXIOM_MFA_ENCRYPTION_KEY: good.APPROVAL_SIGNING_KEY })).toThrow(
+      /distinct key/,
+    );
+  });
+
   it('accepts real minted secrets', () => {
     resetEnvCache();
     expect(() => loadEnv(good)).not.toThrow();

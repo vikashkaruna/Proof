@@ -158,6 +158,7 @@ do_verify() {
     "AGENT_RUNTIME_URL:Inter-service"
     "MODEL_GATEWAY_URL:Inter-service"
     "APPROVAL_SIGNING_KEY:Security & Tokens"
+    "AXIOM_MFA_ENCRYPTION_KEY:Security & Tokens"
     "AGENT_RUNTIME_INTERNAL_TOKEN:Security & Tokens"
     "MODEL_GATEWAY_API_KEY:Security & Tokens"
     "AXIOM_EVIDENCE_BUCKET:Evidence Vault"
@@ -295,6 +296,7 @@ gemini_api_key    = "$(get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")")"
 
 # Security Tokens
 approval_signing_key         = "$(get_val "APPROVAL_SIGNING_KEY")"
+mfa_encryption_key           = "$(get_val "AXIOM_MFA_ENCRYPTION_KEY")"
 agent_runtime_internal_token = "$(get_val "AGENT_RUNTIME_INTERNAL_TOKEN")"
 model_gateway_api_key        = "$(get_val "MODEL_GATEWAY_API_KEY")"
 
@@ -327,6 +329,7 @@ do_secrets() {
     "axiom-${TARGET_ENV}-gemini-api-key:$(get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")")"
     "axiom-${TARGET_ENV}-temporal-api-key:$(get_val "TEMPORAL_API_KEY")"
     "axiom-${TARGET_ENV}-approval-signing-key:$(get_val "APPROVAL_SIGNING_KEY")"
+    "axiom-${TARGET_ENV}-mfa-encryption-key:$(get_val "AXIOM_MFA_ENCRYPTION_KEY")"
     "axiom-${TARGET_ENV}-agent-runtime-internal-token:$(get_val "AGENT_RUNTIME_INTERNAL_TOKEN")"
     "axiom-${TARGET_ENV}-model-gateway-api-key:$(get_val "MODEL_GATEWAY_API_KEY")"
     "axiom-${TARGET_ENV}-upstash-redis-url:$(get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")")"
