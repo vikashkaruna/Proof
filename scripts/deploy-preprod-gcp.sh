@@ -528,6 +528,33 @@ if should_run_phase "db"; then
     DB_PUBLIC_IP=$(terraform output -raw cloud_sql_public_ip 2>/dev/null || echo "")
     pass "Cloud SQL Instance active: ${DB_NAME} (Public IP: ${DB_PUBLIC_IP:-pending})"
     pass "Secrets synchronized in Google Secret Manager"
+
+    # ─── Supabase bootstrap, before any Supabase service starts ───────────
+    # Ordering, not decoration. GoTrue deploys in phase 5 and runs its own 54
+    # migrations over `auth` the moment it starts, but it does NOT create the
+    # schema — it fails with `schema "auth" does not exist`. And if the
+    # migration series has already run, migration 0000's hand-rolled
+    # `auth.users` is there instead and GoTrue's chain breaks partway.
+    #
+    # So: roles and an empty `auth` here, GoTrue in phase 5, the series in
+    # phase 6 with 0000's auth tables as no-ops. Proved end to end in
+    # tests/deployment/selfhosted-supabase.sh.
+    cd "$REPO_ROOT"
+    BOOTSTRAP_PASSWORD=$(cd "infra/terraform/envs/preprod" && terraform output -raw db_password 2>/dev/null || echo "")
+    if [ -z "$DB_PUBLIC_IP" ] || [ -z "$BOOTSTRAP_PASSWORD" ]; then
+      fail "Cloud SQL address or password unavailable; cannot bootstrap the Supabase schema."
+      exit 1
+    fi
+    info "Creating Supabase roles and an empty auth schema..."
+    if ! PGPASSWORD="$BOOTSTRAP_PASSWORD" psql -w \
+         "postgresql://axiom_admin@${DB_PUBLIC_IP}:5432/axiom_proof_preprod?sslmode=require" \
+         -v ON_ERROR_STOP=1 -q -f infra/supabase/bootstrap-selfhosted.sql; then
+      fail "Supabase bootstrap failed. GoTrue cannot start without its roles and schema."
+      echo "    If the connection was refused, add this host to the instance's authorized networks."
+      exit 1
+    fi
+    pass "Supabase roles and auth schema ready for GoTrue"
+    cd "infra/terraform/envs/preprod"
   fi
   cd "$REPO_ROOT"
 fi

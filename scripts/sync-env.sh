@@ -577,6 +577,72 @@ do_scaffold() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7. MINT ACTION — fill the secrets that have to be generated
+# ─────────────────────────────────────────────────────────────────────────────
+# `verify` correctly refuses a .env still holding `<run scripts/mint-...>`, and
+# the operator then had to run the minting script and paste eight values by
+# hand. Pasting the Supabase three in particular is where this goes wrong: the
+# anon and service keys are JWTs signed with the secret, so taking them from
+# different runs produces tokens GoTrue issues and PostgREST rejects.
+#
+# Existing real values are left alone. Only placeholders and empty values are
+# filled, because rotating a live secret is a different act with real
+# consequences — a new AXIOM_MFA_ENCRYPTION_KEY makes every enrolled
+# authenticator undecryptable — and it needs --force said out loud.
+do_mint() {
+  local force=false
+  [ "${MINT_FORCE:-false}" = true ] && force=true
+
+  info "Minting generated secrets for ${TARGET_ENV}..."
+
+  local minted
+  if ! minted="$(node scripts/mint-supabase-keys.mjs --env "$TARGET_ENV" 2>/dev/null)"; then
+    fail "scripts/mint-supabase-keys.mjs failed."
+    return 1
+  fi
+
+  local filled=() kept=() key value current
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^[A-Z_]+$ ]] || continue
+    current="$(grep -E "^[[:space:]]*${key}=" "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+
+    # A value counts as real unless it is empty or still template shaped.
+    if [ "$force" != true ] && [ -n "$current" ] \
+       && [[ "$current" != *"<"*">"* ]] && [[ "$current" != *placeholder* ]] \
+       && [[ "$current" != *YOUR_* ]]; then
+      kept+=("$key")
+      continue
+    fi
+
+    if grep -qE "^[[:space:]]*${key}=" "$ENV_FILE"; then
+      # Values are base64/hex/JWT, so `|` is safe as a delimiter here.
+      python3 - "$ENV_FILE" "$key" "$value" <<'REPLACE'
+import re, sys
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path).read()
+text = re.sub(rf"^[ \t]*{re.escape(key)}=.*$", f"{key}={value}", text, count=1, flags=re.M)
+open(path, "w").write(text)
+REPLACE
+    else
+      printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    fi
+    filled+=("$key")
+  done <<< "$minted"
+
+  if [ ${#filled[@]} -gt 0 ]; then
+    pass "Filled ${#filled[@]} secret(s) in ${ENV_FILE}:"
+    printf "    %s\n" "${filled[@]}"
+  fi
+  if [ ${#kept[@]} -gt 0 ]; then
+    info "Left ${#kept[@]} existing value(s) untouched:"
+    printf "    %s\n" "${kept[@]}"
+    echo -e "  ${DIM}MINT_FORCE=true overwrites them. Rotating AXIOM_MFA_ENCRYPTION_KEY makes"
+    echo -e "  every enrolled authenticator undecryptable; rotating SUPABASE_JWT_SECRET"
+    echo -e "  invalidates every live session.${NC}"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # EXECUTION ROUTER
 # ─────────────────────────────────────────────────────────────────────────────
 case "$ACTION" in
@@ -598,6 +664,9 @@ case "$ACTION" in
   scaffold)
     do_scaffold
     ;;
+  mint)
+    do_mint
+    ;;
   all)
     do_scaffold
     do_verify
@@ -609,7 +678,7 @@ case "$ACTION" in
     fi
     ;;
   *)
-    fail "Unknown action: '$ACTION'. Use scaffold, verify, terraform, secrets, cloudrun, docker, or all."
+    fail "Unknown action: '$ACTION'. Use scaffold, mint, verify, terraform, secrets, cloudrun, docker, or all."
     exit 1
     ;;
 esac
