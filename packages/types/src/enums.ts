@@ -177,6 +177,7 @@ export const LedgerActionType = {
   // trail said the opposite of what happened. On a product whose proposition
   // is a tamper-evident ledger, that is not a cosmetic defect.
   EXECUTION_KILL_SWITCH_RELEASED: 'execution.kill_switch.released',
+  EXECUTION_DISPATCH_RECONCILED: 'execution.dispatch.reconciled',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',

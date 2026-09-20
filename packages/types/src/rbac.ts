@@ -45,6 +45,14 @@ export const Capability = {
   PLAN_REJECT: 'plan.reject',
   PLAN_EXECUTE: 'plan.execute',
 
+  /**
+   * Decide what happens to a dispatch that was promised and never confirmed
+   * (W5). The actions may be running on a client's estate, so releasing them
+   * is an assertion that they are not — the same weight as releasing the
+   * emergency stop, and held by the same roles.
+   */
+  EXECUTION_RECONCILE: 'execution.reconcile',
+
   // Emergency stop
   KILL_SWITCH_ENGAGE_TENANT: 'kill_switch.engage.tenant',
   KILL_SWITCH_ENGAGE_GLOBAL: 'kill_switch.engage.global',
@@ -98,6 +106,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.KILL_SWITCH_ENGAGE_GLOBAL,
     Capability.KILL_SWITCH_RELEASE_TENANT,
+    Capability.EXECUTION_RECONCILE,
     Capability.KILL_SWITCH_RELEASE_GLOBAL,
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_CREATE,
@@ -168,6 +177,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.PLAN_EXECUTE,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.KILL_SWITCH_RELEASE_TENANT,
+    Capability.EXECUTION_RECONCILE,
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_CREATE,
     Capability.TENANT_SETTINGS_WRITE,

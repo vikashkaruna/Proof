@@ -1538,6 +1538,138 @@ export function v1Routes(deps: Deps) {
     );
   });
 
+  // ─── Dispatch reconciliation (W5) ────────────────────────────────
+  //
+  // An `unknown` dispatch retains its claim, because from here an unreachable
+  // runtime is indistinguishable from work running on a client's estate. That
+  // is correct and it is also a dead end, so a human has to be able to record
+  // a judgement. Redelivery always needs a FRESH approval — founder decision —
+  // so nothing here re-dispatches anything.
+
+  // GET /v1/execution/dispatches/pending — the operator's queue.
+  app.get('/execution/dispatches/pending', async (c) => {
+    const refusal = requireCapability(c, Capability.EXECUTION_RECONCILE);
+    if (refusal) return refusal;
+
+    const tenantId = c.get('tenantId');
+    const { data, error } = await createSupabaseAdmin()
+      .from('pending_execution_dispatches')
+      .select('*')
+      .eq('tenant_id', tenantId);
+    if (error) {
+      return c.json({ error: { code: 'lookup_failed', message: error.message } }, 500);
+    }
+    return c.json({ dispatches: data ?? [] });
+  });
+
+  // POST /v1/execution/dispatches/reconcile — record the judgement.
+  app.post('/execution/dispatches/reconcile', async (c) => {
+    const refusal = requireCapability(c, Capability.EXECUTION_RECONCILE);
+    if (refusal) return refusal;
+
+    const parsed = z
+      .object({
+        planId: z.string().uuid(),
+        requestKey: z.string().min(1).max(255),
+        decision: z.enum(['released', 'abandoned']),
+        // A reconciliation with no stated reason records no judgement, which
+        // is the only thing this endpoint produces. Trimmed first: `min(1)`
+        // alone accepts a single space, and the database would then be the
+        // only thing refusing it.
+        reason: z.string().trim().min(1).max(500),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid reconciliation',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const input = parsed.data;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const correlationId = randomUUID();
+
+    const { data, error } = await createSupabaseAdmin().rpc('reconcile_execution_dispatch', {
+      p_tenant_id: tenantId,
+      p_plan_id: input.planId,
+      p_request_key: input.requestKey,
+      p_decision: input.decision,
+      p_reason: input.reason,
+      p_actor_id: user.id,
+    });
+    if (error) {
+      logger.error({ err: error.message, planId: input.planId }, 'reconciliation failed');
+      return c.json({ error: { code: 'reconcile_failed', message: error.message } }, 500);
+    }
+
+    const result = data as { decision?: string; released_action_count?: number } | null;
+    switch (result?.decision) {
+      case 'released':
+      case 'abandoned':
+        break;
+      case 'intent_not_found':
+      case 'plan_not_found':
+        return c.json(
+          { error: { code: 'intent_not_found', message: 'No such dispatch intent' } },
+          404,
+        );
+      case 'not_reconcilable':
+        // Delivered, or already judged. Releasing delivered work would invite
+        // a second execution of a batch already in flight.
+        return c.json(
+          {
+            error: {
+              code: 'not_reconcilable',
+              message:
+                'This intent was delivered or has already been reconciled, so it cannot be reopened.',
+            },
+          },
+          409,
+        );
+      default:
+        return c.json(
+          { error: { code: result?.decision ?? 'reconcile_failed', message: 'Refused' } },
+          422,
+        );
+    }
+
+    // The row records the decision; the ledger is the copy an operator cannot
+    // edit afterwards.
+    await deps.ledger.append({
+      tenantId,
+      correlationId,
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.EXECUTION_DISPATCH_RECONCILED,
+      targetRef: input.planId,
+      result: 'success',
+      detail: {
+        requestKey: input.requestKey,
+        decision: input.decision,
+        reason: input.reason,
+        releasedActionCount: result.released_action_count ?? 0,
+        // Said plainly, because this is the thing a reviewer will want to
+        // know: releasing does not restore the spent approval token.
+        redeliveryRequiresFreshApproval: true,
+      },
+    });
+
+    return c.json({
+      decision: input.decision,
+      releasedActionCount: result.released_action_count ?? 0,
+      correlationId,
+      redeliveryRequiresFreshApproval: true,
+    });
+  });
+
   // ─── Kill switch ─────────────────────────────────────────────────
   const handleKillSwitchEngage = async (c: any) => {
     const engageRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_TENANT);
