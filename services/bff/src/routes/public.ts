@@ -4,6 +4,7 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
 import type { LedgerService } from '../services/ledger.js';
 import { GapScanSubmitSchema } from '@axiom/types';
+import { LIBRARY_VERSION } from '@axiom/control-library';
 import { createHash } from 'node:crypto';
 
 interface Deps {
@@ -45,7 +46,7 @@ export function publicRoutes(deps: Deps) {
         processes_children_data: input.processesChildrenData,
         is_sdf: input.isSdf,
         answers: input.answers,
-        library_version: '0.1.0',
+        library_version: LIBRARY_VERSION,
         contact_name: input.contactName,
         contact_email: input.contactEmail,
         contact_company: input.contactCompany,

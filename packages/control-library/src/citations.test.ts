@@ -165,6 +165,42 @@ describe('CTL-1 · citations match the subject of the control', () => {
   });
 });
 
+describe('CTL-1 · the prose agrees with the citation beside it', () => {
+  /**
+   * The rule numbers embedded in `obligation` text, which is what a client
+   * actually reads in a report.
+   *
+   * W7.1 corrected the structured `citations` array and left these behind, so
+   * twelve controls named one rule in their metadata and a different one in
+   * their own sentence — Rule 16 in the text, Rule 14 in the citation, for the
+   * same obligation. The control-count gate could never see it: it compares
+   * totals, and the totals matched throughout.
+   */
+  const rulesIn = (text: string) =>
+    new Set((text.match(/Rule (\d+)/g) ?? []).map((m) => m.replace('Rule ', '')));
+
+  const citedRules = (c: (typeof controls)[number]) =>
+    new Set(
+      c.citations
+        .filter((cite) => cite.instrument === 'DPDPR-2025')
+        .flatMap((cite) =>
+          (cite.reference.match(/Rule (\d+)/g) ?? []).map((m) => m.replace('Rule ', '')),
+        ),
+    );
+
+  it.each(controls.filter((c) => rulesIn(c.obligation).size > 0).map((c) => [c.id, c] as const))(
+    '%s cites the same rule in its text as in its metadata',
+    (_id, control) => {
+      const prose = [...rulesIn(control.obligation)].sort();
+      const cited = [...citedRules(control)].sort();
+      // A control may cite rules it does not name in prose; it must not name a
+      // rule in prose that its citations contradict.
+      expect(cited.length, 'prose names a Rule but nothing cites one').toBeGreaterThan(0);
+      expect(prose).toEqual(cited);
+    },
+  );
+});
+
 describe('library metadata', () => {
   it('is published as 0.1.1 — a PATCH, so assessments stay comparable', () => {
     expect(LIBRARY_VERSION).toBe('0.1.1');

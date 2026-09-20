@@ -1,8 +1,8 @@
-import { controls } from '@axiom/control-library';
+import { controls, LIBRARY_VERSION } from '@axiom/control-library';
 import type { GapScanReport } from '@axiom/types';
 
 /**
- * Score a 12-question gap-scan against the v0.1.0 control library.
+ * Score a 12-question gap-scan against the published control library.
  *
  * The 12 questions map to a curated subset of controls (one per
  * major control cluster). A "no" or "I don't know" answer produces
@@ -87,6 +87,9 @@ export async function computeGapScanReport(
     estimatedExposureInr: Math.round(totalExposure * 10_00_000), // penalty points → INR estimate
     findings: findings.sort((a, b) => b.riskPoints - a.riskPoints),
     recommendations,
-    libraryVersion: '0.1.0',
+    // R-06: was a literal '0.1.0'. A gap-scan report stamped with a version
+    // it was not scored against is a provenance claim that is simply false, and it
+    // went stale the moment the library moved to 0.1.1.
+    libraryVersion: LIBRARY_VERSION,
   };
 }

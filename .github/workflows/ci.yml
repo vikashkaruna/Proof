@@ -61,9 +61,34 @@ jobs:
       - uses: actions/checkout@v5
       - run: ./scripts/check-control-count.sh
 
+  # R-06: the agent runtime scores assessments against a GENERATED copy of the
+  # control library. W7.1's citation correction landed in TypeScript and never
+  # reached that copy, so for a year the runtime cited rules the Gazette puts
+  # elsewhere. The count gate could not see it — both sides had 46 controls the
+  # whole time; only the citations differed. This one compares the bytes.
+  control-library-drift-gate:
+    name: Control library TS → runtime parity (W7 · R-06)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/check-controls-drift.sh
+
   # ─── Static analysis ─────────────────────────────────────────────
   lint-and-typecheck:
-    needs: [env-security-gate, control-count-gate, database-security, strict-auth-parity]
+    needs:
+      [
+        env-security-gate,
+        control-count-gate,
+        control-library-drift-gate,
+        database-security,
+        strict-auth-parity,
+      ]
     name: Lint + typecheck
     runs-on: ubuntu-latest
     steps:

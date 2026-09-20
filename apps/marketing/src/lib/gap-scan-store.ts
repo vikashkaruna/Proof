@@ -1,4 +1,5 @@
 import { createSupabaseAdmin } from '@axiom/supabase';
+import { LIBRARY_VERSION } from '@axiom/control-library';
 import type { GapScanReport } from '@axiom/types';
 
 export interface GapScanRecord {
@@ -47,7 +48,7 @@ export const SAMPLE_GAP_SCAN_RECORD: GapScanRecord = {
   report_snapshot: {
     postureScore: 68,
     estimatedExposureInr: 150000000,
-    libraryVersion: '0.1.0',
+    libraryVersion: LIBRARY_VERSION,
     findings: [
       {
         controlId: 'DPDPA-SEC-001',
@@ -98,7 +99,7 @@ export const SAMPLE_GAP_SCAN_RECORD: GapScanRecord = {
       },
     ],
   },
-  library_version: '0.1.0',
+  library_version: LIBRARY_VERSION,
   posture_score: 68,
   estimated_exposure_inr: 150000000,
   created_at: new Date().toISOString(),

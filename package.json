@@ -49,7 +49,9 @@
     "env:tf": "./scripts/sync-env.sh preprod terraform",
     "env:secrets": "./scripts/sync-env.sh preprod secrets",
     "env:sync": "./scripts/sync-env.sh preprod all",
-    "gate:controls": "./scripts/check-control-count.sh"
+    "gate:controls": "./scripts/check-control-count.sh",
+    "gate:controls:drift": "./scripts/check-controls-drift.sh",
+    "build:controls-json": "tsx scripts/build-controls-json.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

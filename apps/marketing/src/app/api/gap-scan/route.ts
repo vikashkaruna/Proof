@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GapScanSubmitSchema } from '@axiom/types';
+import { LIBRARY_VERSION } from '@axiom/control-library';
 import { computeGapScanReport } from '@/lib/gap-scan-scoring';
 import { computeQuarterlyReadinessIndex } from '@/lib/readiness-index';
 import { saveGapScanSubmission } from '@/lib/gap-scan-store';
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     is_sdf: input.isSdf,
     answers: input.answers,
     report_snapshot: report,
-    library_version: '0.1.0',
+    library_version: LIBRARY_VERSION,
     posture_score: report.postureScore,
     estimated_exposure_inr: report.estimatedExposureInr,
     contact_name: input.contactName,

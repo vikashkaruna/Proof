@@ -106,7 +106,7 @@ export const controls: Control[] = [
     domain: 'GOV',
     severity: 'high',
     obligation:
-      'A publicly accessible privacy policy must describe the personal data processed, the purposes, the rights of data principals, and contact information for grievance redressal (Section 5(3) read with Rule 5).',
+      'A publicly accessible privacy policy must describe the personal data processed, the purposes, the rights of data principals, and contact information for grievance redressal (Section 5(3) read with Rule 3).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 5(3)' },
       { instrument: 'DPDPR-2025', reference: 'Rule 3' },
@@ -244,7 +244,7 @@ export const controls: Control[] = [
     domain: 'CNS',
     severity: 'high',
     obligation:
-      'Before seeking consent the Data Fiduciary must issue a notice describing the personal data and the purpose of processing, the manner of exercising rights, and the means of making a complaint (Section 5(1)–(2), Rule 5).',
+      'Before seeking consent the Data Fiduciary must issue a notice describing the personal data and the purpose of processing, the manner of exercising rights, and the means of making a complaint (Section 5(1)–(2), Rule 3).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 5(1), 5(2)' },
       { instrument: 'DPDPR-2025', reference: 'Rule 3' },
@@ -283,7 +283,7 @@ export const controls: Control[] = [
     domain: 'CNS',
     severity: 'high',
     obligation:
-      'Records of consent — including the notice version, the data principal identifier, the timestamp, and the items consented to — must be retained for at least 7 years from the date of consent or last action, whichever is later (Rule 5(3) read with retention Rules).',
+      'Records of consent — including the notice version, the data principal identifier, the timestamp, and the items consented to — must be retained for at least 7 years from the date of consent or last action, whichever is later (Rule 4 read with the First Schedule).',
     citations: [{ instrument: 'DPDPR-2025', reference: 'Rule 4 and First Schedule' }],
     evidenceRequired: [
       {
@@ -391,7 +391,7 @@ export const controls: Control[] = [
     domain: 'DAT',
     severity: 'high',
     obligation:
-      'A data principal has the right to obtain a summary of their personal data being processed and the related processing activities (Section 11(1), Rule 16).',
+      'A data principal has the right to obtain a summary of their personal data being processed and the related processing activities (Section 11(1), Rule 14).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 11(1)' },
       { instrument: 'DPDPR-2025', reference: 'Rule 14' },
@@ -429,7 +429,7 @@ export const controls: Control[] = [
     domain: 'DAT',
     severity: 'high',
     obligation:
-      'A data principal may request correction or erasure of their personal data where it is incomplete, inaccurate, or no longer necessary (Section 12, Rule 17).',
+      'A data principal may request correction or erasure of their personal data where it is incomplete, inaccurate, or no longer necessary (Section 12, Rule 14).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 12' },
       { instrument: 'DPDPR-2025', reference: 'Rule 14' },
@@ -468,7 +468,7 @@ export const controls: Control[] = [
     domain: 'DAT',
     severity: 'high',
     obligation:
-      'The Data Fiduciary must establish a grievance redressal mechanism and respond to data principal complaints within 30 days, with the name and contact details of the grievance officer published (Section 13(1), Rule 18).',
+      'The Data Fiduciary must establish a grievance redressal mechanism and respond to data principal complaints within 30 days, with the name and contact details of the grievance officer published (Section 13(1), Rule 14).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 13(1)' },
       { instrument: 'DPDPR-2025', reference: 'Rule 14' },
@@ -538,7 +538,7 @@ export const controls: Control[] = [
     domain: 'RCD',
     severity: 'high',
     obligation:
-      'The Data Fiduciary must maintain accurate and up-to-date records of its processing activities, sufficient to demonstrate compliance (Rule 21 read with the SDF-specific Rules 11–12 where applicable).',
+      'The Data Fiduciary must maintain accurate and up-to-date records of its processing activities, sufficient to demonstrate compliance (Rule 8 read with the Third Schedule).',
     citations: [
       { instrument: 'DPDPR-2025', reference: 'Rule 8 and Third Schedule' },
       { instrument: 'DPDPA-2023', reference: 'Section 8' },
@@ -666,7 +666,7 @@ export const controls: Control[] = [
     domain: 'BRCH',
     severity: 'high',
     obligation:
-      'Where a breach is likely to cause harm to a data principal, the Data Fiduciary must inform affected principals without delay, in plain language, of the nature of the breach and the protective measures (Rule 20).',
+      'Where a breach is likely to cause harm to a data principal, the Data Fiduciary must inform affected principals without delay, in plain language, of the nature of the breach and the protective measures (Rule 7).',
     citations: [{ instrument: 'DPDPR-2025', reference: 'Rule 7' }],
     evidenceRequired: [
       { type: 'document', description: 'Principal notification template and trigger criteria' },
@@ -704,7 +704,7 @@ export const controls: Control[] = [
     domain: 'XBR',
     severity: 'high',
     obligation:
-      'Personal data may be transferred outside India only to countries or territories not specifically restricted by the Central Government via notification (Section 16, Rule 13).',
+      'Personal data may be transferred outside India only to countries or territories not specifically restricted by the Central Government via notification (Section 16, Rule 15).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 16' },
       { instrument: 'DPDPR-2025', reference: 'Rule 15' },
@@ -851,7 +851,7 @@ export const controls: Control[] = [
     domain: 'SDF',
     severity: 'high',
     obligation:
-      'A Significant Data Fiduciary must appoint a Data Protection Officer based in India who reports to the board, and publish their name and contact (Section 10, Rule 11).',
+      'A Significant Data Fiduciary must appoint a Data Protection Officer based in India who reports to the board, and publish their name and contact (Section 10, Rule 13).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 10' },
       { instrument: 'DPDPR-2025', reference: 'Rule 13' },
@@ -894,7 +894,7 @@ export const controls: Control[] = [
     domain: 'SDF',
     severity: 'high',
     obligation:
-      'A Significant Data Fiduciary must conduct periodic Data Protection Impact Assessments, including for any processing that is likely to cause harm to a data principal (Section 10, Rule 12).',
+      'A Significant Data Fiduciary must conduct periodic Data Protection Impact Assessments, including for any processing that is likely to cause harm to a data principal (Section 10, Rule 13).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 10' },
       { instrument: 'DPDPR-2025', reference: 'Rule 13' },
@@ -924,7 +924,7 @@ export const controls: Control[] = [
     domain: 'SDF',
     severity: 'high',
     obligation:
-      'A Significant Data Fiduciary must be audited periodically by an independent Data Auditor, and the audit report must be submitted to the Board (Section 10, Rule 12).',
+      'A Significant Data Fiduciary must be audited periodically by an independent Data Auditor, and the audit report must be submitted to the Board (Section 10, Rule 13).',
     citations: [
       { instrument: 'DPDPA-2023', reference: 'Section 10' },
       { instrument: 'DPDPR-2025', reference: 'Rule 13' },

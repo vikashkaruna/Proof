@@ -1,9 +1,9 @@
 {
-  "version": "0.1.0",
+  "version": "0.1.1",
   "controls": [
     {
       "id": "DPDPA-GOV-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Designate a data fiduciary accountable for DPDPA compliance",
       "obligation": "Every entity that determines the purpose and means of processing digital personal data is a Data Fiduciary and bears primary statutory accountability under Section 8 of the DPDP Act, regardless of contract structure.",
       "domain": "GOV",
@@ -58,9 +58,9 @@
     },
     {
       "id": "DPDPA-GOV-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Publish a privacy policy covering all processing activities",
-      "obligation": "A publicly accessible privacy policy must describe the personal data processed, the purposes, the rights of data principals, and contact information for grievance redressal (Section 5(3) read with Rule 5).",
+      "obligation": "A publicly accessible privacy policy must describe the personal data processed, the purposes, the rights of data principals, and contact information for grievance redressal (Section 5(3) read with Rule 3).",
       "domain": "GOV",
       "severity": "high",
       "citations": [
@@ -70,7 +70,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 5"
+          "reference": "Rule 3"
         }
       ],
       "evidence_required": [
@@ -125,7 +125,7 @@
     },
     {
       "id": "DPDPA-GOV-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain a written data-processing agreement with every Data Processor",
       "obligation": "Personal data may be processed by a Data Processor only under a valid contract that limits processing to the Data Fiduciary's instructions, enforces security safeguards, and binds the processor to the Act (Section 8(1), Rule 6).",
       "domain": "GOV",
@@ -188,7 +188,7 @@
     },
     {
       "id": "DPDPA-CNS-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Obtain free, specific, informed, unconditional, unambiguous consent",
       "obligation": "Consent must be free, specific, informed, unconditional and unambiguous, with a clear affirmative action, and must be capable of being withdrawn as easily as it was given (Section 6(1)–(4)).",
       "domain": "CNS",
@@ -200,7 +200,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 5, 6"
+          "reference": "Rule 3"
         }
       ],
       "evidence_required": [
@@ -267,9 +267,9 @@
     },
     {
       "id": "DPDPA-CNS-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Issue notice before or alongside consent specifying purpose, items, and rights",
-      "obligation": "Before seeking consent the Data Fiduciary must issue a notice describing the personal data and the purpose of processing, the manner of exercising rights, and the means of making a complaint (Section 5(1)–(2), Rule 5).",
+      "obligation": "Before seeking consent the Data Fiduciary must issue a notice describing the personal data and the purpose of processing, the manner of exercising rights, and the means of making a complaint (Section 5(1)–(2), Rule 3).",
       "domain": "CNS",
       "severity": "high",
       "citations": [
@@ -279,7 +279,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 5"
+          "reference": "Rule 3"
         }
       ],
       "evidence_required": [
@@ -333,15 +333,15 @@
     },
     {
       "id": "DPDPA-CNS-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain a consent ledger with at least 7-year retention",
-      "obligation": "Records of consent — including the notice version, the data principal identifier, the timestamp, and the items consented to — must be retained for at least 7 years from the date of consent or last action, whichever is later (Rule 5(3) read with retention Rules).",
+      "obligation": "Records of consent — including the notice version, the data principal identifier, the timestamp, and the items consented to — must be retained for at least 7 years from the date of consent or last action, whichever is later (Rule 4 read with the First Schedule).",
       "domain": "CNS",
       "severity": "high",
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 5(3), retention Rules"
+          "reference": "Rule 4 and First Schedule"
         }
       ],
       "evidence_required": [
@@ -397,7 +397,7 @@
     },
     {
       "id": "DPDPA-CNS-004",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Honor consent withdrawal and erase related data",
       "obligation": "On withdrawal of consent, processing must stop and personal data must be erased within a reasonable time, except where retention is necessary for legal obligation (Section 6(4), 8(7)).",
       "domain": "CNS",
@@ -463,7 +463,7 @@
     },
     {
       "id": "DPDPA-CNS-005",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Publish an itemised list of personal data collected for each purpose",
       "obligation": "The notice must itemise the personal data being collected and the specific purpose, not generic categories. \"Personal data\" must be itemised at a level a data principal can understand and consent to specifically.",
       "domain": "CNS",
@@ -475,7 +475,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 5(1)(a)"
+          "reference": "Rule 3"
         }
       ],
       "evidence_required": [
@@ -515,9 +515,9 @@
     },
     {
       "id": "DPDPA-DAT-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Provide a right-of-access mechanism (summary of personal data held)",
-      "obligation": "A data principal has the right to obtain a summary of their personal data being processed and the related processing activities (Section 11(1), Rule 16).",
+      "obligation": "A data principal has the right to obtain a summary of their personal data being processed and the related processing activities (Section 11(1), Rule 14).",
       "domain": "DAT",
       "severity": "high",
       "citations": [
@@ -527,7 +527,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 16"
+          "reference": "Rule 14"
         }
       ],
       "evidence_required": [
@@ -584,9 +584,9 @@
     },
     {
       "id": "DPDPA-DAT-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Provide right to correction and erasure of personal data",
-      "obligation": "A data principal may request correction or erasure of their personal data where it is incomplete, inaccurate, or no longer necessary (Section 12, Rule 17).",
+      "obligation": "A data principal may request correction or erasure of their personal data where it is incomplete, inaccurate, or no longer necessary (Section 12, Rule 14).",
       "domain": "DAT",
       "severity": "high",
       "citations": [
@@ -596,7 +596,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 17"
+          "reference": "Rule 14"
         }
       ],
       "evidence_required": [
@@ -655,9 +655,9 @@
     },
     {
       "id": "DPDPA-DAT-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Operate a grievance redressal mechanism with named contact",
-      "obligation": "The Data Fiduciary must establish a grievance redressal mechanism and respond to data principal complaints within 30 days, with the name and contact details of the grievance officer published (Section 13(1), Rule 18).",
+      "obligation": "The Data Fiduciary must establish a grievance redressal mechanism and respond to data principal complaints within 30 days, with the name and contact details of the grievance officer published (Section 13(1), Rule 14).",
       "domain": "DAT",
       "severity": "high",
       "citations": [
@@ -667,7 +667,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 18"
+          "reference": "Rule 14"
         }
       ],
       "evidence_required": [
@@ -723,7 +723,7 @@
     },
     {
       "id": "DPDPA-DAT-004",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Provide right to nominate another individual",
       "obligation": "A data principal may nominate another individual to exercise their rights in the event of death or incapacity (Section 14).",
       "domain": "DAT",
@@ -778,15 +778,15 @@
     },
     {
       "id": "DPDPA-RCD-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain a Record of Processing Activities (RoPA)",
-      "obligation": "The Data Fiduciary must maintain accurate and up-to-date records of its processing activities, sufficient to demonstrate compliance (Rule 21 read with the SDF-specific Rules 11–12 where applicable).",
+      "obligation": "The Data Fiduciary must maintain accurate and up-to-date records of its processing activities, sufficient to demonstrate compliance (Rule 8 read with the Third Schedule).",
       "domain": "RCD",
       "severity": "high",
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 21"
+          "reference": "Rule 8 and Third Schedule"
         },
         {
           "instrument": "DPDPA-2023",
@@ -842,7 +842,7 @@
     },
     {
       "id": "DPDPA-RCD-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Capture a complete data inventory (systems, fields, flows)",
       "obligation": "The RoPA must be backed by an actual inventory of systems, databases, fields and data flows — not a generic narrative. Records must be available on demand to the Data Protection Board.",
       "domain": "RCD",
@@ -850,7 +850,7 @@
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 21"
+          "reference": "Rule 6"
         }
       ],
       "evidence_required": [
@@ -900,7 +900,7 @@
     },
     {
       "id": "DPDPA-BRCH-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Notify the Data Protection Board of a personal data breach",
       "obligation": "On becoming aware of a personal data breach, the Data Fiduciary must inform the Data Protection Board and the affected data principals in the manner and within the time prescribed (Section 8(6), Rules 19–20).",
       "domain": "BRCH",
@@ -912,7 +912,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 19, 20"
+          "reference": "Rule 7"
         }
       ],
       "evidence_required": [
@@ -978,15 +978,15 @@
     },
     {
       "id": "DPDPA-BRCH-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Notify affected data principals of a breach where harm is likely",
-      "obligation": "Where a breach is likely to cause harm to a data principal, the Data Fiduciary must inform affected principals without delay, in plain language, of the nature of the breach and the protective measures (Rule 20).",
+      "obligation": "Where a breach is likely to cause harm to a data principal, the Data Fiduciary must inform affected principals without delay, in plain language, of the nature of the breach and the protective measures (Rule 7).",
       "domain": "BRCH",
       "severity": "high",
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 20"
+          "reference": "Rule 7"
         }
       ],
       "evidence_required": [
@@ -1036,9 +1036,9 @@
     },
     {
       "id": "DPDPA-XBR-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Restrict cross-border transfer to countries not on the restricted list",
-      "obligation": "Personal data may be transferred outside India only to countries or territories not specifically restricted by the Central Government via notification (Section 16, Rule 13).",
+      "obligation": "Personal data may be transferred outside India only to countries or territories not specifically restricted by the Central Government via notification (Section 16, Rule 15).",
       "domain": "XBR",
       "severity": "high",
       "citations": [
@@ -1048,7 +1048,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 13"
+          "reference": "Rule 15"
         }
       ],
       "evidence_required": [
@@ -1105,7 +1105,7 @@
     },
     {
       "id": "DPDPA-XBR-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Document the legal basis for any cross-border transfer",
       "obligation": "Every cross-border transfer must be supported by a specific contract clause, consent, or other lawful basis that meets Section 16 requirements.",
       "domain": "XBR",
@@ -1154,7 +1154,7 @@
     },
     {
       "id": "DPDPA-CHD-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Obtain verifiable parental consent before processing children's data",
       "obligation": "Personal data of children (under 18) may be processed only with verifiable parental consent, and processing must not be detrimental to the well-being of the child (Section 9, Rule 10).",
       "domain": "CHD",
@@ -1222,7 +1222,7 @@
     },
     {
       "id": "DPDPA-CHD-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Refuse to undertake tracking or behavioural monitoring of children",
       "obligation": "Data Fiduciaries must not undertake tracking, behavioural monitoring, or targeted advertising directed at children (Section 9(2), Rule 10).",
       "domain": "CHD",
@@ -1280,9 +1280,9 @@
     },
     {
       "id": "DPDPA-SDF-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Appoint a Data Protection Officer (India-based, named)",
-      "obligation": "A Significant Data Fiduciary must appoint a Data Protection Officer based in India who reports to the board, and publish their name and contact (Section 10, Rule 11).",
+      "obligation": "A Significant Data Fiduciary must appoint a Data Protection Officer based in India who reports to the board, and publish their name and contact (Section 10, Rule 13).",
       "domain": "SDF",
       "severity": "high",
       "citations": [
@@ -1292,7 +1292,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 11"
+          "reference": "Rule 13"
         }
       ],
       "evidence_required": [
@@ -1348,9 +1348,9 @@
     },
     {
       "id": "DPDPA-SDF-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Conduct periodic Data Protection Impact Assessments (DPIA)",
-      "obligation": "A Significant Data Fiduciary must conduct periodic Data Protection Impact Assessments, including for any processing that is likely to cause harm to a data principal (Section 10, Rule 12).",
+      "obligation": "A Significant Data Fiduciary must conduct periodic Data Protection Impact Assessments, including for any processing that is likely to cause harm to a data principal (Section 10, Rule 13).",
       "domain": "SDF",
       "severity": "high",
       "citations": [
@@ -1360,7 +1360,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 12"
+          "reference": "Rule 13"
         }
       ],
       "evidence_required": [
@@ -1402,9 +1402,9 @@
     },
     {
       "id": "DPDPA-SDF-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Submit to periodic audit by an independent Data Auditor",
-      "obligation": "A Significant Data Fiduciary must be audited periodically by an independent Data Auditor, and the audit report must be submitted to the Board (Section 10, Rule 12).",
+      "obligation": "A Significant Data Fiduciary must be audited periodically by an independent Data Auditor, and the audit report must be submitted to the Board (Section 10, Rule 13).",
       "domain": "SDF",
       "severity": "high",
       "citations": [
@@ -1414,7 +1414,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 12"
+          "reference": "Rule 13"
         }
       ],
       "evidence_required": [
@@ -1455,7 +1455,7 @@
     },
     {
       "id": "DPDPA-SEC-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Implement reasonable security safeguards (technical + organisational)",
       "obligation": "The Data Fiduciary must protect personal data in its possession by taking reasonable security safeguards to prevent personal data breach (Section 8(5)). Failure constitutes grounds for the highest penalty tier under Section 33(7).",
       "domain": "SEC",
@@ -1467,7 +1467,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 14, 15"
+          "reference": "Rule 6"
         }
       ],
       "evidence_required": [
@@ -1533,7 +1533,7 @@
     },
     {
       "id": "DPDPA-SEC-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Enforce least-privilege access to personal data",
       "obligation": "Access to personal data must be limited to personnel who require it for the documented purpose, with role-based access controls and periodic access review.",
       "domain": "SEC",
@@ -1593,7 +1593,7 @@
     },
     {
       "id": "DPDPA-SEC-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain audit logs of access and processing of personal data",
       "obligation": "Comprehensive, tamper-evident logs of who accessed or processed personal data, when, and for what purpose must be maintained for forensic and regulatory use.",
       "domain": "SEC",
@@ -1653,7 +1653,7 @@
     },
     {
       "id": "DPDPA-SEC-004",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Conduct periodic vulnerability assessment and penetration testing",
       "obligation": "Personal-data-bearing systems should be subject to periodic vulnerability assessment and penetration testing, with findings remediated within a defined SLA.",
       "domain": "SEC",
@@ -1702,7 +1702,7 @@
     },
     {
       "id": "DPDPA-SEC-005",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Encrypt backups of personal data",
       "obligation": "Backups containing personal data must be encrypted and access-controlled at the same standard as the primary system.",
       "domain": "SEC",
@@ -1751,7 +1751,7 @@
     },
     {
       "id": "DPDPA-RTN-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Define and enforce a retention schedule for personal data",
       "obligation": "Personal data must be retained only for as long as necessary to satisfy the purpose for which it was collected, and erased thereafter (Section 8(7)).",
       "domain": "RTN",
@@ -1814,7 +1814,7 @@
     },
     {
       "id": "DPDPA-RTN-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Erase personal data upon purpose-end or withdrawal",
       "obligation": "On the conclusion of the processing purpose, or on consent withdrawal, the Data Fiduciary must erase the personal data unless retention is required for legal obligation (Section 8(7)).",
       "domain": "RTN",
@@ -1864,7 +1864,7 @@
     },
     {
       "id": "DPDPA-RTN-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain an exception register for legally-required retention",
       "obligation": "Where erasure is deferred for a legal obligation (e.g. tax, AML, litigation hold), the basis, scope, and the responsible officer must be recorded in a register that an auditor or the Board can review.",
       "domain": "RTN",
@@ -1913,7 +1913,7 @@
     },
     {
       "id": "DPDPA-DPF-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Publish contact details for privacy inquiries",
       "obligation": "An email and a contact mechanism for privacy inquiries must be publicly available; this can be a grievance officer or a DPO depending on the entity's SDF status.",
       "domain": "DPF",
@@ -1963,7 +1963,7 @@
     },
     {
       "id": "DPDPA-DPF-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Designate a single point of accountability for privacy",
       "obligation": "Even non-SDF Data Fiduciaries benefit from designating a single internal owner — typically a Privacy Lead — who is responsible for the privacy programme, escalation, and Board reporting.",
       "domain": "DPF",
@@ -2012,7 +2012,7 @@
     },
     {
       "id": "DPDPA-AUD-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain a continuous, timestamped evidence history of compliance",
       "obligation": "A defensible compliance posture requires a continuous, timestamped, tamper-evident history of compliance evidence — not point-in-time documentation. This is the operational manifestation of the Act's \"demonstrate compliance\" burden.",
       "domain": "AUD",
@@ -2063,7 +2063,7 @@
     },
     {
       "id": "DPDPA-AUD-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Report posture to the Board or Audit Committee at least annually",
       "obligation": "A periodic (at least annual) posture report to the Board or Audit Committee establishes governance accountability and provides defensible evidence of oversight.",
       "domain": "AUD",
@@ -2113,7 +2113,7 @@
     },
     {
       "id": "DPDPA-DPIA-001",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Conduct a DPIA before launching any new high-risk processing",
       "obligation": "Where processing is likely to cause harm to data principals — large-scale profiling, biometric processing, children, cross-border — a Data Protection Impact Assessment must be completed before processing begins.",
       "domain": "DPIA",
@@ -2125,7 +2125,7 @@
         },
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 12"
+          "reference": "Rule 13"
         }
       ],
       "evidence_required": [
@@ -2167,7 +2167,7 @@
     },
     {
       "id": "DPDPA-DPIA-002",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Capture and remediate risks identified in the DPIA",
       "obligation": "Risks identified in a DPIA must be tracked to closure with an owner, a remediation plan, and a re-assessment after remediation.",
       "domain": "DPIA",
@@ -2175,7 +2175,7 @@
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 12"
+          "reference": "Rule 13"
         }
       ],
       "evidence_required": [
@@ -2217,7 +2217,7 @@
     },
     {
       "id": "DPDPA-GOV-004",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Maintain a current org chart of data processing responsibilities",
       "obligation": "Roles and responsibilities for privacy must be visible and current — who decides purposes, who signs off on processors, who handles DSARs, who is on the breach call.",
       "domain": "GOV",
@@ -2265,7 +2265,7 @@
     },
     {
       "id": "DPDPA-GOV-005",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Conduct annual privacy training for staff handling personal data",
       "obligation": "Personnel handling personal data must receive privacy training on induction and at least annually thereafter, with completion recorded.",
       "domain": "GOV",
@@ -2315,7 +2315,7 @@
     },
     {
       "id": "DPDPA-BRCH-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Designate a breach response owner with a documented playbook",
       "obligation": "A named individual must own breach response end-to-end, with a documented playbook covering detection → triage → notification → post-mortem, exercised at least annually.",
       "domain": "BRCH",
@@ -2377,7 +2377,7 @@
     },
     {
       "id": "DPDPA-RCD-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Map and document data flows to processors and sub-processors",
       "obligation": "Beyond the RoPA, a working data-flow map (system-of-systems diagram) showing personal data movement — including to sub-processors — must be available for the Board and any DPB inquiry.",
       "domain": "RCD",
@@ -2385,7 +2385,7 @@
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 21"
+          "reference": "Rule 8 and Third Schedule"
         }
       ],
       "evidence_required": [
@@ -2427,7 +2427,7 @@
     },
     {
       "id": "DPDPA-XBR-003",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Conduct a transfer impact assessment for high-risk destinations",
       "obligation": "For transfers to jurisdictions with materially different data protection regimes, a transfer impact assessment should be completed to demonstrate that the receiving environment provides comparable protection.",
       "domain": "XBR",
@@ -2476,7 +2476,7 @@
     },
     {
       "id": "DPDPA-SEC-006",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Securely dispose of media and devices containing personal data",
       "obligation": "Media and devices containing personal data, including at end-of-life, must be securely wiped or destroyed with a documented process and certificate of destruction where applicable.",
       "domain": "SEC",
@@ -2526,7 +2526,7 @@
     },
     {
       "id": "DPDPA-SEC-007",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Operate an incident response capability with rehearsed playbook",
       "obligation": "Beyond breach notification, an operational incident response capability — on-call, escalation, runbook, post-mortem — is necessary to meet the 72-hour clock in practice, not just in policy.",
       "domain": "SEC",
@@ -2581,7 +2581,7 @@
     },
     {
       "id": "DPDPA-DAT-005",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Verify the identity of a data principal before acting on rights requests",
       "obligation": "Identity verification proportional to the sensitivity of the request is required before acting on access, correction, or erasure requests, to prevent unauthorised disclosure.",
       "domain": "DAT",
@@ -2589,7 +2589,7 @@
       "citations": [
         {
           "instrument": "DPDPR-2025",
-          "reference": "Rule 16, 17"
+          "reference": "Rule 14"
         }
       ],
       "evidence_required": [
@@ -2632,7 +2632,7 @@
     },
     {
       "id": "DPDPA-DAT-006",
-      "library_version": "0.1.0",
+      "library_version": "0.1.1",
       "title": "Provide data portability in a structured, commonly used format",
       "obligation": "On request, the data principal is entitled to receive a copy of their personal data in a structured, commonly used and machine-readable format (Section 11(2)).",
       "domain": "DAT",
