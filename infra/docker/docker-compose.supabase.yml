@@ -21,6 +21,13 @@ services:
       - POSTGRES_USER=postgres
     volumes:
       - supabase-db-data:/var/lib/postgresql/data
+      # NOTE: this mounts the series into initdb, so it runs BEFORE GoTrue.
+      # Migration 0000 then creates a hand-rolled `auth.users` that GoTrue did
+      # not make, and GoTrue's own chain fails partway over it. A deployment
+      # does the opposite — bootstrap-selfhosted.sql, then GoTrue, then the
+      # series — which is what tests/deployment/selfhosted-supabase.sh proves.
+      # Kept for the local convenience path; do not copy this ordering into a
+      # deployed environment.
       - ../supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
       - ../supabase/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
     healthcheck:
@@ -43,7 +50,13 @@ services:
       - GOTRUE_API_HOST=0.0.0.0
       - GOTRUE_API_PORT=9999
       - GOTRUE_DB_DRIVER=postgres
-      - GOTRUE_DB_DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres?sslmode=disable
+      # search_path=auth is load-bearing. GoTrue's MFA migration creates the
+      # `factor_type` and `factor_status` enums UNQUALIFIED, so without it they
+      # are created in `public` and a later migration dies on
+      # `type "auth.factor_type" does not exist` — after already creating
+      # sixteen tables, which makes it read like a schema conflict rather than
+      # a search_path one. Proved in tests/deployment/selfhosted-supabase.sh.
+      - GOTRUE_DB_DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres?sslmode=disable&search_path=auth
       - GOTRUE_SITE_URL=http://${HOST_IP:-localhost}:3000
       - GOTRUE_URI_ALLOW_LIST=http://${HOST_IP:-localhost}:3000,http://${HOST_IP:-localhost}:3001,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001
       # One secret signs tokens here and validates them in PostgREST below.
@@ -54,6 +67,12 @@ services:
       # fails at `docker compose up` rather than at first login.
       - GOTRUE_JWT_SECRET=${SUPABASE_JWT_SECRET:?SUPABASE_JWT_SECRET is required — run scripts/mint-supabase-keys.mjs}
       - GOTRUE_JWT_EXP=3600
+      - GOTRUE_JWT_AUD=authenticated
+      # GoTrue writes the `role` claim from its default group. Unset, it emits an
+      # empty string, PostgREST runs `set local role ""` and every authenticated
+      # request fails with `role "" does not exist` — a 400 that looks like a
+      # malformed query rather than a misconfigured claim.
+      - GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
       - GOTRUE_EXTERNAL_EMAIL_ENABLED=true
       - GOTRUE_MAILER_AUTOCONFIRM=true
     networks:

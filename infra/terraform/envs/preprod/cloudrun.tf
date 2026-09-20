@@ -9,7 +9,9 @@ locals {
   agent_runtime_url    = "https://axiom-agent-runtime-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
   model_gateway_url    = "https://axiom-model-gateway-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
   marketing_url        = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  supabase_preprod_url = "https://preprod-supabase.axiomproof.ai"
+  # Was a hard-coded hostname that nothing in this Terraform provisioned. It
+  # now points at the gateway in supabase.tf, which is a resource that exists.
+  supabase_preprod_url = local.supabase_gateway_url
 }
 
 # ─── 1. BFF (API Gateway & Execution Gate) ───────────────────────────────────

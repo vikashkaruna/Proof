@@ -154,3 +154,31 @@ variable "mfa_encryption_key" {
     error_message = "MFA encryption key must have at least 32 characters."
   }
 }
+
+# ─── Self-hosted Supabase (W0.1) ──────────────────────────────────────────────
+# These cannot be generated here the way the other secrets are. The anon and
+# service_role keys are JWTs SIGNED WITH the JWT secret, so a random value per
+# resource would produce three unrelated strings and no token would validate.
+# They are minted together by scripts/mint-supabase-keys.mjs and carried in
+# .env like every other value; sync-env.sh refuses to deploy without them.
+variable "supabase_jwt_secret" {
+  description = "HS256 secret GoTrue signs with and PostgREST validates against. Must be the one the anon/service keys were signed with."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_anon_key" {
+  description = "Supabase anon JWT, signed with supabase_jwt_secret. Public by design; RLS is the boundary, not this value."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_service_key" {
+  description = "Supabase service_role JWT, signed with supabase_jwt_secret. Bypasses RLS by design; server-side only."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+

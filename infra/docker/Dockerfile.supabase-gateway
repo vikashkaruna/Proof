@@ -1,0 +1,17 @@
+# W0.1 — the Supabase API gateway for a self-hosted deployment.
+#
+# Cloud Run needs an image, and the stock nginx image plus an inline command is
+# what docker-compose.supabase.yml does locally. This is the same config as a
+# template so the upstreams arrive as environment variables.
+FROM nginx:1.27-alpine
+
+# The nginx entrypoint envsubst's every *.template in this directory into
+# /etc/nginx/conf.d/ before starting. Only these three are substituted, so
+# nginx's own $variables survive.
+ENV NGINX_ENVSUBST_TEMPLATE_SUFFIX=".template"
+ENV NGINX_ENVSUBST_FILTER="^(PORT|SUPABASE_AUTH_UPSTREAM|SUPABASE_REST_UPSTREAM)$"
+ENV PORT=8080
+
+COPY infra/docker/supabase-gateway/default.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 8080

@@ -65,6 +65,26 @@ jobs:
       - uses: actions/checkout@v5
       - run: ./scripts/check-tfvars-coverage.sh
 
+  # ─── W0.1 self-hosted Supabase topology ──────────────────────────
+  # Higher environments self-host GoTrue and PostgREST against their own
+  # Postgres rather than using Supabase Cloud, so preprod is a real
+  # replica and no third-party processor sits in the data path. That
+  # shape had never been run: GoTrue's MFA migration creates its enums
+  # unqualified, so without search_path=auth they land in `public` and a
+  # later migration dies having already created sixteen tables; and with
+  # no default group GoTrue emits an empty `role` claim, which PostgREST
+  # turns into `set local role ""`. Both failures look like something
+  # else entirely, so they are pinned here.
+  selfhosted-supabase:
+    name: Self-hosted Supabase topology (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: ./tests/deployment/selfhosted-supabase.sh
+
   # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
   # The library's total is derived from the controls array. Six other
   # places carried their own literal and had drifted to 43 and 48, so a

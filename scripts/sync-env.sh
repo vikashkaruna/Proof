@@ -194,6 +194,11 @@ do_verify() {
     required_keys+=(
       "AXIOM_PROJECT_ID:Cloud Infrastructure"
       "AXIOM_PROJECT_NUMBER:Cloud Infrastructure"
+      # Self-hosting Supabase means we own the signing secret. Terraform cannot
+      # generate it: the anon and service keys are JWTs signed WITH it, so a
+      # random value would leave GoTrue issuing tokens PostgREST rejects.
+      "SUPABASE_JWT_SECRET:Database & Auth"
+      "AXIOM_EVIDENCE_RETENTION_DAYS:Evidence Vault"
     )
   fi
 
@@ -341,6 +346,14 @@ tfvar_value() {
     mfa_encryption_key)           get_val "AXIOM_MFA_ENCRYPTION_KEY" ;;
     agent_runtime_internal_token) get_val "AGENT_RUNTIME_INTERNAL_TOKEN" ;;
     model_gateway_api_key)        get_val "MODEL_GATEWAY_API_KEY" ;;
+
+    # Self-hosted Supabase. These three are minted TOGETHER by
+    # scripts/mint-supabase-keys.mjs: the anon and service keys are JWTs signed
+    # with the secret, so mixing values from different mintings produces tokens
+    # GoTrue issues and PostgREST rejects.
+    supabase_jwt_secret)          get_val "SUPABASE_JWT_SECRET" ;;
+    supabase_anon_key)            get_val "SUPABASE_ANON_KEY" ;;
+    supabase_service_key)         get_val "SUPABASE_SERVICE_KEY" ;;
 
     # ── Email ──
     resend_api_key)             get_val "RESEND_API_KEY" ;;
