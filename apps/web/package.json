@@ -6,7 +6,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start --port 3001",
-    "lint": "eslint .",
+    "lint": "axiom-lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
@@ -35,13 +35,12 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@axiom/eslint-config": "workspace:*",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.5.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "autoprefixer": "^10.5.6",
-    "eslint": "^10.10.0",
-    "eslint-config-next": "^16.3.5",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",

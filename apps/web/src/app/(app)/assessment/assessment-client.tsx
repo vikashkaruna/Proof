@@ -240,7 +240,9 @@ export function AssessmentClient({
           setHasCompleted(true);
           // Update evaluated controls and counts after completed assessment
           setControls((prev) =>
-            prev.map((c) => (c.status === 'partial' ? { ...c, score: Math.min(100, c.score + 15) } : c)),
+            prev.map((c) =>
+              c.status === 'partial' ? { ...c, score: Math.min(100, c.score + 15) } : c,
+            ),
           );
           setPassCount((prev) => Math.min(totalControlsCount, prev + 1));
           setFailCount((prev) => Math.max(0, prev - 1));
@@ -472,9 +474,13 @@ export function AssessmentClient({
                   <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
                     {area.code}
                   </span>
-                  <h3 className="text-xs font-bold text-[#1E2A4A] mt-1 line-clamp-1">{area.name}</h3>
+                  <h3 className="text-xs font-bold text-[#1E2A4A] mt-1 line-clamp-1">
+                    {area.name}
+                  </h3>
                 </div>
-                <span className="font-mono text-[10px] text-slate-400 shrink-0">{area.citation}</span>
+                <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                  {area.citation}
+                </span>
               </div>
               <p className="mt-1.5 text-[11px] text-slate-600 leading-snug line-clamp-2">
                 {area.highlight}
@@ -486,7 +492,9 @@ export function AssessmentClient({
                   {area.partialCount > 0 && (
                     <span className="text-amber-700">· {area.partialCount} part</span>
                   )}
-                  {area.failCount > 0 && <span className="text-red-600">· {area.failCount} fail</span>}
+                  {area.failCount > 0 && (
+                    <span className="text-red-600">· {area.failCount} fail</span>
+                  )}
                 </div>
               </div>
             </div>

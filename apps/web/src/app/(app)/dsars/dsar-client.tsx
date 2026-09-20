@@ -420,7 +420,9 @@ export function DsarClient({ initialDsars, stats }: DsarClientProps) {
 
             <form onSubmit={handleCreateDsar} className="space-y-3.5">
               <div>
-                <label className="text-xs font-semibold text-slate-700">Data Principal Full Name *</label>
+                <label className="text-xs font-semibold text-slate-700">
+                  Data Principal Full Name *
+                </label>
                 <input
                   type="text"
                   required
@@ -472,7 +474,9 @@ export function DsarClient({ initialDsars, stats }: DsarClientProps) {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">Mobile Phone (e-KYC / OTP)</label>
+                <label className="text-xs font-semibold text-slate-700">
+                  Mobile Phone (e-KYC / OTP)
+                </label>
                 <input
                   type="tel"
                   value={newPhone}
@@ -483,7 +487,9 @@ export function DsarClient({ initialDsars, stats }: DsarClientProps) {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">Request Scope & Notes</label>
+                <label className="text-xs font-semibold text-slate-700">
+                  Request Scope & Notes
+                </label>
                 <textarea
                   rows={2}
                   value={newNotes}
