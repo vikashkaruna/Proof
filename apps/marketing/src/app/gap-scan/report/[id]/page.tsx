@@ -28,15 +28,12 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
   if (id === 'preview') {
     scan = SAMPLE_GAP_SCAN_RECORD;
   } else {
+    // The ownership check is unconditional. It used to be disabled in local,
+    // development, preprod, staging and any container without NODE_ENV, which
+    // meant three deployed environments served any prospect's report to any
+    // visitor who had an ID.
     const access = (await cookies()).get('gap_scan_access')?.value;
-    const isLocal =
-      process.env.ENVIRONMENT === 'local' ||
-      process.env.ENVIRONMENT === 'development' ||
-      process.env.ENVIRONMENT === 'preprod' ||
-      process.env.ENVIRONMENT === 'staging' ||
-      process.env.NODE_ENV !== 'production';
-
-    scan = await getGapScanReport(id, access, isLocal);
+    scan = await getGapScanReport(id, access);
   }
 
   if (!scan) {

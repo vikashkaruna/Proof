@@ -100,17 +100,17 @@ export async function POST(request: Request) {
     emailSent,
   });
 
-  const isLocalOrInsecure =
-    process.env.ENVIRONMENT === 'local' ||
-    process.env.ENVIRONMENT === 'development' ||
-    process.env.ENVIRONMENT === 'staging' ||
-    process.env.NODE_ENV !== 'production' ||
-    !request.url.startsWith('https:');
+  // The Secure flag was dropped in local, development, staging and any
+  // container without NODE_ENV. Only one of those clauses was ever load-bearing
+  // — a cookie with Secure cannot be set over plain HTTP — and the protocol
+  // check expresses it directly. An HTTPS staging deployment now gets a Secure
+  // cookie, as it should.
+  const isInsecureTransport = !request.url.startsWith('https:');
 
   response.cookies.set('gap_scan_access', sessionHash, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: !isLocalOrInsecure,
+    secure: !isInsecureTransport,
     maxAge: 60 * 60 * 24 * 7,
     path: '/',
   });

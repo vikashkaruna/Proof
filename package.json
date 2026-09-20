@@ -14,6 +14,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "gate:security": "./scripts/check-env-security-gate.sh",
     "test:e2e": "turbo run test:e2e",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",

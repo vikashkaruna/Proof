@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getGapScanReport } from '@/lib/gap-scan-store';
+import { getGapScanReportForTrustedDispatch } from '@/lib/gap-scan-store';
 import { sendGapScanReportEmail } from '@/lib/gap-scan-email';
 import { GapScanReportSchema } from '@axiom/types';
 
@@ -40,8 +40,10 @@ export async function POST(request: Request) {
 
   const { id, email, name, phone, company } = parsed.data;
 
-  // Retrieve scan record (bypass session restriction for direct report ID on verified email send)
-  const scan = await getGapScanReport(id, undefined, true);
+  // Trusted server-side dispatch: the report is delivered to the address on
+  // the record, not to an address the caller supplies, so the caller learns
+  // nothing about a record they do not own.
+  const scan = await getGapScanReportForTrustedDispatch(id);
   if (!scan) {
     return NextResponse.json(
       { error: { code: 'not_found', message: 'Gap-scan report not found' } },

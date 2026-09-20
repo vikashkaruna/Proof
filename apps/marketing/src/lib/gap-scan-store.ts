@@ -183,25 +183,71 @@ export async function saveGapScanSubmission(record: GapScanRecord): Promise<stri
 }
 
 /**
- * Retrieves a gap scan report by ID. Tries database first, falls back to memory cache and sample fixture.
+ * Retrieves a gap-scan report by ID, enforcing ownership.
+ *
+ * A gap-scan record holds a prospect's company, name, email, phone, posture
+ * score and rupee exposure estimate. It is personal data, and on a DPDPA
+ * product it is the last place that should leak.
+ *
+ * The previous signature took an `isLocal` flag and applied the ownership
+ * filter only `if (accessHash && !isLocal)`. Two defects followed from that
+ * single line:
+ *
+ *   1. The `!isLocal` half was environment-conditional — the caller set it
+ *      true in staging, preprod and any container without NODE_ENV, so the
+ *      ownership check was off in three deployed environments (the SEC-1
+ *      family, extended to the marketing site).
+ *   2. The `accessHash &&` half meant the filter was ALSO skipped whenever the
+ *      caller presented no cookie at all — in every environment, production
+ *      included. `.single()` then matched on `id` alone. A caller who
+ *      presented nothing received the record; only a caller who already held a
+ *      valid cookie was checked. That is an unconditional IDOR.
+ *
+ * Ownership is now required unconditionally. `accessHash` is not optional.
  */
 export async function getGapScanReport(
   id: string,
-  accessHash?: string,
-  isLocal: boolean = false,
+  accessHash: string | undefined,
 ): Promise<GapScanRecord | null> {
   if (id === 'sample') {
     return SAMPLE_GAP_SCAN_RECORD;
   }
 
-  // 1. Try Supabase database
+  // No session cookie means no claim of ownership, which means no record.
+  if (!accessHash) return null;
+
+  const record = await readGapScanRecord(id);
+  if (!record) return null;
+  return record.session_id === accessHash ? record : null;
+}
+
+/**
+ * Retrieves a gap-scan report WITHOUT an ownership check.
+ *
+ * Restricted to trusted server-side callers that have established the
+ * requester's right to the record by another means — currently only the
+ * email-dispatch route, which delivers the report to the address captured on
+ * the record itself rather than to an address the caller supplies.
+ *
+ * Never call this from a page or from any handler whose result is returned to
+ * the requester.
+ */
+export async function getGapScanReportForTrustedDispatch(
+  id: string,
+): Promise<GapScanRecord | null> {
+  if (id === 'sample') return SAMPLE_GAP_SCAN_RECORD;
+  return readGapScanRecord(id);
+}
+
+/** Storage lookup with no authorisation semantics of its own. */
+async function readGapScanRecord(id: string): Promise<GapScanRecord | null> {
   try {
     const supabase = createSupabaseAdmin();
-    let query = supabase.from('gap_scan_responses').select('*').eq('id', id);
-    if (accessHash && !isLocal) {
-      query = query.eq('session_id', accessHash);
-    }
-    const { data, error } = await query.single();
+    const { data, error } = await supabase
+      .from('gap_scan_responses')
+      .select('*')
+      .eq('id', id)
+      .single();
     if (data && !error && (data as GapScanRecord).report_snapshot) {
       return data as GapScanRecord;
     }
@@ -212,14 +258,5 @@ export async function getGapScanReport(
     );
   }
 
-  // 2. Fall back to memory cache
-  const cached = memoryCache.get(id);
-  if (cached) {
-    if (!isLocal && accessHash && cached.session_id !== accessHash) {
-      return null;
-    }
-    return cached;
-  }
-
-  return null;
+  return memoryCache.get(id) ?? null;
 }

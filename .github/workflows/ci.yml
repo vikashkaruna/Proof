@@ -11,8 +11,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─── W0.0 security gate ──────────────────────────────────────────
+  # Runs first and gates everything else. The findings it guards against
+  # (SEC-1, SEC-2, SEC-3, SEC-13) were all instances of one mistake:
+  # environment identity used as a proxy for security posture. This job
+  # exists so that mistake cannot be made again silently.
+  env-security-gate:
+    name: Environment/security separation (W0.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-env-security-gate.sh
+
   # ─── Static analysis ─────────────────────────────────────────────
   lint-and-typecheck:
+    needs: env-security-gate
     name: Lint + typecheck
     runs-on: ubuntu-latest
     steps:

@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "lint": "echo 'no lint config'",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "echo 'BFF has no Playwright suite; see apps/web/tests/e2e'",
     "clean": "rm -rf dist .turbo coverage"

@@ -34,7 +34,18 @@ export async function loginAction(formData: FormData) {
     authError = err?.message || 'fetch failed';
   }
 
-  // Handle authentication failure
+  // Handle authentication failure.
+  //
+  // SEC-2 / SEC-13 row 6: a "sovereign session" block stood here. Whenever
+  // login hit a network or 5xx failure and the environment was anything but
+  // production, it minted the founder identity WITHOUT CREDENTIALS and wrote
+  // `axiom_e2e_bypass=true` as a non-httpOnly cookie. That cookie then
+  // satisfied the unguarded clause in the page middleware and the BFF proxy —
+  // in every environment, production included — so a transient Supabase
+  // outage permanently handed a real user a full takeover credential.
+  //
+  // A failure to authenticate is now a failure to authenticate. A dependency
+  // being unreachable is reported as such and is never an authorisation.
   if (!authenticatedUser) {
     const isNetworkOrServiceFailure =
       authError?.includes('fetch failed') ||
@@ -44,38 +55,11 @@ export async function loginAction(formData: FormData) {
       authError?.includes('502') ||
       authError?.includes('503');
 
-    const isNonProd =
-      process.env.ENVIRONMENT === 'preprod' ||
-      process.env.ENVIRONMENT === 'development' ||
-      process.env.ENVIRONMENT === 'local' ||
-      process.env.ENVIRONMENT === 'staging' ||
-      process.env.NODE_ENV !== 'production';
+    const errorMessage = isNetworkOrServiceFailure
+      ? 'Authentication service is unreachable. Please try again shortly.'
+      : authError || 'Invalid email or password.';
 
-    if (isNonProd && isNetworkOrServiceFailure) {
-      // Establish sovereign session for preprod/dev environments
-      authenticatedUser = {
-        id: '00000000-0000-0000-0000-000000000001',
-        email: email || 'founder@axiomminds.ai',
-        user_metadata: { full_name: 'Founder' },
-      };
-      cookieStore.set('axiom_user_email', authenticatedUser.email, { path: '/', httpOnly: false });
-      cookieStore.set('axiom_e2e_bypass', 'true', { path: '/', httpOnly: false });
-      cookieStore.set(
-        'sb-local-auth-token',
-        JSON.stringify({
-          access_token: 'test-access-token',
-          refresh_token: 'test-refresh-token',
-          user: authenticatedUser,
-        }),
-        { path: '/', httpOnly: false },
-      );
-    } else {
-      const errorMessage = isNetworkOrServiceFailure
-        ? 'Authentication service is unreachable or unconfigured. Please check database and auth service connectivity.'
-        : authError || 'Invalid email or password.';
-
-      redirect(`/login?error=${encodeURIComponent(errorMessage)}`);
-    }
+    redirect(`/login?error=${encodeURIComponent(errorMessage)}`);
   }
 
   if (authenticatedUser) {
@@ -233,7 +217,6 @@ export async function signupAction(formData: FormData) {
 export async function logoutAction() {
   const cookieStore = await cookies();
   cookieStore.set('axiom_e2e_logged_out', 'true', { path: '/', httpOnly: false });
-  cookieStore.delete('axiom_e2e_bypass');
   cookieStore.delete('axiom_user_email');
 
   // Explicitly delete any sb-*-auth-token cookies to ensure session purge

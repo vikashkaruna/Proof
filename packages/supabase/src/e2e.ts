@@ -229,7 +229,9 @@ function createQuery(table: string): QueryBuilder {
   const allData = storeItems.length > 0 ? storeItems : defaultRows;
   const filteredData =
     filters.length > 0
-      ? allData.filter((item) => filters.every((f) => (item as Record<string, unknown>)[f.field] === f.value))
+      ? allData.filter((item) =>
+          filters.every((f) => (item as Record<string, unknown>)[f.field] === f.value),
+        )
       : allData;
 
   const result: QueryResult = {
@@ -242,13 +244,17 @@ function createQuery(table: string): QueryBuilder {
   return query;
 }
 
-export function isE2EBypassEnabled(): boolean {
-  return (
-    process.env.NODE_ENV === 'test' ||
-    ((process.env.NODE_ENV === 'development' || process.env.ENVIRONMENT === 'local') &&
-      process.env.AXIOM_E2E_BYPASS_AUTH === 'true')
-  );
-}
+/**
+ * @deprecated W0.0 — superseded by `isAuthBypassEnabled()` from `@axiom/config`.
+ *
+ * This guard was itself written correctly: it required NODE_ENV=test, or local
+ * plus an explicit flag. It was defeated by `admin.ts` ORing it together with
+ * `ENVIRONMENT === 'preprod'` and two SUPABASE_URL substring checks (SEC-13).
+ *
+ * Kept as a re-export so there is exactly one answer to "is the bypass on?",
+ * and that answer is refused at boot outside local/test.
+ */
+export { isAuthBypassEnabled as isE2EBypassEnabled } from '@axiom/config';
 
 /**
  * A deterministic, resilient Supabase facade for browser tests and standalone preprod/staging setups.

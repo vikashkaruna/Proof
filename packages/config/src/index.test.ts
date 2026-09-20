@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadEnv, resetEnvCache, BRAND } from './index';
+import { loadEnv, resetEnvCache, resolveAuthMode, isAuthBypassEnabled, BRAND } from './index';
 
 describe('loadEnv', () => {
   it('loads valid env', () => {
@@ -41,20 +41,43 @@ describe('loadEnv', () => {
     ).toThrow(/AGENT_RUNTIME_INTERNAL_TOKEN|APPROVAL_SIGNING_KEY/);
   });
 
-  it('allows preprod and staging environments without requiring production secrets', () => {
+  // W0.0 · SEC-13 row 9 — preprod and staging previously skipped ALL production
+  // credential validation. They are deployed environments and are now held to
+  // the identical ruleset; only their topology differs.
+  it.each(['staging', 'preprod', 'production', 'onprem'] as const)(
+    'enforces production credential validation in the hardened environment %s',
+    (environment) => {
+      resetEnvCache();
+      expect(() => loadEnv({ NODE_ENV: 'production', ENVIRONMENT: environment })).toThrow(
+        /SUPABASE_URL|SUPABASE_SERVICE_KEY/,
+      );
+    },
+  );
+
+  it.each(['development', 'local', 'test'] as const)(
+    'exempts the non-deployed environment %s from production credential validation',
+    (environment) => {
+      resetEnvCache();
+      const env = loadEnv({ NODE_ENV: 'production', ENVIRONMENT: environment });
+      expect(env.ENVIRONMENT).toBe(environment);
+    },
+  );
+
+  it('accepts a fully-credentialled hardened deployment', () => {
     resetEnvCache();
-    const envPreprod = loadEnv({
+    const env = loadEnv({
       NODE_ENV: 'production',
       ENVIRONMENT: 'preprod',
+      SUPABASE_URL: 'https://preprod.supabase.co',
+      SUPABASE_ANON_KEY: 'a'.repeat(40),
+      SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+      APPROVAL_SIGNING_KEY: 'k'.repeat(48),
+      AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
+      AGENT_RUNTIME_URL: 'https://agent-runtime.preprod.internal',
+      MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
     });
-    expect(envPreprod.ENVIRONMENT).toBe('preprod');
-
-    resetEnvCache();
-    const envStaging = loadEnv({
-      NODE_ENV: 'production',
-      ENVIRONMENT: 'staging',
-    });
-    expect(envStaging.ENVIRONMENT).toBe('staging');
+    expect(env.ENVIRONMENT).toBe('preprod');
+    expect(env.AXIOM_AUTH_MODE).toBe('strict');
   });
 
   it('resolves primary AXIOM_* storage variables and mirrors to legacy AWS_* aliases', () => {
@@ -99,6 +122,94 @@ describe('loadEnv', () => {
     expect(env.AXIOM_STORAGE_ACCESS_KEY_ID).toBe('AWS123');
     expect(env.AXIOM_STORAGE_SECRET_ACCESS_KEY).toBe('AWSSEC123');
     expect(env.AXIOM_PROJECT_ID).toBe('legacy-gcp-project');
+  });
+});
+
+describe('resolveAuthMode — W0.0 · SEC-1 · SEC-2 · SEC-13', () => {
+  const base = {
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+
+  it('defaults to strict when AXIOM_AUTH_MODE is unset', () => {
+    resetEnvCache();
+    expect(resolveAuthMode({ ...base })).toBe('strict');
+    resetEnvCache();
+    expect(isAuthBypassEnabled({ ...base })).toBe(false);
+  });
+
+  it('defaults to strict when ENVIRONMENT is unset entirely', () => {
+    resetEnvCache();
+    expect(resolveAuthMode({})).toBe('strict');
+  });
+
+  it.each(['local', 'test'] as const)('permits e2e-bypass in %s', (environment) => {
+    resetEnvCache();
+    expect(
+      resolveAuthMode({ ...base, ENVIRONMENT: environment, AXIOM_AUTH_MODE: 'e2e-bypass' }),
+    ).toBe('e2e-bypass');
+  });
+
+  // The core of W0.0: no deployed environment can reach the bypass, whatever
+  // NODE_ENV says. The process refuses to start rather than degrading.
+  it.each(['development', 'staging', 'preprod', 'production', 'onprem'] as const)(
+    'refuses to boot with e2e-bypass in %s',
+    (environment) => {
+      resetEnvCache();
+      expect(() =>
+        loadEnv({ ...base, ENVIRONMENT: environment, AXIOM_AUTH_MODE: 'e2e-bypass' }),
+      ).toThrow(/AXIOM_AUTH_MODE/);
+    },
+  );
+
+  it('refuses to boot with e2e-bypass when ENVIRONMENT is unset', () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...base, AXIOM_AUTH_MODE: 'e2e-bypass' })).toThrow(
+      /permitted only when ENVIRONMENT is/,
+    );
+  });
+
+  // SEC-1: an unset NODE_ENV used to flip five separate security branches open.
+  // The auth mode is now independent of NODE_ENV in both directions.
+  const hardened = {
+    SUPABASE_URL: 'https://deployed.supabase.co',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+    APPROVAL_SIGNING_KEY: 'k'.repeat(48),
+    AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
+    AGENT_RUNTIME_URL: 'https://agent-runtime.internal',
+    MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+  };
+
+  it('is unaffected by an unset or non-production NODE_ENV', () => {
+    resetEnvCache();
+    expect(resolveAuthMode({ ...hardened, ENVIRONMENT: 'staging' })).toBe('strict');
+    resetEnvCache();
+    expect(resolveAuthMode({ ...hardened, ENVIRONMENT: 'preprod', NODE_ENV: 'development' })).toBe(
+      'strict',
+    );
+  });
+
+  // Inverse of the above: a hardened environment cannot buy the bypass by
+  // lying about NODE_ENV either.
+  it('refuses e2e-bypass in a hardened environment regardless of NODE_ENV', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        ...hardened,
+        ENVIRONMENT: 'staging',
+        NODE_ENV: 'development',
+        AXIOM_AUTH_MODE: 'e2e-bypass',
+      }),
+    ).toThrow(/AXIOM_AUTH_MODE/);
+  });
+
+  it('rejects an unrecognised auth mode rather than falling back', () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...base, AXIOM_AUTH_MODE: 'permissive' })).toThrow(
+      /Invalid environment configuration/,
+    );
   });
 });
 

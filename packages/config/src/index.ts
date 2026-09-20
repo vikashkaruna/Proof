@@ -6,10 +6,35 @@ import { z } from 'zod';
  * directly. Validation fails fast at boot.
  */
 
+/**
+ * Environments in which `AXIOM_AUTH_MODE=e2e-bypass` may be honoured. Everything
+ * else runs `strict`. Deliberately a closed set — see W0.0.
+ */
+const AUTH_BYPASS_ENVIRONMENTS = new Set<string>(['local', 'test']);
+
+/**
+ * Deployed environments. These differ from one another in TOPOLOGY only
+ * (cluster, URLs, GCP project, bucket names, replica count) and share one
+ * identical security ruleset, including full production credential validation.
+ */
+const HARDENED_ENVIRONMENTS = new Set<string>(['staging', 'preprod', 'production', 'onprem']);
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
-    ENVIRONMENT: z.enum(['development', 'staging', 'preprod', 'production', 'local']).optional(),
+    ENVIRONMENT: z
+      .enum(['development', 'local', 'test', 'staging', 'preprod', 'production', 'onprem'])
+      .optional(),
+
+    /**
+     * The security ruleset the process runs under. This is the ONLY switch that
+     * may relax authentication, tenant resolution or idempotency, and it is
+     * refused at boot outside `local`/`test` (see the superRefine below).
+     *
+     * Per W0.0: environment identity determines TOPOLOGY only — never security
+     * posture. `staging`, `preprod`, `production` and `onprem` all run `strict`.
+     */
+    AXIOM_AUTH_MODE: z.enum(['strict', 'e2e-bypass']).default('strict'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
     // Supabase
@@ -114,13 +139,38 @@ const EnvSchema = z
       .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
-    // NODE_ENV is the runtime safety boundary. When ENVIRONMENT is explicitly
-    // set to 'development', 'local', 'preprod', or 'staging' (e.g. Docker local stack,
-    // preprod GCP stack where Supabase might use Cloud SQL or placeholder URLs),
-    // bypass production credential checks. Production checks only apply when
-    // both NODE_ENV is production and ENVIRONMENT is production (or unset).
-    if (env.NODE_ENV !== 'production' || (env.ENVIRONMENT && env.ENVIRONMENT !== 'production'))
-      return;
+    // ---------------------------------------------------------------------
+    // W0.0 — the governing principle: the security ruleset never varies by
+    // environment. `e2e-bypass` is the single switch that relaxes auth, and it
+    // is refused at boot anywhere but `local`/`test`. The process exits with a
+    // clear error rather than degrading. This check runs unconditionally,
+    // before any environment-shaped early return.
+    // ---------------------------------------------------------------------
+    if (
+      env.AXIOM_AUTH_MODE === 'e2e-bypass' &&
+      !AUTH_BYPASS_ENVIRONMENTS.has(env.ENVIRONMENT ?? '')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AXIOM_AUTH_MODE'],
+        message:
+          `AXIOM_AUTH_MODE='e2e-bypass' is permitted only when ENVIRONMENT is ` +
+          `${[...AUTH_BYPASS_ENVIRONMENTS].join(' or ')} (got ` +
+          `${env.ENVIRONMENT ? `'${env.ENVIRONMENT}'` : 'unset'}). ` +
+          `Refusing to start: authentication must not be relaxed in a deployed environment.`,
+      });
+    }
+
+    // Production-strength credential validation applies to every hardened
+    // deployment — staging, preprod, production and onprem — not just
+    // production. Prior to W0.0 this returned early for staging/preprod, which
+    // is the same fail-open family as SEC-1: a deployed environment silently
+    // accepted demo Supabase keys and a missing approval signing key.
+    // `development`, `local` and `test` remain exempt; they are not deployed.
+    const isHardenedDeployment = env.ENVIRONMENT
+      ? HARDENED_ENVIRONMENTS.has(env.ENVIRONMENT)
+      : env.NODE_ENV === 'production';
+    if (!isHardenedDeployment) return;
 
     // In production, distinguish frontend web/marketing applications from backend data-plane services.
     // Frontend apps NEVER hold approval signing keys or agent runtime tokens (Principle of Least Privilege).
@@ -281,6 +331,33 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 
 export function resetEnvCache(): void {
   cached = null;
+}
+
+/** The security ruleset a process runs under. See W0.0. */
+export type AuthMode = Env['AXIOM_AUTH_MODE'];
+
+/**
+ * The single, authoritative answer to "may this process relax authentication?".
+ *
+ * Every auth, tenant-resolution and idempotency decision in the codebase reads
+ * this and nothing else. No caller may consult `ENVIRONMENT` or `NODE_ENV` to
+ * make a security decision — `scripts/check-env-security-gate.sh` fails CI on
+ * any attempt to reintroduce that pattern.
+ *
+ * Defaults to `strict`. `e2e-bypass` cannot be reached outside `local`/`test`
+ * because `loadEnv()` refuses to parse that combination, so a misconfigured
+ * deployment fails at boot rather than serving requests with auth disabled.
+ */
+export function resolveAuthMode(source: NodeJS.ProcessEnv = process.env): AuthMode {
+  return loadEnv(source).AXIOM_AUTH_MODE;
+}
+
+/**
+ * Convenience predicate for the one question call sites actually ask. Returns
+ * `false` in every deployed environment, always.
+ */
+export function isAuthBypassEnabled(source: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveAuthMode(source) === 'e2e-bypass';
 }
 
 /** Brand constants — the single source of truth. */

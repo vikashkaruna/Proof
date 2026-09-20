@@ -23,18 +23,15 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     return next();
   }
 
-  const isDevOrTest =
-    env.ENVIRONMENT === 'development' ||
-    env.ENVIRONMENT === 'local' ||
-    env.ENVIRONMENT === 'preprod' ||
-    env.ENVIRONMENT === 'staging' ||
-    process.env.NODE_ENV !== 'production' ||
-    process.env.AXIOM_E2E_BYPASS_AUTH === 'true';
-
-  let key = c.req.header(IDEMPOTENCY_HEADER);
-  if (!key && isDevOrTest) {
-    key = `dev-auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
+  // SEC-13 row 3: a missing key used to be auto-generated in development,
+  // local, preprod, staging and any container without NODE_ENV. Every
+  // generated key is unique by construction, so the retry-safety FR-8.3
+  // specifies was disabled in exactly the environments meant to test it.
+  //
+  // There is no environment in which this is relaxed — including e2e-bypass,
+  // which relaxes authentication only. A test harness supplies a key like any
+  // other client.
+  const key = c.req.header(IDEMPOTENCY_HEADER);
 
   if (!key) {
     return c.json(
