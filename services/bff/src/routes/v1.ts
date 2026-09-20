@@ -364,7 +364,7 @@ export function v1Routes(deps: Deps) {
       const admin = createSupabaseAdmin();
       const { data: plan } = await admin
         .from('remediation_plans')
-        .select('id')
+        .select('id, version')
         .eq('id', input.planId!)
         .eq('tenant_id', tenantId)
         .maybeSingle();
@@ -376,6 +376,10 @@ export function v1Routes(deps: Deps) {
         planId: input.planId!,
         actionIds: input.actionIds!,
         mode: input.mode,
+        // R-08: bind the revision the approver was shown, so a plan edited
+        // between satisfying the challenge and issuing the approval no longer
+        // matches.
+        planVersion: (plan as { version?: number }).version ?? null,
       });
     } else if (input.purpose === 'login') {
       // Bound to the session it will vouch for. Without this a challenge
@@ -637,7 +641,7 @@ export function v1Routes(deps: Deps) {
     // Verify plan + actions exist and belong to the tenant
     const { data: plan, error: planErr } = await admin
       .from('remediation_plans')
-      .select('id, status, library_version, tenant_id')
+      .select('id, status, library_version, tenant_id, version')
       .eq('id', input.planId)
       .eq('tenant_id', tenantId)
       .single();
@@ -765,6 +769,7 @@ export function v1Routes(deps: Deps) {
       planId: input.planId,
       actionIds: input.actionIds,
       mode: input.mode,
+      planVersion: (plan as { version?: number }).version ?? null,
     });
 
     if (!input.mfaChallengeId) {
@@ -1087,6 +1092,63 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    // W1 · R-08 — the approver's execution settings are authority, not a hint.
+    //
+    // `concurrency` and `stopOnFailure` are inside the signed spec, and the
+    // execute path took them from the REQUEST instead. So an approver could
+    // sign "one at a time, stop on the first failure" and the caller could
+    // execute twenty at once, ignoring failures, against the same token. The
+    // signature covered settings nobody then enforced, which is worse than not
+    // signing them: it makes the token look like it constrains blast radius.
+    //
+    // The signed values now govern. A request that contradicts them is
+    // refused rather than quietly overridden, because silently narrowing
+    // someone's stated intent is its own kind of wrong answer.
+    const signedConcurrency = signedToken.spec.concurrency;
+    const signedStopOnFailure = signedToken.spec.stopOnFailure;
+    const signedMode = signedToken.spec.mode;
+
+    // A setting the spec does not carry is not a setting the approver bound,
+    // so there is nothing to enforce and nothing to contradict. The spec is
+    // HMAC-signed, so a caller cannot drop a field to escape the check — only
+    // a token we issued without one reaches here, and refusing those would
+    // invalidate every token issued before this change for no security gain.
+    const settingConflicts: string[] = [];
+    if (signedConcurrency !== undefined && input.concurrency !== signedConcurrency) {
+      settingConflicts.push('concurrency');
+    }
+    if (signedStopOnFailure !== undefined && input.stopOnFailure !== signedStopOnFailure) {
+      settingConflicts.push('stopOnFailure');
+    }
+    if (signedMode !== undefined && input.mode !== signedMode) settingConflicts.push('mode');
+
+    if (settingConflicts.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'execution_settings_mismatch',
+            message:
+              'These execution settings differ from the ones that were approved. ' +
+              'Re-approve the plan with the settings you intend to run.',
+            details: {
+              conflicting: settingConflicts,
+              approved: {
+                mode: signedMode,
+                concurrency: signedConcurrency ?? input.concurrency,
+                stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+              },
+              requested: {
+                mode: input.mode,
+                concurrency: input.concurrency,
+                stopOnFailure: input.stopOnFailure,
+              },
+            },
+          },
+        },
+        409,
+      );
+    }
+
     // The in-memory nonce check is only a fast path. The persisted token is
     // the source of truth so replay protection also works across replicas.
     const { data: persistedToken, error: persistedTokenErr } = await admin
@@ -1280,8 +1342,9 @@ export function v1Routes(deps: Deps) {
       detail: {
         accepted: accepted.length,
         rejected: rejected.length,
-        mode: input.mode,
-        concurrency: input.concurrency,
+        mode: signedMode ?? input.mode,
+        concurrency: signedConcurrency ?? input.concurrency,
+        stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
       },
     });
 
@@ -1325,9 +1388,10 @@ export function v1Routes(deps: Deps) {
                 correlationId,
                 actionIds: claimedActions,
                 requestKey,
-                mode: input.mode,
-                concurrency: input.concurrency,
-                stopOnFailure: input.stopOnFailure,
+                // The signed settings, never the request's. See R-08 above.
+                mode: signedMode ?? input.mode,
+                concurrency: signedConcurrency ?? input.concurrency,
+                stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
                 approvalToken: signedToken,
               }),
             ),

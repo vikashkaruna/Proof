@@ -33,7 +33,11 @@ function parseOrClause(clause: string): Filter {
 }
 
 export interface FakeDb {
-  client: { from(table: string): unknown };
+  client: { from(table: string): unknown; rpc(fn: string, args: Record<string, unknown>): unknown };
+  /** Install a handler for a Postgres function the code calls via `.rpc()`. */
+  onRpc(fn: string, handler: (args: Record<string, unknown>) => unknown): void;
+  /** Force the next `.rpc()` call for this function to fail. */
+  failNextRpc(fn: string): void;
   rows(table: string): Row[];
   seed(table: string, row: Row): Row;
   /** Force the next read on a table to fail, as an unreachable database would. */
@@ -44,6 +48,22 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
   const tables: Record<string, Row[]> = {};
   for (const [name, rows] of Object.entries(initial)) tables[name] = rows.map((r) => ({ ...r }));
   const failing = new Set<string>();
+  const rpcHandlers = new Map<string, (args: Record<string, unknown>) => unknown>();
+  const failingRpc = new Set<string>();
+
+  /**
+   * A fixed-window counter standing in for `take_rate_limit` (migration 0018).
+   * Real enough to exhaust: the MFA budgets are only meaningful if a test can
+   * spend them.
+   */
+  const buckets = new Map<string, number>();
+  rpcHandlers.set('take_rate_limit', (args) => {
+    const key = `${args.p_bucket}:${args.p_subject}`;
+    const limit = Number(args.p_limit);
+    const used = (buckets.get(key) ?? 0) + 1;
+    buckets.set(key, used);
+    return { allowed: used <= limit, retry_after: Number(args.p_window_seconds) };
+  });
 
   function table(name: string): Row[] {
     tables[name] ??= [];
@@ -152,8 +172,20 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     return builder;
   }
 
+  async function rpc(fn: string, args: Record<string, unknown>) {
+    if (failingRpc.has(fn)) {
+      failingRpc.delete(fn);
+      return { data: null, error: { message: `rpc ${fn} unavailable` } };
+    }
+    const handler = rpcHandlers.get(fn);
+    if (!handler) throw new Error(`fake-postgrest: no handler for rpc "${fn}"`);
+    return { data: handler(args), error: null };
+  }
+
   return {
-    client: { from },
+    client: { from, rpc },
+    onRpc: (fn, handler) => rpcHandlers.set(fn, handler),
+    failNextRpc: (fn) => failingRpc.add(fn),
     rows: (name) => table(name),
     seed: (name, row) => {
       const created = { id: randomUUID(), created_at: new Date().toISOString(), ...row };

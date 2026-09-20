@@ -282,6 +282,104 @@ describe('dry-run expiry at both safety gates', () => {
       expect(fake.rows('approval_tokens')).toHaveLength(0);
     },
   );
+  it('refuses execution settings that differ from the ones that were signed', async () => {
+    // R-08: `concurrency` and `stopOnFailure` are inside the signed spec, and
+    // the execute path took them from the REQUEST. An approver could sign
+    // "one at a time, stop on first failure" while the caller ran twenty at
+    // once ignoring failures — on the same token. The signature covered
+    // settings nobody enforced, which is worse than not signing them.
+    for (const action of fake.rows('remediation_actions')) {
+      action.approval_status = 'approved';
+      action.dry_run_expires_at = new Date(Date.now() + 3_600_000).toISOString();
+    }
+    fake.seed('approval_tokens', {
+      id: '44444444-4444-4444-8444-44444444aaaa',
+      tenant_id: TENANT,
+      plan_id: PLAN,
+      action_ids: [ACTION_A, ACTION_B],
+      signature: 'sig',
+      nonce: 'nonce-settings',
+      status: 'issued',
+    });
+
+    const app = await buildApp();
+    const response = await post(
+      app,
+      `/v1/plans/${PLAN}/execute`,
+      JSON.stringify({
+        planId: PLAN,
+        actionIds: [ACTION_A, ACTION_B],
+        mode: 'batch',
+        concurrency: 20,
+        stopOnFailure: false,
+        approvalToken: JSON.stringify({
+          signature: 'sig',
+          spec: {
+            planId: PLAN,
+            actionIds: [ACTION_A, ACTION_B],
+            nonce: 'nonce-settings',
+            mode: 'batch',
+            concurrency: 1,
+            stopOnFailure: true,
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as {
+      error: { code: string; details: { conflicting: string[] } };
+    };
+    expect(body.error.code).toBe('execution_settings_mismatch');
+    expect(body.error.details.conflicting.sort()).toEqual(['concurrency', 'stopOnFailure']);
+    // Refused before the token was spent.
+    expect(fake.rows('approval_tokens').find((t) => t.nonce === 'nonce-settings')!.status).toBe(
+      'issued',
+    );
+  });
+
+  it('permits execution settings that match the signed spec', async () => {
+    for (const action of fake.rows('remediation_actions')) {
+      action.approval_status = 'approved';
+      action.dry_run_expires_at = new Date(Date.now() + 3_600_000).toISOString();
+    }
+    fake.seed('approval_tokens', {
+      id: '44444444-4444-4444-8444-44444444bbbb',
+      tenant_id: TENANT,
+      plan_id: PLAN,
+      action_ids: [ACTION_A, ACTION_B],
+      signature: 'sig',
+      nonce: 'nonce-match',
+      status: 'issued',
+    });
+
+    const app = await buildApp();
+    const response = await post(
+      app,
+      `/v1/plans/${PLAN}/execute`,
+      JSON.stringify({
+        planId: PLAN,
+        actionIds: [ACTION_A, ACTION_B],
+        mode: 'batch',
+        concurrency: 1,
+        stopOnFailure: true,
+        approvalToken: JSON.stringify({
+          signature: 'sig',
+          spec: {
+            planId: PLAN,
+            actionIds: [ACTION_A, ACTION_B],
+            nonce: 'nonce-match',
+            mode: 'batch',
+            concurrency: 1,
+            stopOnFailure: true,
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).not.toBe(409);
+  });
+
   it.each([null, 'not-a-date', '2000-01-01T00:00:00.000Z'])(
     'refuses execution with expiry %s without consuming the token',
     async (expiry) => {

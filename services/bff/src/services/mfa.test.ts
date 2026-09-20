@@ -105,6 +105,26 @@ describe('approvalBindingSha256', () => {
     expect(approvalBinding([ACTION_A])).not.toBe(approvalBinding([ACTION_A, ACTION_B]));
   });
 
+  it('changes when the plan is revised under it', () => {
+    // R-08: the binding said "this plan, these actions" and said nothing about
+    // WHICH revision. A plan edited between satisfying the challenge and
+    // issuing the approval still matched, so the human approved version 1 and
+    // version 2 executed.
+    const v1 = approvalBindingSha256({
+      planId: PLAN,
+      actionIds: [ACTION_A],
+      mode: 'batch',
+      planVersion: 1,
+    });
+    const v2 = approvalBindingSha256({
+      planId: PLAN,
+      actionIds: [ACTION_A],
+      mode: 'batch',
+      planVersion: 2,
+    });
+    expect(v1).not.toBe(v2);
+  });
+
   it('changes when the mode changes — batch and individual are different consents', () => {
     expect(approvalBinding([ACTION_A], 'batch')).not.toBe(
       approvalBinding([ACTION_A], 'individual'),

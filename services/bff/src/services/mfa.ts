@@ -73,12 +73,45 @@ const ALWAYS_MFA_REQUIRED: ReadonlySet<string> = new Set(['founder', 'axiom_anal
 /** A TOTP code is six digits. Anything else is treated as a recovery code. */
 const TOTP_CODE_PATTERN = /^\d{6}$/;
 
+/**
+ * Account-wide MFA budgets (W1 · R-08).
+ *
+ * `mfa_challenges.max_attempts` bounds guesses against ONE challenge, and the
+ * review found the obvious way around it: open another. Five guesses per
+ * challenge with unlimited challenges is unlimited guesses, and a six-digit
+ * code does not survive that.
+ *
+ * These budgets are per account and survive opening a fresh challenge. They
+ * use the shared fixed-window limiter from migration 0018 rather than a second
+ * mechanism, so the concurrency behaviour is the one already proven by the
+ * multi-session database tests.
+ *
+ * Deliberately generous enough that a real person mistyping a code, or
+ * re-approving several plans in a sitting, never meets them.
+ */
+const CHALLENGE_ISSUE_BUDGET = { limit: 20, windowSeconds: 3600 } as const;
+const VERIFY_ATTEMPT_BUDGET = { limit: 20, windowSeconds: 3600 } as const;
+
 export type MfaChallengePurpose = 'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation';
 
 export interface ApprovalBinding {
   planId: string;
   actionIds: readonly string[];
   mode: string;
+  /**
+   * `remediation_plans.version` at the moment the approver was shown the plan
+   * (W1 · R-08).
+   *
+   * Without it the binding said "this plan, these actions" and a plan revised
+   * between the challenge being satisfied and the approval being issued would
+   * still match — so the human approved version 1 and version 2 executed. The
+   * step-up is supposed to bind a fresh authentication to the exact act; the
+   * act includes WHICH revision was on screen.
+   *
+   * Optional so a token issued before this change still resolves; a plan whose
+   * version we cannot read binds as unversioned rather than failing shut.
+   */
+  planVersion?: number | null;
 }
 
 /**
@@ -102,6 +135,7 @@ export function approvalBindingSha256(binding: ApprovalBinding): string {
     planId: binding.planId,
     actionIds: [...binding.actionIds].sort(),
     mode: binding.mode,
+    planVersion: binding.planVersion ?? null,
   });
 }
 
@@ -163,7 +197,8 @@ export interface IssueChallengeOptions {
 
 export type IssueChallengeResult =
   | { ok: true; challengeId: string; expiresAt: string; maxAttempts: number }
-  | { ok: false; reason: 'not_enrolled' };
+  | { ok: false; reason: 'not_enrolled' }
+  | { ok: false; reason: 'rate_limited'; retryAfterSeconds: number };
 
 export interface VerifyChallengeOptions {
   challengeId: string;
@@ -189,8 +224,10 @@ export type VerifyChallengeResult =
         | 'challenge_already_satisfied'
         | 'attempts_exhausted'
         | 'code_rejected'
-        | 'not_enrolled';
+        | 'not_enrolled'
+        | 'rate_limited';
       detail?: string;
+      retryAfterSeconds?: number;
     };
 
 export interface ConsumeChallengeOptions {
@@ -345,6 +382,36 @@ export function createMfaService(
       );
     }
     return encryptionKey;
+  }
+
+  /**
+   * Take a slot from an account-wide budget (R-08).
+   *
+   * Fails CLOSED: a limiter we cannot read is not permission to keep
+   * guessing. The cost of being wrong that way is a user waiting; the cost of
+   * the other way is an unbounded guess budget on a six-digit code.
+   */
+  async function takeBudget(
+    bucket: string,
+    subject: string,
+    budget: { limit: number; windowSeconds: number },
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+    const supabase = clientFactory();
+    const { data, error } = await supabase.rpc('take_rate_limit', {
+      p_bucket: bucket,
+      p_subject: subject,
+      p_limit: budget.limit,
+      p_window_seconds: budget.windowSeconds,
+    });
+    if (error) {
+      logger.error({ err: error.message, bucket }, 'MFA budget unreadable; refusing');
+      return { allowed: false, retryAfterSeconds: budget.windowSeconds };
+    }
+    const result = data as { allowed?: boolean; retry_after?: number } | null;
+    return {
+      allowed: result?.allowed === true,
+      retryAfterSeconds: Number(result?.retry_after ?? budget.windowSeconds),
+    };
   }
 
   async function activeTotpFactor(userId: string): Promise<FactorRow | null> {
@@ -707,6 +774,13 @@ export function createMfaService(
     },
 
     async issueChallenge(opts) {
+      // Budget first. Otherwise an attacker refreshes the per-challenge
+      // attempt counter for free by opening challenge after challenge.
+      const budget = await takeBudget('mfa_challenge_issue', opts.userId, CHALLENGE_ISSUE_BUDGET);
+      if (!budget.allowed) {
+        return { ok: false, reason: 'rate_limited', retryAfterSeconds: budget.retryAfterSeconds };
+      }
+
       const factor = await activeTotpFactor(opts.userId);
       if (!factor) return { ok: false, reason: 'not_enrolled' };
 
@@ -744,6 +818,18 @@ export function createMfaService(
     },
 
     async verifyChallenge({ challengeId, userId, code, atMs }) {
+      // The account-wide guess budget. `max_attempts` bounds guesses against
+      // one challenge; this one survives opening a new challenge, which is
+      // what made the per-challenge limit escapable.
+      const budget = await takeBudget('mfa_verify_attempt', userId, VERIFY_ATTEMPT_BUDGET);
+      if (!budget.allowed) {
+        return {
+          ok: false,
+          reason: 'rate_limited',
+          retryAfterSeconds: budget.retryAfterSeconds,
+        };
+      }
+
       const supabase = clientFactory();
       const { data, error } = await supabase
         .from('mfa_challenges')
