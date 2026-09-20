@@ -945,99 +945,98 @@ export function v1Routes(deps: Deps) {
       expiresAt,
     });
 
-    // Persist the token
-    const { data: tokenRow, error: tokenErr } = await admin
-      .from('approval_tokens')
-      .insert({
-        tenant_id: tenantId,
-        plan_id: input.planId,
-        action_ids: input.actionIds,
-        approver_id: user.id,
-        mode: input.mode,
-        concurrency: input.concurrency,
-        stop_on_failure: input.stopOnFailure,
-        signature: signed.signature,
-        signed_payload: signed.spec,
-        nonce: signed.spec.nonce,
-        expires_at: expiresAt,
-        reason: input.reason ?? null,
-        conditions: input.conditions,
-      })
-      .select('id, expires_at')
-      .single();
-    if (tokenErr || !tokenRow) {
-      logger.error({ err: tokenErr?.message }, 'failed to persist approval token');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not persist approval token' } },
-        500,
-      );
-    }
-
-    // Point the spent challenge at the token it authorised, so the trail runs
-    // both ways: token → challenge → factor → user.
-    await deps.mfa.linkConsumption({
-      challengeId: stepUp.challengeId,
-      consumedFor: tokenRow.id,
-    });
-
-    // Mark actions as approved
-    const { error: actionApprovalErr } = await admin
-      .from('remediation_actions')
-      .update({
-        approval_status: 'approved',
-        approval_token_id: tokenRow.id,
-        approved_by: user.id,
-        approved_at: new Date().toISOString(),
-        final_outcome: null,
-      })
-      .eq('tenant_id', tenantId)
-      .eq('plan_id', input.planId)
-      .in('id', input.actionIds);
-    if (actionApprovalErr) {
-      logger.error({ err: actionApprovalErr.message }, 'failed to mark actions approved');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not mark actions approved' } },
-        500,
-      );
-    }
-
-    // Update plan status to approved
-    await admin
-      .from('remediation_plans')
-      .update({ status: 'approved' })
-      .eq('id', input.planId)
-      .eq('tenant_id', tenantId);
-
-    // Ledger
+    // ── One transaction, or nothing (migration 0026) ──────────────────
+    //
+    // This used to be six more round trips: insert the token, link the
+    // challenge to it, mark the actions approved, move the plan, append the
+    // ledger. Each committed on its own, so a fault between any two left a
+    // state nobody designed — most seriously actions approved and a signed
+    // token live with NO ledger entry, which is authority over a client's
+    // estate with no tamper-evident record of who granted it.
+    //
+    // The digest is recomputed by the database under the row locks and
+    // compared with the one read here. Both ends use the same SQL function,
+    // so they agree by construction rather than by two languages
+    // canonicalising JSON identically — the assumption R-05 disproved.
     const correlationId = randomUUID();
-    await deps.ledger.append({
-      tenantId,
-      correlationId,
-      actorType: 'human',
-      actorId: user.id,
-      actionType: 'approval.token.issued',
-      targetRef: input.planId,
-      approvalTokenId: tokenRow.id,
-      approverId: user.id,
-      result: 'success',
-      detail: {
-        actionIds: input.actionIds,
-        mode: input.mode,
-        concurrency: input.concurrency,
-        stopOnFailure: input.stopOnFailure,
-        expiresAt,
-        reason: input.reason,
-        // FR-7.3 asks for the approver's identity to be recorded. A user id
-        // alone records who the session belonged to. These three fields record
-        // that the human re-authenticated, when, and against what — which is
-        // the question an auditor actually asks.
+
+    const { data: expectedDigest, error: digestErr } = await admin.rpc(
+      'action_set_content_digest',
+      { p_tenant_id: tenantId, p_plan_id: input.planId, p_action_ids: input.actionIds },
+    );
+    if (digestErr || typeof expectedDigest !== 'string') {
+      logger.error({ err: digestErr?.message, planId: input.planId }, 'content digest unreadable');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not read the action content' } },
+        500,
+      );
+    }
+
+    const { data: issuance, error: issueErr } = await admin.rpc('issue_plan_approval', {
+      p_tenant_id: tenantId,
+      p_plan_id: input.planId,
+      p_action_ids: input.actionIds,
+      p_approver_id: user.id,
+      p_mode: input.mode,
+      p_concurrency: input.concurrency,
+      p_stop_on_failure: input.stopOnFailure,
+      p_signature: signed.signature,
+      p_signed_payload: signed.spec,
+      p_nonce: signed.spec.nonce,
+      p_expires_at: expiresAt,
+      p_reason: input.reason ?? null,
+      p_conditions: input.conditions,
+      p_challenge_id: stepUp.challengeId,
+      p_expected_digest: expectedDigest,
+      // FR-7.3: a user id records whose session it was. These record that the
+      // human re-authenticated, when, and against what.
+      p_mfa_detail: {
         mfa: {
           challengeId: stepUp.challengeId,
           satisfiedAt: stepUp.satisfiedAt,
           binding: stepUpBinding,
         },
       },
+      p_correlation_id: correlationId,
     });
+    if (issueErr) {
+      logger.error({ err: issueErr.message, planId: input.planId }, 'approval issuance failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not issue the approval' } },
+        500,
+      );
+    }
+
+    const issued = issuance as {
+      decision?: string;
+      token_id?: string;
+      expires_at?: string;
+    } | null;
+
+    if (issued?.decision !== 'issued') {
+      // The step-up has already been spent by this point, deliberately:
+      // burning a challenge and refusing costs a re-authentication, which is
+      // the safe direction. Each of these is a refusal the route's own earlier
+      // reads could not see, because they were taken before the row locks.
+      const message =
+        issued?.decision === 'content_changed'
+          ? 'An action changed while this approval was being issued. Re-read the plan and approve again.'
+          : issued?.decision === 'actions_not_ready'
+            ? 'A dry-run expired or a rollback became invalid while this approval was being issued.'
+            : issued?.decision === 'actions_in_flight'
+              ? 'Some of these actions are already executing or finished.'
+              : issued?.decision === 'actions_not_found'
+                ? 'Every requested action must belong to this tenant and plan.'
+                : 'This approval could not be issued.';
+      logger.warn(
+        { decision: issued?.decision, planId: input.planId },
+        'approval refused under row locks',
+      );
+      return c.json(
+        { error: { code: issued?.decision ?? 'approval_refused', message } },
+        issued?.decision === 'content_changed' ? 409 : 422,
+      );
+    }
 
     deps.realtime.broadcast({
       type: 'approval.pending',
@@ -1049,8 +1048,8 @@ export function v1Routes(deps: Deps) {
 
     return c.json(
       {
-        approvalTokenId: tokenRow.id,
-        expiresAt: tokenRow.expires_at,
+        approvalTokenId: issued.token_id,
+        expiresAt: issued.expires_at,
         // The actual token — sent to the client. The client must
         // present it in the execute call.
         token: signed,
