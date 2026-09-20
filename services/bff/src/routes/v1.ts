@@ -19,6 +19,7 @@ import type { LedgerService } from '../services/ledger.js';
 import type { MfaService } from '../services/mfa.js';
 import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
 import { ACTION_CONTENT_COLUMNS, actionSetDigestSha256 } from '../services/action-digest.js';
+import { clientAddressKey, trustedClientAddress } from '../services/client-address.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -333,6 +334,19 @@ export function v1Routes(deps: Deps) {
     return c.json({ factorId, status: 'revoked' });
   });
 
+  /**
+   * The pseudonymised client address, or null when the deployment has not
+   * declared how many proxy hops to trust. Null disables the address budget
+   * rather than falling back to a value the caller could have chosen.
+   */
+  const addressKeyFor = (c: { req: { header: (name: string) => string | undefined } }) => {
+    const address = trustedClientAddress(
+      c.req.header('x-forwarded-for'),
+      env.AXIOM_TRUSTED_PROXY_HOPS,
+    );
+    return address ? clientAddressKey(address) : null;
+  };
+
   // POST /v1/mfa/challenge — open a challenge, bound to what it may authorise.
   app.post('/mfa/challenge', async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -458,6 +472,7 @@ export function v1Routes(deps: Deps) {
       boundPayloadSha256,
       // From the verified access token, not the request.
       sessionId: c.get('sessionId') ?? null,
+      addressKey: addressKeyFor(c),
     });
 
     if (!issued.ok) {
@@ -524,6 +539,7 @@ export function v1Routes(deps: Deps) {
       userId: user.id,
       code: parsed.data.code,
       sessionId: c.get('sessionId') ?? null,
+      addressKey: addressKeyFor(c),
     });
 
     if (!result.ok) {

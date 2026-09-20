@@ -77,6 +77,10 @@ spec:
                   key: mfa-encryption-key
             - name: AXIOM_MFA_SESSION_TTL_HOURS
               value: {{ .Values.config.mfaSessionTtlHours | default 12 | quote }}
+            # 0 disables address-scoped MFA budgets. Set it to the number of
+            # proxies in front of the BFF; see packages/config.
+            - name: AXIOM_TRUSTED_PROXY_HOPS
+              value: {{ .Values.config.trustedProxyHops | default 0 | quote }}
           livenessProbe:
             httpGet:
               path: /health

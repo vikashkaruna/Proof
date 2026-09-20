@@ -108,6 +108,23 @@ const VERIFY_ATTEMPT_BUDGET = { limit: 20, windowSeconds: 3600 } as const;
 const SESSION_CHALLENGE_ISSUE_BUDGET = { limit: 10, windowSeconds: 3600 } as const;
 const SESSION_VERIFY_ATTEMPT_BUDGET = { limit: 10, windowSeconds: 3600 } as const;
 
+/**
+ * And once more per client address, for the case the other two cannot see
+ * (W1 · R-08): one attacker spraying codes across MANY accounts. Every
+ * individual account stays inside its own budget, so only a subject that spans
+ * accounts catches it.
+ *
+ * Deliberately LOOSE, which is the opposite of the session budgets and for the
+ * opposite reason. An address is frequently shared — an office behind one NAT,
+ * a mobile carrier's CGNAT — so a tight limit here would lock out a building
+ * full of legitimate approvers. It is set to catch a machine, not a floor.
+ *
+ * Applies only when `AXIOM_TRUSTED_PROXY_HOPS` says an address can be trusted;
+ * see `client-address.ts` for why an untrusted one is worse than none.
+ */
+const ADDRESS_CHALLENGE_ISSUE_BUDGET = { limit: 200, windowSeconds: 3600 } as const;
+const ADDRESS_VERIFY_ATTEMPT_BUDGET = { limit: 200, windowSeconds: 3600 } as const;
+
 export type MfaChallengePurpose = 'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation';
 
 export interface ApprovalBinding {
@@ -229,6 +246,12 @@ export interface IssueChallengeOptions {
    * this is read from the verified token rather than from the request.
    */
   sessionId?: string | null;
+  /**
+   * Pseudonymised client address, present only when the deployment declares
+   * trusted proxy hops. Null means the address budget does not apply, never
+   * that it was waived.
+   */
+  addressKey?: string | null;
 }
 
 export type IssueChallengeResult =
@@ -243,6 +266,8 @@ export interface VerifyChallengeOptions {
   atMs?: number;
   /** See `IssueChallengeOptions.sessionId`. */
   sessionId?: string | null;
+  /** See `IssueChallengeOptions.addressKey`. */
+  addressKey?: string | null;
 }
 
 export type VerifyChallengeResult =
@@ -836,6 +861,22 @@ export function createMfaService(
       if (!budget.allowed) {
         return { ok: false, reason: 'rate_limited', retryAfterSeconds: budget.retryAfterSeconds };
       }
+      // Broadest last: an attacker spraying across accounts stays inside every
+      // per-account budget, so this is the only subject that accumulates.
+      if (opts.addressKey) {
+        const addressBudget = await takeBudget(
+          'mfa_challenge_issue_address',
+          opts.addressKey,
+          ADDRESS_CHALLENGE_ISSUE_BUDGET,
+        );
+        if (!addressBudget.allowed) {
+          return {
+            ok: false,
+            reason: 'rate_limited',
+            retryAfterSeconds: addressBudget.retryAfterSeconds,
+          };
+        }
+      }
 
       const factor = await activeTotpFactor(opts.userId);
       if (!factor) return { ok: false, reason: 'not_enrolled' };
@@ -873,7 +914,7 @@ export function createMfaService(
       };
     },
 
-    async verifyChallenge({ challengeId, userId, code, atMs, sessionId }) {
+    async verifyChallenge({ challengeId, userId, code, atMs, sessionId, addressKey }) {
       // Per-session first, for the reason given on the budget constants: a
       // stolen session must exhaust its own guesses before it can exhaust the
       // account's and lock the real user out.
@@ -901,6 +942,21 @@ export function createMfaService(
           reason: 'rate_limited',
           retryAfterSeconds: budget.retryAfterSeconds,
         };
+      }
+      // See issueChallenge: the only subject that spans accounts.
+      if (addressKey) {
+        const addressBudget = await takeBudget(
+          'mfa_verify_attempt_address',
+          addressKey,
+          ADDRESS_VERIFY_ATTEMPT_BUDGET,
+        );
+        if (!addressBudget.allowed) {
+          return {
+            ok: false,
+            reason: 'rate_limited',
+            retryAfterSeconds: addressBudget.retryAfterSeconds,
+          };
+        }
       }
 
       const supabase = clientFactory();

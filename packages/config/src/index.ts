@@ -140,6 +140,30 @@ const EnvSchema = z
       .max(24 * 30)
       .default(12),
 
+    /**
+     * How many trusted proxies sit in front of the BFF (W1 · R-08).
+     *
+     * `x-forwarded-for` is appended to by each hop, so the rightmost entries
+     * are the ones written by infrastructure we control and everything to
+     * their left is, ultimately, whatever the caller sent. The real client
+     * address is therefore `parts[parts.length - 1 - hops]`.
+     *
+     * This is topology, not posture — the W0.0 rule — so it varies by
+     * environment while the behaviour it feeds does not:
+     *
+     *   Cloud Run behind Google's load balancer   1
+     *   nginx ingress with one proxy in front      1  (add one per extra hop)
+     *   plain Compose, no proxy                    0
+     *
+     * The default is 0, which DISABLES address-derived budgets rather than
+     * trusting the last entry. With no proxy in front, `x-forwarded-for` is
+     * pure caller input: budgeting on it would let an attacker pick a
+     * victim's key and exhaust it, which is precisely the attack the
+     * per-session budget exists to prevent. An unset value must therefore
+     * mean "no address", never "trust whatever arrived".
+     */
+    AXIOM_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(8).default(0),
+
     // Approval token signing
     APPROVAL_SIGNING_KEY: z.string().min(32).optional(), // per-tenant in prod
     APPROVAL_TOKEN_TTL_MINUTES: z
