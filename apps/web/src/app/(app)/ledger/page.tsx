@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { PageHeader, Card, CardContent, Badge, AgentIcon } from '@axiom/ui';
 import { VerifyButton } from './verify-button';
 import { ExportLedgerButton } from './export-ledger-button';
@@ -42,11 +42,11 @@ export default async function LedgerPage({
   }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  // W1 · SEC-9/SEC-8: this page read the session directly, so it was gated on
+  // being signed in and nothing else — no role check, and, once login MFA
+  // landed, no MFA check either.
+  const { supabase, userId } = await requireCapabilityContext(Capability.LEDGER_READ);
+  const user = { id: userId };
 
   const { data: profile, error: profileError } = await supabase
     .from('users')

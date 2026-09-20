@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { can } from '@axiom/types';
 import {
   PageHeader,
   Card,
@@ -67,11 +68,19 @@ interface PlanDetail {
 
 export default async function PlanDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  // W1 · SEC-9/SEC-8: this page read the session directly, so any signed-in
+  // user could open any plan the RLS policy let through, and — once login MFA
+  // landed — could do so without having met the second factor.
+  const { supabase, email, role, approvalScopes } = await requireCapabilityContext(
+    Capability.PLAN_READ,
+  );
+
+  // Reading a plan and approving it are different authorities. A viewer sees
+  // the actions, the blast radius and the dry-run diff, and no buttons.
+  const canApprove = can(Capability.PLAN_APPROVE, { role, approvalScopes });
+  const canReject = can(Capability.PLAN_REJECT, { role, approvalScopes });
+  const canExecute = can(Capability.PLAN_EXECUTE, { role, approvalScopes });
+  const canKillSwitch = can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role });
 
   const { data: plan, error } = await supabase
     .from('remediation_plans')
@@ -140,7 +149,9 @@ export default async function PlanDetailPage({ params }: PageProps) {
         }
         actions={
           <div className="flex items-center gap-2">
-            <KillSwitchButton planId={typedPlan.id} tenantId={typedPlan.tenant_id} />
+            {canKillSwitch && (
+              <KillSwitchButton planId={typedPlan.id} tenantId={typedPlan.tenant_id} />
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link href="/plans">← Back to plans</Link>
             </Button>
@@ -181,11 +192,11 @@ export default async function PlanDetailPage({ params }: PageProps) {
           <p className="text-xs text-slate-500">need dry-run or rollback fix</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Approver</p>
-          <p className="mt-1 text-sm font-medium text-indigo-500">
-            {user.user_metadata?.full_name ?? user.email}
+          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+            Signed in as
           </p>
-          <p className="text-xs text-slate-500">{user.email}</p>
+          <p className="mt-1 text-sm font-medium text-indigo-500">{email}</p>
+          <p className="text-xs text-slate-500">{role} in this tenant</p>
         </div>
       </div>
 
@@ -209,6 +220,9 @@ export default async function PlanDetailPage({ params }: PageProps) {
             blocked={blocked}
             initialApprovalToken={activeApprovalToken}
             initialApprovedActionIds={activeApprovedActionIds}
+            canApprove={canApprove}
+            canReject={canReject}
+            canExecute={canExecute}
           />
         </CardContent>
       </Card>

@@ -1,11 +1,13 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { BRAND } from '@axiom/config';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const supabase = await createSupabaseServerClient();
+  const { supabase } = await requireTenantContext();
+  // The page renders profile details (display name, last sign-in) that live on
+  // the auth user rather than on the tenant context.
   const {
     data: { user },
   } = await supabase.auth.getUser();

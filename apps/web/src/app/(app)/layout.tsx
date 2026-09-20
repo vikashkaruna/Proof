@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { capabilitiesFor, type UserRole } from '@axiom/types';
 import { logoutAction } from '../(auth)/login/actions';
 import { AppShell } from './app-shell';
 
@@ -45,11 +46,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     };
   });
 
+  // The persona for the tenant currently being acted in — not a union across
+  // memberships. Someone who owns tenant A and merely views tenant B must see
+  // B's navigation while they are in B.
+  const active =
+    tenants.find((t) => t.slug === activeTenantSlug || t.id === activeTenantSlug) ?? tenants[0];
+  const capabilities = active ? capabilitiesFor(active.role as UserRole) : [];
+
   return (
     <AppShell
       user={user}
       tenants={tenants}
       activeTenantSlug={activeTenantSlug}
+      capabilities={capabilities}
       logoutAction={logoutAction}
     >
       {children}

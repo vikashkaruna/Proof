@@ -5,141 +5,44 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { AxiomLogo } from '@axiom/ui';
 import { SidebarAgentPanel } from './sidebar-agent-panel';
+import { APP_NAV_GROUPS, visibleNavGroups, type NavGroup, type NavItem } from './nav';
+import { switchTenantAction } from './tenant-actions';
 
-export interface NavItem {
-  route: string;
-  en: string;
-  hi: string;
-  phase: string;
-  star?: boolean;
-}
+export { APP_NAV_GROUPS };
+export type { NavGroup, NavItem };
 
-export interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-export const APP_NAV_GROUPS: NavGroup[] = [
-  {
-    label: 'Overview',
-    items: [{ route: '/dashboard', en: 'Dashboard', hi: 'डैशबोर्ड', phase: 'P0' }],
-  },
-  {
-    label: 'Discover & Classify · Drishti + Vibhaag',
-    items: [
-      { route: '/discovery', en: 'Data Discovery', hi: 'डेटा खोज', phase: 'P1' },
-      { route: '/classification', en: 'Classification', hi: 'वर्गीकरण', phase: 'P1' },
-      { route: '/datamap', en: 'Data Map & RoPA', hi: 'डेटा मानचित्र', phase: 'P1' },
-    ],
-  },
-  {
-    label: 'Assess · Parikshan',
-    items: [
-      { route: '/assessment', en: 'Assessment', hi: 'मूल्यांकन', phase: 'P0' },
-      { route: '/controls', en: 'Control Library', hi: 'नियंत्रण संग्रह', phase: 'P0' },
-    ],
-  },
-  {
-    label: 'Remediate · Sudhaar + Karya',
-    items: [
-      { route: '/plans', en: 'Remediation Plans', hi: 'सुधार योजना', phase: 'P3' },
-      { route: '/approval', en: 'Approval Console', hi: 'अनुमोदन कंसोल', phase: 'P3', star: true },
-      { route: '/execution', en: 'Execution & Rollback', hi: 'निष्पादन', phase: 'P3' },
-    ],
-  },
-  {
-    label: 'Evidence & Audit · Saakshi + Lekha',
-    items: [
-      { route: '/evidence', en: 'Evidence Explorer', hi: 'साक्ष्य', phase: 'P2' },
-      { route: '/ledger', en: 'Audit Ledger', hi: 'अंकेक्षण बही', phase: 'P2' },
-    ],
-  },
-  {
-    label: 'Rights & Consent',
-    items: [
-      { route: '/dsars', en: 'DSAR / Rights', hi: 'अधिकार अनुरोध', phase: 'P3' },
-      { route: '/consent', en: 'Consent Manager', hi: 'सहमति प्रबंधन', phase: 'P3' },
-    ],
-  },
-  {
-    label: 'Incident',
-    items: [{ route: '/breaches', en: 'Breach & Incident', hi: 'उल्लंघन', phase: 'P3' }],
-  },
-  {
-    label: 'Monitor · Nazar',
-    items: [
-      { route: '/monitoring', en: 'Continuous Monitoring', hi: 'सतत निगरानी', phase: 'P3' },
-      { route: '/regwatch', en: 'Regulatory Watch', hi: 'नियामक निगरानी', phase: 'P2' },
-    ],
-  },
-  {
-    label: 'Report · Prativedan',
-    items: [{ route: '/reports', en: 'Reports', hi: 'रिपोर्ट', phase: 'P2' }],
-  },
-  {
-    label: 'Operate',
-    items: [
-      { route: '/workbench', en: 'Agent Workbench', hi: 'एजेंट कार्यक्षेत्र', phase: 'P0' },
-      { route: '/partner', en: 'Partner Portal', hi: 'भागीदार पोर्टल', phase: 'P4' },
-      { route: '/connectors', en: 'Connectors', hi: 'कनेक्टर', phase: 'P2' },
-      { route: '/policies', en: 'Standing Policies', hi: 'स्थायी नीतियाँ', phase: 'P4' },
-      { route: '/settings', en: 'Settings', hi: 'सेटिंग्स', phase: 'P0' },
-    ],
-  },
-];
-
+/**
+ * A tenant the signed-in user actually belongs to.
+ *
+ * What stood here was `DEFAULT_TENANTS` — three invented companies ("Meridian
+ * Pay · Fintech · 420 employees · score 74") rendered to every user under the
+ * heading "Demo environments", and used as the FIRST source when resolving the
+ * active tenant from the cookie, ahead of real memberships. A client opening
+ * the switcher saw two other companies' names beside their own.
+ *
+ * The fields are now only those we actually know from `tenant_users`. `mark`
+ * and `color` are derived from the name and id: presentation, not data.
+ */
 export interface TenantOption {
   id: string;
   name: string;
-  slug?: string;
-  sector: string;
-  mark: string;
-  color: string;
-  employees: number;
-  score: number;
-  env: string;
+  slug: string;
+  role: string;
 }
 
-export const DEFAULT_TENANTS: TenantOption[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    name: 'Meridian Pay',
-    slug: 'meridian',
-    sector: 'Fintech',
-    mark: 'MP',
-    color: '#1E2A4A',
-    employees: 420,
-    score: 74,
-    env: 'Production',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    name: 'Aarogya Health',
-    slug: 'aarogya',
-    sector: 'Healthcare',
-    mark: 'AH',
-    color: '#0FB5A5',
-    employees: 680,
-    score: 61,
-    env: 'Production',
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    name: 'Streamline SaaS',
-    slug: 'streamline',
-    sector: 'B2B SaaS',
-    mark: 'SS',
-    color: '#C9A227',
-    employees: 210,
-    score: 83,
-    env: 'Staging',
-  },
-];
+const TENANT_COLORS = ['#1E2A4A', '#0FB5A5', '#C9A227', '#5B6BA8', '#7A5C9E', '#3F7D6B'];
 
-function setActiveTenantCookie(slug: string) {
-  if (typeof document !== 'undefined') {
-    document.cookie = `axiom_active_tenant=${slug}; path=/; max-age=31536000; SameSite=Lax`;
-  }
+/** Stable per tenant, so the same client keeps the same chip between visits. */
+function tenantColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return TENANT_COLORS[hash % TENANT_COLORS.length]!;
+}
+
+function tenantMark(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0]![0]! + words[1]![0]!).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
 }
 
 interface AppShellProps {
@@ -149,8 +52,14 @@ interface AppShellProps {
     email?: string;
     user_metadata?: { full_name?: string };
   };
-  tenants: Array<{ id: string; name: string; slug: string; role: string }>;
+  tenants: TenantOption[];
   activeTenantSlug?: string;
+  /**
+   * The persona's capabilities, resolved on the server from the central
+   * matrix. Passed in rather than derived here so there is one place that
+   * decides — the same module the BFF enforces with.
+   */
+  capabilities: readonly string[];
   logoutAction: () => Promise<void>;
 }
 
@@ -159,61 +68,43 @@ export function AppShell({
   user,
   tenants,
   activeTenantSlug,
+  capabilities,
   logoutAction,
 }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [killOn, setKillOn] = useState(false);
   const [tenantsOpen, setTenantsOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
-  // Active tenant resolution: activeTenantSlug cookie > user tenants > default tenants
-  const matchedFromSlug = activeTenantSlug
-    ? DEFAULT_TENANTS.find(
-        (t) =>
-          t.slug === activeTenantSlug ||
-          t.id === activeTenantSlug ||
-          (activeTenantSlug === 'meridian' && t.id === '00000000-0000-0000-0000-000000000001') ||
-          (activeTenantSlug === 'demo-client' && t.id === '00000000-0000-0000-0000-000000000001'),
-      ) ||
-      tenants
-        .filter((t) => t.slug === activeTenantSlug || t.id === activeTenantSlug)
-        .map((t) => ({
-          id: t.id,
-          name: t.name,
-          slug: t.slug,
-          sector: 'Enterprise',
-          mark: t.name.slice(0, 2).toUpperCase(),
-          color: '#1E2A4A',
-          employees: 150,
-          score: 70,
-          env: 'Production',
-        }))[0]
+  const held = new Set(capabilities);
+  const navGroups = visibleNavGroups(capabilities);
+
+  // Halting a client's automation is an authority, not a convenience. A viewer
+  // was previously shown this button; the BFF refused, so all it taught them
+  // was that the product is broken.
+  const canKillSwitch = held.has('kill_switch.engage.tenant');
+
+  // Resolved from memberships alone. A slug the user does not belong to is
+  // ignored rather than honoured — the same rule `requireTenantContext()`
+  // applies on the server, and the reason the cookie is a preference.
+  const preferred = activeTenantSlug
+    ? tenants.find((t) => t.slug === activeTenantSlug || t.id === activeTenantSlug)
     : undefined;
+  const selectedTenant: TenantOption | null = preferred ?? tenants[0] ?? null;
 
-  const initialTenant: TenantOption =
-    matchedFromSlug ||
-    (tenants.length > 0 && tenants[0]
-      ? {
-          id: tenants[0].id,
-          name: tenants[0].name,
-          slug: tenants[0].slug,
-          sector: 'Enterprise',
-          mark: tenants[0].name.slice(0, 2).toUpperCase(),
-          color: '#1E2A4A',
-          employees: 500,
-          score: 74,
-          env: 'Production',
-        }
-      : DEFAULT_TENANTS[0]!);
-
-  const [selectedTenant, setSelectedTenant] = useState<TenantOption>(initialTenant);
+  const selectedTenantId = selectedTenant?.id ?? null;
 
   useEffect(() => {
     let active = true;
     async function fetchKillStatus() {
+      if (!selectedTenantId) return;
       try {
+        // Reading whether execution is halted is not an authority — a viewer
+        // who cannot engage the switch should still be told when the platform
+        // has stopped acting on their estate. Only the toggle is gated.
         const res = await fetch('/api/bff/v1/kill-switch/status', {
-          headers: { 'X-Tenant-Id': selectedTenant.id },
+          headers: { 'X-Tenant-Id': selectedTenantId },
         });
         if (res.ok) {
           const data = await res.json();
@@ -238,16 +129,19 @@ export function AppShell({
       active = false;
       window.removeEventListener('axiom:kill-switch-changed', handleEvent);
     };
-  }, [selectedTenant.id]);
+  }, [selectedTenantId]);
 
   async function handleToggleKillSwitch() {
+    if (!selectedTenantId || !canKillSwitch) return;
     if (!killOn) {
-      if (!confirm('ENGAGE KILL SWITCH?\n\nThis will halt ALL in-flight agent execution globally.'))
+      if (
+        !confirm('ENGAGE KILL SWITCH?\n\nThis halts all in-flight agent execution for this tenant.')
+      )
         return;
       try {
         const res = await fetch('/api/bff/v1/kill-switch/engage', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenant.id },
+          headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
           body: JSON.stringify({ scope: 'tenant', reason: 'Engaged from navigation bar' }),
         });
         if (res.ok) {
@@ -265,7 +159,7 @@ export function AppShell({
       try {
         const res = await fetch('/api/bff/v1/kill-switch/release', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenant.id },
+          headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
         });
         if (res.ok) {
           setKillOn(false);
@@ -279,15 +173,25 @@ export function AppShell({
     }
   }
 
-  const handleSelectTenant = (t: TenantOption) => {
-    setSelectedTenant(t);
+  const handleSelectTenant = async (t: TenantOption) => {
     setTenantsOpen(false);
-    const targetSlug = t.slug || t.id;
-    setActiveTenantCookie(targetSlug);
-    if (pathname === '/portal') {
-      router.push(`/portal?tenant=${targetSlug}`);
-    } else {
-      router.refresh();
+    if (t.id === selectedTenantId) return;
+    setSwitching(true);
+    try {
+      // The server sets the cookie, after verifying the membership. Optimistic
+      // local state is deliberately not used: the active tenant determines what
+      // every server component renders, so the browser showing one tenant while
+      // the server renders another is the worst possible failure here.
+      const result = await switchTenantAction(t.slug || t.id);
+      if (!result.ok) return;
+      const targetSlug = t.slug || t.id;
+      if (pathname === '/portal') {
+        router.push(`/portal?tenant=${targetSlug}`);
+      } else {
+        router.refresh();
+      }
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -295,7 +199,7 @@ export function AppShell({
   let activeBreadcrumb = 'Overview';
   let activeTitle = 'Dashboard';
 
-  for (const group of APP_NAV_GROUPS) {
+  for (const group of navGroups) {
     for (const item of group.items) {
       if (
         pathname === item.route ||
@@ -307,8 +211,6 @@ export function AppShell({
       }
     }
   }
-
-  const scoreColor = (s: number) => (s >= 80 ? '#0FB5A5' : s >= 70 ? '#E0A82E' : '#D9534F');
 
   return (
     <div className="flex min-h-screen bg-[#F4F6F8]">
@@ -323,7 +225,7 @@ export function AppShell({
 
         {/* Navigation Stream */}
         <div className="flex-1 overflow-y-auto py-2">
-          {APP_NAV_GROUPS.map((group) => (
+          {navGroups.map((group) => (
             <div key={group.label} className="mb-1">
               <div className="px-5 pt-3.5 pb-1 text-[9.5px] font-semibold tracking-[0.08em] uppercase text-[#6f7ba0]">
                 {group.label}
@@ -413,98 +315,69 @@ export function AppShell({
               className="flex items-center gap-2.5 rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 cursor-pointer shadow-sm hover:border-[#0FB5A5] transition-colors"
             >
               <span
-                style={{ backgroundColor: selectedTenant.color }}
+                style={{
+                  backgroundColor: selectedTenant ? tenantColor(selectedTenant.id) : '#8a909b',
+                }}
                 className="flex h-6 w-6 items-center justify-center rounded-md font-heading text-[11px] font-bold text-white"
               >
-                {selectedTenant.mark}
+                {selectedTenant ? tenantMark(selectedTenant.name) : '—'}
               </span>
               <div className="leading-tight text-left">
-                <div className="text-xs font-semibold text-[#2F3542]">{selectedTenant.name}</div>
-                <div className="text-[10px] text-[#8a909b]">{selectedTenant.sector}</div>
+                <div className="text-xs font-semibold text-[#2F3542]">
+                  {selectedTenant?.name ?? 'No organization'}
+                </div>
+                {/* The role, which is a fact. What stood here was an invented
+                    sector ("Enterprise") shown as if it were tenant data. */}
+                <div className="text-[10px] text-[#8a909b]">
+                  {selectedTenant?.role ?? 'no membership'}
+                </div>
               </div>
               <span className="text-[10px] text-[#8a909b] ml-1">▾</span>
             </div>
 
             {tenantsOpen && (
               <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e4e8ee] bg-white p-1.5 shadow-xl max-h-[420px] overflow-y-auto">
-                {tenants && tenants.length > 0 && (
+                {/* Only memberships. The "Demo environments" section that stood
+                    here listed three invented companies to every user, and was
+                    consulted BEFORE real memberships when resolving the active
+                    tenant from the cookie. */}
+                {tenants.length > 0 ? (
                   <div className="mb-2">
                     <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#0FB5A5]">
-                      Your Organizations
+                      Your organizations
                     </div>
-                    {tenants.map((t) => {
-                      const opt: TenantOption = {
-                        id: t.id,
-                        name: t.name,
-                        slug: t.slug,
-                        sector: 'Enterprise',
-                        mark: (t.name || 'OR').slice(0, 2).toUpperCase(),
-                        color: '#0FB5A5',
-                        employees: 120,
-                        score: 75,
-                        env: 'Staging',
-                      };
-                      return (
-                        <div
-                          key={t.id}
-                          onClick={() => handleSelectTenant(opt)}
-                          className={`flex items-center gap-2.5 rounded-lg p-2 cursor-pointer transition-colors ${
-                            t.id === selectedTenant.id ? 'bg-[#F4F6F8]' : 'hover:bg-[#F4F6F8]'
-                          }`}
+                    {tenants.map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => void handleSelectTenant(t)}
+                        aria-disabled={switching}
+                        className={`flex items-center gap-2.5 rounded-lg p-2 transition-colors ${
+                          switching ? 'cursor-wait opacity-60' : 'cursor-pointer'
+                        } ${t.id === selectedTenantId ? 'bg-[#F4F6F8]' : 'hover:bg-[#F4F6F8]'}`}
+                      >
+                        <span
+                          style={{ backgroundColor: tenantColor(t.id) }}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-heading text-xs font-bold text-white"
                         >
-                          <span
-                            style={{ backgroundColor: opt.color }}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-heading text-xs font-bold text-white"
-                          >
-                            {opt.mark}
-                          </span>
-                          <div className="flex-1 text-left min-w-0">
-                            <div className="text-xs font-semibold text-[#2F3542] truncate">
-                              {t.name}
-                            </div>
-                            <div className="text-[10.5px] text-[#8a909b] truncate">
-                              {t.role} · ap-south-1
-                            </div>
+                          {tenantMark(t.name)}
+                        </span>
+                        <div className="flex-1 text-left min-w-0">
+                          <div className="text-xs font-semibold text-[#2F3542] truncate">
+                            {t.name}
                           </div>
-                          <span className="text-xs font-bold font-mono text-[#0FB5A5]">Active</span>
+                          <div className="text-[10.5px] text-[#8a909b] truncate">{t.role}</div>
                         </div>
-                      );
-                    })}
-                    <div className="my-1 border-t border-[#eef1f5]" />
+                        {t.id === selectedTenantId && (
+                          <span className="text-xs font-bold font-mono text-[#0FB5A5]">Active</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-2 py-3 text-[11px] text-[#8a909b]">
+                    You are not a member of any organization yet.
                   </div>
                 )}
-
-                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#8a909b]">
-                  Demo environments
-                </div>
-                {DEFAULT_TENANTS.map((t) => (
-                  <div
-                    key={t.id}
-                    onClick={() => handleSelectTenant(t)}
-                    className={`flex items-center gap-2.5 rounded-lg p-2 cursor-pointer transition-colors ${
-                      t.id === selectedTenant.id ? 'bg-[#F4F6F8]' : 'hover:bg-[#F4F6F8]'
-                    }`}
-                  >
-                    <span
-                      style={{ backgroundColor: t.color }}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-heading text-xs font-bold text-white"
-                    >
-                      {t.mark}
-                    </span>
-                    <div className="flex-1 text-left min-w-0">
-                      <div className="text-xs font-semibold text-[#2F3542] truncate">{t.name}</div>
-                      <div className="text-[10.5px] text-[#8a909b] truncate">
-                        {t.sector} · {t.employees} employees
-                      </div>
-                    </div>
-                    <span
-                      style={{ color: scoreColor(t.score) }}
-                      className="text-xs font-bold font-mono"
-                    >
-                      {t.score}
-                    </span>
-                  </div>
-                ))}
 
                 <div className="mt-1 border-t border-[#eef1f5] pt-1">
                   <Link
@@ -519,24 +392,27 @@ export function AppShell({
             )}
           </div>
 
-          {/* Environment Indicator */}
-          <div className="flex items-center gap-1.5 rounded-lg border border-[#e4e8ee] bg-white px-2.5 py-1.5">
-            <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
-            <span className="text-xs font-medium text-[#5b6270]">{selectedTenant.env}</span>
-          </div>
+          {/* The "Environment Indicator" that stood here read
+              `selectedTenant.env` — a hardcoded 'Production' on every invented
+              tenant, and an outright lie on a staging deployment. Deployment
+              environment is not a property of a tenant, and a badge nobody
+              computed is worse than no badge. */}
 
-          {/* Kill Switch Toggle */}
-          <button
-            onClick={handleToggleKillSwitch}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-              killOn
-                ? 'border-[#D9534F] bg-[#D9534F] text-white shadow-sm animate-pulse'
-                : 'border-[#e4e8ee] bg-white text-[#D9534F] hover:bg-[#FCEEEC]'
-            }`}
-            title="Global kill switch for autonomous agents"
-          >
-            <span>⏻</span> {killOn ? 'Kill switch active' : 'Kill switch'}
-          </button>
+          {/* Kill Switch Toggle — only for a persona that may engage it. */}
+          {canKillSwitch && (
+            <button
+              onClick={handleToggleKillSwitch}
+              disabled={!selectedTenantId}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                killOn
+                  ? 'border-[#D9534F] bg-[#D9534F] text-white shadow-sm animate-pulse'
+                  : 'border-[#e4e8ee] bg-white text-[#D9534F] hover:bg-[#FCEEEC]'
+              }`}
+              title="Halt autonomous agent execution for this tenant"
+            >
+              <span>⏻</span> {killOn ? 'Kill switch active' : 'Kill switch'}
+            </button>
+          )}
         </header>
 
         {/* Global Kill Switch Alert Banner */}
@@ -544,14 +420,16 @@ export function AppShell({
           <div className="flex items-center justify-between bg-[#D9534F] px-6 py-2.5 text-xs font-semibold text-white shadow-inner">
             <div className="flex items-center gap-2">
               <span className="text-sm">⏻</span>
-              <span>KILL SWITCH ENGAGED — all in-flight agent execution halted globally.</span>
+              <span>KILL SWITCH ENGAGED — in-flight agent execution is halted.</span>
             </div>
-            <button
-              onClick={handleToggleKillSwitch}
-              className="font-normal underline hover:text-white/80 cursor-pointer"
-            >
-              Disengage
-            </button>
+            {canKillSwitch && (
+              <button
+                onClick={handleToggleKillSwitch}
+                className="font-normal underline hover:text-white/80 cursor-pointer"
+              >
+                Disengage
+              </button>
+            )}
           </div>
         )}
 

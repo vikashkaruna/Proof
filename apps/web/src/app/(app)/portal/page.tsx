@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import {
   PortalClient,
   type TenantSummary,
@@ -36,11 +36,8 @@ export default async function ClientPortalPage({
 }) {
   const resolvedParams = await searchParams;
   const cookieStore = await cookies();
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const { supabase, userId } = await requireTenantContext();
+  const user = { id: userId };
 
   // SEC-3: was `createSupabaseAdmin()`, which listed EVERY tenant on the
   // platform regardless of who was asking. The `tenants_select_member` RLS

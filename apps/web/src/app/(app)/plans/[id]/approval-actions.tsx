@@ -23,6 +23,16 @@ interface Props {
   blocked: Action[];
   initialApprovalToken?: string | null;
   initialApprovedActionIds?: string[];
+  /**
+   * Resolved on the server from the central capability matrix (W1 · SEC-9).
+   *
+   * Render gating, not the security boundary — the BFF refuses regardless.
+   * Its job is that a reviewer or viewer is not handed an Approve button whose
+   * only possible outcome is a 403.
+   */
+  canApprove?: boolean;
+  canReject?: boolean;
+  canExecute?: boolean;
 }
 
 export function ApprovalActions({
@@ -34,6 +44,9 @@ export function ApprovalActions({
   blocked,
   initialApprovalToken = null,
   initialApprovedActionIds = [],
+  canApprove = false,
+  canReject = false,
+  canExecute = false,
 }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set(eligible.map((a) => a.id)));
@@ -357,7 +370,7 @@ export function ApprovalActions({
         />
       </div>
 
-      {stepUp && (
+      {canApprove && stepUp && (
         <div className="rounded-md border border-slate-300 bg-slate-50 p-4">
           <p className="text-sm font-medium text-slate-800">Confirm with your authenticator</p>
           <p className="mt-1 text-xs text-slate-600">
@@ -401,17 +414,26 @@ export function ApprovalActions({
         </div>
       )}
 
+      {!canApprove && !canReject && (
+        <div className="rounded-md border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+          You have read access to this plan. Approving and rejecting are reserved for an approver or
+          owner in this tenant.
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="accent"
-          size="lg"
-          onClick={beginApproval}
-          loading={submitting && !stepUp}
-          disabled={selected.size === 0 || Boolean(stepUp)}
-        >
-          Approve {selected.size} action{selected.size === 1 ? '' : 's'}
-        </Button>
-        {approvalToken && (
+        {canApprove && (
+          <Button
+            variant="accent"
+            size="lg"
+            onClick={beginApproval}
+            loading={submitting && !stepUp}
+            disabled={selected.size === 0 || Boolean(stepUp)}
+          >
+            Approve {selected.size} action{selected.size === 1 ? '' : 's'}
+          </Button>
+        )}
+        {canExecute && approvalToken && (
           <Button variant="primary" size="lg" onClick={execute} loading={submitting}>
             Execute approved actions
           </Button>
@@ -419,15 +441,17 @@ export function ApprovalActions({
         <Button variant="ghost" size="lg" onClick={() => router.refresh()}>
           Refresh
         </Button>
-        <Button
-          variant="danger"
-          size="lg"
-          onClick={reject}
-          loading={submitting}
-          disabled={submitting}
-        >
-          Reject plan
-        </Button>
+        {canReject && (
+          <Button
+            variant="danger"
+            size="lg"
+            onClick={reject}
+            loading={submitting}
+            disabled={submitting}
+          >
+            Reject plan
+          </Button>
+        )}
       </div>
 
       <p className="text-xs text-slate-500">
