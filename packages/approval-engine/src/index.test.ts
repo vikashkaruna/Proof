@@ -129,3 +129,60 @@ describe('ApprovalEngine', () => {
     });
   });
 });
+
+describe('nonce replay cache is bounded — SEC-12', () => {
+  it('drops an entry once its token expiry has passed', () => {
+    const engine = new ApprovalEngine(Buffer.from('a'.repeat(48), 'utf-8'));
+
+    // Already expired: the token would fail the expiry check before replay is
+    // ever consulted, so retaining the nonce buys nothing.
+    engine.markNonceUsed('stale-nonce', new Date(Date.now() - 1000));
+    expect(engine.trackedNonceCount).toBe(0);
+  });
+
+  it('retains an entry while its token is still valid', () => {
+    const engine = new ApprovalEngine(Buffer.from('a'.repeat(48), 'utf-8'));
+    engine.markNonceUsed('live-nonce', new Date(Date.now() + 60_000));
+    expect(engine.trackedNonceCount).toBe(1);
+  });
+
+  it('prunes expired entries when a new one is recorded', () => {
+    const engine = new ApprovalEngine(Buffer.from('a'.repeat(48), 'utf-8'));
+    for (let i = 0; i < 50; i++) {
+      engine.markNonceUsed(`live-${i}`, new Date(Date.now() + 60_000));
+    }
+    expect(engine.trackedNonceCount).toBe(50);
+
+    // These are recorded and immediately collected, and collecting them does
+    // not disturb the live entries.
+    for (let i = 0; i < 50; i++) {
+      engine.markNonceUsed(`expired-${i}`, new Date(Date.now() - 1000));
+    }
+    expect(engine.trackedNonceCount).toBe(50);
+  });
+
+  it('re-marking refreshes rather than duplicating', () => {
+    const engine = new ApprovalEngine(Buffer.from('a'.repeat(48), 'utf-8'));
+    engine.markNonceUsed('n', new Date(Date.now() + 60_000));
+    engine.markNonceUsed('n', new Date(Date.now() + 120_000));
+    expect(engine.trackedNonceCount).toBe(1);
+  });
+
+  it('still rejects a replay of a live token', async () => {
+    const engine = new ApprovalEngine(Buffer.from('a'.repeat(48), 'utf-8'));
+    const token = await engine.issue('tenant-a', {
+      planId: 'plan-1',
+      actionIds: ['action-1'],
+      approverId: 'approver-1',
+      mode: 'batch',
+      concurrency: 1,
+      stopOnFailure: true,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    expect((await engine.verify('tenant-a', token)).valid).toBe(true);
+    engine.markNonceUsed(token.spec.nonce, token.spec.expiresAt);
+    const replayed = await engine.verify('tenant-a', token);
+    expect(replayed).toEqual({ valid: false, reason: 'nonce_replay' });
+  });
+});

@@ -16,7 +16,19 @@ import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
-import { loadEnv } from '@axiom/config';
+import { loadEnv, BRAND } from '@axiom/config';
+
+/**
+ * How many organizations one user may own (SEC-5).
+ *
+ * `/organizations/onboard` is exempt from tenant resolution — it runs before
+ * the caller has a tenant — and had no entitlement check of any kind, so a
+ * single account could create tenants without limit. A quota is the control
+ * that matches the abuse: it bounds the durable resource rather than the
+ * request rate. Raising it for a genuine multi-entity customer is a
+ * deliberate act, which is the point.
+ */
+const MAX_TENANTS_PER_USER = Number(process.env.AXIOM_MAX_TENANTS_PER_USER ?? 5);
 
 const env = loadEnv();
 
@@ -34,7 +46,7 @@ export function v1Routes(deps: Deps) {
 
   // POST /v1/plans/approve — issue a signed approval token
   app.post('/plans/approve', async (c) => {
-    if (deps.killSwitch.isActive(c.get('tenantId'))) {
+    if (await deps.killSwitch.isActive(c.get('tenantId'))) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -265,7 +277,7 @@ export function v1Routes(deps: Deps) {
 
   // POST /v1/plans/:id/reject — reject the plan
   app.post('/plans/:id/reject', async (c) => {
-    if (deps.killSwitch.isActive(c.get('tenantId'))) {
+    if (await deps.killSwitch.isActive(c.get('tenantId'))) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -318,7 +330,7 @@ export function v1Routes(deps: Deps) {
   // approval token. The token is validated per-action.
   app.post('/plans/:id/execute', async (c) => {
     const tenantId = c.get('tenantId');
-    if (deps.killSwitch.isActive(tenantId)) {
+    if (await deps.killSwitch.isActive(tenantId)) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -422,21 +434,43 @@ export function v1Routes(deps: Deps) {
       );
     }
 
-    // Per-action validation
+    // Per-action validation.
+    //
+    // PERF-1: this issued one `.single()` per action inside the loop, so a
+    // 200-action batch was 200 sequential round-trips before execution could
+    // start. One `.in()` fetch replaces them.
+    //
+    // SEC-6: `dry_run_expires_at` was checked at approve time but not here,
+    // and was not even selected. Time passes between approval and execution —
+    // that is the entire point of an approval queue — so a dry-run that was
+    // fresh when a human approved it can be hours stale by the time it runs.
+    // FR-6.3 says a stale dry-run cannot back an approval; the execute path
+    // has to re-assert it or the guarantee lasts only until the approver
+    // clicks.
     const accepted: string[] = [];
     const rejected: Array<{ actionId: string; reason: string }> = [];
+
+    const { data: actionRows, error: actionsErr } = await admin
+      .from('remediation_actions')
+      .select(
+        'id, plan_id, approval_status, dry_run_status, dry_run_expires_at, rollback_validated, idempotency_key',
+      )
+      .in('id', input.actionIds)
+      .eq('tenant_id', tenantId);
+
+    if (actionsErr) {
+      return c.json({ error: { code: 'action_lookup_failed', message: actionsErr.message } }, 500);
+    }
+
+    const actionsById = new Map((actionRows ?? []).map((a) => [String(a.id), a]));
+    const executeAt = Date.now();
+
     for (const actionId of input.actionIds) {
       if (!deps.approvalEngine.isActionCovered(signedToken, actionId)) {
         rejected.push({ actionId, reason: 'action_not_in_token_scope' });
         continue;
       }
-      // Fetch the action row
-      const { data: action } = await admin
-        .from('remediation_actions')
-        .select('id, plan_id, approval_status, dry_run_status, rollback_validated, idempotency_key')
-        .eq('id', actionId)
-        .eq('tenant_id', tenantId)
-        .single();
+      const action = actionsById.get(actionId);
       if (!action || action.plan_id !== planId) {
         rejected.push({ actionId, reason: 'action_not_found' });
         continue;
@@ -449,12 +483,12 @@ export function v1Routes(deps: Deps) {
         rejected.push({ actionId, reason: 'action_not_ready' });
         continue;
       }
-      // Idempotency: if this action already has an idempotency_key and
-      // it's the same as the request, treat it as already-executed.
-      if (action.idempotency_key === c.get('idempotencyKey')) {
-        accepted.push(actionId);
+      if (action.dry_run_expires_at && new Date(action.dry_run_expires_at).getTime() < executeAt) {
+        rejected.push({ actionId, reason: 'dry_run_expired' });
         continue;
       }
+      // Idempotency: if this action already carries this request's key, it has
+      // already been executed under it.
       accepted.push(actionId);
     }
 
@@ -548,7 +582,9 @@ export function v1Routes(deps: Deps) {
       }
     }
 
-    deps.approvalEngine.markNonceUsed(signedToken.spec.nonce);
+    // Pass the token's expiry so the replay cache can drop the entry once the
+    // token would fail the expiry check anyway (SEC-12).
+    deps.approvalEngine.markNonceUsed(signedToken.spec.nonce, signedToken.spec.expiresAt);
 
     const status =
       rejected.length === 0 ? 'accepted' : accepted.length === 0 ? 'rejected' : 'partial';
@@ -593,18 +629,21 @@ export function v1Routes(deps: Deps) {
       );
     }
     const { reason, scope } = parsedKillSwitch.data;
-    if (scope === 'global' && c.get('role') !== 'founder' && c.get('role') !== 'owner') {
+    // SEC-4: a GLOBAL halt stops execution for every tenant on the platform.
+    // `owner` is a per-tenant role, so it is not authority over other
+    // tenants' execution. Global scope is founder-only in both directions.
+    if (scope === 'global' && c.get('role') !== 'founder') {
       return c.json(
         {
           error: {
             code: 'role_forbidden',
-            message: 'Only founders/owners can engage a global kill switch',
+            message: 'Only a founder can engage a global kill switch',
           },
         },
         403,
       );
     }
-    deps.killSwitch.engage({
+    await deps.killSwitch.engage({
       tenantId: c.get('tenantId'),
       userId: c.get('user').id,
       reason,
@@ -626,7 +665,8 @@ export function v1Routes(deps: Deps) {
   app.post('/kill-switch', handleKillSwitchEngage);
 
   app.post('/kill-switch/release', async (c) => {
-    if (c.get('role') !== 'founder' && c.get('role') !== 'owner') {
+    const role = c.get('role');
+    if (role !== 'founder' && role !== 'owner') {
       return c.json(
         {
           error: {
@@ -637,21 +677,72 @@ export function v1Routes(deps: Deps) {
         403,
       );
     }
-    deps.killSwitch.release();
+
+    const body = await c.req.json().catch(() => ({}));
+    const parsedRelease = z
+      .object({ scope: z.enum(['global', 'tenant']).default('tenant') })
+      .safeParse(body);
+    if (!parsedRelease.success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid kill-switch release request' } },
+        400,
+      );
+    }
+    const { scope } = parsedRelease.data;
+
+    // SEC-4: `release()` used to take no arguments and clear everything, so a
+    // tenant owner could lift a founder-engaged GLOBAL halt — the platform-wide
+    // emergency stop, released by someone with authority over one tenant.
+    // Releasing the global scope is founder-only, and the service refuses a
+    // tenant release while a global halt stands.
+    if (scope === 'global' && role !== 'founder') {
+      return c.json(
+        {
+          error: {
+            code: 'role_forbidden',
+            message: 'Only a founder can release a global kill switch',
+          },
+        },
+        403,
+      );
+    }
+
+    const result = await deps.killSwitch.release({
+      scope,
+      tenantId: c.get('tenantId'),
+      userId: c.get('user').id,
+    });
+
+    if (!result.released) {
+      const status = result.reason === 'global_halt_active' ? 409 : 200;
+      return c.json(
+        {
+          engaged: result.reason === 'global_halt_active',
+          released: false,
+          reason: result.reason,
+          message:
+            result.reason === 'global_halt_active'
+              ? 'A global kill switch is engaged; a tenant release cannot lift it'
+              : 'No kill switch was engaged for this scope',
+        },
+        status,
+      );
+    }
+
     await deps.ledger.append({
       tenantId: c.get('tenantId'),
       correlationId: randomUUID(),
       actorType: 'human',
       actorId: c.get('user').id,
-      actionType: 'execution.kill_switch.engaged',
+      actionType: 'execution.kill_switch.released',
       result: 'success',
-      detail: { action: 'released' },
+      detail: { action: 'released', scope },
     });
-    return c.json({ engaged: false });
+    return c.json({ engaged: false, released: true, scope });
   });
 
-  app.get('/kill-switch/status', (c) => {
-    return c.json({ engaged: deps.killSwitch.isActive(c.get('tenantId')) });
+  app.get('/kill-switch/status', async (c) => {
+    return c.json(await deps.killSwitch.state(c.get('tenantId')));
   });
 
   // ─── Ledger ──────────────────────────────────────────────────────
@@ -809,6 +900,51 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', details: parsed.error.flatten() } }, 400);
     }
 
+    const admin = createSupabaseAdmin();
+
+    // SEC-5: this endpoint is exempt from tenant resolution — it legitimately
+    // runs before the caller has a tenant — and it then inserted a tenant and
+    // self-assigned `owner` with no entitlement check, no quota and no rate
+    // limit. Any authenticated user could create unlimited tenants; combined
+    // with SEC-1 it was reachable unauthenticated in staging.
+    //
+    // The quota is the meaningful control here: it bounds the total a user can
+    // own, which is the actual abuse vector. General per-request rate limiting
+    // across the API is PERF-3 / W9.6.
+    const { count: ownedCount, error: quotaErr } = await admin
+      .from('tenant_users')
+      .select('tenant_id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('role', 'owner');
+
+    if (quotaErr) {
+      logger.error({ error: quotaErr.message, userId: user.id }, 'tenant quota check failed');
+      return c.json(
+        {
+          error: {
+            code: 'quota_check_failed',
+            message: 'Could not verify organization quota. Please try again.',
+          },
+        },
+        503,
+      );
+    }
+
+    if ((ownedCount ?? 0) >= MAX_TENANTS_PER_USER) {
+      logger.warn({ userId: user.id, ownedCount }, 'tenant creation refused: quota exceeded');
+      return c.json(
+        {
+          error: {
+            code: 'tenant_quota_exceeded',
+            message:
+              `You already own ${ownedCount} organizations, which is the limit of ` +
+              `${MAX_TENANTS_PER_USER}. Contact ${BRAND.salesEmail} to raise it.`,
+          },
+        },
+        429,
+      );
+    }
+
     const {
       name,
       tier,
@@ -828,9 +964,9 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
     ).slice(0, 45);
-    const uniqueSlug = `${baseSlug}-${Math.random().toString(36).substring(2, 7)}`;
-
-    const admin = createSupabaseAdmin();
+    // `Math.random()` gave 5 base-36 characters from a predictable PRNG —
+    // collision-prone at scale and guessable, on a value that appears in URLs.
+    const uniqueSlug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
 
     // 1. Insert into public.tenants
     const { data: tenant, error: tenantErr } = await admin
@@ -868,8 +1004,21 @@ export function v1Routes(deps: Deps) {
       accepted_at: new Date().toISOString(),
     });
 
+    // A tenant with no owner row is unreachable: nobody can resolve it, nobody
+    // can administer it, and it cannot be deleted through the product. This
+    // was logged and ignored, leaving orphans behind on every partial failure.
     if (memberErr) {
-      logger.error({ error: memberErr }, 'failed to link tenant owner');
+      logger.error({ error: memberErr, tenantId: tenant.id }, 'failed to link tenant owner');
+      await admin.from('tenants').delete().eq('id', tenant.id);
+      return c.json(
+        {
+          error: {
+            code: 'tenant_creation_failed',
+            message: 'Could not establish ownership of the new organization. Nothing was created.',
+          },
+        },
+        500,
+      );
     }
 
     // 3. Create initial engagement in engagements table
@@ -890,26 +1039,53 @@ export function v1Routes(deps: Deps) {
       logger.warn({ error: engErr }, 'failed to create initial engagement for new tenant');
     }
 
-    // 4. Record to immutable audit ledger
+    // 4. Record to immutable audit ledger.
+    //
+    // SEC-10: this was `appendAndForget`, contradicting the rule stated in
+    // `packages/ledger/src/append.ts`: per BR-3 no action bypasses the ledger,
+    // so a ledger write failure must fail the parent operation. Tenant
+    // creation is exactly such a path — an organization that exists with no
+    // audit entry for its creation is a hole in the chain the product sells.
     const correlationId = randomUUID();
-    deps.ledger.appendAndForget({
-      tenantId: tenant.id,
-      correlationId,
-      actorType: ActorType.HUMAN,
-      actorId: user.id,
-      actionType: LedgerActionType.TENANT_CREATED,
-      targetRef: `tenant:${tenant.id}`,
-      result: LedgerResult.SUCCESS,
-      detail: {
-        name,
-        slug: uniqueSlug,
-        tier,
-        is_sdf,
-        dpo_name: dpo_name || user.user_metadata?.full_name || 'Compliance Officer',
-        dpo_email: dpo_email || user.email,
-        systems_count: systems?.length || 0,
-      },
-    });
+    try {
+      await deps.ledger.append({
+        tenantId: tenant.id,
+        correlationId,
+        actorType: ActorType.HUMAN,
+        actorId: user.id,
+        actionType: LedgerActionType.TENANT_CREATED,
+        targetRef: `tenant:${tenant.id}`,
+        result: LedgerResult.SUCCESS,
+        detail: {
+          name,
+          slug: uniqueSlug,
+          tier,
+          is_sdf,
+          dpo_name: dpo_name || user.user_metadata?.full_name || 'Compliance Officer',
+          dpo_email: dpo_email || user.email,
+          systems_count: systems?.length || 0,
+        },
+      });
+    } catch (ledgerErr: any) {
+      // Unwind rather than leave a tenant whose creation is not in the chain.
+      logger.error(
+        { error: ledgerErr?.message, tenantId: tenant.id },
+        'ledger append failed during onboarding; rolling back tenant',
+      );
+      await admin.from('tenant_users').delete().eq('tenant_id', tenant.id);
+      await admin.from('tenants').delete().eq('id', tenant.id);
+      return c.json(
+        {
+          error: {
+            code: 'ledger_append_failed',
+            message:
+              'The organization could not be recorded to the audit ledger, so it was not ' +
+              'created. No action bypasses the ledger.',
+          },
+        },
+        500,
+      );
+    }
 
     return c.json(
       {

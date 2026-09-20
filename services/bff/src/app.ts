@@ -52,7 +52,11 @@ export function createApp() {
 
   // Health endpoints (no auth)
   app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
-  app.get('/ready', (c) => c.json({ status: 'ready', killSwitch: killSwitch.isActive() }));
+  // `isActive` reads shared state, so this must await it — it previously
+  // serialised a pending Promise as `{}`.
+  app.get('/ready', async (c) =>
+    c.json({ status: 'ready', killSwitch: await killSwitch.isActive() }),
+  );
 
   // Public routes (no auth) — gap-scan, public marketing endpoints
   app.route('/public', publicRoutes({ ledger }));

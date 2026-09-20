@@ -53,9 +53,31 @@ export interface ValidationResult {
   details?: Record<string, unknown>;
 }
 
+/**
+ * Retention for a nonce whose token expiry was not supplied. Comfortably
+ * longer than APPROVAL_TOKEN_TTL_MINUTES' default of 60.
+ */
+const DEFAULT_NONCE_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/** Hard ceiling on the replay cache, as a memory backstop. */
+const MAX_TRACKED_NONCES = 100_000;
+
 export class ApprovalEngine {
   private readonly secrets = new Map<string, Buffer>();
-  private readonly usedNonces = new Set<string>(); // in-memory; persisted in DB via the token row
+
+  /**
+   * Replay cache: nonce -> the epoch-ms after which the entry is useless.
+   *
+   * SEC-12: this was a `Set<string>` that was never pruned, so a long-lived
+   * process accumulated every nonce it had ever seen. Functionally harmless —
+   * the database is the source of truth for replay protection — but an
+   * unbounded leak in a service intended to run for weeks.
+   *
+   * An entry only has to outlive its token: once `expiresAt` has passed the
+   * expiry check rejects the token before the replay check is reached, so
+   * retaining the nonce buys nothing. Entries are pruned on write.
+   */
+  private readonly usedNonces = new Map<string, number>();
 
   constructor(private readonly defaultSecret?: Buffer) {}
 
@@ -144,10 +166,48 @@ export class ApprovalEngine {
   }
 
   /**
-   * Mark a nonce as used. Idempotent — re-marking is a no-op.
+   * Mark a nonce as used. Idempotent — re-marking refreshes the retention
+   * deadline rather than duplicating the entry.
+   *
+   * `expiresAt` is the token's own expiry. Past it the token fails the expiry
+   * check before replay is considered, so the entry can be dropped. Callers
+   * that do not supply one fall back to a conservative window.
    */
-  markNonceUsed(nonce: string): void {
-    this.usedNonces.add(nonce);
+  markNonceUsed(nonce: string, expiresAt?: string | Date): void {
+    const deadline = expiresAt
+      ? new Date(expiresAt).getTime()
+      : Date.now() + DEFAULT_NONCE_RETENTION_MS;
+    this.usedNonces.set(nonce, deadline);
+    this.pruneNonces();
+  }
+
+  /**
+   * Drop entries whose token has expired.
+   *
+   * Runs on write rather than on a timer: an interval would keep a handle
+   * alive and make the engine awkward to use in short-lived processes and in
+   * tests. Writes are the only thing that grows the map, so pruning there
+   * bounds it by construction.
+   */
+  private pruneNonces(): void {
+    const now = Date.now();
+    for (const [nonce, deadline] of this.usedNonces) {
+      if (deadline <= now) this.usedNonces.delete(nonce);
+    }
+
+    // Backstop for a pathological burst of long-lived tokens: evict oldest
+    // first. The database still rejects a replay, so this degrades the fast
+    // path rather than the guarantee.
+    if (this.usedNonces.size > MAX_TRACKED_NONCES) {
+      const overflow = this.usedNonces.size - MAX_TRACKED_NONCES;
+      const oldest = [...this.usedNonces.entries()].sort((a, b) => a[1] - b[1]).slice(0, overflow);
+      for (const [nonce] of oldest) this.usedNonces.delete(nonce);
+    }
+  }
+
+  /** Current replay-cache size. Exposed for tests and diagnostics. */
+  get trackedNonceCount(): number {
+    return this.usedNonces.size;
   }
 
   /**
