@@ -2,9 +2,27 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 11 — INTEGRATED IMPLEMENTATION HANDOFF** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Document:** 11 · **Revision 12 — ATOMIC APPROVAL ISSUANCE** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `5a4d6a0`, including all eight Claude commits after `8877e75`; follow-up fixes include migration 0021.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
+
+## Revision 12 — current implementation checkpoint
+
+Continues from staging `8476d8c`. The 21 September review named atomic approval issuance as the next W1 safety slice; migration 0026 delivers it and the approve route is wired onto it.
+
+Issuing an approval was seven round trips, each committing on its own. A fault between any two left a state nobody designed — most seriously actions approved and a signed token live with **no ledger entry**, which is authority over a client's estate with no tamper-evident record of who granted it. Token, challenge link, action approval, plan status and the ledger append are now one transaction, under the same lock order as `claim_plan_execution` and `reconcile_execution_dispatch`.
+
+`action_set_content_digest` is recomputed under those row locks and compared with the digest the route read, which closes the read-to-write race the review identified: the content that is approved is now the content that was verified. Eligibility is rechecked there too, because the route's reads can go stale before the write lands. The function lives in SQL so both ends of the comparison agree by construction rather than by two languages canonicalising JSON identically — the assumption R-05 disproved.
+
+**Deliberate deviation from the review's sequence:** challenge consumption stays *outside* the transaction. Burning a step-up and then failing costs the approver a re-authentication, which is the safe direction; folding it in would mean a rolled-back issuance silently restores a spent challenge. Everything after consumption is atomic. If that trade is not wanted, it is a one-parameter change and a founder decision, not a defect.
+
+| Workstream | Delivered since Revision 11 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Atomic approval issuance (0026): token, challenge link, action approval, plan status and ledger in one transaction; content digest and eligibility rechecked under row locks; ledger-failure and concurrent-edit tests | Browser personas; action snapshot enforcement at the executor; MFA key rotation/deployment |
+
+Migration allocation is through **0026**. Everything Revision 11 records as remaining stays remaining unless listed above. No deployed parity, irreversible lock or live estate execution is claimed.
+
+---
 
 ## Revision 11 — current implementation checkpoint
 
@@ -15,13 +33,13 @@ Accepted decisions remain: higher environments self-host Supabase; no billable/i
 | Workstream | Delivered since Revision 10 | Remaining acceptance |
 | --- | --- | --- |
 | W0 | Fail-closed deploy/env generation; self-hosted Auth/PostgREST artifacts; managed service-role policies (0024); public signup disabled while mail verification is unwired; runtime DB TLS required; real MFA parity expansion | Actual reviewed preprod deployment/secret verification, verified GCS retention, live halt proof, complete security/operations acceptance |
-| W1 | Action-content MFA binding; account/session/trusted-address budgets; correct HTTP 429 responses; explicit execution capability; real TOTP/recovery/session/approval tests; operator policy document | Browser personas; atomic approval issuance and action snapshot enforcement at execution; MFA key rotation/deployment |
+| W1 | Action-content MFA binding; account/session/trusted-address budgets; correct HTTP 429 responses; explicit execution capability; real TOTP/recovery/session/approval tests; operator policy document | Browser personas; action snapshot enforcement at execution; MFA key rotation/deployment. *(Atomic approval issuance delivered in Revision 12.)* |
 | W2 | 0022 retires obsolete dispatch RPCs; 0023 reconciliation; 0024 managed service policies; 0025 atomic audited reconciliation/revocation | Most estate/connector/dry-run/batch/rights/monitoring models remain pending; do not treat operational tables as whole W2 completion |
 | W5 | Human reconciliation with fresh-approval policy; release revokes other outstanding old authority; ledger failure rolls release back | Real consumer/executor, live connectors, queued/chunk interruption, rollback and PRD B.10 proof |
 
 **Review corrections:** the topology rehearsal's empty reads did not prove BFF authority without `BYPASSRLS`; the SQL suite now removes that attribute and tests positive access plus client denial. Reconciliation's pre-existing unused token was incorrectly labelled a fresh approval by its test; it is now revoked, and the positive test issues a new token after release. The old release committed before its ledger append; 0025 makes them atomic. R-04/R-08/R-09/R-10/R-11 remain broader acceptance packages, not closed merely by these patches.
 
-Migration allocation is through **0025**. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
+Migration allocation is through **0026** as of Revision 12. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
 
 ---
 

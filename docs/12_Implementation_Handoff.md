@@ -1,6 +1,8 @@
 # Axiom Proof — implementation handoff
 
-> Current status is [Doc 11 Revision 11](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [saved session](15_Session_Handoff.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md). The original snapshot below predates the resumed staging work. Analyst is committed, email OTP is explicitly deferred, and R01–R11 have mixed closure status rather than blanket completion.
+> **Current status lives elsewhere.** Read [Doc 11 Revision 12](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md) first. The most recent reviews are [audit 06](audits/06-resumed-implementation-review-2026-09-20.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md).
+>
+> Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
 **As of 20 September 2026 · reviewed source: `2c54fcd` plus three uncommitted analyst files.**
 
@@ -25,7 +27,10 @@ The HTML handoff map is a design reference with mock examples, not completion ev
 | Other pre-existing dirty files | Root checkout's `apps/marketing/next-env.d.ts` and `apps/web/next-env.d.ts`; untouched by review                                                |
 | Remote-tracking state observed | `origin/staging` at `2c54fcd`; `origin/main` at `9575205`; this is not a cloud deployment or fresh remote verification                          |
 
-Resume in the implementation worktree, not the old root source. Read the review docs from the root checkout or incorporate their eventual documentation commit intentionally. The reviewer did not copy them over Claude's files, cherry-pick commits, stash changes, reset branches or push anything. Recheck status and migration numbers on resumption; do not overwrite WIP.
+> [!WARNING]
+> **The table above is a 20 September snapshot and is no longer accurate.** `origin/staging` has advanced well past `2c54fcd`, the analyst files are committed, and migration allocation is through 0026. For the live workspace state, branch and resume sequence, use [Doc 15](15_Session_Handoff.md).
+
+Resume in the implementation worktree, not the old root source. Recheck status and migration numbers against `origin/staging` on resumption; do not overwrite work in progress.
 
 ## Completed source changes
 
@@ -48,6 +53,9 @@ Resume in the implementation worktree, not the old root source. Read the review 
 | `2c54fcd` | Real membership-based switcher and capability-based navigation/rendering                                       | Analyst WIP and backend/database matrix parity                        |
 
 ## In progress — resume without duplicating
+
+> [!NOTE]
+> **This section is closed.** The analyst persona shipped in `dc901e9` — migration 0015, the capability matrix and render gating — and the acceptance points below were met, including the negative tests. It is kept because the reasoning about enum naming, membership resolution and the nine resulting role values remains correct. Nothing here is outstanding work.
 
 The analyst role patch adds `AXIOM_ANALYST`, its capabilities and a separate enum migration. This is the “persona/user_role schema plus matrix” work described by the user. The SQL enum is named **`user_role`**; the membership table is **`tenant_users`**. There is no need to invent a `person` or `user_roles` table merely from that shorthand.
 
@@ -91,8 +99,10 @@ For each completed slice, record commit, applied migration versions, exact comma
 
 ## Decisions awaiting confirmation
 
-- Whether email OTP is intentionally deferred; otherwise retain it as pending W1 scope.
-- Whether analyst access is assigned tenants only (recommended and specified in Doc 11) or a separately authorised broader model.
+> Resolved since this snapshot: email OTP **is** intentionally deferred; analyst access **is** assigned tenants only, without aggregate `MULTI_TENANT_READ`; higher environments self-host Supabase; every outbox redelivery needs a fresh approval; proxy trust is configured per environment and disabled by default. The still-open decisions are in [Doc 15](15_Session_Handoff.md).
+
+- ~~Whether email OTP is intentionally deferred~~ — deferred, confirmed by the founder.
+- ~~Whether analyst access is assigned tenants only~~ — assigned tenants only, confirmed.
 - Sectoral pack #1 selection before pack delivery.
 - Authoritative provider/retention equivalence record and marketing/API boundary reconciliation.
 - BR-4 founder review versus automatic public gap-scan delivery: either introduce the review gate or record an explicit exception with precise scope.

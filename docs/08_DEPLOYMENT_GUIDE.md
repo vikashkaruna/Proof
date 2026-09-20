@@ -283,9 +283,25 @@ For running in a staging machine on a local network or a dedicated staging VM:
 1. **Prepare Staging Environment Configuration**:
 
    ```bash
-   cp infra/docker/environments/.env.staging.example infra/docker/environments/.env.staging
-   # Edit .env.staging with staging database credentials and hostnames
+   # Create .env.staging, or bring an existing one up to the template.
+   # Only missing keys are appended; values already set are kept.
+   ./scripts/sync-env.sh staging scaffold
+
+   # Generate the secrets that must be generated. The Supabase JWT secret and
+   # its anon/service keys come from ONE minting — those two are JWTs signed
+   # with that secret, and mixing runs leaves GoTrue issuing tokens PostgREST
+   # rejects.
+   ./scripts/sync-env.sh staging mint
+
+   # Fill in what a machine cannot generate (hostnames, provider keys), then
+   # confirm. `verify` is a gate: missing or placeholder values exit non-zero.
+   $EDITOR infra/docker/environments/.env.staging
+   ./scripts/sync-env.sh staging verify --allow-simulated
    ```
+
+   > `--allow-simulated` accepts the LLM, email and Temporal credentials that
+   > staging deliberately runs without. It is refused for preprod and
+   > production.
 
 2. **Deploy with Staging Overlay**:
 
@@ -326,12 +342,26 @@ _Provisions VPC (3 AZs), EKS cluster, S3 Evidence Vault with Compliance Object L
 #### Step 2: Supabase Schema Migration
 
 ```bash
-# Link to production Supabase project (ap-south-1)
-supabase link --project-ref <your-supabase-project-ref>
-
-# Push immutable migrations
-pnpm db:migrate
+# Apply the migration series to the deployed database.
+#
+# NOT `pnpm db:migrate`, which runs `supabase db push`. That cannot succeed
+# here: migration 0000 creates roles and writes to the Auth-owned schema,
+# which the CLI's restricted migration role may not do. It also has no
+# checksum history, so it cannot tell an unapplied migration from a changed
+# one.
+#
+# This runner records a checksum per migration, refuses changed history,
+# wraps each file in its own transaction, serialises concurrent runners on an
+# advisory lock, and exits non-zero when anything fails.
+./scripts/migrate-cloudsql.sh "postgresql://<user>:<password>@<host>:5432/<database>"
 ```
+
+> [!IMPORTANT]
+> Higher environments self-host Supabase Auth and PostgREST against their own
+> Postgres rather than linking a Supabase Cloud project, so there is no
+> `supabase link` step. The bootstrap, GoTrue and migration ordering is
+> load-bearing and documented in
+> [the GCP preprod guide](GCP_PREPROD_DEPLOYMENT_GUIDE.md#self-hosted-supabase-and-why-the-order-matters).
 
 #### Step 3: Container Image Build & Push
 
