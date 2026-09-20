@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { usePersistentState } from '@/lib/use-persistent-state';
 import { AgentIcon } from '@axiom/ui';
 
 export interface DsarItem {
@@ -29,8 +30,18 @@ export interface DsarClientProps {
 const STAGES = ['Intake', 'Identity verification', 'Data location', 'Fulfilment', 'Delivered'];
 
 export function DsarClient({ initialDsars, stats }: DsarClientProps) {
-  const [dsarList, setDsarList] = useState<DsarItem[]>(initialDsars.length > 0 ? initialDsars : []);
-  const [selId, setSelId] = useState<string>(dsarList[0]?.id || 'DSAR-2026-088');
+  // Stage changes persist across reloads. `usePersistentState` renders the
+  // server-supplied list during SSR and hydration, then swaps to the stored
+  // list without an effect — see the hook for why the effect had to go.
+  const [dsarList, setDsarList] = usePersistentState<DsarItem[]>('axiom_dsar_items', initialDsars);
+
+  // `selId` used to be mirrored state that an effect kept in step with the
+  // list. It is a *derivation* of the list plus an optional user choice, so
+  // holding null until the user picks removes the sync problem entirely
+  // rather than solving it.
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const selId = pickedId ?? dsarList[0]?.id ?? '';
+  const setSelId = setPickedId;
 
   // New DSAR Modal State
   const [newModalOpen, setNewModalOpen] = useState(false);
@@ -42,35 +53,12 @@ export function DsarClient({ initialDsars, stats }: DsarClientProps) {
   const [newNotes, setNewNotes] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Sync with localStorage so stage changes persist across reloads
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('axiom_dsar_items');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setDsarList(parsed);
-          setSelId(parsed[0].id);
-        }
-      }
-    } catch {}
-  }, []);
-
   const selectedDsar = dsarList.find((d) => d.id === selId) || dsarList[0];
 
   const handleAdvance = (id: string) => {
-    setDsarList((prev) => {
-      const next = prev.map((d) => {
-        if (d.id === id && d.stage < 4) {
-          return { ...d, stage: d.stage + 1 };
-        }
-        return d;
-      });
-      try {
-        localStorage.setItem('axiom_dsar_items', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    setDsarList((prev) =>
+      prev.map((d) => (d.id === id && d.stage < 4 ? { ...d, stage: d.stage + 1 } : d)),
+    );
   };
 
   const handleCreateDsar = (e: React.FormEvent) => {
@@ -91,12 +79,8 @@ export function DsarClient({ initialDsars, stats }: DsarClientProps) {
       notes: newNotes.trim() || undefined,
     };
 
-    const updated = [created, ...dsarList];
-    setDsarList(updated);
+    setDsarList((prev) => [created, ...prev]);
     setSelId(newId);
-    try {
-      localStorage.setItem('axiom_dsar_items', JSON.stringify(updated));
-    } catch {}
 
     setNewModalOpen(false);
     setNewPrincipal('');

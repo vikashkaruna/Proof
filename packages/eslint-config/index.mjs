@@ -37,19 +37,7 @@ const config = [
     rules: {
       'react/no-unescaped-entities': 'off',
 
-      // Downgraded from error, deliberately and temporarily.
-      //
-      // The two current violations are both the standard SSR-safe pattern for
-      // hydrating UI state from localStorage on mount: an empty-dependency
-      // effect that reads storage and calls setState. A lazy `useState`
-      // initialiser cannot be used because `localStorage` does not exist during
-      // server rendering, so the correct fix is `useSyncExternalStore`.
-      //
-      // That rewrite is worth doing but does not belong in a security change,
-      // and leaving the rule at `error` would mean CI stays red and the gate
-      // stops meaning anything. As a warning the finding remains visible on
-      // every run. Restore to 'error' once both call sites are migrated.
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/set-state-in-effect': 'error',
     },
   },
 ];
