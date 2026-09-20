@@ -7,7 +7,7 @@ export default async function DataMapPage() {
   // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
   // The client below is user-scoped, so RLS is the backstop it was designed
   // to be and a missing filter is an empty result, not a leak.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let ropaEvidence: any[] = [];
   let ledgerEvents: any[] = [];
 
@@ -53,6 +53,7 @@ export default async function DataMapPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Data Map & RoPA',
         hi: 'डेटा मानचित्र',

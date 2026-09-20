@@ -25,6 +25,7 @@ export const BASE_ENV = {
   AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
   AGENT_RUNTIME_URL: 'https://agent-runtime.internal',
   MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+  AXIOM_MFA_ENCRYPTION_KEY: 'f'.repeat(48),
 } as const;
 
 /** Apply an environment to `process.env`, clearing the keys this suite owns. */

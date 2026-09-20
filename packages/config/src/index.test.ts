@@ -75,6 +75,7 @@ describe('loadEnv', () => {
       AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
       AGENT_RUNTIME_URL: 'https://agent-runtime.preprod.internal',
       MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+      AXIOM_MFA_ENCRYPTION_KEY: 'f'.repeat(48),
     });
     expect(env.ENVIRONMENT).toBe('preprod');
     expect(env.AXIOM_AUTH_MODE).toBe('strict');
@@ -136,6 +137,7 @@ describe('placeholder secrets are refused in hardened deployments', () => {
     AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
     AGENT_RUNTIME_URL: 'https://agent-runtime.internal',
     MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+    AXIOM_MFA_ENCRYPTION_KEY: 'f'.repeat(48),
   };
 
   // The exact value that shipped in .env.staging.example. It passes the length
@@ -168,6 +170,23 @@ describe('placeholder secrets are refused in hardened deployments', () => {
     expect(() =>
       loadEnv({ ...good, MODEL_GATEWAY_API_KEY: 'dev-model-gateway-key-axiom' }),
     ).toThrow(/MODEL_GATEWAY_API_KEY/);
+  });
+
+  it('requires an MFA encryption key in a deployed environment', () => {
+    // A TOTP secret cannot be hashed — the server must recover the plaintext
+    // to compute the expected code — so without this key the secrets would sit
+    // in the clear and a database read would yield valid second factors for
+    // every enrolled user.
+    resetEnvCache();
+    const { AXIOM_MFA_ENCRYPTION_KEY: _omitted, ...withoutKey } = good;
+    expect(() => loadEnv(withoutKey)).toThrow(/AXIOM_MFA_ENCRYPTION_KEY/);
+  });
+
+  it('refuses a placeholder MFA encryption key', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({ ...good, AXIOM_MFA_ENCRYPTION_KEY: 'dev-mfa-key-placeholder-value-1234567890' }),
+    ).toThrow(/AXIOM_MFA_ENCRYPTION_KEY/);
   });
 
   it('accepts real minted secrets', () => {
@@ -243,6 +262,7 @@ describe('resolveAuthMode — W0.0 · SEC-1 · SEC-2 · SEC-13', () => {
     AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(32),
     AGENT_RUNTIME_URL: 'https://agent-runtime.internal',
     MODEL_GATEWAY_API_KEY: 'm'.repeat(32),
+    AXIOM_MFA_ENCRYPTION_KEY: 'f'.repeat(48),
   };
 
   it('is unaffected by an unset or non-production NODE_ENV', () => {

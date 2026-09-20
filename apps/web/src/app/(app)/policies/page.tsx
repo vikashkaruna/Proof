@@ -7,7 +7,7 @@ export default async function PoliciesPage() {
   // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
   // The client below is user-scoped, so RLS is the backstop it was designed
   // to be and a missing filter is an empty result, not a leak.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let policyRuns: any[] = [];
   let totalLedgerEntries = 0;
   let autoRemediatedCount = 42;
@@ -59,6 +59,7 @@ export default async function PoliciesPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Standing Approval Policies',
         hi: 'स्थायी नीतियाँ',

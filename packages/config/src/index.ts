@@ -117,6 +117,12 @@ const EnvSchema = z
     BFF_PUBLIC_URL: z.string().url().optional(),
     BFF_CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001'),
 
+    // MFA (W1). Separate from the approval signing key on purpose: these
+    // protect different things, and compromising one should not hand over the
+    // other. This decrypts TOTP secrets, so holding it means being able to
+    // mint valid codes for every enrolled user.
+    AXIOM_MFA_ENCRYPTION_KEY: z.string().min(32).optional(),
+
     // Approval token signing
     APPROVAL_SIGNING_KEY: z.string().min(32).optional(), // per-tenant in prod
     APPROVAL_TOKEN_TTL_MINUTES: z
@@ -284,6 +290,25 @@ const EnvSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['MODEL_GATEWAY_API_KEY'],
+          message:
+            'Looks like a committed development placeholder. Mint one with ' +
+            '`node scripts/mint-supabase-keys.mjs`.',
+        });
+      }
+
+      if (!env.AXIOM_MFA_ENCRYPTION_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AXIOM_MFA_ENCRYPTION_KEY'],
+          message:
+            'Required in a deployed environment. TOTP secrets cannot be stored in the clear: ' +
+            'anyone reading the table could mint codes for every enrolled user, which turns ' +
+            'two-factor authentication back into one.',
+        });
+      } else if (isPlaceholderSecret(env.AXIOM_MFA_ENCRYPTION_KEY)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['AXIOM_MFA_ENCRYPTION_KEY'],
           message:
             'Looks like a committed development placeholder. Mint one with ' +
             '`node scripts/mint-supabase-keys.mjs`.',

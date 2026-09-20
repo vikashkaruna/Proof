@@ -51,9 +51,22 @@ export interface GenericModuleMeta {
 
 export function GenericModuleView({
   meta,
+  isDemo = false,
   children,
 }: {
   meta: GenericModuleMeta;
+  /**
+   * Whether this tenant may be shown the illustrative figures in `meta.cards`.
+   *
+   * Those figures are hardcoded — "12.4M rows", "47 tables", "8,210 files" —
+   * and used to render for everyone. On a compliance product that is the most
+   * damaging possible default: a real client sees invented numbers presented
+   * as their own posture, indistinguishable from a genuine finding, in a
+   * product sold on the basis that its output can be shown to a regulator.
+   *
+   * Opt-in per tenant (`tenants.is_demo`), and visibly labelled when on.
+   */
+  isDemo?: boolean;
   children?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -270,8 +283,19 @@ export function GenericModuleView({
       {/* ============================================================ */}
       {/* 2. DYNAMIC CARDS GRID                                        */}
       {/* ============================================================ */}
+      {isDemo && meta.cards.length > 0 && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-[#C9A227]/30 bg-[#C9A227]/5 px-3.5 py-2.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-[#C9A227]" />
+          <p className="text-[11px] leading-tight text-[#6b5a14]">
+            <span className="font-semibold">Sample data.</span> The figures below are illustrative,
+            not measured from this estate. They appear because this tenant is flagged for
+            demonstration.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {meta.cards.map((c, idx) => (
+        {(isDemo ? meta.cards : []).map((c, idx) => (
           <div
             key={idx}
             className="rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-2xs hover:shadow-xs transition-shadow"
@@ -306,6 +330,18 @@ export function GenericModuleView({
           </div>
         ))}
       </div>
+
+      {!isDemo && meta.cards.length > 0 && (
+        <div className="rounded-2xl border border-dashed border-[#e4e8ee] bg-[#fafbfc] p-8 text-center">
+          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
+            Nothing measured yet
+          </h2>
+          <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[#8a909b]">
+            This module has no results for your estate. Once {meta.agent ?? 'the responsible agent'}{' '}
+            has run, its findings and the ledger entries behind them appear here.
+          </p>
+        </div>
+      )}
 
       {children}
 

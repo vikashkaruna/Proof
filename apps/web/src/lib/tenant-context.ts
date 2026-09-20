@@ -39,21 +39,40 @@ export interface TenantContext {
   approvalScopes: string[];
   isAxiomInternal: boolean;
   /**
+   * Whether this tenant may be shown illustrative sample figures.
+   *
+   * Ten module pages carry hardcoded demo numbers ("12.4M rows", "47 tables")
+   * that render whenever a query returns nothing. On a compliance product that
+   * is the wrong default in the wrong direction: a real client with a sparse
+   * estate sees invented numbers presented as their own posture, and has no
+   * way to tell them apart from a genuine finding.
+   *
+   * Sample data is now opt-in per tenant and labelled as simulated wherever it
+   * appears — the same treatment non-production connector bindings get.
+   */
+  isDemo: boolean;
+  /**
    * User-scoped Supabase client. RLS applies to every query made with it.
    * This is deliberately the only client a page is given.
    */
   supabase: SupabaseClient;
 }
 
+interface TenantRel {
+  slug: string;
+  name: string;
+  is_demo?: boolean | null;
+}
+
 interface MembershipRow {
   tenant_id: string;
   role: UserRole;
   approval_scopes: string[] | null;
-  tenants: { slug: string; name: string } | { slug: string; name: string }[] | null;
+  tenants: TenantRel | TenantRel[] | null;
 }
 
 /** Supabase types an embedded relation as either an object or an array. */
-function readTenant(rel: MembershipRow['tenants']): { slug: string; name: string } {
+function readTenant(rel: MembershipRow['tenants']): TenantRel {
   if (Array.isArray(rel)) return rel[0] ?? { slug: '', name: 'Unknown' };
   return rel ?? { slug: '', name: 'Unknown' };
 }
@@ -81,7 +100,7 @@ export async function requireTenantContext(requestedSlug?: string): Promise<Tena
   // the set of tenants they may act in.
   const { data: memberships } = await supabase
     .from('tenant_users')
-    .select('tenant_id, role, approval_scopes, tenants:tenant_id(slug, name)')
+    .select('tenant_id, role, approval_scopes, tenants:tenant_id(slug, name, is_demo)')
     .eq('user_id', user.id);
 
   const rows = (memberships ?? []) as unknown as MembershipRow[];
@@ -116,6 +135,7 @@ export async function requireTenantContext(requestedSlug?: string): Promise<Tena
     role: selected.role,
     approvalScopes: selected.approval_scopes ?? [],
     isAxiomInternal: Boolean(profile?.is_axiom_internal),
+    isDemo: Boolean(tenant.is_demo),
     supabase,
   };
 }

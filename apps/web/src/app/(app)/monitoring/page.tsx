@@ -7,7 +7,7 @@ export default async function MonitoringPage() {
   // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
   // The client below is user-scoped, so a missing tenant filter is an empty
   // result rather than a cross-tenant leak.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let monitoringLedger: any[] = [];
   let totalLedgerEntries = 0;
 
@@ -47,6 +47,7 @@ export default async function MonitoringPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Continuous Monitoring',
         hi: 'सतत निगरानी और ड्रिफ्ट',

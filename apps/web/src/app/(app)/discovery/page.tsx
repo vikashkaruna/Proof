@@ -7,7 +7,7 @@ export default async function DiscoveryPage() {
   // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
   // The client below is user-scoped, so a missing tenant filter is an empty
   // result rather than a cross-tenant leak.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let drishtiRuns: any[] = [];
   let totalDrishtiScans = 0;
 
@@ -45,6 +45,7 @@ export default async function DiscoveryPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Data Discovery',
         hi: 'डेटा खोज',

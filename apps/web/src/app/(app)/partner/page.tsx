@@ -7,7 +7,7 @@ export default async function PartnerPage() {
   // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
   // The client below is user-scoped, so RLS is the backstop it was designed
   // to be and a missing filter is an empty result, not a leak.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let partnerRuns: any[] = [];
   let tenantCount = 4;
 
@@ -47,6 +47,7 @@ export default async function PartnerPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Partner / White-label Portal',
         hi: 'भागीदार एवं डेटा प्रोसेसर पोर्टल',
