@@ -1,6 +1,6 @@
 # Saved implementation session — 21 September 2026
 
-Resume from fetched staging, not a guessed SHA. This checkpoint integrated `ad2d046` and adds W1 authenticator replacement plus migration **0030**; the merge commit containing this file is the resume baseline. Current detail: [Doc 11 Revision 22](11_Phase0-5_Gap_Closure_Plan.md), [progress](14_Implementation_Progress.md), [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md).
+Resume from fetched staging, not a guessed SHA. This checkpoint integrated `ad2d046` (green upstream CI [35587825571](https://github.com/vikashkaruna/Proof/actions/runs/35587825571)) and adds W1 authenticator replacement plus migration **0030**; the merge commit containing this file is the resume baseline. Current detail: [Doc 11 Revision 22](11_Phase0-5_Gap_Closure_Plan.md), [progress](14_Implementation_Progress.md), [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md).
 
 ## Workspace and accepted scope
 
@@ -37,3 +37,4 @@ Founder decisions still needed for real irreversible evidence retention and name
 - Local Chrome can be selected with `AXIOM_E2E_BROWSER_CHANNEL=chrome`; CI uses Playwright's pinned Chromium. Browser servers use ports 3000/3001/4000. Next rewrites `next-env.d.ts` during dev in **both** `apps/web` and `apps/marketing`; revert both before committing.
 - Apply 0029 before using estate linkage in the BFF, and 0030 before any authenticator replacement. Old clients may omit estateId; do not fabricate scope during backfill. Scan rows are metadata until a real scanner records a run.
 - CI cancels an older staging run when a newer push arrives. Check the SHA and ancestry before treating cancellation as a defect.
+- `Self-hosted Supabase topology (W0.1)` pulls three images from Docker Hub and has failed on a registry `connection reset by peer` during acquisition, ~40s in, before reaching a database. Read the log before suspecting the commit: a re-run on the unchanged SHA passed. `test-database.sh` already carries an ECR fallback for the same class of failure; this lane does not.
