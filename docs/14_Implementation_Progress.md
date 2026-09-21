@@ -337,3 +337,25 @@ The API suites could not have found this. They pass a fresh `randomUUID()` on ev
 Verified: the full e2e suite is **47 passed, 0 skipped** — no `fixme` left. 268 BFF, 178 `@axiom/mfa`, 38 web and 14/14 package test tasks; typecheck and lint 15/15; format; env-security, controls-drift and deployment-coverage gates. Mutation-tested: reverting the per-attempt key makes the first login-MFA verification succeed and the second fail, which is the defect's exact signature — works once, then never again.
 
 **What this does not do.** A signed token is not an execution. The token is the gate; a separate execute call runs the work against a client estate, and no connector-backed executor exists to perform it. Nothing is deployed, so none of this is deployed acceptance.
+
+## W1 milestone: the retiring key reaches a deployed BFF
+
+Committed on branch `claude/phase-0-5-gap-closure-5fd349` and merged to staging. No migration; allocation stays at 0028.
+
+Revision 15 made the MFA encryption key rotatable — a primary that seals new and rewrapped secrets, and `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`, a comma-separated list of keys that may still be read — and wired it into the four Compose files. Cloud Run and Helm were not touched, so a **deployed** rotation had no path for the retiring list. `sync-env.sh verify` would pass, the service would roll, and every factor still sealed under the outgoing key would be unreadable.
+
+The shape of that failure is why it matters more than the size of the change suggests. Nothing fails at deploy time. It fails afterwards, one user at a time, as each person's next verification returns `secret_unreadable` and a 503 — which reads like a broken authenticator, not a deployment that shipped half a key ring.
+
+**Absent, not empty.** Both surfaces express "no rotation in flight" as the variable being _absent_, which is already how the key ring reads an unset value. That is forced rather than chosen: an empty payload is not storable as a Secret Manager version, so carrying the retiring list as a permanently-empty member of `local.managed_secrets` would fail every apply that is not a rotation.
+
+- **Cloud Run** — `google_secret_manager_secret.mfa_previous_keys` and its version are `count`-conditional on `var.mfa_encryption_keys_previous`, and the BFF's environment entry is a `dynamic "env"` block iterating that resource, so the condition is stated once in `secrets.tf` instead of being restated in `cloudrun.tf` and left to drift. Clearing the variable destroys the secret, so a retiring key stops existing at the same moment it stops being needed rather than lingering as a live decryption key nobody is watching.
+- **Helm** — `optional: true` on the `secretKeyRef` for `mfa-encryption-keys-previous` in the `<release>-internal` Secret. Without it every pod would refuse to start until an operator supplied a key they do not have.
+- **`sync-env.sh`** — `mfa_encryption_keys_previous` joins the tfvars mapping, which `check-tfvars-coverage.sh` requires of every declared variable. The Secret Manager push adds the pair only when the value is non-empty; appending it unconditionally would print "Skipping empty or placeholder secret" on every ordinary sync and teach operators to read past the warnings that matter.
+
+**The check that would have caught it.** The omission survived because no gate asks whether a variable reaches every surface that runs the service needing it. `scripts/check-mfa-ring-coverage.sh` asks exactly that across all six BFF surfaces and runs in the existing deployment coverage job. Its match is word-boundary anchored on purpose: `AXIOM_MFA_ENCRYPTION_KEY` is a prefix of `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`, so a substring test would stay green with the primary key missing.
+
+Verified: `terraform validate` passes on preprod; `terraform fmt` shows no new drift from these edits (`cloudrun.tf` has pre-existing alignment drift in its `locals` block, untouched here); `check-tfvars-coverage.sh` passes at 27 declared variables; `check-mfa-ring-coverage.sh` passes on all six surfaces; env-security gate, `prettier --check` and `bash -n` pass.
+
+Mutation-tested twice. Restoring the pre-change `cloudrun.tf` and `bff-deployment.yaml` makes the new gate fail naming those two surfaces and no others. Removing the `mfa_encryption_keys_previous` line from `tfvar_value()` makes `check-tfvars-coverage.sh` fail, which is what holds the sync mapping in place.
+
+**What this does not do.** Nothing is deployed and no rotation has been exercised against a running service, so the path exists but is not proven — the conditional resources are unapplied. The Helm change is reviewed rather than templated: `helm` is not installed on this machine, so `helm template` could not be run locally. CI does not render the chart either, which is a gap worth closing separately.

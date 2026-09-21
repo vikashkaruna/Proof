@@ -27,6 +27,8 @@ agent_runtime_internal_token = ""
 model_gateway_api_key        = ""
 
 mfa_encryption_key           = ""
+# Empty unless an MFA key rotation is in flight. Comma-separated, newest first.
+mfa_encryption_keys_previous = ""
 
 # Transactional Email (Resend)
 resend_api_key          = "re_your_resend_api_key_here"

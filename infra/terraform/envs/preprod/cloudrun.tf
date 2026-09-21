@@ -117,6 +117,25 @@ resource "google_cloud_run_v2_service" "bff" {
           }
         }
       }
+
+      # The retiring half of the ring, present only while a rotation is in
+      # flight. A `dynamic` block is what makes absence expressible: a plain
+      # `env` pointing at a secret with no versions would fail the deploy in
+      # the ordinary case, which is no rotation at all. Iterating the resource
+      # itself means the condition lives in one place — secrets.tf — instead of
+      # being restated here and drifting.
+      dynamic "env" {
+        for_each = google_secret_manager_secret.mfa_previous_keys
+        content {
+          name = "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS"
+          value_source {
+            secret_key_ref {
+              secret  = env.value.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
       # Secrets
       env {
         name = "APPROVAL_SIGNING_KEY"
@@ -221,7 +240,10 @@ resource "google_cloud_run_v2_service" "bff" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_version.version]
+  depends_on = [
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── 2. Web App (Compliance Workbench & Approval Console) ───────────────────
