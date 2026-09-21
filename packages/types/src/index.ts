@@ -4,3 +4,5 @@ export * from './api';
 export * from './agents';
 export * from './rbac';
 export * from './estate';
+
+export * from './connectors';
