@@ -34,7 +34,7 @@ for first in revoke attest; do
   wait "$first_pid"
   if [ "$first" = revoke ]; then
     if wait "$second_pid"; then echo 'Late attestation was accepted'; exit 1; fi
-    rg -q 'MFA session requires an active factor' "$result_dir/second"
+    grep -q 'MFA session requires an active factor' "$result_dir/second"
   else
     wait "$second_pid"
   fi

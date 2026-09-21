@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 23, reviewed staging `1990304`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 24, reviewed staging `47685ab`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -142,7 +142,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **32 migrations, 0000 → 0031**.
+non-zero on a failing migration. Expect **33 migrations, 0000 → 0032**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -230,7 +230,7 @@ date. I make the change and the gate re-validates.
 
 I flip **W0 → Closed** when all of these hold, and not before:
 
-1. Your W0-5 evidence shows **32 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **33 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -248,7 +248,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 55 browser journeys under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the replacement-session policy remain open. Atomic recovery-code refresh is the next engineering follow-up from review 12.
+**Current status: Partial.** The suite now has 55 browser journeys under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the replacement-session policy remain open. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 
@@ -455,7 +455,7 @@ to me than a green run that took a detour.
 
 | Workstream | Now                                 | Flips to                       | On                                                                                                           |
 | ---------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 32 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 33 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
 | **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |

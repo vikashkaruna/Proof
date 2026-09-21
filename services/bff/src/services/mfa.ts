@@ -218,7 +218,7 @@ export type ActivateEnrolmentResult =
   | ActivateEnrolmentSuccess
   | {
       ok: false;
-      reason: 'no_pending_factor' | 'code_rejected' | 'secret_unreadable';
+      reason: 'no_pending_factor' | 'code_rejected' | 'secret_unreadable' | 'activation_failed';
       detail?: string;
     };
 
@@ -677,53 +677,23 @@ export function createMfaService(
       });
       if (!result.valid) return { ok: false, reason: 'code_rejected', detail: result.reason };
 
-      // Activation proves possession, so it burns the counter like any other
-      // use. Otherwise the enrolment code itself is replayable as a login.
-      //
-      // Through an RPC rather than an UPDATE because of the replacement case.
-      // `user_mfa_factors_one_active_totp` allows one active TOTP row per
-      // user, so promoting this one while the factor it replaces is still
-      // active raised 23505 — and the branch below reported that as
-      // `no_pending_factor`, which sent anyone reading it to the wrong layer.
-      // Migration 0030 retires the old factor and activates this one under a
-      // single set of row locks; see its header for why neither order works
-      // from out here.
-      const { data: swapped, error: activateErr } = await supabase.rpc('activate_totp_factor', {
+      // Prepare the complete recovery set before any factor transition. SQL
+      // commits both together, and a persistence failure leaves the old set
+      // and old factor usable rather than stranding the account half-enrolled.
+      const codes = generateRecoveryCodes();
+      const hashed = await Promise.all(codes.map((c) => hashRecoveryCode(c)));
+      const { data: swapped, error: activateErr } = await supabase.rpc('finalize_totp_enrolment', {
         p_user_id: userId,
         p_factor_id: row.id,
         p_last_used_counter: Number(result.counter),
+        p_recovery_hashes: hashed,
       });
-      const swap = (swapped as Array<{ retired_factor_id: string | null }> | null)?.[0];
-      if (activateErr || !swap) {
-        if (activateErr) {
-          logger.error({ userId, error: activateErr.message }, 'TOTP activation failed');
-        }
-        // Now means only what it says: nothing pending for this user.
-        return { ok: false, reason: 'no_pending_factor' };
+      if (activateErr) {
+        logger.error({ userId, error: activateErr.message }, 'TOTP activation transaction failed');
+        return { ok: false, reason: 'activation_failed' };
       }
-
-      // Recovery codes replace any that survived a previous enrolment: codes
-      // issued against an old factor should not outlive it.
-      await supabase
-        .from('user_mfa_factors')
-        .delete()
-        .eq('user_id', userId)
-        .eq('factor_type', 'recovery_code')
-        .is('consumed_at', null);
-
-      const codes = generateRecoveryCodes();
-      const hashed = await Promise.all(codes.map((c) => hashRecoveryCode(c)));
-      const { error: codeErr } = await supabase.from('user_mfa_factors').insert(
-        hashed.map((code_hash) => ({
-          user_id: userId,
-          factor_type: 'recovery_code',
-          status: 'active',
-          code_hash,
-        })),
-      );
-      if (codeErr) {
-        logger.error({ err: codeErr.message, userId }, 'failed to persist recovery codes');
-        throw new Error('MFA activated but recovery codes could not be stored');
+      if (!Array.isArray(swapped) || swapped.length === 0) {
+        return { ok: false, reason: 'no_pending_factor' };
       }
 
       return { ok: true, factorId: row.id, recoveryCodes: codes };

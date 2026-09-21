@@ -317,3 +317,21 @@ describe('POST /v1/mfa/factors/:id/revoke', () => {
     expect(await mfa.isEnrolled(USER)).toBe(false);
   });
 });
+
+describe('activation persistence errors', () => {
+  it('reports activation persistence failure as 503, without blaming the submitted code', async () => {
+    const app = await buildApp();
+    const pending = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'first' });
+    fake.failNextRpc('finalize_totp_enrolment');
+    const response = await post(
+      app,
+      '/v1/mfa/enrol/activate',
+      JSON.stringify({ code: generateTotp(pending.secret) }),
+    );
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      'activation_failed',
+    );
+    expect(await mfa.isEnrolled(USER)).toBe(false);
+  });
+});

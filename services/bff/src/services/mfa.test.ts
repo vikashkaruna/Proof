@@ -556,3 +556,37 @@ describe('encryption key', () => {
     expect(BASE_ENV.AXIOM_MFA_ENCRYPTION_KEY.length).toBeGreaterThanOrEqual(32);
   });
 });
+
+describe('atomic activation and recovery set', () => {
+  it('keeps the old credentials on persistence failure and permits a later retry', async () => {
+    const old = await enrol();
+    const next = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'replacement' });
+    db.failNextRpc('finalize_totp_enrolment');
+    const input = { userId: USER, code: generateTotp(next.secret, T0 + STEP), atMs: T0 + STEP };
+    expect(await mfa.activateTotpEnrolment(input)).toMatchObject({
+      ok: false,
+      reason: 'activation_failed',
+    });
+    expect(await mfa.activeFactorId(USER)).toBe(old.factorId);
+    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(10);
+    const challenge = await satisfiedApprovalChallenge();
+    expect(
+      await mfa.verifyChallenge({
+        userId: USER,
+        challengeId: challenge.challengeId,
+        code: old.recoveryCodes[0]!,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await mfa.activateTotpEnrolment(input)).toMatchObject({ ok: true });
+    expect(await mfa.activeFactorId(USER)).toBe(next.factorId);
+    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(10);
+    const after = await satisfiedApprovalChallenge();
+    expect(
+      await mfa.verifyChallenge({
+        userId: USER,
+        challengeId: after.challengeId,
+        code: old.recoveryCodes[1]!,
+      }),
+    ).toMatchObject({ ok: false });
+  });
+});
