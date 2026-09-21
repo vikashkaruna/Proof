@@ -112,6 +112,40 @@ jobs:
       # time as their old-key factors come up for verification.
       - run: ./scripts/check-mfa-ring-coverage.sh
 
+      # Terraform formatting had drifted on four files across both
+      # environments and nothing noticed, because no job had ever run
+      # `terraform fmt`. One of the four drifted without anyone writing a
+      # misaligned line: fmt aligns contiguous runs of assignments, so the
+      # comment 66885c5 added inside preprod's `locals` block split it into
+      # two alignment groups and stale-padded the six keys above it. That is
+      # exactly the shape a reviewer skims past, which is the argument for
+      # deciding it mechanically rather than by eye.
+      #
+      # Pinned rather than floating: fmt's own rules can change between
+      # Terraform releases, and an unpinned gate would turn an upstream
+      # release into a red build on untouched files.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra/terraform
+
+      # fmt only parses; it never resolves a module, so it cannot see a
+      # module block whose arguments its pinned version does not accept.
+      # `validate` does, which is how envs/prod was found to be unloadable:
+      # three variables declared twice, and seven arguments written against
+      # module majors the config does not pin. preprod is gated here because
+      # it passes. prod is deliberately absent — adding it would land the
+      # gate red, and the repairs it needs change provisioned infrastructure
+      # (the EKS API endpoint's exposure among them) rather than formatting.
+      # It goes in once those land, and until then this gate does not claim
+      # to cover it.
+      - name: terraform validate (preprod)
+        working-directory: infra/terraform/envs/preprod
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
   # ─── W0.1 self-hosted Supabase topology ──────────────────────────
   # Higher environments self-host GoTrue and PostgREST against their own
   # Postgres rather than using Supabase Cloud, so preprod is a real
