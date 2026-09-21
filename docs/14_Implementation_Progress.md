@@ -532,3 +532,19 @@ Validation: 279 BFF tests, 40 web, 178 MFA package, 14 packages green, lint and 
 **One job failed first, and it was not this work.** `Self-hosted Supabase topology (W0.1)` exited 1 after 41 seconds with `Head "https://registry-1.docker.io/v2/postgrest/postgrest/manifests/v12.2.8" ... read: connection reset by peer` — a Docker Hub reset during image acquisition, before the script reached a database at all. It was re-run on the same commit and passed in 34 seconds with nothing changed. Recorded rather than quietly re-run, because a red job on a migration commit invites the assumption that the migration caused it, and the log is the thing that says otherwise.
 
 **What this does not do.** Factor revocation through the UI and enrolment under login quarantine are untouched. Replacement does not invalidate `mfa_session_attestations` already issued against the retired factor; on the recovery-code path that is a posture question recorded as an open decision in Doc 11 E.2 rather than answered here. No cloud apply, no connector execution, and no change to any deployed instance.
+
+## Status pass: a per-workstream register, re-derived rather than inherited
+
+No code change. Doc 11 gains a **workstream status register** covering W0–W10 in one maintained table, replacing the previous arrangement where a reader asking "where is W4?" had to reconstruct it from six per-revision delta tables.
+
+Every row was re-derived by running that row's own acceptance check against `3c1275f`. Three things came out of doing that rather than copying the previous revision forward.
+
+**SEC-3 reads as open and is closed.** `git grep -ln createSupabaseAdmin -- apps/web/src` returns 21 files, which looks like the service-role ban having failed. It has not: the gate matches _calls_ and excludes comment lines, and every one of those 21 matches is a comment recording what used to be there and why it was wrong. Actual calls: zero. The baseline file is correct and the documentation is doing its job — but a reader running the obvious grep will reach the wrong conclusion, so the register states the distinction explicitly.
+
+**28 of the 34 named W2 target tables do not exist.** Checked against the migrated database, not by grep, after grep produced a false negative: `regulatory_instruments` exists but is not created by a literal `create table public.regulatory_instruments`, so a pattern search called it missing. The database says the whole W7.0 regulatory baseline group of six is delivered, alongside the four estate tables from 0029, and that all 7 connector, 5 execution-detail, 4 monitoring/policy, 4 multi-regulator, 4 Phase 1/2 parity and 4 rights/consent tables are absent. Doc 11's target list now annotates the regulatory group as delivered, which its prose already said and its code block did not.
+
+**Performance is untouched, and W9 did not say so.** `k6`, `artillery`, `p95`, `benchmark` and `load test` match nothing in the repository. PERF-3 is delivered through `take_rate_limit`; PERF-2's estimated counts are not, and NFR-7 cannot be load-tested until W4 lands. W9 was carrying an unqualified strength on the testing half while the performance half had nothing in it.
+
+The register's own summary is the uncomfortable part and is left uncomfortable: six workstreams Partial, two Pending outright, W0's remaining half and W8's retention Gated on actions this workspace is not permitted to take. The delivered work concentrates in the P0 band; the two XL workstreams that constitute the actual product loop — W4's connectors and W5's executor — are close to empty, and W5's tables are empty _because_ W4 has to land first.
+
+Doc 13 is kept for its Doc 02 module-to-owner mapping, which nothing else carries, but its header no longer presents a 20 September `2c54fcd` snapshot as current status; it now defers to the register and says the register wins on conflict.

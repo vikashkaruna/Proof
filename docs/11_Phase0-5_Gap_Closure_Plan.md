@@ -5,6 +5,7 @@
 **Document:** 11 · **Revision 22 — AUTHENTICATOR REPLACEMENT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `ad2d046`, including the estate inventory foundation, the browser harness privilege separation and the approval-page hydration fix.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
+**Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
 ## Revision 22 — current implementation checkpoint
 
@@ -71,9 +72,50 @@ have their device, and whether that should end sessions the lost device
 attested is a posture question with a real cost either way. It is recorded in
 E.2 rather than answered here.
 
-See [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md),
+Per-workstream status for every workstream, not just this one, is in the
+[workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026)
+immediately below. See also
+[review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md),
 [progress](14_Implementation_Progress.md), and
 [session handoff](15_Session_Handoff.md).
+
+---
+
+# Workstream status register — as at Revision 22 (21 Sep 2026)
+
+One maintained table rather than a per-revision delta, because a reader asking
+"where is W4?" should not have to reconstruct it from six revision sections.
+Every row was re-derived from the repository at `3c1275f` by running the
+acceptance check named in the row, not by reading the previous revision.
+
+**Status vocabulary** (shared with [Doc 13](13_Roadmap_Traceability.md)):
+**Closed** — exit criteria met and held by a test or CI gate. **Partial** —
+foundation delivered and proven, named acceptance outstanding. **Pending** —
+not delivered; a stub or a page shell does not qualify. **Gated** — blocked on
+a founder decision or on a deployment this workspace is not authorized to make.
+
+| # | Workstream | Status | Proven, and by what | Not proven |
+| --- | --- | --- | --- | --- |
+| **W0** | Security remediation & environment parity · P0 blocking | **Partial** — code **Closed**, deployment **Gated** | W0.0 and W0.2 are closed and held by the CI gate. Zero environment-conditional security branches; the only two matches are a marketing URL resolver the plan explicitly names as topology and a comment recording the removed defect. `axiom_e2e_bypass` has no reader anywhere. SEC-3 is closed: **zero** service-role calls across the 22 `apps/web` files, with the baseline file now empty and acting as a ratchet. SEC-4/5/6/10/11/12/13 each carry a regression test. Four strict-parity topology labels produce identical security outcomes. | W0.1. There is no provisioned preprod database and no deployed parity lane. The four parity labels are **one local stack under four configurations**, not four deployments. Blocked on the first real deploy, which the founder has reserved. |
+| **W1** | Tenancy, RBAC, MFA, personas · P0 | **Partial** | All 22 web files go through `requireTenantContext()`, so RLS enforces tenancy for every query the web app makes. Capability matrix and central `authorize()` in `@axiom/types`; `approval_scopes` is genuinely read, proven by a scoped approver who differs from an unscoped one *only* by that column. MFA: TOTP, recovery codes, login quarantine, approval-time step-up, key-ring rotation, and — Revision 22 — authenticator replacement with atomic retirement of the factor it replaces. 52 browser journeys under `AXIOM_AUTH_MODE=strict` with real GoTrue accounts. | Factor revocation through the UI: the endpoint exists and is step-up gated, and nothing calls it. Enrolment while held under the login-MFA quarantine. The invitation/email flow. Whether a recovery-code replacement should invalidate session attestations made with the retired factor — [E.2 item 3](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it), an open decision, not an oversight. |
+| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0030**, 43 tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4, via 0029) and the entire W7.0 regulatory baseline group (6). Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **28 of the 34 named target tables do not exist** — verified against the migrated database, not by grep. All 7 W4 connector tables, all 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
+| **W3** | Client estate & onboarding · P1 | **Pending** | Nothing of W3 itself. The 0029 schema it will build on is delivered and counted under W2, and engagement creation accepts an optional `estateId` under its existing capability gate. | Estate management API and UI, onboarding proposal normalization, and human-confirmed assignment of legacy engagements. Accepting a link to an estate is not managing one. |
+| **W4** | Universal Connection Framework · P1 XL | **Pending** | Nothing. | Zero of 7 tables. No registry, descriptors, credential envelope, grants, health checks, workload identity or MCP tool registry. `connectors/page.tsx` is a shell and is not evidence of the workstream. |
+| **W5** | Phase 3 execution loop · P1 XL | **Partial** | The *authority* machinery is real and tested: signed scope-bound approval tokens, bounded nonce replay defence, execution claims with serialization proven by a held-open two-session race, the dispatch outbox, atomic reconciliation and the kill switch. | The executor. Karya refuses mutating execution without a signed token **by design at this phase** — a deliberate refusal stub, not a defect, and not a PRD B.10 completion claim. Zero of 5 execution-detail tables. |
+| **W6** | Continuous compliance · P1 | **Pending** | Nothing. | Zero of 4 tables. A monitoring page shell and a controls-drift script exist; neither is this workstream. |
+| **W7** | Control library & multi-regulator · P0-adjacent | **Partial** | 46 controls, with a CI gate proving every count in the repository agrees with the library, a TS→runtime parity gate against drift, and citation tests. The full W7.0 regulatory baseline group is in the database. | Multi-regulator and sector packs: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs` — all 4 missing. Sectoral pack #1 is an open founder decision ([E.2 item 1](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it)). |
+| **W8** | Reporting, evidence, branding · P1 | **Partial**, retention **Gated** | The evidence package and the gap-scan report exist and are tested. | Real immutable retention, which **cannot** be proven from here: an evidence-bucket Object Lock is a COMPLIANCE-mode lock nobody, including the project owner, can shorten or delete. Deliberately out of scope rather than skipped. The 4 rights/consent tables are missing. |
+| **W9** | Test, audit and performance · P0, alongside | **Partial** | 17 CI jobs green on this head. 279 BFF, 40 web, 178 MFA, 14 packages; the database suite over 31 migrations; four concurrency suites; DSN failure checks; strict parity across four labels; 52 browser journeys; a security scan. Mutation testing is the working convention, not an aspiration. | **Performance is untouched.** No load lane, no budget, nothing measured — `k6`, `artillery`, `p95` and `benchmark` match nothing in the repository. PERF-3 (rate limiting) is delivered via `take_rate_limit`; PERF-2's estimated counts are not. NFR-7 (1M records/hour/connector) cannot be load-tested until W4 lands. |
+| **W10** | On-prem deployment environment · P2 | **Partial** | The Helm chart renders, passes `kubeconform` and a semantic gate, and the self-hosted Supabase topology rehearsal is green in CI. | No deployed on-prem instance. Air-gapped operation is unexercised. A chart that renders is an artifact, not a running deployment. |
+
+**Reading the register honestly.** Six of eleven workstreams are Partial, two are
+Pending outright, and W0's remaining half plus W8's retention are Gated on things
+this workspace is not permitted to do. The P0 band (W0 code, W1, W2, W7, W9) is
+where the delivered work is concentrated; the XL workstreams that make up the
+actual product loop — W4's connectors and W5's executor — are the ones with
+almost nothing in them, and W5's own tables are empty because W4 has to land
+first. Nothing here states or implies that a scan, a connector or a mutating
+execution has ever run.
 
 ---
 
@@ -1122,7 +1164,7 @@ plan_reconciliations
 -- Monitoring & policy (W6)
 monitoring_schedules, drift_events, standing_approval_policies, policy_evaluations
 
--- Regulatory baseline & versioning (W7.0)
+-- Regulatory baseline & versioning (W7.0) -- DELIVERED; all six exist. Do not recreate.
 regulatory_instruments,        -- content-hashed, with amends/supersedes chain
 regulatory_provisions,         -- addressable: 'Rule 7(1)', 'Third Schedule'
 regulatory_baselines,          -- frozen named set: 'IN-DPDP@2026-09-20'
