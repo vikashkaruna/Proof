@@ -59,6 +59,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "evidence" {
     id     = "transition-to-ia"
     status = "Enabled"
 
+    # Applies to every object. Stating it empty rather than omitting it:
+    # a rule with neither `filter` nor `prefix` is already a provider
+    # warning and becomes an error in a later major.
+    filter {}
+
     transition {
       days          = 90
       storage_class = "STANDARD_IA"

@@ -17,10 +17,10 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  enable_flow_log                      = true
-  create_flow_log_cloudwatch_log_group = true
-  create_flow_log_iam_role             = true
-  flow_log_retention_in_days           = 30
+  enable_flow_log                                 = true
+  create_flow_log_cloudwatch_log_group            = true
+  create_flow_log_cloudwatch_iam_role             = true
+  flow_log_cloudwatch_log_group_retention_in_days = 30
 
   public_subnet_tags = {
     "kubernetes.io/role/elb"                    = 1
