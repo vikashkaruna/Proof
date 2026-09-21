@@ -2,9 +2,30 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 12 — ATOMIC APPROVAL ISSUANCE** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Document:** 11 · **Revision 13 — EXECUTOR SNAPSHOT ENFORCEMENT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `5a4d6a0`, including all eight Claude commits after `8877e75`; follow-up fixes include migration 0021.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
+
+## Revision 13 — current implementation checkpoint
+
+Migration 0027. Revision 12 verified the content digest when an approval was issued; nothing downstream checked it, so the token named which rows to execute and not what they contained.
+
+`trg_actions_approved_immutable` (0004) freezes an approved action's type, parameters, rollback definition and findings. It does **not** freeze `dry_run_result`, and the simulated outcome is exactly what the approver read before agreeing — so between approval and execution the diff could be replaced without anyone breaking a constraint, and nothing noticed. `tests/database/claim-snapshot.test.sql` establishes that gap against the live schema rather than asserting it from the trigger's source, so a future widening of the trigger shows up as a failing test.
+
+`claim_plan_execution` now recomputes `action_set_content_digest` under the action row locks and compares it with the digest on the token, read from the persisted signed payload and never from the caller — the function still takes no digest parameter. A token carrying no snapshot is refused outright: failing closed costs a re-approval, failing open executes content nobody agreed to.
+
+The digest is signed into `ApprovalTokenSpec`, carried into the dispatch intent, and put on the wire as dispatch contract **v2** (`content_digest`, required on both sides and pinned by the shared fixture that exists because neither side's own tests could catch R-05).
+
+| Workstream | Delivered since Revision 12 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Claim-time snapshot enforcement (0027); digest signed into the approval token; dispatch contract v2 carries it; a token without a snapshot cannot claim | Browser personas; MFA key rotation/deployment |
+| W5 | The dispatch intent and the wire payload both carry the snapshot the batch was authorised for | A real executor that recomputes the digest before mutating; live connectors, chunk interruption, rollback, PRD B.10 |
+
+**What this does not do.** The executor is still a refusal stub, so it records the snapshot rather than re-verifying against it. Recomputing there needs database access the stub does not have, and a check around a no-op would read as coverage while guarding nothing. The enforcement point today is the claim, which is transactional and holds the row locks — that is a stronger place for it than the executor, but it is not the same as the executor refusing.
+
+Migration allocation is through **0027**. Everything Revision 12 records as remaining stays remaining unless listed above.
+
+---
 
 ## Revision 12 — current implementation checkpoint
 
@@ -18,7 +39,7 @@ Issuing an approval was seven round trips, each committing on its own. A fault b
 
 | Workstream | Delivered since Revision 11 | Remaining acceptance |
 | --- | --- | --- |
-| W1 | Atomic approval issuance (0026): token, challenge link, action approval, plan status and ledger in one transaction; content digest and eligibility rechecked under row locks; ledger-failure and concurrent-edit tests | Browser personas; action snapshot enforcement at the executor; MFA key rotation/deployment |
+| W1 | Atomic approval issuance (0026): token, challenge link, action approval, plan status and ledger in one transaction; content digest and eligibility rechecked under row locks; ledger-failure and concurrent-edit tests | Browser personas; MFA key rotation/deployment. *(Snapshot enforcement delivered in Revision 13.)* |
 
 Migration allocation is through **0026**. Everything Revision 11 records as remaining stays remaining unless listed above. No deployed parity, irreversible lock or live estate execution is claimed.
 
@@ -39,7 +60,7 @@ Accepted decisions remain: higher environments self-host Supabase; no billable/i
 
 **Review corrections:** the topology rehearsal's empty reads did not prove BFF authority without `BYPASSRLS`; the SQL suite now removes that attribute and tests positive access plus client denial. Reconciliation's pre-existing unused token was incorrectly labelled a fresh approval by its test; it is now revoked, and the positive test issues a new token after release. The old release committed before its ledger append; 0025 makes them atomic. R-04/R-08/R-09/R-10/R-11 remain broader acceptance packages, not closed merely by these patches.
 
-Migration allocation is through **0026** as of Revision 12. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
+Migration allocation is through **0027** as of Revision 13. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
 
 ---
 
