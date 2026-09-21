@@ -68,20 +68,10 @@ provider "helm" {
 }
 
 # ─── Variables ──────────────────────────────────────────────────────
-variable "cluster_name" {
-  type    = string
-  default = "axiom-proof-prod"
-}
-
-variable "vpc_cidr" {
-  type    = string
-  default = "10.10.0.0/16"
-}
-
-variable "kubernetes_version" {
-  type    = string
-  default = "1.29"
-}
+# Declared in variables.tf, with descriptions. They were duplicated here
+# as well — bare, and with identical defaults — which is why this module
+# would not load: Terraform rejects a variable declared twice in one
+# module, so prod could not plan at all until the copies came out.
 
 # ─── Locals ─────────────────────────────────────────────────────────
 locals {
