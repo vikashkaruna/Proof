@@ -16,6 +16,20 @@ import { account, createApprovablePlan, selectTenant, signIn, state } from '../f
  * what the caller may do; the BFF is what decides.
  */
 
+// A successful click is not sufficient if React had to discard the server DOM.
+const browserErrors = new WeakMap<Page, string[]>();
+test.beforeEach(async ({ page }) => {
+  const errors: string[] = [];
+  browserErrors.set(page, errors);
+  page.on('pageerror', (error) => errors.push(error.message));
+});
+test.afterEach(async ({ page }) => {
+  expect(
+    browserErrors.get(page) ?? [],
+    'approval pages must hydrate without runtime errors',
+  ).toEqual([]);
+});
+
 const secretFor = (key: 'approver' | 'approverReplay') => {
   const secret = account(key).totpSecret;
   if (!secret) throw new Error(`The ${key} persona was seeded without a TOTP factor`);

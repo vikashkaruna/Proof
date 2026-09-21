@@ -1945,6 +1945,7 @@ export function v1Routes(deps: Deps) {
     const body = await c.req.json();
     const Schema = z.object({
       libraryVersion: z.string(),
+      estateId: z.uuid().optional(),
       title: z.string().min(3).max(200),
     });
     const parsed = Schema.safeParse(body);
@@ -1957,12 +1958,24 @@ export function v1Routes(deps: Deps) {
       .insert({
         tenant_id: c.get('tenantId'),
         library_version: parsed.data.libraryVersion,
+        estate_id: parsed.data.estateId ?? null,
         title: parsed.data.title,
         lead_reviewer_id: c.get('user').id,
         status: 'intake',
       })
       .select()
       .single();
+    if (error?.code === '23503' && parsed.data.estateId) {
+      return c.json(
+        {
+          error: {
+            code: 'invalid_reference',
+            message: 'The estate and library must belong to the requested assessment scope.',
+          },
+        },
+        422,
+      );
+    }
     if (error)
       return c.json({ error: { code: 'persistence_failed', message: error.message } }, 500);
     return c.json(data, 201);

@@ -2,11 +2,25 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 20 — THE INFRASTRUCTURE NOBODY HAD EVER LOADED** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `cf0f168`, including the Helm chart render gate.
+**Document:** 11 · **Revision 21 — ESTATE INVENTORY FOUNDATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `a73dad7`, including the browser approval journeys, MFA key ring, Helm render gate and both-environment Terraform validation.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 20 — current implementation checkpoint
+## Revision 21 — current implementation checkpoint
+
+W2 estate foundation, migration **0029**: `estates`, `estate_systems`, `system_data_categories`, `estate_scans`, and an optional estate reference on engagements. Every relationship uses a tenant-consistent composite foreign key. Authenticated clients have membership-bound reads only; the BFF has explicit policies that work without BYPASSRLS. Referenced records cannot be deleted out from under their history; estates/systems can be archived. A queued scan is metadata, not evidence that discovery ran.
+
+Existing engagements remain unassigned rather than being silently mapped to an invented estate. The engagement-creation API accepts an optional `estateId`, retains its capability gate, and the database rejects another tenant's estate. Shared Zod models and branded IDs describe the new entities. The upgrade test applies 0029 to a populated 0028 database and verifies the assessment survives unchanged with a null estate reference.
+
+Reviewed and retained the other model's browser/MFA/deployment work. Two follow-ups: the browser harness no longer explicitly gives administrative Supabase credentials to Next.js, and approval-page invalid HTML nesting is fixed. The original browser suite passed despite React hydration errors; approval journeys now fail on browser runtime errors, and the old markup fails that new assertion.
+
+**Delivered:** model, constraints, RLS, engagement API linkage, SQL/upgrade/API/real-Auth coverage. **Pending:** estate management APIs and UI, normalization of onboarding proposals, user-confirmed assignment of legacy engagements, scan/connector implementation and graph. W2 is still partial; this does not complete W3 or imply that a scan has executed. Migration allocation is through **0029**. W0 deployment/retention acceptance and executor-side checks remain open. MFA replacement UI still needs its required step-up flow; the existing server correctly refuses replacement without it.
+
+See [review 10](audits/10-estate-foundation-and-browser-review-2026-09-21.md), [progress](14_Implementation_Progress.md), and [session handoff](15_Session_Handoff.md). Earlier revision sections are historical where they conflict with this checkpoint.
+
+---
+
+## Revision 20 — prior implementation checkpoint
 
 No migration. Not a workstream item — a gate that was missing, and what turned up once it existed.
 
@@ -1013,11 +1027,11 @@ Enforcement is **step-up, not blanket**: required at login for `founder` / `owne
 
 ## W2 · Data model completion — **P0** · size M
 
-Append-only migrations, allocated from the next unused number. **0009–0021 exist** in the current implementation; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+Append-only migrations, allocated from the next unused number. **0000–0029 exist** at Revision 21; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)
-estates, estate_systems, system_data_categories, estate_scans
+estates, estate_systems, system_data_categories, estate_scans -- DELIVERED by 0029; management/workflows pending
 
 -- Universal Connection Framework (W4)
 connectors,                    -- registered target instances + targetBinding
