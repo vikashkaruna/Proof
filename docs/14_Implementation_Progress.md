@@ -1,6 +1,6 @@
 # W0 → W1 → W2 → W3 implementation progress
 
-Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
+Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The two-worker rerun passed all 61 browsers, then exposed a CommonJS/top-level-await error in the new restart probe; its async entry point is corrected and the complete lane is rerun. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
 
 ## 22 September 2026 — durable public gap-scan boundary (Revision 30)
 
