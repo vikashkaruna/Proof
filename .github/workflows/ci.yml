@@ -79,7 +79,7 @@ jobs:
   strict-auth-parity:
     name: Real Auth/PostgREST strict topology parity
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
@@ -92,6 +92,21 @@ jobs:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/test-strict-parity.sh
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: uv sync --locked
+        working-directory: services/agent-runtime
+      - run: uv run --locked python ../../scripts/verify-runtime-audit.py
+        working-directory: services/agent-runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-audit-acceptance
+          path: .axiom-runtime/runtime-audit/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Stop the isolated parity project
         if: always()
         run: supabase stop --workdir .axiom-runtime/parity --no-backup
