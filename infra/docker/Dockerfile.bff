@@ -14,6 +14,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY services/bff/package.json ./services/bff/
 COPY packages/approval-engine/package.json ./packages/approval-engine/
 COPY packages/config/package.json ./packages/config/
+COPY packages/mfa/package.json ./packages/mfa/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY packages/control-library/package.json ./packages/control-library/
 COPY packages/evidence/package.json ./packages/evidence/
 COPY packages/ledger/package.json ./packages/ledger/
@@ -21,7 +23,7 @@ COPY packages/supabase/package.json ./packages/supabase/
 COPY packages/types/package.json ./packages/types/
 COPY packages/ui/package.json ./packages/ui/
 COPY packages/design-tokens/package.json ./packages/design-tokens/
-RUN pnpm install --frozen-lockfile --filter @axiom/bff...
+RUN --mount=type=cache,id=axiom-pnpm,target=/pnpm/store pnpm install --store-dir=/pnpm/store --frozen-lockfile --filter @axiom/bff...
 
 # ─── build ─────────────────────────────────────────────────────────
 FROM base AS build
@@ -33,6 +35,9 @@ RUN pnpm --filter @axiom/bff build
 
 # ─── runtime ───────────────────────────────────────────────────────
 FROM base AS runtime
+ARG AXIOM_RELEASE_SHA
+ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
+LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
 WORKDIR /app
 RUN apk add --no-cache tini
 ENV NODE_ENV=production

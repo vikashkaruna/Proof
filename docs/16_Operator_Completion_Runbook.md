@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 27, reviewed staging `b62f87b`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 28, reviewed staging `d386fad`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -51,7 +51,7 @@ value.
 
 # W0 · Security remediation & environment parity
 
-**Current status: Partial** — existing security changes are verified locally; deployed parity/persona harness work and deployment acceptance remain open.
+**Current status: Partial** — deployed-target harness delivered and locally rehearsed; higher-environment deployment acceptance remains open.
 
 ## What is already done, so you do not redo it
 
@@ -67,7 +67,7 @@ this head:
 | Mock Supabase substitution removed                 | **Met.** Reachable only under `e2e-bypass`, which is refused at boot outside `local`/`test`                                                    |
 | Idempotency auto-key generation removed (FR-8.3)   | **Met.** No environment relaxes it, including `e2e-bypass`                                                                                     |
 
-**W0 is not wholly operator-owned.** Provisioning is reserved to the operator. The deployed parity and persona-seeding harness remain engineering work; their final verification needs a deployed target. Local parity is already green.
+**W0 is not wholly operator-owned.** Provisioning is reserved to the operator. The deployed parity and persona-seeding harness are delivered in Revision 28; their final verification still needs isolated higher-environment targets. Local Docker evidence is not remote acceptance.
 
 ## OPERATOR steps, in order
 
@@ -142,7 +142,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **34 migrations, 0000 → 0033**.
+non-zero on a failing migration. Expect **36 migrations, 0000 → 0035**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -177,32 +177,11 @@ URL of the web app and the BFF.
 This is the step that actually closes W0.1, and the one most likely to be
 skipped because the previous step printed green.
 
-The browser journeys can be pointed at a deployed environment — setting
-`PLAYWRIGHT_BASE_URL` makes Playwright skip its own dev servers and drive
-yours:
+Use the [deployed acceptance guide](17_Deployed_Acceptance.md) and its private target JSON. `PLAYWRIGHT_BASE_URL` alone is refused: it cannot safely select the correct Auth stack, persona credentials or marketing origin.
 
-```bash
-PLAYWRIGHT_BASE_URL=https://<your-preprod-web-url> \
-  pnpm --filter @axiom/e2e exec playwright test --reporter=line
-```
+Run the same API/browser suites against isolated preprod and production-configured acceptance deployments at one exact revision. `run-deployed-acceptance.sh` checks BFF/SSR identity, seeds synthetic multi-tenant personas, enrols MFA through the BFF and drives the browser journeys. External contact-form email must be disabled. The manual CI workflow compares both environments and fails on behavioral divergence.
 
-Two caveats, both of which will bite otherwise:
-
-1. The journeys read seeded persona credentials from a local
-   `.axiom-runtime/personas/state.json`, which describes your **local parity
-   stack**, not preprod. Against a deployed environment they need personas
-   seeded _there_. Treat a first run as a wiring exercise, not a verdict, and
-   send me what it says — adapting the harness to a deployed target is my work
-   (see below), not yours.
-2. An unauthenticated request must return **401**, not a redirect to a login
-   page that then works. Check one by hand:
-   ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' https://<your-bff-url>/v1/plans
-   ```
-   Anything other than `401` is a finding — send it to me before going further.
-
-**Evidence to return:** the curl status code, and the Playwright run output
-(pass/fail counts and the first failure, if any).
+**Evidence to return:** the exact revision, CI run URL and sanitized `api-results.json`/`browser-results.json` for each target. Do not share persona state, target JSON, private logs or browser reports. A local Docker rehearsal does not close this step. The workflow needs promotion to the default branch before GitHub manual dispatch is available.
 
 ### W0-9 · The prod EKS decision
 
@@ -220,22 +199,22 @@ date. I make the change and the gate re-validates.
 
 ## ENGINEERING steps for W0
 
-| #      | What                                                               | Why it is mine, and why it is blocked until your steps land                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C-W0-1 | **Write the deployed parity lane**                                 | W0's exit criteria demand "the same E2E suite runs against preprod and against a production-configured stack, and any behavioural divergence fails the build". This **does not exist**. `scripts/verify-strict-parity.ts` is structurally local-only: it reads `.axiom-runtime/parity/status.json` and binds to a Docker-reachable interface. Its four "topology labels" are one local stack under four configurations — never four deployments, and the reviews have always said so. I cannot write the deployed lane until there is a deployed target and a way to authenticate to it |
-| C-W0-2 | **Make the browser harness able to target a deployed environment** | Today persona seeding writes local state. Pointing the journeys at preprod needs a seeding path that runs against a deployed Supabase and a credential route that never puts a service key in CI logs                                                                                                                                                                                                                                                                                                                                                                                   |
-| C-W0-3 | Apply the EKS CIDR decision and re-validate                        | Blocked on W0-9                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| #      | Work                                        | Current status                                                                                                                                                                          |
+| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C-W0-1 | Deployed API parity lane and comparison     | Delivered: real HTTP targets, exact identity/revision checks, separate automatic Docker and manual remote CI lanes. Remote acceptance still pending.                                    |
+| C-W0-2 | Target-aware browser and persona harness    | Delivered: deployment-bound private state, real MFA enrollment, scoped SSR credentials and sanitized reports. Same browser suite; local Docker rehearsal is distinct from remote proof. |
+| C-W0-3 | Apply the EKS CIDR decision and re-validate | Awaits W0-9 operator policy.                                                                                                                                                            |
 
 ## How I mark W0 Closed
 
 I flip **W0 → Closed** when all of these hold, and not before:
 
-1. Your W0-5 evidence shows **34 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **36 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
 3. The deployed parity lane (C-W0-1) exists, is in CI, and is **green on a
-   commit I can name** — not green once by hand.
+   commit I can name**, comparing both remote API and browser suites — not green once by hand or only against local containers.
 4. `pnpm gate:security` and the W0.0 CI job are still green on that same
    commit, so nothing regressed while the environment was being built.
 
@@ -354,7 +333,7 @@ you apply, never the reverse.
 
 ## ENGINEERING steps for W2
 
-Connector schema batch **delivered in Revision 25**, with composite FKs, RLS without BYPASSRLS, private credential envelopes, constrained agent grants, SQL and real-Auth tests, and a populated upgrade test. Remaining 21 tables follow their dependent workstreams; execution normalization must wait for the W4 grant model/runtime, avoiding a second source of truth alongside existing execution fields. W3 estate management can now proceed independently. Every subsequent batch keeps the same security and upgrade evidence contract.
+Connector schema batch **delivered in Revision 25**, with composite FKs, RLS without BYPASSRLS, private credential envelopes, constrained agent grants, SQL and real-Auth tests, and a populated upgrade test. Remaining 21 tables follow their dependent workstreams; execution normalization must wait for the W4 grant model/runtime, avoiding a second source of truth alongside existing execution fields. W3 inventory management and initial proposal review are delivered through 0035; the dependent wizard remains open. Every subsequent batch keeps the same security and upgrade evidence contract.
 
 ### Applying the connector schema batch (0033)
 
@@ -461,14 +440,14 @@ to me than a green run that took a detour.
 
 # What changes when evidence arrives
 
-| Workstream | Now                                 | Flips to                       | On                                                                                                           |
-| ---------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 34 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
-| **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
-| **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
-| **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
-| **W3**     | Inventory/proposals delivered       | **Partial**                    | Verified APIs/UI, atomic audit, idempotency and client owner/admin review                                    |
-| **W3**     | —                                   | **Closed**                     | Full wizard and sustenance, browser journeys, reviewed proposals and recorded human legacy assignment        |
+| Workstream | Now                           | Flips to                       | On                                                                                                           |
+| ---------- | ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **W0**     | Partial (harness delivered)   | **Closed**                     | 36 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | —                             | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
+| **W1**     | Partial                       | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
+| **W2**     | Partial                       | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
+| **W3**     | Inventory/proposals delivered | **Partial**                    | Verified APIs/UI, atomic audit, idempotency and client owner/admin review                                    |
+| **W3**     | —                             | **Closed**                     | Full wizard and sustenance, browser journeys, reviewed proposals and recorded human legacy assignment        |
 
 I update [Doc 11's register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026),
 [Doc 14](14_Implementation_Progress.md) with the evidence and what it does

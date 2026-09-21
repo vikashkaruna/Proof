@@ -4,6 +4,12 @@ Started 20 September 2026 with authorisation to implement in order and commit/me
 
 Two models alternate on this repository, each from its own worktree, so a worktree path or branch named in a milestone below is where that milestone was delivered and not where work happens now. This file was opened from `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof` on branch `codex/w0-w3-closure`, resumed from staging `5a4d6a0`, where analyst migration 0015 was committed. For current status read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, and [Doc 15](15_Session_Handoff.md); the most recent reviews are [audit 07](audits/07-staging-integration-review-2026-09-21.md) and [audit 09](audits/09-reviewed-approval-snapshot-2026-09-21.md). Milestone narratives below describe their original delivery and are not restated as current.
 
+## 21 September — W0 deployed-target acceptance and scoped SSR configuration
+
+Reviewed staging `d386fad` (CI 35628480541 green); no new upstream work. Delivered explicit HTTP/API and browser targets, private deployment-bound personas, real API MFA enrollment, exact BFF/SSR revision checks and successful-result comparison. Automatic CI now exercises production BFF/web/marketing containers under preprod and production configuration; the separate manual workflow compares two remote deployments. Review also removed SSR's service-key requirement and ambient frontend hints that waived backend validation. Docker workspace dependencies/private-context exclusions are fixed.
+
+Validation: 59 browser journeys in each of two local production-container configurations, matching API suites, 59 original dev-server journeys, 309 BFF and 54 config tests, 24 harness checks, workspace tests/typecheck/lint and security gate. Final exact merge CI is recorded in the ignored session checkpoint. No remote deployment is claimed. Migration tip remains 0035. [Review 17](audits/17-deployed-acceptance-review-2026-09-21.md), [operator guide](17_Deployed_Acceptance.md), and Docs 11/15/16 carry the remaining gates.
+
 ## Delivered milestones
 
 | Milestone                           | Staging commit | Evidence                                                            |

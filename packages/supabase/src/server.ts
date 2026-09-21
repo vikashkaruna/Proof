@@ -1,6 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { loadEnv, isAuthBypassEnabled } from '@axiom/config';
+import { loadWebEnv, isWebAuthBypassEnabled } from '@axiom/config';
 import { createE2ESupabaseClient } from './e2e';
 
 /**
@@ -8,7 +8,7 @@ import { createE2ESupabaseClient } from './e2e';
  * Route Handlers, and Server Actions. Reads/writes session cookies.
  */
 export async function createSupabaseServerClient() {
-  const env = loadEnv();
+  const env = loadWebEnv();
   const cookieStore = await cookies();
 
   const authCookie = cookieStore
@@ -26,7 +26,7 @@ export async function createSupabaseServerClient() {
   //
   // The mock is now reachable only under `e2e-bypass`, refused at boot outside
   // local/test.
-  if (!isLoggedOut && isAuthBypassEnabled()) {
+  if (!isLoggedOut && isWebAuthBypassEnabled()) {
     return createE2ESupabaseClient(userEmail);
   }
 

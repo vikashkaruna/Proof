@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { acceptanceTarget, personaStatePath, assertPersonaTarget } from './target';
+import { verifyAcceptanceTarget } from '../../scripts/lib/acceptance-target';
 
 /**
  * Refuse to run persona journeys without seeded personas.
@@ -10,9 +12,11 @@ import path from 'node:path';
  * second is a missing step.
  */
 export default async function globalSetup() {
-  const repoRoot = path.resolve(__dirname, '..', '..');
-  const state = path.join(repoRoot, '.axiom-runtime/personas/state.json');
-  if (existsSync(state)) return;
+  if (acceptanceTarget) await verifyAcceptanceTarget(acceptanceTarget);
+  if (existsSync(personaStatePath)) {
+    assertPersonaTarget(JSON.parse(readFileSync(personaStatePath, 'utf8')));
+    return;
+  }
 
   throw new Error(
     [

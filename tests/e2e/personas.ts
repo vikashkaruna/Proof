@@ -247,6 +247,14 @@ export const personaByKey = (key: PersonaKey): Persona => {
 
 /** Written by the seed, read by the specs. Lives under `.axiom-runtime`. */
 export interface PersonaState {
+  deployment?: {
+    id: string;
+    environment: string;
+    revision: string;
+    webUrl: string;
+    bffUrl: string;
+    marketingUrl: string;
+  } | null;
   supabaseUrl: string;
   anonKey: string;
   publishableKey: string;

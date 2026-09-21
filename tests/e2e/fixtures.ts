@@ -1,14 +1,12 @@
+import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
+import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { encryptSecret, generateSecret, generateTotp } from '@axiom/mfa';
 import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } from './personas';
 
-const repoRoot = path.resolve(__dirname, '..', '..');
-
-export const state: PersonaState = JSON.parse(
-  readFileSync(path.join(repoRoot, '.axiom-runtime/personas/state.json'), 'utf8'),
-);
+export const state: PersonaState = JSON.parse(readFileSync(personaStatePath, 'utf8'));
+assertPersonaTarget(state);
 
 export const account = (key: PersonaKey) => state.accounts[key];
 export const persona = personaByKey;
@@ -38,14 +36,7 @@ export async function signInAs(page: Page, email: string, password: string): Pro
 /** Point the session at a seeded tenant. The cookie is a preference; membership still decides. */
 export async function selectTenant(page: Page, which: 'a' | 'b'): Promise<void> {
   const tenant = which === 'a' ? state.tenantA : state.tenantB;
-  await page.context().addCookies([
-    {
-      name: 'axiom_active_tenant',
-      value: tenant.slug,
-      domain: 'localhost',
-      path: '/',
-    },
-  ]);
+  await page.context().addCookies([tenantCookie(tenant.slug)]);
 }
 
 /**
@@ -68,6 +59,7 @@ export async function createApprovablePlan(label: string): Promise<{
   const post = async (path: string, body: unknown, what: string) => {
     const res = await fetch(`${state.supabaseUrl}${path}`, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         apikey: state.publishableKey,
         Authorization: `Bearer ${state.serviceKey}`,
@@ -178,6 +170,7 @@ export async function createMfaAccount(
   const admin = async (path: string, body: unknown, what: string, expected = 200) => {
     const res = await fetch(`${state.supabaseUrl}${path}`, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         apikey: state.publishableKey,
         Authorization: `Bearer ${state.serviceKey}`,
@@ -215,7 +208,16 @@ export async function createMfaAccount(
   );
 
   let totpSecret: string | undefined;
-  if (opts.withFactor) {
+  if (opts.withFactor && acceptanceTarget) {
+    totpSecret = await enrolTestMfa({
+      bffUrl: acceptanceTarget.bffUrl,
+      supabaseUrl: state.supabaseUrl,
+      anonKey: state.anonKey,
+      email,
+      password,
+      tenantId: state.tenantA.id,
+    });
+  } else if (opts.withFactor) {
     totpSecret = generateSecret(20);
     await admin(
       '/rest/v1/user_mfa_factors',
