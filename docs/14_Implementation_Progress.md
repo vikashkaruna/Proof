@@ -362,7 +362,7 @@ Mutation-tested twice. Restoring the pre-change `cloudrun.tf` and `bff-deploymen
 
 ## W0.1 milestone: the chart that had never been rendered
 
-Delivered on branch `claude/helm-render-gate` off staging, in the commit containing this entry. No migration; allocation stays at 0028. CI has not yet run this lane, so no run id is cited here.
+Committed as `5ff7404` and `37121bb` on branch `claude/helm-render-gate` off staging, merged as `cf0f168` and pushed. Full configured CI [35583341796](https://github.com/vikashkaruna/Proof/actions/runs/35583341796) is green across all fifteen jobs; `Build container images` is skipped, which is its `main`-only condition and not a failure. No migration; allocation stays at 0028.
 
 The previous milestone closed by naming this gap: the Helm half of the MFA key ring was reviewed rather than templated, because `helm` is not installed on the dev machines and no CI job rendered the chart. `helm lint` and `helm template` now run in the deployment coverage lane, and the rendered output is schema-validated with kubeconform.
 
@@ -424,7 +424,9 @@ so only a declared expectation could see that it was missing at all.
 Verified: helm v3.16.3 and kubeconform v0.6.7, both pinned. `helm lint` passes.
 22 resources render across chart defaults, `values-prod.yaml.example` and both
 `ci/` fixtures — 21 under `serviceAccount.create: false` — all schema-valid at
-Kubernetes 1.30.0, 0 invalid, and all passing the semantic checks.
+Kubernetes 1.30.0, 0 invalid, and all passing the semantic checks. The hosted
+runner reproduced those counts exactly, so the gate is confirmed on the
+platform that will enforce it and not only on a developer machine.
 `check-mfa-ring-coverage.sh`, `check-tfvars-coverage.sh` and
 `check-control-count.sh` still pass; `prettier --check` passes on the workflow
 and this document.
