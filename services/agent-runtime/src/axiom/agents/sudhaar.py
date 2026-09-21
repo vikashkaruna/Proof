@@ -112,6 +112,7 @@ class SudhaarOutput(BaseModel):
 
 class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
     name: ClassVar[AgentName] = AgentName.SUDHAAR
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Generate a typed remediation plan with rollback definitions."
     one_liner: ClassVar[str] = "I propose the fix. You decide."
     # A plan proposal is returned to the caller; Sudhaar has no persistence

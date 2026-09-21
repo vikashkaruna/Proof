@@ -14,31 +14,40 @@ import { AgentName } from './enums';
  * surface for each agent's output.
  */
 
-export const AgentContractSchema = z.object({
-  name: z.nativeEnum(AgentName),
-  displayName: z.string(),
-  oneLiner: z.string(),
-  // 'L0' = L0 agent-assisted, etc. Per Doc 04 §5.2
-  autonomyLevel: z.enum(['L0', 'L1', 'L2', 'L3', 'L4']),
-  // Whether this agent can mutate client systems (architecturally enforced)
-  canMutate: z.boolean(),
-  // The Zod schema of inputs the agent accepts
-  inputSchema: z.custom<z.ZodTypeAny>(
-    (value) => value instanceof z.ZodType,
-    'inputSchema must be a Zod schema',
-  ),
-  // The Zod schema of outputs the agent returns
-  outputSchema: z.custom<z.ZodTypeAny>(
-    (value) => value instanceof z.ZodType,
-    'outputSchema must be a Zod schema',
-  ),
-  // Tool permission scopes (e.g. 'connector.read.postgres', 'evidence.write')
-  toolScopes: z.array(z.string()),
-  // When the agent must pause for human review
-  escalationConditions: z.array(z.string()),
-  // Phase at which the agent becomes operationally relevant
-  phase: z.number().int().min(0).max(5),
-});
+export const AgentContractSchema = z
+  .object({
+    name: z.nativeEnum(AgentName),
+    displayName: z.string(),
+    oneLiner: z.string(),
+    // 'L0' = L0 agent-assisted, etc. Per Doc 04 §5.2
+    autonomyLevel: z.enum(['L0', 'L1', 'L2', 'L3', 'L4']),
+    // Compatibility alias for mutatesClientEstate; neither field grants authority.
+    canMutate: z.boolean(),
+    mutatesClientEstate: z.boolean(),
+    // Produces changes to Axiom domain records; excludes ordinary run telemetry.
+    // This metadata grants no database credentials or execution permission.
+    writesAxiomState: z.boolean(),
+    // The Zod schema of inputs the agent accepts
+    inputSchema: z.custom<z.ZodTypeAny>(
+      (value) => value instanceof z.ZodType,
+      'inputSchema must be a Zod schema',
+    ),
+    // The Zod schema of outputs the agent returns
+    outputSchema: z.custom<z.ZodTypeAny>(
+      (value) => value instanceof z.ZodType,
+      'outputSchema must be a Zod schema',
+    ),
+    // Tool permission scopes (e.g. 'connector.read.postgres', 'evidence.write')
+    toolScopes: z.array(z.string()),
+    // When the agent must pause for human review
+    escalationConditions: z.array(z.string()),
+    // Phase at which the agent becomes operationally relevant
+    phase: z.number().int().min(0).max(5),
+  })
+  .refine((contract) => contract.canMutate === contract.mutatesClientEstate, {
+    message: 'canMutate must match mutatesClientEstate',
+    path: ['canMutate'],
+  });
 export type AgentContract = z.infer<typeof AgentContractSchema>;
 
 // The roster of contracts is static at compile-time. Each agent's
@@ -52,6 +61,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: "I find what you didn't know you had.",
     autonomyLevel: 'L1', // L2 with read-only connectors in Phase 2
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['connector.read', 'inventory.write', 'evidence.write'],
@@ -68,6 +79,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I tell you what kind of data it is.',
     autonomyLevel: 'L1',
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: false,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: [], // Operates on discovery output only
@@ -80,6 +93,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I measure you against the law.',
     autonomyLevel: 'L1',
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['control_library.read', 'findings.write'],
@@ -92,6 +107,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I am your witness.',
     autonomyLevel: 'L1',
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['evidence.write', 's3.write_worm'],
@@ -104,6 +121,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I propose the fix. You decide.',
     autonomyLevel: 'L1',
     canMutate: false, // Planning agent holds NO write credentials (ADR-3)
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['findings.read', 'control_library.read', 'plan.propose'],
@@ -120,6 +139,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I only act on your approval.',
     autonomyLevel: 'L2', // Requires approval token (ADR-2)
     canMutate: true,
+    mutatesClientEstate: true,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: [
@@ -142,6 +163,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I remember everything, forever.',
     autonomyLevel: 'L1',
     canMutate: false, // Only appends to the ledger
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['ledger.append', 'ledger.read'],
@@ -154,6 +177,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: "I watch the law so you don't have to.",
     autonomyLevel: 'L1',
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     // SEC-15: Nazar previously held `control_library.write`. The architecture
@@ -177,9 +202,17 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: 'I turn findings into documents.',
     autonomyLevel: 'L1',
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
-    toolScopes: ['report.write', 'pdf.render'],
+    toolScopes: [
+      'findings.read',
+      'evidence.read',
+      'control_library.read',
+      'report.write',
+      'pdf.render',
+    ],
     escalationConditions: ['report_includes_unverified_claim'],
     phase: 0,
   },
@@ -189,6 +222,8 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     oneLiner: "I find who's about to buy.",
     autonomyLevel: 'L1', // Internal GTM only
     canMutate: false,
+    mutatesClientEstate: false,
+    writesAxiomState: false,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
     toolScopes: ['http.read.public_sources'],

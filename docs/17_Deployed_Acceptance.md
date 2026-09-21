@@ -57,3 +57,7 @@ pnpm exec tsx scripts/verify-gap-scan-durability.ts verify
 Repeat for the comparison target before comparing API artifacts. The manual workflow runs API/browser checks but does not restart remote services; remote durability closure needs this separate operator evidence. The capability is bound to the target URL and source revision. No real email is sent; disabled dispatch returns unavailable, not simulated success. This checks persistence/ownership, not questionnaire scoring accuracy or contact inquiry durability.
 
 Vault and OAuth broker core acceptance is covered by SQL/crypto/adapter tests and isolated HTTP/TLS authorization-server fixtures. The existing browser/API parity suite does not acquire client tokens or exercise cloud KMS/SPIRE. Deployed workload/grant authority, real KMS and client execution require separate evidence (Doc 16 W4-2); the broker defaults to deny-all.
+
+## Isolated workload identity acceptance (W4.3)
+
+`python3 scripts/test-workload-identity.py` runs real SPIRE issuance and the BFF identity verifier in a fresh local Docker fixture. CI publishes only `workload-identity-acceptance/results.json` (61 allowlisted outcomes, source revision and dirty status). It is separate from the 63-browser/89-API application parity suite. A passing identity fixture does not prove deployed workload isolation, live task/grant authority or connector execution. See Doc 16 W4-3 before enabling any acquisition route.

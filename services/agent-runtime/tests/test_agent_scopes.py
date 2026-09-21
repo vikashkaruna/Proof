@@ -131,3 +131,24 @@ def test_sudhaar_cannot_execute_and_karya_cannot_plan() -> None:
     assert "plan.propose" in SudhaarAgent.tool_scopes
     assert not any(s.startswith("connector.write") for s in SudhaarAgent.tool_scopes)
     assert not any(s == "plan.propose" for s in KaryaAgent.tool_scopes)
+
+
+@pytest.mark.parametrize("name", sorted(PYTHON_AGENTS))
+def test_explicit_mutation_metadata_matches_typescript(name: str) -> None:
+    source = TS_CONTRACTS.read_text(encoding="utf-8")
+    block = source.split(f"  {name}: {{", 1)[1].split("\n  },", 1)[0]
+    agent = PYTHON_AGENTS[name]
+    expected_client = name == "karya"
+    expected_internal = name not in {"vibhaag", "sanket"}
+    assert agent.can_mutate is expected_client
+    assert agent.mutates_client_estate is expected_client
+    assert agent.writes_axiom_state is expected_internal
+    assert f"mutatesClientEstate: {str(expected_client).lower()}" in block
+    assert f"writesAxiomState: {str(expected_internal).lower()}" in block
+
+
+def test_reporting_declares_explicit_reads_without_connector_access() -> None:
+    assert set(PrativedanAgent.tool_scopes) == {
+        "findings.read", "evidence.read", "control_library.read", "report.write", "pdf.render"
+    }
+    assert PrativedanAgent.can_mutate is False

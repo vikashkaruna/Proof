@@ -58,9 +58,10 @@ class PrativedanOutput(BaseModel):
 
 class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     name: ClassVar[AgentName] = AgentName.PRATIVEDAN
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Generate a structured compliance report from findings."
     one_liner: ClassVar[str] = "I turn findings into documents."
-    tool_scopes: ClassVar[tuple[str, ...]] = ("report.write", "pdf.render")
+    tool_scopes: ClassVar[tuple[str, ...]] = ("findings.read", "evidence.read", "control_library.read", "report.write", "pdf.render")
     autonomy: ClassVar[AutonomyLevel] = AutonomyLevel.L1
     default_task_kind: ClassVar[Any] = "report"
     default_pii_redact: ClassVar[bool] = True

@@ -58,6 +58,7 @@ class ParikshanOutput(BaseModel):
 
 class ParikshanAgent(BaseAgent[ParikshanInput, ParikshanOutput]):
     name: ClassVar[AgentName] = AgentName.PARIKSHAN
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Score the engagement against the versioned control library."
     one_liner: ClassVar[str] = "I measure you against the law."
     tool_scopes: ClassVar[tuple[str, ...]] = ("control_library.read", "findings.write")
