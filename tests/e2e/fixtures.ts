@@ -120,6 +120,10 @@ export async function createApprovablePlan(label: string): Promise<{
 export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void> {
   const secret = account(key).totpSecret;
   if (!secret) throw new Error(`${key} was seeded without a TOTP factor`);
+  await satisfyLoginMfaWithSecret(page, secret);
+}
+
+export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {
   await page.goto('/verify');
 
   // `last_used_counter` replay defence is per FACTOR, so two journeys using
@@ -133,11 +137,20 @@ export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void
       await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
       return;
     } catch {
-      if (attempt === 1) throw new Error(`${key} could not satisfy the login-MFA gate`);
+      if (attempt === 1) throw new Error('Could not satisfy the login-MFA gate');
       // Into the next TOTP step, then one more try with a genuinely new code.
       await page.waitForTimeout(31_000);
     }
   }
+}
+
+/** Each verifying journey owns its counter; concurrent tests cannot spend its code. */
+export async function signInFreshAnalyst(page: Page, label: string): Promise<void> {
+  const who = await createMfaAccount(label, { role: 'axiom_analyst', withFactor: true });
+  if (!who.totpSecret) throw new Error('Analyst journey requires an enrolled factor');
+  await signInAs(page, who.email, who.password);
+  await selectTenant(page, 'a');
+  await satisfyLoginMfaWithSecret(page, who.totpSecret);
 }
 
 export const planUrl = (id: string) => `/plans/${id}`;
