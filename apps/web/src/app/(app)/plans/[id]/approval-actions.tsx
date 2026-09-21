@@ -105,7 +105,15 @@ export function ApprovalActions({
     try {
       const res = await fetch('/api/bff/v1/mfa/challenge', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+        // A step-up challenge is single-use, so creating one must not replay.
+        // The bridge's derived key is stable per (path, body), which for a
+        // re-approval of the same plan and actions would hand back a
+        // challenge that had already been spent. See `verify-form.tsx`.
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': tenantId,
+          'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
+        },
         body: JSON.stringify({
           purpose: 'approval_issuance',
           planId,
