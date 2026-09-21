@@ -8,6 +8,7 @@ processes) drive the orchestration.
 
 from __future__ import annotations
 
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -154,8 +155,17 @@ async def list_agents():
     }
 
 
+def require_internal_caller(request: Request) -> None:
+    """Legacy BFF transport authentication; never workload or grant authority."""
+    expected = app.state.settings.internal_token
+    supplied = request.headers.get("x-internal-token", "")
+    if not expected or not secrets.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="invalid internal token")
+
+
 @app.post("/agents/{agent_name}/invoke", response_model=InvokeResponse)
 async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
+    require_internal_caller(req)
     try:
         agent_enum = AgentName(agent_name)
     except ValueError:
@@ -164,13 +174,6 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
     agent = app.state.agents.get(agent_enum)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not initialised: {agent_name}")
-
-    # Internal-token check (BFF only)
-    expected = app.state.settings.internal_token
-    if expected:
-        auth = req.headers.get("x-internal-token", "")
-        if auth != expected:
-            raise HTTPException(status_code=401, detail="invalid internal token")
 
     t0 = time.monotonic()
     result: AgentRunResult = await agent.invoke(
@@ -227,9 +230,7 @@ class InternalExecuteRequest(BaseModel):
 
 @app.post("/internal/execute")
 async def internal_execute(body: InternalExecuteRequest, req: Request):
-    expected = app.state.settings.internal_token
-    if not expected or req.headers.get("x-internal-token", "") != expected:
-        raise HTTPException(status_code=401, detail="invalid internal token")
+    require_internal_caller(req)
 
     if body.contract_version != EXECUTION_CONTRACT_VERSION:
         # A deployment error, and it says so. The BFF records this against the
