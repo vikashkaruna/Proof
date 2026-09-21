@@ -4,7 +4,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 32, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 33, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **40 migrations, 0000 → 0039**.
+non-zero on a failing migration. Expect **41 migrations, 0000 → 0040**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -432,7 +432,7 @@ Disable before editing an enabled registration or archiving its estate/system. D
 
 ## Remaining W4 / W3 dependency gates
 
-W4.2 vault/rotation and OAuth client-credentials/JWT-bearer broker → W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Readiness must remain unverified until an implemented transport and real health checks prove connectivity. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
+W4.2 vault/OAuth core is implemented but disabled; W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Readiness must remain unverified until an implemented transport and real health checks prove connectivity. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
 
 ---
 
@@ -484,4 +484,10 @@ from the new baseline — the same chain every checkpoint uses.
 
 **Evidence to return:** sanitized key resource IDs/region, tenant-to-key uniqueness and IAM policy review, successful real KMS seal/open/rotation for synthetic data, atomic SQL rollback and concurrent-change tests, exact source/migration and deployment acceptance. Never provide clear secrets, DEKs, credential payloads or bearer tokens.
 
-**Still ENGINEERING:** OAuth handlers and pinned endpoint transport, explicit workload/grant authorization, internal acquisition endpoint, deployment/key-ring provisioning wiring, real provider acceptance. W4.3/4 remain mandatory before any agent acquisition endpoint is enabled. The vault milestone alone does not close W4.2 or connector execution.
+### W4-2 continuation · OAuth core delivered, activation pending (0040)
+
+**ENGINEERING:** Apply 0040. The broker factory takes strict server-owned configuration (version/provider, tenant UUID, primary/retiring KMS resources, and connector UUID → descriptor SHA/endpoint reference/target binding/HTTPS URL/IPv4 pin/deadline/optional CA). No environment variable or deployment loader is wired yet. Do not put client secrets into this configuration: provision the typed encrypted OAuth profile through the vault adapter. No administration UI/route is enabled. Changing a secret requires deliberate revoke/re-provision; key rotation reseals the same profile. Canonical HTTPS URLs exclude userinfo/query/fragment; DNS/IPv6 fallback is unavailable. Loopback is accepted only for reference-mock bindings. Address/certificate changes require reviewed configuration. Key rings retain the existing Mumbai/tenant isolation checks.
+
+**ENGINEERING gate before activation:** Replace deny-all only with real SVID validation/current registration, current grant/target-scope mapping, kill-switch checks, and Karya action approval backed by dry-run/rollback. Recheck each controlled invocation; external bearer tokens cannot be revoked simply by changing local grant rows. Keep the broker and credentials outside agent/SSR/browser processes. Add deployment/key-ring configuration and isolated provider acceptance; then expose the authenticated internal acquisition endpoint. Do not use shared runtime bearer tokens or human admin roles as workload authority.
+
+**Evidence:** 471 BFF tests, including 107 broker tests with local HTTP/TLS authorization servers, provider fixtures, SQL snapshot refusals and audit-failure cases. These do not prove deployed SPIRE, real KMS or client execution. Existing 63-browser/89-API parity checks remain regression evidence only. See review 22. W4.3/4 remain mandatory before any agent acquisition endpoint is enabled; W4.2 production activation and connector execution are still pending.

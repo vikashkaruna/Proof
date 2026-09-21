@@ -2,6 +2,20 @@
 
 Committed source `4a6b13c` passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod and production container configurations, with zero retries and matching sanitized results. Final merge CI remains the exact staging gate; its result is saved in the private session checkpoint.
 
+## Revision 33 — W4.2 OAuth broker core
+
+Reviewed staging `9a75743` and successful CI [35659326878](https://github.com/vikashkaruna/Proof/actions/runs/35659326878): all 16 applicable jobs passed; sanitized artifacts prove 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration. No newer other-model staging commits were present. The vault milestone is complete and green; the broader implementation goal remains open.
+
+Delivered: typed encrypted OAuth profiles; `client_credentials` and `jwt_bearer` grants; separate Basic/private-key client authentication; short-lived RS256/ES256 assertions; an exact-endpoint, IPv4-pinned HTTPS transport with certificate/hostname checks, bounded responses/deadlines and no redirects. Tenant/connector/configuration-specific trusted configuration selects the endpoint and Mumbai KMS ring. No caller-supplied URL or key resource is accepted. Tokens stay in an explicit redacted in-memory handle, with no token cache or browser response.
+
+The internal broker copies authorization inputs, permits only Drishti read or Karya approved production write leases, and repeats current authority plus credential checks before/after exchange and after audit. Acquisition fails closed on audit errors or excessive scopes/lifetimes. Review fixed a network-latency edge case: the external lifetime upper bound uses response receipt time, while local use expires conservatively from request start. Typed profile provisioning refuses malformed/wrong-family payloads before wrapping. Migration **0040** adds three ledger event types and a service-only credential snapshot reader checking exact tenant/estate/configuration/version, live parents, expiry and revocation; it does not authenticate workloads or grant access.
+
+**Activation gate:** `createCredentialBroker` defaults to deny-all. No acquisition route is enabled. Real SVID authentication, registration, kill-switch, grant mapping and approval/dry-run/rollback checks belong to the mandatory W4.3/4 authority adapter. Synthetic test authority proves broker sequencing only. Repeated issuance checks cannot invalidate an already-issued external bearer token; controlled transports must recheck authority per invocation, and target-side revocation remains provider-specific. JavaScript/SDK buffer clearing is best effort. Deployment configuration/provisioning and real KMS acceptance remain open.
+
+Validation: **471 BFF tests** (107 broker tests), local SQL/security suite including all **41 migration files**, ten concurrency suites and upgrade regressions. Reference HTTP authorization-server tests verify Basic/JWT credentials and claims; a separate real TLS fixture exercises encrypted-profile acquisition. Database SQL tests and HTTP repository adapter tests are distinct evidence, not a claim of end-to-end real SPIRE/cloud KMS. Container and exact merge CI results are recorded after they complete. Tip **0040**, **51 public tables**, W2 named targets **19/40** unchanged. See [review 22](audits/22-oauth-broker-review-2026-09-22.md).
+
+**Next:** W4.3 workload identity, then W4.4 live grants/approval adapter and controlled invocation; finish full W3 wizard/readiness and graph, then W4.5/6/7. W4.2 core implementation is delivered, but deployment activation/acceptance is still gated; W3/W4 are not complete.
+
 ## Revision 32 — W4.2 credential vault and rotation foundation
 
 Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
