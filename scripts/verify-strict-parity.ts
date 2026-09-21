@@ -566,6 +566,90 @@ async function main() {
     ownerPost({ libraryVersion: library, title: 'Wrong scope', estateId: estateA }),
   );
 
+  const estateIntent = ownerPost({ slug: 'managed-estate', name: 'Managed estate' });
+  const estateCreated = await check('estate_create', '/v1/estates', 201, estateIntent);
+  const managed = ((await estateCreated.json()) as { data: { id: string } }).data;
+  const estateReplay = await check('estate_create_replay', '/v1/estates', 201, estateIntent);
+  assert.equal(estateReplay.headers.get('idempotency-replayed'), 'true');
+  assert.equal(((await estateReplay.json()) as { data: { id: string } }).data.id, managed.id);
+  const auditRows = await apiRequest(
+    `/rest/v1/audit_ledger?target_ref=eq.${managed.id}&action_type=eq.estate.created&select=id`,
+  );
+  assert.equal(auditRows.status, 200);
+  assert.equal(
+    ((await auditRows.json()) as unknown[]).length,
+    1,
+    'replay must append exactly one creation event',
+  );
+  await check('estate_foreign_read', `/v1/estates/${estateA}`, 404, { headers: ownerHeaders });
+  await check('estate_foreign_update', `/v1/estates/${estateA}`, 404, {
+    ...ownerPost({ name: 'Wrong tenant', status: 'active', expectedVersion: 1 }),
+    method: 'PATCH',
+  });
+  const systemCreated = await check(
+    'estate_system_create',
+    `/v1/estates/${managed.id}/systems`,
+    201,
+    ownerPost({ name: 'CRM', systemKind: 'saas', dataCategories: ['contact'] }),
+  );
+  const managedSystem = ((await systemCreated.json()) as { data: { id: string } }).data;
+  const changedSystem = {
+    name: 'CRM updated',
+    systemKind: 'saas',
+    dataCategories: ['contact'],
+    status: 'active',
+    expectedVersion: 1,
+  };
+  await check('estate_system_update', `/v1/estate-systems/${managedSystem.id}`, 200, {
+    ...ownerPost(changedSystem),
+    method: 'PATCH',
+  });
+  await check('estate_stale_system_edit', `/v1/estate-systems/${managedSystem.id}`, 409, {
+    ...ownerPost(changedSystem),
+    method: 'PATCH',
+  });
+  const emptyAssessment = await check(
+    'estate_unassigned_intake',
+    '/v1/engagements',
+    201,
+    ownerPost({ libraryVersion: library, title: 'Unstarted scope' }),
+  );
+  const intakeId = ((await emptyAssessment.json()) as { id: string }).id;
+  await check(
+    'estate_assignment_requires_confirmation',
+    `/v1/engagements/${intakeId}/estate`,
+    400,
+    ownerPost({ estateId: managed.id }),
+  );
+  await check(
+    'estate_assignment',
+    `/v1/engagements/${intakeId}/estate`,
+    200,
+    ownerPost({ estateId: managed.id, confirmed: true }),
+  );
+  await check(
+    'estate_reassignment_refused',
+    `/v1/engagements/${intakeId}/estate`,
+    409,
+    ownerPost({ estateId: estateB, confirmed: true }),
+  );
+  await check('estate_archive', `/v1/estates/${managed.id}`, 200, {
+    ...ownerPost({ name: 'Archived estate', status: 'archived', expectedVersion: 1 }),
+    method: 'PATCH',
+  });
+  await check(
+    'estate_archived_system_refused',
+    `/v1/estates/${managed.id}/systems`,
+    409,
+    ownerPost({ name: 'Late system', systemKind: 'other' }),
+  );
+  await check(
+    'estate_archived_assessment_refused',
+    '/v1/engagements',
+    409,
+    ownerPost({ libraryVersion: library, title: 'Late assessment', estateId: managed.id }),
+  );
+
   await check('login_attestation_cannot_move_to_another_session', '/v1/engagements', 401, {
     headers: { ...ownerHeaders, Authorization: `Bearer ${await owner.newSession()}` },
   });

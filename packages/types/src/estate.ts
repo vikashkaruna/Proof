@@ -18,6 +18,7 @@ export const EstateSchema = z.object({
   description: z.string(),
   status: lifecycle,
   createdAt: z.iso.datetime(),
+  version: z.number().int().positive().default(1),
 });
 export type Estate = z.infer<typeof EstateSchema>;
 export const EstateSystemSchema = z.object({
@@ -30,6 +31,7 @@ export const EstateSystemSchema = z.object({
   description: z.string(),
   status: lifecycle,
   createdAt: z.iso.datetime(),
+  version: z.number().int().positive().default(1),
 });
 export type EstateSystem = z.infer<typeof EstateSystemSchema>;
 export const SystemDataCategorySchema = z.object({
@@ -64,3 +66,37 @@ export const EstateScanSchema = z
     return true;
   }, 'Scan timestamps must match its status');
 export type EstateScan = z.infer<typeof EstateScanSchema>;
+
+export const CreateEstateRequestSchema = z
+  .object({
+    slug: key,
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(4000).default(''),
+  })
+  .strict();
+export const UpdateEstateRequestSchema = CreateEstateRequestSchema.omit({ slug: true })
+  .extend({
+    status: lifecycle,
+    expectedVersion: z.number().int().positive(),
+  })
+  .strict();
+export const CreateEstateSystemRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    systemKind: EstateSystemSchema.shape.systemKind,
+    externalRef: z.string().trim().max(500).nullable().default(null),
+    description: z.string().max(4000).default(''),
+    dataCategories: z
+      .array(key)
+      .max(100)
+      .refine((v) => new Set(v).size === v.length, 'Duplicate categories')
+      .default([]),
+  })
+  .strict();
+export const UpdateEstateSystemRequestSchema = CreateEstateSystemRequestSchema.extend({
+  status: lifecycle,
+  expectedVersion: z.number().int().positive(),
+}).strict();
+export const AssignEngagementEstateRequestSchema = z
+  .object({ estateId: z.uuid(), confirmed: z.literal(true) })
+  .strict();

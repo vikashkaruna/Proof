@@ -582,3 +582,11 @@ Continued from merge 47685ab. Migration 0032 and the BFF now commit activation p
 Continued after green staging `6271699` (CI 35618777188). Migration 0033 adds all seven W2 connector tables, tenant-consistent references, broker-private envelope storage, immutable published metadata, explicit target provenance and the Drishti-read/Karya-write grant split. Shared schemas describe metadata; no invocation authority is implied.
 
 Validated 34 migrations, SQL isolation/constraint tests without BYPASSRLS, real GoTrue/PostgREST connector isolation across all four local labels, credential-read-denial mutation, populated 0032 upgrade, 42 shared type tests and workspace typecheck/lint. The upgrade creates empty tables and changes no existing systems. Doc 16 now records delivery and migration evidence required from the operator. W2: 19/40 named targets delivered, 21 absent; W4 runtime still pending. Next: W3 estate management API/UI and deliberate onboarding scope review. E.2.3 remains unanswered; no change to replacement-session policy.
+
+## Revision 26 — W3 estate inventory milestone
+
+Reviewed upstream `b380578` (no newer staging work). Migration 0034, central `estate.manage` capability and `/estate` deliver tenant-scoped estate/system create/edit/archive/restore and confirmed assignment of unassigned intake assessments. Authority is repeated inside the audited transaction; stale edits conflict, observed category provenance survives declaration changes, active connectors block archival, and archived estates refuse new scope. Browser writes retain their idempotency key after an ambiguous response.
+
+298 BFF tests, all 35 migrations, six concurrency suites, three populated upgrades, DSN/deploy failures and four local real-Auth parity configurations pass. The browser milestone covers inventory lifecycle, read-only roles, lost-response replay and confirmed assignment. Final browser/CI results and merge identity are recorded in the ignored session checkpoint. See [review 15](audits/15-estate-management-review-2026-09-21.md).
+
+W3 is **partial**: proposal normalization/review and the complete wizard remain pending. User decision recorded: **owner and admin** can approve proposals prepared by analysts. Next work follows that decision, then W3.5/W4. No claim of live connector execution or deployed acceptance.

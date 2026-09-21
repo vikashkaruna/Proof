@@ -330,6 +330,7 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     let mode: 'select' | 'insert' | 'update' | 'delete' = 'select';
     let payload: Row | Row[] | null = null;
     let returning = false;
+    let ordering: { column: string; ascending: boolean } | null = null;
     let settled: { data: unknown; error: { message: string } | null } | null = null;
 
     const matched = () => table(name).filter((row) => filters.every((f) => f(row)));
@@ -364,7 +365,15 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
         tables[name] = table(name).filter((row) => !hits.has(row));
         data = returning ? [...hits] : null;
       } else {
-        data = matched().map((r) => ({ ...r }));
+        const rows = matched().map((r) => ({ ...r }));
+        if (ordering) {
+          const { column, ascending } = ordering;
+          rows.sort(
+            (a, b) =>
+              String(a[column] ?? '').localeCompare(String(b[column] ?? '')) * (ascending ? 1 : -1),
+          );
+        }
+        data = rows;
       }
 
       settled = { data, error: null };
@@ -373,6 +382,10 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
 
     const builder: Record<string, unknown> = {};
 
+    builder.order = (column: string, options: { ascending?: boolean } = {}) => {
+      ordering = { column, ascending: options.ascending ?? true };
+      return builder;
+    };
     builder.select = () => {
       returning = true;
       return builder;

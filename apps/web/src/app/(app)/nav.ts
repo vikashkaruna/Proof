@@ -52,6 +52,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     label: 'Discover & Classify · Drishti + Vibhaag',
     items: [
       {
+        route: '/estate',
+        en: 'Client Estate',
+        hi: 'क्लाइंट एस्टेट',
+        phase: 'P1',
+        capability: Capability.POSTURE_READ,
+      },
+      {
         route: '/discovery',
         en: 'Data Discovery',
         hi: 'डेटा खोज',

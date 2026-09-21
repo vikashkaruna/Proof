@@ -61,6 +61,7 @@ export const Capability = {
 
   // Tenant administration
   ENGAGEMENT_CREATE: 'engagement.create',
+  ESTATE_MANAGE: 'estate.manage',
   TENANT_CREATE: 'tenant.create',
   TENANT_SETTINGS_WRITE: 'tenant.settings.write',
   USER_MANAGE: 'user.manage',
@@ -111,6 +112,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_CREATE,
     Capability.TENANT_SETTINGS_WRITE,
+    Capability.ESTATE_MANAGE,
     Capability.USER_MANAGE,
     Capability.BILLING_MANAGE,
     Capability.MULTI_TENANT_READ,
@@ -181,6 +183,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_CREATE,
     Capability.TENANT_SETTINGS_WRITE,
+    Capability.ESTATE_MANAGE,
     Capability.USER_MANAGE,
     Capability.BILLING_MANAGE,
   ],
@@ -205,6 +208,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_SETTINGS_WRITE,
+    Capability.ESTATE_MANAGE,
     Capability.USER_MANAGE,
   ],
 
