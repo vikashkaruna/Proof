@@ -18,10 +18,11 @@ insert into public.tenants(id,slug,name) values ('00000000-0000-4000-8000-000000
 insert into public.estates(id,tenant_id,slug,name) values ('00000000-0000-4000-8000-000000000092','00000000-0000-4000-8000-000000000091','prod','Existing estate');
 insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) values ('00000000-0000-4000-8000-000000000093','00000000-0000-4000-8000-000000000091','00000000-0000-4000-8000-000000000092','Existing system','database');
 SQL
-before=$(sql -c "select md5(jsonb_agg(t order by id)::text) from public.estate_systems t")
+before=$(sql -c "select md5(jsonb_agg(to_jsonb(t)-'version' order by id)::text) from public.estate_systems t")
 python3 scripts/migrate-database.py --container "$container" --user postgres --database connector_upgrade_test > "$fixture_dir/upgrade.log"
-[ "$before" = "$(sql -c "select md5(jsonb_agg(t order by id)::text) from public.estate_systems t")" ]
+[ "$before" = "$(sql -c "select md5(jsonb_agg(to_jsonb(t)-'version' order by id)::text) from public.estate_systems t")" ]
 for table in connector_descriptors connectors connector_credentials connector_grants connector_health_checks workload_identities mcp_tool_registry; do
   [ "$(sql -c "select count(*) from public.$table")" = 0 ]
 done
+[ "$(sql -c 'select count(*) from public.estate_systems where version=1')" = 1 ]
 echo 'Connector upgrade: existing system unchanged; seven new tables empty, no inferred connectors or grants.'

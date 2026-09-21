@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 25, reviewed staging `6271699`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 26, reviewed staging `b380578`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -374,9 +374,7 @@ Apply the migration runner as W0-5 describes. It creates seven empty tables; it 
 
 # W3 · Client estate & onboarding
 
-**Current status: Pending.** Nothing of W3 itself exists. The 0029 schema it
-builds on is delivered and counted under W2; accepting an `estateId` on
-engagement creation is a link, not management.
+**Current status: Partial.** Migration 0034 delivers C-W3-1 and C-W3-2: audited, idempotent estate/system lifecycle APIs and `/estate`, with explicit assignment of unstarted legacy intakes. C-W3-4 has inventory browser coverage; proposal/wizard journeys remain pending with C-W3-3.
 
 ## OPERATOR steps
 
@@ -399,12 +397,15 @@ Tell me if your real engagements need kinds that list does not cover.
 
 ### W3-3 · Onboarding proposal review
 
-Normalized onboarding produces _proposals_. Who approves them — the client
-`owner`, or an Axiom `axiom_analyst`? Maker-checker says the party who prepares
-the change should not be the party who authorises it, which points at the
-client owner, but this is your call about how you deliver.
+**Decision recorded from the user:** client `owner` **and tenant `admin`** may approve proposals prepared by Axiom staff. `axiom_analyst` prepares; it must not acquire direct estate mutation authority. No further role confirmation is needed for this implementation. The normalization/review workflow is the next engineering chunk.
 
-**Evidence to return:** which role approves.
+### W3-4 · Verify the inventory milestone
+
+Apply through 0034 and deploy its BFF/web together. With an owner/admin seat, open `/estate`, create an estate with an explicit slug, add a system and declared category keys, edit it, and archive/restore it. Check that each successful mutation has one ledger event. A viewer/analyst can read but cannot manage. Do not put credentials or raw personal data into inventory descriptions/references.
+
+To assign a legacy assessment, choose its intended estate and confirm the scope. The server accepts only an unassigned intake with no recorded findings, plans, runs, evidence or reports. Started history stays unassigned until a separate reviewed migration policy exists. Do not bypass the guard with direct SQL.
+
+If a response is lost, keep the form open and use **Retry same request**. It retains the same body/path/key. For a persisted unknown or expired claim, inspect the request claim and ledger before reconciliation; do not generate a fresh key to force a duplicate. Archival preserves history and refuses active connectors. Future W4 activation must also serialize with estate/system lifecycle checks.
 
 ## ENGINEERING steps for W3
 
@@ -456,7 +457,7 @@ to me than a green run that took a detour.
 | **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
-| **W3**     | Pending                             | **Partial**                    | The estate management API landing with capability, audit and idempotency tests                               |
+| **W3**     | Inventory milestone delivered       | **Partial**                    | The estate management API landing with capability, audit and idempotency tests                               |
 | **W3**     | —                                   | **Closed**                     | Full lifecycle in UI + browser journeys + recorded human legacy assignment                                   |
 
 I update [Doc 11's register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026),

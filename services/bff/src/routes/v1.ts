@@ -1,3 +1,4 @@
+import { estateRoutes } from './estates.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -107,6 +108,7 @@ interface Deps {
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
+  app.route('/', estateRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //
@@ -1976,6 +1978,16 @@ export function v1Routes(deps: Deps) {
       })
       .select()
       .single();
+    if (error?.code === '23514' && parsed.data.estateId)
+      return c.json(
+        {
+          error: {
+            code: 'estate_archived',
+            message: 'Restore the estate before starting an assessment.',
+          },
+        },
+        409,
+      );
     if (error?.code === '23503' && parsed.data.estateId) {
       return c.json(
         {
