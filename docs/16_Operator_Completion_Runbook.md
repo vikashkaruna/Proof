@@ -1,10 +1,10 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+Verified staging checkpoint: `41f9171`, CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056) green for the identity foundation. Runtime audit hardening is the next acceptance checkpoint; full W4.3 activation remains gated below.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 34, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 35, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -504,4 +504,6 @@ from the new baseline — the same chain every checkpoint uses.
 
 **Runtime transport correction:** use `AGENT_RUNTIME_INTERNAL_TOKEN` as deployed by Helm/compose; Python now recognizes it. `INTERNAL_TOKEN` remains a legacy fallback, with the canonical name taking precedence. An unset/empty key refuses every generic invocation rather than disabling authentication. The existing `/internal/execute` stub remains 501 after valid authentication. This correction does not authorize any client action.
 
-**Runtime audit blockers found during review:** remove `LedgerClient.from_settings`'s production in-memory fallback; replace raw input/output/error/traceback logging in `BaseAgent.invoke` with safe metadata and digests; fail the invocation if its mandatory completion ledger append fails. Test these paths before routing authenticated workers through the broker. Existing BFF parity evidence cannot close runtime audit defects.
+**Runtime audit corrections delivered in Revision 35:** staging/preprod/production use the actual append RPC; invalid configuration or missing/malformed receipts fail closed. Memory is limited to explicit local development/test. The base agent records safe phase/receipt/failure-code metadata and input/output digests, revalidates models, and refuses success after completion-audit failure. Returned errors/logs omit raw validation and exception payloads. Existing audit history is preserved; no migration rewrites prior records.
+
+Run `./scripts/start-parity-supabase.sh`, then from `services/agent-runtime` run `uv run python ../../scripts/verify-runtime-audit.py`. The probe accepts only the isolated loopback parity API on port 56321, creates synthetic tenant/audit rows and leaves append-only evidence intact. No real cloud resources or client actions are used. Only `.axiom-runtime/runtime-audit/results.json` is publishable; require `passed: true`, `dirty: false` and the expected revision for release evidence. CI runs it after strict Auth/PostgREST parity. The ledger's actual receipt is a positive bigint, not a UUID. A completion-audit failure means intervention/reconciliation is needed if a future mutating tool already acted; it does not mean a rollback occurred. Every-tool/physical isolation still remains W4.3 work.

@@ -61,3 +61,7 @@ Vault and OAuth broker core acceptance is covered by SQL/crypto/adapter tests an
 ## Isolated workload identity acceptance (W4.3)
 
 `python3 scripts/test-workload-identity.py` runs real SPIRE issuance and the BFF identity verifier in a fresh local Docker fixture. CI publishes only `workload-identity-acceptance/results.json` (61 allowlisted outcomes, source revision and dirty status). It is separate from the 63-browser/89-API application parity suite. A passing identity fixture does not prove deployed workload isolation, live task/grant authority or connector execution. See Doc 16 W4-3 before enabling any acquisition route.
+
+## Runtime audit acceptance (W4.3)
+
+After local parity-stack startup, run `uv run python ../../scripts/verify-runtime-audit.py` from `services/agent-runtime`. Five real-Postgres outcomes check durable strict-mode appends, numeric receipts, redacted metadata, digests and the actual ledger chain. CI includes this in the strict Auth/PostgREST lane and publishes only `runtime-audit-acceptance/results.json`. Synthetic tenant/audit records remain; never delete audit rows as cleanup. This probe does not replace workload/task/grant enforcement or demonstrate client execution. Unit fault injection separately covers start/completion failures and secret-bearing exceptions.

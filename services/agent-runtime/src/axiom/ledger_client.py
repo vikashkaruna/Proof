@@ -10,17 +10,16 @@ via the RPC, which is enforced at the DB role level too.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from supabase import Client, create_client
 
 from .canonicalise import canonical_json, sha256_hex
 from .config import Settings, get_settings
-
 
 ActorType = Literal["agent", "human", "system"]
 LedgerResult = Literal["success", "failure", "rolled_back", "skipped", "pending"]
@@ -57,9 +56,9 @@ class LedgerClient:
     """Append-only audit ledger client.
 
     The constructor accepts either a Supabase client (production) or
-    `in_memory=True` (tests). The in-memory implementation is faithful
-    to the production contract — same hash chain, same shape — but
-    doesn't reach a network.
+    `in_memory=True` (tests). The memory implementation supplies test receipts
+    and a local chain; it is not evidence of PostgreSQL durability or identical
+    SQL canonicalization. Strict environments always use the real RPC.
     """
 
     def __init__(self, client: Client | None = None, *, in_memory: bool = False):
@@ -71,14 +70,24 @@ class LedgerClient:
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> "LedgerClient":
         s = settings or get_settings()
-        if s.supabase_url.startswith("http://localhost") or s.supabase_url.startswith("http://127."):
-            # Local dev — don't try to connect to Supabase on import.
+        try:
+            target = urlsplit(s.supabase_url)
+            is_loopback = target.scheme == "http" and target.hostname in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }
+        except ValueError:
+            raise RuntimeError("Audit ledger configuration was refused") from None
+        if s.environment in {"development", "test"} and is_loopback:
+            # Explicit local development/test only. Strict environments always
+            # use the real append_ledger RPC, including isolated local stacks.
             return cls(in_memory=True)
         try:
             client = create_client(s.supabase_url, s.supabase_service_key)
             return cls(client)
         except Exception:
-            return cls(in_memory=True)
+            raise RuntimeError("Audit ledger configuration was refused") from None
 
     @classmethod
     def in_memory(cls) -> "LedgerClient":
@@ -99,8 +108,9 @@ class LedgerClient:
         return await self._append_remote(input)
 
     def _append_in_memory(self, input: AppendInput) -> AppendResult:
-        import time
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
         from .canonicalise import canonical_json as _cj
 
         detail = input.detail or {}
@@ -167,12 +177,8 @@ class LedgerClient:
         detail = input.detail or {}
 
         # Compute input/output hashes from the canonical detail (if not provided)
-        input_hash = input.input_hash or sha256_hex(
-            canonical_json({**detail, "_kind": "input"})
-        )
-        output_hash = input.output_hash or sha256_hex(
-            canonical_json({**detail, "_kind": "output"})
-        )
+        input_hash = input.input_hash or sha256_hex(canonical_json({**detail, "_kind": "input"}))
+        output_hash = input.output_hash or sha256_hex(canonical_json({**detail, "_kind": "output"}))
 
         rpc = self._client.rpc(  # type: ignore[union-attr]
             "append_ledger",
@@ -197,12 +203,26 @@ class LedgerClient:
             },
         )
         result = rpc.execute()
-        new_id = str(result.data) if result.data else "0"
-        return AppendResult(id=new_id, occurred_at=datetime.now(timezone.utc))
+        # append_ledger returns the global bigint row ID, not a UUID. Accept
+        # the JSON integer or canonical decimal form, never an absent/zero ID.
+        receipt = result.data
+        if type(receipt) is int:
+            valid = 0 < receipt <= 9223372036854775807
+        elif isinstance(receipt, str):
+            valid = (
+                receipt.isascii()
+                and receipt.isdigit()
+                and 1 <= len(receipt) <= 19
+                and not receipt.startswith("0")
+                and int(receipt) <= 9223372036854775807
+            )
+        else:
+            valid = False
+        if not valid:
+            raise RuntimeError("Audit ledger append was not confirmed")
+        return AppendResult(id=str(receipt), occurred_at=datetime.now(timezone.utc))
 
-    async def verify(
-        self, tenant_id: str, from_sequence: int = 1
-    ) -> dict[str, Any]:
+    async def verify(self, tenant_id: str, from_sequence: int = 1) -> dict[str, Any]:
         rpc = self._client.rpc(
             "verify_ledger",
             {"p_tenant_id": tenant_id, "p_from_sequence": from_sequence},

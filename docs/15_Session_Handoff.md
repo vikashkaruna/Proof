@@ -1,8 +1,18 @@
 # Axiom Proof — implementation session handoff
 
-Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
+## Revision 35 — W4.3 runtime audit hardening
 
-The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+Committed acceptance: source `956aa55` passed the real Postgres audit probe with all five outcomes and a clean source tree (`CI=true`, locked Python dependencies). Python unit tests passed 174/174; repository format checks and touched-file F/I lint passed. The merge CI result remains the final staging gate.
+
+The W4.3 identity foundation is **complete and green** at staging `41f9171`, CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056). Verified exact-merge artifacts contain 61 SPIRE outcomes and 63 browser journeys plus 89 API/restart outcomes in each configuration. The earlier `2c3f8f6` run failed on an undeclared root Zod dependency and is superseded by this successful corrected run. W4.3 as a whole remains partial; the runtime audit follow-up below still requires its own exact-merge CI.
+
+Closed the runtime audit defects found in Revision 34. `LedgerClient.from_settings` never selects memory in staging/preprod/production, including a local strict-mode stack, and client-construction failure always raises instead of falling back. Only explicit development/test loopback configuration retains the memory fixture; lookalike hostnames do not qualify. The remote append requires a positive SQL bigint receipt, refusing missing, zero, malformed or out-of-range results. All writes still use `append_ledger`.
+
+`BaseAgent.invoke` revalidates inputs even when passed a different Pydantic model, validates outputs and computes canonical input/output digests. Ledger detail contains phase/receipt/failure-code metadata, not raw payloads, approval material or exception traces. Validation, adapter and execution exceptions are sanitized in logs and returned errors. Mandatory completion-audit failure now returns a failed invocation with no output; it cannot claim success. This cannot undo a side effect already performed by future tools, so execution reconciliation/rollback remains a W5 requirement.
+
+Validation: **174 Python tests**; **five real Postgres outcomes** against the isolated local Supabase stack prove strict durable writes, confirmed receipts, redaction, digests and chain verification. The probe exposed an incorrect draft UUID-receipt assumption; it was corrected to the actual bigint RPC contract before commit. The strict Auth/PostgREST CI lane now runs and publishes only the sanitized runtime-audit result. Memory-ledger tests are explicitly not PostgreSQL durability or canonicalization evidence. No migration or application route is added; tip 0040 and 51 public tables remain unchanged. See [review 24](audits/24-runtime-audit-review-2026-09-22.md).
+
+**Still pending:** complete W4.3 isolated credential-less workers, trust/registration lifecycle, authenticated tenant/task delegation, every-tool permission and tenant/estate data checks, token exchange and actor-chain verification. Then W4.4 grants/approval enforcement, full W3 wizard/readiness and graph, and W4.5/6/7. Broker acquisition and the runtime executor remain disabled. The overall goal is not complete.
 
 ## Revision 34 — W4.3 identity verification and attestation foundation
 
