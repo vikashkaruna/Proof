@@ -1,5 +1,7 @@
 # Saved implementation session — 22 September 2026
 
+Local committed merge `bc0f58a` passed both container configurations: 61 browsers and 75 API/restart outcomes each. Its staging CI caught a missing `report_email_mode` mapping in `sync-env.sh`; that deployment wiring is corrected with a default of disabled and the configuration coverage gate rerun. The latest corrective merge CI, not the earlier failed run, is the final gate.
+
 Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The two-worker rerun passed all 61 browsers, then exposed a CommonJS/top-level-await error in the new restart probe; its async entry point is corrected and the complete lane is rerun. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
 
 Fetch staging first. The merge containing this file is the checkpoint. Plan **Revision 30**, migration tip **0037** (38 files, 51 public tables; W2 named targets 19/40). Reviewed upstream `f5a88d5`, green CI [35640285441](https://github.com/vikashkaruna/Proof/actions/runs/35640285441); no newer other-model commits appeared. Worktree `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`. Preserve root and Claude worktrees.
