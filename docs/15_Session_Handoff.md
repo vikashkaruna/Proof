@@ -1,6 +1,6 @@
 # Saved implementation session — 21 September 2026
 
-Resume from fetched staging, not a guessed SHA. This checkpoint integrated `ad2d046` (green upstream CI [35587825571](https://github.com/vikashkaruna/Proof/actions/runs/35587825571)) and adds W1 authenticator replacement plus migration **0030**; the merge commit containing this file is the resume baseline. Current detail: [Doc 11 Revision 22](11_Phase0-5_Gap_Closure_Plan.md), [progress](14_Implementation_Progress.md), [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md).
+Resume from fetched staging, not a guessed SHA. This checkpoint integrated `ad2d046` (green upstream CI [35587825571](https://github.com/vikashkaruna/Proof/actions/runs/35587825571)) and adds W1 authenticator replacement plus migration **0030**; the merge commit containing this file is the resume baseline. Current detail: [Doc 11 Revision 22](11_Phase0-5_Gap_Closure_Plan.md), [progress](14_Implementation_Progress.md), [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md). **Per-workstream status for W0–W10 is the [status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026)** — start there before picking the next chunk.
 
 ## Workspace and accepted scope
 
@@ -27,6 +27,8 @@ Validation: 279 BFF tests, 40 web, 178 MFA, 14 packages, lint and typecheck 15/1
 4. **W0 acceptance:** deployed ownership/role split, invitation/email flow, ingress, key retirement and immutable evidence. Terraform/Helm gates validate artifacts, not a running deployment. EKS public endpoint CIDR remains unresolved.
 
 Founder decisions still needed for real irreversible evidence retention and named regulatory citation sign-off. W0/W1/W2 remain **partial**.
+
+Status at a glance, from the register: **W0** partial (code closed, deployment gated) · **W1** partial · **W2** partial, 28 of 34 named target tables absent · **W3** pending · **W4** pending, nothing · **W5** partial, authority machinery real and the executor a deliberate refusal stub · **W6** pending · **W7** partial · **W8** partial, retention gated · **W9** partial, performance untouched · **W10** partial, artifacts validate but nothing is deployed.
 
 ## Operational resume notes
 

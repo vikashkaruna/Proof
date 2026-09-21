@@ -1,5 +1,12 @@
 # Axiom Proof — roadmap traceability and delivery status
 
+> **This matrix is a 20 September snapshot and is not the current status.** It
+> maps every phase-table module in Doc 02 to a closure owner, which nothing else
+> does, so it is kept for that mapping. For what is actually delivered now, read
+> the [workstream status register in Doc 11](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026),
+> which is re-derived from the repository each checkpoint. Where the two
+> disagree, the register is right.
+
 **Review snapshot: 20 September 2026, implementation `2c54fcd` + analyst WIP.** This matrix restores coverage of every phase-table module in Doc 02 and maps it to a closure owner. It is not a production acceptance report.
 
 **Status:** `Partial` = source foundation exists, required journey/evidence incomplete; `Pending` = intended capability not delivered (a stub or prototype does not qualify); `Gated` = roadmap demand/funding/safety condition precedes delivery; `External` = not provable from repository. `Source complete` is used only for individual committed changes in [Doc 12](12_Implementation_Handoff.md), not whole phases.
