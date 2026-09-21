@@ -51,7 +51,7 @@ value.
 
 # W0 · Security remediation & environment parity
 
-**Current status: Partial** — code **Closed**, deployment **Gated**.
+**Current status: Partial** — existing security changes are verified locally; deployed parity/persona harness work and deployment acceptance remain open.
 
 ## What is already done, so you do not redo it
 
@@ -248,7 +248,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 55 browser journeys under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the replacement-session policy remain open. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
+**Current status: Partial.** The suite now has 59 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the replacement-session policy remain open. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 
@@ -422,11 +422,13 @@ The initial intake is a single complete batch. Per-item exclusion and later onbo
 | C-W3-1 | Estate management API — create, update, archive — capability-gated, audited, idempotent, tenant-consistent |
 | C-W3-2 | Estate management UI, plus explicit human assignment of legacy engagements per W2-1                        |
 | C-W3-3 | Onboarding proposal normalization with the W3-3 review role                                                |
-| C-W3-4 | Browser journeys for the above, under strict auth                                                          |
+| C-W3-4 | Browser journeys for inventory and proposal review — delivered under strict auth                           |
+| C-W3-5 | Complete resumable company → estate → inventory → connector/grant → readiness wizard — pending             |
+| C-W3-6 | Re-onboarding/sustenance and access re-attestation — pending with W4/W6 dependencies                       |
 
 ## How I mark W3 Closed
 
-1. C-W3-1 … C-W3-4 delivered and mutation-tested.
+1. C-W3-1 … C-W3-6 delivered and mutation-tested. C-W3-1 through C-W3-4 alone close the inventory/proposal milestone, not the full W3 roadmap.
 2. Every mutation requires a capability, appends to the ledger, and is
    idempotent — proven by test, including a cross-tenant refusal.
 3. No estate or scope is ever inferred. A legacy engagement becomes assigned
@@ -465,8 +467,8 @@ to me than a green run that took a detour.
 | **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
-| **W3**     | Inventory milestone delivered       | **Partial**                    | The estate management API landing with capability, audit and idempotency tests                               |
-| **W3**     | —                                   | **Closed**                     | Full lifecycle in UI + browser journeys + recorded human legacy assignment                                   |
+| **W3**     | Inventory/proposals delivered       | **Partial**                    | Verified APIs/UI, atomic audit, idempotency and client owner/admin review                                    |
+| **W3**     | —                                   | **Closed**                     | Full wizard and sustenance, browser journeys, reviewed proposals and recorded human legacy assignment        |
 
 I update [Doc 11's register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026),
 [Doc 14](14_Implementation_Progress.md) with the evidence and what it does

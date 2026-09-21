@@ -17,3 +17,5 @@ Browser and ordinary service roles cannot update proposal snapshots or fabricate
 This completes proposal review of the initial intake, not the full W3 wizard. Every initial item is mapped as a batch; item exclusion, later batches and unsent draft autosave remain future work. Original region/personal-data declarations remain in the source snapshot; they are not asserted as verified attributes. Existing estate management remains available for direct human declarations.
 
 W4 registry/contracts/lifecycle is next; broker/SVID/grants and live transports remain unimplemented. Complete connector/grant/readiness wizard stages and live permission graph require those runtime boundaries. No cloud deployment or external execution was performed. W0 deployed acceptance, W1 invitations and E.2.3 remain open.
+
+Runbook review also corrected a closure ambiguity: C-W3-1–4 cover this milestone, but do not close the full roadmap's wizard and sustenance. C-W3-5/6 now carry those remaining obligations explicitly. W0's headline no longer incorrectly describes all engineering as closed.
