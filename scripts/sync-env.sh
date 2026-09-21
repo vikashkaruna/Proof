@@ -359,6 +359,9 @@ tfvar_value() {
     # operator has not supplied one, which is why this mapping exists at all.
     approval_signing_key)         get_val "APPROVAL_SIGNING_KEY" ;;
     mfa_encryption_key)           get_val "AXIOM_MFA_ENCRYPTION_KEY" ;;
+    # Normally empty. Terraform reads that as "no rotation in flight" and
+    # creates no secret at all; see infra/terraform/envs/preprod/secrets.tf.
+    mfa_encryption_keys_previous) get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS" ;;
     agent_runtime_internal_token) get_val "AGENT_RUNTIME_INTERNAL_TOKEN" ;;
     model_gateway_api_key)        get_val "MODEL_GATEWAY_API_KEY" ;;
 
@@ -477,6 +480,13 @@ do_secrets() {
     "axiom-${TARGET_ENV}-model-gateway-api-key:$(get_val "MODEL_GATEWAY_API_KEY")"
     "axiom-${TARGET_ENV}-upstash-redis-url:$(get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")")"
   )
+
+  # Added only while a rotation is in flight. Appending it unconditionally
+  # would print "Skipping empty or placeholder secret" on every ordinary sync,
+  # which teaches operators to read past the warnings that do matter.
+  if [ -n "$(get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS")" ]; then
+    secret_pairs+=("axiom-${TARGET_ENV}-mfa-encryption-keys-previous:$(get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS")")
+  fi
 
   local sa="axiom-${TARGET_ENV}-cloudrun-sa@${project}.iam.gserviceaccount.com"
 

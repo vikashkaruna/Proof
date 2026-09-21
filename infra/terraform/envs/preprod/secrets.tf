@@ -64,3 +64,37 @@ resource "google_secret_manager_secret_version" "version" {
   secret      = google_secret_manager_secret.secret[each.key].id
   secret_data = local.managed_secrets[each.key]
 }
+
+# ─── MFA key rotation — the retiring key ring ────────────────────────────────
+# `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` is empty except while a rotation is in
+# flight, and an empty payload is not something Secret Manager will store: a
+# version must have bytes. So this secret is conditional rather than a
+# permanently-empty member of `local.managed_secrets`, which would fail every
+# apply that is not a rotation.
+#
+# The conditionality is the design, not a workaround. Absent means "no retiring
+# keys", which is exactly how the BFF's key ring reads an unset variable. When
+# the rotation finishes and every enrolled factor has been rewrapped under the
+# primary key, clearing the variable destroys the secret — so the retiring key
+# stops existing here at the same moment it stops being needed, rather than
+# lingering as a live decryption key nobody is watching.
+resource "google_secret_manager_secret" "mfa_previous_keys" {
+  count     = var.mfa_encryption_keys_previous != "" ? 1 : 0
+  secret_id = "axiom-${var.environment}-mfa-encryption-keys-previous"
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_version" "mfa_previous_keys" {
+  count       = var.mfa_encryption_keys_previous != "" ? 1 : 0
+  secret      = google_secret_manager_secret.mfa_previous_keys[0].id
+  secret_data = var.mfa_encryption_keys_previous
+}

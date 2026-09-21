@@ -105,6 +105,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/check-tfvars-coverage.sh
+      # Every surface that runs the BFF must be able to carry BOTH halves of
+      # the MFA key ring. Rotation landed with the retiring list wired into
+      # the Compose files only, so Cloud Run and Helm could start the BFF with
+      # no path for it — a deploy that succeeds and then fails one user at a
+      # time as their old-key factors come up for verification.
+      - run: ./scripts/check-mfa-ring-coverage.sh
 
   # ─── W0.1 self-hosted Supabase topology ──────────────────────────
   # Higher environments self-host GoTrue and PostgREST against their own

@@ -2,11 +2,65 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 17 — APPROVAL COMPLETED IN A BROWSER** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `c79b49d`, including the browser persona journeys and their spec corrections.
+**Document:** 11 · **Revision 18 — THE ROTATION REACHES A DEPLOYED BFF** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `495f548`, including the browser approval journey and the single-use challenge fix.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 17 — current implementation checkpoint
+## Revision 18 — current implementation checkpoint
+
+No migration. The last piece of W1 that was not deployment acceptance.
+
+**Half a key ring.** Revision 15 gave the BFF a rotatable MFA key: a primary
+that seals new and rewrapped secrets, and `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`,
+a comma-separated list of keys that may still be read. It was wired into the
+four Compose files and nothing else. Cloud Run and Helm carried only the
+primary, so a rotation in a deployed environment had **no path for the
+retiring list** — `sync-env.sh verify` would pass, the service would roll, and
+every factor still sealed under the outgoing key would become unreadable.
+
+That failure does not show up at deploy time. It shows up later and one user at
+a time, as each person's next verification hits `secret_unreadable` and a 503,
+which reads like an authenticator problem rather than a deployment one.
+
+**Absent, not empty.** Both surfaces now express "no rotation in flight" as the
+variable being *absent*, which is what the key ring already reads an unset
+value as. That is not a stylistic choice: an empty payload is not storable as a
+Secret Manager version, so a permanently-empty member of `managed_secrets`
+would fail every apply that is not a rotation.
+
+- **Cloud Run** — the secret and its version are `count`-conditional on
+  `var.mfa_encryption_keys_previous`, and the BFF's env entry is a `dynamic`
+  block iterating that resource, so the condition is stated once in
+  `secrets.tf` rather than restated and left to drift. Clearing the variable
+  destroys the secret, so the retiring key stops existing at the moment it
+  stops being needed.
+- **Helm** — `optional: true` on the `secretKeyRef`. With no
+  `mfa-encryption-keys-previous` key in the `<release>-internal` Secret the
+  variable is simply unset; without `optional` every pod would refuse to start
+  until someone supplied a key they do not have.
+
+**The check that would have caught it.** No gate asked whether a variable
+reaches every surface that runs the service needing it, which is why the
+omission survived. `scripts/check-mfa-ring-coverage.sh` asks it across all six
+BFF surfaces and fails the build otherwise; it runs in the existing deployment
+coverage job. Against the pre-change tree it names Cloud Run and Helm and
+nothing else. The word-boundary match is deliberate —
+`AXIOM_MFA_ENCRYPTION_KEY` is a prefix of the retiring list's name, so a
+substring test would stay green with the primary key missing.
+
+| Workstream | Delivered since Revision 17 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Retiring key ring wired into Cloud Run and Helm; a conditional Secret Manager secret; the cross-surface coverage gate; the deployed rotation path documented per surface in Doc 09 | Deployed acceptance — no rotation has been exercised against a running environment |
+
+**What this does not do.** Nothing is deployed and no rotation has been run
+against a live service; this makes the path exist, not proven. `terraform
+validate` passes and the conditional resources are unapplied. Helm could not be
+rendered locally — `helm` is not installed on this machine — so the chart change
+is reviewed, not templated. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 17 — prior implementation checkpoint
 
 No migration. The positive case the persona journeys could not reach, and the defect it uncovered.
 

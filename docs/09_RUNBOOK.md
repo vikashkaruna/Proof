@@ -137,6 +137,22 @@ rewritten under the new key the next time its owner verifies, so the rotation
 drains at the pace people log in rather than in a single pass that would
 decrypt every TOTP secret into one process.
 
+**How the retiring list reaches a deployed BFF.** Until Revision 18 it did
+not: Compose carried it, Cloud Run and Helm carried only the primary key, so
+step 2 could pass and the rolled service would still have half a ring. Both
+surfaces express "no rotation in flight" as _absent_ rather than empty,
+because an empty value is not storable as a Secret Manager version and is not
+a key.
+
+| Surface                                 | Retiring list                                                                                                                    | Clearing it                                 |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Compose (local, staging, preprod, prod) | `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`, empty by default                                                                           | Unset the variable                          |
+| Cloud Run (preprod)                     | `mfa_encryption_keys_previous` in `.env` → tfvars → a Secret Manager secret that exists **only** while the variable is non-empty | Clear it and apply; the secret is destroyed |
+| Helm (prod/EKS)                         | Key `mfa-encryption-keys-previous` in the `<release>-internal` Secret, read with `optional: true`                                | Remove the key; pods start without it       |
+
+`scripts/check-mfa-ring-coverage.sh` fails the build if a surface that runs the
+BFF cannot carry both halves. A surface added later belongs in that list.
+
 **Do not remove a key from the retiring list until nothing is sealed under
 it.** Removing it early is the lockout this design exists to prevent. If it
 happens, affected users get `secret_unreadable` and HTTP 503 — a deliberate,

@@ -155,6 +155,24 @@ variable "mfa_encryption_key" {
   }
 }
 
+# The retiring half of the key ring. Comma-separated, newest first, and empty
+# except while a rotation is in flight — which is why it is not a member of
+# `local.managed_secrets`: Secret Manager will not store an empty payload, so a
+# permanently-empty member would fail every apply that is not a rotation.
+# See secrets.tf for how absence is expressed.
+variable "mfa_encryption_keys_previous" {
+  description = "Retiring MFA encryption keys, comma-separated, newest first. Empty unless a rotation is in flight."
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition = var.mfa_encryption_keys_previous == "" || alltrue([
+      for key in split(",", var.mfa_encryption_keys_previous) : length(trimspace(key)) >= 32
+    ])
+    error_message = "Every retiring MFA encryption key must have at least 32 characters."
+  }
+}
+
 # ─── Self-hosted Supabase (W0.1) ──────────────────────────────────────────────
 # These cannot be generated here the way the other secrets are. The anon and
 # service_role keys are JWTs SIGNED WITH the JWT secret, so a random value per
