@@ -112,7 +112,7 @@ and [`docs/07_SECURITY_REVIEW.md`](./docs/07_SECURITY_REVIEW.md)):
 
 ### Prerequisites
 
-- Node.js ≥ 20.11
+- Node.js ≥ 22 (BFF KMS SDK minimum; Docker and CI use Node 24)
 - pnpm ≥ 9.12 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Python ≥ 3.11
 - uv (Python package manager) — `pip install uv`

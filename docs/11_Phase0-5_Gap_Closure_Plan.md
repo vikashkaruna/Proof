@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 31 — CONNECTOR REGISTRY AND LIFECYCLE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `c79c303`, green CI [35647963475](https://github.com/vikashkaruna/Proof/actions/runs/35647963475); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 32 — CREDENTIAL VAULT FOUNDATION** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `be69c3f`, green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 32 — W4.2 credential vault and rotation foundation
+
+Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
+
+Delivered: tenant/connector/credential/configuration-bound AES-256-GCM envelopes, independent random data keys, Mumbai-only AWS/GCP KMS adapters with tenant-specific key rings, authenticated context and provider response checks (including GCP CRC32C). Rotation retains the old stored envelope until the new envelope and audit event commit. Secret buffers are cleared after use; this is best-effort buffer hygiene, not a claim that JavaScript/SDK heaps can be erased.
+
+Migration **0039** adds explicit format/revision/context metadata and a service-only owner/admin/founder administration RPC. Connector version and credential revision checks serialize stale rotation/revocation. Parent/lifecycle locks and live membership are repeated in SQL. Every credential change revokes prior grants and appends an atomic, redacted ledger event. Historical envelopes remain byte-for-byte intact as format 0 and cannot be opened by the v1 broker. No browser credential reads, token cache, acquisition endpoint or execution authority is added. Existing service-role access remains a trusted backend boundary; this milestone is not workload credential isolation.
+
+Validation: **394 BFF tests**, workspace tests/lint/typecheck; **40 migration files**, 51 public tables; ten concurrency suites, including both credential rotation/revocation orders; populated 0038→0039 upgrade; production dependency audit clean. Exact committed container/merge CI remains a separate gate, recorded in the session checkpoint after execution. Provider tests inject KMS responses; no real cloud KMS request was made. See [review 21](audits/21-credential-vault-review-2026-09-22.md).
+
+**Next:** finish W4.2 OAuth grant handlers, pinned token-endpoint transport, broker authorization seam and isolated reference-authorization-server tests. Then W4.3 workload identity, W4.4 per-invocation grants, full W3 wizard/readiness and graph, W4.5/6/7. No connectivity or readiness claim is implied by encrypted storage.
 
 ## Revision 31 — connector registry, contracts and lifecycle
 
@@ -1514,7 +1526,7 @@ Revisions 3 and 7 proposed registering a **separate OAuth client per agent** at 
 
 It is also largely redundant, because the fact it was protecting is **known statically**:
 
-> Of ten agents, exactly one — **Karya** — writes to external systems. The other nine are read-only against client estates, and five of them never touch a client system at all.
+> Of ten agents, **Karya** alone writes to external systems, **Drishti** alone reads client systems, and the other eight receive no client-system access.
 
 That is not a runtime property needing an external authority to adjudicate. It is a fixed property of the architecture, enforced at three points inside our own perimeter.
 
@@ -1523,7 +1535,7 @@ That is not a runtime property needing an external authority to adjudicate. It i
 | Layer | What it holds | Enforcement |
 | ----- | ------------- | ----------- |
 | **Per tenant-connector** | **One** registered OAuth client identity, with read and write scopes available | Client's IdP |
-| **Read scope** | Requested by any agent holding `connector.read:<tenant>:<estate>` | Broker (W4.2), SPIFFE-authenticated |
+| **Read scope** | Requested only by Drishti holding the matching tenant/estate/connector read grant | Broker (W4.2), SPIFFE-authenticated |
 | **Write scope** | Requested **only** when the caller's SVID is Karya's **and** a valid approval token exists | Broker + approval gate (`v1.ts:319-470`) |
 
 One registration, one rotation, one scope set to validate. Onboarding friction drops sharply, which matters for the ICP.
@@ -1545,7 +1557,9 @@ Revision 3 claimed a client's IdP could refuse a write-scoped token to any ident
 | Boundary | Mechanism | Status |
 | -------- | --------- | ------ |
 | **Inside Axiom's perimeter** — agent-runtime, BFF, model-gateway, temporal-workers, agent-to-agent, internal MCP registry | **SPIFFE/SPIRE SVIDs** for all ten agents. Single trust domain, one root of trust, no federation | **Real, enforceable, ships in W4.3** |
-| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The agent's JWT-SVID is the `private_key_jwt` client assertion | Real. The client validates a JWT signed by a key it trusts, not a SPIFFE identity |
+| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The broker issues a separate OAuth client assertion using the registered connector identity | Planned W4.2/3. A workload SVID authenticates the caller inside Axiom; it is not forwarded as an OAuth client assertion |
+
+**Revision 32 protocol correction:** `private_key_jwt` client authentication and the `jwt_bearer` authorization grant are different uses of JWTs. The client-authentication assertion must identify the registered OAuth client as subject and use an audience accepted by the target authorization server. An agent SVID is therefore not interchangeable with that assertion. Keep internal workload authentication separate from external connector authentication. This preserves the accepted one-client-per-connector decision. [RFC 7523 §§2–3](https://www.rfc-editor.org/rfc/rfc7523.html#section-3).
 
 SPIFFE never reaches into a client's infrastructure without federation the client would have to run SPIRE for — which no mid-market client will. Scoping it intra-perimeter is what makes W4.3 something that actually ships rather than an aspiration.
 
