@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 31 — CONNECTOR REGISTRY AND LIFECYCLE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `c79c303`, green CI [35647963475](https://github.com/vikashkaruna/Proof/actions/runs/35647963475); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 32 — CREDENTIAL VAULT FOUNDATION** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `be69c3f`, green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 32 — W4.2 credential vault and rotation foundation
+
+Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
+
+Delivered: tenant/connector/credential/configuration-bound AES-256-GCM envelopes, independent random data keys, Mumbai-only AWS/GCP KMS adapters with tenant-specific key rings, authenticated context and provider response checks (including GCP CRC32C). Rotation retains the old stored envelope until the new envelope and audit event commit. Secret buffers are cleared after use; this is best-effort buffer hygiene, not a claim that JavaScript/SDK heaps can be erased.
+
+Migration **0039** adds explicit format/revision/context metadata and a service-only owner/admin/founder administration RPC. Connector version and credential revision checks serialize stale rotation/revocation. Parent/lifecycle locks and live membership are repeated in SQL. Every credential change revokes prior grants and appends an atomic, redacted ledger event. Historical envelopes remain byte-for-byte intact as format 0 and cannot be opened by the v1 broker. No browser credential reads, token cache, acquisition endpoint or execution authority is added. Existing service-role access remains a trusted backend boundary; this milestone is not workload credential isolation.
+
+Validation: **394 BFF tests**, workspace tests/lint/typecheck; **40 migration files**, 51 public tables; ten concurrency suites, including both credential rotation/revocation orders; populated 0038→0039 upgrade; production dependency audit clean. Exact committed container/merge CI remains a separate gate, recorded in the session checkpoint after execution. Provider tests inject KMS responses; no real cloud KMS request was made. See [review 21](audits/21-credential-vault-review-2026-09-22.md).
+
+**Next:** finish W4.2 OAuth grant handlers, pinned token-endpoint transport, broker authorization seam and isolated reference-authorization-server tests. Then W4.3 workload identity, W4.4 per-invocation grants, full W3 wizard/readiness and graph, W4.5/6/7. No connectivity or readiness claim is implied by encrypted storage.
 
 ## Revision 31 — connector registry, contracts and lifecycle
 
@@ -1375,7 +1387,7 @@ Four layers, each independently testable. The bottom two are the reusable framew
 ┌─ L1 · WORKLOAD IDENTITY ──▼────────────────────────────────┐
 │  SPIFFE / SPIRE — X.509-SVID & JWT-SVID per agent workload │
 │  INTRA-PERIMETER only. All 10 agents; Karya's ID ≠ Sudhaar's│
-│  Crosses to client systems as private_key_jwt assertion     │
+│  Broker uses separate registered-client assertions       │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -1386,7 +1398,7 @@ Each agent runtime workload receives its own SVID. Karya, Sudhaar and Drishti ar
 The benefit is real but its boundary matters, and Revision 3 drew it too generously — see **the workload-identity correction** under the MCP posture below. Precisely:
 
 - **Inside Axiom's perimeter**, SVIDs give per-agent identity with a single trust domain and no federation. Sudhaar's workload is structurally incapable of presenting Karya's identity to the broker, so `connector.write` cannot be acquired on its behalf. This is enforceable and it ships in W4.3.
-- **Across to the client**, SPIFFE does not reach without federation the client will not run. The SVID crosses the boundary as a `private_key_jwt` **client assertion** against **one** connector identity per tenant — see *External-system authentication* below. Per-agent registration at the client's IdP is available as **optional hardening**, not the default.
+- **Across to the client**, the broker authenticates as the registered connector identity using a separate OAuth assertion; the internal SVID stays inside Axiom. Per-agent client registration remains optional hardening. See the Revision 32 protocol correction under *External-system authentication*.
 
 It is also the enabling primitive for **M5.1 split-plane** and **W10 on-prem** — an in-perimeter data plane proves its identity without a shared secret crossing the boundary.
 
@@ -1416,15 +1428,15 @@ Every agent gets its own SVID, not just the three I used as examples. Here is th
 
 **So: only two of ten agents ever touch a client estate.** Drishti reads it; Karya writes to it. Five more handle estate-*derived* data — including personal data — without any connector access at all. Three never see client data in any form.
 
-That concentration is the real security story, and it is a good one. It means connector grants (W4.4) only ever need to be issued to two workload identities, and the client's IdP can be configured to refuse a connector token to any of the other eight outright.
+Connector grants (W4.4) are issued only to those two internal workload identities. In the accepted shared connector-client model, Axiom's broker refuses the other eight; the client's IdP enforces target scopes against the connector identity. Separate per-agent registrations can add external enforcement when explicitly configured.
 
-#### Discrepancies found while reconciling — all fixed in this chunk
+#### Discrepancies — delivered declarations versus pending W4.3 enforcement
 
-1. **Nazar** holds `control_library.write`; the architecture says "External sources read". See **SEC-15** — downgraded to `regulatory_signal.write`.
-2. **Prativedan has no read scope at all**, yet the architecture describes it as "Read all". It assembles client-facing reports containing findings, evidence and personal data — so it has the **broadest de facto data access of any agent and the thinnest declared permissions**. Its reads are currently ungoverned. Gets explicit, tenant-and-estate-scoped read scopes.
-3. **`canMutate` does not mean "read-only"** and is documented nowhere. Six of ten agents with `canMutate: false` hold a `.write` scope. It actually means "mutates *client* systems". A contributor reading `canMutate: false` as "harmless" would be wrong about Drishti, Parikshan, Saakshi, Lekha, Nazar and Prativedan. Renamed `mutatesClientEstate`, with `writesAxiomState` added alongside it.
+1. **Nazar — declaration fix already delivered** in `cc3fcee`: both TS and Python declare `regulatory_signal.write` instead of `control_library.write`. Preserve that work. W4.3 must prove runtime/workload enforcement; do not report the declaration change as newly implemented.
+2. **Prativedan has no read scope at all**, yet the architecture describes it as "Read all". It assembles client-facing reports containing findings, evidence and personal data — so it has the **broadest de facto data access of any agent and the thinnest declared permissions**. Its reads need explicit, tenant-and-estate-scoped permissions and enforcement in W4.3; this remains pending.
+3. **`canMutate` does not mean "read-only"** and is documented nowhere. Six of ten agents with `canMutate: false` hold a `.write` scope. It actually means "mutates *client* systems". A contributor reading `canMutate: false` as "harmless" would be wrong about Drishti, Parikshan, Saakshi, Lekha, Nazar and Prativedan. The planned `mutatesClientEstate`/`writesAxiomState` distinction is not implemented: TS still uses `canMutate`, Python `can_mutate`. Preserve Sudhaar's enforced non-mutating contract while introducing compatible, explicit metadata and tests in W4.3.
 4. **Saakshi's "write-once"** (architecture) is expressed as ordinary `evidence.write` + `s3.write_worm` strings with nothing enforcing append-only. WORM must be enforced at the object store (Object Lock / MinIO compliance mode), not asserted by a scope name.
-5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture doc corrected to match.
+5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture scope-table alignment and enforcement conformance remain part of W4.3; the current table still uses the abbreviated descriptions.
 
 #### The missing dimension: scopes have no estate
 
@@ -1444,8 +1456,8 @@ Resolved at token-acquisition time by the credential broker (W4.2) and mapped on
 
 Declared scopes become checked scopes, at three layers:
 
-1. **Workload identity (L1)** — each agent's SVID carries its permitted scope set. Karya's identity is the only one that can ever be issued a `connector.write` token; Sudhaar's identity is structurally incapable of holding one, enforced by the client's IdP rather than by our code.
-2. **Broker (L2)** — refuses to acquire a token for a scope the requesting SVID does not hold. Over-broad requests are rejected and logged as a security event, not silently narrowed.
+1. **Workload identity (L1)** — authenticate the agent's SVID, then resolve its permitted scopes from trusted, current workload registration and policy. Only Karya may obtain write authority; Sudhaar receives no connector authority. Enforcement lives inside Axiom under the accepted single external connector identity. SVIDs prove workload identity; custom scope claims are not assumed to exist. [JWT-SVID specification](https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#3-jwt-claims).
+2. **Broker (L2)** — refuses to acquire a token for a scope the authenticated workload is not currently permitted to use. Over-broad requests are rejected and logged as a security event, not silently narrowed.
 3. **Runtime (agent-runtime)** — every tool invocation checks the scope before dispatch. An undeclared scope raises and is written to the ledger. This is the piece that makes `tool_scopes` load-bearing instead of decorative.
 
 A conformance test per agent asserts its declared set matches its enforced set, so the three declaration sites cannot drift apart again — which is how discrepancies 1–5 arose.
@@ -1514,7 +1526,7 @@ Revisions 3 and 7 proposed registering a **separate OAuth client per agent** at 
 
 It is also largely redundant, because the fact it was protecting is **known statically**:
 
-> Of ten agents, exactly one — **Karya** — writes to external systems. The other nine are read-only against client estates, and five of them never touch a client system at all.
+> Of ten agents, **Karya** alone writes to external systems, **Drishti** alone reads client systems, and the other eight receive no client-system access.
 
 That is not a runtime property needing an external authority to adjudicate. It is a fixed property of the architecture, enforced at three points inside our own perimeter.
 
@@ -1523,7 +1535,7 @@ That is not a runtime property needing an external authority to adjudicate. It i
 | Layer | What it holds | Enforcement |
 | ----- | ------------- | ----------- |
 | **Per tenant-connector** | **One** registered OAuth client identity, with read and write scopes available | Client's IdP |
-| **Read scope** | Requested by any agent holding `connector.read:<tenant>:<estate>` | Broker (W4.2), SPIFFE-authenticated |
+| **Read scope** | Requested only by Drishti holding the matching tenant/estate/connector read grant | Broker (W4.2), SPIFFE-authenticated |
 | **Write scope** | Requested **only** when the caller's SVID is Karya's **and** a valid approval token exists | Broker + approval gate (`v1.ts:319-470`) |
 
 One registration, one rotation, one scope set to validate. Onboarding friction drops sharply, which matters for the ICP.
@@ -1545,7 +1557,9 @@ Revision 3 claimed a client's IdP could refuse a write-scoped token to any ident
 | Boundary | Mechanism | Status |
 | -------- | --------- | ------ |
 | **Inside Axiom's perimeter** — agent-runtime, BFF, model-gateway, temporal-workers, agent-to-agent, internal MCP registry | **SPIFFE/SPIRE SVIDs** for all ten agents. Single trust domain, one root of trust, no federation | **Real, enforceable, ships in W4.3** |
-| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The agent's JWT-SVID is the `private_key_jwt` client assertion | Real. The client validates a JWT signed by a key it trusts, not a SPIFFE identity |
+| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The broker issues a separate OAuth client assertion using the registered connector identity | Planned W4.2/3. A workload SVID authenticates the caller inside Axiom; it is not forwarded as an OAuth client assertion |
+
+**Revision 32 protocol correction:** `private_key_jwt` client authentication and the `jwt_bearer` authorization grant are different uses of JWTs. The client-authentication assertion must identify the registered OAuth client as subject and use an audience accepted by the target authorization server. An agent SVID is therefore not interchangeable with that assertion. Keep internal workload authentication separate from external connector authentication. This preserves the accepted one-client-per-connector decision. [RFC 7523 §§2–3](https://www.rfc-editor.org/rfc/rfc7523.html#section-3).
 
 SPIFFE never reaches into a client's infrastructure without federation the client would have to run SPIRE for — which no mid-market client will. Scoping it intra-perimeter is what makes W4.3 something that actually ships rather than an aspiration.
 
@@ -1599,7 +1613,7 @@ Each independently mergeable, tested and staging-deployable. **W5 unblocks at W4
 | ----- | ----------- | -------- |
 | **W4.1** | Registry + contract: `ReadConnector`/`WriteConnector` (TS + Python), capability-descriptor schema and loader, `connectors` / `connector_health_checks` tables, lifecycle | — |
 | **W4.2** | **Credential broker core** + `client_credentials` and `jwt_bearer` handlers; per-tenant envelope-encrypted vault; rotation; zero plaintext in Postgres | — |
-| **W4.3** | **SPIFFE workload identity, intra-perimeter** — SPIRE deployment, **SVIDs for all ten agents**, scope enforcement at identity/broker/runtime (closes SEC-14), Nazar downgraded to `regulatory_signal.write` (closes SEC-15), `token_exchange` handler with `act`-chain capture | Enforced SoD + W10 |
+| **W4.3** | **SPIFFE workload identity, intra-perimeter** — SPIRE deployment, **SVIDs for all ten agents**, scope enforcement at identity/broker/runtime (closes SEC-14), enforce Nazar's already-corrected `regulatory_signal.write` declaration (SEC-15), `token_exchange` handler with `act`-chain capture | Enforced SoD + W10 |
 | **W4.4** | **Grant model** — `connector_grants` with scope/`expires_at`/`revoked_at`, mapped to target OAuth scopes; enforced per invocation; portal grant/revoke UI; ledger event per change | **W5 unblocks here** |
 | **W4.5** | **Internal MCP tool registry** — perimeter-scoped, hash-pinned descriptions, deny-by-default read/write classification. Delivers §5.2's "Tool/MCP Server registry" | Governed agent tooling |
 | **W4.6** | **First live binding — PostgreSQL/MySQL** via SQL transport + cloud-IAM credential path, end to end against a live staging database | Real Drishti discovery |

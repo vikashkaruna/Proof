@@ -1,0 +1,65 @@
+begin;
+create function pg_temp.ok(value boolean,message text) returns void language plpgsql as $$
+begin if value is distinct from true then raise exception 'ASSERTION FAILED: %',message; end if; end $$;
+create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('42420000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+insert into auth.users(id,email) values(pg_temp.id(1),'vault@test.invalid');
+insert into public.users(id,email) values(pg_temp.id(1),'vault@test.invalid');
+insert into public.tenants(id,slug,name) values(pg_temp.id(2),'vault','Vault'),(pg_temp.id(9),'vault-foreign','Foreign');
+insert into public.tenant_users(tenant_id,user_id,role) values(pg_temp.id(2),pg_temp.id(1),'admin');
+insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(3),pg_temp.id(2),'estate','Estate');
+insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) values(pg_temp.id(4),pg_temp.id(2),pg_temp.id(3),'CRM','saas');
+insert into public.connector_descriptors(id,slug,version,transport,target_binding,manifest) values(pg_temp.id(5),'vault','1.0.0','rest','production','{"auth":"oauth2.client_credentials"}');
+insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_binding,name,endpoint_ref,assurance) values(pg_temp.id(6),pg_temp.id(2),pg_temp.id(4),pg_temp.id(5),'production','CRM','crm','high');
+create function pg_temp.envelope() returns jsonb language sql as $$ select jsonb_build_object('formatVersion',1,'algorithm','aes-256-gcm','grantType','client_credentials','descriptorSha256',content_sha256,'endpointRef','crm','targetBinding','production','keyRef','fixture/key','nonce',repeat('aa',12),'ciphertext',repeat('bb',32),'wrappedDataKey',repeat('cc',80)) from public.connector_descriptors where id=pg_temp.id(5) $$;
+create function pg_temp.manage(op text,rev int,body jsonb default pg_temp.envelope(),credential uuid default pg_temp.id(7)) returns jsonb language sql as $$
+ select public.manage_connector_credential(pg_temp.id(2),pg_temp.id(1),pg_temp.id(6),credential,op,1,rev,body,gen_random_uuid()) $$;
+set local role service_role;
+do $$declare r jsonb; n bigint; begin
+ r:=pg_temp.manage('create',0);
+ perform pg_temp.ok(r->>'revision'='1' and r->>'revoked'='false','vault creation');
+ perform pg_temp.ok((select format_version=1 and descriptor_sha256 is not null from public.connector_credentials where id=pg_temp.id(7)),'context persisted');
+ perform pg_temp.ok(pg_temp.manage('create',0,pg_temp.envelope(),pg_temp.id(8))->>'error'='credential_exists','single current credential');
+ perform pg_temp.ok(pg_temp.manage('rotate',0)->>'error'='version_conflict','stale rotation refused');
+ perform pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"endpointRef":"other"}')->>'error'='invalid_envelope','target mismatch');
+ perform pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"descriptorSha256":null}')->>'error'='invalid_envelope','missing digest');
+ perform pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"grantType":"jwt_bearer"}')->>'error'='invalid_envelope','descriptor auth family enforced');
+ perform pg_temp.ok(public.manage_connector_credential(pg_temp.id(9),pg_temp.id(1),pg_temp.id(6),pg_temp.id(7),'rotate',1,1,pg_temp.envelope(),gen_random_uuid())->>'error'='forbidden','foreign tenant denied');
+ insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values(pg_temp.id(10),pg_temp.id(2),'drishti','spiffe://test/drishti');
+ insert into public.connector_grants(tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values(pg_temp.id(2),pg_temp.id(6),pg_temp.id(10),'drishti','connector.read',now()+interval '1 hour');
+ select count(*) into n from public.audit_ledger;
+ begin
+  perform public.manage_connector_credential(pg_temp.id(2),pg_temp.id(1),pg_temp.id(6),pg_temp.id(7),'rotate',1,1,pg_temp.envelope()||'{"keyRef":"fixture/next"}',null);
+  raise exception 'audit failure must throw';
+ exception when not_null_violation then null; end;
+ perform pg_temp.ok((select revision=1 and key_ref='fixture/key' from public.connector_credentials where id=pg_temp.id(7)),'audit failure preserves working key');
+ perform pg_temp.ok((select bool_and(revoked_at is null) from public.connector_grants where connector_id=pg_temp.id(6)),'audit failure preserves grants');
+ perform pg_temp.ok((select count(*)=n from public.audit_ledger),'failed rotation has no success event');
+ r:=pg_temp.manage('rotate',1,pg_temp.envelope()||'{"keyRef":"fixture/next"}');
+ perform pg_temp.ok(r->>'revision'='2','rotation increments revision');
+ perform pg_temp.ok((select bool_and(revoked_at is not null) from public.connector_grants where connector_id=pg_temp.id(6)),'rotation revokes prior authority');
+ perform pg_temp.ok(r::text not like '%fixture%' and r::text not like '%ciphertext%','result contains no private envelope');
+ r:=pg_temp.manage('revoke',2,null);
+ perform pg_temp.ok(r->>'revoked'='true' and r->>'revision'='3','revocation advances revision');
+ perform pg_temp.ok(pg_temp.manage('rotate',3)->>'error'='version_conflict','cannot rotate revoked credential');
+ r:=pg_temp.manage('create',0,pg_temp.envelope(),pg_temp.id(8));
+ perform pg_temp.ok(r->>'revision'='1','new identity after revocation');
+end $$;
+reset role;
+-- Parent archival and endpoint retargeting cannot reuse an old envelope.
+update public.connectors set endpoint_ref='other' where id=pg_temp.id(6);
+set local role service_role;
+select pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"endpointRef":"other"}',pg_temp.id(8))->>'error'='credential_unavailable','retargeted stored context refused');
+reset role;
+update public.estates set status='archived' where id=pg_temp.id(3);
+set local role service_role;
+select pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope(),pg_temp.id(8))->>'error'='parent_archived','archived parent refused');
+select pg_temp.ok(pg_temp.manage('revoke',1,null,pg_temp.id(8))->>'revoked'='true','cleanup allowed under archived parent');
+reset role;
+update public.tenant_users set role='viewer' where tenant_id=pg_temp.id(2);
+set local role service_role;
+select pg_temp.ok(pg_temp.manage('create',0)->>'error'='forbidden','live demotion respected');
+reset role;
+select pg_temp.ok(not has_function_privilege('authenticated','public.manage_connector_credential(uuid,uuid,uuid,uuid,text,integer,integer,jsonb,uuid)','execute'),'browser RPC denied');
+select pg_temp.ok(not has_table_privilege('authenticated','public.connector_credentials','select'),'browser vault reads denied');
+select pg_temp.ok((select bool_and(detail::text not like '%fixture/%' and detail::text not like '%ciphertext%' and detail::text not like '%wrappedDataKey%') from public.audit_ledger where action_type='connector.credential_changed'),'audit payload excludes private envelope');
+rollback;

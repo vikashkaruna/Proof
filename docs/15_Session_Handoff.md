@@ -1,8 +1,18 @@
 # Axiom Proof — implementation session handoff
 
-Committed container build `8091c76` passed **63 browser journeys and 89 API/restart outcomes in each of preprod and production**, with zero retries and matching sanitized results. Final review also aligned nil/max descriptor UUID refusal across TS/Python; 364 BFF and 120 runtime tests plus workspace typecheck pass after that correction. The final merge CI is the closure gate and is saved in the private session checkpoint. Earlier `0e14602`/`05e265a` fixture failures are superseded, not counted as successful acceptance.
+Committed source `4a6b13c` passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod and production container configurations, with zero retries and matching sanitized results. Final merge CI remains the exact staging gate; its result is saved in the private session checkpoint.
 
-Fetch staging first. This file belongs to the W4.1 milestone; the containing merge and exact CI result are recorded in ignored `.axiom-runtime/session-checkpoint.json` after validation. Reviewed upstream `c79c303`, green CI 35647963475. No newer other-model work appeared during this review. Worktree `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`; preserve the root and Claude worktrees.
+## Revision 32 — W4.2 credential vault and rotation foundation
+
+Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
+
+Delivered: tenant/connector/credential/configuration-bound AES-256-GCM envelopes, independent random data keys, Mumbai-only AWS/GCP KMS adapters with tenant-specific key rings, authenticated context and provider response checks (including GCP CRC32C). Rotation retains the old stored envelope until the new envelope and audit event commit. Secret buffers are cleared after use; this is best-effort buffer hygiene, not a claim that JavaScript/SDK heaps can be erased.
+
+Migration **0039** adds explicit format/revision/context metadata and a service-only owner/admin/founder administration RPC. Connector version and credential revision checks serialize stale rotation/revocation. Parent/lifecycle locks and live membership are repeated in SQL. Every credential change revokes prior grants and appends an atomic, redacted ledger event. Historical envelopes remain byte-for-byte intact as format 0 and cannot be opened by the v1 broker. No browser credential reads, token cache, acquisition endpoint or execution authority is added. Existing service-role access remains a trusted backend boundary; this milestone is not workload credential isolation.
+
+Validation: **394 BFF tests**, workspace tests/lint/typecheck; **40 migration files**, 51 public tables; ten concurrency suites, including both credential rotation/revocation orders; populated 0038→0039 upgrade; production dependency audit clean. Exact committed container/merge CI remains a separate gate, recorded in the session checkpoint after execution. Provider tests inject KMS responses; no real cloud KMS request was made. See [review 21](audits/21-credential-vault-review-2026-09-22.md).
+
+**Next:** finish W4.2 OAuth grant handlers, pinned token-endpoint transport, broker authorization seam and isolated reference-authorization-server tests. Then W4.3 workload identity, W4.4 per-invocation grants, full W3 wizard/readiness and graph, W4.5/6/7. No connectivity or readiness claim is implied by encrypted storage.
 
 ## Revision 31 — connector registry, contracts and lifecycle
 
@@ -28,8 +38,8 @@ Validation includes descriptor/role/tenant/API refusals, SQL audit rollback, bot
 
 ## Next implementation order
 
-1. W4.2: credential broker, per-tenant envelope storage/rotation, short-lived client-credentials and JWT-bearer handlers. Extend the existing credential grant-type constraint append-only. Do not accept arbitrary token URLs or leak credentials through errors/ledger. Use isolated local reference authorization servers for conformance; no real client credentials are needed.
-2. W4.3: SPIFFE/SPIRE identities for all ten agents, broker/runtime scope checks, token exchange and actor-chain evidence. Only Drishti reads and Karya writes client systems; remove Nazar control-library write authority.
+1. W4.2: finish credential broker authorization and short-lived client-credentials/JWT-bearer handlers. Vault/rotation foundation and grant-family extension are now in 0039. Do not accept arbitrary token URLs or leak credentials through errors/ledger. Use isolated local reference authorization servers for conformance; no real client credentials are needed.
+2. W4.3: SPIFFE/SPIRE identities for all ten agents, broker/runtime scope checks, token exchange and actor-chain evidence. Only Drishti reads and Karya writes client systems; preserve Nazar's existing TS/Python declaration fix (`cc3fcee`) and prove runtime enforcement; complete the still-pending Prativedan read scopes and mutation metadata distinction.
 3. W4.4: live target-scoped grants, expiry/revocation and per-invocation enforcement, portal grant/revoke UI and audit. Disabled connector grants must stay revoked after re-enable. Existing reference-mock metadata is not authority to write.
 4. Complete W3 resumable company → estate → systems → connector/grant → readiness wizard and W3.5 real graph. Graph access edges must reflect enforced authority; do not turn stored grant rows into claims of access. Then W4.5 registry and W4.6 first live SQL binding, followed by W4.7 transports/descriptor pack.
 5. Retain deferred work: W0 per-service IAM, durable contact/mail and score/benchmark semantics, W1 invitations, W2 remaining targets, remote acceptance, W3 sustenance. No claim these are closed.
@@ -38,6 +48,6 @@ Validation includes descriptor/role/tenant/API refusals, SQL audit rollback, bot
 
 Run `scripts/test-deployed-http.sh --browser` from a clean committed tree. It exercises real Docker GoTrue/Postgres, BFF/web/marketing under preprod and production configurations, compares sanitized outcomes and performs the report restart probe. New connector tests cover registration replay, role/tenant refusal, archival, declared provenance, and an ambiguous response retry. Exact merge CI is the final staging gate.
 
-Local Supabase project `axiom-w0-parity`, API 56321, DB 56322. Apply **0038** with the normal checksum migration runner; 39 files, 51 tables. Next migration **0039 after fresh fetch**. No previous migration was changed. Descriptors live in `services/bff/src/connectors/descriptors`; changing published content requires a new descriptor ID/version. Loader/schema contract changes need TS/Python conformance tests. Production descriptors are declarations, not executable bindings.
+Local Supabase project `axiom-w0-parity`, API 56321, DB 56322. Apply **0039** with the normal checksum migration runner; 40 files, 51 tables. Next migration **0040 after fresh fetch**. No previous migration was changed. Descriptors live in `services/bff/src/connectors/descriptors`; changing published content requires a new descriptor ID/version. Loader/schema contract changes need TS/Python conformance tests. Production descriptors are declarations, not executable bindings.
 
 Implementation, local Docker tests, documentation and staging merge pushes are authorized. No billable cloud apply, real mail, client connector execution or retention changes. Higher environments dynamically deploy self-hosted Supabase. Sudhaar holds no client credentials; ledger writes use append_ledger. Private target/persona/probe data stays under ignored `.axiom-runtime`; never publish raw browser traces, cookies, secrets or private target JSON. Restore generated next-env.d.ts before commits; do not pop the superseded prototype stash.

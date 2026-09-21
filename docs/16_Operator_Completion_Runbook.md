@@ -1,13 +1,13 @@
-# Axiom Proof — Operator completion runbook: W0 → W3
+# Axiom Proof — Operator completion runbook: W0 → W4
 
 Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 31, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 32, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
-through W3 only, and — the part that is usually missing — **exactly what
+through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **39 migrations, 0000 → 0038**.
+non-zero on a failing migration. Expect **40 migrations, 0000 → 0039**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -475,3 +475,13 @@ _not_ prove, and [Doc 15](15_Session_Handoff.md) so the next session resumes
 from the new baseline — the same chain every checkpoint uses.
 
 **W4 onward:** continue in the existing plan order after available W1–W3 work; no new permission conversation is required for authorized engineering. The W2 connector schema batch precedes W5 execution details, and live execution still depends on W4.4 grants and controlled target validation.
+
+## W4-2 · Credential vault foundation (engineering delivered by 0039; W4.2 partial)
+
+**ENGINEERING:** Apply through 0039 before using the administrative vault adapter. Existing format-0 envelopes are preserved but refused by the new reader; re-provision deliberately after revoking the legacy row. Owner/admin/founder authority is rechecked in SQL. A connector edit invalidates credentials bound to the former endpoint. Rotation uses connector-version and credential-revision checks; on conflict, reload and review current state. A revoked credential cannot be resurrected. Every successful create/rotation/revocation revokes existing grants, so grant approval must be repeated. Retain old KMS resources while any unrevoked envelope references them; remove a retiring key only after verifying the reference count and a successful decryption under its replacement. A failed persistence/audit transaction leaves the old envelope usable.
+
+**OPERATOR, when deployment wiring is ready:** provision distinct per-tenant wrapping keys in Mumbai (`ap-south-1` AWS or `asia-south1` GCP), and grant the broker workload only the required encrypt/decrypt permissions. Configure explicit primary and retiring key references through the eventual broker deployment configuration. The adapters currently accept constructor configuration; there is no new environment variable or automatic shared-key fallback. No cloud provisioning is required to run fixture-based local tests.
+
+**Evidence to return:** sanitized key resource IDs/region, tenant-to-key uniqueness and IAM policy review, successful real KMS seal/open/rotation for synthetic data, atomic SQL rollback and concurrent-change tests, exact source/migration and deployment acceptance. Never provide clear secrets, DEKs, credential payloads or bearer tokens.
+
+**Still ENGINEERING:** OAuth handlers and pinned endpoint transport, explicit workload/grant authorization, internal acquisition endpoint, deployment/key-ring provisioning wiring, real provider acceptance. W4.3/4 remain mandatory before any agent acquisition endpoint is enabled. The vault milestone alone does not close W4.2 or connector execution.

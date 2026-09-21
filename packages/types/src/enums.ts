@@ -186,6 +186,7 @@ export const LedgerActionType = {
   ONBOARDING_PROPOSAL_REJECTED: 'onboarding.proposal.rejected',
   CONNECTOR_REGISTERED: 'connector.registered',
   CONNECTOR_UPDATED: 'connector.updated',
+  CONNECTOR_CREDENTIAL_CHANGED: 'connector.credential_changed',
   ESTATE_CREATED: 'estate.created',
   ESTATE_UPDATED: 'estate.updated',
   ESTATE_SYSTEM_CREATED: 'estate.system.created',
