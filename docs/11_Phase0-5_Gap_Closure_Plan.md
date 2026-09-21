@@ -50,7 +50,12 @@ appears. `-backend=false` is deliberate: prod's `main.tf` carries a live
 
 | Workstream | Delivered since Revision 19 | Remaining acceptance |
 | --- | --- | --- |
-| W0.1 | `terraform fmt -check -recursive` and `terraform validate` across every environment in the W0.1 job, on a pinned Terraform; four files reformatted; `envs/prod` made loadable for the first time | The gate has not yet run on GitHub Actions; prod is loadable, not reviewed as correct |
+| W0.1 | `terraform fmt -check -recursive` and `terraform validate` across every environment in the W0.1 job, on a pinned Terraform; four files reformatted; `envs/prod` made loadable for the first time | prod is loadable, not reviewed as correct; its public API CIDR is unchanged and remains a founder decision |
+
+**Confirmed on the runner, not only locally.** Staging CI [35584341666](https://github.com/vikashkaruna/Proof/actions/runs/35584341666) is
+green across all fifteen jobs on the merge commit, and the validate step's log
+shows both environment groups and two valid verdicts with no warnings — so the
+loop iterated both rather than matching nothing, which would also have exited 0.
 
 **What this does not do.** Nothing was applied and no cloud resource was
 created — `init -backend=false` and `validate` only. `validate` proves a
