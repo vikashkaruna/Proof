@@ -100,12 +100,22 @@ resource "google_cloud_run_v2_service" "bff" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_SERVICE_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_service_key"].secret_id
+            version = "latest"
+          }
+        }
       }
 
       env {
@@ -299,16 +309,26 @@ resource "google_cloud_run_v2_service" "web" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "SUPABASE_URL"
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
 
       startup_probe {
@@ -713,16 +733,26 @@ resource "google_cloud_run_v2_service" "marketing" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "SUPABASE_URL"
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name = "RESEND_API_KEY"

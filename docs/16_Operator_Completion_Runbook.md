@@ -205,9 +205,16 @@ date. I make the change and the gate re-validates.
 | C-W0-2 | Target-aware browser and persona harness    | Delivered: deployment-bound private state, real MFA enrollment, scoped SSR credentials and sanitized reports. Same browser suite; local Docker rehearsal is distinct from remote proof. |
 | C-W0-3 | Apply the EKS CIDR decision and re-validate | Awaits W0-9 operator policy.                                                                                                                                                            |
 
+### Additional engineering findings from Revision 28
+
+- **C-W0-4:** move the marketing gap-scan store from its legacy admin-client/process-memory fallback to BFF-owned durable storage. The current browser suite does not test full submission/retrieval persistence; add that evidence before claiming complete Phase 1 funnel acceptance.
+- **C-W0-5:** isolate Cloud Run service identities and secret permissions. Environment injection now separates scoped SSR keys from BFF keys, but the existing shared Cloud Run service account still needs least-privilege IAM review.
+
+The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending, and C-W0-4/5 are engineering responsibilities.
+
 ## How I mark W0 Closed
 
-I flip **W0 → Closed** when all of these hold, and not before:
+I flip **W0 → Closed** when the additional C-W0-4/5 findings are resolved with tests and all of these hold, and not before:
 
 1. Your W0-5 evidence shows **36 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
