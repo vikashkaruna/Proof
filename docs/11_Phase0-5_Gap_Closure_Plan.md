@@ -19,7 +19,7 @@ Cloud Run wiring review also found placeholder Auth values despite existing mana
 
 This closes engineering items C-W0-1/2, **not W0 remote acceptance**. No higher environment was provisioned. Local production-container evidence shares the local Docker Auth/Postgres stack and is labeled accordingly. Read [Doc 17](17_Deployed_Acceptance.md) for isolated-target setup, CI promotion requirements, fixture side effects and safe evidence handling. Migration tip remains 0035 (36 files, 51 public tables; W2 named targets 19/40).
 
-Next engineering follows the remaining dependencies: W1 invitation lifecycle, then W4.1 registry/contracts/lifecycle for the remaining W3 wizard; W2 execution-detail groups follow stable W4 permissions. E.2.3 replacement-session policy remains unresolved and is separate from the accepted onboarding admin decision.
+Next engineering follows the remaining dependencies: W1 invitation lifecycle, then W4.1 registry/contracts/lifecycle for the remaining W3 wizard; W2 execution-detail groups follow stable W4 permissions. E.2.3 is now resolved by the user: recovery-code replacement must invalidate sessions attested by the retired factor. Implementation and regression evidence remain pending as a separate W1 milestone.
 
 ---
 
@@ -1902,7 +1902,7 @@ These change the shape of the work, so I would rather ask than assume.
 
 2. **Mock-data line (needed before W3/W4 UI work).** You said mock may stay for demo. My proposal: permitted **only** behind an explicit `demo` tenant flag, never hardcoded in a page component (QUA-2), and subject to the same `provenance: 'simulated'` labelling as simulated connectors. Everything else reads real tables, empty states included. I will proceed on this basis unless you say otherwise.
 
-3. **Sessions after an authenticator is replaced (Revision 22; needed before W1 acceptance).** Replacing a factor retires the old one, so it satisfies no future step-up. It does not touch `mfa_session_attestations` already issued against it, so a session that logged in with the retired authenticator stays attested until its own expiry. Where the replacement was satisfied by the *current* factor this is clearly right — the user holds the device and is standing at the keyboard. Where it was satisfied by a **recovery code** it is a genuine question: the user did not have their authenticator, which is consistent with having lost it and also with someone else holding it. Invalidating those attestations closes that case and signs out a user who was merely travelling without their phone; leaving them means a stolen device's session survives the replacement meant to shut it out. My proposal is to invalidate on the recovery-code path only, and to say so on the page before the user commits. Not implemented either way pending your call — no current behaviour depends on the answer.
+3. **Resolved 21 Sep 2026 — sessions after recovery-code replacement.** The user requires sessions verified with the retired authenticator to complete MFA again when replacement is authorized by a recovery code. Replacement authorized with the current factor keeps its existing behavior. Implement revocation atomically with activation and the recovery-set swap; show the effect before confirmation. Tests must prove old-factor attestations end on the recovery path and remain on the current-factor path. **Decision accepted; implementation pending.**
 
 ---
 

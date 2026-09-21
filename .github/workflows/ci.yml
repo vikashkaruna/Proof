@@ -33,7 +33,7 @@ jobs:
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: ./scripts/test-deployed-http.sh --browser
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: container-http-acceptance
           path: |
