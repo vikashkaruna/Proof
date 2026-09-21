@@ -2,11 +2,82 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 21 — ESTATE INVENTORY FOUNDATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `a73dad7`, including the browser approval journeys, MFA key ring, Helm render gate and both-environment Terraform validation.
+**Document:** 11 · **Revision 22 — AUTHENTICATOR REPLACEMENT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `ad2d046`, including the estate inventory foundation, the browser harness privilege separation and the approval-page hydration fix.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 21 — current implementation checkpoint
+## Revision 22 — current implementation checkpoint
+
+Migration **0030**. W1's replacement path, which Revision 21 carried forward as
+a UI gap and which turned out to be broken at three layers — each one hiding
+the next.
+
+**A refusal that looked like a control working.** The Replace button called
+`POST /v1/mfa/enrol` with no `mfaChallengeId`, and the BFF refused it with
+`mfa_challenge_required`. That refusal is correct, and it is why the defect
+survived review: a gate that refuses every caller is indistinguishable from a
+gate that works. Because no request had ever cleared it, nothing had ever
+reached the code behind it.
+
+**What was behind it.** `user_mfa_factors_one_active_totp` (migration 0012) is
+UNIQUE on `user_id` WHERE `totp AND active`. Activation promoted the pending
+factor with a bare UPDATE and never retired the one being replaced, so it
+raised `23505` for any user who already held a factor — and the service
+reported that unique violation as `no_pending_factor`, rendered as "No
+enrolment is in progress". A reason that names the wrong layer is worse than no
+reason: fixing only the UI would have swapped a clean refusal for a confusing
+one, arriving after the user had been shown a new secret.
+
+**The fix, in three parts.** `activate_totp_factor` (0030) retires the replaced
+factor and activates the new one under one set of row locks. Neither order is
+safe from outside a transaction, and revoke-then-activate is the worse of the
+two for a reason beyond lockout: a first enrolment is deliberately not step-up
+gated, so an account momentarily holding no active factor is one a stolen
+session can enrol its own device on — the revoke-then-re-enrol chain the
+enrolment gate exists to break. The security page now opens the `enrolment`
+challenge, satisfies it with the current authenticator or a recovery code, and
+spends it, carrying a per-attempt `Idempotency-Key` because it is the third
+caller of `/v1/mfa/challenge` and the bridge's derived key is fixed for its
+body. `BeginMfaEnrolmentRequestSchema` declares `mfaChallengeId`, which the
+route had been reading off the raw body — an undeclared field is a contract
+nobody can see, and no client sent it for exactly as long.
+
+**Coverage, where there was none.** `/v1/mfa/enrol` had no route test at all;
+seven now. A SQL suite covers 0030 and separately asserts the unique index
+still bites, so dropping it cannot make the function's own tests pass while two
+live authenticators quietly become possible. Five browser journeys cover first
+enrolment, replacement by TOTP, replacement by recovery code, single-use
+consumption and both refusals. The in-memory PostgREST double now models the
+unique index rather than being more permissive than the database — it was that
+permissiveness that let the bare UPDATE pass every unit test in the repository.
+
+The journeys provision their own accounts instead of borrowing seeded personas.
+Enrolment and recovery-code consumption are state transitions on the account,
+so persona-based journeys pass once on a freshly seeded database and fail on
+every rerun — under `retries: 2` that appears as a product flake rather than a
+fixture defect. Confirmed re-runnable by running them twice against an already
+mutated database.
+
+**Delivered:** replacement by current factor and by recovery code, atomic
+retirement of the replaced factor, and the coverage above. **Pending:** factor
+revocation through the UI, enrolment under login quarantine, and estate
+management APIs/UI. W1 remains partial. Migration allocation is through
+**0030**.
+
+**Open decision, not an oversight.** Replacing an authenticator does not
+invalidate live session attestations made with the retired factor. Where the
+replacement was satisfied by a *recovery code*, the user by definition did not
+have their device, and whether that should end sessions the lost device
+attested is a posture question with a real cost either way. It is recorded in
+E.2 rather than answered here.
+
+See [review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md),
+[progress](14_Implementation_Progress.md), and
+[session handoff](15_Session_Handoff.md).
+
+---
+
+## Revision 21 — prior implementation checkpoint
 
 W2 estate foundation, migration **0029**: `estates`, `estate_systems`, `system_data_categories`, `estate_scans`, and an optional estate reference on engagements. Every relationship uses a tenant-consistent composite foreign key. Authenticated clients have membership-bound reads only; the BFF has explicit policies that work without BYPASSRLS. Referenced records cannot be deleted out from under their history; estates/systems can be archived. A queued scan is metadata, not evidence that discovery ran.
 
@@ -1021,13 +1092,15 @@ Code parity alone is not enough — preprod currently has no database to be stri
 
 Enforcement is **step-up, not blanket**: required at login for `founder` / `owner` / `approver`, and **re-challenged at the moment of approval-token issuance**. That second challenge is the one that matters — it binds a fresh, strong authentication to the exact act of approving, which is what FR-7.3 ("approver identity, timestamp, scope recorded") actually needs to mean in front of an auditor. Recovery codes issued at enrolment, single-use, hashed at rest.
 
+**Authenticator replacement (Revision 22).** Replacing a live factor requires an `enrolment` challenge satisfied with the current authenticator or a recovery code, and the swap is atomic: migration 0030's `activate_totp_factor` retires the replaced factor and activates the new one under one set of row locks. The one-active-TOTP unique index makes any two-statement version either impossible or unsafe — revoke-then-activate leaves a window in which an account holds no factor, and a first enrolment is not step-up gated. Recovery codes are reissued on replacement so a code spent against the old factor does not outlive it.
+
 **Exit:** a `viewer` in tenant A cannot see tenant B, cannot reach an approve button, and cannot call the approve endpoint. Proven by test, not inspection.
 
 ---
 
 ## W2 · Data model completion — **P0** · size M
 
-Append-only migrations, allocated from the next unused number. **0000–0029 exist** at Revision 21; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+Append-only migrations, allocated from the next unused number. **0000–0030 exist** at Revision 22; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)
@@ -1702,6 +1775,8 @@ These change the shape of the work, so I would rather ask than assume.
 1. **Sectoral pack #1 (needed before W7's pack work).** Healthcare (ABDM/NHA retention vs DPDPA erasure conflict) or BFSI (RBI / Account Aggregator overlay)? Pick whichever is closest to your live pipeline — everything before it proceeds regardless.
 
 2. **Mock-data line (needed before W3/W4 UI work).** You said mock may stay for demo. My proposal: permitted **only** behind an explicit `demo` tenant flag, never hardcoded in a page component (QUA-2), and subject to the same `provenance: 'simulated'` labelling as simulated connectors. Everything else reads real tables, empty states included. I will proceed on this basis unless you say otherwise.
+
+3. **Sessions after an authenticator is replaced (Revision 22; needed before W1 acceptance).** Replacing a factor retires the old one, so it satisfies no future step-up. It does not touch `mfa_session_attestations` already issued against it, so a session that logged in with the retired authenticator stays attested until its own expiry. Where the replacement was satisfied by the *current* factor this is clearly right — the user holds the device and is standing at the keyboard. Where it was satisfied by a **recovery code** it is a genuine question: the user did not have their authenticator, which is consistent with having lost it and also with someone else holding it. Invalidating those attestations closes that case and signs out a user who was merely travelling without their phone; leaving them means a stolen device's session survives the replacement meant to shut it out. My proposal is to invalidate on the recovery-code path only, and to say so on the page before the user commits. Not implemented either way pending your call — no current behaviour depends on the answer.
 
 ---
 
