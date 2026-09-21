@@ -6,3 +6,5 @@ export * from './rbac';
 export * from './estate';
 
 export * from './connectors';
+
+export * from './connector-contracts';

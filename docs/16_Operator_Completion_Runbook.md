@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **38 migrations, 0000 → 0037**.
+non-zero on a failing migration. Expect **39 migrations, 0000 → 0038**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -223,7 +223,7 @@ For report rollout, apply 0037 and deploy BFF/marketing together; seed the publi
 
 I flip **W0 → Closed** when the remaining C-W0-5/6/7 findings are resolved with tests and all of these hold, and not before:
 
-1. Your W0-5 evidence shows **38 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **39 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -415,6 +415,24 @@ The initial intake is a single complete batch. Per-item exclusion and later onbo
 3. No estate or scope is ever inferred. A legacy engagement becomes assigned
    only through a recorded human action.
 4. Browser journeys cover a full estate lifecycle under strict auth.
+
+---
+
+# W4 · Connector registry and execution
+
+## W4-1 · Register and manage a connector (engineering delivered by 0038)
+
+Apply through **0038**, then deploy BFF/web together. Open `/connectors` as a tenant owner/admin (or assigned founder). Choose an active estate system and a reviewed descriptor; enter a name and a non-secret endpoint identifier such as `primary_crm`. Do not paste connection URLs, tokens or passwords. The registration starts in draft and is durably audited. Catalogue entries are published immutably on first registration; a conflicting published version is refused rather than overwritten.
+
+“Enable registration” changes lifecycle only. It does not obtain credentials, probe a system, grant access or run discovery. A descriptor's assurance value is its authentication policy, not verified connectivity. Health shows a dated recorded check or “Not checked.” Reference/sandbox bindings remain explicitly non-production and cannot declare writes.
+
+Disable before editing an enabled registration or archiving its estate/system. Disable revokes all existing grants; re-enable does not restore them. Archive additionally revokes stored credential envelopes and is terminal. A legacy descriptor missing from the reviewed catalogue may still be disabled/archived, but enabling it requires a reviewed new registration. If a form reports an unknown outcome, keep it open and use “Retry same request”; do not invent a second intent.
+
+**Evidence:** sanitized registration/lifecycle audit IDs, exact commit and green container/CI results. Do not supply target credentials at this stage. Both archive/enable race orderings and populated migration upgrade are tested locally. No client target was contacted.
+
+## Remaining W4 / W3 dependency gates
+
+W4.2 vault/rotation and OAuth client-credentials/JWT-bearer broker → W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
 
 ---
 

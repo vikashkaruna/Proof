@@ -729,6 +729,110 @@ async function main() {
     409,
     ownerPost({ estateId: estateB, confirmed: true }),
   );
+  const registrationIntent = ownerPost({
+    systemId: managedSystem.id,
+    descriptorId: '41410000-0000-4000-8000-000000000002',
+    name: 'Reference registration',
+    endpointRef: 'reference_crm',
+  });
+  const registrationCreated = await check(
+    'connector_register',
+    '/v1/connectors',
+    201,
+    registrationIntent,
+  );
+  const registration = (
+    (await registrationCreated.json()) as {
+      data: { id: string; status: string; version: number; target_binding: string };
+    }
+  ).data;
+  assert.equal(registration.status, 'draft');
+  assert.equal(registration.target_binding, 'reference-mock');
+  const registrationReplay = await check(
+    'connector_register_replay',
+    '/v1/connectors',
+    201,
+    registrationIntent,
+  );
+  assert.equal(registrationReplay.headers.get('idempotency-replayed'), 'true');
+  assert.equal(
+    ((await registrationReplay.json()) as { data: { id: string } }).data.id,
+    registration.id,
+  );
+  const registrationAudits = await apiRequest(
+    `/rest/v1/audit_ledger?target_ref=eq.${registration.id}&action_type=eq.connector.registered&select=id`,
+  );
+  assert.equal(((await registrationAudits.json()) as unknown[]).length, 1);
+  const connectorPatch = (body: unknown) => ({ ...ownerPost(body), method: 'PATCH' });
+  await check(
+    'connector_foreign_system',
+    '/v1/connectors',
+    404,
+    ownerPost({
+      systemId: systemA,
+      descriptorId: '41410000-0000-4000-8000-000000000002',
+      name: 'Foreign',
+      endpointRef: 'foreign',
+    }),
+  );
+  await check(
+    'connector_refuse_credentials',
+    '/v1/connectors',
+    400,
+    ownerPost({
+      systemId: managedSystem.id,
+      descriptorId: '41410000-0000-4000-8000-000000000002',
+      name: 'Secret',
+      endpointRef: 'postgres://secret@host',
+    }),
+  );
+  await check(
+    'connector_foreign_update',
+    `/v1/connectors/${connectorA}`,
+    404,
+    connectorPatch({ operation: 'transition', status: 'active', expectedVersion: 1 }),
+  );
+  const visibleConnectors = await check('connector_tenant_list', '/v1/connectors', 200, {
+    headers: ownerHeaders,
+  });
+  assert(
+    !((await visibleConnectors.json()) as { data: { id: string }[] }).data.some(
+      (row) => row.id === connectorA,
+    ),
+  );
+  await check(
+    'connector_enable',
+    `/v1/connectors/${registration.id}`,
+    200,
+    connectorPatch({ operation: 'transition', status: 'active', expectedVersion: 1 }),
+  );
+  await check(
+    'connector_active_edit_refused',
+    `/v1/connectors/${registration.id}`,
+    409,
+    connectorPatch({
+      operation: 'edit',
+      name: 'Changed',
+      endpointRef: 'new_ref',
+      expectedVersion: 2,
+    }),
+  );
+  await check('connector_blocks_estate_archive', `/v1/estates/${managed.id}`, 409, {
+    ...ownerPost({ name: 'Archived estate', status: 'archived', expectedVersion: 1 }),
+    method: 'PATCH',
+  });
+  await check(
+    'connector_disable',
+    `/v1/connectors/${registration.id}`,
+    200,
+    connectorPatch({ operation: 'transition', status: 'disabled', expectedVersion: 2 }),
+  );
+  await check(
+    'connector_stale_transition',
+    `/v1/connectors/${registration.id}`,
+    409,
+    connectorPatch({ operation: 'transition', status: 'active', expectedVersion: 2 }),
+  );
   await check('estate_archive', `/v1/estates/${managed.id}`, 200, {
     ...ownerPost({ name: 'Archived estate', status: 'archived', expectedVersion: 1 }),
     method: 'PATCH',
@@ -746,6 +850,24 @@ async function main() {
     ownerPost({ libraryVersion: library, title: 'Late assessment', estateId: managed.id }),
   );
 
+  await check(
+    'connector_archived_parent_refused',
+    `/v1/connectors/${registration.id}`,
+    409,
+    connectorPatch({ operation: 'transition', status: 'active', expectedVersion: 3 }),
+  );
+  await check(
+    'connector_archive',
+    `/v1/connectors/${registration.id}`,
+    200,
+    connectorPatch({ operation: 'transition', status: 'archived', expectedVersion: 3 }),
+  );
+  await check(
+    'connector_archive_terminal',
+    `/v1/connectors/${registration.id}`,
+    409,
+    connectorPatch({ operation: 'transition', status: 'active', expectedVersion: 4 }),
+  );
   const preparer = await createUser();
   assert.equal(
     (
