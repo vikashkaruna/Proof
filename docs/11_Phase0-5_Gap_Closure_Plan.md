@@ -108,6 +108,14 @@ a founder decision or on a deployment this workspace is not authorized to make.
 | **W9** | Test, audit and performance · P0, alongside | **Partial** | 17 CI jobs green on this head. 279 BFF, 40 web, 178 MFA, 14 packages; the database suite over 31 migrations; four concurrency suites; DSN failure checks; strict parity across four labels; 52 browser journeys; a security scan. Mutation testing is the working convention, not an aspiration. | **Performance is untouched.** No load lane, no budget, nothing measured — `k6`, `artillery`, `p95` and `benchmark` match nothing in the repository. PERF-3 (rate limiting) is delivered via `take_rate_limit`; PERF-2's estimated counts are not. NFR-7 (1M records/hour/connector) cannot be load-tested until W4 lands. |
 | **W10** | On-prem deployment environment · P2 | **Partial** | The Helm chart renders, passes `kubeconform` and a semantic gate, and the self-hosted Supabase topology rehearsal is green in CI. | No deployed on-prem instance. Air-gapped operation is unexercised. A chart that renders is an artifact, not a running deployment. |
 
+**What it takes to move W0–W3.** The ordered operator steps — configure,
+deploy, migrate, seed, verify — together with the evidence each one returns and
+what I do with that evidence to flip a status, are in
+[Doc 16, the operator completion runbook](16_Operator_Completion_Runbook.md).
+Every item there names one owner, because the four workstreams split unevenly:
+W0's remainder is entirely yours (its code is closed), W2 and W3 are almost
+entirely mine, and W1 is genuinely shared.
+
 **Reading the register honestly.** Six of eleven workstreams are Partial, two are
 Pending outright, and W0's remaining half plus W8's retention are Gated on things
 this workspace is not permitted to do. The P0 band (W0 code, W1, W2, W7, W9) is

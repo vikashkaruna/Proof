@@ -548,3 +548,19 @@ Every row was re-derived by running that row's own acceptance check against `3c1
 The register's own summary is the uncomfortable part and is left uncomfortable: six workstreams Partial, two Pending outright, W0's remaining half and W8's retention Gated on actions this workspace is not permitted to take. The delivered work concentrates in the P0 band; the two XL workstreams that constitute the actual product loop — W4's connectors and W5's executor — are close to empty, and W5's tables are empty _because_ W4 has to land first.
 
 Doc 13 is kept for its Doc 02 module-to-owner mapping, which nothing else carries, but its header no longer presents a 20 September `2c54fcd` snapshot as current status; it now defers to the register and says the register wins on conflict.
+
+## Handover pass: an operator completion runbook for W0–W3
+
+No code change. Doc 16 is new: the ordered steps the operator runs to configure, deploy, migrate, seed and verify W0 through W3, what evidence each step returns, and what I do with that evidence before a status moves.
+
+**Why it exists.** The register says what is delivered. It does not say who does the next thing, and for these four workstreams the split is uneven enough that assuming is expensive. W0's remainder is entirely the operator's — its code is closed. W2 and W3 are almost entirely mine. W1 is genuinely shared, including one decision only the founder can make. Every item in Doc 16 names exactly one owner.
+
+**What re-verification found before writing it.** Two W0.1 items the plan still lists as outstanding are already done, and asking the operator to do them would have wasted their time: the mock Supabase substitution is reachable only under `e2e-bypass`, which `@axiom/config` refuses at boot outside `local`/`test`, and the idempotency auto-key generation is gone with no environment relaxing it — including `e2e-bypass`, which relaxes authentication only. So W0 has no code work left at all, which is a materially different message from "W0 is partial".
+
+**The honest gap it names.** W0's exit criteria require that the same suite run against preprod and a production-configured stack with any divergence failing the build. That lane does not exist. `scripts/verify-strict-parity.ts` is structurally local-only — it reads `.axiom-runtime/parity/status.json` and binds to a Docker-reachable interface — so its four topology labels are one local stack under four configurations, which every review has said and which is easy to mistake for four environments. Writing the deployed lane is mine, and it is blocked until there is a deployed target to point it at. The browser journeys, by contrast, already accept `PLAYWRIGHT_BASE_URL` and skip their own dev servers, so they can be aimed at a deployed environment as soon as personas can be seeded there.
+
+**Redaction is part of the contract.** The runbook is written so the operator never has to send a secret: Secret Manager resource names where I need to know a secret exists, a SHA-256 where I need to confirm two values match, and an explicit never-send list covering service-role keys, JWT secrets, `APPROVAL_SIGNING_KEY`, any `.env*`, and `.axiom-runtime/personas/state.json`, which holds working test credentials.
+
+**What it deliberately does not cover.** W4 onward. W4 and W5 are the XL workstreams that make up the product loop, they are close to empty, and W5's tables reference W4's so W5 cannot start first. Sequencing them is a separate conversation once W0–W3 are real rather than a section appended to a runbook nobody can act on yet.
+
+Doc 00 registers Doc 16 and its entry-point paragraph now names the register. Doc 11's register links to it from the W0–W3 discussion. Lint and typecheck 15/15, 14 packages green, `format:check` clean, W0.0 and control-count gates pass; every anchor verified against its heading slug.
