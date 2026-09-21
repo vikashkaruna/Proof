@@ -256,6 +256,16 @@ export type RevokeApprovalRequest = z.infer<typeof RevokeApprovalRequestSchema>;
 export const BeginMfaEnrolmentRequestSchema = z.object({
   /** Friendly device name, e.g. "iPhone Authenticator". Never the secret. */
   label: z.string().max(120).nullish(),
+  /**
+   * A satisfied `enrolment` challenge, required only when the caller already
+   * holds an active factor — replacing one means proving you hold it.
+   *
+   * Declared here rather than read off the raw body, which is what the route
+   * did while no client sent it. An undeclared field is a contract nobody can
+   * see: the web app's Replace button omitted it for exactly as long, and the
+   * BFF refused every press with `mfa_challenge_required`.
+   */
+  mfaChallengeId: z.string().uuid().nullish(),
 });
 export type BeginMfaEnrolmentRequest = z.infer<typeof BeginMfaEnrolmentRequestSchema>;
 

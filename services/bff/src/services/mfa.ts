@@ -676,18 +676,26 @@ export function createMfaService(
 
       // Activation proves possession, so it burns the counter like any other
       // use. Otherwise the enrolment code itself is replayable as a login.
-      const { data: activated, error: activateErr } = await supabase
-        .from('user_mfa_factors')
-        .update({
-          status: 'active',
-          activated_at: new Date().toISOString(),
-          last_used_counter: Number(result.counter),
-          last_used_at: new Date().toISOString(),
-        })
-        .eq('id', row.id)
-        .eq('status', 'pending')
-        .select('id');
-      if (activateErr || (activated ?? []).length === 0) {
+      //
+      // Through an RPC rather than an UPDATE because of the replacement case.
+      // `user_mfa_factors_one_active_totp` allows one active TOTP row per
+      // user, so promoting this one while the factor it replaces is still
+      // active raised 23505 — and the branch below reported that as
+      // `no_pending_factor`, which sent anyone reading it to the wrong layer.
+      // Migration 0030 retires the old factor and activates this one under a
+      // single set of row locks; see its header for why neither order works
+      // from out here.
+      const { data: swapped, error: activateErr } = await supabase.rpc('activate_totp_factor', {
+        p_user_id: userId,
+        p_factor_id: row.id,
+        p_last_used_counter: Number(result.counter),
+      });
+      const swap = (swapped as Array<{ retired_factor_id: string | null }> | null)?.[0];
+      if (activateErr || !swap) {
+        if (activateErr) {
+          logger.error({ userId, error: activateErr.message }, 'TOTP activation failed');
+        }
+        // Now means only what it says: nothing pending for this user.
         return { ok: false, reason: 'no_pending_factor' };
       }
 
