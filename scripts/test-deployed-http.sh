@@ -59,6 +59,12 @@ PY
       containers+=("$app_container")
       if [ "$app" = web ]; then app_port=$web_port; internal_port=3001; else app_port=$marketing_port; internal_port=3000; fi
       docker run -d --name "$app_container" --network "$network_id" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment-web.env" -p "127.0.0.1:$app_port:$internal_port" "axiom-acceptance-${app}:local" >/dev/null
+      # Check the internal hop explicitly. Host-side API success cannot prove
+      # a container can reach the BFF (loopback publishing differs on Linux).
+      docker exec "$app_container" node --input-type=module -e '
+        const r = await fetch(process.env.BFF_PUBLIC_URL + "/health", {signal: AbortSignal.timeout(5000)});
+        if (r.status !== 200 || (await r.json()).environment !== process.env.ENVIRONMENT) process.exit(1);
+      '
       ready=false
       for attempt in $(seq 1 60); do
         if curl --silent --fail "http://127.0.0.1:$app_port/" >/dev/null; then ready=true; break; fi
