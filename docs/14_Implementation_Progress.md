@@ -2,6 +2,8 @@
 
 Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The two-worker rerun passed all 61 browsers, then exposed a CommonJS/top-level-await error in the new restart probe; its async entry point is corrected and the complete lane is rerun. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
 
+A later full run passed preprod including restart but failed the production two-session MFA re-verification helper. Database evidence showed the first code was already consumed by activation, while the later UI retry never reached challenge issuance. Three isolated diagnostic repetitions passed, so the missing retry is not claimed as a reproduced product defect. The journey now waits explicitly for a code different from the successful activation code; dedicated replay tests remain unchanged. The helper retains status-only diagnostics, never codes or response payloads. Final full acceptance is rerun on the corrected fixture.
+
 ## 22 September 2026 — durable public gap-scan boundary (Revision 30)
 
 Reviewed `f5a88d5` and its green CI 35640285441; no newer other-model commits appeared. Public report computation/storage/mail now belong to the BFF, with no memory fallback or backend credentials in the SSR report path. Migration 0037 backfills hashed ownership for legacy reports. Reads and resends require ownership; review fixed unowned report dispatch to arbitrary recipients. Explicit delivery opt-in replaces simulated success; durable rate budgets bound public requests and mail.
