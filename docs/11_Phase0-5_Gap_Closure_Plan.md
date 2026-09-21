@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 31 — CONNECTOR REGISTRY AND LIFECYCLE** (22 Sep 2026) · **Status:** W0/W1/W2/W3 partial; later intentional W5/W7/W8/W9 work preserved.
+**Document:** 11 · **Revision 31 — CONNECTOR REGISTRY AND LIFECYCLE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `c79c303`, green CI [35647963475](https://github.com/vikashkaruna/Proof/actions/runs/35647963475); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
@@ -216,7 +216,7 @@ a founder decision or on a deployment this workspace is not authorized to make.
 | **W6** | Continuous compliance · P1 | **Pending** | Nothing. | Zero of 4 tables. A monitoring page shell and a controls-drift script exist; neither is this workstream. |
 | **W7** | Control library & multi-regulator · P0-adjacent | **Partial** | 46 controls, with a CI gate proving every count in the repository agrees with the library, a TS→runtime parity gate against drift, and citation tests. The full W7.0 regulatory baseline group is in the database. | Multi-regulator and sector packs: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs` — all 4 missing. Sectoral pack #1 is an open founder decision ([E.2 item 1](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it)). |
 | **W8** | Reporting, evidence, branding · P1 | **Partial**, retention **Gated** | The evidence package and the gap-scan report exist and are tested. | Real immutable retention, which **cannot** be proven from here: an evidence-bucket Object Lock is a COMPLIANCE-mode lock nobody, including the project owner, can shorten or delete. Deliberately out of scope rather than skipped. The 4 rights/consent tables are missing. |
-| **W9** | Test, audit and performance · P0, alongside | **Partial** | 309 BFF tests, 54 configuration tests, 24 acceptance-harness checks, 59 browser journeys; 36 migrations, seven concurrency suites and three populated upgrades retained. New automatic container HTTP acceptance complements the local strict suite and manual remote API/browser comparison. | Performance/load acceptance remains open; NFR-7 depends on W4 execution. Remote workflow success is not claimed from local tests. |
+| **W9** | Test, audit and performance · P0, alongside | **Partial** | 362 BFF tests, 118 Python runtime tests, 54 configuration tests, 25 acceptance-harness checks and 63 browser journeys; 39 migrations and nine concurrency suites, plus populated upgrades. New automatic container HTTP acceptance complements the local strict suite and manual remote API/browser comparison. | Performance/load acceptance remains open; NFR-7 depends on W4 execution. Remote workflow success is not claimed from local tests. |
 | **W10** | On-prem deployment environment · P2 | **Partial** | The Helm chart renders, passes `kubeconform` and a semantic gate, and the self-hosted Supabase topology rehearsal is green in CI. | No deployed on-prem instance. Air-gapped operation is unexercised. A chart that renders is an artifact, not a running deployment. |
 
 **What it takes to move W0–W3.** The ordered operator steps — configure,

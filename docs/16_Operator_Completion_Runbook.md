@@ -4,7 +4,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 30, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 31, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -241,7 +241,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 61 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
+**Current status: Partial.** The suite now has 63 browser journeys (including W3 inventory/proposal and W4.1 registration coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 
@@ -432,7 +432,7 @@ Disable before editing an enabled registration or archiving its estate/system. D
 
 ## Remaining W4 / W3 dependency gates
 
-W4.2 vault/rotation and OAuth client-credentials/JWT-bearer broker → W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
+W4.2 vault/rotation and OAuth client-credentials/JWT-bearer broker → W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Readiness must remain unverified until an implemented transport and real health checks prove connectivity. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
 
 ---
 
@@ -462,7 +462,7 @@ to me than a green run that took a detour.
 
 | Workstream | Now                           | Flips to                       | On                                                                                                           |
 | ---------- | ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (harness delivered)   | **Closed**                     | 36 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | Partial (harness delivered)   | **Closed**                     | 39 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
 | **W0**     | —                             | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                       | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                       | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |

@@ -74,9 +74,15 @@ test('owner registers a connector without claiming connectivity and manages its 
   await expect(row.getByRole('button')).toHaveCount(0);
   await selectTenant(page, 'b');
   await page.goto('/connectors');
-  await expect(page.getByRole('region', { name: `Reference ${suffix}`, exact: true })).toHaveCount(
-    0,
-  );
+  // This owner belongs only to A; a forged B preference must not grant membership.
+  await expect(row).toBeVisible();
+  const foreign = await page.evaluate(async (tenantId) => {
+    const response = await fetch('/api/bff/v1/connectors', {
+      headers: { 'X-Tenant-Id': tenantId },
+    });
+    return response.status;
+  }, state.tenantB.id);
+  expect(foreign).toBe(403);
 });
 
 test('viewer reads real connector inventory without registration controls', async ({ page }) => {
