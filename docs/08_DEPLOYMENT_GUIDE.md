@@ -516,13 +516,13 @@ _Instantly invalidates all pre-existing unsigned or stale tokens._
 
 ## 8. Summary of Key Files
 
-| File Path                                                                                                               | Description                                           |
-| :---------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
-| [`scripts/dev-docker.sh`](file:///Users/vikash/Axiom%20Proof/scripts/dev-docker.sh)                                     | Master Docker automation & multi-environment manager. |
-| [`scripts/test-local-stack.sh`](file:///Users/vikash/Axiom%20Proof/scripts/test-local-stack.sh)                         | Self-contained 5-stage pre-CI test pipeline.          |
-| [`docker-compose.yml`](file:///Users/vikash/Axiom%20Proof/docker-compose.yml)                                           | Base & local Docker Compose stack definition.         |
-| [`infra/docker/docker-compose.staging.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.staging.yml) | Staging compose overlay.                              |
-| [`infra/docker/docker-compose.preprod.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.preprod.yml) | Preprod compose overlay.                              |
-| [`infra/docker/docker-compose.prod.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.prod.yml)       | Production reference compose overlay.                 |
-| [`infra/docker/environments/`](file:///Users/vikash/Axiom%20Proof/infra/docker/environments/)                           | Environment `.env.*.example` configuration templates. |
-| [`docs/08_DEPLOYMENT_GUIDE.md`](file:///Users/vikash/Axiom%20Proof/docs/08_DEPLOYMENT_GUIDE.md)                         | This master deployment and operations guide.          |
+| File Path                                                                               | Description                                           |
+| :-------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+| [`scripts/dev-docker.sh`](../scripts/dev-docker.sh)                                     | Master Docker automation & multi-environment manager. |
+| [`scripts/test-local-stack.sh`](../scripts/test-local-stack.sh)                         | Self-contained 5-stage pre-CI test pipeline.          |
+| [`docker-compose.yml`](../docker-compose.yml)                                           | Base & local Docker Compose stack definition.         |
+| [`infra/docker/docker-compose.staging.yml`](../infra/docker/docker-compose.staging.yml) | Staging compose overlay.                              |
+| [`infra/docker/docker-compose.preprod.yml`](../infra/docker/docker-compose.preprod.yml) | Preprod compose overlay.                              |
+| [`infra/docker/docker-compose.prod.yml`](../infra/docker/docker-compose.prod.yml)       | Production reference compose overlay.                 |
+| [`infra/docker/environments/`](../infra/docker/environments/)                           | Environment `.env.*.example` configuration templates. |
+| [`docs/08_DEPLOYMENT_GUIDE.md`](08_DEPLOYMENT_GUIDE.md)                                 | This master deployment and operations guide.          |

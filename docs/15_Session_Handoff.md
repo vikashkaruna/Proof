@@ -7,6 +7,7 @@ Logical checkpoint after integrating staging `369bcf7` and correcting the gap be
 - Worktree: `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`, merged to staging. Preserve other worktrees and any uncommitted work in them.
 - Two models alternate on this repository and review each other's work. Assume staging has moved on arrival, and assume the other model's work is sound but incomplete — verify findings against the code before accepting them, and hunt for what was left behind. Both assumptions have repeatedly paid off.
 - Accepted decisions stand: higher environments self-host Supabase; fresh approval for every redelivery; proxy trust configured per environment and disabled by default; TOTP and recovery codes only, email OTP deferred; **no billable or irreversible cloud action** in these sessions.
+- Challenge consumption stays **outside** the issuing transaction as a deliberate inherited tradeoff: a later failure costs a fresh authentication. This is settled, not a pending founder decision — do not infer an approval to change it from the review documents.
 - No cloud apply, billable resource, irreversible lock or live estate execution was performed. `terraform validate` is as far as infrastructure work went.
 
 ## Completed at this checkpoint
@@ -29,7 +30,6 @@ The eight PRD B.10 live execution scenarios belong to Phase 3 acceptance; API-le
 
 - **Locking a real evidence bucket.** Irreversible and a deployment decision. No bucket is locked and no retention mode has been validated against a deployed provider, so R-10 stays open whatever the code asserts.
 - **A named human sign-off for the control-library citations.** `verifiedBy: 'Axiom Minds · Founder'` is an attributed string, not a recorded sign-off.
-  Challenge consumption remains outside issuance as a deliberate inherited tradeoff: a later failure costs a fresh authentication. Do not infer an approval to change that behavior from the review documents.
 
 ## Operational state
 

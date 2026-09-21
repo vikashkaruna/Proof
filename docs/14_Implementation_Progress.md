@@ -2,7 +2,7 @@
 
 Started 20 September 2026 with authorisation to implement in order and commit/merge/push each verified milestone to staging. Goal remains active until the complete acceptance criteria are proved. Revision 9 review/handoff documents are the starting requirements, not a claim of current completion.
 
-Implementation worktree: `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`. Resumed from staging `5a4d6a0` after reviewing Claude's eight later commits. The analyst migration 0015 is now committed. Claude's additional uncommitted handoff text was preserved here; his worktree was not edited. See Doc 11 Revision 10 and audit 06 for the latest verified status; milestone narratives below describe their original delivery.
+Two models alternate on this repository, each from its own worktree, so a worktree path or branch named in a milestone below is where that milestone was delivered and not where work happens now. This file was opened from `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof` on branch `codex/w0-w3-closure`, resumed from staging `5a4d6a0`, where analyst migration 0015 was committed. For current status read [Doc 11 Revision 14](11_Phase0-5_Gap_Closure_Plan.md) and [Doc 15](15_Session_Handoff.md); the most recent reviews are [audit 07](audits/07-staging-integration-review-2026-09-21.md) and [audit 09](audits/09-reviewed-approval-snapshot-2026-09-21.md). Milestone narratives below describe their original delivery and are not restated as current.
 
 ## Delivered milestones
 
@@ -238,7 +238,7 @@ Not closed by this: action snapshot enforcement at the executor, which is still 
 
 ## W1 milestone: the claim enforces the snapshot the approver authorised
 
-Committed as `0a3137f`. 0026 verified the content digest when an approval was issued. Nothing downstream then checked it, so the approval token named **which rows** to execute and not **what they contained**.
+Committed as `0a3137f` and merged to staging as `369bcf7`; CI [35554182456](https://github.com/vikashkaruna/Proof/actions/runs/35554182456) is green across every configured job, with only the normally skipped container image build not run. 0026 verified the content digest when an approval was issued. Nothing downstream then checked it, so the approval token named **which rows** to execute and not **what they contained**.
 
 The interesting part is how much of that gap was already closed, and by what. `trg_actions_approved_immutable` in migration 0004 freezes an approved action's `action_type`, `parameters`, `rollback_definition` and `closes_finding_ids`, so the executable definition genuinely cannot move after approval. It does not freeze `dry_run_result` — and the simulated outcome is precisely what the approver read before agreeing. Between approval and execution the diff could be replaced, without anyone breaking a constraint, and nothing noticed.
 
@@ -263,3 +263,15 @@ The remaining race was earlier than the 0026 test covered: the route consumed a 
 0028 hashes the exact server-read rows used in the MFA binding through a pure SQL helper, retaining the 0026 digest format. A new reviewed-issuance entrypoint locks and checks the expected revision and plan eligibility, then calls the existing atomic transaction; direct service-role access to the old entrypoint is revoked. Existing signed token digests remain compatible. Missing revisions fail closed. Migration must precede BFF rollout; an old BFF using the retired entrypoint refuses issuance until upgraded.
 
 Validation: 258 BFF tests and typecheck/lint; full 29-migration sequence, ten SQL suites, four concurrency suites and DSN/deploy refusal tests; all four real Auth/PostgREST MFA parity labels. The new concurrency test observes the issuer blocked on a writer lock before asserting its refusal, rather than merely running two sequential calls. Its initial fixture collided with the preceding execution test's email; the fixture now uses its own identity. No cloud resources or live estate mutations were involved. Final staging CI is checked after push.
+
+## Documentation checkpoint: the index, and the links nobody could follow
+
+No behaviour changed here. Recorded because the status documents cite each other by revision number and staging SHA, so every merge leaves some of them behind, and a stale pointer costs the next session real time.
+
+The 0028 work above re-pointed Docs 11, 12 and 15 as it landed. What it did not reach was [Doc 00](00_README_Document_Index.md) — the index, and the first file a new reader opens. It still led with "Implementation status (20 September 2026)", pointed at **Revision 9**, sent the reader to [Doc 12](12_Implementation_Handoff.md) to resume — which has since been relabelled historical precisely so nobody does that — and carried no row at all for Doc 14 or Doc 15, the two files that hold current status. It now names Revision 14, staging `e5a830d` and its green CI, and lists Docs 14 and 15 with what each is for.
+
+Two smaller contradictions went with it. Doc 12's "Read first" list still called Revision 9 the current plan, three lines under a banner saying everything below it was historical. And in Doc 15 the third founder decision — challenge consumption staying outside the issuing transaction — had lost its bullet marker in the 0028 edit, so the list read as two items and that text attached itself to the control-library citation bullet. It is a settled tradeoff rather than a pending decision, so it now sits with the other standing decisions, under its own marker.
+
+One unrelated defect fell out of checking the links. [Doc 08](08_DEPLOYMENT_GUIDE.md)'s "Summary of Key Files" table linked all eight entries by absolute `file:///Users/vikash/Axiom%20Proof/...` URLs — one machine's main checkout, which resolves for no other reader and from no worktree of this repository. They are repo-relative now.
+
+Verified: a link check over `docs/*.md` reports zero unresolvable relative targets, where it reported eight before; `pnpm format:check` is clean across the repository; the env-security, controls-drift and deployment-coverage gates pass. `docs/11_Phase0-5_Gap_Closure_Plan.md` is in `.prettierignore` by design — prose, not code — so it is formatted by hand and `format:check` does not cover it.

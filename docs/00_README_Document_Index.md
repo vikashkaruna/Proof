@@ -4,14 +4,17 @@
 
 **Compiled:** August 2026
 
-**Implementation status (20 September 2026):** The latest review covers Claude's
-`2c54fcd` branch and unfinished analyst role changes. W1 is partially implemented;
-security closure and release verification remain. The earlier Phase 3 _audit_
-completion was not completion of the Phase 3 product. Start with
-[Doc 11 Revision 9](11_Phase0-5_Gap_Closure_Plan.md),
-[the implementation handoff](12_Implementation_Handoff.md),
-[roadmap traceability](13_Roadmap_Traceability.md), and
-[the independent review](audits/04-roadmap-review-2026-09-20.md).
+**Implementation status (21 September 2026):** Staging is `e5a830d`, CI [35556665448](https://github.com/vikashkaruna/Proof/actions/runs/35556665448)
+green. W0, W1 and W2 are **partial**; migration allocation runs through 0028.
+Nothing has been deployed, no evidence bucket is locked and no action has executed
+against a client estate — the earlier Phase 3 _audit_ completion was not completion
+of the Phase 3 product. Start with
+[Doc 11 Revision 14](11_Phase0-5_Gap_Closure_Plan.md),
+[Doc 14 implementation progress](14_Implementation_Progress.md),
+[Doc 15 session handoff](15_Session_Handoff.md), and the two most recent reviews,
+[audit 07](audits/07-staging-integration-review-2026-09-21.md) and
+[audit 09](audits/09-reviewed-approval-snapshot-2026-09-21.md). Doc 12 is a
+historical snapshot kept for its design reasoning; do not resume from it.
 
 ---
 
@@ -28,9 +31,11 @@ completion was not completion of the Phase 3 product. Start with
 | **06**    | `06_Infrastructure_and_Lockin_Strategy.md`                    | Single-CSP consolidation analysis (AWS vs GCP vs Azure), lock-in scoring per service, Supabase/S3/Redis/compute alternatives, hybrid self-hosted + hosted LLM strategy, on-prem trade-off                                                                                                                                                  | Choosing the actual CSP and deploy targets, evaluating "no lock-in" trade-offs before signing up for any vendor |
 | **10**    | `10_Systems_Map.html`                                         | Five grounded diagram views of the running system: the non-technical five-stage loop, the layered stack with real ports/services, a top-down module map read from the actual monorepo, the agent/subagent separation-of-duties wall (ADR-2/ADR-3), and the execution safety chain with its shared ledger rail. Open directly in a browser. | Onboarding a new engineer or stakeholder, a quick visual gut-check against the current codebase                 |
 | **Audit** | `audits/README.md` and numbered reports                       | Evidence-backed repository baseline, security, module coverage, and Phase 3 quality review                                                                                                                                                                                                                                                 | Current implementation status, fixed findings, and external TODOs                                               |
-| **11**    | [Phase 0–5 Gap Closure Plan](11_Phase0-5_Gap_Closure_Plan.md) | Revision 9 status, findings, scope and closure packages                                                                                                                                                                                                                                                                                    | Prioritise implementation without losing intentional roadmap additions                                          |
-| **12**    | [Implementation Handoff](12_Implementation_Handoff.md)        | Commits, worktree, WIP, pending work and acceptance gates                                                                                                                                                                                                                                                                                  | Resume another model's implementation safely                                                                    |
+| **11**    | [Phase 0–5 Gap Closure Plan](11_Phase0-5_Gap_Closure_Plan.md) | Revision 14 status, findings, scope and closure packages                                                                                                                                                                                                                                                                                   | Prioritise implementation without losing intentional roadmap additions                                          |
+| **12**    | [Implementation Handoff](12_Implementation_Handoff.md)        | The 20 September design snapshot: commits, worktree, WIP and acceptance gates as they stood then. **Historical — its commit tables and workspace paths are now wrong.**                                                                                                                                                                    | Design reasoning behind the closure work, not resumption                                                        |
 | **13**    | [Roadmap Traceability](13_Roadmap_Traceability.md)            | Every phase module, BR/FR family and NFR mapped to closure work                                                                                                                                                                                                                                                                            | Prevent roadmap omissions and unsupported completion claims                                                     |
+| **14**    | [Implementation Progress](14_Implementation_Progress.md)      | Milestone-by-milestone delivery record: commit SHA, CI run, what was verified, and what each milestone explicitly does **not** prove                                                                                                                                                                                                       | Establishing what is actually built and evidenced                                                               |
+| **15**    | [Session Handoff](15_Session_Handoff.md)                      | The current resume baseline: workspace, standing decisions, next implementation sequence, founder decisions still open, and operational state of the local test stacks                                                                                                                                                                     | Resuming implementation in a new session                                                                        |
 | **—**     | `DPDPA_Axiom_Minds_Strategic_Roadmap.md`                      | Market sizing (TAM/SAM/SOM), competitive landscape, right-to-win, pricing, cash-flow model, revenue projections, risk register, council deliberation log                                                                                                                                                                                   | Strategic context, investor conversation (if ever), market positioning                                          |
 
 ---
