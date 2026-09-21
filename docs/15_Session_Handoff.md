@@ -2,6 +2,8 @@
 
 ## Revision 35 — W4.3 runtime audit hardening
 
+Committed acceptance: source `956aa55` passed the real Postgres audit probe with all five outcomes and a clean source tree (`CI=true`, locked Python dependencies). Python unit tests passed 174/174; repository format checks and touched-file F/I lint passed. The merge CI result remains the final staging gate.
+
 The W4.3 identity foundation is **complete and green** at staging `41f9171`, CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056). Verified exact-merge artifacts contain 61 SPIRE outcomes and 63 browser journeys plus 89 API/restart outcomes in each configuration. The earlier `2c3f8f6` run failed on an undeclared root Zod dependency and is superseded by this successful corrected run. W4.3 as a whole remains partial; the runtime audit follow-up below still requires its own exact-merge CI.
 
 Closed the runtime audit defects found in Revision 34. `LedgerClient.from_settings` never selects memory in staging/preprod/production, including a local strict-mode stack, and client-construction failure always raises instead of falling back. Only explicit development/test loopback configuration retains the memory fixture; lookalike hostnames do not qualify. The remote append requires a positive SQL bigint receipt, refusing missing, zero, malformed or out-of-range results. All writes still use `append_ledger`.
