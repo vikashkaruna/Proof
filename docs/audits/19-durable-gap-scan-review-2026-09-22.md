@@ -1,5 +1,7 @@
 # Durable public gap-scan review — 22 September 2026
 
+Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
+
 Reviewed staging `f5a88d5` with green CI 35640285441; no newer other-model commits on fetch. This milestone closes C-W0-4 engineering, not W0 remote or Phase 1 funnel acceptance.
 
 ## Findings addressed

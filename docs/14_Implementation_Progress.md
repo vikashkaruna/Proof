@@ -1,5 +1,7 @@
 # W0 → W1 → W2 → W3 implementation progress
 
+Acceptance correction: the first local container run used five CPU-derived browser workers and hit existing MFA/onboarding UI timeouts. Deployed targets now use the same two workers as CI, still with zero retries and unchanged assertions. That failed run is not closure evidence. The ownership regression also rejects a removed SQL-filter mutation; restored tests pass.
+
 ## 22 September 2026 — durable public gap-scan boundary (Revision 30)
 
 Reviewed `f5a88d5` and its green CI 35640285441; no newer other-model commits appeared. Public report computation/storage/mail now belong to the BFF, with no memory fallback or backend credentials in the SSR report path. Migration 0037 backfills hashed ownership for legacy reports. Reads and resends require ownership; review fixed unowned report dispatch to arbitrary recipients. Explicit delivery opt-in replaces simulated success; durable rate budgets bound public requests and mail.

@@ -98,7 +98,9 @@ export default defineConfig({
   retries: acceptanceTarget ? 0 : process.env.CI ? 2 : 0,
   maxFailures: acceptanceTarget ? 3 : undefined,
   globalTimeout: acceptanceTarget ? 10 * 60_000 : undefined,
-  workers: process.env.CI ? 2 : undefined,
+  // Keep deployed rehearsal concurrency identical to CI, independent of the
+  // operator laptop's CPU count. Acceptance remains zero-retry.
+  workers: acceptanceTarget || process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     channel: process.env.AXIOM_E2E_BROWSER_CHANNEL === 'chrome' ? 'chrome' : undefined,
