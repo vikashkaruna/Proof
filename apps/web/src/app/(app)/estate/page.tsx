@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
@@ -33,6 +34,9 @@ export default async function EstatePage() {
         title="Client estate"
         description="Declare the systems in each assessment boundary. Inventory declarations do not establish connectivity or authorize agent execution."
       />
+      <Link href="/estate/onboarding" className="text-teal-700 underline">
+        Review onboarding proposals
+      </Link>
       {estates.error || systems.error || intakes.error ? (
         <p role="alert">Estate inventory could not be loaded. Refresh to try again.</p>
       ) : (

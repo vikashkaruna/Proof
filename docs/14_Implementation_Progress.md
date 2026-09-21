@@ -590,3 +590,9 @@ Reviewed upstream `b380578` (no newer staging work). Migration 0034, central `es
 298 BFF tests, all 35 migrations, six concurrency suites, three populated upgrades, DSN/deploy failures and four local real-Auth parity configurations pass. The browser milestone covers inventory lifecycle, read-only roles, lost-response replay and confirmed assignment. Final browser/CI results and merge identity are recorded in the ignored session checkpoint. See [review 15](audits/15-estate-management-review-2026-09-21.md).
 
 W3 is **partial**: proposal normalization/review and the complete wizard remain pending. User decision recorded: **owner and admin** can approve proposals prepared by analysts. Next work follows that decision, then W3.5/W4. No claim of live connector execution or deployed acceptance.
+
+## Revision 27 — W3 reviewed onboarding inventory
+
+The prior inventory milestone merged as `b62f87b`, with all applicable CI checks green ([35626658366](https://github.com/vikashkaruna/Proof/actions/runs/35626658366)). Migration 0035 and `/estate/onboarding` now implement staff preparation and **owner/admin** review of immutable intake mappings. Approval atomically creates inventory and source links with audit records; changed estate versions, self-review, duplicate applications and cross-tenant requests are refused.
+
+309 BFF tests, 59 browser journeys, 36 migrations, seven concurrency suites, three populated upgrades and four local real-Auth parity configurations pass; workspace lint/typecheck/format pass. Final-ledger fault injection leaves no applied inventory. The full W3 wizard and W3.5/W4 remain pending; declarations do not imply active connections. See [review 16](audits/16-onboarding-proposal-review-2026-09-21.md) and the saved handoff.

@@ -29,7 +29,7 @@ export interface IntakeRow {
 const fieldClass = 'w-full rounded-md border border-input bg-background p-2 text-sm';
 
 /** Keeps the exact intent/key after a lost response. A retry cannot silently duplicate it. */
-function MutationForm({
+export function MutationForm({
   tenantId,
   path,
   method,

@@ -62,6 +62,8 @@ export const Capability = {
   // Tenant administration
   ENGAGEMENT_CREATE: 'engagement.create',
   ESTATE_MANAGE: 'estate.manage',
+  ONBOARDING_PREPARE: 'onboarding.prepare',
+  ONBOARDING_REVIEW: 'onboarding.review',
   TENANT_CREATE: 'tenant.create',
   TENANT_SETTINGS_WRITE: 'tenant.settings.write',
   USER_MANAGE: 'user.manage',
@@ -117,6 +119,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.BILLING_MANAGE,
     Capability.MULTI_TENANT_READ,
     Capability.WORKBENCH_ACCESS,
+    Capability.ONBOARDING_PREPARE,
   ],
 
   /**
@@ -158,6 +161,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     // the founder's, and the asymmetry is deliberate.
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.WORKBENCH_ACCESS,
+    Capability.ONBOARDING_PREPARE,
   ],
 
   /** Tenant owner: signed the contract. Full authority within their tenant. */
@@ -186,6 +190,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.ESTATE_MANAGE,
     Capability.USER_MANAGE,
     Capability.BILLING_MANAGE,
+    Capability.ONBOARDING_REVIEW,
   ],
 
   /** Tenant admin: operations, but not commercial control. */
@@ -210,6 +215,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.TENANT_SETTINGS_WRITE,
     Capability.ESTATE_MANAGE,
     Capability.USER_MANAGE,
+    Capability.ONBOARDING_REVIEW,
   ],
 
   /**

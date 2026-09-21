@@ -1,3 +1,4 @@
+import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
@@ -109,6 +110,7 @@ interface Deps {
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', estateRoutes());
+  app.route('/', onboardingProposalRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //

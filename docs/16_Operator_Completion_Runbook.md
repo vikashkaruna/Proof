@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 26, reviewed staging `b380578`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 27, reviewed staging `b62f87b`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -374,7 +374,7 @@ Apply the migration runner as W0-5 describes. It creates seven empty tables; it 
 
 # W3 · Client estate & onboarding
 
-**Current status: Partial.** Migration 0034 delivers C-W3-1 and C-W3-2: audited, idempotent estate/system lifecycle APIs and `/estate`, with explicit assignment of unstarted legacy intakes. C-W3-4 has inventory browser coverage; proposal/wizard journeys remain pending with C-W3-3.
+**Current status: Partial.** Migration 0034 delivers C-W3-1 and C-W3-2: audited, idempotent estate/system lifecycle APIs and `/estate`, with explicit assignment of unstarted legacy intakes. 0035 delivers C-W3-3 and proposal browser coverage under C-W3-4. The full connector/grant/readiness wizard and sustenance remain pending.
 
 ## OPERATOR steps
 
@@ -397,7 +397,7 @@ Tell me if your real engagements need kinds that list does not cover.
 
 ### W3-3 · Onboarding proposal review
 
-**Decision recorded from the user:** client `owner` **and tenant `admin`** may approve proposals prepared by Axiom staff. `axiom_analyst` prepares; it must not acquire direct estate mutation authority. No further role confirmation is needed for this implementation. The normalization/review workflow is the next engineering chunk.
+**Decision recorded from the user:** client `owner` **and tenant `admin`** may approve proposals prepared by Axiom staff. `axiom_analyst` prepares; it must not acquire direct estate mutation authority. No further role confirmation is needed for this implementation. The normalization/review workflow is delivered in 0035 and `/estate/onboarding`.
 
 ### W3-4 · Verify the inventory milestone
 
@@ -406,6 +406,14 @@ Apply through 0034 and deploy its BFF/web together. With an owner/admin seat, op
 To assign a legacy assessment, choose its intended estate and confirm the scope. The server accepts only an unassigned intake with no recorded findings, plans, runs, evidence or reports. Started history stays unassigned until a separate reviewed migration policy exists. Do not bypass the guard with direct SQL.
 
 If a response is lost, keep the form open and use **Retry same request**. It retains the same body/path/key. For a persisted unknown or expired claim, inspect the request claim and ledger before reconciliation; do not generate a fresh key to force a duplicate. Archival preserves history and refuses active connectors. Future W4 activation must also serialize with estate/system lifecycle checks.
+
+### W3-5 · Review an onboarding proposal
+
+Apply through 0035 and deploy its BFF/web together. An assigned analyst opens `/estate/onboarding`, chooses an active estate, reviews every original intake entry, and submits its normalized name, kind, description and category keys. Submitting creates a pending proposal, not live systems. It remains available after navigation or a new session; unsent form drafts do not autosave.
+
+A different client owner or **admin** opens the proposal, compares original and proposed fields, chooses approve/reject and records a reason. Approval adds all systems atomically and records source-index links. Rejection preserves the proposal and allows staff to submit a revision. If the estate changed since preparation, reject/reprepare rather than bypassing the content guard. An approved initial intake cannot be imported again. This is inventory review, not authority to connect to or mutate client systems.
+
+The initial intake is a single complete batch. Per-item exclusion and later onboarding batches are future work. Region and personal-data declarations remain visible in the original snapshot, without asserting they were discovered or verified. For a client with no submitted systems, owners/admins can declare inventory directly in `/estate`.
 
 ## ENGINEERING steps for W3
 
