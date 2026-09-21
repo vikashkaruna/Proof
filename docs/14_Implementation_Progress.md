@@ -235,3 +235,21 @@ Verification: full 0000–0026 series on real PostgreSQL. `tests/database/approv
 That fix was also reverted once by a footgun in `tests/database/migration-dsn.sh`, which ran `git checkout -- infra/supabase/migrations` to undo tampering only ever applied to a temp copy. The line was unnecessary and destructive, and its symptom was a checksum mismatch several steps later rather than anything naming the cause. Removed.
 
 Not closed by this: action snapshot enforcement at the executor, which is still a refusal stub, so nothing yet proves the content approved is the content executed. Browser persona journeys, MFA key rotation and deployed acceptance remain where Revision 11 left them.
+
+## W1 milestone: the claim enforces the snapshot the approver authorised
+
+Committed as `0a3137f`. 0026 verified the content digest when an approval was issued. Nothing downstream then checked it, so the approval token named **which rows** to execute and not **what they contained**.
+
+The interesting part is how much of that gap was already closed, and by what. `trg_actions_approved_immutable` in migration 0004 freezes an approved action's `action_type`, `parameters`, `rollback_definition` and `closes_finding_ids`, so the executable definition genuinely cannot move after approval. It does not freeze `dry_run_result` — and the simulated outcome is precisely what the approver read before agreeing. Between approval and execution the diff could be replaced, without anyone breaking a constraint, and nothing noticed.
+
+`tests/database/claim-snapshot.test.sql` establishes both halves against the live schema rather than reading the trigger's source: it asserts that rewriting `parameters` after approval raises, and that rewriting `dry_run_result` does not. If the trigger ever widens, that second assertion fails and someone has to think about it.
+
+Migration 0027 puts the check where it belongs. `claim_plan_execution` already holds the action row locks, already spends the token, and is where actions become `executing`. It recomputes `action_set_content_digest` and compares it with the digest on the token — read from the persisted signed payload, never from the caller, which is why the function still takes no digest parameter at all. A token carrying no snapshot is refused outright: failing closed costs a re-approval, failing open executes content nobody agreed to.
+
+The digest is now signed into `ApprovalTokenSpec`, so the token itself states what was approved, and the approve route reads it before signing rather than after. It is carried into the dispatch intent and onto the wire as contract **v2** — `content_digest`, required on both sides and pinned by the shared fixture that exists because neither side's own tests could catch R-05. The BFF refuses to dispatch actions it cannot name a snapshot for; `claim_plan_execution` makes that unreachable, and reaching it would mean the claim is not the function the route thinks it is.
+
+Existing fixtures created tokens with empty signed payloads, which the new rule correctly refuses. They now take real digests from the same SQL function, so a fixture cannot drift from what the claim recomputes.
+
+Verified: 0000–0027 on real PostgreSQL, nine SQL suites, three concurrency suites, 255 BFF tests, 99 runtime tests, typecheck and lint 15/15, format, and the env-security, controls-drift and deployment-coverage gates. Mutation-tested both directions — removing the digest comparison lets a replaced dry-run diff be claimed and executed, and making `content_digest` optional in the runtime model lets a dispatch through with nothing to verify against.
+
+**What this does not do.** The executor is a refusal stub, so it records the snapshot rather than re-verifying against it. Recomputing there needs database access the stub does not have, and a check around a no-op would read as coverage while guarding nothing. Today's enforcement point is the claim — transactional, under the row locks, and stronger than a check in the executor would be — but it is not the same thing as the executor refusing, and the distinction matters for any Phase 3 acceptance claim.

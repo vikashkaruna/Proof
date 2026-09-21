@@ -34,6 +34,26 @@ export interface ApprovalTokenSpec {
   expiresAt: string; // ISO datetime
   nonce: string;
   conditions?: Record<string, unknown>;
+  /**
+   * SHA-256 over the content of every action this token authorises, as
+   * computed by `action_set_content_digest` in the database at the moment the
+   * approval was issued (W1 · migration 0026/0027).
+   *
+   * Signing it is what makes the token say *what* was approved rather than
+   * only *which rows*. `trg_actions_approved_immutable` freezes an action's
+   * type, parameters, rollback definition and findings once it is approved,
+   * but not its `dry_run_result` — and the simulated outcome is precisely what
+   * the approver read before agreeing. A token that named only action ids
+   * could therefore authorise execution against a diff nobody approved.
+   *
+   * `claim_plan_execution` recomputes the digest under the action row locks
+   * and compares it with this value, read from the persisted signed payload
+   * rather than from the caller.
+   *
+   * Optional only so a spec can be constructed in tests without one; the
+   * database refuses a claim whose token carries no digest.
+   */
+  contentDigest?: string;
 }
 
 export interface SignedApprovalToken {

@@ -45,7 +45,7 @@ const env = loadEnv();
  * `services/agent-runtime/src/axiom/app.py` in the same commit;
  * `services/bff/src/routes/execution-contract.test.ts` asserts they agree.
  */
-export const EXECUTION_CONTRACT_VERSION = 1;
+export const EXECUTION_CONTRACT_VERSION = 2;
 
 export interface ExecutionDispatchInput {
   tenantId: string;
@@ -56,7 +56,8 @@ export interface ExecutionDispatchInput {
   mode: string;
   concurrency: number;
   stopOnFailure: boolean;
-  approvalToken: unknown;
+  approvalToken: unknown; /** From the claim, which read it from the token's signed payload. */
+  contentDigest: string;
 }
 
 /**
@@ -80,6 +81,10 @@ export function buildExecutionDispatchPayload(input: ExecutionDispatchInput) {
     concurrency: input.concurrency,
     stop_on_failure: input.stopOnFailure,
     approval_token: input.approvalToken,
+    // v2: the snapshot this batch was authorised for, reported by
+    // `claim_plan_execution` from the token's signed payload. The executor
+    // must refuse to mutate anything whose content no longer matches it.
+    content_digest: input.contentDigest,
   };
 }
 
@@ -933,31 +938,17 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: stepUp.reason, message } }, 401);
     }
 
-    // Issue the signed token
-    const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString();
-    const signed = await deps.approvalEngine.issue(tenantId, {
-      planId: input.planId,
-      actionIds: input.actionIds,
-      approverId: user.id,
-      mode: input.mode,
-      concurrency: input.concurrency,
-      stopOnFailure: input.stopOnFailure,
-      expiresAt,
-    });
-
-    // ── One transaction, or nothing (migration 0026) ──────────────────
+    // ── What is being approved, before it is signed ───────────────────
     //
-    // This used to be six more round trips: insert the token, link the
-    // challenge to it, mark the actions approved, move the plan, append the
-    // ledger. Each committed on its own, so a fault between any two left a
-    // state nobody designed — most seriously actions approved and a signed
-    // token live with NO ledger entry, which is authority over a client's
-    // estate with no tamper-evident record of who granted it.
+    // Read first, because the digest goes INSIDE the signed spec: the token
+    // then says what was approved and not merely which rows. `issue_plan_approval`
+    // recomputes it under the action row locks and refuses if it has moved, so
+    // a token can only ever be persisted carrying a digest that was true at
+    // the moment it became authority.
     //
-    // The digest is recomputed by the database under the row locks and
-    // compared with the one read here. Both ends use the same SQL function,
-    // so they agree by construction rather than by two languages
-    // canonicalising JSON identically — the assumption R-05 disproved.
+    // Both ends use the same SQL function, so they agree by construction
+    // rather than by two languages canonicalising JSON identically — the
+    // assumption R-05 disproved.
     const correlationId = randomUUID();
 
     const { data: expectedDigest, error: digestErr } = await admin.rpc(
@@ -972,6 +963,28 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    // Issue the signed token
+    const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString();
+    const signed = await deps.approvalEngine.issue(tenantId, {
+      planId: input.planId,
+      actionIds: input.actionIds,
+      approverId: user.id,
+      mode: input.mode,
+      concurrency: input.concurrency,
+      stopOnFailure: input.stopOnFailure,
+      expiresAt,
+      contentDigest: expectedDigest,
+    });
+
+    // ── One transaction, or nothing (migration 0026) ──────────────────
+    //
+    // This used to be six more round trips: insert the token, link the
+    // challenge to it, mark the actions approved, move the plan, append the
+    // ledger. Each committed on its own, so a fault between any two left a
+    // state nobody designed — most seriously actions approved and a signed
+    // token live with NO ledger entry, which is authority over a client's
+    // estate with no tamper-evident record of who granted it.
+    //
     const { data: issuance, error: issueErr } = await admin.rpc('issue_plan_approval', {
       p_tenant_id: tenantId,
       p_plan_id: input.planId,
@@ -1348,6 +1361,8 @@ export function v1Routes(deps: Deps) {
     const correlationId = randomUUID();
     const requestKey = c.get('idempotencyKey');
     let claimedActions: string[] = [];
+    // Reported by the claim, straight from the token's signed payload.
+    let claimedDigest: string | null = null;
 
     if (accepted.length > 0) {
       // W5: the outbox row is written inside this same transaction, so "we
@@ -1371,6 +1386,10 @@ export function v1Routes(deps: Deps) {
           concurrency: signedConcurrency ?? input.concurrency,
           stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
           approvalToken: signedToken,
+          // From the verified token. `claim_plan_execution` overwrites this in
+          // the stored intent with the value it read from the token row, so
+          // the outbox is authoritative even if this were ever wrong.
+          contentDigest: signedToken.spec.contentDigest ?? '',
         }),
       });
 
@@ -1382,11 +1401,44 @@ export function v1Routes(deps: Deps) {
         );
       }
 
-      const parsed = claim as { decision?: string; action_ids?: string[] } | null;
+      const parsed = claim as {
+        decision?: string;
+        action_ids?: string[];
+        content_digest?: string;
+      } | null;
       switch (parsed?.decision) {
         case 'claimed':
           claimedActions = parsed.action_ids ?? [];
+          claimedDigest = parsed.content_digest ?? null;
           break;
+        // ── The snapshot the approver authorised (0027) ──────────────
+        case 'content_changed':
+          // The action content no longer matches what the token was issued
+          // for. `trg_actions_approved_immutable` freezes an approved
+          // action's parameters and rollback definition but not its
+          // dry-run diff, so this is reachable without anyone breaking a
+          // constraint — and the diff is what the approver read.
+          return c.json(
+            {
+              error: {
+                code: 'content_changed',
+                message:
+                  'These actions no longer match what was approved. Re-read the plan and approve again.',
+              },
+            },
+            409,
+          );
+        case 'token_without_snapshot':
+          return c.json(
+            {
+              error: {
+                code: 'token_without_snapshot',
+                message:
+                  'This approval predates content binding and cannot authorise execution. Approve again.',
+              },
+            },
+            409,
+          );
         case 'already_claimed':
           return c.json(
             {
@@ -1473,6 +1525,24 @@ export function v1Routes(deps: Deps) {
       reference: null,
       error: 'dispatch not attempted',
     };
+    if (claimedActions.length > 0 && claimedDigest === null) {
+      // Unreachable through `claim_plan_execution`, which refuses a token
+      // carrying no snapshot — so reaching it means the claim is not the
+      // function this route thinks it is. Dispatching anyway would send the
+      // executor a batch with nothing to verify against, which is the whole
+      // property 0027 adds.
+      logger.error({ planId, requestKey }, 'claim returned actions without a content snapshot');
+      return c.json(
+        {
+          error: {
+            code: 'token_without_snapshot',
+            message: 'The claim reported no approved content snapshot; nothing was dispatched.',
+          },
+        },
+        500,
+      );
+    }
+
     if (claimedActions.length > 0) {
       dispatch = await dispatchExecution(
         env.AGENT_RUNTIME_URL,
@@ -1487,6 +1557,10 @@ export function v1Routes(deps: Deps) {
           concurrency: signedConcurrency ?? input.concurrency,
           stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
           approvalToken: signedToken,
+          // Reported by the claim, which read it from the token's signed
+          // payload under the action row locks. Guarded above: a claim that
+          // reports actions always reports this.
+          contentDigest: claimedDigest ?? '',
         }),
       );
 

@@ -21,7 +21,7 @@ from pydantic import ValidationError
 from axiom.app import EXECUTION_CONTRACT_VERSION, InternalExecuteRequest
 
 FIXTURE = (
-    Path(__file__).resolve().parents[3] / "tests" / "contracts" / "execution-dispatch.v1.json"
+    Path(__file__).resolve().parents[3] / "tests" / "contracts" / "execution-dispatch.v2.json"
 )
 
 
@@ -74,7 +74,18 @@ def test_unknown_fields_are_refused(payload: dict) -> None:
 
 @pytest.mark.parametrize(
     "missing",
-    ["contract_version", "tenant_id", "plan_id", "correlation_id", "action_ids", "request_key"],
+    [
+        "contract_version",
+        "tenant_id",
+        "plan_id",
+        "correlation_id",
+        "action_ids",
+        "request_key",
+        # v2. A dispatch without the approved snapshot is a dispatch the
+        # executor cannot verify before mutating a client estate, so the
+        # contract refuses it rather than letting the executor decide.
+        "content_digest",
+    ],
 )
 def test_required_fields_are_required(payload: dict, missing: str) -> None:
     incomplete = {k: v for k, v in payload.items() if k != missing}
@@ -100,7 +111,7 @@ def test_stub_refuses_execution_instead_of_claiming_responsibility(payload: dict
     assert response.status_code == 501
     assert response.json() == {
         "accepted": False,
-        "contract_version": 1,
+        "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": payload["correlation_id"],
         "reason": "execution_not_implemented",
     }

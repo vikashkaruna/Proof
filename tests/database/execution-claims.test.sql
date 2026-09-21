@@ -49,6 +49,15 @@ values
    array['00000000-0000-0000-0000-0000000000d3']::uuid[],
    '00000000-0000-0000-0000-0000000000a9', 'batch', 'sig-2', '{}'::jsonb, 'nonce-2', now() + interval '1 hour', 'issued');
 
+-- Every token carries the snapshot of what it approves (0026/0027). Issued by
+-- `issue_plan_approval` in production; set here from the same SQL function, so
+-- the fixture cannot drift from what the claim recomputes. A token without one
+-- is refused — that is asserted separately.
+update public.approval_tokens t
+   set signed_payload = coalesce(t.signed_payload, '{}'::jsonb)
+     || jsonb_build_object('contentDigest',
+          public.action_set_content_digest(t.tenant_id, t.plan_id, t.action_ids));
+
 update public.remediation_actions set approval_status = 'approved', dry_run_status = 'dry_run_complete', rollback_validated = true, dry_run_expires_at = now() + interval '1 hour';
 
 
