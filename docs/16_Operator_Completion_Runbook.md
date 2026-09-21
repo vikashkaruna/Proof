@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 24, reviewed staging `47685ab`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 25, reviewed staging `6271699`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -142,7 +142,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **33 migrations, 0000 → 0032**.
+non-zero on a failing migration. Expect **34 migrations, 0000 → 0033**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -230,7 +230,7 @@ date. I make the change and the gate re-validates.
 
 I flip **W0 → Closed** when all of these hold, and not before:
 
-1. Your W0-5 evidence shows **33 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **34 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -328,10 +328,7 @@ each succeeded, and the exact error code if any did not.
 **Current status: Partial.** This one is almost entirely mine, and I want to be
 precise about the size so it is not mistaken for a small gap.
 
-**28 of the 40 named target tables do not exist.** Delivered: the four estate
-tables (0029), the six W7.0 regulatory baseline tables and the two auth tables: 12 delivered, 28 absent. Absent: all 7
-connector, 5 execution-detail, 4 monitoring/policy, 4 multi-regulator, 4
-Phase 1/2 parity and 4 rights/consent tables.
+**21 of the 40 named target tables do not exist.** Delivered: estate (4), regulatory baseline (6), auth (2), and connector foundation (7, via 0033): 19 delivered. Absent: 5 execution-detail, 4 monitoring/policy, 4 multi-regulator, 4 Phase 1/2 parity and 4 rights/consent tables. The seven connector tables are metadata; W4 runtime and live authorization remain pending.
 
 ## OPERATOR steps
 
@@ -357,11 +354,11 @@ you apply, never the reverse.
 
 ## ENGINEERING steps for W2
 
-The 28 tables, in the order their dependent workstreams need them — W4's
-connector group first, because W5's execution tables reference it and W5 cannot
-be built before W4 exists. Each batch: composite tenant-consistent foreign
-keys, RLS that works with `service_role nobypassrls`, a SQL suite, and a
-populated-database upgrade test.
+Connector schema batch **delivered in Revision 25**, with composite FKs, RLS without BYPASSRLS, private credential envelopes, constrained agent grants, SQL and real-Auth tests, and a populated upgrade test. Remaining 21 tables follow their dependent workstreams; execution normalization must wait for the W4 grant model/runtime, avoiding a second source of truth alongside existing execution fields. W3 estate management can now proceed independently. Every subsequent batch keeps the same security and upgrade evidence contract.
+
+### Applying the connector schema batch (0033)
+
+Apply the migration runner as W0-5 describes. It creates seven empty tables; it does not infer connectors, import credentials or grant agents access. Return the migration summary through 0033. Do not insert real credentials or mark a connector production to make a demo look live: the W4 broker and transports are not implemented. Descriptor manifests/tool descriptions must contain only non-secret metadata; encrypted envelopes are broker-private and never browser-readable.
 
 ## How I mark W2 Closed
 
@@ -455,7 +452,7 @@ to me than a green run that took a detour.
 
 | Workstream | Now                                 | Flips to                       | On                                                                                                           |
 | ---------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 33 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 34 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
 | **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |

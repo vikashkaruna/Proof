@@ -165,6 +165,96 @@ async function main() {
     ).status,
     201,
   );
+  const descriptorId = randomUUID();
+  const connectorA = randomUUID();
+  const connectorB = randomUUID();
+  const identityA = randomUUID();
+  const identityB = randomUUID();
+  async function seedConnectorTable(table: string, rows: unknown) {
+    const response = await apiRequest(`/rest/v1/${table}`, 'POST', rows);
+    assert.equal(response.status, 201, `seed ${table}`);
+  }
+  await seedConnectorTable('connector_descriptors', {
+    id: descriptorId,
+    slug: `parity-${randomUUID()}`,
+    version: '1',
+    transport: 'mcp',
+    target_binding: 'reference-mock',
+    manifest: { enumerate: 'list' },
+  });
+  await seedConnectorTable('connectors', [
+    {
+      id: connectorA,
+      tenant_id: tenantA,
+      system_id: systemA,
+      descriptor_id: descriptorId,
+      target_binding: 'reference-mock',
+      name: 'A',
+      endpoint_ref: 'fixture-a',
+      assurance: 'high',
+    },
+    {
+      id: connectorB,
+      tenant_id: tenantB,
+      system_id: systemB,
+      descriptor_id: descriptorId,
+      target_binding: 'reference-mock',
+      name: 'B',
+      endpoint_ref: 'fixture-b',
+      assurance: 'high',
+    },
+  ]);
+  await seedConnectorTable('workload_identities', [
+    {
+      id: identityA,
+      tenant_id: tenantA,
+      agent_name: 'drishti',
+      spiffe_id: 'spiffe://parity/agent/drishti',
+    },
+    {
+      id: identityB,
+      tenant_id: tenantB,
+      agent_name: 'karya',
+      spiffe_id: 'spiffe://parity/agent/karya',
+    },
+  ]);
+  for (const [tenant_id, connector_id, workload_identity_id, agent_name, internal_scope] of [
+    [tenantA, connectorA, identityA, 'drishti', 'connector.read'],
+    [tenantB, connectorB, identityB, 'karya', 'connector.write'],
+  ]) {
+    await seedConnectorTable('connector_credentials', {
+      tenant_id,
+      connector_id,
+      grant_type: 'cloud_iam',
+      key_ref: 'fixture-key',
+      algorithm: 'aes-256-gcm',
+      nonce: `\\x${'aa'.repeat(12)}`,
+      ciphertext: `\\x${'bb'.repeat(32)}`,
+      wrapped_data_key: '\\xcc',
+    });
+    await seedConnectorTable('connector_grants', {
+      tenant_id,
+      connector_id,
+      workload_identity_id,
+      agent_name,
+      internal_scope,
+      expires_at: new Date(Date.now() + 3600000).toISOString(),
+    });
+    await seedConnectorTable('connector_health_checks', {
+      tenant_id,
+      connector_id,
+      status: 'healthy',
+    });
+    await seedConnectorTable('mcp_tool_registry', {
+      tenant_id,
+      connector_id,
+      tool_name: 'list',
+      tool_version: '1',
+      operation_class: 'read',
+      description: 'Fixture metadata only',
+      input_schema: {},
+    });
+  }
   const library = `parity-${randomUUID()}`;
   const engagementA = randomUUID();
   const engagementB = randomUUID();
@@ -276,6 +366,60 @@ async function main() {
     'Browser cannot write inventory',
   );
   outcomes.estate_isolation = true;
+  for (const table of [
+    'connectors',
+    'workload_identities',
+    'connector_grants',
+    'connector_health_checks',
+    'mcp_tool_registry',
+  ]) {
+    const response = await apiRequest(
+      `/rest/v1/${table}?select=tenant_id`,
+      'GET',
+      undefined,
+      viewer.token,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      await response.json(),
+      [{ tenant_id: tenantA }],
+      `${table}: real Auth isolation`,
+    );
+  }
+  assert.equal(
+    (await apiRequest('/rest/v1/connector_credentials', 'GET', undefined, viewer.token)).status,
+    403,
+    'credential envelopes never reach browsers',
+  );
+  assert.equal(
+    (await apiRequest(`/rest/v1/connectors?id=eq.${connectorA}`, 'PATCH', { system_id: systemB }))
+      .status,
+    409,
+    'service cannot cross-link tenant systems',
+  );
+  assert.equal(
+    (
+      await apiRequest(`/rest/v1/connector_grants?tenant_id=eq.${tenantA}`, 'PATCH', {
+        internal_scope: 'connector.write',
+      })
+    ).status,
+    400,
+    'Drishti cannot receive write scope',
+  );
+  assert.equal(
+    (
+      await apiRequest(
+        `/rest/v1/connectors?id=eq.${connectorA}`,
+        'PATCH',
+        { status: 'active' },
+        viewer.token,
+      )
+    ).status,
+    403,
+    'browser cannot activate connectors',
+  );
+  outcomes.connector_isolation = true;
+
   outcomes.direct_rls = true;
   const promotion = await apiRequest(
     `/rest/v1/users?id=eq.${viewer.id}`,

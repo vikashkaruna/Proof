@@ -49,5 +49,6 @@ bash tests/database/concurrent-mfa-revocation.sh "$container"
 # every higher environment is reached over a network rather than docker exec.
 bash tests/database/estate-upgrade.sh "$container"
 bash tests/database/mfa-upgrade.sh "$container"
+bash tests/database/connector-upgrade.sh "$container"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."

@@ -2,12 +2,24 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 24 — ATOMIC MFA RECOVERY ROTATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `47685ab`; its CI exposed a runner-only test dependency corrected in this checkpoint.
+**Document:** 11 · **Revision 25 — CONNECTOR DATA FOUNDATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `6271699`, green CI [35618777188](https://github.com/vikashkaruna/Proof/actions/runs/35618777188); includes both MFA milestones and the CI portability fix.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
-## Revision 24 — current implementation checkpoint
+## Revision 25 — current implementation checkpoint
+
+W2 connector schema batch, migration **0033**: `connector_descriptors`, `connectors`, `connector_credentials`, `connector_grants`, `connector_health_checks`, `workload_identities`, `mcp_tool_registry`. Every tenant-owned relationship uses composite foreign keys; membership RLS works without a JWT tenant claim. Browser roles cannot read credential envelopes or mutate any of these tables. Descriptors and tool registrations are append-only for the service role and carry database-computed content hashes. Target provenance is required and descriptor/instance-consistent. Only Drishti read and Karya write grants can be represented; the workload/agent binding is enforced by a composite FK.
+
+This is **W2 data foundation**, not W4 acceptance. No registry API, broker encryption/decryption, SVID authentication, grant enforcement per invocation, connector transport, credential issuance or external mutation is implemented by these rows. Health records in tests are explicitly fixtures. A connector defaults to draft; a workload registration defaults to disabled. Descriptor manifests are non-secret catalogue metadata; credential envelopes have no browser response schema.
+
+The populated 0032→0033 upgrade leaves the existing system unchanged and all seven new tables empty. SQL security/constraint tests, real GoTrue/PostgREST isolation across four local topology labels, and shared contract tests pass. A temporary browser SELECT grant makes the credential regression fail. Migration allocation is **0000–0033** (34 files). The named W2 set is now **19 of 40 delivered, 21 absent**; direct `pg_tables` inspection finds **49 public tables** overall, correcting the earlier 43 count at the pre-connector checkpoint.
+
+W1 invitation/deployed acceptance and E.2.3 remain open. Next: W3 estate management API/UI using the existing model, then W4 registry/broker/grants; W5 execution details require the stable W4 grant model. See [review 14](audits/14-connector-foundation-review-2026-09-21.md), progress, handoff and Doc 16. No cloud apply, scan or connector execution.
+
+---
+
+## Revision 24 — prior implementation checkpoint
 
 Migration **0032** closes the activation failure boundary found in review 12. `finalize_totp_enrolment` swaps the authenticator and replaces its recovery set in one transaction. Recovery codes cross the database boundary only as hashes; the old rows are retained but revoked. A failed recovery insert rolls back the factor swap, old-code retirement and replay counter. BFF errors distinguish storage failure (503) from a rejected code or missing pending enrollment. The old three-argument activation primitive is no longer callable by `service_role`; deploy 0032 together with the updated BFF.
 
@@ -107,7 +119,7 @@ immediately below. See also
 
 <a id="workstream-status-register--as-at-revision-22-21-sep-2026"></a>
 
-# Workstream status register — as at Revision 24 (21 Sep 2026)
+# Workstream status register — as at Revision 25 (21 Sep 2026)
 
 One maintained table rather than a per-revision delta, because a reader asking
 "where is W4?" should not have to reconstruct it from six revision sections.
@@ -123,9 +135,9 @@ a founder decision or on a deployment this workspace is not authorized to make.
 | --- | --- | --- | --- | --- |
 | **W0** | Security remediation & environment parity · P0 blocking | **Partial** — code **Closed**, deployment **Gated** | W0.0 and W0.2 are closed and held by the CI gate. Zero environment-conditional security branches; the only two matches are a marketing URL resolver the plan explicitly names as topology and a comment recording the removed defect. `axiom_e2e_bypass` has no reader anywhere. SEC-3 is closed: **zero** service-role calls across the 22 `apps/web` files, with the baseline file now empty and acting as a ratchet. SEC-4/5/6/10/11/12/13 each carry a regression test. Four strict-parity topology labels produce identical security outcomes. | W0.1. There is no provisioned preprod database and no deployed parity lane. The four parity labels are **one local stack under four configurations**, not four deployments. Blocked on the first real deploy, which the founder has reserved. |
 | **W1** | Tenancy, RBAC, MFA, personas · P0 | **Partial** | All 22 web files go through `requireTenantContext()`, so RLS enforces tenancy for every query the web app makes. Capability matrix and central `authorize()` in `@axiom/types`; `approval_scopes` is genuinely read, proven by a scoped approver who differs from an unscoped one *only* by that column. MFA: TOTP, recovery codes, login quarantine, approval-time step-up, key-ring rotation, and — Revision 22 — authenticator replacement with atomic retirement of the factor it replaces. 55 browser journeys under `AXIOM_AUTH_MODE=strict` with real GoTrue accounts, including revocation and quarantined enrollment (Revision 23). | Revocation UI and quarantined enrollment delivered in Revision 23. Atomic recovery rotation delivered in Revision 24. Remaining: invitation/email flow and deployed acceptance. Whether a recovery-code replacement should invalidate session attestations made with the retired factor — [E.2 item 3](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it), an open decision, not an oversight. |
-| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0032**, 43 tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4, via 0029), the W7.0 regulatory baseline group (6), and the auth group (2). Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **28 of the 40 named target tables do not exist** — verified against the migrated database, not by grep. All 7 W4 connector tables, all 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
+| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0033**, 49 public tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4), W7.0 regulatory group (6), auth group (2), and connector group (7, via 0033): 19 of 40 named targets. Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **21 of the 40 named target tables do not exist** — verified against the migrated database, not by grep. All 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
 | **W3** | Client estate & onboarding · P1 | **Pending** | Nothing of W3 itself. The 0029 schema it will build on is delivered and counted under W2, and engagement creation accepts an optional `estateId` under its existing capability gate. | Estate management API and UI, onboarding proposal normalization, and human-confirmed assignment of legacy engagements. Accepting a link to an estate is not managing one. |
-| **W4** | Universal Connection Framework · P1 XL | **Pending** | Nothing. | Zero of 7 tables. No registry, descriptors, credential envelope, grants, health checks, workload identity or MCP tool registry. `connectors/page.tsx` is a shell and is not evidence of the workstream. |
+| **W4** | Universal Connection Framework · P1 XL | **Pending runtime**, W2 schema delivered | Seven supporting tables, shared metadata contracts and isolation tests via 0033, counted under W2. | No registry API, descriptor validation/publishing workflow, credential broker, SVID validation, live grant enforcement, health probes or transports. The connector page remains a shell. Database rows are not executable authority. |
 | **W5** | Phase 3 execution loop · P1 XL | **Partial** | The *authority* machinery is real and tested: signed scope-bound approval tokens, bounded nonce replay defence, execution claims with serialization proven by a held-open two-session race, the dispatch outbox, atomic reconciliation and the kill switch. | The executor. Karya refuses mutating execution without a signed token **by design at this phase** — a deliberate refusal stub, not a defect, and not a PRD B.10 completion claim. Zero of 5 execution-detail tables. |
 | **W6** | Continuous compliance · P1 | **Pending** | Nothing. | Zero of 4 tables. A monitoring page shell and a controls-drift script exist; neither is this workstream. |
 | **W7** | Control library & multi-regulator · P0-adjacent | **Partial** | 46 controls, with a CI gate proving every count in the repository agrees with the library, a TS→runtime parity gate against drift, and citation tests. The full W7.0 regulatory baseline group is in the database. | Multi-regulator and sector packs: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs` — all 4 missing. Sectoral pack #1 is an open founder decision ([E.2 item 1](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it)). |
@@ -1175,13 +1187,13 @@ Enforcement is **step-up, not blanket**: required at login for `founder` / `owne
 
 ## W2 · Data model completion — **P0** · size M
 
-Append-only migrations, allocated from the next unused number. **0000–0032 exist** at Revision 24; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+Append-only migrations, allocated from the next unused number. **0000–0033 exist** at Revision 25; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)
 estates, estate_systems, system_data_categories, estate_scans -- DELIVERED by 0029; management/workflows pending
 
--- Universal Connection Framework (W4)
+-- Universal Connection Framework (W4) -- SCHEMA DELIVERED by 0033; runtime pending
 connectors,                    -- registered target instances + targetBinding
 connector_descriptors,         -- capability descriptors (versioned, hash-pinned)
 connector_credentials,         -- envelope-encrypted grant config, never raw tokens
