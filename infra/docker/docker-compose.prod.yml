@@ -23,6 +23,7 @@ services:
       - NODE_ENV=production
       - ENVIRONMENT=production
       - AXIOM_MFA_ENCRYPTION_KEY=${AXIOM_MFA_ENCRYPTION_KEY:?Set the distinct persistent MFA encryption key}
+      - AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}
       - LOG_LEVEL=warn
     restart: always
 

@@ -249,6 +249,19 @@ export function v1Routes(deps: Deps) {
         result: 'failure',
         detail: { purpose: 'enrolment', reason: result.reason, detail: result.detail },
       });
+      if (result.reason === 'secret_unreadable') {
+        return c.json(
+          {
+            error: {
+              code: 'secret_unreadable',
+              message:
+                'Enrolment cannot be completed right now. This is a fault on our side, not a ' +
+                'problem with your code. Start a fresh enrolment once it is resolved.',
+            },
+          },
+          503,
+        );
+      }
       return c.json(
         {
           error: {
@@ -582,6 +595,22 @@ export function v1Routes(deps: Deps) {
         result: 'failure',
         detail: { reason: result.reason, detail: result.detail },
       });
+      if (result.reason === 'secret_unreadable') {
+        // Their code may well have been right; we cannot read the secret to
+        // find out. Saying 401 here would blame the user for an operator
+        // error and hide a broken key rotation behind ordinary login noise.
+        return c.json(
+          {
+            error: {
+              code: 'secret_unreadable',
+              message:
+                'Your second factor cannot be verified right now. This is a fault on our side, ' +
+                'not a problem with your code. Use a recovery code if you need access now.',
+            },
+          },
+          503,
+        );
+      }
       // `challenge_not_found` covers both "no such id" and "not yours". The
       // two are not distinguished on the wire: telling a caller that a
       // challenge exists but belongs to someone else is a user-enumeration

@@ -16,4 +16,12 @@ export {
   verifyRecoveryCode,
 } from './recovery';
 
-export { decryptSecret, encryptSecret } from './secret-store';
+export {
+  decryptSecret,
+  encryptSecret,
+  mfaKeyId,
+  openSecret,
+  MfaSecretUnreadableError,
+  MFA_KEY_MIN_LENGTH,
+} from './secret-store';
+export type { OpenedSecret } from './secret-store';
