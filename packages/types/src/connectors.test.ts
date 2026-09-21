@@ -62,6 +62,8 @@ describe('connector authority metadata', () => {
       endpointRef: 'local-fixture',
       assurance: 'high',
       status: 'draft',
+      version: 1,
+      updatedAt: '2026-09-22T00:00:00Z',
       createdAt,
     };
     expect(ConnectorSchema.safeParse(connector).success).toBe(false);

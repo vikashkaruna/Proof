@@ -35,6 +35,8 @@ export const ConnectorSchema = z.object({
   endpointRef: z.string().trim().min(1).max(500),
   assurance: z.enum(['high', 'low']),
   status: z.enum(['draft', 'active', 'disabled', 'archived']),
+  version: z.number().int().positive(),
+  updatedAt: z.iso.datetime(),
   createdAt: z.iso.datetime(),
 });
 export type Connector = z.infer<typeof ConnectorSchema>;

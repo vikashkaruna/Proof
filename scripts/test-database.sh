@@ -46,6 +46,7 @@ bash tests/database/concurrent-reviewed-approval.sh "$container"
 bash tests/database/concurrent-mfa-revocation.sh "$container"
 bash tests/database/concurrent-mfa-replacement.sh "$container"
 bash tests/database/concurrent-estate.sh "$container"
+bash tests/database/concurrent-connector.sh "$container"
 bash tests/database/concurrent-proposal.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
@@ -53,6 +54,7 @@ bash tests/database/concurrent-proposal.sh "$container"
 bash tests/database/estate-upgrade.sh "$container"
 bash tests/database/mfa-upgrade.sh "$container"
 bash tests/database/connector-upgrade.sh "$container"
+bash tests/database/connector-lifecycle-upgrade.sh "$container"
 bash tests/database/gap-scan-upgrade.sh "$container"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."

@@ -4,7 +4,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 30, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 31, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **38 migrations, 0000 → 0037**.
+non-zero on a failing migration. Expect **39 migrations, 0000 → 0038**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -223,7 +223,7 @@ For report rollout, apply 0037 and deploy BFF/marketing together; seed the publi
 
 I flip **W0 → Closed** when the remaining C-W0-5/6/7 findings are resolved with tests and all of these hold, and not before:
 
-1. Your W0-5 evidence shows **38 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **39 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -241,7 +241,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 61 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
+**Current status: Partial.** The suite now has 63 browser journeys (including W3 inventory/proposal and W4.1 registration coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 
@@ -418,6 +418,24 @@ The initial intake is a single complete batch. Per-item exclusion and later onbo
 
 ---
 
+# W4 · Connector registry and execution
+
+## W4-1 · Register and manage a connector (engineering delivered by 0038)
+
+Apply through **0038**, then deploy BFF/web together. Open `/connectors` as a tenant owner/admin (or assigned founder). Choose an active estate system and a reviewed descriptor; enter a name and a non-secret endpoint identifier such as `primary_crm`. Do not paste connection URLs, tokens or passwords. The registration starts in draft and is durably audited. Catalogue entries are published immutably on first registration; a conflicting published version is refused rather than overwritten.
+
+“Enable registration” changes lifecycle only. It does not obtain credentials, probe a system, grant access or run discovery. A descriptor's assurance value is its authentication policy, not verified connectivity. Health shows a dated recorded check or “Not checked.” Reference/sandbox bindings remain explicitly non-production and cannot declare writes.
+
+Disable before editing an enabled registration or archiving its estate/system. Disable revokes all existing grants; re-enable does not restore them. Archive additionally revokes stored credential envelopes and is terminal. A legacy descriptor missing from the reviewed catalogue may still be disabled/archived, but enabling it requires a reviewed new registration. If a form reports an unknown outcome, keep it open and use “Retry same request”; do not invent a second intent.
+
+**Evidence:** sanitized registration/lifecycle audit IDs, exact commit and green container/CI results. Do not supply target credentials at this stage. Both archive/enable race orderings and populated migration upgrade are tested locally. No client target was contacted.
+
+## Remaining W4 / W3 dependency gates
+
+W4.2 vault/rotation and OAuth client-credentials/JWT-bearer broker → W4.3 workload identity → W4.4 live grants must be enforced before execution or graph access edges can be called live. Then complete the resumable onboarding wizard/readiness and graph; proceed to W4.5 internal tool registry, W4.6 first real SQL binding and W4.7 REST/GraphQL. Existing tables and registration status do not satisfy these gates. Readiness must remain unverified until an implemented transport and real health checks prove connectivity. Phase 2's three-live-connector-type exit remains separate from a first SQL binding.
+
+---
+
 # Sending evidence back
 
 One markdown block or a file, per batch of steps. For each step: the step id
@@ -444,7 +462,7 @@ to me than a green run that took a detour.
 
 | Workstream | Now                           | Flips to                       | On                                                                                                           |
 | ---------- | ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (harness delivered)   | **Closed**                     | 36 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | Partial (harness delivered)   | **Closed**                     | 39 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
 | **W0**     | —                             | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                       | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                       | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |

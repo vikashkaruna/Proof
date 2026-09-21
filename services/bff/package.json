@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-connector-descriptors.mjs",
     "start": "node dist/index.js",
     "lint": "axiom-lint",
     "typecheck": "tsc --noEmit",
@@ -27,6 +27,7 @@
     "@hono/node-server": "^2.1.1",
     "@supabase/supabase-js": "^2.116.0",
     "hono": "^4.13.7",
+    "yaml": "2.8.3",
     "zod": "^4.5.4"
   },
   "devDependencies": {
