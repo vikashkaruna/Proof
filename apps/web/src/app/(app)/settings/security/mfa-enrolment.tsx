@@ -55,6 +55,16 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The open `enrolment` challenge, when replacing a live factor.
+   *
+   * Replacement is a three-step act and the UI has to model all three: open a
+   * challenge, satisfy it, then spend it on the new enrolment. Earlier this
+   * component jumped straight to the third step, so the BFF — correctly —
+   * refused every press of Replace with `mfa_challenge_required`.
+   */
+  const [stepUp, setStepUp] = useState<{ challengeId: string } | null>(null);
+  const [stepUpCode, setStepUpCode] = useState('');
 
   const headers = {
     'Content-Type': 'application/json',
@@ -63,7 +73,10 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
 
   const readError = async (res: Response, fallback: string) => {
     const body = await res.json().catch(() => ({}));
-    return (body?.error?.message as string | undefined) ?? `${fallback} (HTTP ${res.status})`;
+    return {
+      code: body?.error?.code as string | undefined,
+      message: (body?.error?.message as string | undefined) ?? `${fallback} (HTTP ${res.status})`,
+    };
   };
 
   /**
@@ -81,26 +94,112 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
     }
   }
 
-  async function begin() {
+  /**
+   * Begin enrolment, spending `mfaChallengeId` when one was required.
+   *
+   * A first enrolment sends none: there is no factor yet to protect, and the
+   * BFF opens the enrolment without a step-up. A replacement must send one.
+   */
+  async function begin(mfaChallengeId?: string) {
     setError(null);
     setBusy(true);
     try {
       const res = await fetch('/api/bff/v1/mfa/enrol', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ label: 'Authenticator' }),
+        body: JSON.stringify({ label: 'Authenticator', mfaChallengeId }),
       });
       if (!res.ok) {
-        setError(await readError(res, 'Could not start enrolment'));
+        const { message } = await readError(res, 'Could not start enrolment');
+        setError(message);
+        // The challenge is spent or was never good; a retry needs a new one.
+        setStepUp(null);
         return;
       }
       setPending(await res.json());
+      setStepUp(null);
+      setStepUpCode('');
       setCode('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start enrolment');
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * The entry point behind the single button: enrol directly, or open an
+   * `enrolment` challenge first when a live factor is being replaced.
+   */
+  async function beginOrChallenge() {
+    if (!status.enrolled) {
+      await begin();
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch('/api/bff/v1/mfa/challenge', {
+        method: 'POST',
+        headers: {
+          ...headers,
+          // A step-up challenge is single-use, and the browser-to-BFF bridge
+          // derives a key from method + path + body when none is given — which
+          // for this fixed body is the same key for this user forever. The
+          // second replacement would replay a spent challenge. See
+          // `apps/web/src/app/api/bff/idempotency-key.test.ts`.
+          'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
+        },
+        body: JSON.stringify({ purpose: 'enrolment' }),
+      });
+      if (!res.ok) {
+        const { message } = await readError(res, 'Could not start verification');
+        setError(message);
+        return;
+      }
+      const body = await res.json();
+      setStepUp({ challengeId: body.challengeId as string });
+      setStepUpCode('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start verification');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Satisfy the replacement challenge, then spend it on the new enrolment. */
+  async function confirmStepUp() {
+    if (!stepUp) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/bff/v1/mfa/challenge/${encodeURIComponent(stepUp.challengeId)}/verify`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ code: stepUpCode.trim() }),
+        },
+      );
+      if (!res.ok) {
+        const { code: errorCode, message } = await readError(res, 'Verification failed');
+        setError(message);
+        // Terminal for this challenge — keeping the panel open would only
+        // collect codes against an id the server will never accept again.
+        if (errorCode === 'attempts_exhausted' || errorCode === 'challenge_expired') {
+          setStepUp(null);
+        }
+        return;
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Verification failed');
+      return;
+    } finally {
+      setBusy(false);
+    }
+    // Outside the try: `begin` manages its own busy state and errors, and a
+    // failure there is an enrolment failure, not a verification one.
+    await begin(stepUp.challengeId);
   }
 
   async function activate() {
@@ -113,7 +212,8 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
         body: JSON.stringify({ code: code.trim() }),
       });
       if (!res.ok) {
-        setError(await readError(res, 'That code was not accepted'));
+        const { message } = await readError(res, 'That code was not accepted');
+        setError(message);
         return;
       }
       const body = await res.json();
@@ -162,9 +262,16 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
               Each works once. They are stored hashed, so nobody, including us, can read them back.
               They are the only way in if you lose the authenticator.
             </p>
-            <div className="mt-3 grid grid-cols-2 gap-1.5 font-mono text-sm text-amber-950 sm:grid-cols-3">
+            <div
+              data-testid="recovery-codes"
+              className="mt-3 grid grid-cols-2 gap-1.5 font-mono text-sm text-amber-950 sm:grid-cols-3"
+            >
               {recoveryCodes.map((rc) => (
-                <span key={rc} className="rounded bg-white/70 px-2 py-1">
+                <span
+                  key={rc}
+                  data-testid="recovery-code"
+                  className="rounded bg-white/70 px-2 py-1"
+                >
                   {rc}
                 </span>
               ))}
@@ -177,6 +284,55 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
             >
               I have saved them
             </Button>
+          </div>
+        )}
+
+        {stepUp && !pending && (
+          <div
+            data-testid="mfa-replace-step-up"
+            className="flex flex-col gap-3 rounded-md border border-indigo-300 bg-indigo-50 p-4"
+          >
+            <p className="text-sm font-medium text-indigo-900">
+              Confirm with your current authenticator before replacing it.
+            </p>
+            <p className="text-xs text-indigo-800">
+              Enter the six-digit code from the authenticator you have now, or one of your recovery
+              codes if you no longer have it. The new authenticator is only issued once this is
+              satisfied.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="stepUpCode">Current code or recovery code</Label>
+                <Input
+                  id="stepUpCode"
+                  value={stepUpCode}
+                  onChange={(e) => setStepUpCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && stepUpCode.trim()) void confirmStepUp();
+                  }}
+                  placeholder="123456"
+                  autoComplete="one-time-code"
+                />
+              </div>
+              <Button
+                variant="accent"
+                onClick={confirmStepUp}
+                loading={busy}
+                disabled={!stepUpCode.trim()}
+              >
+                Confirm and replace
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setStepUp(null);
+                  setStepUpCode('');
+                  setError(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
 
@@ -226,9 +382,9 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
           </div>
         )}
 
-        {!pending && (
+        {!pending && !stepUp && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="accent" onClick={begin} loading={busy}>
+            <Button variant="accent" onClick={beginOrChallenge} loading={busy}>
               {status.enrolled ? 'Replace authenticator' : 'Enrol an authenticator'}
             </Button>
             {status.enrolled && (
@@ -240,7 +396,7 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
           </div>
         )}
 
-        {status.enrolled && !pending && (
+        {status.enrolled && !pending && !stepUp && (
           <p className="text-xs text-slate-500">
             Replacing an active authenticator asks you to confirm with the current one (or a
             recovery code) first. Without that, anyone who got hold of your session could simply

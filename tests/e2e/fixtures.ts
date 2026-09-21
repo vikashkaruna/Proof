@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { generateTotp } from '@axiom/mfa';
-import { type PersonaKey, type PersonaState, personaByKey } from './personas';
+import { encryptSecret, generateSecret, generateTotp } from '@axiom/mfa';
+import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } from './personas';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 
@@ -21,9 +21,14 @@ export const persona = personaByKey;
  */
 export async function signIn(page: Page, key: PersonaKey): Promise<void> {
   const who = account(key);
+  await signInAs(page, who.email, who.password);
+}
+
+/** The same real login, for an account a journey provisioned for itself. */
+export async function signInAs(page: Page, email: string, password: string): Promise<void> {
   await page.goto('/login');
-  await page.fill('input[name="email"]', who.email);
-  await page.fill('input[name="password"]', who.password);
+  await page.fill('input[name="email"]', email);
+  await page.fill('input[name="password"]', password);
   await Promise.all([
     page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 }),
     page.click('button[type="submit"]'),
@@ -144,3 +149,83 @@ export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void
 }
 
 export const planUrl = (id: string) => `/plans/${id}`;
+
+/**
+ * A fresh approver in tenant A, provisioned for one journey.
+ *
+ * The MFA journeys need this for the same reason approval journeys need
+ * `createApprovablePlan`: they are state transitions on the account itself. A
+ * first enrolment happens once, a recovery code is shown once and spends
+ * once, and a replaced secret is not the secret the seed recorded. A journey
+ * written against a seeded persona passes on a clean database and fails on
+ * every rerun — including, silently and permanently, on a CI retry.
+ *
+ * Tenant A keeps `mfa_required_roles = '{}'`, so an account with no factor
+ * signs in and reaches the app instead of landing on the quarantine page.
+ *
+ * `withFactor` seeds an active TOTP factor encrypted under the harness ring
+ * key, exactly as `scripts/seed-personas.ts` does, for journeys that start
+ * from a user who already holds an authenticator.
+ */
+export async function createMfaAccount(
+  label: string,
+  opts: { withFactor?: boolean } = {},
+): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const email = `journey-${label}-${suffix}@example.invalid`;
+  const password = `Pw-${crypto.randomUUID()}`;
+
+  const admin = async (path: string, body: unknown, what: string, expected = 200) => {
+    const res = await fetch(`${state.supabaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        apikey: state.publishableKey,
+        Authorization: `Bearer ${state.serviceKey}`,
+        'content-type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== expected) {
+      throw new Error(`${what}: ${res.status} — ${(await res.text()).slice(0, 300)}`);
+    }
+    return res;
+  };
+
+  const created = await admin(
+    '/auth/v1/admin/users',
+    { email, password, email_confirm: true },
+    'journey account',
+  );
+  const { id } = (await created.json()) as { id: string };
+
+  // The application profile is a separate row; without it the tenant resolver
+  // has an authenticated user with nothing to resolve.
+  await admin('/rest/v1/users', { id, email, is_axiom_internal: false }, 'journey profile', 201);
+  await admin(
+    '/rest/v1/tenant_users',
+    { tenant_id: state.tenantA.id, user_id: id, role: 'approver', approval_scopes: [] },
+    'journey membership',
+    201,
+  );
+
+  let totpSecret: string | undefined;
+  if (opts.withFactor) {
+    totpSecret = generateSecret(20);
+    await admin(
+      '/rest/v1/user_mfa_factors',
+      {
+        user_id: id,
+        factor_type: 'totp',
+        status: 'active',
+        label: `${label} authenticator`,
+        secret_encrypted: encryptSecret(totpSecret, HARNESS_MFA_KEY),
+        activated_at: new Date().toISOString(),
+      },
+      'journey factor',
+      201,
+    );
+  }
+
+  return { id, email, password, ...(totpSecret ? { totpSecret } : {}) };
+}

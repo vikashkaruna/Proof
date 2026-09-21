@@ -73,10 +73,24 @@ describe('challenge creation cannot rely on that derivation', () => {
   });
 });
 
-describe('both challenge callers supply their own key', () => {
+describe('challenge creation cannot rely on that derivation (enrolment)', () => {
+  it('is the same key every time for a fixed replacement request', () => {
+    // The replacement step-up has the barest body of the three — a single
+    // fixed `purpose` — so its derived key is constant for a user forever.
+    // The first replacement would claim it and every later one would be
+    // refused `idempotency_conflict`, or worse, replay a spent challenge.
+    const body = JSON.stringify({ purpose: 'enrolment' });
+    expect(derivedKey('POST', '/v1/mfa/challenge', body)).toBe(
+      derivedKey('POST', '/v1/mfa/challenge', body),
+    );
+  });
+});
+
+describe('every challenge caller supplies its own key', () => {
   const sources = [
     ['the login-MFA prompt', 'apps/web/src/app/(auth)/verify/verify-form.tsx'],
     ['the approval console', 'apps/web/src/app/(app)/plans/[id]/approval-actions.tsx'],
+    ['the authenticator replacement', 'apps/web/src/app/(app)/settings/security/mfa-enrolment.tsx'],
   ] as const;
 
   it.each(sources)('%s sends a per-attempt Idempotency-Key', async (_label, file) => {

@@ -108,6 +108,48 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     ),
   );
 
+  /**
+   * Migration 0030 — activate a pending TOTP factor and retire the one it
+   * replaces, together.
+   *
+   * This double models the UNIQUE index `user_mfa_factors_one_active_totp`
+   * as well as the function, and raises on a violation the way Postgres
+   * does. Without that the double is more permissive than the database: the
+   * bare UPDATE this RPC replaced passed every in-memory test and raised
+   * 23505 against a real stack the moment a user already held a factor,
+   * which is precisely how the defect reached a browser journey to be found.
+   */
+  rpcHandlers.set('activate_totp_factor', (args) => {
+    const userId = args['p_user_id'] as string;
+    const factorId = args['p_factor_id'] as string;
+    const rows = tables['user_mfa_factors'] ?? [];
+    const mine = (r: Row) => r['user_id'] === userId && r['factor_type'] === 'totp';
+
+    const pending = rows.find((r) => r['id'] === factorId && mine(r) && r['status'] === 'pending');
+    // No rows, which the caller reads as `no_pending_factor`.
+    if (!pending) return [];
+
+    const now = new Date().toISOString();
+    const retired = rows.find((r) => mine(r) && r['status'] === 'active' && r['id'] !== factorId);
+    if (retired) {
+      retired['status'] = 'revoked';
+      retired['revoked_at'] = now;
+    }
+
+    pending['status'] = 'active';
+    pending['activated_at'] = now;
+    pending['last_used_counter'] = args['p_last_used_counter'];
+    pending['last_used_at'] = now;
+
+    const active = rows.filter((r) => mine(r) && r['status'] === 'active');
+    if (active.length > 1) {
+      throw new Error(
+        'duplicate key value violates unique constraint "user_mfa_factors_one_active_totp"',
+      );
+    }
+    return [{ activated_factor_id: factorId, retired_factor_id: retired?.['id'] ?? null }];
+  });
+
   rpcHandlers.set('issue_reviewed_plan_approval', (args) => {
     const tenantId = args['p_tenant_id'] as string;
     const planId = args['p_plan_id'] as string;

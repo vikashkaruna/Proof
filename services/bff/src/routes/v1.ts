@@ -158,9 +158,8 @@ export function v1Routes(deps: Deps) {
     // logged quietly.
     const existingFactorId = await deps.mfa.activeFactorId(user.id);
     if (existingFactorId) {
-      const challengeId = (body as { mfaChallengeId?: string } | null)?.mfaChallengeId;
       const stepUp = await deps.mfa.consumeChallenge({
-        challengeId,
+        challengeId: parsed.data.mfaChallengeId ?? undefined,
         userId: user.id,
         purpose: 'enrolment',
         boundResourceRef: existingFactorId,
