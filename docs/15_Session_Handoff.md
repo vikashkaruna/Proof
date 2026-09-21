@@ -1,5 +1,7 @@
 # Axiom Proof — implementation session handoff
 
+Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
+
 ## Revision 34 — W4.3 identity verification and attestation foundation
 
 W4.2 broker core is complete and green at staging merge **`46847d8`**, CI [35663034387](https://github.com/vikashkaruna/Proof/actions/runs/35663034387). The broker remains disabled pending mandatory workload/grant activation. No newer other-model staging implementation was present. The broader W3/W4 goal remains open.
