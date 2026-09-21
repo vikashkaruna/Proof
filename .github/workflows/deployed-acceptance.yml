@@ -62,6 +62,8 @@ jobs:
             .axiom-runtime/acceptance/*/api-results.json
             .axiom-runtime/acceptance/*/browser-results.json
           retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Remove private test credentials and raw reports
         if: always()
         run: rm -rf .axiom-runtime
