@@ -130,21 +130,33 @@ jobs:
           terraform_wrapper: false
       - run: terraform fmt -check -recursive infra/terraform
 
-      # fmt only parses; it never resolves a module, so it cannot see a
-      # module block whose arguments its pinned version does not accept.
-      # `validate` does, which is how envs/prod was found to be unloadable:
-      # three variables declared twice, and seven arguments written against
-      # module majors the config does not pin. preprod is gated here because
-      # it passes. prod is deliberately absent — adding it would land the
-      # gate red, and the repairs it needs change provisioned infrastructure
-      # (the EKS API endpoint's exposure among them) rather than formatting.
-      # It goes in once those land, and until then this gate does not claim
-      # to cover it.
-      - name: terraform validate (preprod)
-        working-directory: infra/terraform/envs/preprod
+      # fmt only parses; it never resolves a module or a reference, so it
+      # cannot see a module block whose arguments the pinned version rejects.
+      # `validate` does, which is how envs/prod was found unloadable: three
+      # variables declared twice, seven arguments spelled for module majors it
+      # does not pin, a helm_release using the provider v3 `set` form under a
+      # v2 pin, and a lifecycle rule with no filter. prod had never been
+      # initialised at all, so none of it had ever been reported.
+      #
+      # The loop discovers environments instead of naming them, so a third one
+      # cannot be added ungated — the failure mode that produced prod.
+      # -backend=false because prod's main.tf carries a live `backend "s3"`
+      # block; this gate reads configuration and must not touch state.
+      #
+      # Error level only. `validate` exits 0 on warnings, so the lifecycle
+      # rule's empty `filter {}` is defensive rather than held here — removing
+      # it warns and still passes. Promoting warnings to failures was declined
+      # on purpose: a provider minor can introduce one on untouched files,
+      # which is the brittleness the pinned terraform_version above avoids.
+      - name: terraform validate (all environments)
         run: |
-          terraform init -backend=false -input=false
-          terraform validate
+          set -euo pipefail
+          for env in infra/terraform/envs/*/; do
+            echo "::group::${env}"
+            terraform -chdir="${env}" init -backend=false -input=false
+            terraform -chdir="${env}" validate
+            echo "::endgroup::"
+          done
 
   # ─── W0.1 self-hosted Supabase topology ──────────────────────────
   # Higher environments self-host GoTrue and PostgREST against their own
