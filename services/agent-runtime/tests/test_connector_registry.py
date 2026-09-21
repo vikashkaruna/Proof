@@ -31,6 +31,8 @@ def test_shared_catalogue_contracts():
         {"auth": "legacy_static"},
         {"assurance": "low"},
         {"version": "latest"},
+        {"id": "00000000-0000-0000-0000-000000000000"},
+        {"id": "ffffffff-ffff-ffff-ffff-ffffffffffff"},
         {"schemaVersion": True},
         {"capabilities": {"enumerate": {"operation": "sql.read", "mutating": 0}}},
         {"password": "secret"},

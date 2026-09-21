@@ -19,6 +19,8 @@ describe('reviewed descriptor registry', () => {
     { ...production, auth: 'legacy_static' },
     { ...production, assurance: 'low' },
     { ...production, version: 'latest' },
+    { ...production, id: '00000000-0000-0000-0000-000000000000' },
+    { ...production, id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' },
     { ...production, password: 'secret' },
     {
       ...production,

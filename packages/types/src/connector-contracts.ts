@@ -14,7 +14,16 @@ const writeOperation = z
 export const ConnectorManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
-    id: z.uuid(),
+    id: z
+      .uuid()
+      .refine(
+        (id) =>
+          ![
+            '00000000-0000-0000-0000-000000000000',
+            'ffffffff-ffff-ffff-ffff-ffffffffffff',
+          ].includes(id.toLowerCase()),
+        'A descriptor requires a versioned UUID, not a sentinel',
+      ),
     target: z
       .string()
       .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
