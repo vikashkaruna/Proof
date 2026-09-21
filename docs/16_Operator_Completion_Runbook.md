@@ -1,5 +1,7 @@
 # Axiom Proof — Operator completion runbook: W0 → W3
 
+Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
 **Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 28, reviewed staging `d386fad`, 21 Sep 2026

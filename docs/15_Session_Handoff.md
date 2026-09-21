@@ -1,5 +1,7 @@
 # Saved implementation session — 21 September 2026
 
+Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+
 Fetch staging first; the merge containing this file is the checkpoint. Plan **Revision 28**, migration tip **0035** (36 files, 51 public tables). Reviewed upstream **d386fad**, green CI [35628480541](https://github.com/vikashkaruna/Proof/actions/runs/35628480541); no newer other-model work appeared. Read Docs 11, 16, [17](17_Deployed_Acceptance.md) and [review 17](audits/17-deployed-acceptance-review-2026-09-21.md).
 
 ## Completed and verified

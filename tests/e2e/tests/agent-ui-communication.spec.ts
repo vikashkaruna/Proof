@@ -10,13 +10,11 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { satisfyLoginMfa, selectTenant, signIn } from '../fixtures';
+import { signInFreshAnalyst } from '../fixtures';
 
 test.describe('Agent ↔ UI communication', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page, 'analyst');
-    await selectTenant(page, 'a');
-    await satisfyLoginMfa(page, 'analyst');
+    await signInFreshAnalyst(page, 'workbench');
   });
 
   test('agent progress events update the UI', async ({ page }) => {

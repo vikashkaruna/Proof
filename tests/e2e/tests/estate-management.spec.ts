@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { signIn, selectTenant, satisfyLoginMfa, state } from '../fixtures';
+import { signIn, selectTenant, signInFreshAnalyst, state } from '../fixtures';
 
 test('owner declares, edits and archives an estate and system', async ({ page }) => {
   const suffix = crypto.randomUUID().slice(0, 8);
@@ -84,8 +84,8 @@ test('owner declares, edits and archives an estate and system', async ({ page })
 
 for (const role of ['viewer', 'analyst'] as const) {
   test(`${role} can read estate inventory but cannot edit it`, async ({ page }) => {
-    await signIn(page, role);
-    if (role === 'analyst') await satisfyLoginMfa(page, role);
+    if (role === 'analyst') await signInFreshAnalyst(page, 'estate-reader');
+    else await signIn(page, role);
     await selectTenant(page, 'a');
     await page.goto('/estate');
     await expect(page.getByRole('heading', { name: 'Client estate', exact: true })).toBeVisible();

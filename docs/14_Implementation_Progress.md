@@ -1,5 +1,7 @@
 # W0 → W1 → W2 → W3 implementation progress
 
+Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+
 Started 20 September 2026 with authorisation to implement in order and commit/merge/push each verified milestone to staging. Goal remains active until the complete acceptance criteria are proved. Revision 9 review/handoff documents are the starting requirements, not a claim of current completion.
 
 Two models alternate on this repository, each from its own worktree, so a worktree path or branch named in a milestone below is where that milestone was delivered and not where work happens now. This file was opened from `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof` on branch `codex/w0-w3-closure`, resumed from staging `5a4d6a0`, where analyst migration 0015 was committed. For current status read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, and [Doc 15](15_Session_Handoff.md); the most recent reviews are [audit 07](audits/07-staging-integration-review-2026-09-21.md) and [audit 09](audits/09-reviewed-approval-snapshot-2026-09-21.md). Milestone narratives below describe their original delivery and are not restated as current.

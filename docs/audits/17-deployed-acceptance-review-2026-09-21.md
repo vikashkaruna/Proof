@@ -1,5 +1,7 @@
 # Deployed acceptance review — 21 September 2026
 
+Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+
 Reviewed staging `d386fad`; no newer other-model changes appeared on fetch. Existing W3 inventory/proposal work is retained, including the accepted owner/**tenant admin** review policy. The unfinished W0 deployed harness remained engineering work and was completed before moving to the next runtime dependency.
 
 ## Findings and fixes
