@@ -1,5 +1,13 @@
 # W0 → W1 → W2 → W3 implementation progress
 
+## 22 September 2026 — durable public gap-scan boundary (Revision 30)
+
+Reviewed `f5a88d5` and its green CI 35640285441; no newer other-model commits appeared. Public report computation/storage/mail now belong to the BFF, with no memory fallback or backend credentials in the SSR report path. Migration 0037 backfills hashed ownership for legacy reports. Reads and resends require ownership; review fixed unowned report dispatch to arbitrary recipients. Explicit delivery opt-in replaces simulated success; durable rate budgets bound public requests and mail.
+
+323 BFF tests, 61 browser journeys, all 38 migrations, populated legacy upgrade, four local real-Auth parity labels and harness checks pass. Container acceptance adds actual BFF/SSR restarts between submission and owned retrieval; final committed container/CI evidence is recorded in the private checkpoint. No real email or cloud apply. See [review 19](audits/19-durable-gap-scan-review-2026-09-22.md).
+
+C-W0-4 is implemented. W0 remains partial for IAM, remote acceptance and newly recorded contact persistence/scoring accuracy gaps. W1 invitations, W2 remaining 21 named targets, full W3 wizard/graph and W4 execution remain open. Migration tip 0037, 51 public tables; next migration 0038 after fetch.
+
 ## 22 September 2026 — accepted recovery replacement policy (Revision 29)
 
 Migration 0036 and BFF persist trusted challenge provenance and require it when activating a replacement. Recovery-authorized activation clears the account's existing MFA attestations in the same transaction as the factor/recovery-set swap; TOTP-authorized replacement preserves them. The browser explains this before confirmation and handles stale replacement authorization with a restart. Pending replacements begun before the migration must restart; active credentials are preserved during upgrade.

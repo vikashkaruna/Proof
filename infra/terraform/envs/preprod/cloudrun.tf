@@ -229,6 +229,10 @@ resource "google_cloud_run_v2_service" "bff" {
         }
       }
       env {
+        name  = "AXIOM_REPORT_EMAIL_MODE"
+        value = var.report_email_mode
+      }
+      env {
         name = "RESEND_API_KEY"
         value_source {
           secret_key_ref {

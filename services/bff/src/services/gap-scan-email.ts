@@ -1,5 +1,6 @@
 import type { GapScanReport, ReadinessIndex } from '@axiom/types';
 import { BRAND } from '@axiom/config';
+import { z } from 'zod';
 
 export interface SendGapScanEmailParams {
   report: GapScanReport;
@@ -65,28 +66,9 @@ export async function sendGapScanReportEmail(
     contactCompany ? ` for ${contactCompany}` : ''
   }`;
 
-  // Log simulation if no API key configured
-  if (!resendApiKey) {
-    console.log('[gap-scan-email] RESEND_API_KEY omitted. Simulated email delivery:');
-    console.log(`   To:      ${contactEmail}`);
-    console.log(`   CC:      ${salesEmail}`);
-    console.log(`   BCC:     ${founderEmail}`);
-    console.log(`   From:    ${fromEmail}`);
-    console.log(`   Subject: ${subject}`);
-    console.log(
-      `   Report:  Score=${report.postureScore}/100, Exposure=${formatInr(report.estimatedExposureInr)}`,
-    );
-    if (contactPhone) console.log(`   Phone:   ${contactPhone}`);
-    if (readinessIndex)
-      console.log(
-        `   Index:   Sector=${readinessIndex.sector}, Percentile=${readinessIndex.percentileRank}%`,
-      );
-
-    return {
-      success: true,
-      simulated: true,
-      id: `sim_${Date.now()}`,
-    };
+  // Explicit opt-in only. Missing configuration never claims a delivered email.
+  if (process.env.AXIOM_REPORT_EMAIL_MODE !== 'delivery' || !resendApiKey) {
+    return { success: false, error: 'Report email delivery is not configured.' };
   }
 
   // Build Plain Text Content
@@ -277,6 +259,8 @@ export async function sendGapScanReportEmail(
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${resendApiKey}`,
         'Content-Type': 'application/json',
@@ -298,23 +282,23 @@ export async function sendGapScanReportEmail(
     if (!res.ok) {
       console.error('[gap-scan-email] Resend API dispatch failed:', {
         status: res.status,
-        error: resData,
+        code: 'provider_refused',
       });
       return {
         success: false,
-        error: resData?.message || `Resend dispatch HTTP ${res.status}`,
+        error: 'Email provider refused delivery.',
       };
     }
 
-    return {
-      success: true,
-      id: resData?.id,
-    };
+    const receipt = z.object({ id: z.string().min(1) }).safeParse(resData);
+    return receipt.success
+      ? { success: true, id: receipt.data.id }
+      : { success: false, error: 'Email provider returned no receipt.' };
   } catch (err) {
-    console.error('[gap-scan-email] Network failure calling Resend API:', err);
+    console.error('[gap-scan-email] Email provider unavailable');
     return {
       success: false,
-      error: err instanceof Error ? err.message : 'Unknown network failure',
+      error: 'Email provider unavailable.',
     };
   }
 }

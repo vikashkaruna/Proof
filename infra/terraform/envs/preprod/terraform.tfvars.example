@@ -36,3 +36,5 @@ axiom_from_email        = "Axiom Proof <platform@axiomproof.ai>"
 axiom_sales_email       = "sales@axiomproof.ai"
 axiom_founder_email     = "founder@axiomminds.ai"
 contact_recipient_email = "hello@axiomminds.ai"
+
+report_email_mode = "disabled"

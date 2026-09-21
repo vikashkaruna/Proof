@@ -93,6 +93,14 @@ spec:
             # proxies in front of the BFF; see packages/config.
             - name: AXIOM_TRUSTED_PROXY_HOPS
               value: {{ .Values.config.trustedProxyHops | default 0 | quote }}
+            - name: AXIOM_REPORT_EMAIL_MODE
+              value: {{ .Values.bff.reportEmailMode | default "disabled" | quote }}
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bff.reportEmailSecretName | default "axiom-report-email" | quote }}
+                  key: resend-api-key
+                  optional: true
           livenessProbe:
             httpGet:
               path: /health

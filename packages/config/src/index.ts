@@ -201,6 +201,7 @@ const EnvFields = z.object({
 
   // Email Delivery (Resend)
   RESEND_API_KEY: z.string().optional(),
+  AXIOM_REPORT_EMAIL_MODE: z.enum(['disabled', 'delivery']).default('disabled'),
   AXIOM_FROM_EMAIL: z.string().default('Axiom Proof <platform@axiomproof.ai>'),
   RESEND_FROM_EMAIL: z.string().default('Axiom Proof <platform@axiomproof.ai>'),
   AXIOM_SALES_EMAIL: z.string().email().default('sales@axiomproof.ai'),

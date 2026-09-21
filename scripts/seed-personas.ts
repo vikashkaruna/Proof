@@ -3,6 +3,7 @@ import {
   acceptanceStatePath,
   verifyAcceptanceTarget,
 } from './lib/acceptance-target.js';
+import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { enrolTestMfa } from './lib/enrol-test-mfa.js';
 /**
  * Seed the browser persona journeys against the real parity stack.
@@ -43,6 +44,7 @@ async function main() {
         }
       : JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8'))
   ) as Record<string, string>;
+  await seedAcceptanceLibrary(status.API_URL!, status.PUBLISHABLE_KEY!, status.SERVICE_ROLE_KEY!);
   const origin = new URL(status.API_URL!).origin;
   const run = randomUUID().slice(0, 8);
 

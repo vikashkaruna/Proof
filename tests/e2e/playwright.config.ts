@@ -73,6 +73,7 @@ const bffEnv = {
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
   NODE_ENV: 'development',
   BFF_PORT,
+  AXIOM_REPORT_EMAIL_MODE: 'disabled',
   APPROVAL_SIGNING_KEY: 'axiom-e2e-persona-harness-approval-signing-key',
   AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
   AGENT_RUNTIME_INTERNAL_TOKEN: 'axiom-e2e-persona-harness-runtime-token-32c',

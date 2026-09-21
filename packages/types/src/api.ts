@@ -118,6 +118,25 @@ export const GapScanReportSchema = z.object({
 });
 export type GapScanReport = z.infer<typeof GapScanReportSchema>;
 
+export const GapScanStoredReportSchema = z.object({
+  id: z.string(),
+  report_snapshot: GapScanReportSchema,
+  library_version: z.string(),
+  posture_score: z.number().min(0).max(100),
+  estimated_exposure_inr: z.number().nonnegative(),
+  contact_name: z.string().nullish(),
+  contact_email: z.string().nullish(),
+  contact_phone: z.string().nullish(),
+  contact_company: z.string().nullish(),
+  follow_up_requested: z.boolean().optional(),
+  created_at: z.string(),
+});
+export type GapScanStoredReport = z.infer<typeof GapScanStoredReportSchema>;
+export const GapScanEmailRequestSchema = z.object({
+  id: z.uuid(),
+  email: z.email().max(320),
+});
+
 // ─── Contact inquiry (public) ────────────────────────────────────────
 
 export const ContactSubmitSchema = z.object({

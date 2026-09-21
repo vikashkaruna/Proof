@@ -1,6 +1,7 @@
 import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-target.js';
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
+import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
@@ -51,8 +52,11 @@ async function main() {
       AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
       MODEL_GATEWAY_API_KEY: randomBytes(32).toString('hex'),
       AXIOM_REGION: 'ap-south-1',
+      AXIOM_REPORT_EMAIL_MODE: 'disabled',
       LOG_LEVEL: 'error',
     });
+
+  await seedAcceptanceLibrary(api.origin, status.PUBLISHABLE_KEY!, status.SERVICE_ROLE_KEY!);
 
   async function apiRequest(
     path: string,
@@ -331,6 +335,69 @@ async function main() {
     assert.equal(response.status, expected, name);
     return response;
   }
+  const reportConfig = await check('gap_scan_email_config', '/public/gap-scan/config', 200);
+  assert.equal(
+    ((await reportConfig.json()) as { emailDeliveryEnabled: boolean }).emailDeliveryEnabled,
+    false,
+  );
+  const reportCreated = await check('gap_scan_create', '/public/gap-scan', 201, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: randomUUID(),
+      answers: { q1: true, q2: false },
+      contactEmail: 'fixture@example.invalid',
+    }),
+  });
+  const report = (await reportCreated.json()) as {
+    id: string;
+    accessToken: string;
+    postureScore: number;
+    emailSent: boolean;
+  };
+  assert.equal(report.emailSent, false);
+  const owned = await check('gap_scan_owned_read', `/public/gap-scan/${report.id}`, 200, {
+    headers: { 'X-Gap-Scan-Access': report.accessToken },
+  });
+  const ownedReport = (await owned.json()) as {
+    report_snapshot: { postureScore: number };
+    access_token_hash?: string;
+  };
+  assert.equal(ownedReport.report_snapshot.postureScore, report.postureScore);
+  assert.equal(ownedReport.access_token_hash, undefined);
+  await check('gap_scan_missing_proof', `/public/gap-scan/${report.id}`, 404);
+  await check('gap_scan_foreign_proof', `/public/gap-scan/${report.id}`, 404, {
+    headers: { 'X-Gap-Scan-Access': randomBytes(32).toString('hex') },
+  });
+  await check('gap_scan_email_missing_proof', '/public/gap-scan/send-email', 404, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: report.id, email: 'fixture@example.invalid' }),
+  });
+  await check('gap_scan_email_disabled', '/public/gap-scan/send-email', 503, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Gap-Scan-Access': report.accessToken },
+    body: JSON.stringify({ id: report.id, email: 'fixture@example.invalid' }),
+  });
+  const storedReport = await apiRequest(
+    `/rest/v1/gap_scan_responses?id=eq.${report.id}&select=access_token_hash,report_snapshot`,
+  );
+  assert.equal(storedReport.status, 200);
+  const stored = (
+    (await storedReport.json()) as Array<{ access_token_hash: string; report_snapshot: unknown }>
+  )[0]!;
+  assert.notEqual(stored.access_token_hash, report.accessToken);
+  await check('gap_scan_digest_is_not_proof', `/public/gap-scan/${report.id}`, 404, {
+    headers: { 'X-Gap-Scan-Access': stored.access_token_hash },
+  });
+  const forged = await apiRequest(
+    '/rest/v1/gap_scan_responses',
+    'POST',
+    { session_id: 'forged', access_token_hash: 'a'.repeat(64), library_version: library },
+    viewer.token,
+  );
+  assert.equal(forged.status, 403);
+  outcomes.gap_scan_direct_write_refused = true;
   const viewerHeaders = { Authorization: `Bearer ${viewer.token}`, 'x-tenant-id': tenantA };
   await check('unauthenticated', '/v1/engagements', 401);
   await check('cookie_cannot_authenticate', '/v1/engagements', 401, {
