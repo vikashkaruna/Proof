@@ -40,6 +40,8 @@ jobs:
             .axiom-runtime/acceptance/http-*/api-results.json
             .axiom-runtime/acceptance/http-*/browser-results.json
           retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Stop isolated Auth stack
         if: always()
         run: supabase stop --workdir .axiom-runtime/parity --no-backup
