@@ -37,7 +37,7 @@ const FIXTURE_PATH = join(
   '..',
   'tests',
   'contracts',
-  'execution-dispatch.v1.json',
+  'execution-dispatch.v2.json',
 );
 const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as Record<string, unknown>;
 
@@ -52,6 +52,9 @@ describe('execution dispatch payload', () => {
     concurrency: fixture.concurrency as number,
     stopOnFailure: fixture.stop_on_failure as boolean,
     approvalToken: fixture.approval_token,
+    // v2: the snapshot the approver authorised, so the executor has something
+    // to verify against before it mutates a client estate.
+    contentDigest: fixture.content_digest as string,
   });
 
   it('matches the shared contract fixture exactly', () => {

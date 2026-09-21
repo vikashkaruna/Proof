@@ -197,7 +197,7 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 # the response, so it reported the batch as accepted. Aliases are deliberately
 # NOT added: accepting both shapes would preserve the ambiguity that caused it.
 # The contract is versioned instead, so a mismatch refuses with a reason.
-EXECUTION_CONTRACT_VERSION = 1
+EXECUTION_CONTRACT_VERSION = 2
 
 
 class InternalExecuteRequest(BaseModel):
@@ -215,6 +215,12 @@ class InternalExecuteRequest(BaseModel):
     concurrency: int
     stop_on_failure: bool
     approval_token: dict[str, Any]
+    # v2: the content snapshot this batch was authorised for. The claim read it
+    # from the approval token's signed payload, so it is what the approver
+    # agreed to. A real executor must recompute the digest and refuse to mutate
+    # anything that no longer matches — this runtime records it and refuses to
+    # execute at all, which is the honest state until there is an executor.
+    content_digest: str
 
 
 @app.post("/internal/execute")
