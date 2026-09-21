@@ -1,0 +1,39 @@
+{{/*
+The autoscaling block has been in values.yaml since 0.1.0 and nothing ever
+read it except the deployments, which use it to decide whether to OMIT
+`replicas`. With no HorizontalPodAutoscaler in the chart that omission handed
+the count to the API server default of one, so bff and agent-runtime declared
+minReplicas: 2 and ran a single pod each — under PodDisruptionBudgets with
+minAvailable: 1, which then permits zero voluntary evictions and stalls any
+node drain. Either the block had to go or this had to exist.
+*/}}
+{{- $services := dict
+      "bff" .Values.bff
+      "agent-runtime" .Values.agentRuntime
+      "model-gateway" .Values.modelGateway }}
+{{- range $component, $svc := $services }}
+{{- if and $svc.enabled $svc.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "axiom-proof.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "axiom-proof.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "axiom-proof.fullname" $ }}-{{ $component }}
+  minReplicas: {{ $svc.autoscaling.minReplicas }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

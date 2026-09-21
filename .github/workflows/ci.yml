@@ -144,6 +144,15 @@ jobs:
       - name: helm lint
         run: helm lint infra/helm/axiom-proof
 
+      # Own interpreter rather than the runner's system Python: a system-wide
+      # `pip install` trips PEP 668 (externally-managed-environment) on the
+      # newer Ubuntu images.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install PyYAML for the rendered-manifest checks
+        run: pip install --quiet pyyaml
+
       # Rendering the defaults alone is not coverage: a `{{- with }}` guarding
       # an empty map never executes, which is exactly how the ServiceAccount
       # annotations defect survived — clean on defaults, invalid YAML the
@@ -167,11 +176,18 @@ jobs:
 
           for value_set in "${VALUE_SETS[@]}"; do
             echo "::group::helm template ${value_set:-(chart defaults)}"
+            # Rendered to a file rather than piped because two checks consume
+            # it, and they answer different questions: kubeconform asks whether
+            # each manifest is well-formed, check-rendered-manifests.py asks
+            # whether the set of them means what the chart claims.
             # Unquoted on purpose: each entry is a flag pair, not one argument.
-            helm template axiom-proof "${CHART}" ${value_set} \
-              | kubeconform -strict -summary \
-                  -cache /tmp/kubeconform-cache \
-                  -kubernetes-version 1.30.0 -
+            helm template axiom-proof "${CHART}" ${value_set} > /tmp/rendered.yaml
+            kubeconform -strict -summary \
+              -cache /tmp/kubeconform-cache \
+              -kubernetes-version 1.30.0 /tmp/rendered.yaml
+            python3 scripts/check-rendered-manifests.py \
+              --expect-components web,marketing,bff,agent-runtime,model-gateway,temporal-worker \
+              < /tmp/rendered.yaml
             echo "::endgroup::"
           done
 
