@@ -64,7 +64,7 @@ report() {
 # was dangerous, and that documentation is the point — it is what stops the
 # pattern being reintroduced by someone who does not know the history.
 scan() {
-  grep -rnE "$1" apps packages services \
+  grep -rnE "$1" apps packages services tests \
     --include='*.ts' --include='*.tsx' \
     2>/dev/null \
   | grep -v node_modules \

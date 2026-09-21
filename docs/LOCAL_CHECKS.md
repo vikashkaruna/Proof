@@ -65,6 +65,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+
+# 4. Browser persona journeys (W1). Real GoTrue accounts, real login form,
+#    AXIOM_AUTH_MODE=strict. Needs Docker for the isolated parity stack.
+./scripts/start-parity-supabase.sh
+pnpm exec tsx scripts/seed-personas.ts
+pnpm --filter @axiom/e2e exec playwright install chromium   # first run only
+pnpm --filter @axiom/e2e exec playwright test
 ```
 
 **Expected**: each step exits 0. The build step takes ~15s; the rest are <2s.
