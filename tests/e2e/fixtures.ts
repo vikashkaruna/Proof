@@ -169,7 +169,7 @@ export const planUrl = (id: string) => `/plans/${id}`;
  */
 export async function createMfaAccount(
   label: string,
-  opts: { withFactor?: boolean } = {},
+  opts: { withFactor?: boolean; role?: 'approver' | 'founder' } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;
@@ -204,7 +204,12 @@ export async function createMfaAccount(
   await admin('/rest/v1/users', { id, email, is_axiom_internal: false }, 'journey profile', 201);
   await admin(
     '/rest/v1/tenant_users',
-    { tenant_id: state.tenantA.id, user_id: id, role: 'approver', approval_scopes: [] },
+    {
+      tenant_id: state.tenantA.id,
+      user_id: id,
+      role: opts.role ?? 'approver',
+      approval_scopes: [],
+    },
     'journey membership',
     201,
   );

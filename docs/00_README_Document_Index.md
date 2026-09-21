@@ -5,7 +5,7 @@
 **Compiled:** August 2026
 
 **Implementation status.** W0, W1 and W2 are **partial**; migration allocation runs
-through 0029. Nothing has been deployed, no evidence bucket is locked and no action
+through 0031. Nothing has been deployed, no evidence bucket is locked and no action
 has executed against a client estate — the earlier Phase 3 _audit_ completion was
 not completion of the Phase 3 product. Start with
 [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the
@@ -13,8 +13,8 @@ current checkpoint and whose workstream status register carries W0–W10, then
 [Doc 14 implementation progress](14_Implementation_Progress.md)
 and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head
 this all rests on. The most recent reviews are
-[audit 07](audits/07-staging-integration-review-2026-09-21.md) and
-[audit 10](audits/10-estate-foundation-and-browser-review-2026-09-21.md). Doc 12 is a
+[audit 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md) and
+[audit 12](audits/12-w1-revocation-quarantine-review-2026-09-21.md). Doc 12 is a
 historical snapshot kept for its design reasoning; do not resume from it.
 
 _This block deliberately names no revision number or commit. It was four revisions

@@ -269,3 +269,51 @@ describe('POST /v1/mfa/enrol — replacing a live factor', () => {
     );
   });
 });
+
+describe('POST /v1/mfa/factors/:id/revoke', () => {
+  it('refuses absent and wrong-purpose proofs without removing the factor', async () => {
+    const app = await buildApp();
+    const secret = await enrolFirstFactor();
+    const factorId = (await mfa.activeFactorId(USER))!;
+    expect((await post(app, `/v1/mfa/factors/${factorId}/revoke`, '{}')).status).toBe(401);
+    const challengeId = await satisfiedEnrolmentChallenge(app, secret);
+    expect(
+      (
+        await post(
+          app,
+          `/v1/mfa/factors/${factorId}/revoke`,
+          JSON.stringify({ mfaChallengeId: challengeId }),
+        )
+      ).status,
+    ).toBe(401);
+    expect(await mfa.isEnrolled(USER)).toBe(true);
+  });
+
+  it('spends one bound proof once and cannot revoke a different factor', async () => {
+    const app = await buildApp();
+    const secret = await enrolFirstFactor();
+    const factorId = (await mfa.activeFactorId(USER))!;
+    const opened = await post(
+      app,
+      '/v1/mfa/challenge',
+      JSON.stringify({ purpose: 'factor_revocation' }),
+    );
+    expect(opened.status).toBe(201);
+    const { challengeId } = (await opened.json()) as { challengeId: string };
+    expect(
+      await mfa.verifyChallenge({
+        userId: USER,
+        challengeId,
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+      }),
+    ).toMatchObject({ ok: true });
+    const body = JSON.stringify({ mfaChallengeId: challengeId });
+    expect(
+      (await post(app, '/v1/mfa/factors/00000000-0000-4000-8000-0000000000bb/revoke', body)).status,
+    ).toBe(401);
+    expect((await post(app, `/v1/mfa/factors/${factorId}/revoke`, body)).status).toBe(200);
+    expect((await post(app, `/v1/mfa/factors/${factorId}/revoke`, body)).status).toBe(401);
+    expect(await mfa.isEnrolled(USER)).toBe(false);
+  });
+});

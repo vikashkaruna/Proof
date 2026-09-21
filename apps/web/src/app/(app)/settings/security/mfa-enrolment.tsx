@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   Button,
   Card,
@@ -18,6 +19,7 @@ interface Props {
   accountEmail: string;
   /** Rendered on the server from the user's own rows, so the first paint is correct. */
   initialStatus: MfaStatus;
+  enrolmentRequired?: boolean;
 }
 
 interface MfaStatus {
@@ -48,7 +50,12 @@ interface PendingEnrolment {
  * authenticator's "enter a setup key" flow expects. Adding a QR is a later
  * convenience, not a gap in the control.
  */
-export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
+export function MfaEnrolment({
+  tenantId,
+  accountEmail,
+  initialStatus,
+  enrolmentRequired = false,
+}: Props) {
   const [status, setStatus] = useState<MfaStatus>(initialStatus);
   const [pending, setPending] = useState<PendingEnrolment | null>(null);
   const [code, setCode] = useState('');
@@ -63,7 +70,12 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
    * component jumped straight to the third step, so the BFF — correctly —
    * refused every press of Replace with `mfa_challenge_required`.
    */
-  const [stepUp, setStepUp] = useState<{ challengeId: string } | null>(null);
+  const [stepUp, setStepUp] = useState<{
+    challengeId: string;
+    purpose: 'enrolment' | 'factor_revocation';
+    factorId?: string;
+  } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [stepUpCode, setStepUpCode] = useState('');
 
   const headers = {
@@ -131,9 +143,17 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
    * The entry point behind the single button: enrol directly, or open an
    * `enrolment` challenge first when a live factor is being replaced.
    */
-  async function beginOrChallenge() {
-    if (!status.enrolled) {
+  async function beginOrChallenge(purpose: 'enrolment' | 'factor_revocation' = 'enrolment') {
+    setNotice(null);
+    if (!status.enrolled && purpose === 'enrolment') {
       await begin();
+      return;
+    }
+    const factorId = status.factors.find(
+      (factor) => factor.factorType === 'totp' && factor.status === 'active',
+    )?.id;
+    if (!factorId) {
+      setError('Refresh the page to read your current authenticator.');
       return;
     }
     setError(null);
@@ -150,7 +170,7 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
           // `apps/web/src/app/api/bff/idempotency-key.test.ts`.
           'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
         },
-        body: JSON.stringify({ purpose: 'enrolment' }),
+        body: JSON.stringify({ purpose, factorId }),
       });
       if (!res.ok) {
         const { message } = await readError(res, 'Could not start verification');
@@ -158,7 +178,7 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
         return;
       }
       const body = await res.json();
-      setStepUp({ challengeId: body.challengeId as string });
+      setStepUp({ challengeId: body.challengeId as string, purpose, factorId });
       setStepUpCode('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start verification');
@@ -199,7 +219,37 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
     }
     // Outside the try: `begin` manages its own busy state and errors, and a
     // failure there is an enrolment failure, not a verification one.
-    await begin(stepUp.challengeId);
+    if (stepUp.purpose === 'factor_revocation') {
+      await revoke(stepUp.challengeId, stepUp.factorId!);
+    } else {
+      await begin(stepUp.challengeId);
+    }
+  }
+
+  async function revoke(mfaChallengeId: string, factorId: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/bff/v1/mfa/factors/${encodeURIComponent(factorId)}/revoke`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ mfaChallengeId }),
+      });
+      if (!res.ok) {
+        setError((await readError(res, 'Could not revoke authenticator')).message);
+        return;
+      }
+      setRecoveryCodes(null);
+      setNotice(
+        'Authenticator revoked. Its recovery codes and MFA-verified sessions have ended. Enrol a new authenticator before continuing if your role requires MFA.',
+      );
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not revoke authenticator');
+    } finally {
+      setStepUp(null);
+      setStepUpCode('');
+      setBusy(false);
+    }
   }
 
   async function activate() {
@@ -247,6 +297,11 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
+        {notice && (
+          <p role="status" className="text-sm text-slate-700">
+            {notice}
+          </p>
+        )}
         {error && (
           <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
             {error}
@@ -289,16 +344,22 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
 
         {stepUp && !pending && (
           <div
-            data-testid="mfa-replace-step-up"
+            data-testid={
+              stepUp.purpose === 'enrolment' ? 'mfa-replace-step-up' : 'mfa-revoke-step-up'
+            }
             className="flex flex-col gap-3 rounded-md border border-indigo-300 bg-indigo-50 p-4"
           >
             <p className="text-sm font-medium text-indigo-900">
-              Confirm with your current authenticator before replacing it.
+              {stepUp.purpose === 'enrolment'
+                ? 'Confirm with your current authenticator before replacing it.'
+                : 'Confirm revocation of your authenticator.'}
             </p>
             <p className="text-xs text-indigo-800">
               Enter the six-digit code from the authenticator you have now, or one of your recovery
-              codes if you no longer have it. The new authenticator is only issued once this is
-              satisfied.
+              codes if you no longer have it.
+              {stepUp.purpose === 'factor_revocation'
+                ? ' Revoking ends your recovery codes and MFA-verified sessions. You must enrol again if your role requires MFA.'
+                : ' The new authenticator is only issued once this is satisfied.'}
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1.5">
@@ -320,7 +381,7 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
                 loading={busy}
                 disabled={!stepUpCode.trim()}
               >
-                Confirm and replace
+                {stepUp.purpose === 'enrolment' ? 'Confirm and replace' : 'Confirm revocation'}
               </Button>
               <Button
                 variant="ghost"
@@ -384,9 +445,18 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
 
         {!pending && !stepUp && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="accent" onClick={beginOrChallenge} loading={busy}>
+            <Button variant="accent" onClick={() => beginOrChallenge()} loading={busy}>
               {status.enrolled ? 'Replace authenticator' : 'Enrol an authenticator'}
             </Button>
+            {status.enrolled && (
+              <Button
+                variant="ghost"
+                onClick={() => beginOrChallenge('factor_revocation')}
+                disabled={busy}
+              >
+                Revoke authenticator
+              </Button>
+            )}
             {status.enrolled && (
               <span className="text-sm text-slate-600">
                 {status.recoveryCodesRemaining} recovery code
@@ -394,6 +464,12 @@ export function MfaEnrolment({ tenantId, accountEmail, initialStatus }: Props) {
               </span>
             )}
           </div>
+        )}
+
+        {enrolmentRequired && status.enrolled && !recoveryCodes && !pending && !stepUp && (
+          <Link href="/verify" prefetch={false} className="font-medium text-indigo-600 underline">
+            Continue to sign-in verification
+          </Link>
         )}
 
         {status.enrolled && !pending && !stepUp && (

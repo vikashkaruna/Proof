@@ -564,3 +564,9 @@ No code change. Doc 16 is new: the ordered steps the operator runs to configure,
 **What it deliberately does not cover.** W4 onward. W4 and W5 are the XL workstreams that make up the product loop, they are close to empty, and W5's tables reference W4's so W5 cannot start first. Sequencing them is a separate conversation once W0–W3 are real rather than a section appended to a runbook nobody can act on yet.
 
 Doc 00 registers Doc 16 and its entry-point paragraph now names the register. Doc 11's register links to it from the W0–W3 discussion. Lint and typecheck 15/15, 14 packages green, `format:check` clean, W0.0 and control-count gates pass; every anchor verified against its heading slug.
+
+## 21 Sep 2026 — Revision 23: revocation and quarantine
+
+Reviewed and integrated staging `1990304` (other model's replacement fix, status register and Doc 16). Completed C-W1-1 and C-W1-2: purpose-bound revocation UI and explicit enrollment → save recovery codes → login verification for quarantined users. Forward migration 0031 makes credential/session revocation atomic and serializes racing login attestations. Recovery-code consumption now rejects revoked credentials even when unused.
+
+Validation: 284 BFF tests, 55 strict browser journeys, 32 migrations with SQL failure injection and five concurrency suites, populated upgrade, DSN/deployment refusals and real Auth/PostgREST parity. Old UI and removed credential-status checks fail the new regression assertions. See review 12 for evidence and limits. Doc 16 is updated at this checkpoint; W1 remains partial. Next: make activation/recovery-set rotation one transaction, then W2 connector schema in dependency order. The recovery-replacement session policy remains a pending user decision.

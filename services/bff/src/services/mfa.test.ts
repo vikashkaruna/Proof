@@ -476,6 +476,47 @@ describe('revokeFactor', () => {
     expect(await mfa.isEnrolled(USER)).toBe(false);
   });
 
+  it('ends every verified session and recovery code when the factor is revoked', async () => {
+    const { factorId } = await enrol(USER);
+    const pending = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'replacement' });
+    const attestation = await mfa.attestSession({ userId: USER, sessionId: 'session', factorId });
+    db.seed('mfa_session_attestations', { user_id: OTHER_USER, revoked_at: null });
+    expect(await mfa.revokeFactor({ userId: USER, factorId })).toMatchObject({ ok: true });
+    expect(await mfa.sessionAttestation({ userId: USER, sessionId: 'session' })).toBeNull();
+    expect(
+      db.rows('mfa_session_attestations').find((r) => r.id === attestation.id)?.revoked_at,
+    ).toBeTruthy();
+    expect(
+      db.rows('mfa_session_attestations').find((r) => r.user_id === OTHER_USER)?.revoked_at,
+    ).toBeNull();
+    expect(db.rows('user_mfa_factors').find((r) => r.id === pending.factorId)?.status).toBe(
+      'revoked',
+    );
+    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(0);
+    expect(await mfa.revokeFactor({ userId: USER, factorId })).toMatchObject({ ok: false });
+  });
+
+  it('refuses an unused recovery code on a challenge opened before revocation', async () => {
+    const enrolled = await enrol(USER);
+    const challenge = await satisfiedApprovalChallenge();
+    await mfa.revokeFactor({ userId: USER, factorId: enrolled.factorId });
+    expect(
+      await mfa.verifyChallenge({
+        userId: USER,
+        challengeId: challenge.challengeId,
+        code: enrolled.recoveryCodes[0]!,
+      }),
+    ).toMatchObject({ ok: false, reason: 'code_rejected' });
+  });
+
+  it('does not report success or change credentials when the transaction fails', async () => {
+    const { factorId } = await enrol(USER);
+    db.failNextRpc('revoke_totp_factor');
+    await expect(mfa.revokeFactor({ userId: USER, factorId })).rejects.toThrow('Could not revoke');
+    expect(await mfa.isEnrolled(USER)).toBe(true);
+    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(10);
+  });
+
   it('binds enrolment and revocation challenges to different digests', () => {
     // A step-up obtained to revoke must not double as permission to enrol.
     expect(factorBindingSha256('enrolment', 'factor-1')).not.toBe(

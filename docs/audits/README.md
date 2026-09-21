@@ -1,13 +1,8 @@
 # Audit Reports
 
-Latest review:
-[11-w1-authenticator-replacement-review-2026-09-21.md](11-w1-authenticator-replacement-review-2026-09-21.md)
-accepts the estate foundation and records why the authenticator replacement gap
-was deeper than the UI: the gate refused every caller, so nothing had ever
-reached the activation path behind it, which was also broken. W1 is still
-partial. For the current head see [Doc 15](../15_Session_Handoff.md) and for the
-numbered detail [Doc 11](../11_Phase0-5_Gap_Closure_Plan.md); reviews 05–09 are
-listed below in order and are historical where they conflict with the newest.
+Latest review: [12 — revocation and quarantine](12-w1-revocation-quarantine-review-2026-09-21.md).
+C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
+[Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 
 Historical audit status as of 2026-08-16: Part A and Part B audit Phases 0–3
 were reported complete at `c259c42`, with five required CI checks passing.

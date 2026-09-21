@@ -2,7 +2,7 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** staging `9994cb8`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 23, reviewed staging `1990304`, 21 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -16,7 +16,7 @@ Every item names one owner:
 - **OPERATOR** — you. Anything that provisions, bills, deploys, or is
   irreversible. Anything needing a credential I must never see. Anything that
   is a business or posture decision rather than an engineering one.
-- **CLAUDE** — me. Code, migrations, tests, gates, docs.
+- **ENGINEERING** — the implementing model/team. Code, migrations, tests, gates, docs.
 
 Each operator step ends with **Evidence to return**. Each workstream ends with
 **How I mark it Closed** — the checks I run against your evidence before I
@@ -67,9 +67,7 @@ this head:
 | Mock Supabase substitution removed                 | **Met.** Reachable only under `e2e-bypass`, which is refused at boot outside `local`/`test`                                                    |
 | Idempotency auto-key generation removed (FR-8.3)   | **Met.** No environment relaxes it, including `e2e-bypass`                                                                                     |
 
-**Nothing in W0 is waiting on me for code.** What remains is W0.1, and W0.1 is
-infrastructure you own, plus one CI lane I can only write once a deployed
-target exists.
+**W0 is not wholly operator-owned.** Provisioning is reserved to the operator. The deployed parity and persona-seeding harness remain engineering work; their final verification needs a deployed target. Local parity is already green.
 
 ## OPERATOR steps, in order
 
@@ -81,9 +79,7 @@ ordered spine and the evidence, not a replacement for those.
 
 ### W0-1 · Decide and record the target
 
-Project, region, billing account, and whether preprod is Cloud SQL + Cloud Run
-(as the guides assume) or self-hosted Supabase (as W10 assumes). They are
-different topologies and the rest of the sequence depends on which.
+Project, region, billing account, and the intended placement of the self-hosted Supabase services. The accepted direction is local Docker Supabase and dynamically deployed self-hosted Supabase in higher environments; Cloud SQL may provide PostgreSQL underneath that stack. Do not substitute a managed Supabase project or reopen this accepted choice.
 
 **Evidence to return:** project id, region, and which topology. No credentials.
 
@@ -114,7 +110,7 @@ presence and shape, not values.
 ./scripts/deploy-preprod-gcp.sh --dry-run
 ```
 
-`terraform plan` only; mutates nothing. Read the plan before the next step —
+Review the script before using this flag: the default phase selection also includes preparation/verification. It is not a blanket guarantee that no GCP API enablement or other setup runs. Use an already-initialized Terraform configuration with `terraform plan` for a plan-only review. Read the plan before the next step —
 this is the last point at which nothing has been created.
 
 **Evidence to return:** the plan summary line (`Plan: N to add, …`) and any
@@ -146,7 +142,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **31 migrations, 0000 → 0030**.
+non-zero on a failing migration. Expect **32 migrations, 0000 → 0031**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -156,7 +152,7 @@ is not something to force past.
 ### W0-6 · Seed representative identities
 
 ```bash
-./scripts/deploy-preprod-gcp.sh --seed-identities
+./scripts/deploy-preprod-gcp.sh --phase migrate --seed-identities
 ```
 
 W0.1 asks for _representative_ data, not fixtures: multiple tenants and users
@@ -222,7 +218,7 @@ This is your decision, not a defect I can fix by guessing a CIDR.
 **Evidence to return:** the CIDR list you want, or a decision to defer with a
 date. I make the change and the gate re-validates.
 
-## CLAUDE steps for W0
+## ENGINEERING steps for W0
 
 | #      | What                                                               | Why it is mine, and why it is blocked until your steps land                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -234,7 +230,7 @@ date. I make the change and the gate re-validates.
 
 I flip **W0 → Closed** when all of these hold, and not before:
 
-1. Your W0-5 evidence shows **31 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **32 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -252,9 +248,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** Most of W1 is delivered and held by 52 browser
-journeys under `AXIOM_AUTH_MODE=strict`. Four things remain, and they split
-evenly between us.
+**Current status: Partial.** The suite now has 55 browser journeys under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the replacement-session policy remain open. Atomic recovery-code refresh is the next engineering follow-up from review 12.
 
 ## OPERATOR steps
 
@@ -271,7 +265,7 @@ code**, the user did not have their authenticator, which is equally consistent
 with having lost it and with someone else holding it.
 
 - **Invalidate on the recovery-code path** — closes the stolen-device case;
-  signs out a user who was merely travelling without their phone.
+  requires a user who was merely travelling without their phone to verify MFA again; the GoTrue login itself need not end.
 - **Leave as-is** — never interrupts a legitimate user; a stolen device's
   session survives the replacement intended to shut it out.
 
@@ -306,14 +300,14 @@ and not a user error.
 **Evidence to return:** whether enrolment, approval step-up, and replacement
 each succeeded, and the exact error code if any did not.
 
-## CLAUDE steps for W1
+## ENGINEERING steps for W1
 
-| #      | What                                                                                                                                       |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| C-W1-1 | Factor revocation in the UI. The endpoint exists and is step-up gated; nothing calls it. Same shape as the replacement flow just delivered |
-| C-W1-2 | Enrolment while held under the login-MFA quarantine — the path a brand-new `founder` or `owner` hits on first sign-in                      |
-| C-W1-3 | The invitation flow, once W1-2 gives it a provider                                                                                         |
-| C-W1-4 | Implement the W1-1 decision, with browser journeys either way                                                                              |
+| #      | What                                                                                                                                                          |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C-W1-1 | **Delivered, Rev 23.** Purpose-bound revocation UI, atomic credential/session retirement (0031), negative/API/browser/SQL/concurrency tests                   |
+| C-W1-2 | **Delivered, Rev 23.** Quarantined founder enrollment, recovery-code save and explicit verification continuation; API remains denied until login MFA succeeds |
+| C-W1-3 | Invitation flow. Provider/domain evidence gates real delivery, not implementation of the internal workflow and adapter contract                               |
+| C-W1-4 | Implement the W1-1 decision, with browser journeys either way                                                                                                 |
 
 ## How I mark W1 Closed
 
@@ -334,8 +328,8 @@ each succeeded, and the exact error code if any did not.
 **Current status: Partial.** This one is almost entirely mine, and I want to be
 precise about the size so it is not mistaken for a small gap.
 
-**28 of the 34 named target tables do not exist.** Delivered: the four estate
-tables (0029) and the six W7.0 regulatory baseline tables. Absent: all 7
+**28 of the 40 named target tables do not exist.** Delivered: the four estate
+tables (0029), the six W7.0 regulatory baseline tables and the two auth tables: 12 delivered, 28 absent. Absent: all 7
 connector, 5 execution-detail, 4 monitoring/policy, 4 multi-regulator, 4
 Phase 1/2 parity and 4 rights/consent tables.
 
@@ -361,7 +355,7 @@ you apply, never the reverse.
 
 **Evidence to return:** the applied count and last migration name, per batch.
 
-## CLAUDE steps for W2
+## ENGINEERING steps for W2
 
 The 28 tables, in the order their dependent workstreams need them — W4's
 connector group first, because W5's execution tables reference it and W5 cannot
@@ -371,7 +365,7 @@ populated-database upgrade test.
 
 ## How I mark W2 Closed
 
-1. All 34 named tables exist, verified **against a migrated database**, not by
+1. All 40 named tables exist, verified **against a migrated database**, not by
    grep — a pattern search already gave me a false negative on
    `regulatory_instruments` once.
 2. Every new table has RLS proven positively and negatively with
@@ -415,7 +409,7 @@ client owner, but this is your call about how you deliver.
 
 **Evidence to return:** which role approves.
 
-## CLAUDE steps for W3
+## ENGINEERING steps for W3
 
 | #      | What                                                                                                       |
 | ------ | ---------------------------------------------------------------------------------------------------------- |
@@ -461,7 +455,7 @@ to me than a green run that took a detour.
 
 | Workstream | Now                                 | Flips to                       | On                                                                                                           |
 | ---------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 31 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 32 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
 | **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
 | **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
 | **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
@@ -473,7 +467,4 @@ I update [Doc 11's register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-r
 _not_ prove, and [Doc 15](15_Session_Handoff.md) so the next session resumes
 from the new baseline — the same chain every checkpoint uses.
 
-**W4 onward is deliberately not in this document.** W4 and W5 are the XL
-workstreams that constitute the actual product loop, they are close to empty,
-and W5 cannot start before W4 because its tables reference W4's. Sequencing
-them is a separate conversation once W0–W3 are real.
+**W4 onward:** continue in the existing plan order after available W1–W3 work; no new permission conversation is required for authorized engineering. The W2 connector schema batch precedes W5 execution details, and live execution still depends on W4.4 grants and controlled target validation.

@@ -547,6 +547,7 @@ export function createMfaService(
       .from('user_mfa_factors')
       .update({ last_used_counter: next, last_used_at: new Date().toISOString() })
       .eq('id', factorId)
+      .eq('status', 'active')
       .or(`last_used_counter.is.null,last_used_counter.lt.${next}`)
       .select('id');
     if (error) {
@@ -569,6 +570,7 @@ export function createMfaService(
       .select('*')
       .eq('user_id', userId)
       .eq('factor_type', 'recovery_code')
+      .eq('status', 'active')
       .is('consumed_at', null);
     if (error) {
       logger.error({ err: error.message, userId }, 'failed to read recovery codes');
@@ -591,6 +593,7 @@ export function createMfaService(
       .from('user_mfa_factors')
       .update({ consumed_at: new Date().toISOString(), status: 'revoked' })
       .eq('id', matched)
+      .eq('status', 'active')
       .is('consumed_at', null)
       .select('id');
     if (claimErr || (claimed ?? []).length === 0) return null;
@@ -743,7 +746,8 @@ export function createMfaService(
         // Recovery-code rows are a count, never a list: enumerating them would
         // hand an attacker the shape of the remaining credential set.
         recoveryCodesRemaining: rows.filter(
-          (r) => r.factor_type === 'recovery_code' && r.consumed_at == null,
+          (r) =>
+            r.factor_type === 'recovery_code' && r.status === 'active' && r.consumed_at == null,
         ).length,
         factors: rows
           .filter((r) => r.factor_type !== 'recovery_code')
@@ -864,32 +868,16 @@ export function createMfaService(
 
     async revokeFactor({ userId, factorId }) {
       const supabase = clientFactory();
-      // Scoped by `user_id` as well as `id`. A route that trusted the path
-      // parameter alone would let any authenticated caller disable anyone
-      // else's second factor, which is a one-request downgrade of the whole
-      // control for a targeted approver.
-      const { data, error } = await supabase
-        .from('user_mfa_factors')
-        .update({ status: 'revoked', revoked_at: new Date().toISOString() })
-        .eq('id', factorId)
-        .eq('user_id', userId)
-        .neq('status', 'revoked')
-        .select('id');
-      if (error || (data ?? []).length === 0) return { ok: false, reason: 'factor_not_found' };
-
-      // End the sessions this factor vouched for. A revoked authenticator that
-      // leaves live attestations behind has not really been revoked — the
-      // sessions it authorised would run on for up to the full window.
-      const { error: revokeErr } = await supabase
-        .from('mfa_session_attestations')
-        .update({ revoked_at: new Date().toISOString() })
-        .eq('factor_id', factorId)
-        .is('revoked_at', null);
-      if (revokeErr) {
-        logger.error(
-          { err: revokeErr.message, factorId },
-          'factor revoked but its session attestations could not be ended',
-        );
+      const { data, error } = await supabase.rpc('revoke_totp_factor', {
+        p_user_id: userId,
+        p_factor_id: factorId,
+      });
+      if (error) {
+        logger.error({ userId, factorId, error: error.message }, 'MFA revocation failed');
+        throw new Error('Could not revoke authenticator');
+      }
+      if (!Array.isArray(data) || data.length === 0) {
+        return { ok: false, reason: 'factor_not_found' };
       }
 
       return { ok: true, factorId };
