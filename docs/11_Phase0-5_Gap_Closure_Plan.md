@@ -2,10 +2,24 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 33 — OAUTH BROKER CORE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `9a75743`, green CI [35659326878](https://github.com/vikashkaruna/Proof/actions/runs/35659326878); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 34 — WORKLOAD IDENTITY VERIFICATION** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `46847d8`, green CI [35663034387](https://github.com/vikashkaruna/Proof/actions/runs/35663034387); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 34 — W4.3 identity verification and attestation foundation
+
+W4.2 broker core is complete and green at staging merge **`46847d8`**, CI [35663034387](https://github.com/vikashkaruna/Proof/actions/runs/35663034387). The broker remains disabled pending mandatory workload/grant activation. No newer other-model staging implementation was present. The broader W3/W4 goal remains open.
+
+Delivered: strict JWT-SVID verification using pinned `jose` 6.2.12, a trusted current-bundle interface, canonical allowlisted trust domains, signature/header/audience/time validation, bounded trust freshness and refusal of removed or changed keys. The verifier returns only immutable identity metadata, never claimed scopes/tenant roles. A tenant-scoped registration adapter checks the exact verified subject, current active registration, expected agent and declared permission on every call. These are internal library components; no application route uses them yet, and neither identity nor registration grants task/estate/connector authority.
+
+The reproducible Docker harness uses checksum-pinned SPIRE 1.15.3 and a digest-pinned Alpine image. A fresh network-disabled container hosts a server, securely bootstrapped agent and ten distinct UID-attested workloads. It proves **61 outcomes**: ten identities, cross-agent/unknown-UID refusals and BFF signature/audience/bundle checks. Private material stays in subprocess memory/stdin and container-local state; only boolean outcomes and revision metadata are artifacts. Containers/state are cleaned up. A required CI lane runs the same harness. An early exploratory diagnostic printed synthetic five-minute tokens; that isolated issuer was removed, its bundle was never trusted by the application, and the reusable runner was changed to allowlist all output. Do not reuse exploratory private fixtures.
+
+TS/Python metadata now distinguishes client mutation from internal domain-record changes while retaining `canMutate`/`can_mutate` compatibility and Sudhaar's false setting. Prativedan now declares findings/evidence/Control Library reads; cross-language tests pin both scopes and metadata. These declarations do not enforce tenant/estate data access on their own. Nazar's earlier declaration fix is preserved.
+
+Validation: **513 BFF tests**, **131 Python runtime tests**, workspace tests/lint/typecheck, acceptance harness types and production dependency audit passed locally; 61 real SPIRE/BFF outcomes passed. Existing unrelated runtime Ruff findings are not represented as clean. No new database migration or table: tip **0040**, 41 files, 51 public tables; W2 named targets still 19/40. See [review 23](audits/23-workload-identity-review-2026-09-22.md). Committed container and exact merge CI evidence is recorded after execution.
+
+**Still W4.3:** isolated credential-less agent processes and production SPIRE deployment/bundle delivery, live registration provisioning/revocation, authenticated runtime orchestration with tenant/task delegation, every-tool scope checks and tenant/estate-aware reads, plus RFC 8693 token exchange and verified actor-chain evidence. Do not replace the broker's deny-all default with this identity-only adapter. Then implement W4.4 live grants/approval enforcement, finish W3 wizard/readiness and graph, and proceed W4.5/6/7.
 
 ## Revision 33 — W4.2 OAuth broker core
 
@@ -1435,7 +1449,7 @@ Every agent gets its own SVID, not just the three I used as examples. Here is th
 | **Parikshan** | L1 | false | `control_library.read`, `findings.write` | I | No |
 | **Sudhaar** | L1 | false | `findings.read`, `control_library.read`, `plan.propose` | I | **No — never** |
 | **Saakshi** | L1 | false | `evidence.write`, `s3.write_worm` | I | No |
-| **Prativedan** | L1 | false | `report.write`, `pdf.render` | I | No |
+| **Prativedan** | L1 | false | `findings.read`, `evidence.read`, `control_library.read`, `report.write`, `pdf.render` | I | No |
 | **Lekha** | L1 | false | `ledger.append`, `ledger.read` | N | No |
 | **Nazar** | L1 | false | `http.read.government_sources`, ~~`control_library.write`~~ → `regulatory_signal.write` (SEC-15) | N | No |
 | **Sanket** | L1 | false | `http.read.public_sources` | N | No |
@@ -1447,10 +1461,10 @@ Connector grants (W4.4) are issued only to those two internal workload identitie
 #### Discrepancies — delivered declarations versus pending W4.3 enforcement
 
 1. **Nazar — declaration fix already delivered** in `cc3fcee`: both TS and Python declare `regulatory_signal.write` instead of `control_library.write`. Preserve that work. W4.3 must prove runtime/workload enforcement; do not report the declaration change as newly implemented.
-2. **Prativedan has no read scope at all**, yet the architecture describes it as "Read all". It assembles client-facing reports containing findings, evidence and personal data — so it has the **broadest de facto data access of any agent and the thinnest declared permissions**. Its reads need explicit, tenant-and-estate-scoped permissions and enforcement in W4.3; this remains pending.
-3. **`canMutate` does not mean "read-only"** and is documented nowhere. Six of ten agents with `canMutate: false` hold a `.write` scope. It actually means "mutates *client* systems". A contributor reading `canMutate: false` as "harmless" would be wrong about Drishti, Parikshan, Saakshi, Lekha, Nazar and Prativedan. The planned `mutatesClientEstate`/`writesAxiomState` distinction is not implemented: TS still uses `canMutate`, Python `can_mutate`. Preserve Sudhaar's enforced non-mutating contract while introducing compatible, explicit metadata and tests in W4.3.
+2. **Prativedan read declarations are corrected in Revision 34**: findings, evidence and Control Library reads are explicit in TS/Python. Tenant/estate-scoped enforcement at each runtime data access is still required; declaration tests and the internal registration adapter do not close this.
+3. **Mutation metadata is clarified in Revision 34**: `mutatesClientEstate`/`mutates_client_estate` distinguishes client changes from `writesAxiomState`/`writes_axiom_state` domain-record changes. `canMutate`/`can_mutate` remains compatible; Sudhaar stays false. No credentials or permission are granted by these labels. Runtime/workload isolation remains pending.
 4. **Saakshi's "write-once"** (architecture) is expressed as ordinary `evidence.write` + `s3.write_worm` strings with nothing enforcing append-only. WORM must be enforced at the object store (Object Lock / MinIO compliance mode), not asserted by a scope name.
-5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture scope-table alignment and enforcement conformance remain part of W4.3; the current table still uses the abbreviated descriptions.
+5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture scope-table alignment is corrected in Revision 34; runtime enforcement conformance remains part of W4.3.
 
 #### The missing dimension: scopes have no estate
 

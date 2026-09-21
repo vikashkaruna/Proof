@@ -41,6 +41,7 @@ class LekhaOutput(BaseModel):
 
 class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
     name: ClassVar[AgentName] = AgentName.LEKHA
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Audit ledger queries: verify, reconstruct, export."
     one_liner: ClassVar[str] = "I remember everything, forever."
     tool_scopes: ClassVar[tuple[str, ...]] = ("ledger.append", "ledger.read")

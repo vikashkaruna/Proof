@@ -47,6 +47,8 @@ class KaryaOutput(BaseModel):
 
 class KaryaAgent(BaseAgent[KaryaInput, KaryaOutput]):
     name: ClassVar[AgentName] = AgentName.KARYA
+    writes_axiom_state: ClassVar[bool] = True
+    mutates_client_estate: ClassVar[bool] = True
     description: ClassVar[str] = "Execute an approved action (Phase 3, stub in Phase 0/1)."
     one_liner: ClassVar[str] = "I only act on your approval."
     tool_scopes: ClassVar[tuple[str, ...]] = (

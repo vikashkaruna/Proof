@@ -8,6 +8,8 @@ const baseContract = {
   oneLiner: 'Discovery',
   autonomyLevel: 'L1' as const,
   canMutate: false,
+  mutatesClientEstate: false,
+  writesAxiomState: true,
   inputSchema: z.object({ tenantId: z.string().uuid() }),
   outputSchema: z.object({ findings: z.array(z.string()) }),
   toolScopes: [],
@@ -84,5 +86,27 @@ describe('agent tool scopes — SEC-15 · separation of duties', () => {
     for (const c of contracts) {
       expect(Array.isArray(c.toolScopes), `${c.name} has no toolScopes`).toBe(true);
     }
+  });
+});
+
+describe('explicit mutation metadata', () => {
+  it('preserves the compatibility flag and distinguishes internal records from client writes', () => {
+    for (const contract of Object.values(AGENT_CONTRACTS)) {
+      expect(contract.mutatesClientEstate).toBe(contract.canMutate);
+      expect(contract.mutatesClientEstate).toBe(contract.name === 'karya');
+    }
+    expect(() => AgentContractSchema.parse({ ...baseContract, canMutate: true })).toThrow(
+      'canMutate must match mutatesClientEstate',
+    );
+    expect(AGENT_CONTRACTS.sudhaar.writesAxiomState).toBe(true);
+    expect(AGENT_CONTRACTS.nazar.writesAxiomState).toBe(true);
+    expect(AGENT_CONTRACTS.vibhaag.writesAxiomState).toBe(false);
+    expect(AGENT_CONTRACTS.prativedan.toolScopes).toEqual([
+      'findings.read',
+      'evidence.read',
+      'control_library.read',
+      'report.write',
+      'pdf.render',
+    ]);
   });
 });

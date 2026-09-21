@@ -52,6 +52,7 @@ class NazarOutput(BaseModel):
 
 class NazarAgent(BaseAgent[NazarInput, NazarOutput]):
     name: ClassVar[AgentName] = AgentName.NAZAR
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Monitor MeitY/DPB/gazette for regulatory changes."
     one_liner: ClassVar[str] = "I watch the law so you don't have to."
     # SEC-15: was ("http.read.government_sources", "control_library.write").

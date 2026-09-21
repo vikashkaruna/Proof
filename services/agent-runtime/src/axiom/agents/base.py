@@ -99,6 +99,10 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
     default_pii_redact: ClassVar[bool] = True
     # Whether this agent can mutate external state (architectural)
     can_mutate: ClassVar[bool] = False
+    # Explicit metadata, not credentials or an authorization decision.
+    mutates_client_estate: ClassVar[bool] = False
+    # Domain records only; excludes ordinary run/audit telemetry.
+    writes_axiom_state: ClassVar[bool] = False
 
     def __init__(
         self,

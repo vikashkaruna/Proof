@@ -55,6 +55,7 @@ class SaakshiOutput(BaseModel):
 
 class SaakshiAgent(BaseAgent[SaakshiInput, SaakshiOutput]):
     name: ClassVar[AgentName] = AgentName.SAAKSHI
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Seal an evidence artifact into the WORM-locked vault."
     one_liner: ClassVar[str] = "I am your witness."
     tool_scopes: ClassVar[tuple[str, ...]] = ("evidence.write", "s3.write_worm")

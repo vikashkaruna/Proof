@@ -146,6 +146,8 @@ async def list_agents():
                 "one_liner": a.one_liner,
                 "tool_scopes": list(a.tool_scopes),
                 "can_mutate": a.can_mutate,
+                "mutates_client_estate": a.mutates_client_estate,
+                "writes_axiom_state": a.writes_axiom_state,
             }
             for a in app.state.agents.values()
         ]

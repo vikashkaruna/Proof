@@ -142,6 +142,7 @@ class DrishtiOutput(BaseModel):
 
 class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
     name: ClassVar[AgentName] = AgentName.DRISHTI
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Build a system inventory from interview data or live connectors."
     one_liner: ClassVar[str] = "I find what you didn't know you had."
     tool_scopes: ClassVar[tuple[str, ...]] = ("connector.read", "inventory.write", "evidence.write")
