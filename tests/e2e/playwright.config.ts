@@ -46,7 +46,6 @@ const commonEnv = {
   AXIOM_AUTH_MODE: 'strict',
   SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
   SUPABASE_ANON_KEY: state?.anonKey ?? '',
-  SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
   // The seed wrote every TOTP secret under this key. The BFF has to hold the
   // same one or a step-up fails as `secret_unreadable` — which is exactly the
   // distinct 503 the key ring introduced, and would be a confusing way to
@@ -66,6 +65,7 @@ const webEnv = {
 
 const bffEnv = {
   ...commonEnv,
+  SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
   NODE_ENV: 'development',
   BFF_PORT,
   APPROVAL_SIGNING_KEY: 'axiom-e2e-persona-harness-approval-signing-key',
@@ -93,6 +93,7 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
+    channel: process.env.AXIOM_E2E_BROWSER_CHANNEL === 'chrome' ? 'chrome' : undefined,
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3001',
     // No storageState: each journey establishes its own session by signing in,
     // which is the thing being tested.

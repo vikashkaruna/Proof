@@ -113,6 +113,58 @@ async function main() {
     201,
   );
 
+  const estateA = randomUUID();
+  const estateB = randomUUID();
+  const systemA = randomUUID();
+  const systemB = randomUUID();
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/estates', 'POST', [
+        { id: estateA, tenant_id: tenantA, slug: 'production', name: 'Estate A' },
+        { id: estateB, tenant_id: tenantB, slug: 'production', name: 'Estate B' },
+      ])
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/estate_systems', 'POST', [
+        {
+          id: systemA,
+          tenant_id: tenantA,
+          estate_id: estateA,
+          name: 'System A',
+          system_kind: 'database',
+        },
+        {
+          id: systemB,
+          tenant_id: tenantB,
+          estate_id: estateB,
+          name: 'System B',
+          system_kind: 'database',
+        },
+      ])
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/system_data_categories', 'POST', [
+        { tenant_id: tenantA, system_id: systemA, category_key: 'contact-details' },
+        { tenant_id: tenantB, system_id: systemB, category_key: 'contact-details' },
+      ])
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/estate_scans', 'POST', [
+        { tenant_id: tenantA, estate_id: estateA },
+        { tenant_id: tenantB, estate_id: estateB },
+      ])
+    ).status,
+    201,
+  );
   const library = `parity-${randomUUID()}`;
   const engagementA = randomUUID();
   const engagementB = randomUUID();
@@ -132,8 +184,20 @@ async function main() {
   assert.equal(
     (
       await apiRequest('/rest/v1/engagements', 'POST', [
-        { id: engagementA, tenant_id: tenantA, library_version: library, title: 'Visible A' },
-        { id: engagementB, tenant_id: tenantB, library_version: library, title: 'Private B' },
+        {
+          id: engagementA,
+          tenant_id: tenantA,
+          estate_id: estateA,
+          library_version: library,
+          title: 'Visible A',
+        },
+        {
+          id: engagementB,
+          tenant_id: tenantB,
+          estate_id: estateB,
+          library_version: library,
+          title: 'Private B',
+        },
       ])
     ).status,
     201,
@@ -173,6 +237,45 @@ async function main() {
   const visible = await apiRequest('/rest/v1/tenants?select=id', 'GET', undefined, viewer.token);
   assert.equal(visible.status, 200);
   assert.deepEqual(await visible.json(), [{ id: tenantA }]);
+  for (const table of ['estates', 'estate_systems', 'system_data_categories', 'estate_scans']) {
+    const read = await apiRequest(
+      `/rest/v1/${table}?select=tenant_id`,
+      'GET',
+      undefined,
+      viewer.token,
+    );
+    assert.equal(read.status, 200);
+    assert.deepEqual(await read.json(), [{ tenant_id: tenantA }], `${table}: real Auth RLS`);
+  }
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/estate_systems', 'POST', {
+        tenant_id: tenantA,
+        estate_id: estateB,
+        name: 'Wrong tenant',
+        system_kind: 'database',
+      })
+    ).status,
+    409,
+    'Composite FK rejects privileged cross-tenant inventory writes',
+  );
+  assert.equal(
+    (
+      await apiRequest(
+        '/rest/v1/estates',
+        'POST',
+        {
+          tenant_id: tenantA,
+          slug: 'forged',
+          name: 'Unapproved browser write',
+        },
+        viewer.token,
+      )
+    ).status,
+    403,
+    'Browser cannot write inventory',
+  );
+  outcomes.estate_isolation = true;
   outcomes.direct_rls = true;
   const promotion = await apiRequest(
     `/rest/v1/users?id=eq.${viewer.id}`,
@@ -304,6 +407,19 @@ async function main() {
       (e) => e.id,
     ),
     [engagementB],
+  );
+  const linkedEngagement = await check(
+    'create_estate_engagement',
+    '/v1/engagements',
+    201,
+    ownerPost({ libraryVersion: library, title: 'Scoped assessment', estateId: estateB }),
+  );
+  assert.equal(((await linkedEngagement.json()) as { estate_id: string }).estate_id, estateB);
+  await check(
+    'refuse_foreign_estate_engagement',
+    '/v1/engagements',
+    422,
+    ownerPost({ libraryVersion: library, title: 'Wrong scope', estateId: estateA }),
   );
 
   await check('login_attestation_cannot_move_to_another_session', '/v1/engagements', 401, {

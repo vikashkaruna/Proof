@@ -3,3 +3,4 @@ export * from './domain';
 export * from './api';
 export * from './agents';
 export * from './rbac';
+export * from './estate';

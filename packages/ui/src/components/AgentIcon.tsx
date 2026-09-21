@@ -9,7 +9,7 @@ export type AgentIconSize = 'xs' | 'sm' | 'md' | 'lg' | number;
 
 export type AgentKey = AgentName | 'policy' | 'policy_engine' | 'incident' | 'dsar' | 'consent';
 
-export interface AgentIconProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface AgentIconProps extends React.HTMLAttributes<HTMLSpanElement> {
   agent: AgentKey | string;
   state?: AgentIconState;
   size?: AgentIconSize;
@@ -71,7 +71,7 @@ export function AgentIcon({
       : SIZE_MAP[size] || SIZE_MAP.sm;
 
   return (
-    <div
+    <span
       className={cn(
         'relative inline-flex items-center justify-center rounded-lg transition-all select-none',
         state === 'working' && 'shadow-sm',
@@ -242,7 +242,7 @@ export function AgentIcon({
           }
         }
       `}</style>
-    </div>
+    </span>
   );
 }
 
