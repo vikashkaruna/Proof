@@ -2,12 +2,26 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 22 — AUTHENTICATOR REPLACEMENT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `ad2d046`, including the estate inventory foundation, the browser harness privilege separation and the approval-page hydration fix.
+**Document:** 11 · **Revision 23 — REVOCATION AND QUARANTINE** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `1990304`, including atomic authenticator replacement, strict browser enrollment journeys, the status register and operator runbook.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
-## Revision 22 — current implementation checkpoint
+## Revision 23 — current implementation checkpoint
+
+Completed C-W1-1 (factor revocation UI) and C-W1-2 (enrollment during login quarantine). The UI collects a purpose-bound proof before revocation and shows the effects before confirmation. A first-time quarantined user can enroll, save recovery codes and explicitly continue to login verification; activation alone grants no session assurance.
+
+Reviewing staging exposed a failure boundary behind the existing revoke endpoint: factor removal succeeded even if ending its sessions failed. Forward migration **0031** replaces that best-effort pair with a transaction that revokes the user's active/pending credentials, recovery set and all MFA session attestations together. New attestations must hold an active factor for that user; real two-session races in both orderings prove a concurrent login cannot leave assurance behind. Recovery verification and counter claims now require active credentials as well as unused codes/counters.
+
+**Remaining W1:** invitation delivery and deployed acceptance, plus the pending founder decision on session invalidation after recovery-based replacement (E.2.3). Explicit revocation is separate from replacement and ends assurance unconditionally. Review also found that activation swaps the TOTP rows atomically but still refreshes recovery codes in separate writes; that failure boundary is the next security chunk. W1 is not closed.
+
+The W2 target list contains **40** names, **12 delivered and 28 absent** (including the two existing auth tables). The previous register's 34 total was inconsistent with its own named groups. W0 code delivered so far is tested, but deployed harness work remains engineering work, not solely an operator obligation.
+
+Evidence and limitations: [review 12](audits/12-w1-revocation-quarantine-review-2026-09-21.md), [progress](14_Implementation_Progress.md), [operator runbook](16_Operator_Completion_Runbook.md). Migration tip **0031**; no cloud apply or client-system execution.
+
+---
+
+## Revision 22 — prior implementation checkpoint
 
 Migration **0030**. W1's replacement path, which Revision 21 carried forward as
 a UI gap and which turned out to be broken at three layers — each one hiding
@@ -81,12 +95,13 @@ immediately below. See also
 
 ---
 
-# Workstream status register — as at Revision 22 (21 Sep 2026)
+<a id="workstream-status-register--as-at-revision-22-21-sep-2026"></a>
+
+# Workstream status register — as at Revision 23 (21 Sep 2026)
 
 One maintained table rather than a per-revision delta, because a reader asking
 "where is W4?" should not have to reconstruct it from six revision sections.
-Every row was re-derived from the repository at `3c1275f` by running the
-acceptance check named in the row, not by reading the previous revision.
+Baseline review: `3c1275f`; W1 and migration/count evidence updated in Revision 23. Historical measurements elsewhere in the table are labelled by their checkpoint.
 
 **Status vocabulary** (shared with [Doc 13](13_Roadmap_Traceability.md)):
 **Closed** — exit criteria met and held by a test or CI gate. **Partial** —
@@ -97,8 +112,8 @@ a founder decision or on a deployment this workspace is not authorized to make.
 | # | Workstream | Status | Proven, and by what | Not proven |
 | --- | --- | --- | --- | --- |
 | **W0** | Security remediation & environment parity · P0 blocking | **Partial** — code **Closed**, deployment **Gated** | W0.0 and W0.2 are closed and held by the CI gate. Zero environment-conditional security branches; the only two matches are a marketing URL resolver the plan explicitly names as topology and a comment recording the removed defect. `axiom_e2e_bypass` has no reader anywhere. SEC-3 is closed: **zero** service-role calls across the 22 `apps/web` files, with the baseline file now empty and acting as a ratchet. SEC-4/5/6/10/11/12/13 each carry a regression test. Four strict-parity topology labels produce identical security outcomes. | W0.1. There is no provisioned preprod database and no deployed parity lane. The four parity labels are **one local stack under four configurations**, not four deployments. Blocked on the first real deploy, which the founder has reserved. |
-| **W1** | Tenancy, RBAC, MFA, personas · P0 | **Partial** | All 22 web files go through `requireTenantContext()`, so RLS enforces tenancy for every query the web app makes. Capability matrix and central `authorize()` in `@axiom/types`; `approval_scopes` is genuinely read, proven by a scoped approver who differs from an unscoped one *only* by that column. MFA: TOTP, recovery codes, login quarantine, approval-time step-up, key-ring rotation, and — Revision 22 — authenticator replacement with atomic retirement of the factor it replaces. 52 browser journeys under `AXIOM_AUTH_MODE=strict` with real GoTrue accounts. | Factor revocation through the UI: the endpoint exists and is step-up gated, and nothing calls it. Enrolment while held under the login-MFA quarantine. The invitation/email flow. Whether a recovery-code replacement should invalidate session attestations made with the retired factor — [E.2 item 3](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it), an open decision, not an oversight. |
-| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0030**, 43 tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4, via 0029) and the entire W7.0 regulatory baseline group (6). Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **28 of the 34 named target tables do not exist** — verified against the migrated database, not by grep. All 7 W4 connector tables, all 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
+| **W1** | Tenancy, RBAC, MFA, personas · P0 | **Partial** | All 22 web files go through `requireTenantContext()`, so RLS enforces tenancy for every query the web app makes. Capability matrix and central `authorize()` in `@axiom/types`; `approval_scopes` is genuinely read, proven by a scoped approver who differs from an unscoped one *only* by that column. MFA: TOTP, recovery codes, login quarantine, approval-time step-up, key-ring rotation, and — Revision 22 — authenticator replacement with atomic retirement of the factor it replaces. 55 browser journeys under `AXIOM_AUTH_MODE=strict` with real GoTrue accounts, including revocation and quarantined enrollment (Revision 23). | Revocation UI and quarantined enrollment delivered in Revision 23. Remaining: atomic recovery-code refresh during activation, invitation/email flow and deployed acceptance. Whether a recovery-code replacement should invalidate session attestations made with the retired factor — [E.2 item 3](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it), an open decision, not an oversight. |
+| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0031**, 43 tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4, via 0029), the W7.0 regulatory baseline group (6), and the auth group (2). Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **28 of the 40 named target tables do not exist** — verified against the migrated database, not by grep. All 7 W4 connector tables, all 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
 | **W3** | Client estate & onboarding · P1 | **Pending** | Nothing of W3 itself. The 0029 schema it will build on is delivered and counted under W2, and engagement creation accepts an optional `estateId` under its existing capability gate. | Estate management API and UI, onboarding proposal normalization, and human-confirmed assignment of legacy engagements. Accepting a link to an estate is not managing one. |
 | **W4** | Universal Connection Framework · P1 XL | **Pending** | Nothing. | Zero of 7 tables. No registry, descriptors, credential envelope, grants, health checks, workload identity or MCP tool registry. `connectors/page.tsx` is a shell and is not evidence of the workstream. |
 | **W5** | Phase 3 execution loop · P1 XL | **Partial** | The *authority* machinery is real and tested: signed scope-bound approval tokens, bounded nonce replay defence, execution claims with serialization proven by a held-open two-session race, the dispatch outbox, atomic reconciliation and the kill switch. | The executor. Karya refuses mutating execution without a signed token **by design at this phase** — a deliberate refusal stub, not a defect, and not a PRD B.10 completion claim. Zero of 5 execution-detail tables. |
@@ -113,7 +128,7 @@ deploy, migrate, seed, verify — together with the evidence each one returns an
 what I do with that evidence to flip a status, are in
 [Doc 16, the operator completion runbook](16_Operator_Completion_Runbook.md).
 Every item there names one owner, because the four workstreams split unevenly:
-W0's remainder is entirely yours (its code is closed), W2 and W3 are almost
+W0's deployment awaits the operator and its deployed harness still needs engineering, W2 and W3 are almost
 entirely mine, and W1 is genuinely shared.
 
 **Reading the register honestly.** Six of eleven workstreams are Partial, two are
@@ -1150,7 +1165,7 @@ Enforcement is **step-up, not blanket**: required at login for `founder` / `owne
 
 ## W2 · Data model completion — **P0** · size M
 
-Append-only migrations, allocated from the next unused number. **0000–0030 exist** at Revision 22; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+Append-only migrations, allocated from the next unused number. **0000–0031 exist** at Revision 23; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
 
 ```
 -- Estate (W3)

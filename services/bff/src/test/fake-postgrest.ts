@@ -150,6 +150,32 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     return [{ activated_factor_id: factorId, retired_factor_id: retired?.['id'] ?? null }];
   });
 
+  rpcHandlers.set('revoke_totp_factor', (args) => {
+    const rows = tables['user_mfa_factors'] ?? [];
+    if (
+      !rows.some(
+        (r) =>
+          r['id'] === args['p_factor_id'] &&
+          r['user_id'] === args['p_user_id'] &&
+          r['factor_type'] === 'totp' &&
+          r['status'] === 'active',
+      )
+    )
+      return [];
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      if (row['user_id'] === args['p_user_id'] && row['status'] !== 'revoked') {
+        row['status'] = 'revoked';
+        row['revoked_at'] = now;
+      }
+    }
+    for (const row of tables['mfa_session_attestations'] ?? []) {
+      if (row['user_id'] === args['p_user_id'] && row['revoked_at'] == null)
+        row['revoked_at'] = now;
+    }
+    return [{ revoked_factor_id: args['p_factor_id'] }];
+  });
+
   rpcHandlers.set('issue_reviewed_plan_approval', (args) => {
     const tenantId = args['p_tenant_id'] as string;
     const planId = args['p_plan_id'] as string;

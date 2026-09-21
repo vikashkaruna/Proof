@@ -39,7 +39,7 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
   const initialStatus = {
     enrolled: rows.some((r) => r.factor_type === 'totp' && r.status === 'active'),
     recoveryCodesRemaining: rows.filter(
-      (r) => r.factor_type === 'recovery_code' && r.consumed_at == null,
+      (r) => r.factor_type === 'recovery_code' && r.status === 'active' && r.consumed_at == null,
     ).length,
     factors: rows
       .filter((r) => r.factor_type !== 'recovery_code')
@@ -92,6 +92,7 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
         tenantId={ctx.tenantId}
         accountEmail={ctx.email ?? 'your account'}
         initialStatus={initialStatus}
+        enrolmentRequired={sentHere}
       />
     </div>
   );

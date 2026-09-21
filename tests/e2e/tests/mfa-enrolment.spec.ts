@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { generateTotp } from '@axiom/mfa';
-import { createMfaAccount, selectTenant, signInAs } from '../fixtures';
+import { createMfaAccount, selectTenant, signInAs, state } from '../fixtures';
 
 /**
  * W1 · SEC-8 — enrolment, replacement and recovery, driven through the browser.
@@ -189,5 +189,77 @@ test.describe.serial('replacing an authenticator you have lost', () => {
     // Single use is the whole property of a recovery code. If this ever
     // succeeded, one leaked code would be a standing credential.
     await expect(page.locator('#setupKey')).toHaveCount(0, { timeout: 20_000 });
+  });
+});
+
+// Security transitions use private accounts so reruns exercise the same path.
+test.describe('revocation and login quarantine', () => {
+  test('wrong revocation proof keeps the authenticator active', async ({ page }) => {
+    const who = await createMfaAccount('revoke-wrong', { withFactor: true });
+    await signInAs(page, who.email, who.password);
+    await page.goto(SECURITY_PAGE);
+    await page.getByRole('button', { name: /^Revoke authenticator$/ }).click();
+    await expect(page.getByTestId('mfa-revoke-step-up')).toBeVisible();
+    await page.fill('#stepUpCode', 'not-a-recovery-code');
+    await page.getByRole('button', { name: /^Confirm revocation$/ }).click();
+    await expect(page.locator('body')).toContainText('not accepted');
+    await page.reload();
+    await expect(page.getByRole('button', { name: /^Replace authenticator$/ })).toBeVisible();
+  });
+
+  test('revocation spends proof, clears credentials, and requires enrollment again', async ({
+    page,
+  }) => {
+    const who = await createMfaAccount('revoke');
+    await signInAs(page, who.email, who.password);
+    await page.goto(SECURITY_PAGE);
+    await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
+    await activateWith(page, await readSetupKey(page));
+    const codes = await readRecoveryCodes(page);
+    await page.getByRole('button', { name: /I have saved them/ }).click();
+    await page.getByRole('button', { name: /^Revoke authenticator$/ }).click();
+    await page.fill('#stepUpCode', codes[0]!);
+    await page.getByRole('button', { name: /^Confirm revocation$/ }).click();
+    await expect(page.getByRole('status')).toContainText('Authenticator revoked');
+    await expect(page.getByRole('button', { name: /^Enrol an authenticator$/ })).toBeVisible();
+    await page.reload();
+    await expect(page.locator('body')).toContainText('Not enrolled');
+    await expect(page.getByRole('button', { name: /^Revoke authenticator$/ })).toHaveCount(0);
+  });
+
+  test('a quarantined founder enrolls, saves codes, verifies, and can then access the app', async ({
+    page,
+  }) => {
+    const who = await createMfaAccount('quarantine', { role: 'founder' });
+    await signInAs(page, who.email, who.password);
+    await page.goto('/dashboard');
+    await expect(page).toHaveURL(/settings\/security\?enrol=required/);
+    const protectedApi = () =>
+      page.request.get('/api/bff/v1/engagements', { headers: { 'X-Tenant-Id': state.tenantA.id } });
+    const before = await protectedApi();
+    expect(before.status()).toBe(403);
+    expect((await before.json()).error.code).toBe('mfa_enrolment_required');
+    await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
+    await activateWith(page, await readSetupKey(page));
+    const codes = await readRecoveryCodes(page);
+    const enrolled = await protectedApi();
+    expect(enrolled.status()).toBe(401);
+    expect((await enrolled.json()).error.code).toBe('mfa_verification_required');
+    await expect(page.getByRole('link', { name: 'Continue to sign-in verification' })).toHaveCount(
+      0,
+    );
+    await page.getByRole('button', { name: /I have saved them/ }).click();
+    await page.getByRole('link', { name: 'Continue to sign-in verification' }).click();
+    await expect(page).toHaveURL(/\/verify/);
+    await page.fill('#code', codes[0]!);
+    await page.getByRole('button', { name: /^Verify$/ }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    expect((await protectedApi()).status()).toBe(200);
+    // A second browser session with just the password is still quarantined.
+    await page.context().clearCookies();
+    await signInAs(page, who.email, who.password);
+    await page.goto('/dashboard');
+    await expect(page).toHaveURL(/\/verify/);
+    expect((await protectedApi()).status()).toBe(401);
   });
 });
