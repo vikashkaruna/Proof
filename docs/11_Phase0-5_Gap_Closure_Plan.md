@@ -2,11 +2,31 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 16 — BROWSER PERSONA JOURNEYS** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `77c4dcd`, including MFA key rotation and the verified approval snapshot (0028).
+**Document:** 11 · **Revision 17 — APPROVAL COMPLETED IN A BROWSER** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `c79b49d`, including the browser persona journeys and their spec corrections.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 16 — current implementation checkpoint
+## Revision 17 — current implementation checkpoint
+
+No migration. The positive case the persona journeys could not reach, and the defect it uncovered.
+
+**The approval completes.** The harness now starts the BFF alongside the web app, so a step-up challenge has something to be satisfied against. `scripts/seed-personas.ts` enrols real TOTP factors — written encrypted under the same ring key the harness starts the BFF with, so the two agree by construction — and an approver signs in, selects an action, opens the step-up panel, enters a code generated from their own seeded secret, and receives a **signed approval token**. Every gate the product has, in the order a person meets them. A wrong code approves nothing and leaves the panel open; the same code cannot be spent twice; a viewer is never offered the path and a scoped approver is refused it.
+
+The two workbench journeys that Revision 16 marked `fixme` are live for the same reason: `axiom_analyst` now clears the login-MFA gate with a real code and reaches `/workbench`. They needed one more thing the seed had not modelled — `requireInternalContext` asks two separate questions, `users.is_axiom_internal` (who employs you) and `WORKBENCH_ACCESS` (what you may do), and the capability alone lands on the client portal. The seed marks Axiom staff as staff.
+
+**What the browser found.** The web-to-BFF bridge derives an `Idempotency-Key` from method, path and body when the caller supplies none. For `POST /v1/mfa/challenge` with `{"purpose":"login"}` that is the **same key for a given user forever**, and `claim_request` returns `conflict` whenever the stored claim's authority hash differs — a hash that includes the GoTrue session id. So the first login-MFA verification of a user's life claimed the key, and every later sign-in presented the same key from a different session and was refused `idempotency_conflict` **permanently**. Inside one session it failed more quietly: the claim replayed and handed back a challenge id that had already been consumed.
+
+A derived key is right for approving and executing, where a double submit must not run twice. It is wrong for minting a single-use credential. Both challenge callers now supply a per-attempt key. The API suites cannot find this class of defect at all — they pass a fresh `randomUUID()` on every request and never exercise the bridge's derivation.
+
+| Workstream | Delivered since Revision 16 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Approval carried to a signed token in a browser; wrong-code, replay and refusal journeys; the BFF in the harness; seeded TOTP factors; the two workbench journeys un-`fixme`d; the single-use challenge idempotency fix with a unit regression | Deployed acceptance |
+
+**What this does not do.** A signed token is not an execution: the token is the gate, and a separate execute call runs the work against a client estate, which no connector-backed executor exists to perform. Nothing is deployed. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 16 — prior implementation checkpoint
 
 No migration. The W1 exit criterion, and the harness that could never have proved it.
 

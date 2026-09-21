@@ -15,7 +15,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { encryptSecret, generateSecret } from '@axiom/mfa';
 import {
+  HARNESS_MFA_KEY,
   PERSONAS,
   PERSONA_STATE_PATH,
   type PersonaKey,
@@ -60,7 +62,7 @@ async function main() {
     throw new Error(`${label}: expected ${status}, got ${res.status} — ${body.slice(0, 400)}`);
   }
 
-  async function createAccount(emailPrefix: string) {
+  async function createAccount(emailPrefix: string, internal: boolean) {
     const email = `${emailPrefix}-${run}@example.invalid`;
     const password = randomBytes(24).toString('base64url');
     const created = await api('/auth/v1/admin/users', 'POST', {
@@ -72,7 +74,11 @@ async function main() {
     const { id } = (await created.json()) as { id: string };
     // The application profile is a separate row; without it the tenant
     // resolver has an authenticated user with nothing to resolve.
-    const mirrored = await api('/rest/v1/users', 'POST', { id, email });
+    const mirrored = await api('/rest/v1/users', 'POST', {
+      id,
+      email,
+      is_axiom_internal: internal,
+    });
     await expectStatus(mirrored, 201, `Profile provisioning for ${emailPrefix}`);
     // Prove the password works here rather than discovering it in a browser,
     // where the failure would look like a broken login page.
@@ -113,9 +119,28 @@ async function main() {
 
   const accounts = {} as PersonaState['accounts'];
   const memberships: Record<string, unknown>[] = [];
+  const factors: Record<string, unknown>[] = [];
   for (const persona of PERSONAS) {
-    const account = await createAccount(persona.emailPrefix);
-    accounts[persona.key as PersonaKey] = account;
+    const account = await createAccount(persona.emailPrefix, persona.axiomInternal);
+
+    // Approving always needs a fresh step-up, whatever the tenant's login
+    // policy is, so an approver with no factor cannot complete an approval in
+    // a browser at all. The secret is written encrypted under the same ring
+    // key the harness starts the BFF with, so the two agree by construction
+    // rather than by both happening to read the same env var correctly.
+    let totpSecret: string | undefined;
+    if (persona.totpEnrolled) {
+      totpSecret = generateSecret(20);
+      factors.push({
+        user_id: account.id,
+        factor_type: 'totp',
+        status: 'active',
+        label: `${persona.key} authenticator`,
+        secret_encrypted: encryptSecret(totpSecret, HARNESS_MFA_KEY),
+        activated_at: new Date().toISOString(),
+      });
+    }
+    accounts[persona.key as PersonaKey] = { ...account, ...(totpSecret ? { totpSecret } : {}) };
     const row = (tenantId: string) => ({
       tenant_id: tenantId,
       user_id: account.id,
@@ -134,6 +159,14 @@ async function main() {
     201,
     'Tenant membership',
   );
+
+  if (factors.length > 0) {
+    await expectStatus(
+      await api('/rest/v1/user_mfa_factors', 'POST', factors),
+      201,
+      'TOTP factor enrolment',
+    );
+  }
 
   const library = `persona-${run}`;
   await expectStatus(
@@ -217,6 +250,8 @@ async function main() {
     serviceKey: status.SERVICE_ROLE_KEY!,
     tenantA,
     tenantB,
+    engagementA,
+    libraryVersion: library,
     planA: { ...planA, actionId },
     planB,
     accounts,
@@ -225,7 +260,10 @@ async function main() {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify(state, null, 2), { mode: 0o600 });
   // Outcome only. These are real credentials for a real running stack.
-  console.log(`Seeded ${PERSONAS.length} personas across 2 tenants. State written (not printed).`);
+  console.log(
+    `Seeded ${PERSONAS.length} personas across 2 tenants, ${factors.length} with a TOTP factor. ` +
+      'State written (not printed).',
+  );
 }
 
 main().catch((err) => {

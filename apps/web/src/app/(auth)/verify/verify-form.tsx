@@ -18,6 +18,28 @@ interface Props {
  * challenge minted during a page load they walked away from is a window open
  * for no reason.
  */
+/**
+ * A step-up challenge is single-use by definition, so creating one is NOT an
+ * idempotent operation and must never replay.
+ *
+ * The browser-to-BFF bridge derives an Idempotency-Key from method, path and
+ * body when the caller supplies none. For this request that is the same value
+ * every time — `POST /v1/mfa/challenge` with a fixed body — while
+ * `claim_request` conflicts whenever the stored claim's authority hash
+ * differs, and that hash includes the GoTrue session id. So the first
+ * verification of a user's life claimed the key, and every later sign-in
+ * presented the same key from a different session and was refused
+ * `idempotency_conflict` permanently. Within one session it was worse in a
+ * quieter way: the claim replayed, handing back a challenge id that had
+ * already been consumed.
+ *
+ * Derived keys are right for approving and executing, where a double submit
+ * must not run twice. They are wrong here, so this caller supplies its own.
+ */
+function freshChallengeKey(): string {
+  return `mfa-challenge-${crypto.randomUUID()}`;
+}
+
 export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
   const router = useRouter();
   const [code, setCode] = useState('');
@@ -37,7 +59,7 @@ export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
     try {
       const opened = await fetch('/api/bff/v1/mfa/challenge', {
         method: 'POST',
-        headers,
+        headers: { ...headers, 'Idempotency-Key': freshChallengeKey() },
         body: JSON.stringify({ purpose: 'login' }),
       });
       if (!opened.ok) {

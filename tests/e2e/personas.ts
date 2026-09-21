@@ -19,6 +19,7 @@ export type PersonaKey =
   | 'partner'
   | 'analyst'
   | 'approverScoped'
+  | 'approverReplay'
   | 'ownerInMfaTenant';
 
 export interface Persona {
@@ -41,8 +42,23 @@ export interface Persona {
   canReject: boolean;
   /** Whether the workbench (internal Axiom surface) should be reachable. */
   workbench: boolean;
+  /**
+   * `users.is_axiom_internal`. `requireInternalContext` asks two separate
+   * questions — who employs you, and what you may do — and needs both. The
+   * capability alone lands on the client portal.
+   */
+  axiomInternal: boolean;
   /** Whether the partner portal should be reachable. */
   partnerPortal: boolean;
+  /**
+   * True when the seed enrols a real, active TOTP factor for this account.
+   *
+   * Approving ALWAYS requires a fresh step-up, whatever the tenant's login
+   * policy says, so the approver needs one to complete an approval in a
+   * browser at all. `mfaQuarantined` is about *login*; this is about being
+   * able to satisfy a challenge once signed in.
+   */
+  totpEnrolled: boolean;
   /**
    * True when signing in should land on enrolment instead of the app,
    * because the tenant (or the role, for `founder`) demands a second factor
@@ -63,6 +79,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'founder',
     membership: 'both',
     emailPrefix: 'persona-founder',
+    axiomInternal: true,
+    totpEnrolled: true,
     canReject: true,
     mfaQuarantined: true,
     approvalScopes: [],
@@ -75,6 +93,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'owner',
     membership: 'a',
     emailPrefix: 'persona-owner',
+    axiomInternal: false,
+    totpEnrolled: true,
     canReject: true,
     mfaQuarantined: false,
     approvalScopes: [],
@@ -87,6 +107,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'approver',
     membership: 'a',
     emailPrefix: 'persona-approver',
+    axiomInternal: false,
+    totpEnrolled: true,
     canReject: true,
     mfaQuarantined: false,
     canApprove: true,
@@ -106,6 +128,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'approver',
     membership: 'a',
     emailPrefix: 'persona-approver-scoped',
+    axiomInternal: false,
+    totpEnrolled: false,
     canReject: true,
     mfaQuarantined: false,
     canApprove: false,
@@ -118,6 +142,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'reviewer',
     membership: 'a',
     emailPrefix: 'persona-reviewer',
+    axiomInternal: false,
+    totpEnrolled: false,
     canReject: false,
     mfaQuarantined: false,
     approvalScopes: [],
@@ -130,6 +156,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'viewer',
     membership: 'a',
     emailPrefix: 'persona-viewer',
+    axiomInternal: false,
+    totpEnrolled: false,
     canReject: false,
     mfaQuarantined: false,
     approvalScopes: [],
@@ -142,6 +170,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'partner',
     membership: 'a',
     emailPrefix: 'persona-partner',
+    axiomInternal: false,
+    totpEnrolled: false,
     canReject: false,
     mfaQuarantined: false,
     approvalScopes: [],
@@ -154,6 +184,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'axiom_analyst',
     membership: 'a',
     emailPrefix: 'persona-analyst',
+    axiomInternal: true,
+    totpEnrolled: true,
     canReject: false,
     mfaQuarantined: true,
     approvalScopes: [],
@@ -166,6 +198,29 @@ export const PERSONAS: readonly Persona[] = [
   },
   {
     /**
+     * A second, identical approver with its own TOTP factor.
+     *
+     * `last_used_counter` replay defence is per FACTOR, not per challenge, so
+     * two journeys approving inside the same 30-second TOTP step with one
+     * account have the second correctly refused as a replay. That is the
+     * product working; it is not what the replay journey is trying to
+     * demonstrate, so it gets its own authenticator.
+     */
+    key: 'approverReplay',
+    role: 'approver',
+    membership: 'a',
+    emailPrefix: 'persona-approver-replay',
+    axiomInternal: false,
+    approvalScopes: [],
+    canApprove: true,
+    canReject: true,
+    workbench: false,
+    partnerPortal: false,
+    totpEnrolled: true,
+    mfaQuarantined: false,
+  },
+  {
+    /**
      * The same owner role, in the tenant that keeps the default
      * `mfa_required_roles`. Signing in lands on enrolment, not the dashboard.
      */
@@ -173,6 +228,8 @@ export const PERSONAS: readonly Persona[] = [
     role: 'owner',
     membership: 'b',
     emailPrefix: 'persona-owner-mfa',
+    axiomInternal: false,
+    totpEnrolled: false,
     canReject: true,
     approvalScopes: [],
     canApprove: true,
@@ -197,11 +254,34 @@ export interface PersonaState {
   serviceKey: string;
   tenantA: { id: string; slug: string; name: string };
   tenantB: { id: string; slug: string; name: string };
+  /** So tests can create their own plans in the same engagement. */
+  engagementA: string;
+  libraryVersion: string;
   /** A plan in tenant A with one approvable action. */
   planA: { id: string; title: string; actionId: string };
   /** A plan in tenant B, which nobody scoped to A may see. */
   planB: { id: string; title: string };
-  accounts: Record<PersonaKey, { id: string; email: string; password: string }>;
+  accounts: Record<
+    PersonaKey,
+    {
+      id: string;
+      email: string;
+      password: string;
+      /** Base32 TOTP secret, present when `totpEnrolled`. */
+      totpSecret?: string;
+    }
+  >;
 }
 
 export const PERSONA_STATE_PATH = '.axiom-runtime/personas/state.json';
+
+/**
+ * The MFA encryption key the harness pins.
+ *
+ * The seed writes `user_mfa_factors.secret_encrypted` with it and the BFF is
+ * started with it, so both ends of the ring agree. It is a fixture value for a
+ * disposable local stack and is never a deployed key — `loadEnv()` refuses a
+ * placeholder outside local/test, and the seeded accounts live only in the
+ * parity database.
+ */
+export const HARNESS_MFA_KEY = 'axiom-e2e-persona-harness-mfa-key-32chars';

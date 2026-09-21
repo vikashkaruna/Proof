@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+import { HARNESS_MFA_KEY } from './personas';
 
 /**
  * Browser journeys, run against REAL authentication.
@@ -35,17 +36,44 @@ function personaState(): { supabaseUrl: string; anonKey: string; serviceKey: str
 
 const state = personaState();
 
-const webEnv = {
-  NODE_ENV: 'development',
+const BFF_PORT = '4000';
+
+/** Shared by both servers so the ring key and the Supabase target cannot drift. */
+const commonEnv = {
   ENVIRONMENT: 'local',
   // The point of the whole harness. Never relax this to make a journey pass:
   // a journey that needs the bypass is not testing authorisation.
   AXIOM_AUTH_MODE: 'strict',
-  NEXT_PUBLIC_SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: state?.anonKey ?? '',
   SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
   SUPABASE_ANON_KEY: state?.anonKey ?? '',
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
+  // The seed wrote every TOTP secret under this key. The BFF has to hold the
+  // same one or a step-up fails as `secret_unreadable` — which is exactly the
+  // distinct 503 the key ring introduced, and would be a confusing way to
+  // discover a harness misconfiguration.
+  AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
+};
+
+const webEnv = {
+  ...commonEnv,
+  NODE_ENV: 'development',
+  NEXT_PUBLIC_SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: state?.anonKey ?? '',
+  // Where the browser-to-BFF bridge forwards to. Without a BFF the approval
+  // journey stops at "Could not start verification" and proves nothing.
+  BFF_PUBLIC_URL: `http://localhost:${BFF_PORT}`,
+};
+
+const bffEnv = {
+  ...commonEnv,
+  NODE_ENV: 'development',
+  BFF_PORT,
+  APPROVAL_SIGNING_KEY: 'axiom-e2e-persona-harness-approval-signing-key',
+  AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
+  AGENT_RUNTIME_INTERNAL_TOKEN: 'axiom-e2e-persona-harness-runtime-token-32c',
+  MODEL_GATEWAY_API_KEY: 'axiom-e2e-persona-harness-gateway-key-32chars',
+  AXIOM_REGION: 'ap-south-1',
+  LOG_LEVEL: 'error',
 };
 
 export default defineConfig({
@@ -58,7 +86,7 @@ export default defineConfig({
    * of a budget problem rather than a defect — so the budget moved, and the
    * journeys did not.
    */
-  timeout: 90_000,
+  timeout: 120_000,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -81,6 +109,17 @@ export default defineConfig({
           port: 3001,
           cwd: repoRoot,
           env: webEnv,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+        {
+          // The BFF. Every authorisation the product makes is decided here,
+          // so an approval journey that does not reach it is only testing a
+          // page.
+          command: 'pnpm --filter @axiom/bff dev',
+          port: Number(BFF_PORT),
+          cwd: repoRoot,
+          env: bffEnv,
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },
