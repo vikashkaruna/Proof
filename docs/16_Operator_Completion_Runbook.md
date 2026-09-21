@@ -1,0 +1,479 @@
+# Axiom Proof — Operator completion runbook: W0 → W3
+
+### Axiom Minds Private Limited · https://axiomminds.ai
+
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** staging `9994cb8`, 21 Sep 2026
+
+The register says what is delivered. This says **who does what next**, for W0
+through W3 only, and — the part that is usually missing — **exactly what
+evidence flips a status**, so that "done" is something you can hand over rather
+than something either of us asserts.
+
+## How to read this
+
+Every item names one owner:
+
+- **OPERATOR** — you. Anything that provisions, bills, deploys, or is
+  irreversible. Anything needing a credential I must never see. Anything that
+  is a business or posture decision rather than an engineering one.
+- **CLAUDE** — me. Code, migrations, tests, gates, docs.
+
+Each operator step ends with **Evidence to return**. Each workstream ends with
+**How I mark it Closed** — the checks I run against your evidence before I
+change a status. I do not flip a status on a report alone; where a claim is
+checkable from the repository or from a URL you give me, I check it.
+
+---
+
+## 0. The standing constraint, restated so it is not a surprise
+
+I do not create, modify or bill any cloud resource. `terraform validate` and
+read-only checks are my ceiling. No `terraform apply`, no Supabase project
+creation, no Secret Manager writes, no Cloud Run deploy.
+
+Two of these are not caution, they are one-way doors:
+
+- **The first real deploy is reserved to you.** That was your instruction and I
+  have kept to it.
+- **Evidence-bucket Object Lock is COMPLIANCE mode.** Once set, nobody —
+  including the project owner, including Google — can shorten or delete it. A
+  test bucket locked for the statutory 2555 days is gone for seven years. Do
+  not set retention on a bucket you are experimenting with. W8 depends on this
+  and it is deliberately the last thing anyone should turn on.
+
+**Never send me:** a service-role key, a JWT secret, an `APPROVAL_SIGNING_KEY`,
+the contents of any `.env*`, or `.axiom-runtime/personas/state.json`. Everything
+below is written so you never have to. Where I need to know a secret _exists_, I
+ask for the Secret Manager resource name or a SHA-256 of the value, never the
+value.
+
+---
+
+# W0 · Security remediation & environment parity
+
+**Current status: Partial** — code **Closed**, deployment **Gated**.
+
+## What is already done, so you do not redo it
+
+W0.0 and W0.2 are closed and held by a CI gate on every push. Re-verified at
+this head:
+
+| Exit criterion                                     | State                                                                                                                                          |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zero environment-conditional security branches     | **Met.** The only two matches are a marketing URL resolver the plan explicitly classes as topology, and a comment recording the removed defect |
+| `axiom_e2e_bypass` has no effect anywhere          | **Met.** No reader exists in any package                                                                                                       |
+| Service-role client banned from `apps/web` (SEC-3) | **Met.** Zero calls across 22 files; the baseline file is empty and now acts as a ratchet                                                      |
+| SEC-4/5/6/10/11/12/13 closed with regression tests | **Met**                                                                                                                                        |
+| Mock Supabase substitution removed                 | **Met.** Reachable only under `e2e-bypass`, which is refused at boot outside `local`/`test`                                                    |
+| Idempotency auto-key generation removed (FR-8.3)   | **Met.** No environment relaxes it, including `e2e-bypass`                                                                                     |
+
+**Nothing in W0 is waiting on me for code.** What remains is W0.1, and W0.1 is
+infrastructure you own, plus one CI lane I can only write once a deployed
+target exists.
+
+## OPERATOR steps, in order
+
+The detail for each lives in
+[Doc 08](08_DEPLOYMENT_GUIDE.md), the
+[GCP preprod guide](GCP_PREPROD_DEPLOYMENT_GUIDE.md) and the
+[env config checklist](GCP_PREPROD_ENV_CONFIG_CHECKLIST.md). This is the
+ordered spine and the evidence, not a replacement for those.
+
+### W0-1 · Decide and record the target
+
+Project, region, billing account, and whether preprod is Cloud SQL + Cloud Run
+(as the guides assume) or self-hosted Supabase (as W10 assumes). They are
+different topologies and the rest of the sequence depends on which.
+
+**Evidence to return:** project id, region, and which topology. No credentials.
+
+### W0-2 · Scaffold and mint configuration
+
+```bash
+./scripts/sync-env.sh scaffold
+```
+
+Appends only missing keys to `.env.preprod`; values you already set are kept.
+
+```bash
+./scripts/sync-env.sh mint
+```
+
+This one matters more than it looks. It generates the Supabase JWT secret and
+the anon/service keys **from one minting**. Those two keys are JWTs signed with
+that secret, so mixing values from separate runs leaves GoTrue issuing tokens
+PostgREST rejects — a failure that presents as "login works, every API call
+401s" and wastes an afternoon.
+
+**Evidence to return:** `./scripts/sync-env.sh verify` output. It reports
+presence and shape, not values.
+
+### W0-3 · Pre-flight
+
+```bash
+./scripts/deploy-preprod-gcp.sh --dry-run
+```
+
+`terraform plan` only; mutates nothing. Read the plan before the next step —
+this is the last point at which nothing has been created.
+
+**Evidence to return:** the plan summary line (`Plan: N to add, …`) and any
+resource in it you did not expect.
+
+### W0-4 · Provision base and database
+
+```bash
+./scripts/deploy-preprod-gcp.sh --phase base
+./scripts/deploy-preprod-gcp.sh --phase db
+```
+
+Phase 2 is VPC, subnet, peering, connector, GCS vault, Artifact Registry, IAM.
+Phase 3 is Cloud SQL and Secret Manager. **Billing starts here.**
+
+**Evidence to return:** the Cloud SQL instance name and the Secret Manager
+_resource names_ created. Never the secret values.
+
+### W0-5 · Run the migration series against the real database
+
+```bash
+./scripts/deploy-preprod-gcp.sh --phase migrate
+```
+
+or directly, if you are driving it yourself:
+
+```bash
+./scripts/migrate-cloudsql.sh <DATABASE_URL>
+```
+
+The runner enforces TLS, records checksums, refuses edited history, and exits
+non-zero on a failing migration. Expect **31 migrations, 0000 → 0030**.
+
+**Evidence to return:** the runner's final summary — the count applied, and the
+last migration name. If it refuses on a checksum, send that line verbatim and
+stop; a checksum refusal means applied history differs from the repository and
+is not something to force past.
+
+### W0-6 · Seed representative identities
+
+```bash
+./scripts/deploy-preprod-gcp.sh --seed-identities
+```
+
+W0.1 asks for _representative_ data, not fixtures: multiple tenants and users
+across every persona, so RLS and RBAC are genuinely exercised rather than
+asserted. **Never client production data.**
+
+**Evidence to return:** tenant count, and the persona roles seeded. No emails,
+no passwords.
+
+### W0-7 · Deploy services and verify
+
+```bash
+./scripts/deploy-preprod-gcp.sh --phase services
+./scripts/deploy-preprod-gcp.sh --phase verify
+```
+
+**Evidence to return:** the health matrix from `--phase verify`, and the public
+URL of the web app and the BFF.
+
+### W0-8 · Prove strictness against the deployed environment
+
+This is the step that actually closes W0.1, and the one most likely to be
+skipped because the previous step printed green.
+
+The browser journeys can be pointed at a deployed environment — setting
+`PLAYWRIGHT_BASE_URL` makes Playwright skip its own dev servers and drive
+yours:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://<your-preprod-web-url> \
+  pnpm --filter @axiom/e2e exec playwright test --reporter=line
+```
+
+Two caveats, both of which will bite otherwise:
+
+1. The journeys read seeded persona credentials from a local
+   `.axiom-runtime/personas/state.json`, which describes your **local parity
+   stack**, not preprod. Against a deployed environment they need personas
+   seeded _there_. Treat a first run as a wiring exercise, not a verdict, and
+   send me what it says — adapting the harness to a deployed target is my work
+   (see below), not yours.
+2. An unauthenticated request must return **401**, not a redirect to a login
+   page that then works. Check one by hand:
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://<your-bff-url>/v1/plans
+   ```
+   Anything other than `401` is a finding — send it to me before going further.
+
+**Evidence to return:** the curl status code, and the Playwright run output
+(pass/fail counts and the first failure, if any).
+
+### W0-9 · The prod EKS decision
+
+`infra/terraform/envs/prod` carries
+`cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]` with a "restrict via WAF
+/ OIDC in production" comment above it that has never been actioned. The
+Terraform gate validates that this configuration _loads_; it has never claimed
+the value is one you want. Prod validating is what made this exposure visible
+rather than hidden behind a configuration that could not load.
+
+This is your decision, not a defect I can fix by guessing a CIDR.
+
+**Evidence to return:** the CIDR list you want, or a decision to defer with a
+date. I make the change and the gate re-validates.
+
+## CLAUDE steps for W0
+
+| #      | What                                                               | Why it is mine, and why it is blocked until your steps land                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C-W0-1 | **Write the deployed parity lane**                                 | W0's exit criteria demand "the same E2E suite runs against preprod and against a production-configured stack, and any behavioural divergence fails the build". This **does not exist**. `scripts/verify-strict-parity.ts` is structurally local-only: it reads `.axiom-runtime/parity/status.json` and binds to a Docker-reachable interface. Its four "topology labels" are one local stack under four configurations — never four deployments, and the reviews have always said so. I cannot write the deployed lane until there is a deployed target and a way to authenticate to it |
+| C-W0-2 | **Make the browser harness able to target a deployed environment** | Today persona seeding writes local state. Pointing the journeys at preprod needs a seeding path that runs against a deployed Supabase and a credential route that never puts a service key in CI logs                                                                                                                                                                                                                                                                                                                                                                                   |
+| C-W0-3 | Apply the EKS CIDR decision and re-validate                        | Blocked on W0-9                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+## How I mark W0 Closed
+
+I flip **W0 → Closed** when all of these hold, and not before:
+
+1. Your W0-5 evidence shows **31 migrations applied** against a real deployed
+   database, with the runner's own checksum summary.
+2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
+   request.
+3. The deployed parity lane (C-W0-1) exists, is in CI, and is **green on a
+   commit I can name** — not green once by hand.
+4. `pnpm gate:security` and the W0.0 CI job are still green on that same
+   commit, so nothing regressed while the environment was being built.
+
+If 1 and 2 hold but 3 does not, I move W0 to **Partial — deployment proven,
+parity lane outstanding** and say so plainly. I will not call W0 Closed on a
+successful deploy alone: a deploy proves the thing runs, and W0 is about it
+running under identical rules everywhere, which only the divergence lane tests.
+
+---
+
+# W1 · Tenancy, RBAC, MFA, personas
+
+**Current status: Partial.** Most of W1 is delivered and held by 52 browser
+journeys under `AXIOM_AUTH_MODE=strict`. Four things remain, and they split
+evenly between us.
+
+## OPERATOR steps
+
+### W1-1 · Decide the session-attestation posture (blocks W1 acceptance)
+
+Open decision, recorded as
+[Doc 11 E.2 item 3](11_Phase0-5_Gap_Closure_Plan.md#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it).
+
+Replacing an authenticator retires the old factor, so it satisfies no future
+step-up. It does **not** touch session attestations already issued against it.
+Where the replacement was satisfied by the _current_ factor that is clearly
+right — the user holds the device. Where it was satisfied by a **recovery
+code**, the user did not have their authenticator, which is equally consistent
+with having lost it and with someone else holding it.
+
+- **Invalidate on the recovery-code path** — closes the stolen-device case;
+  signs out a user who was merely travelling without their phone.
+- **Leave as-is** — never interrupts a legitimate user; a stolen device's
+  session survives the replacement intended to shut it out.
+
+My proposal: invalidate on the recovery-code path only, and say so on the page
+before the user commits. Nothing currently depends on the answer, so this is
+not blocking anything except calling W1 accepted.
+
+**Evidence to return:** the decision, one line.
+
+### W1-2 · Provide an email provider for invitations
+
+The invitation/email flow is listed under W0 acceptance and is genuinely W1
+work. It cannot be built against nothing: it needs a transactional email
+provider, a sending domain, and SPF/DKIM on that domain.
+
+Note that **email OTP remains deferred by accepted scope** — this is invitations
+only, not a second authentication factor. Do not let a provider's "magic link"
+feature quietly become an auth path.
+
+**Evidence to return:** provider name, sending domain, and confirmation that
+SPF/DKIM verify. Put the API key in Secret Manager and send me the resource
+name, never the key.
+
+### W1-3 · Enrol a real second factor on the deployed environment
+
+Once W0-7 lands, enrol MFA as a real user on preprod: a real authenticator app,
+a real TOTP code, and then a replacement using a recovery code. This exercises
+the key ring against a deployed instance — a mis-set `AXIOM_MFA_ENCRYPTION_KEY`
+presents as `secret_unreadable` (503), which is a deliberately distinct signal
+and not a user error.
+
+**Evidence to return:** whether enrolment, approval step-up, and replacement
+each succeeded, and the exact error code if any did not.
+
+## CLAUDE steps for W1
+
+| #      | What                                                                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| C-W1-1 | Factor revocation in the UI. The endpoint exists and is step-up gated; nothing calls it. Same shape as the replacement flow just delivered |
+| C-W1-2 | Enrolment while held under the login-MFA quarantine — the path a brand-new `founder` or `owner` hits on first sign-in                      |
+| C-W1-3 | The invitation flow, once W1-2 gives it a provider                                                                                         |
+| C-W1-4 | Implement the W1-1 decision, with browser journeys either way                                                                              |
+
+## How I mark W1 Closed
+
+1. C-W1-1 … C-W1-4 delivered, each mutation-tested.
+2. Browser journeys cover revocation and quarantined enrolment, and I have
+   confirmed they fail when the fix is reverted.
+3. Your W1-3 evidence shows enrolment, step-up and replacement working against
+   a **deployed** environment — the local parity stack has never been proof of
+   the deployed key ring.
+4. The W1 exit criterion still holds: a `viewer` in tenant A cannot see tenant
+   B, cannot reach an approve button, and cannot call the approve endpoint,
+   proven by test rather than inspection.
+
+---
+
+# W2 · Data model completion
+
+**Current status: Partial.** This one is almost entirely mine, and I want to be
+precise about the size so it is not mistaken for a small gap.
+
+**28 of the 34 named target tables do not exist.** Delivered: the four estate
+tables (0029) and the six W7.0 regulatory baseline tables. Absent: all 7
+connector, 5 execution-detail, 4 monitoring/policy, 4 multi-regulator, 4
+Phase 1/2 parity and 4 rights/consent tables.
+
+## OPERATOR steps
+
+### W2-1 · Legacy assignment policy
+
+0029 deliberately left existing engagements **unassigned** rather than inventing
+an estate for them. Backfilling a guess would put fabricated scope into a
+compliance record, which is worse than a null.
+
+Decide: assign existing engagements to an estate by hand, or leave them
+unassigned until someone reviews each one?
+
+**Evidence to return:** the policy. If "assign by hand", I build the UI for a
+human to do it; I will not write an inference.
+
+### W2-2 · Re-run migrations after each batch I land
+
+Each new migration batch needs applying to your deployed environment. Same
+command as W0-5. The runner refuses edited history, so the order is: I commit,
+you apply, never the reverse.
+
+**Evidence to return:** the applied count and last migration name, per batch.
+
+## CLAUDE steps for W2
+
+The 28 tables, in the order their dependent workstreams need them — W4's
+connector group first, because W5's execution tables reference it and W5 cannot
+be built before W4 exists. Each batch: composite tenant-consistent foreign
+keys, RLS that works with `service_role nobypassrls`, a SQL suite, and a
+populated-database upgrade test.
+
+## How I mark W2 Closed
+
+1. All 34 named tables exist, verified **against a migrated database**, not by
+   grep — a pattern search already gave me a false negative on
+   `regulatory_instruments` once.
+2. Every new table has RLS proven positively and negatively with
+   `service_role nobypassrls`, in the disposable-container suite.
+3. A populated upgrade test proves no existing row is altered or invented.
+4. Your W2-2 evidence shows the same count applied on the deployed database.
+
+---
+
+# W3 · Client estate & onboarding
+
+**Current status: Pending.** Nothing of W3 itself exists. The 0029 schema it
+builds on is delivered and counted under W2; accepting an `estateId` on
+engagement creation is a link, not management.
+
+## OPERATOR steps
+
+### W3-1 · Estate taxonomy
+
+What is an "estate" for your actual clients — a legal entity, a business unit,
+an environment (prod/staging), or a geography? The schema does not care; the UI,
+the defaults and every report do. Getting this wrong is expensive to undo once
+clients have data in it.
+
+**Evidence to return:** the definition, and two or three real examples from a
+client you have.
+
+### W3-2 · System kinds
+
+0029 ships `database`, `application`, `storage`, `identity`, `saas`, `other`.
+Tell me if your real engagements need kinds that list does not cover.
+
+**Evidence to return:** any missing kinds, or confirmation the list is enough.
+
+### W3-3 · Onboarding proposal review
+
+Normalized onboarding produces _proposals_. Who approves them — the client
+`owner`, or an Axiom `axiom_analyst`? Maker-checker says the party who prepares
+the change should not be the party who authorises it, which points at the
+client owner, but this is your call about how you deliver.
+
+**Evidence to return:** which role approves.
+
+## CLAUDE steps for W3
+
+| #      | What                                                                                                       |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| C-W3-1 | Estate management API — create, update, archive — capability-gated, audited, idempotent, tenant-consistent |
+| C-W3-2 | Estate management UI, plus explicit human assignment of legacy engagements per W2-1                        |
+| C-W3-3 | Onboarding proposal normalization with the W3-3 review role                                                |
+| C-W3-4 | Browser journeys for the above, under strict auth                                                          |
+
+## How I mark W3 Closed
+
+1. C-W3-1 … C-W3-4 delivered and mutation-tested.
+2. Every mutation requires a capability, appends to the ledger, and is
+   idempotent — proven by test, including a cross-tenant refusal.
+3. No estate or scope is ever inferred. A legacy engagement becomes assigned
+   only through a recorded human action.
+4. Browser journeys cover a full estate lifecycle under strict auth.
+
+---
+
+# Sending evidence back
+
+One markdown block or a file, per batch of steps. For each step: the step id
+(`W0-5`), what you ran, and the output — trimmed to the summary lines, not the
+whole log.
+
+**Redact before sending.** Never include:
+
+- any service-role key, `SUPABASE_SERVICE_KEY`, JWT secret, or
+  `APPROVAL_SIGNING_KEY`
+- the contents of any `.env*`
+- `.axiom-runtime/personas/state.json` — it holds working test credentials
+- client data of any kind
+
+Secret Manager **resource names** are fine and are what I actually need. If I
+ever need to confirm a value matches across two places, I will ask you for a
+SHA-256 of it, never the value.
+
+If a step fails, send the failure rather than working around it. A checksum
+refusal from the migration runner, or a `401` that is a `302`, is more useful
+to me than a green run that took a detour.
+
+# What changes when evidence arrives
+
+| Workstream | Now                                 | Flips to                       | On                                                                                                           |
+| ---------- | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **W0**     | Partial (code Closed, deploy Gated) | **Closed**                     | 31 migrations on a deployed DB + `401` from the deployed BFF + the parity lane green in CI on a named commit |
+| **W0**     | —                                   | **Partial, deployment proven** | The first two above, if the parity lane is still outstanding                                                 |
+| **W1**     | Partial                             | **Closed**                     | C-W1-1…4 delivered + deployed MFA evidence (W1-3) + the E.2.3 decision implemented                           |
+| **W2**     | Partial                             | **Closed**                     | 34/34 tables verified against a migrated database + RLS and upgrade tests + your applied-count evidence      |
+| **W3**     | Pending                             | **Partial**                    | The estate management API landing with capability, audit and idempotency tests                               |
+| **W3**     | —                                   | **Closed**                     | Full lifecycle in UI + browser journeys + recorded human legacy assignment                                   |
+
+I update [Doc 11's register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026),
+[Doc 14](14_Implementation_Progress.md) with the evidence and what it does
+_not_ prove, and [Doc 15](15_Session_Handoff.md) so the next session resumes
+from the new baseline — the same chain every checkpoint uses.
+
+**W4 onward is deliberately not in this document.** W4 and W5 are the XL
+workstreams that constitute the actual product loop, they are close to empty,
+and W5 cannot start before W4 because its tables reference W4's. Sequencing
+them is a separate conversation once W0–W3 are real.

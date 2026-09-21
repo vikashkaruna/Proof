@@ -21,6 +21,8 @@ Validation: 279 BFF tests, 40 web, 178 MFA, 14 packages, lint and typecheck 15/1
 
 ## Next implementation chunks
 
+**Blocked on the operator, not on me:** W0's remainder is entirely infrastructure — its code is closed, including the two W0.1 items the plan still lists (the mock substitution and idempotency auto-keys are both already gone). The ordered operator steps, the evidence each returns, and what I do with that evidence to move a status are in [Doc 16, the operator completion runbook](16_Operator_Completion_Runbook.md). Read it before assuming a W0–W3 item is mine to pick up.
+
 1. **W1 remainder:** factor revocation through the UI (the endpoint exists and is step-up gated; nothing calls it), and enrolment while held under the login-MFA quarantine. Settle Doc 11 E.2 item 3 — whether a recovery-code replacement should invalidate session attestations made with the retired factor — before calling W1 accepted.
 2. **W2/W3:** estate management API/UI, explicit legacy-assessment assignment, and onboarding proposal normalization. The schema exists through 0029; no estate mutation endpoint or scan executor was invented. Require capabilities, audit/idempotency and tenant consistency.
 3. **W4/W5:** connector registry and real executor with snapshot checks before mutation, rollback and halt tests. Runtime remains a refusal stub; no PRD B.10 completion claim.
@@ -39,4 +41,5 @@ Status at a glance, from the register: **W0** partial (code closed, deployment g
 - Local Chrome can be selected with `AXIOM_E2E_BROWSER_CHANNEL=chrome`; CI uses Playwright's pinned Chromium. Browser servers use ports 3000/3001/4000. Next rewrites `next-env.d.ts` during dev in **both** `apps/web` and `apps/marketing`; revert both before committing.
 - Apply 0029 before using estate linkage in the BFF, and 0030 before any authenticator replacement. Old clients may omit estateId; do not fabricate scope during backfill. Scan rows are metadata until a real scanner records a run.
 - CI cancels an older staging run when a newer push arrives. Check the SHA and ancestry before treating cancellation as a defect.
+- The deployed parity lane W0 requires **does not exist**. `scripts/verify-strict-parity.ts` reads `.axiom-runtime/parity/status.json` and binds to a Docker-reachable interface, so it is local-only by construction and its four topology labels are one stack in four configurations. The browser journeys _can_ target a deployed environment via `PLAYWRIGHT_BASE_URL`, which skips Playwright's own dev servers; what they still lack is a way to seed personas there.
 - `Self-hosted Supabase topology (W0.1)` pulls three images from Docker Hub and has failed on a registry `connection reset by peer` during acquisition, ~40s in, before reaching a database. Read the log before suspecting the commit: a re-run on the unchanged SHA passed. `test-database.sh` already carries an ECR fallback for the same class of failure; this lane does not.
