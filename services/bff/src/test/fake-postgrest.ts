@@ -154,9 +154,46 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     const hashes = args['p_recovery_hashes'] as string[];
     if (hashes.length !== 10 || new Set(hashes).size !== 10)
       throw new Error('invalid recovery set');
+    const rows = tables['user_mfa_factors'] ?? [];
+    const pending = rows.find(
+      (r) =>
+        r['id'] === args['p_factor_id'] &&
+        r['user_id'] === args['p_user_id'] &&
+        r['status'] === 'pending',
+    );
+    if (!pending) return [];
+    const active = rows.find(
+      (r) =>
+        r['user_id'] === args['p_user_id'] &&
+        r['factor_type'] === 'totp' &&
+        r['status'] === 'active',
+    );
+    const challenge = (tables['mfa_challenges'] ?? []).find(
+      (r) => r['id'] === pending['replacement_challenge_id'],
+    );
+    if (
+      active
+        ? pending['replaces_factor_id'] !== active['id'] ||
+          !challenge ||
+          challenge['user_id'] !== args['p_user_id'] ||
+          challenge['purpose'] !== 'enrolment' ||
+          challenge['factor_id'] !== active['id'] ||
+          challenge['bound_resource_ref'] !== active['id'] ||
+          !challenge['consumed_at'] ||
+          !challenge['satisfied_at'] ||
+          !['totp', 'recovery_code'].includes(challenge['satisfied_with'] as string)
+        : pending['replaces_factor_id'] != null || pending['replacement_challenge_id'] != null
+    ) {
+      throw Object.assign(new Error('MFA replacement authorization changed'), { code: 'PT409' });
+    }
     const swapped = rpcHandlers.get('activate_totp_factor')!(args) as Row[];
     if (swapped.length === 0) return [];
-    const rows = tables['user_mfa_factors'] ?? [];
+    if (challenge?.['satisfied_with'] === 'recovery_code') {
+      for (const row of tables['mfa_session_attestations'] ?? []) {
+        if (row['user_id'] === args['p_user_id'] && row['revoked_at'] == null)
+          row['revoked_at'] = new Date().toISOString();
+      }
+    }
     const now = new Date().toISOString();
     for (const row of rows) {
       if (
@@ -447,7 +484,13 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     }
     const handler = rpcHandlers.get(fn);
     if (!handler) throw new Error(`fake-postgrest: no handler for rpc "${fn}"`);
-    return { data: handler(args), error: null };
+    try {
+      return { data: handler(args), error: null };
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'PT409')
+        return { data: null, error: { code: error.code, message: error.message } };
+      throw error;
+    }
   }
 
   return {

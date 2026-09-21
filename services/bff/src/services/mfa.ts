@@ -218,7 +218,12 @@ export type ActivateEnrolmentResult =
   | ActivateEnrolmentSuccess
   | {
       ok: false;
-      reason: 'no_pending_factor' | 'code_rejected' | 'secret_unreadable' | 'activation_failed';
+      reason:
+        | 'no_pending_factor'
+        | 'code_rejected'
+        | 'secret_unreadable'
+        | 'activation_failed'
+        | 'replacement_authorization_changed';
       detail?: string;
     };
 
@@ -344,6 +349,7 @@ export interface MfaService {
     userId: string;
     accountName: string;
     label?: string | null;
+    replacement?: { factorId: string; challengeId: string };
   }): Promise<BeginEnrolmentResult>;
   activateTotpEnrolment(opts: {
     userId: string;
@@ -601,7 +607,7 @@ export function createMfaService(
   }
 
   return {
-    async beginTotpEnrolment({ userId, accountName, label }) {
+    async beginTotpEnrolment({ userId, accountName, label, replacement }) {
       // Called for its refusal: a missing key must stop an enrolment before a
       // secret is generated, not after it is written somewhere unreadable.
       requireRing();
@@ -626,6 +632,8 @@ export function createMfaService(
           status: 'pending',
           label: label ?? null,
           secret_encrypted: encryptSecret(secret, requireRing()),
+          replaces_factor_id: replacement?.factorId ?? null,
+          replacement_challenge_id: replacement?.challengeId ?? null,
         })
         .select('id')
         .single();
@@ -689,6 +697,9 @@ export function createMfaService(
         p_recovery_hashes: hashed,
       });
       if (activateErr) {
+        if (activateErr.code === 'PT409') {
+          return { ok: false, reason: 'replacement_authorization_changed' };
+        }
         logger.error({ userId, error: activateErr.message }, 'TOTP activation transaction failed');
         return { ok: false, reason: 'activation_failed' };
       }
@@ -1063,7 +1074,7 @@ export function createMfaService(
 
       const { data: satisfied, error: satisfyErr } = await supabase
         .from('mfa_challenges')
-        .update({ satisfied_at: new Date().toISOString() })
+        .update({ satisfied_at: new Date().toISOString(), satisfied_with: satisfiedWith })
         .eq('id', challenge.id)
         .is('satisfied_at', null)
         .select('id');

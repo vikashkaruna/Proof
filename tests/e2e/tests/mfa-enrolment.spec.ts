@@ -1,6 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { generateTotp } from '@axiom/mfa';
-import { createMfaAccount, selectTenant, signInAs, state } from '../fixtures';
+import {
+  createMfaAccount,
+  selectTenant,
+  signInAs,
+  satisfyLoginMfaWithSecret,
+  state,
+} from '../fixtures';
 
 /**
  * W1 · SEC-8 — enrolment, replacement and recovery, driven through the browser.
@@ -262,4 +268,62 @@ test.describe('revocation and login quarantine', () => {
     await expect(page).toHaveURL(/\/verify/);
     expect((await protectedApi()).status()).toBe(401);
   });
+});
+
+test('recovery replacement makes both verified sessions complete MFA again', async ({
+  page,
+  browser,
+}) => {
+  const who = await createMfaAccount('recovery-sessions', { role: 'founder' });
+  await signInAs(page, who.email, who.password);
+  await selectTenant(page, 'a');
+  await page.goto(SECURITY_PAGE);
+  await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
+  await activateWith(page, await readSetupKey(page));
+  const codes = await readRecoveryCodes(page);
+  await page.getByRole('button', { name: /I have saved them/ }).click();
+  const verifyRecovery = async (target: Page, code: string) => {
+    await target.goto('/verify');
+    await target.fill('#code', code);
+    await target.getByRole('button', { name: /^Verify$/ }).click();
+    await expect(target).toHaveURL(/\/dashboard/);
+  };
+  const protectedApi = (target: Page) =>
+    target.request.get('/api/bff/v1/engagements', { headers: { 'X-Tenant-Id': state.tenantA.id } });
+  await verifyRecovery(page, codes[0]!);
+  const secondContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  try {
+    const second = await secondContext.newPage();
+    await signInAs(second, who.email, who.password);
+    await selectTenant(second, 'a');
+    await verifyRecovery(second, codes[1]!);
+    expect((await protectedApi(page)).status()).toBe(200);
+    expect((await protectedApi(second)).status()).toBe(200);
+    await page.goto(SECURITY_PAGE);
+    await page.getByRole('button', { name: /^Replace authenticator$/ }).click();
+    await expect(page.getByTestId('mfa-replace-step-up')).toContainText(
+      'activating the replacement ends all existing MFA verifications',
+    );
+    await page.fill('#stepUpCode', codes[2]!);
+    await page.getByRole('button', { name: /^Confirm and replace$/ }).click();
+    const replacement = await readSetupKey(page);
+    await activateWith(page, replacement);
+    const newCodes = await readRecoveryCodes(page);
+    // Revocation occurs on activation, including the session doing recovery.
+    for (const target of [page, second]) {
+      const response = await protectedApi(target);
+      expect(response.status()).toBe(401);
+      expect((await response.json()).error.code).toBe('mfa_verification_required');
+    }
+    await page.getByRole('button', { name: /I have saved them/ }).click();
+    await second.goto('/dashboard');
+    await expect(second).toHaveURL(/\/verify/);
+    await satisfyLoginMfaWithSecret(page, replacement);
+    expect((await protectedApi(page)).status()).toBe(200);
+    expect((await protectedApi(second)).status()).toBe(401);
+    await verifyRecovery(second, newCodes[0]!);
+    expect((await protectedApi(second)).status()).toBe(200);
+  } finally {
+    await secondContext.close();
+  }
 });
