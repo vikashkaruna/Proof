@@ -2,6 +2,8 @@
 
 Committed source `4a6b13c` passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod and production container configurations, with zero retries and matching sanitized results. Final merge CI remains the exact staging gate; its result is saved in the private session checkpoint.
 
+Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
+
 ## Revision 33 — W4.2 OAuth broker core
 
 Reviewed staging `9a75743` and successful CI [35659326878](https://github.com/vikashkaruna/Proof/actions/runs/35659326878): all 16 applicable jobs passed; sanitized artifacts prove 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration. No newer other-model staging commits were present. The vault milestone is complete and green; the broader implementation goal remains open.
