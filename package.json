@@ -2,7 +2,7 @@
   "name": "axiom-proof",
   "version": "0.1.0",
   "private": true,
-  "description": "Axiom Proof \u2014 agentic DPDPA compliance platform \u00b7 Axiom Minds Private Limited",
+  "description": "Axiom Proof — agentic DPDPA compliance platform · Axiom Minds Private Limited",
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=20.11.0",
@@ -60,7 +60,8 @@
     "tsx": "^4.23.13",
     "turbo": "^2.10.12",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "zod": "4.5.4"
   },
   "workspaces": [
     "apps/*",
