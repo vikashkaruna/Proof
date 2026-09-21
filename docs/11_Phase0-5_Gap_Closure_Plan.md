@@ -2,11 +2,35 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 15 — MFA KEY ROTATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `e5a830d`, including the reviewed approval snapshot (0028), verified independently rather than accepted on report.
+**Document:** 11 · **Revision 16 — BROWSER PERSONA JOURNEYS** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `77c4dcd`, including MFA key rotation and the verified approval snapshot (0028).
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 15 — current implementation checkpoint
+## Revision 16 — current implementation checkpoint
+
+No migration. The W1 exit criterion, and the harness that could never have proved it.
+
+**What was actually there.** `tests/e2e` was missing from `pnpm-workspace.yaml`, so `@playwright/test` was never installed, `pnpm test:e2e` resolved to no package, and the whole suite exited 0 having run nothing — the same failure mode as `--passWithNoTests`, which this repository has been bitten by before. There was no e2e job in CI. And the harness it did carry configured `AXIOM_E2E_BYPASS_AUTH` and an `axiom_e2e_bypass` cookie, both deleted from the application in W0.0; under that bypass every caller resolves to a single founder identity, so a persona journey written on it would have been a founder wearing a viewer's name and would have passed whatever the render gating did, including nothing.
+
+**What replaces it.** `scripts/seed-personas.ts` creates nine real GoTrue accounts — one per persona, plus a second approver and a second owner — across two tenants with deliberately different MFA policies, and the journeys sign in through the real login form under `AXIOM_AUTH_MODE=strict`. Tenant A sets `mfa_required_roles = '{}'` so the authorisation journeys vary one thing at a time; tenant B keeps the default so the quarantine is exercised as its own journey. Both are supported configurations, stated rather than inherited.
+
+Twenty-seven journeys cover the first two clauses of the exit criterion — a viewer cannot see tenant B and cannot reach an approve control — plus nav gating, the login-MFA quarantine, and a wrong password staying refused. The third clause is a statement about the server, not the page, so `viewer_cannot_approve` and `viewer_cannot_reject` were added to `verify-strict-parity.ts`, which holds a real GoTrue token; a caller who never loads the page is exactly the one worth refusing.
+
+**What the journeys found.** A scoped approver gets no approve control but keeps **Reject plan**. `SCOPE_NARROWED` covers `PLAN_APPROVE` and `PLAN_EXECUTE` and not `PLAN_REJECT`, so narrowing someone's `approval_scopes` removes their ability to grant and leaves their ability to refuse. That is the right asymmetry — saying no is not authority over a client estate — and it is now asserted rather than assumed. My first draft of the test asserted the opposite and was wrong.
+
+The `approver` / `approverScoped` pair differ **only** by a non-empty `approval_scopes`, which is what makes Doc 11's old note that the column is "defined and never read" falsifiable.
+
+**The gate.** `check-env-security-gate.sh` scanned `apps packages services` and not `tests`, which is why a harness configuring the deleted bypass survived W0.0. It scans `tests` now, and reintroducing `AXIOM_E2E_BYPASS_AUTH` there fails the build.
+
+| Workstream | Delivered since Revision 15 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Real-auth persona harness and 27 browser journeys; persona approve/reject refusals at the API; `tests/*` in the workspace; a CI job that runs them; the security gate extended to the harness | The positive approve **action** through a browser, which needs the full MFA flow and a running BFF; deployed acceptance |
+
+**What this does not do.** The journeys prove what each persona is *offered*, not that an approver can complete an approval end to end in a browser — that needs the TOTP challenge satisfied against a running BFF, and is the next piece. Nothing is deployed, so none of this is deployed acceptance. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 15 — prior implementation checkpoint
 
 No migration. Two pieces of work: verifying Revision 14 rather than inheriting it, and closing the MFA key rotation gap it named as next.
 

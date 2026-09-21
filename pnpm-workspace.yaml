@@ -2,6 +2,11 @@ packages:
   - 'apps/*'
   - 'packages/*'
   - 'services/*'
+  # The browser journeys. Absent from this list, `@axiom/e2e` was never
+  # installed, so `@playwright/test` was never present and `pnpm test:e2e`
+  # resolved to no package at all — it exited 0 having run nothing, which is
+  # the same failure mode as `--passWithNoTests`.
+  - 'tests/*'
 onlyBuiltDependencies:
   - sharp
   - '@tailwindcss/oxide'

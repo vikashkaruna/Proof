@@ -191,6 +191,33 @@ async function main() {
     },
     body: '{}',
   });
+  // Doc 11's W1 exit criterion, third clause: a viewer "cannot call the
+  // approve endpoint". The browser journeys prove the button is absent; that
+  // is a statement about the page, not about the server, and a caller who
+  // never loads the page is exactly the one worth refusing. Asserted here
+  // because this is the suite that holds a real GoTrue token.
+  await check('viewer_cannot_approve', '/v1/plans/approve', 403, {
+    method: 'POST',
+    headers: {
+      ...viewerHeaders,
+      'idempotency-key': randomUUID(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ planId: randomUUID(), actionIds: [randomUUID()], mode: 'batch' }),
+  });
+  // Rejecting is a different authority from approving and must be refused
+  // for a viewer too — the two are separately gated, so they are separately
+  // asserted.
+  await check('viewer_cannot_reject', `/v1/plans/${randomUUID()}/reject`, 403, {
+    method: 'POST',
+    headers: {
+      ...viewerHeaders,
+      'idempotency-key': randomUUID(),
+      'content-type': 'application/json',
+    },
+    body: '{}',
+  });
+
   const quarantined = await check('owner_needs_mfa', '/v1/engagements', 403, {
     headers: { Authorization: `Bearer ${owner.token}`, 'x-tenant-id': tenantB },
   });
