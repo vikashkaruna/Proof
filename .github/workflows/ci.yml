@@ -112,6 +112,69 @@ jobs:
       # time as their old-key factors come up for verification.
       - run: ./scripts/check-mfa-ring-coverage.sh
 
+  # ─── W0.1 deployment manifests render ────────────────────────────
+  # The Helm chart had never been rendered anywhere. No job invoked helm and
+  # helm is not installed on the dev machines, so `check-mfa-ring-coverage.sh`
+  # above could confirm the retiring-key variable was PRESENT in the chart
+  # while the chart it was present in could not produce a manifest at all.
+  # It had four defects: `range` over a boolean in ingress.yaml, two values
+  # keys the templates dereference that values.yaml never defined, and an
+  # annotations block emitted outside metadata. Every one is caught in about
+  # a second by actually rendering.
+  helm-render:
+    name: Deployment manifests render (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      # Pinned rather than floating: a validator that silently changes its
+      # schema set turns this gate into a source of unrelated red builds.
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.6.7
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: helm lint
+        run: helm lint infra/helm/axiom-proof
+
+      # Rendering the defaults alone is not coverage: a `{{- with }}` guarding
+      # an empty map never executes, which is exactly how the ServiceAccount
+      # annotations defect survived — clean on defaults, invalid YAML the
+      # moment an operator attaches an IRSA role. Each fixture in ci/ forces
+      # one such branch; values-prod.yaml.example is rendered because it is
+      # the shape that actually ships. -strict rejects unknown and duplicate
+      # fields, so a typo'd key fails here instead of being silently dropped
+      # by the API server on apply.
+      - name: helm template + schema validation
+        run: |
+          set -euo pipefail
+          CHART=infra/helm/axiom-proof
+          VALUE_SETS=("" "-f ${CHART}/values-prod.yaml.example")
+          for fixture in "${CHART}"/ci/*-values.yaml; do
+            VALUE_SETS+=("-f ${fixture}")
+          done
+
+          # -cache matters: without it kubeconform refetches every schema for
+          # each value set, turning a one-second gate into minutes of network.
+          mkdir -p /tmp/kubeconform-cache
+
+          for value_set in "${VALUE_SETS[@]}"; do
+            echo "::group::helm template ${value_set:-(chart defaults)}"
+            # Unquoted on purpose: each entry is a flag pair, not one argument.
+            helm template axiom-proof "${CHART}" ${value_set} \
+              | kubeconform -strict -summary \
+                  -cache /tmp/kubeconform-cache \
+                  -kubernetes-version 1.30.0 -
+            echo "::endgroup::"
+          done
+
   # ─── W0.1 self-hosted Supabase topology ──────────────────────────
   # Higher environments self-host GoTrue and PostgREST against their own
   # Postgres rather than using Supabase Cloud, so preprod is a real

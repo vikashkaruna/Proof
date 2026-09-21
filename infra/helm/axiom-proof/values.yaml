@@ -15,6 +15,17 @@ labels:
   app.kubernetes.io/part-of: axiom-proof
   app.kubernetes.io/managed-by: helm
 
+# ─── Service account ────────────────────────────────────────────────
+# Every deployment mounts this account by name and sets
+# automountServiceAccountToken: false, so the token is never projected into a
+# pod; the account exists to carry the cloud-IAM binding (IRSA / Workload
+# Identity) in `annotations`, not to grant Kubernetes API access.
+serviceAccount:
+  create: true
+  # Empty means "derive from the release fullname" (see _helpers.tpl).
+  name: ""
+  annotations: {}
+
 # ─── Service-to-service settings ────────────────────────────────────
 config:
   # All India-residency by default
@@ -137,6 +148,12 @@ modelGateway:
     piiRedactionEnabled: "true"
     selfHostedBaseUrl: ""  # filled in values-prod.yaml with the vLLM service URL
     selfHostedModel: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  # The deployment template reads .autoscaling.enabled to decide whether to pin
+  # `replicas`; the key must exist or the template hits a nil pointer. Left
+  # false because the chart ships no HorizontalPodAutoscaler — with no HPA to
+  # own the count, omitting `replicas` would silently settle on one pod.
+  autoscaling:
+    enabled: false
 
 # ─── Temporal worker (Python) ──────────────────────────────────────
 temporalWorker:

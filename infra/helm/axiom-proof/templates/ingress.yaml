@@ -11,10 +11,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    {{- range .Values.web.ingress.tls.enabled }}
+    {{- if .Values.web.ingress.tls.enabled }}
     - hosts:
-        - {{ $.Values.web.ingress.host | quote }}
-      secretName: {{ $.Values.web.ingress.tls.secretName | quote }}
+        - {{ .Values.web.ingress.host | quote }}
+      secretName: {{ .Values.web.ingress.tls.secretName | quote }}
     {{- end }}
     {{- if .Values.marketing.ingress.tls.enabled }}
     - hosts:
