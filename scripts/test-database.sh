@@ -42,6 +42,7 @@ done
 bash tests/database/concurrent-idempotency.sh "$container"
 bash tests/database/concurrent-onboarding.sh "$container"
 bash tests/database/concurrent-execution.sh "$container"
+bash tests/database/concurrent-reviewed-approval.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.

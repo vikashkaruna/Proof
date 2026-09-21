@@ -74,14 +74,8 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
    * plan, the challenge link and the ledger entry all appear together or not
    * at all. A stub returning `issued` would make those tests assert nothing.
    */
-  const contentDigest = (tenantId: string, planId: string, actionIds: string[]): string => {
-    const rows = (tables['remediation_actions'] ?? [])
-      .filter(
-        (a) =>
-          a['tenant_id'] === tenantId &&
-          a['plan_id'] === planId &&
-          actionIds.includes(a['id'] as string),
-      )
+  const reviewedDigest = (snapshot: Row[]): string => {
+    const rows = [...snapshot]
       .sort((a, b) => String(a['id']).localeCompare(String(b['id'])))
       .map((a) => ({
         id: a['id'],
@@ -93,6 +87,18 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       }));
     return createHash('sha256').update(JSON.stringify(rows), 'utf8').digest('hex');
   };
+  const contentDigest = (tenantId: string, planId: string, actionIds: string[]) =>
+    reviewedDigest(
+      (tables['remediation_actions'] ?? []).filter(
+        (a) =>
+          a['tenant_id'] === tenantId &&
+          a['plan_id'] === planId &&
+          actionIds.includes(a['id'] as string),
+      ),
+    );
+  rpcHandlers.set('reviewed_action_content_digest', (args) =>
+    reviewedDigest(args['p_actions'] as Row[]),
+  );
 
   rpcHandlers.set('action_set_content_digest', (args) =>
     contentDigest(
@@ -102,7 +108,7 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     ),
   );
 
-  rpcHandlers.set('issue_plan_approval', (args) => {
+  rpcHandlers.set('issue_reviewed_plan_approval', (args) => {
     const tenantId = args['p_tenant_id'] as string;
     const planId = args['p_plan_id'] as string;
     const actionIds = (args['p_action_ids'] as string[]) ?? [];
@@ -115,6 +121,13 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       (r) => r['id'] === planId && r['tenant_id'] === tenantId,
     );
     if (!plan) return { decision: 'plan_not_found' };
+    if (
+      args['p_expected_plan_version'] == null ||
+      plan['version'] !== args['p_expected_plan_version']
+    )
+      return { decision: 'plan_changed' };
+    if (!['draft', 'review', 'approved', 'cancelled'].includes(String(plan['status'])))
+      return { decision: 'plan_not_approvable' };
 
     const actions = (tables['remediation_actions'] ?? []).filter(
       (a) =>
@@ -140,6 +153,9 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       return { decision: 'actions_not_ready' };
     }
 
+    if ((args['p_signed_payload'] as Row)?.['contentDigest'] !== args['p_expected_digest']) {
+      return { decision: 'content_changed' };
+    }
     // Recomputed here, as the real function recomputes it under row locks.
     if (contentDigest(tenantId, planId, actionIds) !== args['p_expected_digest']) {
       return { decision: 'content_changed' };
