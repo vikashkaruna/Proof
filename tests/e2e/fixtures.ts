@@ -1,7 +1,7 @@
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
 import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
 import { readFileSync } from 'node:fs';
-import type { Page } from '@playwright/test';
+import type { Page, Response } from '@playwright/test';
 import { encryptSecret, generateSecret, generateTotp } from '@axiom/mfa';
 import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } from './personas';
 
@@ -125,22 +125,32 @@ export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void
 
 export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {
   await page.goto('/verify');
-
-  // `last_used_counter` replay defence is per FACTOR, so two journeys using
-  // one authenticator inside the same 30-second step have the second refused
-  // — correctly. Waiting for the next code is what a person does, and it is
-  // what keeps this helper honest instead of disabling the defence for tests.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await page.fill('#code', generateTotp(secret));
-    await page.getByRole('button', { name: /^Verify$/ }).click();
-    try {
-      await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
-      return;
-    } catch {
-      if (attempt === 1) throw new Error('Could not satisfy the login-MFA gate');
-      // Into the next TOTP step, then one more try with a genuinely new code.
-      await page.waitForTimeout(31_000);
+  // Record status only, never request bodies, codes, cookies or response payloads.
+  const statuses: string[] = [];
+  const record = (response: Response) => {
+    const path = new URL(response.url()).pathname;
+    if (path.startsWith('/api/bff/v1/mfa/challenge'))
+      statuses.push(`${path.endsWith('/verify') ? 'verify' : 'issue'}:${response.status()}`);
+  };
+  page.on('response', record);
+  try {
+    // Activation consumes the same factor counter. Wait for a genuinely new
+    // code after a refusal; never bypass the replay defence.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      statuses.push(`attempt:${attempt + 1}`);
+      await page.fill('#code', generateTotp(secret));
+      await page.getByRole('button', { name: /^Verify$/ }).click();
+      try {
+        await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
+        return;
+      } catch {
+        if (attempt === 1)
+          throw new Error(`Could not satisfy the login-MFA gate (${statuses.join(', ')})`);
+        await page.waitForTimeout(31_000);
+      }
     }
+  } finally {
+    page.off('response', record);
   }
 }
 

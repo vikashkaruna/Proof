@@ -52,18 +52,20 @@ async function readSetupKey(page: Page): Promise<string> {
  * stale by the time it is submitted — a clock race, not a defect, and waiting
  * is what a person does.
  */
-async function activateWith(page: Page, secret: string): Promise<void> {
+async function activateWith(page: Page, secret: string): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.fill('#activationCode', generateTotp(secret));
+    const activationCode = generateTotp(secret);
+    await page.fill('#activationCode', activationCode);
     await page.getByRole('button', { name: /^Activate$/ }).click();
     try {
       await expect(page.getByTestId('recovery-codes')).toBeVisible({ timeout: 15_000 });
-      return;
+      return activationCode;
     } catch {
       if (attempt === 1) throw new Error('activation was refused twice');
       await page.waitForTimeout(31_000);
     }
   }
+  throw new Error('Activation did not complete');
 }
 
 /** The recovery codes shown once, at activation. */
@@ -307,7 +309,7 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
     await page.fill('#stepUpCode', codes[2]!);
     await page.getByRole('button', { name: /^Confirm and replace$/ }).click();
     const replacement = await readSetupKey(page);
-    await activateWith(page, replacement);
+    const activationCode = await activateWith(page, replacement);
     const newCodes = await readRecoveryCodes(page);
     // Revocation occurs on activation, including the session doing recovery.
     for (const target of [page, second]) {
@@ -318,6 +320,12 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
     await page.getByRole('button', { name: /I have saved them/ }).click();
     await second.goto('/dashboard');
     await expect(second).toHaveURL(/\/verify/);
+    // Activation already spent this TOTP counter. This journey verifies
+    // renewed assurance, not replay refusal (covered separately). Wait for
+    // a fresh code without printing either code if the assertion fails.
+    await expect
+      .poll(() => generateTotp(replacement) !== activationCode, { timeout: 35_000 })
+      .toBe(true);
     await satisfyLoginMfaWithSecret(page, replacement);
     expect((await protectedApi(page)).status()).toBe(200);
     expect((await protectedApi(second)).status()).toBe(401);

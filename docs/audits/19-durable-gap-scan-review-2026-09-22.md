@@ -4,6 +4,8 @@ Acceptance correction: the first local container run used five CPU-derived brows
 
 Reviewed staging `f5a88d5` with green CI 35640285441; no newer other-model commits on fetch. This milestone closes C-W0-4 engineering, not W0 remote or Phase 1 funnel acceptance.
 
+A later full run passed preprod including restart but failed the production two-session MFA re-verification helper. Database evidence showed the first code was already consumed by activation, while the later UI retry never reached challenge issuance. Three isolated diagnostic repetitions passed, so the missing retry is not claimed as a reproduced product defect. The journey now waits explicitly for a code different from the successful activation code; dedicated replay tests remain unchanged. The helper retains status-only diagnostics, never codes or response payloads. Final full acceptance is rerun on the corrected fixture.
+
 ## Findings addressed
 
 Marketing computed reports and wrote with an admin client, falling back to process memory on persistence failure. The BFF route stored answers without the corresponding computed snapshot. Report resend bypassed ownership and sent a report selected by ID to a supplied email address. Comments claiming it used only the stored recipient did not match the code.

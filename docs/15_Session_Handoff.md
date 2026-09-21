@@ -4,6 +4,8 @@ Acceptance correction: the first local container run used five CPU-derived brows
 
 Fetch staging first. The merge containing this file is the checkpoint. Plan **Revision 30**, migration tip **0037** (38 files, 51 public tables; W2 named targets 19/40). Reviewed upstream `f5a88d5`, green CI [35640285441](https://github.com/vikashkaruna/Proof/actions/runs/35640285441); no newer other-model commits appeared. Worktree `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`. Preserve root and Claude worktrees.
 
+A later full run passed preprod including restart but failed the production two-session MFA re-verification helper. Database evidence showed the first code was already consumed by activation, while the later UI retry never reached challenge issuance. Three isolated diagnostic repetitions passed, so the missing retry is not claimed as a reproduced product defect. The journey now waits explicitly for a code different from the successful activation code; dedicated replay tests remain unchanged. The helper retains status-only diagnostics, never codes or response payloads. Final full acceptance is rerun on the corrected fixture.
+
 ## Current milestone
 
 C-W0-4: BFF owns gap-scan scoring, durable report snapshots and report mail; SSR owns validation/routing/HttpOnly cookie only. Migration 0037 stores hashes of opaque access tokens and preserves legacy-cookie ownership. Unknown/missing proof cannot read or resend a report. Fixed the prior resend IDOR. Store/rate-limit failures refuse requests; there is no process-memory fallback. Email requires explicit BFF delivery mode and key, and never reports simulated success. Optional mail failure leaves a saved report accessible.
