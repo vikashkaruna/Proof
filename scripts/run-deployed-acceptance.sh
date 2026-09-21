@@ -18,6 +18,6 @@ export PLAYWRIGHT_JSON_OUTPUT_NAME="$acceptance_dir/browser-private.json"
 # Errors and recordings can contain fixture credentials. Keep raw output local;
 # publish only the allowlisted behavioral result, never this private report.
 result=0
-pnpm --filter @axiom/e2e exec playwright test --reporter=json > "$acceptance_dir/browser-private.log" 2>&1 || result=$?
+pnpm --filter @axiom/e2e exec playwright test --reporter=./acceptance-reporter.ts,json 2> "$acceptance_dir/browser-private.log" || result=$?
 pnpm exec tsx scripts/summarize-deployed-browser.ts
 if [ "$result" -ne 0 ]; then echo 'Deployed browser acceptance failed; inspect the protected local report.' >&2; exit "$result"; fi

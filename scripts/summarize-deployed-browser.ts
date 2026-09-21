@@ -25,20 +25,19 @@ async function main() {
   }
   for (const suite of report.suites) visit(suite, []);
   assert(Object.keys(outcomes).length > 0, 'No browser journeys ran');
-  assert(
+  const passed =
     report.stats.unexpected === 0 &&
-      report.stats.flaky === 0 &&
-      report.stats.skipped === 0 &&
-      Object.values(outcomes).every(Boolean),
-    'Browser acceptance has failed, flaky or skipped journeys; inspect the protected report',
-  );
+    report.stats.flaky === 0 &&
+    report.stats.skipped === 0 &&
+    Object.values(outcomes).every(Boolean);
+
   await writeFile(
     `${dir}/browser-results.json`,
     JSON.stringify(
       {
         schemaVersion: 1,
         kind: 'deployed-browser',
-        passed: true,
+        passed,
         completedAt: new Date().toISOString(),
         deploymentId: target.deploymentId,
         environment: target.environment,
@@ -51,6 +50,10 @@ async function main() {
       2,
     ),
     { mode: 0o600 },
+  );
+  assert(
+    passed,
+    'Browser acceptance has failed, flaky or skipped journeys; inspect the protected report',
   );
   console.log(
     `${target.deploymentId}: ${Object.keys(outcomes).length} browser journeys passed; sanitized results saved.`,

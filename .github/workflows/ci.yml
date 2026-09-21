@@ -33,7 +33,7 @@ jobs:
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: ./scripts/test-deployed-http.sh --browser
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: container-http-acceptance
           path: |
@@ -140,6 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/check-tfvars-coverage.sh
+      - run: python3 scripts/check-cloudrun-auth-wiring.py
       # Every surface that runs the BFF must be able to carry BOTH halves of
       # the MFA key ring. Rotation landed with the retiring list wired into
       # the Compose files only, so Cloud Run and Helm could start the BFF with
