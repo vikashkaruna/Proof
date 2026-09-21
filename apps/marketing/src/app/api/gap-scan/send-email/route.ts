@@ -1,91 +1,44 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { getGapScanReportForTrustedDispatch } from '@/lib/gap-scan-store';
-import { sendGapScanReportEmail } from '@/lib/gap-scan-email';
-import { GapScanReportSchema } from '@axiom/types';
-
+import { cookies } from 'next/headers';
+import { GapScanEmailRequestSchema } from '@axiom/types';
+import { gapScanBackend } from '@/lib/gap-scan-backend';
 export const runtime = 'nodejs';
-
-const SendEmailRequestSchema = z.object({
-  id: z.string().uuid(),
-  email: z.string().trim().email('Please enter a valid email address'),
-  name: z.string().trim().optional(),
-  phone: z.string().trim().optional(),
-  company: z.string().trim().optional(),
-});
-
 export async function POST(request: Request) {
-  let body: unknown;
+  const parsed = GapScanEmailRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success)
+    return NextResponse.json(
+      { error: { code: 'validation_failed', message: 'Invalid request' } },
+      { status: 400 },
+    );
   try {
-    body = await request.json();
+    const access = (await cookies()).get('gap_scan_access')?.value;
+    const res = await gapScanBackend('/public/gap-scan/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(access ? { 'X-Gap-Scan-Access': access } : {}),
+      },
+      body: JSON.stringify(parsed.data),
+    });
+    const payload = await res.json();
+    return NextResponse.json(payload, {
+      status: res.status,
+      headers: {
+        'Cache-Control': 'private, no-store',
+        ...(res.headers.has('Retry-After')
+          ? { 'Retry-After': res.headers.get('Retry-After')! }
+          : {}),
+      },
+    });
   } catch {
     return NextResponse.json(
-      { error: { code: 'invalid_json', message: 'Request body must be valid JSON' } },
-      { status: 400 },
-    );
-  }
-
-  const parsed = SendEmailRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
       {
         error: {
-          code: 'validation_failed',
-          message: parsed.error.issues[0]?.message || 'Invalid email dispatch parameters',
+          code: 'service_unavailable',
+          message: 'Report service unavailable. Please try again.',
         },
       },
-      { status: 400 },
+      { status: 503 },
     );
   }
-
-  const { id, email, name, phone, company } = parsed.data;
-
-  // Trusted server-side dispatch: the report is delivered to the address on
-  // the record, not to an address the caller supplies, so the caller learns
-  // nothing about a record they do not own.
-  const scan = await getGapScanReportForTrustedDispatch(id);
-  if (!scan) {
-    return NextResponse.json(
-      { error: { code: 'not_found', message: 'Gap-scan report not found' } },
-      { status: 404 },
-    );
-  }
-
-  const reportParsed = GapScanReportSchema.safeParse(scan.report_snapshot);
-  if (!reportParsed.success) {
-    return NextResponse.json(
-      { error: { code: 'corrupt_report', message: 'Report data could not be parsed' } },
-      { status: 500 },
-    );
-  }
-
-  const report = reportParsed.data;
-
-  const result = await sendGapScanReportEmail({
-    report,
-    readinessIndex: report.readinessIndex,
-    contactName: name || scan.contact_name,
-    contactEmail: email,
-    contactPhone: phone || scan.contact_phone,
-    contactCompany: company || scan.contact_company,
-    reportId: scan.id,
-  });
-
-  if (!result.success) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'delivery_failed',
-          message: result.error || 'Failed to dispatch report email',
-        },
-      },
-      { status: 502 },
-    );
-  }
-
-  return NextResponse.json({
-    success: true,
-    simulated: result.simulated ?? false,
-    message: `Report successfully dispatched to ${email}`,
-  });
 }

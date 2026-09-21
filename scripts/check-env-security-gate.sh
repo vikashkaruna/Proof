@@ -117,6 +117,11 @@ report "No NEW service-role Supabase client in apps/web (SEC-3)" \
   "Use createSupabaseServerClient(); RLS enforces tenancy. The service-role key bypasses it." \
   "$new_service_role"
 
+marketing_admin="$(grep -rn 'createSupabaseAdmin' apps/marketing/src --include='*.ts' --include='*.tsx' 2>/dev/null | grep -vE '^[^:]+:[0-9]+: *(//|\*|/\*)' || true)"
+report "No service-role Supabase client in marketing" \
+  "Route report storage through the BFF; SSR holds no database write credentials." \
+  "$marketing_admin"
+
 # Report progress, and prompt the baseline to shrink as W1 lands.
 remaining=$(echo "$baseline_service_role" | grep -c . || true)
 fixed="$(comm -13 <(echo "$current_service_role") <(echo "$baseline_service_role"))"

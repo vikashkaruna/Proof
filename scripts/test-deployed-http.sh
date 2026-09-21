@@ -73,6 +73,18 @@ PY
       [ "$ready" = true ] || { echo "$app did not start; inspect protected logs." >&2; docker logs "$app_container" > "$state_dir/$environment-$app.private.log" 2>&1; exit 1; }
     done
     ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
+    # Real process restart, not a second read from the same in-memory cache.
+    docker restart "$container" "axiom-http-${environment}-marketing-$$" >/dev/null
+    for probe in "http://127.0.0.1:$port/health" "http://127.0.0.1:$marketing_port/api/health"; do
+      ready=false
+      for attempt in $(seq 1 60); do
+        if curl --silent --fail "$probe" >/dev/null; then ready=true; break; fi
+        sleep 1
+      done
+      [ "$ready" = true ] || { echo 'Restarted report services did not recover'; exit 1; }
+    done
+    AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts verify
   else
     ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json" api-only
   fi

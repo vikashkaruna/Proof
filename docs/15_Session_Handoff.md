@@ -1,38 +1,30 @@
 # Saved implementation session — 22 September 2026
 
-Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
+Fetch staging first. The merge containing this file is the checkpoint. Plan **Revision 30**, migration tip **0037** (38 files, 51 public tables; W2 named targets 19/40). Reviewed upstream `f5a88d5`, green CI [35640285441](https://github.com/vikashkaruna/Proof/actions/runs/35640285441); no newer other-model commits appeared. Worktree `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`. Preserve root and Claude worktrees.
 
-Fetch staging first; the merge containing this file is the checkpoint. Plan **Revision 29**, migration tip **0036** (37 files, 51 public tables). Reviewed upstream **d386fad**, green CI [35628480541](https://github.com/vikashkaruna/Proof/actions/runs/35628480541); no newer other-model work appeared. Read Docs 11, 16, [17](17_Deployed_Acceptance.md) and [review 17](audits/17-deployed-acceptance-review-2026-09-21.md).
+## Current milestone
 
-## Current milestone — recovery replacement
+C-W0-4: BFF owns gap-scan scoring, durable report snapshots and report mail; SSR owns validation/routing/HttpOnly cookie only. Migration 0037 stores hashes of opaque access tokens and preserves legacy-cookie ownership. Unknown/missing proof cannot read or resend a report. Fixed the prior resend IDOR. Store/rate-limit failures refuse requests; there is no process-memory fallback. Email requires explicit BFF delivery mode and key, and never reports simulated success. Optional mail failure leaves a saved report accessible.
 
-C-W1-4 / E.2.3 is implemented in migration 0036. Verified method is persisted on the consumed challenge; the pending factor retains its active-factor/challenge binding. Recovery activation atomically ends all existing user MFA assurance, including earlier retained attestations. Current-factor replacement preserves assurance. Unknown/stale/legacy pending authorization refuses with HTTP 409 and a restart message. The UI explains the effect before confirmation. Apply migration and deploy BFF/web together; existing active factors survive upgrade.
+323 BFF tests, 61 browser journeys, 38 migrations including legacy-report upgrade, four real-Auth API parity labels, workspace checks and 25 harness tests pass. Production-container acceptance now performs actual BFF/SSR restarts; exact committed container and CI results are saved in ignored `.axiom-runtime/session-checkpoint.json`. Inspect that checkpoint before claiming final green. See [review 19](audits/19-durable-gap-scan-review-2026-09-22.md) and Docs 11/14/16/17.
 
-312 BFF tests, full workspace tests/lint/typecheck, real Auth parity and real database tests pass. All 60 dev-server browser journeys and three negative SQL mutations pass; final container and exact merge CI are recorded in `.axiom-runtime/session-checkpoint.json`. Inspect that result before claiming green. New [review 18](audits/18-recovery-replacement-review-2026-09-22.md) supersedes the prior pending-policy statement.
+## Delivered earlier
 
-## Earlier completed work
+- W1 recovery replacement policy (0036): trusted consumed proof binds pending replacement; recovery activation atomically retires all existing account MFA assurance. Current-factor replacement preserves it. Unknown/stale/legacy authorization requires restart. Two-session browser and SQL rollback/race/mutation evidence passed. Do not ask the accepted policy again.
+- W3 inventory (0034) and reviewed onboarding (0035): staff prepare immutable proposals; a different client owner **or tenant admin** approves. Full wizard/sustenance remain open.
+- W0 deployed-target API/browser harness, scoped SSR configuration, Cloud Run Auth secret bindings, private Docker networking, exact revision checks and sanitized artifacts. Local Docker evidence is distinct from remote acceptance.
+- W2 seven connector tables (0033) are metadata foundation only, not executable grants or a working connector runtime.
 
-- Earlier W3 inventory (0034) and reviewed onboarding (0035) remain delivered. Staff prepare immutable proposals; different client owners **or tenant admins** approve. Full wizard/sustenance are still open.
-- W0 harness engineering: target-aware HTTP and browser runners; real MFA enrollment without backend keys; exact BFF/web/marketing revision preflight; private target-bound state; sanitized successful reports and comparison. Automatic CI uses two local production-container configurations; manual CI compares two isolated remote deployments.
-- Cloud Run binding fix: BFF uses managed anon/service secrets; SSR gets managed anon fields only. Terraform validate and three negative wiring mutations pass. A CI gate checks the actual env bindings.
-- Additional review fix: explicit scoped SSR configuration excludes backend secrets, while ambient frontend hints can no longer weaken backend validation. Missing Docker workspace manifests and private build-context exclusions fixed.
+## Next work in order
 
-Local validation: 59/59 browser journeys in **each** preprod/production container configuration, identical API outcomes; original 59 dev-server journeys; 309 BFF and 54 config tests; 24 harness checks; all 14 workspace test tasks; lint/typecheck/security gate. Initial Docker registry errors resolved on retry. CI then exposed Linux SSR→BFF access through a loopback-published host port; the harness now uses private Docker DNS. The latest exact-merge CI result must be read from the checkpoint. Pre-commit rehearsal is implementation evidence; exact committed merge/CI is saved in ignored `.axiom-runtime/session-checkpoint.json`. Remote deployment is not claimed.
+1. W0 C-W0-5: per-service Cloud Run identities and least-privilege secret IAM. Scoped environment injection alone does not isolate the shared runtime identity.
+2. W0 C-W0-6: move contact inquiry persistence and dispatch behind BFF; process memory and disabled-provider simulated success remain in that separate path. Add restart/ownership or staff access tests as appropriate.
+3. W0 C-W0-7: reconcile question/control semantics (q7 MFA vs SEC-002, q11 transfer-existence vs safeguards, q12 annual questionnaire vs pre-processing DPIA). Benchmark/percentile values are hardcoded heuristics; label provenance and avoid implying measured peer results. Review against the roadmap/control library before claiming score accuracy. Do not rewrite saved report snapshots.
+4. W1 invitation lifecycle/delivery; no real third-party mail during development. Remote W0/MFA acceptance still needs operator-provisioned isolated targets under Doc 17; EKS CIDR policy/manual workflow promotion remain operator tasks.
+5. W4.1 registry/contracts/lifecycle, then broker, workload identity and live grants, to support the remaining W3 wizard/graph. Serialize activation with estate/system archival. W2 execution tables follow stable W4 permission contracts; 21 named targets remain absent.
 
-## Next work, in order
+## Resume constraints
 
-**Latest accepted policy is implemented:** recovery-code replacement requires MFA again; current-factor replacement preserves assurance. Do not reopen this decision.
+Implementation, local Docker tests, documentation and staging merge pushes are authorized. No billable/irreversible cloud deployment, client-system execution or retention changes. Higher environments dynamically deploy self-hosted Supabase. Sudhaar holds no client-system credentials; ledger writes use append_ledger; execution redelivery needs fresh approval.
 
-1. W0 remote acceptance needs isolated targets provisioned by the operator, current migrations and trusted images at one exact revision. Use Doc 17, not PLAYWRIGHT_BASE_URL alone. CI manual dispatch also needs workflow promotion to the default branch. EKS CIDR policy remains an operator decision. Harness engineering no longer waits on provisioning.
-2. **New W0 follow-ups:** marketing `gap-scan-store.ts` still uses an admin client/process-memory fallback; move storage to BFF and add durable cross-process submission/report tests. Current 59 journeys do not cover that full funnel. Cloud Run uses a shared service account; per-service IAM isolation is also pending. Neither is fixed by environment-field separation alone.
-3. **W1 invitation lifecycle/delivery** remains independent engineering work; do not send real third-party mail during development. E.2.3 is delivered in 0036; invitations and remote MFA acceptance remain open.
-4. **W4.1 registry/contracts/lifecycle**, then W4.2 broker, W4.3 workload identity and W4.4 live grants. Reuse seven tables from 0033. Activation must serialize with estate/system lifecycle checks. No connector execution exists merely because metadata tables exist.
-5. Complete W3 resumable company→estate→inventory→connector/grant→readiness wizard and W3.5 live graph against enforced W4 permissions. Initial proposal review imports the retained intake as one batch; exclusions, later batches and unsent draft autosave remain pending. W2 named targets remain **19/40**, with 21 absent; execution-detail groups depend on stable W4 permissions.
-
-## Workspace and operation
-
-Worktree `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`, branch `codex/w0-w3-closure`. Preserve root and Claude worktrees. Implementation, tests, docs and staging merge pushes are authorized. No new billable/irreversible cloud deployment authorization. No client-system writes or evidence retention changes.
-
-Local Docker Supabase project `axiom-w0-parity`, API 56321, DB 56322, through 0036. Acceptance application containers are removed after each rehearsal; private fixture state remains under ignored `.axiom-runtime`. Never publish private target/persona files, raw reports or traces. `scripts/test-deployed-http.sh --browser` requires a clean committed tree. Chrome override: `AXIOM_E2E_BROWSER_CHANNEL=chrome`; CI uses Chromium.
-
-Next migration **0037 only after fresh fetch**; published migrations append-only. Higher environments dynamically deploy self-hosted Supabase. TOTP/recovery only; email OTP deferred. Fresh human approval for execution redelivery, no automatic retry. Sudhaar holds no client-system credentials. Ledger writes use append_ledger. Restore generated next-env.d.ts before commits; do not pop the superseded browser-prototype stash. Verify ancestry before diagnosing cancelled CI runs.
+Local Supabase project `axiom-w0-parity`, API 56321, DB 56322, through 0037. Private target/persona/probe files remain under ignored `.axiom-runtime`; never publish raw browser reports, traces, ownership cookies or secrets. Run `scripts/test-deployed-http.sh --browser` only from a clean committed tree. Its containers are removed after the rehearsal; the isolated database remains. Next migration **0038 after fresh fetch**, append-only. Restore generated next-env.d.ts before commits; do not pop the superseded browser-prototype stash.

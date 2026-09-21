@@ -2,12 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 29 — RECOVERY REPLACEMENT SESSION POLICY** (22 Sep 2026) · **Status:** W0/W1/W2/W3 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `d386fad`, green CI [35628480541](https://github.com/vikashkaruna/Proof/actions/runs/35628480541); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 30 — DURABLE PUBLIC GAP-SCAN BOUNDARY** (22 Sep 2026) · **Status:** W0/W1/W2/W3 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `f5a88d5`, green CI [35640285441](https://github.com/vikashkaruna/Proof/actions/runs/35640285441); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
-## Revision 29 — current implementation checkpoint
+## Revision 30 — current implementation checkpoint
+
+C-W0-4 moves public gap-scan calculation, persisted snapshots and email dispatch into the BFF. SSR validates input, forwards requests and holds only an HttpOnly ownership cookie. Database or rate-limit failure refuses the request; the process-memory fallback is removed. Migration **0037** adds a hashed opaque ownership capability, preserving legacy cookie access without rewriting report snapshots. Both report retrieval and resend require that capability. Review fixed a resend IDOR: the previous route could read any report by ID and dispatch it to a caller-selected address without ownership.
+
+Email delivery requires explicit BFF `AXIOM_REPORT_EMAIL_MODE=delivery` plus a provider key. Disabled or failed delivery never claims success, and optional email failure cannot hide a successfully saved report. Durable request/recipient budgets limit public traffic. Existing client-write denial from 0016 is retained and tested; 0037 does not represent a newly discovered direct SQL write vulnerability.
+
+Validation: 323 BFF tests, 61 browser journeys, all 38 migrations and populated legacy-report upgrade, four real-Auth API parity configurations, workspace and harness checks. The container acceptance runner now submits a report, restarts BFF and marketing, then verifies owned retrieval and foreign denial. Exact committed container/CI results are recorded in the private session checkpoint after execution. See [review 19](audits/19-durable-gap-scan-review-2026-09-22.md) and Docs 14–17. Tip **0037**, 51 public tables, W2 named targets unchanged at 19/40.
+
+**Still open:** C-W0-5 service IAM; new C-W0-6 durable contact inquiries/BFF-owned contact mail; new C-W0-7 questionnaire/control mapping and benchmark provenance. Existing scoring was relocated, not substantively validated by this storage/security milestone. W0 remote acceptance, W1 invitations, full W3 wizard/graph and W4 connector execution remain pending. No cloud resource, real email or client connector action was executed.
+
+## Revision 29 — prior implementation checkpoint
 
 C-W1-4 implements the accepted E.2.3 decision. Migration **0036** records the verified challenge method and binds each pending replacement to the active factor and consumed enrollment proof. Activation refuses missing, unknown or stale provenance with a restart message. Recovery-authorized activation atomically swaps the factor, rotates recovery codes and revokes all existing MFA attestations for that user, including assurance retained from an earlier current-factor replacement. Current-factor authorization preserves attestations. Password sessions remain signed in but MFA-protected APIs and pages require verification again.
 

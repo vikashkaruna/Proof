@@ -13,6 +13,7 @@
     "lib/*.ts",
     "seed-personas.ts",
     "verify-strict-parity.ts",
+    "verify-gap-scan-durability.ts",
     "compare-deployed-parity.ts",
     "summarize-deployed-browser.ts",
     "../tests/e2e/**/*.ts"

@@ -75,9 +75,15 @@ test('preflight refuses configured external email instead of sending test mail',
       ? Response.json({ environment: 'preprod', authMode: 'strict', revision: 'a'.repeat(40) })
       : n === 2
         ? new Response('', { status: 401 })
-        : n <= 4
-          ? Response.json({ environment: 'preprod', authMode: 'strict', revision: 'a'.repeat(40) })
-          : Response.json({ emailConfigured: true });
+        : n === 3
+          ? Response.json({ emailDeliveryEnabled: false })
+          : n <= 5
+            ? Response.json({
+                environment: 'preprod',
+                authMode: 'strict',
+                revision: 'a'.repeat(40),
+              })
+            : Response.json({ emailConfigured: true });
   });
   await assert.rejects(
     verifyAcceptanceTarget(validateAcceptanceTarget(valid())),
@@ -97,4 +103,24 @@ test('refuses broadly readable target credentials', async () => {
   } finally {
     rmSync(dir, { recursive: true });
   }
+});
+
+test('preflight refuses report delivery before creating anonymous reports', async (t) => {
+  let n = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    n++;
+    if (n === 1)
+      return Response.json({
+        environment: 'preprod',
+        authMode: 'strict',
+        revision: 'a'.repeat(40),
+      });
+    if (n === 2) return new Response('', { status: 401 });
+    return Response.json({ emailDeliveryEnabled: true });
+  });
+  await assert.rejects(
+    verifyAcceptanceTarget(validateAcceptanceTarget(valid())),
+    /disabled external email/,
+  );
+  assert.equal(n, 3);
 });

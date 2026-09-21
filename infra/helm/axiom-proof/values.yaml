@@ -103,6 +103,8 @@ marketing:
 
 # ─── BFF (Node/TypeScript) ──────────────────────────────────────────
 bff:
+  reportEmailMode: disabled
+  reportEmailSecretName: axiom-report-email
   enabled: true
   replicaCount: 2
   resources:

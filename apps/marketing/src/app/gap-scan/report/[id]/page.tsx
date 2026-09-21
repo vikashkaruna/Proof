@@ -61,8 +61,8 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
           Your DPDPA Readiness Report
         </h1>
         <p className="mt-2 text-slate-600">
-          Scored against {CONTROL_LIBRARY_COUNT} controls from {BRAND.name} Control Library v
-          {scan.library_version}.
+          Self-assessment across {report.findings.length} selected controls from the{' '}
+          {CONTROL_LIBRARY_COUNT}-control {BRAND.name} library v{scan.library_version}.
         </p>
       </div>
 
@@ -82,10 +82,10 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
       {/* Interactive Email Dispatch Card */}
       <EmailReportAction
         reportId={scan.id}
-        defaultEmail={scan.contact_email}
-        defaultName={scan.contact_name}
-        defaultPhone={scan.contact_phone}
-        defaultCompany={scan.contact_company}
+        defaultEmail={scan.contact_email ?? undefined}
+        defaultName={scan.contact_name ?? undefined}
+        defaultPhone={scan.contact_phone ?? undefined}
+        defaultCompany={scan.contact_company ?? undefined}
         hasReadinessIndex={Boolean(readinessIndex)}
       />
 

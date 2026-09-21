@@ -4,7 +4,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 29, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 30, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **37 migrations, 0000 → 0036**.
+non-zero on a failing migration. Expect **38 migrations, 0000 → 0037**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -209,16 +209,21 @@ date. I make the change and the gate re-validates.
 
 ### Additional engineering findings from Revision 28
 
-- **C-W0-4:** move the marketing gap-scan store from its legacy admin-client/process-memory fallback to BFF-owned durable storage. The current browser suite does not test full submission/retrieval persistence; add that evidence before claiming complete Phase 1 funnel acceptance.
+- **C-W0-4 delivered in Revision 30:** BFF-owned durable gap-scan snapshots, opaque hashed ownership for reads/resends, no memory fallback, explicit email delivery configuration. Migration 0037 preserves legacy cookies/snapshots. Browser and real process-restart acceptance cover persistence and foreign denial; exact committed evidence is in the session checkpoint.
 - **C-W0-5:** isolate Cloud Run service identities and secret permissions. Environment injection now separates scoped SSR keys from BFF keys, but the existing shared Cloud Run service account still needs least-privilege IAM review.
 
-The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending, and C-W0-4/5 are engineering responsibilities.
+The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending. C-W0-5 and the following findings remain engineering responsibilities:
+
+- **C-W0-6:** contact inquiries still use process memory and SSR-owned mail; disabled delivery can claim success. Move this separate workflow behind BFF and test durable persistence/accurate dispatch outcomes.
+- **C-W0-7:** reconcile q7/q11/q12 question/control scoring semantics and benchmark provenance. The current readiness benchmarks/percentiles are heuristics, not measured peer evidence. Stored historic reports remain immutable snapshots.
+
+For report rollout, apply 0037 and deploy BFF/marketing together; seed the published control library through the normal seed workflow. Keep `AXIOM_REPORT_EMAIL_MODE=disabled` during acceptance. Production mail requires an explicit BFF mode of `delivery` and its managed `RESEND_API_KEY`; marketing does not own the report mail credential. Contact mail still has a separate legacy credential path until C-W0-6. Real provider delivery was not exercised. Follow Doc 17 for the restart probe; emailed links do not carry bearer proof and work only in the owning browser. There is no cross-device recovery/share flow yet.
 
 ## How I mark W0 Closed
 
-I flip **W0 → Closed** when the additional C-W0-4/5 findings are resolved with tests and all of these hold, and not before:
+I flip **W0 → Closed** when the remaining C-W0-5/6/7 findings are resolved with tests and all of these hold, and not before:
 
-1. Your W0-5 evidence shows **36 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **38 migrations applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -236,7 +241,7 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 60 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
+**Current status: Partial.** The suite now has 61 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 

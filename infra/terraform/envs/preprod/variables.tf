@@ -200,3 +200,13 @@ variable "supabase_service_key" {
   sensitive   = true
 }
 
+
+variable "report_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF report delivery, enabled only after provider/domain verification."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.report_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}

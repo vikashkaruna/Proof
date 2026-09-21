@@ -70,7 +70,7 @@ export function createApp() {
   );
 
   // Public routes (no auth) — gap-scan, public marketing endpoints
-  app.route('/public', publicRoutes({ ledger }));
+  app.route('/public', publicRoutes());
 
   // Authenticated routes
   app.use('/v1/*', authMiddleware);

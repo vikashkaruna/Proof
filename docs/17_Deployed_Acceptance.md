@@ -5,7 +5,7 @@ This runner creates synthetic tenants, accounts, MFA factors, assessments, estat
 ## Prepare the target
 
 1. Deploy BFF, web and marketing from the same clean Git revision. Supply `--build-arg AXIOM_RELEASE_SHA=<40-character SHA>` to each Docker build. The image retains that revision; do not override it with an unrelated runtime value. The preprod image builder supplies it for clean checkouts. A dirty build has no trustworthy release identity.
-2. Use `ENVIRONMENT=preprod`, `production` or `onprem` and `AXIOM_AUTH_MODE=strict`. Apply all migrations (currently 0000–0035). Keep external marketing email delivery disabled; the contact-form journey is refused when a delivery key is configured. Ensure all endpoints are reachable from the runner.
+2. Use `ENVIRONMENT=preprod`, `production` or `onprem` and `AXIOM_AUTH_MODE=strict`. Apply all migrations (currently 0000–0037). Keep external contact email disabled and BFF `AXIOM_REPORT_EMAIL_MODE=disabled`; preflight refuses enabled report delivery or a contact delivery key. The fixture setup seeds the published control library if absent and refuses a conflicting count; it never overwrites existing control rows. Ensure all endpoints are reachable from the runner.
 3. Populate a private JSON file using [ACCEPTANCE_TARGET.example.json](ACCEPTANCE_TARGET.example.json). Obtain credentials through the environment's secret store, not chat or shell history. `anonKey` is the JWT anon key; `publishableKey` is the API gateway key (or the same anon key for legacy self-hosted deployments); `serviceKey` is the service-role JWT used only by fixture setup. The BFF's MFA encryption/signing keys are never supplied to the runner. SSR requires only the scoped public Supabase connection, not the service-role, signing or MFA encryption keys.
 4. Store the file under ignored `.axiom-runtime`, with mode `0600`. Set `topology=remote` for HTTPS deployments; loopback HTTP is permitted only with `topology=local-docker`. `syntheticFixtures=true` explicitly confirms the target's fixture purpose. Use a different `deploymentId` per deployment. Set `expectedRevision` to the deployed source SHA.
 
@@ -39,3 +39,19 @@ Automatic staging CI runs `scripts/test-deployed-http.sh --browser`: two separat
 ```
 
 Run it from a clean committed checkout; it refuses to stamp uncommitted source with a release SHA. This adds web and marketing containers on separate ports for each configuration, without backend credentials in SSR. SSR→BFF uses private Docker DNS; browser/test ports stay bound to host loopback on both Linux and Docker Desktop. It compares the API results and the complete browser journeys. Only its own application containers are removed afterward; the isolated Supabase project remains for inspection. Local Docker evidence cannot close remote W0 acceptance. No cloud resources are created by either test runner.
+
+## Durable gap-scan restart probe
+
+The local container runner automatically submits a synthetic report, restarts both BFF and marketing processes, waits for health, and checks that the owning browser capability still reads the report while anonymous retrieval and resend fail. Successful checks add three boolean outcomes to the same sanitized API result file. The private capability remains in `gap-scan-private.json` and must never be uploaded.
+
+For an isolated remote deployment, run the ordinary API/browser acceptance first, then:
+
+```bash
+export AXIOM_ACCEPTANCE_TARGET="$PWD/.axiom-runtime/preprod-target.json"
+pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
+# Operator: restart all BFF/marketing replicas without replacing the database.
+# Retain deployment restart evidence; the probe cannot prove an operator restarted them.
+pnpm exec tsx scripts/verify-gap-scan-durability.ts verify
+```
+
+Repeat for the comparison target before comparing API artifacts. The manual workflow runs API/browser checks but does not restart remote services; remote durability closure needs this separate operator evidence. The capability is bound to the target URL and source revision. No real email is sent; disabled dispatch returns unavailable, not simulated success. This checks persistence/ownership, not questionnaire scoring accuracy or contact inquiry durability.

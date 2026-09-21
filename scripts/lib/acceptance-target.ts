@@ -140,6 +140,15 @@ export async function verifyAcceptanceTarget(
     signal: AbortSignal.timeout(15_000),
   });
   requireValue(refusal.status === 401, 'Acceptance BFF did not refuse unauthenticated access');
+  const reportConfig = await fetch(`${target.bffUrl}/public/gap-scan/config`, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(15_000),
+  });
+  requireValue(reportConfig.status === 200, 'Acceptance report configuration unavailable');
+  requireValue(
+    ((await reportConfig.json()) as Record<string, unknown>).emailDeliveryEnabled === false,
+    'Acceptance report journeys require disabled external email delivery',
+  );
   if (checkMarketing) {
     for (const origin of [target.webUrl, target.marketingUrl]) {
       const response = await fetch(`${origin}/api/health`, {
