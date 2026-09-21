@@ -1,0 +1,11 @@
+# Review 13 — atomic MFA activation and recovery rotation
+
+Continued from `47685ab` after completing revocation/quarantine. The previous review correctly identified a remaining non-atomic boundary: activation swapped TOTP rows through 0030, then deleted and inserted recovery rows in independent requests. A recovery insert failure could commit the authenticator replacement and fail its recovery set.
+
+Migration 0032 wraps the original swap in `finalize_totp_enrolment`, validating ten distinct scrypt hashes and retiring/inserting the recovery set in the same transaction. No plaintext recovery value enters SQL. The old primitive loses its service-role execute grant, so applications cannot accidentally use the unsafe split path. Retired recovery rows remain for historical references. The BFF computes the whole hash set before mutation and returns `activation_failed` (503) on storage failure; invalid codes and absent pending factors remain distinct outcomes.
+
+Validation: 286 BFF tests, eight real browser enrollment/replacement/revocation/quarantine journeys, real Auth/PostgREST parity, 33 migrations and all database security/concurrency tests. A SQL trigger injects a failure at recovery insertion _after_ the nested factor swap: old factor, old recovery row and pending counter remain unchanged. Retry succeeds and cannot be replayed to rotate codes again. A populated 0031→0032 upgrade preserves the credential-row digest. User-scoped callers cannot finalize, and service_role cannot call the legacy primitive.
+
+The first milestone's staging CI found a test portability defect: `concurrent-mfa-revocation.sh` assumed `rg` existed. All migrations and SQL tests had passed before that command failed with exit 127. The assertion now uses portable `grep`; this is a harness correction, not a security relaxation. Final CI for the merge carrying both fixes is checked before reporting.
+
+Deployment order: apply 0032 and roll out the updated BFF together. An old BFF fails closed at activation after this migration; existing enrolled logins are not rewritten. E.2.3 remains a pending user decision; replacement does not newly invalidate existing attestations. Explicit revocation continues to end all MFA assurance. No cloud resources deployed or client mutations executed.

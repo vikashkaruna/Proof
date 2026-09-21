@@ -150,6 +150,35 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     return [{ activated_factor_id: factorId, retired_factor_id: retired?.['id'] ?? null }];
   });
 
+  rpcHandlers.set('finalize_totp_enrolment', (args) => {
+    const hashes = args['p_recovery_hashes'] as string[];
+    if (hashes.length !== 10 || new Set(hashes).size !== 10)
+      throw new Error('invalid recovery set');
+    const swapped = rpcHandlers.get('activate_totp_factor')!(args) as Row[];
+    if (swapped.length === 0) return [];
+    const rows = tables['user_mfa_factors'] ?? [];
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      if (
+        row['user_id'] === args['p_user_id'] &&
+        row['factor_type'] === 'recovery_code' &&
+        row['status'] !== 'revoked'
+      ) {
+        row['status'] = 'revoked';
+        row['revoked_at'] = now;
+      }
+    }
+    for (const hash of hashes)
+      rows.push({
+        id: randomUUID(),
+        user_id: args['p_user_id'],
+        factor_type: 'recovery_code',
+        status: 'active',
+        code_hash: hash,
+      });
+    return swapped;
+  });
+
   rpcHandlers.set('revoke_totp_factor', (args) => {
     const rows = tables['user_mfa_factors'] ?? [];
     if (

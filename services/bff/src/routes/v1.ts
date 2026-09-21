@@ -248,6 +248,18 @@ export function v1Routes(deps: Deps) {
         result: 'failure',
         detail: { purpose: 'enrolment', reason: result.reason, detail: result.detail },
       });
+      if (result.reason === 'activation_failed') {
+        return c.json(
+          {
+            error: {
+              code: 'activation_failed',
+              message:
+                'Enrolment could not be saved. Your existing authenticator and recovery codes have not changed. Please try again.',
+            },
+          },
+          503,
+        );
+      }
       if (result.reason === 'secret_unreadable') {
         return c.json(
           {
