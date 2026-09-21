@@ -1,6 +1,6 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11 Revision 14](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md) first. The most recent reviews are [audit 06](audits/06-resumed-implementation-review-2026-09-20.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md).
+> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent reviews are [audit 06](audits/06-resumed-implementation-review-2026-09-20.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
@@ -10,7 +10,7 @@ W1 has substantial committed implementation but is **not complete**. Resolve the
 
 ## Read first
 
-1. [Doc 11, Revision 9](11_Phase0-5_Gap_Closure_Plan.md): the plan, corrections and sequence **as they stood on 20 September**. Revision 14 is current; read it instead.
+1. [Doc 11, Revision 9](11_Phase0-5_Gap_Closure_Plan.md): the plan, corrections and sequence **as they stood on 20 September**. That document's newest revision section is current; read it instead.
 2. [Independent review](audits/04-roadmap-review-2026-09-20.md): R-01–R-11, file evidence and actual test results.
 3. [Roadmap traceability](13_Roadmap_Traceability.md): every phase module and BR/FR/NFR owner.
 4. Docs [02](02_Phase_Wise_Implementation_Plan.md), [03](03_BRD_PRD.md), [04](04_Solution_Architecture.md): requirements, phase gates and architecture.

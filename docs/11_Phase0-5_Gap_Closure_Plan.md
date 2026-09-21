@@ -2,11 +2,72 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 18 — THE ROTATION REACHES A DEPLOYED BFF** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `495f548`, including the browser approval journey and the single-use challenge fix.
+**Document:** 11 · **Revision 19 — THE INFRASTRUCTURE NOBODY HAD EVER LOADED** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `d5de231`, including the deployed MFA rotation path.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 18 — current implementation checkpoint
+## Revision 19 — current implementation checkpoint
+
+No migration. Not a workstream item — a gate that was missing, and what turned up once it existed.
+
+**A comment that invalidated six lines it never touched.** `terraform fmt` had
+never been run by anything, and four files had drifted. Three are ordinary. The
+fourth was not written wrong by anyone: fmt aligns *contiguous* runs of
+assignments, and a comment ends the run. Revision 17's change to preprod's
+`supabase_preprod_url` added a two-line comment directly above it, splitting the
+`locals` block into two alignment groups. The six keys above had been padded to
+that key's 20-character width — correct while they shared its group, stale the
+instant they did not. The edit that invalidated them is three lines away and
+modifies none of them.
+
+**prod had never been initialised.** `fmt` only parses; it never resolves a
+module or a reference, so it cannot see a module block whose arguments the
+pinned version rejects. `terraform validate` can, and against `envs/prod` it
+found a configuration that could not load at all: three variables declared twice
+(bare in `main.tf`, documented in `variables.tf`), then seven arguments spelled
+for module majors the configuration does not pin, then a `helm_release` using
+the provider v3 `set` attribute under a `~> 2.11` pin, then a lifecycle rule
+with neither `filter` nor `prefix`.
+
+The obvious reading — an abandoned module upgrade — is wrong, and the
+distinction matters for how it was fixed. The same `module "eks"` block mixes
+v21 spellings (`name`, `kubernetes_version`, `endpoint_*`) with v20 ones
+(`cluster_encryption_config`, `enable_irsa`). No single version has ever
+accepted that combination. It was assembled from whichever version's
+documentation was open at the time, and because nothing ever ran `init`, nothing
+ever said so.
+
+**Pins kept, names changed.** Moving eks to v21 or helm to v3 would change what
+gets provisioned; renaming changes only which name expresses a setting already
+written. So `~> 20.0` and `~> 5.5` both stand and nine things were corrected
+against them.
+
+**The gate discovers environments rather than naming them.** `for env in
+infra/terraform/envs/*/` — the failure that produced prod was an environment
+nobody checked, and a hand-written list of two reproduces it the moment a third
+appears. `-backend=false` is deliberate: prod's `main.tf` carries a live
+`backend "s3"` block, and a configuration gate must not reach for state.
+
+| Workstream | Delivered since Revision 18 | Remaining acceptance |
+| --- | --- | --- |
+| W0.1 | `terraform fmt -check -recursive` and `terraform validate` across every environment in the W0.1 job, on a pinned Terraform; four files reformatted; `envs/prod` made loadable for the first time | The gate has not yet run on GitHub Actions; prod is loadable, not reviewed as correct |
+
+**What this does not do.** Nothing was applied and no cloud resource was
+created — `init -backend=false` and `validate` only. `validate` proves a
+configuration resolves, never that it describes infrastructure anyone wants, and
+prod has not been reviewed on that second question. One item is carried forward
+unchanged and is a **decision, not an oversight**:
+`cluster_endpoint_public_access_cidrs` still carries `["0.0.0.0/0"]`, exactly as
+the v21-named argument did, with its "restrict via WAF / OIDC in production"
+comment still standing and still unactioned. What changed is that this exposure
+is now reachable rather than blocked behind a configuration that could not load.
+The gate is error-level: `validate` exits 0 on warnings, so the lifecycle
+`filter {}` is defensive rather than enforced. Migration allocation is unchanged
+at **0028**.
+
+---
+
+## Revision 18 — prior implementation checkpoint
 
 No migration. The last piece of W1 that was not deployment acceptance.
 
