@@ -1,4 +1,11 @@
-import path from 'node:path';
+import {
+  acceptanceTarget,
+  personaStatePath,
+  webOrigin,
+  repoRoot,
+  assertPersonaTarget,
+} from './target';
+import type { PersonaState } from './personas';
 import { readFileSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 import { HARNESS_MFA_KEY } from './personas';
@@ -21,12 +28,9 @@ import { HARNESS_MFA_KEY } from './personas';
  * against `AXIOM_AUTH_MODE=strict`.
  */
 
-const repoRoot = path.resolve(__dirname, '..', '..');
-const PERSONA_STATE = path.join(repoRoot, '.axiom-runtime/personas/state.json');
-
-function personaState(): { supabaseUrl: string; anonKey: string; serviceKey: string } | null {
+function personaState(): PersonaState | null {
   try {
-    return JSON.parse(readFileSync(PERSONA_STATE, 'utf8'));
+    return JSON.parse(readFileSync(personaStatePath, 'utf8'));
   } catch {
     // Reported by the global setup with an actionable message rather than a
     // stack trace from the config loader.
@@ -35,6 +39,7 @@ function personaState(): { supabaseUrl: string; anonKey: string; serviceKey: str
 }
 
 const state = personaState();
+if (state) assertPersonaTarget(state);
 
 const BFF_PORT = '4000';
 
@@ -46,11 +51,6 @@ const commonEnv = {
   AXIOM_AUTH_MODE: 'strict',
   SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
   SUPABASE_ANON_KEY: state?.anonKey ?? '',
-  // The seed wrote every TOTP secret under this key. The BFF has to hold the
-  // same one or a step-up fails as `secret_unreadable` — which is exactly the
-  // distinct 503 the key ring introduced, and would be a confusing way to
-  // discover a harness misconfiguration.
-  AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
 };
 
 const webEnv = {
@@ -65,6 +65,11 @@ const webEnv = {
 
 const bffEnv = {
   ...commonEnv,
+  // The seed wrote every TOTP secret under this key. The BFF has to hold the
+  // same one or a step-up fails as `secret_unreadable` — which is exactly the
+  // distinct 503 the key ring introduced, and would be a confusing way to
+  // discover a harness misconfiguration.
+  AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
   NODE_ENV: 'development',
   BFF_PORT,
@@ -94,15 +99,15 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     channel: process.env.AXIOM_E2E_BROWSER_CHANNEL === 'chrome' ? 'chrome' : undefined,
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3001',
+    baseURL: webOrigin,
     // No storageState: each journey establishes its own session by signing in,
     // which is the thing being tested.
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: acceptanceTarget ? 'off' : 'on-first-retry',
+    screenshot: acceptanceTarget ? 'off' : 'only-on-failure',
+    video: acceptanceTarget ? 'off' : 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: process.env.PLAYWRIGHT_BASE_URL
+  webServer: acceptanceTarget
     ? undefined
     : [
         {

@@ -54,7 +54,15 @@ export function createApp() {
   const realtime = startRealtimeChannel({ ledger, killSwitch });
 
   // Health endpoints (no auth)
-  app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  app.get('/health', (c) =>
+    c.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      environment: env.ENVIRONMENT ?? 'local',
+      authMode: env.AXIOM_AUTH_MODE,
+      revision: env.AXIOM_RELEASE_SHA ?? null,
+    }),
+  );
   // `isActive` reads shared state, so this must await it — it previously
   // serialised a pending Promise as `{}`.
   app.get('/ready', async (c) =>

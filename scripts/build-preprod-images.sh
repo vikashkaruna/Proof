@@ -103,6 +103,9 @@ for entry in "${SERVICES[@]}"; do
   fi
 
   BUILD_ARGS=()
+  if [[ "$SVC_NAME" =~ ^(bff|web|marketing)$ ]] && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
+    BUILD_ARGS+=(--build-arg "AXIOM_RELEASE_SHA=$(git rev-parse HEAD)")
+  fi
   if [ "$SVC_NAME" = "marketing" ] || [ "$SVC_NAME" = "web" ]; then
     local_proj_num="${GCP_PROJECT_NUMBER:-}"
     if [ -z "$local_proj_num" ] && command -v gcloud >/dev/null 2>&1; then

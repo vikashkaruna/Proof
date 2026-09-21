@@ -16,7 +16,7 @@
 import { test, expect } from '@playwright/test';
 import { selectTenant, signIn, state } from '../fixtures';
 
-const marketingUrl = 'http://localhost:3000';
+import { marketingUrl } from '../target';
 
 test.describe('Approval Console — the trust surface', () => {
   test('a plan lists its remediation actions for a signed-in member', async ({ page }) => {

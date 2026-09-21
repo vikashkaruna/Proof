@@ -1,41 +1,58 @@
+import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-target.js';
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
 
 async function main() {
-  const environment = process.argv[2];
+  const target = loadAcceptanceTarget();
+  const environment = process.argv[2] ?? target?.environment;
+  if (target) {
+    assert.equal(environment, target.environment, 'Target environment mismatch');
+    await rm(resolve('.axiom-runtime/acceptance', target.deploymentId, 'api-results.json'), {
+      force: true,
+    });
+    await verifyAcceptanceTarget(target, false);
+  }
   assert(environment && ['staging', 'preprod', 'production', 'onprem'].includes(environment));
   const stateDir = process.env.AXIOM_PARITY_STATE_DIR ?? resolve('.axiom-runtime/parity');
-  const status = JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8')) as Record<
-    string,
-    string
-  >;
+  const status = (
+    target
+      ? {
+          API_URL: target.supabaseUrl,
+          ANON_KEY: target.anonKey,
+          PUBLISHABLE_KEY: target.publishableKey,
+          SERVICE_ROLE_KEY: target.serviceKey,
+          SECRET_KEY: target.serviceKey,
+        }
+      : JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8'))
+  ) as Record<string, string>;
   // Run the hardened configuration against Docker's published interface. All
   // topology variants use this same real stack; no credential rules are relaxed.
   const address = Object.values(networkInterfaces())
     .flat()
     .find((n) => n?.family === 'IPv4' && !n.internal)?.address;
-  assert(address, 'A Docker-reachable network interface is required');
+  if (!target) assert(address, 'A Docker-reachable network interface is required');
   const api = new URL(status.API_URL!);
-  api.hostname = address;
-  Object.assign(process.env, {
-    NODE_ENV: 'production',
-    ENVIRONMENT: environment,
-    AXIOM_AUTH_MODE: 'strict',
-    SUPABASE_URL: api.origin,
-    SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY,
-    SUPABASE_SERVICE_KEY: status.SECRET_KEY,
-    APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
-    AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
-    AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
-    AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
-    MODEL_GATEWAY_API_KEY: randomBytes(32).toString('hex'),
-    AXIOM_REGION: 'ap-south-1',
-    LOG_LEVEL: 'error',
-  });
+  if (!target) api.hostname = address!;
+  if (!target)
+    Object.assign(process.env, {
+      NODE_ENV: 'production',
+      ENVIRONMENT: environment,
+      AXIOM_AUTH_MODE: 'strict',
+      SUPABASE_URL: api.origin,
+      SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY,
+      SUPABASE_SERVICE_KEY: status.SECRET_KEY,
+      APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
+      AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+      AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
+      AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
+      MODEL_GATEWAY_API_KEY: randomBytes(32).toString('hex'),
+      AXIOM_REGION: 'ap-south-1',
+      LOG_LEVEL: 'error',
+    });
 
   async function apiRequest(
     path: string,
@@ -45,6 +62,8 @@ async function main() {
   ) {
     return fetch(`${api.origin}${path}`, {
       method,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: status.PUBLISHABLE_KEY!,
         Authorization: `Bearer ${token}`,
@@ -293,11 +312,21 @@ async function main() {
     201,
   );
 
-  const { createApp } = await import('../services/bff/src/app.js');
-  const app = createApp();
+  let request: (path: string, options?: RequestInit) => Promise<Response>;
+  if (target)
+    request = (path, options = {}) =>
+      fetch(`${target.bffUrl}${path}`, {
+        ...options,
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+      });
+  else {
+    const app = (await import('../services/bff/src/app.js')).createApp();
+    request = (path, options) => Promise.resolve(app.request(path, options));
+  }
   const outcomes: Record<string, number | boolean> = {};
   async function check(name: string, path: string, expected: number, options: RequestInit = {}) {
-    const response = await app.request(path, options);
+    const response = await request(path, options);
     outcomes[name] = response.status;
     assert.equal(response.status, expected, name);
     return response;
@@ -889,7 +918,7 @@ async function main() {
   for (const operation of ['issue', 'verify'] as const) {
     let limited = false;
     for (let attempt = 0; attempt < 21; attempt++) {
-      const response = await app.request(
+      const response = await request(
         operation === 'issue' ? '/v1/mfa/challenge' : `/v1/mfa/challenge/${randomUUID()}/verify`,
         ownerPost(operation === 'issue' ? { purpose: 'login' } : { code: '000000' }),
       );
@@ -911,9 +940,32 @@ async function main() {
     assert(limited, `MFA ${operation} must be bounded across fresh challenges`);
     outcomes[`mfa_${operation}_budget`] = true;
   }
-  await writeFile(`${stateDir}/${environment}.json`, JSON.stringify(outcomes, null, 2), {
-    mode: 0o600,
-  });
+  const outputDirectory = target
+    ? resolve('.axiom-runtime/acceptance', target.deploymentId)
+    : stateDir;
+  await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(
+    `${outputDirectory}/${target ? 'api-results' : environment}.json`,
+    JSON.stringify(
+      target
+        ? {
+            schemaVersion: 1,
+            kind: 'deployed-http',
+            passed: true,
+            completedAt: new Date().toISOString(),
+            deploymentId: target.deploymentId,
+            environment,
+            topology: target.topology,
+            revision: target.expectedRevision,
+            bffUrl: target.bffUrl,
+            outcomes,
+          }
+        : outcomes,
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
   console.log(
     `${environment}: real Auth, tenant RLS, RBAC, MFA enrolment/login/bound approval and durable idempotency passed.`,
   );

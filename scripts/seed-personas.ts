@@ -1,3 +1,9 @@
+import {
+  loadAcceptanceTarget,
+  acceptanceStatePath,
+  verifyAcceptanceTarget,
+} from './lib/acceptance-target.js';
+import { enrolTestMfa } from './lib/enrol-test-mfa.js';
 /**
  * Seed the browser persona journeys against the real parity stack.
  *
@@ -19,17 +25,24 @@ import { encryptSecret, generateSecret } from '@axiom/mfa';
 import {
   HARNESS_MFA_KEY,
   PERSONAS,
-  PERSONA_STATE_PATH,
   type PersonaKey,
   type PersonaState,
 } from '../tests/e2e/personas.js';
 
 async function main() {
+  const target = loadAcceptanceTarget();
+  if (target) await verifyAcceptanceTarget(target);
   const stateDir = process.env.AXIOM_PARITY_STATE_DIR ?? resolve('.axiom-runtime/parity');
-  const status = JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8')) as Record<
-    string,
-    string
-  >;
+  const status = (
+    target
+      ? {
+          API_URL: target.supabaseUrl,
+          ANON_KEY: target.anonKey,
+          PUBLISHABLE_KEY: target.publishableKey,
+          SERVICE_ROLE_KEY: target.serviceKey,
+        }
+      : JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8'))
+  ) as Record<string, string>;
   const origin = new URL(status.API_URL!).origin;
   const run = randomUUID().slice(0, 8);
 
@@ -41,6 +54,8 @@ async function main() {
   ) {
     return fetch(`${origin}${path}`, {
       method,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: status.PUBLISHABLE_KEY!,
         Authorization: `Bearer ${token}`,
@@ -58,7 +73,7 @@ async function main() {
    */
   async function expectStatus(res: Response, status: number, label: string) {
     if (res.status === status) return res;
-    const body = await res.text();
+    const body = target ? 'Server details suppressed for deployed credentials.' : await res.text();
     throw new Error(`${label}: expected ${status}, got ${res.status} — ${body.slice(0, 400)}`);
   }
 
@@ -129,7 +144,7 @@ async function main() {
     // key the harness starts the BFF with, so the two agree by construction
     // rather than by both happening to read the same env var correctly.
     let totpSecret: string | undefined;
-    if (persona.totpEnrolled) {
+    if (persona.totpEnrolled && !target) {
       totpSecret = generateSecret(20);
       factors.push({
         user_id: account.id,
@@ -168,6 +183,20 @@ async function main() {
     );
   }
 
+  if (target)
+    for (const persona of PERSONAS.filter((p) => p.totpEnrolled)) {
+      const account = accounts[persona.key];
+      account.totpSecret = await enrolTestMfa({
+        bffUrl: target.bffUrl,
+        supabaseUrl: origin,
+        anonKey: status.ANON_KEY!,
+        email: account.email,
+        password: account.password,
+        tenantId: persona.membership === 'b' ? tenantB.id : tenantA.id,
+        waitForNextCode: false,
+      });
+    }
+  if (target) await new Promise((resolve) => setTimeout(resolve, 30_500 - (Date.now() % 30_000)));
   const library = `persona-${run}`;
   await expectStatus(
     await api('/rest/v1/control_libraries', 'POST', {
@@ -244,6 +273,16 @@ async function main() {
   );
 
   const state: PersonaState = {
+    deployment: target
+      ? {
+          id: target.deploymentId,
+          environment: target.environment,
+          revision: target.expectedRevision,
+          webUrl: target.webUrl,
+          bffUrl: target.bffUrl,
+          marketingUrl: target.marketingUrl,
+        }
+      : null,
     supabaseUrl: origin,
     anonKey: status.ANON_KEY!,
     publishableKey: status.PUBLISHABLE_KEY!,
@@ -256,12 +295,12 @@ async function main() {
     planB,
     accounts,
   };
-  const path = resolve(PERSONA_STATE_PATH);
+  const path = acceptanceStatePath(target);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify(state, null, 2), { mode: 0o600 });
   // Outcome only. These are real credentials for a real running stack.
   console.log(
-    `Seeded ${PERSONAS.length} personas across 2 tenants, ${factors.length} with a TOTP factor. ` +
+    `Seeded ${PERSONAS.length} personas across 2 tenants, ${PERSONAS.filter((p) => p.totpEnrolled).length} with a TOTP factor. ` +
       'State written (not printed).',
   );
 }

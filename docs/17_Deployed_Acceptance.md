@@ -1,0 +1,41 @@
+# Deployed acceptance: API and browser parity
+
+This runner creates synthetic tenants, accounts, MFA factors, assessments, estate inventory, proposals and approval fixtures. Use an **isolated acceptance deployment**, never a client production database. A production-configured acceptance stack uses production security rules with synthetic data. It does not execute connector actions. Fixture rows and append-only ledger events remain after the run; reset/dispose of the isolated database through its normal operator lifecycle. Do not delete audit history to clean up a shared deployment.
+
+## Prepare the target
+
+1. Deploy BFF, web and marketing from the same clean Git revision. Supply `--build-arg AXIOM_RELEASE_SHA=<40-character SHA>` to each Docker build. The image retains that revision; do not override it with an unrelated runtime value. The preprod image builder supplies it for clean checkouts. A dirty build has no trustworthy release identity.
+2. Use `ENVIRONMENT=preprod`, `production` or `onprem` and `AXIOM_AUTH_MODE=strict`. Apply all migrations (currently 0000–0035). Keep external marketing email delivery disabled; the contact-form journey is refused when a delivery key is configured. Ensure all endpoints are reachable from the runner.
+3. Populate a private JSON file using [ACCEPTANCE_TARGET.example.json](ACCEPTANCE_TARGET.example.json). Obtain credentials through the environment's secret store, not chat or shell history. `anonKey` is the JWT anon key; `publishableKey` is the API gateway key (or the same anon key for legacy self-hosted deployments); `serviceKey` is the service-role JWT used only by fixture setup. The BFF's MFA encryption/signing keys are never supplied to the runner. SSR requires only the scoped public Supabase connection, not the service-role, signing or MFA encryption keys.
+4. Store the file under ignored `.axiom-runtime`, with mode `0600`. Set `topology=remote` for HTTPS deployments; loopback HTTP is permitted only with `topology=local-docker`. `syntheticFixtures=true` explicitly confirms the target's fixture purpose. Use a different `deploymentId` per deployment. Set `expectedRevision` to the deployed source SHA.
+
+## Run and compare
+
+```bash
+chmod 600 .axiom-runtime/preprod-target.json
+./scripts/run-deployed-acceptance.sh .axiom-runtime/preprod-target.json
+./scripts/run-deployed-acceptance.sh .axiom-runtime/production-target.json
+pnpm exec tsx scripts/compare-deployed-parity.ts \
+  .axiom-runtime/acceptance/<preprod-id>/api-results.json \
+  .axiom-runtime/acceptance/<production-id>/api-results.json
+pnpm exec tsx scripts/compare-deployed-parity.ts \
+  .axiom-runtime/acceptance/<preprod-id>/browser-results.json \
+  .axiom-runtime/acceptance/<production-id>/browser-results.json
+```
+
+The runner verifies strict BFF identity and unauthenticated refusal before seeding. Browser setup also checks web/marketing revision and security configuration. It enrols fixture MFA through the actual BFF, then drives the same Playwright journeys as local CI. Target-bound persona state prevents accidentally mixing local credentials and deployed URLs. `PLAYWRIGHT_BASE_URL` alone is refused.
+
+Only `api-results.json` and `browser-results.json` are suitable for CI artifacts. They contain allowlisted scenario names/outcomes and deployment metadata, no credentials or response bodies. Raw browser JSON/logs and persona state are private; deployed traces, screenshots and video are disabled. Failed/flaky/skipped browser runs cannot produce successful comparison evidence. Compare artifacts from the same CI run and revision; timestamps are recorded for traceability, not an assertion of indefinite validity.
+
+## CI and Docker rehearsal
+
+`.github/workflows/deployed-acceptance.yml` manually runs preprod against either production-configured or on-prem acceptance. Configure GitHub environments `preprod-acceptance` and the selected comparison environment, each with the secret `AXIOM_ACCEPTANCE_TARGET_JSON`. Both deployments must run the requested revision. The final job compares both successful API and browser suites and refuses divergence, repeated endpoints, mismatched revisions or local/remote substitution. Use trusted reviewed revisions only: the workflow receives fixture-administration credentials. GitHub manual dispatch requires this workflow to be present on the default branch; pushing it to staging alone does not run or provision it.
+
+Automatic staging CI runs `scripts/test-deployed-http.sh --browser`: two separate sets of production-mode BFF/web/marketing containers, configured preprod/production, sharing the isolated local Docker Auth/Postgres stack. It verifies the HTTP runner without claiming cloud deployment. For the full local production-container rehearsal:
+
+```bash
+# Install Playwright Chromium first, or use AXIOM_E2E_BROWSER_CHANNEL=chrome locally.
+./scripts/test-deployed-http.sh --browser
+```
+
+Run it from a clean committed checkout; it refuses to stamp uncommitted source with a release SHA. This adds web and marketing containers on separate ports for each configuration, without backend credentials in SSR. It compares the API results and the complete browser journeys. Only its own application containers are removed afterward; the isolated Supabase project remains for inspection. Local Docker evidence cannot close remote W0 acceptance. No cloud resources are created by either test runner.

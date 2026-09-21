@@ -11,7 +11,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const marketingUrl = 'http://localhost:3000';
+import { marketingUrl } from '../target';
 
 test.describe('Security headers', () => {
   test('the app applies the security headers', async ({ request }) => {

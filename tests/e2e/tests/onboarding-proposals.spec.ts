@@ -1,3 +1,4 @@
+import { tenantCookie } from '../target';
 import { test, expect } from '@playwright/test';
 import { generateTotp } from '@axiom/mfa';
 import { createMfaAccount, signInAs, state } from '../fixtures';
@@ -50,9 +51,7 @@ test('staff proposal requires client admin review before systems enter the estat
   const client = await clientContext.newPage();
   try {
     await signInAs(staff, analyst.email, analyst.password);
-    await staffContext.addCookies([
-      { name: 'axiom_active_tenant', value: slug, domain: 'localhost', path: '/' },
-    ]);
+    await staffContext.addCookies([tenantCookie(slug)]);
     await staff.goto('/verify');
     await staff.fill('#code', generateTotp(analyst.totpSecret!));
     await staff.getByRole('button', { name: 'Verify', exact: true }).click();
@@ -69,9 +68,7 @@ test('staff proposal requires client admin review before systems enter the estat
     await staff.goto('/estate');
     await expect(staff.getByText('Reviewed CRM', { exact: true })).toHaveCount(0);
     await signInAs(client, admin.email, admin.password);
-    await clientContext.addCookies([
-      { name: 'axiom_active_tenant', value: slug, domain: 'localhost', path: '/' },
-    ]);
+    await clientContext.addCookies([tenantCookie(slug)]);
     await client.goto('/estate/onboarding');
     await expect(client.getByText('Original CRM', { exact: false })).toBeVisible();
     await client.getByLabel('Review decision').selectOption('approved');

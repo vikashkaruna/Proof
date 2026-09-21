@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { loadEnv, resetEnvCache, resolveAuthMode, isAuthBypassEnabled, BRAND } from './index';
+import {
+  loadWebEnv,
+  isWebAuthBypassEnabled,
+  loadEnv,
+  resetEnvCache,
+  resolveAuthMode,
+  isAuthBypassEnabled,
+  BRAND,
+} from './index';
 
 describe('loadEnv', () => {
   it('loads valid env', () => {
@@ -323,5 +331,63 @@ describe('BRAND', () => {
     expect(BRAND.primaryDomain).toBe('axiomproof.ai');
     expect(BRAND.productDomain).toBe('app.axiomproof.ai');
     expect(BRAND.companyDomain).toBe('axiomminds.ai');
+  });
+});
+
+describe('explicit SSR configuration boundary', () => {
+  it.each(['staging', 'preprod', 'production', 'onprem'] as const)(
+    'serves %s with only user-scoped credentials',
+    (ENVIRONMENT) => {
+      resetEnvCache();
+      const source = {
+        NODE_ENV: 'production',
+        ENVIRONMENT,
+        SUPABASE_URL: 'https://auth.example.invalid',
+        SUPABASE_ANON_KEY: 'a'.repeat(40),
+        SUPABASE_SERVICE_KEY: 'must-not-reach-SSR',
+        APPROVAL_SIGNING_KEY: 'must-not-reach-SSR',
+      };
+      expect(loadWebEnv(source)).not.toHaveProperty('SUPABASE_SERVICE_KEY');
+      expect(loadWebEnv(source)).not.toHaveProperty('APPROVAL_SIGNING_KEY');
+      expect(isWebAuthBypassEnabled(source)).toBe(false);
+      expect(() => loadEnv(source)).toThrow(/SUPABASE_SERVICE_KEY|AGENT_RUNTIME_INTERNAL_TOKEN/);
+    },
+  );
+  it('refuses deployed bypass and placeholder public credentials', () => {
+    resetEnvCache();
+    expect(() => loadWebEnv({ ENVIRONMENT: 'preprod', AXIOM_AUTH_MODE: 'e2e-bypass' })).toThrow(
+      /AXIOM_AUTH_MODE/,
+    );
+    expect(() => loadWebEnv({ ENVIRONMENT: 'preprod' })).toThrow(/SUPABASE_ANON_KEY/);
+  });
+  it.each(['APP_NAME', 'NEXT_RUNTIME', 'NEXT_PHASE', 'npm_package_name'])(
+    'cannot waive backend credential checks via ambient %s',
+    (hint) => {
+      const previous = process.env[hint];
+      process.env[hint] = hint === 'APP_NAME' ? 'web' : '@axiom/web';
+      try {
+        resetEnvCache();
+        expect(() =>
+          loadEnv({
+            ENVIRONMENT: 'preprod',
+            SUPABASE_URL: 'https://auth.example.invalid',
+            SUPABASE_ANON_KEY: 'a'.repeat(40),
+            SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+          }),
+        ).toThrow(/APPROVAL_SIGNING_KEY/);
+      } finally {
+        if (previous === undefined) delete process.env[hint];
+        else process.env[hint] = previous;
+        resetEnvCache();
+      }
+    },
+  );
+  it('resets the independent SSR cache', () => {
+    resetEnvCache();
+    expect(isWebAuthBypassEnabled({ ENVIRONMENT: 'test', AXIOM_AUTH_MODE: 'e2e-bypass' })).toBe(
+      true,
+    );
+    resetEnvCache();
+    expect(isWebAuthBypassEnabled({ ENVIRONMENT: 'local' })).toBe(false);
   });
 });

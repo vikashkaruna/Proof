@@ -11,6 +11,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  deployed-http-acceptance:
+    name: Container API/browser acceptance (W0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx --test scripts/lib/*.test.ts
+      - run: pnpm exec tsc -p scripts/tsconfig.acceptance.json
+      - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - run: ./scripts/test-deployed-http.sh --browser
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: container-http-acceptance
+          path: |
+            .axiom-runtime/acceptance/http-*/api-results.json
+            .axiom-runtime/acceptance/http-*/browser-results.json
+          retention-days: 14
+      - name: Stop isolated Auth stack
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
   database-security:
     name: Fresh migrations and direct-client RLS
     runs-on: ubuntu-latest
@@ -295,6 +328,7 @@ jobs:
         control-library-drift-gate,
         database-security,
         strict-auth-parity,
+        deployed-http-acceptance,
       ]
     name: Lint + typecheck
     runs-on: ubuntu-latest

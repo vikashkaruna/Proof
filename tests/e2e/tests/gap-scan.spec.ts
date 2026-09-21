@@ -11,7 +11,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const marketingUrl = 'http://localhost:3000';
+import { marketingUrl } from '../target';
 
 test.describe('Public gap-scan funnel', () => {
   test('the marketing site loads with the gap-scan CTA', async ({ page }) => {
