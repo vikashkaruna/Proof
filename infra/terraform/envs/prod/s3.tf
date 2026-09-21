@@ -5,7 +5,7 @@
 # period expires.
 
 resource "aws_s3_bucket" "evidence" {
-  bucket = "axiom-proof-evidence-ap-south-1"
+  bucket              = "axiom-proof-evidence-ap-south-1"
   object_lock_enabled = true
   # Force destroy is FALSE — we cannot delete a bucket with
   # Object Lock Compliance mode retention unexpired.

@@ -13,7 +13,7 @@ module "eks" {
   # API endpoint access
   endpoint_public_access  = true
   endpoint_private_access = true
-  public_access_cidrs     = ["0.0.0.0/0"]  # restrict via WAF / OIDC in production
+  public_access_cidrs     = ["0.0.0.0/0"] # restrict via WAF / OIDC in production
 
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets
@@ -42,7 +42,7 @@ module "eks" {
     # L4-class GPUs are confirmed available in ap-south-1.
     gpu = {
       name           = "gpu"
-      instance_types = ["g6f.xlarge"]  # L4 GPU
+      instance_types = ["g6f.xlarge"] # L4 GPU
       min_size       = 0
       max_size       = 4
       desired_size   = 1
@@ -73,7 +73,7 @@ module "eks" {
   }
 
   # AWS auth
-  enable_irsa = true  # IAM Roles for Service Accounts
+  enable_irsa = true # IAM Roles for Service Accounts
 
   tags = {
     "k8s.io/cluster-autoscaler/enabled"             = "true"

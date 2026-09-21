@@ -3,12 +3,12 @@
 # ==============================================================================
 
 locals {
-  image_prefix         = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.name}"
-  bff_service_url      = "https://axiom-bff-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  web_service_url      = "https://axiom-web-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  agent_runtime_url    = "https://axiom-agent-runtime-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  model_gateway_url    = "https://axiom-model-gateway-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  marketing_url        = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  image_prefix      = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.name}"
+  bff_service_url   = "https://axiom-bff-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  web_service_url   = "https://axiom-web-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  agent_runtime_url = "https://axiom-agent-runtime-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  model_gateway_url = "https://axiom-model-gateway-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  marketing_url     = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
   # Was a hard-coded hostname that nothing in this Terraform provisioned. It
   # now points at the gateway in supabase.tf, which is a resource that exists.
   supabase_preprod_url = local.supabase_gateway_url
