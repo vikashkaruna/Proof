@@ -169,7 +169,7 @@ export const planUrl = (id: string) => `/plans/${id}`;
  */
 export async function createMfaAccount(
   label: string,
-  opts: { withFactor?: boolean; role?: 'approver' | 'founder' } = {},
+  opts: { withFactor?: boolean; role?: 'approver' | 'founder' | 'admin' | 'axiom_analyst' } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;

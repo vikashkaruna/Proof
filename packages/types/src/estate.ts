@@ -100,3 +100,17 @@ export const UpdateEstateSystemRequestSchema = CreateEstateSystemRequestSchema.e
 export const AssignEngagementEstateRequestSchema = z
   .object({ estateId: z.uuid(), confirmed: z.literal(true) })
   .strict();
+
+export const PrepareOnboardingProposalSchema = z
+  .object({
+    estateId: z.uuid(),
+    systems: z.array(CreateEstateSystemRequestSchema).min(1).max(100),
+  })
+  .strict();
+export const ReviewOnboardingProposalSchema = z
+  .object({
+    contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    decision: z.enum(['approved', 'rejected']),
+    reason: z.string().trim().min(1).max(2000),
+  })
+  .strict();

@@ -650,6 +650,95 @@ async function main() {
     ownerPost({ libraryVersion: library, title: 'Late assessment', estateId: managed.id }),
   );
 
+  const preparer = await createUser();
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/tenant_users', 'POST', {
+        tenant_id: tenantB,
+        user_id: preparer.id,
+        role: 'axiom_analyst',
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await apiRequest('/rest/v1/tenant_onboarding_intakes', 'POST', {
+        tenant_id: tenantB,
+        submitted_by: owner.id,
+        dpo_email: 'private-contact@example.invalid',
+        proposed_systems: [{ name: 'Original CRM', type: 'custom' }],
+      })
+    ).status,
+    201,
+  );
+  const prepared = await apiRequest('/rest/v1/rpc/prepare_onboarding_proposal', 'POST', {
+    p_tenant_id: tenantB,
+    p_actor_id: preparer.id,
+    p_estate_id: estateB,
+    p_systems: [{ name: 'Reviewed CRM', systemKind: 'saas', dataCategories: ['contact'] }],
+    p_correlation_id: randomUUID(),
+  });
+  assert.equal(prepared.status, 200);
+  const proposal = ((await prepared.json()) as { data: { id: string; content_sha256: string } })
+    .data;
+  const proposalsRead = await check('proposal_read', '/v1/onboarding/proposals', 200, {
+    headers: ownerHeaders,
+  });
+  assert(
+    !(await proposalsRead.text()).includes('private-contact@example.invalid'),
+    'private intake contact must not enter inventory responses',
+  );
+  await check(
+    'proposal_requires_staff_preparer',
+    '/v1/onboarding/proposals',
+    403,
+    ownerPost({ estateId: estateB, systems: [{ name: 'CRM', systemKind: 'saas' }] }),
+  );
+  await check(
+    'proposal_wrong_digest',
+    `/v1/onboarding/proposals/${proposal.id}/review`,
+    409,
+    ownerPost({ contentSha256: '0'.repeat(64), decision: 'approved', reason: 'Stale content' }),
+  );
+  const reviewIntent = ownerPost({
+    contentSha256: proposal.content_sha256,
+    decision: 'approved',
+    reason: 'Reviewed original intake and normalized inventory',
+  });
+  await check(
+    'proposal_owner_approval',
+    `/v1/onboarding/proposals/${proposal.id}/review`,
+    200,
+    reviewIntent,
+  );
+  const reviewedAgain = await check(
+    'proposal_review_replay',
+    `/v1/onboarding/proposals/${proposal.id}/review`,
+    200,
+    reviewIntent,
+  );
+  assert.equal(reviewedAgain.headers.get('idempotency-replayed'), 'true');
+  const appliedSystems = await apiRequest(
+    `/rest/v1/onboarding_proposal_systems?proposal_id=eq.${proposal.id}&select=system_id`,
+  );
+  assert.equal(appliedSystems.status, 200);
+  assert.equal(((await appliedSystems.json()) as unknown[]).length, 1);
+  const reviewedAudit = await apiRequest(
+    `/rest/v1/audit_ledger?target_ref=eq.${proposal.id}&action_type=eq.onboarding.proposal.approved&select=id`,
+  );
+  assert.equal(((await reviewedAudit.json()) as unknown[]).length, 1);
+  await check(
+    'proposal_second_review_refused',
+    `/v1/onboarding/proposals/${proposal.id}/review`,
+    409,
+    ownerPost({
+      contentSha256: proposal.content_sha256,
+      decision: 'approved',
+      reason: 'Duplicate intent',
+    }),
+  );
+
   await check('login_attestation_cannot_move_to_another_session', '/v1/engagements', 401, {
     headers: { ...ownerHeaders, Authorization: `Bearer ${await owner.newSession()}` },
   });
