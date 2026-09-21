@@ -1,5 +1,7 @@
 # Axiom Proof — implementation session handoff
 
+Committed source `4a6b13c` passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod and production container configurations, with zero retries and matching sanitized results. Final merge CI remains the exact staging gate; its result is saved in the private session checkpoint.
+
 ## Revision 32 — W4.2 credential vault and rotation foundation
 
 Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
@@ -37,7 +39,7 @@ Validation includes descriptor/role/tenant/API refusals, SQL audit rollback, bot
 ## Next implementation order
 
 1. W4.2: finish credential broker authorization and short-lived client-credentials/JWT-bearer handlers. Vault/rotation foundation and grant-family extension are now in 0039. Do not accept arbitrary token URLs or leak credentials through errors/ledger. Use isolated local reference authorization servers for conformance; no real client credentials are needed.
-2. W4.3: SPIFFE/SPIRE identities for all ten agents, broker/runtime scope checks, token exchange and actor-chain evidence. Only Drishti reads and Karya writes client systems; remove Nazar control-library write authority.
+2. W4.3: SPIFFE/SPIRE identities for all ten agents, broker/runtime scope checks, token exchange and actor-chain evidence. Only Drishti reads and Karya writes client systems; preserve Nazar's existing TS/Python declaration fix (`cc3fcee`) and prove runtime enforcement; complete the still-pending Prativedan read scopes and mutation metadata distinction.
 3. W4.4: live target-scoped grants, expiry/revocation and per-invocation enforcement, portal grant/revoke UI and audit. Disabled connector grants must stay revoked after re-enable. Existing reference-mock metadata is not authority to write.
 4. Complete W3 resumable company → estate → systems → connector/grant → readiness wizard and W3.5 real graph. Graph access edges must reflect enforced authority; do not turn stored grant rows into claims of access. Then W4.5 registry and W4.6 first live SQL binding, followed by W4.7 transports/descriptor pack.
 5. Retain deferred work: W0 per-service IAM, durable contact/mail and score/benchmark semantics, W1 invitations, W2 remaining targets, remote acceptance, W3 sustenance. No claim these are closed.

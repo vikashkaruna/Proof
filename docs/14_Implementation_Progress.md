@@ -1,5 +1,7 @@
 # Implementation progress — W0 through W4
 
+Committed source `4a6b13c` passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod and production container configurations, with zero retries and matching sanitized results. Final merge CI remains the exact staging gate; its result is saved in the private session checkpoint.
+
 ## Revision 32 — W4.2 credential vault and rotation foundation
 
 Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.

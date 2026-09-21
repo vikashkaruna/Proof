@@ -12,11 +12,13 @@ Reviewed staging `be69c3f` with successful CI 35654053318. No new other-model wo
 - The TypeScript vault adapter authorizes before reading private rows or calling KMS, consumes/clears supplied secret buffers, rechecks mutations in SQL and emits generic errors. There is no browser or agent acquisition route. JavaScript/SDK memory erasure is not guaranteed.
 - Protocol review corrected the roadmap's conflation of workload SVIDs, OAuth client assertions and JWT-bearer authorization grants. The accepted single connector identity remains; external client assertions need the correct registered-client subject and target audience. Internal SPIFFE identity cannot be forwarded unchanged as `private_key_jwt`.
 
+Further source review found that Nazar's declaration downgrade was already delivered in `cc3fcee` in both TS and Python. The handoff now preserves that completed work. Prativedan's read scopes, the planned mutation metadata distinction and actual workload/tool enforcement remain pending. Removed contradictory current-plan claims that all roster discrepancies were fixed or that the shared external OAuth identity could distinguish internal agents. Historical revision notes remain historical.
+
 ## Validation
 
 394 BFF tests (30 new envelope/provider/vault tests); workspace tests/lint/typecheck; all 40 migrations under service_role without BYPASSRLS; SQL rollback/tenant/lifecycle/format checks; ten concurrency suites with both rotation/revocation orders; populated 0038→0039 upgrade. Production dependency audit passes. BFF KMS SDK requires Node 22+; Docker/CI already use Node 24. Clearing ignored incremental TS build caches resolved stale Supabase optional-peer type identities; no unsafe casts were added to application code.
 
-The first SQL run caught PostgreSQL's bounded-regex repetition limit; validation now separates character validation and length bounds. That failed run is not acceptance evidence. Provider tests use injected SDK responses, not cloud calls. Full committed container parity and exact merge CI outcomes are recorded after execution, never inferred from these unit tests.
+The first SQL run caught PostgreSQL's bounded-regex repetition limit; validation now separates character validation and length bounds. That failed run is not acceptance evidence. Provider tests use injected SDK responses, not cloud calls. Committed source `4a6b13c` also passed 63 browser journeys and 89 API/restart outcomes in each of the local preprod/production configurations, with zero retries and matching sanitized results. Exact merge CI is recorded separately in the private session checkpoint.
 
 ## Remaining gates
 

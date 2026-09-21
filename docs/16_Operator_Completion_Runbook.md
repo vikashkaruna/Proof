@@ -1,4 +1,4 @@
-# Axiom Proof — Operator completion runbook: W0 → W3
+# Axiom Proof — Operator completion runbook: W0 → W4
 
 Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
 
@@ -7,7 +7,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 **Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 32, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
-through W3 only, and — the part that is usually missing — **exactly what
+through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
