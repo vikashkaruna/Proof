@@ -2,11 +2,31 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 14 — REVIEWED APPROVAL SNAPSHOT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `369bcf7`, including atomic issuance (0026), its portability correction, and claim snapshot enforcement (0027).
+**Document:** 11 · **Revision 15 — MFA KEY ROTATION** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `e5a830d`, including the reviewed approval snapshot (0028), verified independently rather than accepted on report.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 14 — current implementation checkpoint
+## Revision 15 — current implementation checkpoint
+
+No migration. Two pieces of work: verifying Revision 14 rather than inheriting it, and closing the MFA key rotation gap it named as next.
+
+**Verification of 0028.** All of it holds. Reverting the route's digest source to a live post-MFA read fails exactly the three regression tests that cover it. The claim that matters most is byte compatibility — `action_set_content_digest` now round-trips through `jsonb_to_recordset`, and 0027 compares a token's stored digest against a fresh recompute, so any disagreement would make **every approval token issued before 0028 permanently unclaimable**, surfacing as `content_changed` on content nobody touched. Rebuilding the 0026 function under another name and comparing on deep nesting, non-BMP characters, combining marks, numeric trailing zeros and exponents, a 23-digit integer, `-0.0`, and `'null'::jsonb` in every jsonb column produced identical digests on every row and every subset, while still detecting a real edit. The other three step-up call sites bind to stable identifiers and have no read-after-consume window, so the gap was confined to the approve route.
+
+**MFA key rotation.** `AXIOM_MFA_ENCRYPTION_KEY` could not be rotated at all. The stored envelope recorded no key identity, so replacing the key did not degrade service — it locked out every enrolled user simultaneously, and each lockout was indistinguishable from a wrong code. There was no procedure, only a flag day, which is why the operator policy told readers not to rotate.
+
+The envelope is now `v2$<keyId>$…`, where the id is a hash of the key material: stable, safe to log, and not a step towards the key. The BFF reads a ring — one primary that seals new secrets, plus retiring keys that may still be read — so both can be live at once. A factor sealed under a retiring key keeps verifying and is rewritten under the primary key the next time its owner **successfully** authenticates, never on a failed attempt, so rotation drains at the pace people log in and nothing decrypts the whole table into one process. Pre-ring `v1` envelopes are opened by trying each key, which is safe because the ciphertext is authenticated.
+
+A secret nobody on the ring can open returns `secret_unreadable` and HTTP 503, not a rejected code. That distinction is the point: collapsing the two is what would hide a broken rotation inside ordinary failed-login noise. `sync-env.sh mint --force` now carries the outgoing key onto the retiring list instead of orphaning every factor, and `verify` reports how many retiring keys remain.
+
+| Workstream | Delivered since Revision 14 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Key ring with identified envelopes; lazy rewrap on successful verification; `secret_unreadable` as a distinct 503; rotation carried through `sync-env.sh`, the env templates and all four Compose topologies; runbook and operator policy | Browser persona journeys; rotating a **deployed** environment, which nothing has done because nothing is deployed |
+
+**What this does not do.** Rotation is proved by unit and service tests, including the lockout case it exists to prevent, and by running the mint carry-over end to end against a real env file. It has never been exercised against a deployed environment, and the Cloud Run and Helm paths pass the primary key through Secret Manager without yet carrying the retiring list — an environment rotated there today would still need the list wired into its secret flow. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 14 — prior implementation checkpoint
 
 Integrated staging `369bcf7` without discarding the other model's work. The follow-up review found a remaining gap: MFA verified the route's first action read, but the signed digest came from a **second live read after challenge consumption**. An edit between the reads became new signed authority; the two regression tests returned 201 before this correction.
 

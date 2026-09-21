@@ -253,6 +253,21 @@ do_verify() {
     fi
   done
 
+  # Not a required key — empty is the normal state — but a non-empty one
+  # means a key rotation has started and has not been finished, and that is
+  # worth saying out loud rather than leaving in the file for someone to find.
+  local retiring_keys
+  retiring_keys="$(get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS")"
+  if [ -n "$retiring_keys" ]; then
+    local retiring_count
+    retiring_count="$(awk -F',' '{print NF}' <<< "$retiring_keys")"
+    echo ""
+    echo -e "  ${YELLOW}⟳ MFA key rotation in progress:${NC} ${retiring_count} retiring key(s) still on the ring."
+    echo -e "    ${DIM}Enrolled factors move to AXIOM_MFA_ENCRYPTION_KEY as their owners verify."
+    echo -e "    Remove a retiring key only once nothing is sealed under it; removing it"
+    echo -e "    early locks those users out rather than degrading gracefully.${NC}"
+  fi
+
   echo ""
   echo -e "  ─────────────────────────────────────────────────────────────────"
   echo -e "  Audit Summary for ${BOLD}${TARGET_ENV}${NC}:"
@@ -587,11 +602,22 @@ do_scaffold() {
 #
 # Existing real values are left alone. Only placeholders and empty values are
 # filled, because rotating a live secret is a different act with real
-# consequences — a new AXIOM_MFA_ENCRYPTION_KEY makes every enrolled
-# authenticator undecryptable — and it needs --force said out loud.
+# consequences — rotating SUPABASE_JWT_SECRET invalidates every live session —
+# and it needs --force said out loud.
+#
+# AXIOM_MFA_ENCRYPTION_KEY is the exception, and used to be the worst case:
+# replacing it made every enrolled authenticator undecryptable at once. The
+# BFF now reads a ring, so the outgoing key is carried onto
+# AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS here instead of being dropped. Secrets
+# already sealed under it keep working and move to the new key as their owners
+# verify. Remove it from that list only when nothing is sealed under it.
 do_mint() {
   local force=false
   [ "${MINT_FORCE:-false}" = true ] && force=true
+
+  # Captured before anything is overwritten.
+  local outgoing_mfa_key
+  outgoing_mfa_key="$(grep -E "^[[:space:]]*AXIOM_MFA_ENCRYPTION_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
 
   info "Minting generated secrets for ${TARGET_ENV}..."
 
@@ -629,6 +655,34 @@ REPLACE
     filled+=("$key")
   done <<< "$minted"
 
+  # If the MFA key actually changed, the old one has to stay readable or the
+  # rotation is a lockout wearing a rotation's clothes.
+  local new_mfa_key
+  new_mfa_key="$(grep -E "^[[:space:]]*AXIOM_MFA_ENCRYPTION_KEY=" "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  if [ -n "$outgoing_mfa_key" ] && [ -n "$new_mfa_key" ] \
+     && [ "$outgoing_mfa_key" != "$new_mfa_key" ] \
+     && [[ "$outgoing_mfa_key" != *"<"*">"* ]] && [[ "$outgoing_mfa_key" != *placeholder* ]]; then
+    local previous
+    previous="$(grep -E "^[[:space:]]*AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=" "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+    if [[ ",${previous}," != *",${outgoing_mfa_key},"* ]]; then
+      # Newest first, so the most recently retired key is tried first.
+      previous="${outgoing_mfa_key}${previous:+,${previous}}"
+      python3 - "$ENV_FILE" "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS" "$previous" <<'REPLACE'
+import re, sys
+path, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path).read()
+if re.search(rf"^[ \t]*{re.escape(key)}=.*$", text, flags=re.M):
+    text = re.sub(rf"^[ \t]*{re.escape(key)}=.*$", f"{key}={value}", text, count=1, flags=re.M)
+else:
+    text = text.rstrip("\n") + f"\n{key}={value}\n"
+open(path, "w").write(text)
+REPLACE
+      pass "Carried the outgoing MFA key onto AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS."
+      echo -e "  ${DIM}Enrolled authenticators keep working and move to the new key as their"
+      echo -e "  owners verify. Drop the old key from that list only once none remain.${NC}"
+    fi
+  fi
+
   if [ ${#filled[@]} -gt 0 ]; then
     pass "Filled ${#filled[@]} secret(s) in ${ENV_FILE}:"
     printf "    %s\n" "${filled[@]}"
@@ -636,9 +690,9 @@ REPLACE
   if [ ${#kept[@]} -gt 0 ]; then
     info "Left ${#kept[@]} existing value(s) untouched:"
     printf "    %s\n" "${kept[@]}"
-    echo -e "  ${DIM}MINT_FORCE=true overwrites them. Rotating AXIOM_MFA_ENCRYPTION_KEY makes"
-    echo -e "  every enrolled authenticator undecryptable; rotating SUPABASE_JWT_SECRET"
-    echo -e "  invalidates every live session.${NC}"
+    echo -e "  ${DIM}MINT_FORCE=true overwrites them. Rotating SUPABASE_JWT_SECRET invalidates"
+    echo -e "  every live session. A rotated AXIOM_MFA_ENCRYPTION_KEY is carried onto"
+    echo -e "  AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS so enrolled factors keep working.${NC}"
   fi
 }
 

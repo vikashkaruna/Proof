@@ -124,6 +124,20 @@ const EnvSchema = z
     AXIOM_MFA_ENCRYPTION_KEY: z.string().min(32).optional(),
 
     /**
+     * Keys being retired, comma separated, newest first. They decrypt but
+     * never encrypt: a secret sealed under one of these is rewritten under
+     * `AXIOM_MFA_ENCRYPTION_KEY` the next time its owner verifies, so a
+     * rotation finishes at the pace people log in rather than in one pass
+     * that decrypts every TOTP secret into a single process.
+     *
+     * Remove a key here only once nothing is sealed under it. Doing it early
+     * does not degrade service, it locks those users out — which is why the
+     * service reports an unopenable secret as its own fault rather than as a
+     * wrong code.
+     */
+    AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS: z.string().optional(),
+
+    /**
      * How long a satisfied login MFA vouches for a session, in hours
      * (W1 · SEC-8). Decided with the founder at 12: one code per working
      * day, and a session stolen in the evening stops being usable overnight
@@ -383,8 +397,60 @@ const EnvSchema = z
             '`node scripts/mint-supabase-keys.mjs`.',
         });
       }
+
+      // The retiring keys are held to the same standard as the primary. A
+      // weak or reused key still opens every secret written under it, and the
+      // ring keeps it live for as long as it is listed.
+      const previous = parseMfaPreviousKeys(env.AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS);
+      const seen = new Set<string>();
+      for (const key of previous) {
+        const fail = (message: string) =>
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS'],
+            message,
+          });
+        if (key.length < 32) {
+          fail('Every retiring MFA key must be at least 32 characters, like the primary.');
+        }
+        if (isPlaceholderSecret(key)) {
+          fail('A retiring MFA key looks like a committed development placeholder.');
+        }
+        if (key === env.AXIOM_MFA_ENCRYPTION_KEY) {
+          fail(
+            'A retiring MFA key repeats the primary. Listing it does nothing and hides whether ' +
+              'a rotation has actually started.',
+          );
+        }
+        if (
+          [
+            env.APPROVAL_SIGNING_KEY,
+            env.AGENT_RUNTIME_INTERNAL_TOKEN,
+            env.MODEL_GATEWAY_API_KEY,
+          ].includes(key)
+        ) {
+          fail('A retiring MFA key reuses a signing or service credential.');
+        }
+        if (seen.has(key)) {
+          fail('A retiring MFA key is listed twice.');
+        }
+        seen.add(key);
+      }
     }
   });
+
+/**
+ * Split `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` into a list. Blank entries are
+ * dropped so a trailing comma, which is how a list usually ends up when the
+ * last key is removed, does not become an empty key on the ring.
+ */
+export function parseMfaPreviousKeys(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
 
 export type Env = z.infer<typeof EnvSchema>;
 

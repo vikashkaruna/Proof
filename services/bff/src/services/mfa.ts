@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
-import { loadEnv, BRAND } from '@axiom/config';
+import { loadEnv, parseMfaPreviousKeys, BRAND } from '@axiom/config';
 import {
-  decryptSecret,
   encryptSecret,
+  MfaSecretUnreadableError,
+  openSecret,
   generateRecoveryCodes,
   generateSecret,
   hashRecoveryCode,
@@ -215,7 +216,11 @@ export interface ActivateEnrolmentSuccess {
 
 export type ActivateEnrolmentResult =
   | ActivateEnrolmentSuccess
-  | { ok: false; reason: 'no_pending_factor' | 'code_rejected'; detail?: string };
+  | {
+      ok: false;
+      reason: 'no_pending_factor' | 'code_rejected' | 'secret_unreadable';
+      detail?: string;
+    };
 
 export interface MfaStatus {
   /** Whether the user holds an active factor — the thing every gate asks. */
@@ -288,7 +293,8 @@ export type VerifyChallengeResult =
         | 'attempts_exhausted'
         | 'code_rejected'
         | 'not_enrolled'
-        | 'rate_limited';
+        | 'rate_limited'
+        | 'secret_unreadable';
       detail?: string;
       retryAfterSeconds?: number;
     };
@@ -427,12 +433,44 @@ function sameDigest(a: string | null | undefined, b: string): boolean {
 
 export function createMfaService(
   clientFactory: () => SupabaseClient = createSupabaseAdmin,
-  options: { encryptionKey?: string } = {},
+  options: { encryptionKey?: string; previousEncryptionKeys?: readonly string[] } = {},
 ): MfaService {
   // Resolved once. `loadEnv()` already refuses to boot a deployed environment
   // without this key (and refuses a placeholder), so an undefined value here
   // can only mean local or test.
   const encryptionKey = options.encryptionKey ?? env.AXIOM_MFA_ENCRYPTION_KEY;
+
+  // Primary first, then anything still being retired. Order matters: the head
+  // of the ring is what new and rewrapped secrets are sealed under.
+  const previousKeys =
+    options.previousEncryptionKeys ?? parseMfaPreviousKeys(env.AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS);
+
+  function requireRing(): readonly string[] {
+    const primary = requireKey();
+    return [primary, ...previousKeys.filter((k) => k && k !== primary)];
+  }
+
+  /**
+   * Move a secret onto the primary key after its owner has proved they hold
+   * it. Best effort on purpose: a failed rewrite leaves the secret readable
+   * under its old key, so the cost is that this factor is rewrapped on the
+   * next verification instead. Failing the login over it would turn a
+   * housekeeping error into a lockout.
+   */
+  async function rewrapSecret(factorId: string, plaintext: string): Promise<void> {
+    try {
+      const { error } = await clientFactory()
+        .from('user_mfa_factors')
+        .update({ secret_encrypted: encryptSecret(plaintext, requireRing()) })
+        .eq('id', factorId);
+      if (error) throw new Error(error.message);
+    } catch (err) {
+      logger.warn(
+        { factorId, err: err instanceof Error ? err.message : String(err) },
+        'mfa secret could not be rewrapped under the current key',
+      );
+    }
+  }
 
   function requireKey(): string {
     if (!encryptionKey) {
@@ -561,7 +599,9 @@ export function createMfaService(
 
   return {
     async beginTotpEnrolment({ userId, accountName, label }) {
-      const key = requireKey();
+      // Called for its refusal: a missing key must stop an enrolment before a
+      // secret is generated, not after it is written somewhere unreadable.
+      requireRing();
       const supabase = clientFactory();
       const secret = generateSecret(20);
 
@@ -582,7 +622,7 @@ export function createMfaService(
           factor_type: 'totp',
           status: 'pending',
           label: label ?? null,
-          secret_encrypted: encryptSecret(secret, key),
+          secret_encrypted: encryptSecret(secret, requireRing()),
         })
         .select('id')
         .single();
@@ -602,7 +642,7 @@ export function createMfaService(
     },
 
     async activateTotpEnrolment({ userId, code, atMs }) {
-      const key = requireKey();
+      const ring = requireRing();
       const supabase = clientFactory();
 
       const { data: pending, error } = await supabase
@@ -617,7 +657,18 @@ export function createMfaService(
       const row = pending as FactorRow;
       if (!row.secret_encrypted) return { ok: false, reason: 'no_pending_factor' };
 
-      const result = verifyTotp(decryptSecret(row.secret_encrypted, key), code, {
+      let pendingSecret: string;
+      try {
+        pendingSecret = openSecret(row.secret_encrypted, ring).secret;
+      } catch (err) {
+        if (err instanceof MfaSecretUnreadableError) {
+          logger.error({ userId, keyId: err.keyId }, 'pending MFA secret is unreadable');
+          return { ok: false, reason: 'secret_unreadable' };
+        }
+        throw err;
+      }
+
+      const result = verifyTotp(pendingSecret, code, {
         lastUsedCounter: row.last_used_counter == null ? null : BigInt(row.last_used_counter),
         atMs,
       });
@@ -1002,11 +1053,29 @@ export function createMfaService(
       let satisfiedWith: 'totp' | 'recovery_code';
 
       if (TOTP_CODE_PATTERN.test(cleaned)) {
-        const key = requireKey();
+        const ring = requireRing();
         const factor = await activeTotpFactor(userId);
         if (!factor?.secret_encrypted) return { ok: false, reason: 'not_enrolled' };
 
-        const result = verifyTotp(decryptSecret(factor.secret_encrypted, key), cleaned, {
+        let opened;
+        try {
+          opened = openSecret(factor.secret_encrypted, ring);
+        } catch (err) {
+          if (err instanceof MfaSecretUnreadableError) {
+            // Not a wrong code. The key this secret was sealed under is no
+            // longer on the ring, which is an operator error during rotation
+            // and has to be visible as one — the caller turns this into a 503
+            // rather than telling the user they mistyped.
+            logger.error(
+              { userId, factorId: factor.id, keyId: err.keyId },
+              'MFA secret cannot be opened by any key on the ring',
+            );
+            return { ok: false, reason: 'secret_unreadable' };
+          }
+          throw err;
+        }
+
+        const result = verifyTotp(opened.secret, cleaned, {
           lastUsedCounter:
             factor.last_used_counter == null ? null : BigInt(factor.last_used_counter),
           atMs,
@@ -1015,6 +1084,10 @@ export function createMfaService(
         if (!(await claimCounter(factor.id, result.counter))) {
           return { ok: false, reason: 'code_rejected', detail: 'replayed' };
         }
+        // Rotation happens here, after the holder has proved the secret is
+        // theirs. Rewrapping on a failed attempt would let anyone who can
+        // reach the endpoint drive rewrites for an account they do not hold.
+        if (opened.rewrapNeeded) await rewrapSecret(factor.id, opened.secret);
         satisfiedWith = 'totp';
       } else {
         const consumed = await consumeRecoveryCode(userId, cleaned);

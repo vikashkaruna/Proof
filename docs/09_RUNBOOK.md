@@ -110,6 +110,43 @@ kubectl -n axiom-proof rollout restart deployment/axiom-proof-bff
 # execution that has a stale token will be rejected by the BFF.
 ```
 
+### Rotate the MFA encryption key
+
+Unlike the approval signing key, this one cannot simply be replaced: a TOTP
+secret has to be recoverable to check a code, so every enrolled factor is
+sealed under it. Replacing it on its own does not invalidate tokens, it locks
+out every enrolled user at once.
+
+The BFF reads a **ring**. `AXIOM_MFA_ENCRYPTION_KEY` seals new and rewrapped
+secrets; `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` is a comma-separated list,
+newest first, of keys that may still be read. Each stored secret names the key
+that sealed it, so both can be live at once.
+
+```bash
+# 1. Mint a new primary and carry the outgoing key onto the retiring list.
+#    MINT_FORCE is required: rotating a live secret is a deliberate act.
+MINT_FORCE=true ./scripts/sync-env.sh <env> mint
+
+# 2. Confirm the ring before deploying anything.
+#    `verify` prints how many retiring keys are still in play.
+./scripts/sync-env.sh <env> verify
+```
+
+Then roll the BFF. Enrolled factors keep working throughout: each one is
+rewritten under the new key the next time its owner verifies, so the rotation
+drains at the pace people log in rather than in a single pass that would
+decrypt every TOTP secret into one process.
+
+**Do not remove a key from the retiring list until nothing is sealed under
+it.** Removing it early is the lockout this design exists to prevent. If it
+happens, affected users get `secret_unreadable` and HTTP 503 — a deliberate,
+distinct signal rather than a rejected code — and the fix is to put the key
+back on the list. Users who cannot wait can authenticate with a recovery code.
+
+There is no query that reports the remaining count directly: the key id in
+each envelope is a hash, so compare it against the primary key's id if you
+need to measure how far a rotation has drained.
+
 ### Verify the audit ledger
 
 ```sql

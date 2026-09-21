@@ -10,7 +10,7 @@ W1 has substantial committed implementation but is **not complete**. Resolve the
 
 ## Read first
 
-1. [Doc 11, Revision 9](11_Phase0-5_Gap_Closure_Plan.md): current plan, corrections and sequence.
+1. [Doc 11, Revision 9](11_Phase0-5_Gap_Closure_Plan.md): the plan, corrections and sequence **as they stood on 20 September**. Revision 14 is current; read it instead.
 2. [Independent review](audits/04-roadmap-review-2026-09-20.md): R-01–R-11, file evidence and actual test results.
 3. [Roadmap traceability](13_Roadmap_Traceability.md): every phase module and BR/FR/NFR owner.
 4. Docs [02](02_Phase_Wise_Implementation_Plan.md), [03](03_BRD_PRD.md), [04](04_Solution_Architecture.md): requirements, phase gates and architecture.
