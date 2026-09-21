@@ -66,7 +66,20 @@ spec:
     matchLabels:
       app.kubernetes.io/part-of: axiom-proof
   policyTypes:
+    - Ingress
     - Egress
+  # Both halves are required. A NetworkPolicy decision needs the sender's
+  # egress AND the receiver's ingress to permit the flow, and this policy
+  # carried only the egress half — so under the default-deny above, bff:4000,
+  # agent-runtime:8000 and model-gateway:8001 admitted nothing. Only port 3000
+  # from ingress-nginx was ever allowed in, which is the public edge, not the
+  # data plane. No ports are listed here deliberately: the service ports differ
+  # per component and restating them would drift from services.yaml.
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: axiom-proof
   egress:
     - to:
         - podSelector:

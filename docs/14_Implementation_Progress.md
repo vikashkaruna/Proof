@@ -360,6 +360,101 @@ Mutation-tested twice. Restoring the pre-change `cloudrun.tf` and `bff-deploymen
 
 **What this does not do.** Nothing is deployed and no rotation has been exercised against a running service, so the path exists but is not proven — the conditional resources are unapplied. The Helm change is reviewed rather than templated: `helm` is not installed on this machine, so `helm template` could not be run locally. CI does not render the chart either, which is a gap worth closing separately.
 
+## W0.1 milestone: the chart that had never been rendered
+
+Delivered on branch `claude/helm-render-gate` off staging, in the commit containing this entry. No migration; allocation stays at 0028. CI has not yet run this lane, so no run id is cited here.
+
+The previous milestone closed by naming this gap: the Helm half of the MFA key ring was reviewed rather than templated, because `helm` is not installed on the dev machines and no CI job rendered the chart. `helm lint` and `helm template` now run in the deployment coverage lane, and the rendered output is schema-validated with kubeconform.
+
+**The chart could not render at all.** This is the finding, not the gate. Rendering `infra/helm/axiom-proof` on staging fails on the first template it reaches, and behind that failure sat three more:
+
+- `templates/ingress.yaml` used `{{- range .Values.web.ingress.tls.enabled }}` over a **boolean** — `range can't iterate over true`. The marketing block four lines below had always used `if`.
+- `_helpers.tpl` and `templates/serviceaccount.yaml` dereference `.Values.serviceAccount.create`, `.name` and `.annotations`, but `values.yaml` declared no `serviceAccount` key. An absent key is a nil pointer in Helm, not an empty string.
+- `templates/model-gateway-deployment.yaml` reads `.Values.modelGateway.autoscaling.enabled` with no `autoscaling` block under `modelGateway`. Same failure, different service.
+- `templates/serviceaccount.yaml` emitted `annotations:` after `automountServiceAccountToken:` rather than inside `metadata:`, producing a mapping under a scalar.
+
+The consequence for the milestone above is worth stating plainly: `check-mfa-ring-coverage.sh` was confirming that `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` was **present in the chart**, and it was — in a chart that could not produce a manifest. A presence check over template source cannot distinguish a wired variable from an unrenderable file. With the four defects fixed, the BFF Deployment renders and `optional: true` on the `mfa-encryption-keys-previous` `secretKeyRef` is schema-valid, which is the first time that change has been verified by anything other than reading.
+
+**Defaults are not coverage.** A `{{- with }}` guarding an empty map never executes, so the annotations defect rendered clean on the chart defaults _and_ on `values-prod.yaml.example`, and appeared only once an operator attached an IRSA role. `infra/helm/axiom-proof/ci/` holds one values file per branch the defaults leave cold — the Helm convention `ct` already uses — and the gate renders every one. `kubeconform -strict` rejects unknown and duplicate fields, so a typo'd key fails in CI instead of being dropped silently by the API server on apply; `-cache` is not optional, because without it the schema set is refetched per value set and the gate takes minutes instead of a second.
+
+Verified: helm v3.16.3 and kubeconform v0.6.7, both pinned in the job. `helm lint` passes. `helm template` renders 18 resources across chart defaults, `values-prod.yaml.example` and both `ci/` fixtures, and 17 under `serviceAccount.create: false` — all schema-valid at Kubernetes 1.30.0, 0 invalid. `prettier --check` passes on the workflow; `infra/helm/` is prettier-ignored, so the fixtures are not reformatted.
+
+Mutation-tested across all three layers a render gate can fail at, seven defect classes, each restored from a checksummed snapshot: unclosed `{{ if` (template parse), `range` over boolean and a deleted values key (template execution — the two original defects), bad indentation (YAML parse), a misspelled field and a misspelled kind (schema, `-strict`), and the annotations block moved outside `metadata`. All seven fail the gate, each naming the file actually mutated.
+
+**The first mutation harness was wrong, and it is worth recording how.** It restored between cases with `git checkout -- infra/helm/axiom-proof`, which restores HEAD — and the fixes under test were uncommitted. The first case wiped them, and the six that followed reported the same pre-existing failure as seven green PASSes. A mutation harness that restores from the wrong baseline produces exactly the evidence it was built to rule out. The harness now snapshots the working tree and verifies the restore by checksum before every case.
+
+**Then the defects that render perfectly.** With the chart rendering for the
+first time, four more appeared. Every one is valid YAML and valid Kubernetes,
+so neither `helm template` nor kubeconform can see them:
+
+- Both NetworkPolicies that _grant_ access selected on
+  `app.kubernetes.io/part-of`, which lives in `.Values.labels` and was emitted
+  on object metadata only — never on the pod templates. They matched zero pods
+  while the default-deny matched all of them, so every workload had DNS and
+  nothing else. Fixed with an `axiom-proof.podLabels` helper, kept separate
+  from `selectorLabels` because `spec.selector.matchLabels` is immutable on an
+  existing Deployment and widening it would fail every upgrade.
+- Binding those policies to real pods then exposed that `allow-internal`
+  carried only the **egress** half. A NetworkPolicy decision needs the sender's
+  egress and the receiver's ingress, so `bff:4000`, `agent-runtime:8000` and
+  `model-gateway:8001` still admitted nothing; only port 3000 from
+  ingress-nginx was allowed in, which is the public edge, not the data plane.
+- A `marketing` Service and the Ingress rule for `axiomproof.ai` pointed at a
+  Deployment that did not exist; the public site answered 503. Its environment
+  mirrors the staging and preprod Compose services, minus
+  `AXIOM_E2E_BYPASS_AUTH` — removed from the application in W0.0 and never to
+  reach a deployed surface.
+- `bff` and `agentRuntime` omitted `replicas` for an autoscaler the chart never
+  shipped, running one pod each under `minAvailable: 1` budgets that then
+  permit zero voluntary evictions and stall a node drain. `temporalWorker` had
+  values, a Dockerfile and a published image but no Deployment, so durable work
+  would be accepted and never run. Both now exist; `modelGateway` keeps
+  `autoscaling.enabled: false` and its declared `replicaCount: 2`.
+
+**A second gate, because it answers a different question.**
+`scripts/check-rendered-manifests.py` reads the rendered stream and asserts
+what the manifests _mean_: every bundled component has a workload, every
+Service selects a pod, every NetworkPolicy binds, every Service port is
+admitted under the default-deny, and no PodDisruptionBudget sits at or above
+its own replica floor. Run against the pre-change tree it reports seven
+findings. The component list is passed explicitly because `temporal-worker` has
+no Service and no Ingress rule — nothing in the rendered output referred to it,
+so only a declared expectation could see that it was missing at all.
+
+Verified: helm v3.16.3 and kubeconform v0.6.7, both pinned. `helm lint` passes.
+22 resources render across chart defaults, `values-prod.yaml.example` and both
+`ci/` fixtures — 21 under `serviceAccount.create: false` — all schema-valid at
+Kubernetes 1.30.0, 0 invalid, and all passing the semantic checks.
+`check-mfa-ring-coverage.sh`, `check-tfvars-coverage.sh` and
+`check-control-count.sh` still pass; `prettier --check` passes on the workflow
+and this document.
+
+Mutation-tested at 13 cases, each restored from a checksummed snapshot: seven
+render defects across template parse, YAML parse and schema, and six semantic
+ones — pod labels losing `part-of`, the HPA template removed, the marketing and
+temporal-worker Deployments removed, a disruption budget raised to its replica
+floor, and the data-plane ingress half removed. All 13 fail the gate, each
+naming the defect actually injected.
+
+**The first mutation harness was wrong, and it is worth recording how.** It
+restored between cases with `git checkout -- infra/helm/axiom-proof`, which
+restores HEAD — and the fixes under test were uncommitted. The first case wiped
+them, and the six that followed reported the same pre-existing failure as seven
+green PASSes. A mutation harness that restores from the wrong baseline produces
+exactly the evidence it was built to rule out. It now snapshots the working
+tree and verifies the restore by checksum before every case.
+
+**What this does not do.** It renders; it does not deploy, and nothing was
+applied to a cluster. kubeconform validates against the upstream schema set
+only: no CRDs, no admission controllers and no cluster policy are consulted, so
+a manifest can pass here and still be rejected on apply. The topology
+corrections — the pod labels, the ingress half, the two new Deployments and the
+autoscalers — are reasoned from the Compose files and the existing Services
+rather than observed against a running cluster, and they are the first thing a
+real deploy should be checked against. The marketing Deployment's Resend key is
+mounted `optional`, so a cluster without it serves the site with a contact form
+that cannot send.
+
 ## Tooling: the Terraform gate, and what formatting was hiding
 
 Committed on branch `claude/gifted-maxwell-0b053f`. No migration; allocation stays at 0028.

@@ -2,11 +2,11 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 19 — THE INFRASTRUCTURE NOBODY HAD EVER LOADED** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `d5de231`, including the deployed MFA rotation path.
+**Document:** 11 · **Revision 20 — THE INFRASTRUCTURE NOBODY HAD EVER LOADED** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `cf0f168`, including the Helm chart render gate.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 19 — current implementation checkpoint
+## Revision 20 — current implementation checkpoint
 
 No migration. Not a workstream item — a gate that was missing, and what turned up once it existed.
 
@@ -48,7 +48,7 @@ nobody checked, and a hand-written list of two reproduces it the moment a third
 appears. `-backend=false` is deliberate: prod's `main.tf` carries a live
 `backend "s3"` block, and a configuration gate must not reach for state.
 
-| Workstream | Delivered since Revision 18 | Remaining acceptance |
+| Workstream | Delivered since Revision 19 | Remaining acceptance |
 | --- | --- | --- |
 | W0.1 | `terraform fmt -check -recursive` and `terraform validate` across every environment in the W0.1 job, on a pinned Terraform; four files reformatted; `envs/prod` made loadable for the first time | The gate has not yet run on GitHub Actions; prod is loadable, not reviewed as correct |
 
@@ -66,6 +66,71 @@ The gate is error-level: `validate` exits 0 on warnings, so the lifecycle
 at **0028**.
 
 ---
+
+## Revision 19 — prior implementation checkpoint
+
+No migration. The deployment gap Revision 18 named in its own closing lines.
+
+**Reviewed, never compiled.** Revision 18 shipped `optional: true` on a Helm
+`secretKeyRef` and recorded plainly that `helm` is not installed on the dev
+machines and CI does not render the chart, so the change was reviewed rather
+than templated. Rendering it for the first time showed the chart could not
+render **at all**, and had not been able to for its whole life: a `range` over
+a boolean in `ingress.yaml`, two values keys the templates dereference that
+`values.yaml` never declared, and an `annotations` block emitted outside
+`metadata`. An absent key is a nil pointer in Helm, not an empty string.
+
+The consequence for Revision 18 is worth stating plainly.
+`check-mfa-ring-coverage.sh` was confirming that
+`AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` was *present in the chart*, and it was —
+in a chart that could not produce a manifest. A presence check over template
+source cannot tell a wired variable from an unrenderable file.
+
+**Then the defects that render perfectly.** With the chart rendering, four more
+appeared that are valid YAML and valid Kubernetes, and wrong:
+
+- Both NetworkPolicies that *grant* access selected on
+  `app.kubernetes.io/part-of`, a label the pod templates never carried — it was
+  emitted on object metadata only. They matched zero pods while the
+  default-deny matched all of them, leaving every workload with DNS and nothing
+  else.
+- `allow-internal` then carried only the **egress** half. A NetworkPolicy
+  decision needs the sender's egress and the receiver's ingress, so once the
+  policies bound to real pods, `bff:4000`, `agent-runtime:8000` and
+  `model-gateway:8001` still admitted nothing; only port 3000 from
+  ingress-nginx was ever allowed in, which is the public edge, not the data
+  plane.
+- A `marketing` Service and the Ingress rule for `axiomproof.ai` pointed at a
+  Deployment that did not exist. The public site answered 503.
+- `bff` and `agentRuntime` omitted `replicas` to hand the count to an
+  autoscaler the chart never shipped, so each ran one pod under a
+  PodDisruptionBudget with `minAvailable: 1` — a floor equal to the count,
+  which permits zero voluntary evictions and stalls a node drain indefinitely.
+  `temporalWorker` had values, a Dockerfile and a published image, and no
+  Deployment: durable work would be accepted and never run.
+
+**Two gates, because they answer different questions.** `helm template` piped
+through `kubeconform -strict` asks whether each manifest is well-formed and
+schema-valid. `scripts/check-rendered-manifests.py` asks whether the set of
+them means what the chart claims: every bundled component has a workload, every
+Service selects a pod, every NetworkPolicy binds, every Service port is
+admitted under the default-deny, and no disruption budget sits at or above its
+own replica floor. Against the pre-change tree it reports seven findings. The
+render gate could not have caught any of them.
+
+Rendering the chart defaults alone is not coverage either — a `{{- with }}`
+guarding an empty map never executes, which is how the annotations defect
+stayed invisible to both the defaults and `values-prod.yaml.example`.
+`infra/helm/axiom-proof/ci/` holds one values file per branch the defaults
+leave cold, following the convention `ct` already uses, and the gate renders
+every one.
+
+**Not deployed.** Nothing was applied to a cluster. kubeconform validates
+against the upstream schema set only — no CRDs, no admission controllers, no
+cluster policy — so a manifest can pass here and still be rejected on apply.
+The topology corrections are reasoned from the Compose files and the existing
+Services, not observed against a running cluster, and they are the first thing
+a real deploy should be checked against.
 
 ## Revision 18 — prior implementation checkpoint
 

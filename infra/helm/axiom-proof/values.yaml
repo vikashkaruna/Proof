@@ -15,6 +15,17 @@ labels:
   app.kubernetes.io/part-of: axiom-proof
   app.kubernetes.io/managed-by: helm
 
+# ─── Service account ────────────────────────────────────────────────
+# Every deployment mounts this account by name and sets
+# automountServiceAccountToken: false, so the token is never projected into a
+# pod; the account exists to carry the cloud-IAM binding (IRSA / Workload
+# Identity) in `annotations`, not to grant Kubernetes API access.
+serviceAccount:
+  create: true
+  # Empty means "derive from the release fullname" (see _helpers.tpl).
+  name: ""
+  annotations: {}
+
 # ─── Service-to-service settings ────────────────────────────────────
 config:
   # All India-residency by default
@@ -78,6 +89,17 @@ marketing:
     tls:
       enabled: true
       secretName: axiom-marketing-tls
+  # Public URLs are baked into the Next.js bundle at request time, so they are
+  # plain values; only the Resend key is a secret, and it is mounted optional
+  # so a missing key degrades the contact form instead of the whole site.
+  env:
+    NEXT_PUBLIC_MARKETING_URL: "https://axiomproof.ai"
+    NEXT_PUBLIC_APP_URL: "https://app.axiomproof.ai"
+    NEXT_PUBLIC_BFF_URL: "https://app.axiomproof.ai/api"
+    BFF_PUBLIC_URL: "http://axiom-bff:4000"
+    RESEND_FROM_EMAIL: ""
+    CONTACT_RECIPIENT_EMAIL: ""
+    CONTACT_FALLBACK_RECIPIENT_EMAIL: ""
 
 # ─── BFF (Node/TypeScript) ──────────────────────────────────────────
 bff:
@@ -137,11 +159,20 @@ modelGateway:
     piiRedactionEnabled: "true"
     selfHostedBaseUrl: ""  # filled in values-prod.yaml with the vLLM service URL
     selfHostedModel: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  # The deployment template reads .autoscaling.enabled to decide whether to pin
+  # `replicas`; the key must exist or the template hits a nil pointer. Left
+  # false because the chart ships no HorizontalPodAutoscaler — with no HPA to
+  # own the count, omitting `replicas` would silently settle on one pod.
+  autoscaling:
+    enabled: false
 
 # ─── Temporal worker (Python) ──────────────────────────────────────
 temporalWorker:
   enabled: true
   replicaCount: 1
+  # Temporal Cloud terminates TLS; an on-cluster Temporal would set this false.
+  env:
+    TEMPORAL_TLS: "true"
   resources:
     requests:
       cpu: 250m

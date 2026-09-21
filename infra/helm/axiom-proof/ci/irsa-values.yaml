@@ -1,0 +1,7 @@
+# Forces the ServiceAccount annotation branch to execute. The default
+# `annotations: {}` leaves the `{{- with }}` block cold, which is how a
+# mis-indented annotations map survived review: invalid YAML only when set.
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::000000000000:role/axiom-proof-ci
