@@ -9,7 +9,7 @@ Fetch staging first; the merge containing this file is the checkpoint. Plan **Re
 - Cloud Run binding fix: BFF uses managed anon/service secrets; SSR gets managed anon fields only. Terraform validate and three negative wiring mutations pass. A CI gate checks the actual env bindings.
 - Additional review fix: explicit scoped SSR configuration excludes backend secrets, while ambient frontend hints can no longer weaken backend validation. Missing Docker workspace manifests and private build-context exclusions fixed.
 
-Local validation: 59/59 browser journeys in **each** preprod/production container configuration, identical API outcomes; original 59 dev-server journeys; 309 BFF and 54 config tests; 24 harness checks; all 14 workspace test tasks; lint/typecheck/security gate. Initial Docker registry errors resolved on retry. Pre-commit rehearsal is implementation evidence; exact committed merge/CI is saved in ignored `.axiom-runtime/session-checkpoint.json`. Remote deployment is not claimed.
+Local validation: 59/59 browser journeys in **each** preprod/production container configuration, identical API outcomes; original 59 dev-server journeys; 309 BFF and 54 config tests; 24 harness checks; all 14 workspace test tasks; lint/typecheck/security gate. Initial Docker registry errors resolved on retry. CI then exposed Linux SSR→BFF access through a loopback-published host port; the harness now uses private Docker DNS. The latest exact-merge CI result must be read from the checkpoint. Pre-commit rehearsal is implementation evidence; exact committed merge/CI is saved in ignored `.axiom-runtime/session-checkpoint.json`. Remote deployment is not claimed.
 
 ## Next work, in order
 

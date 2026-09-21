@@ -243,23 +243,9 @@ running under identical rules everywhere, which only the divergence lane tests.
 Open decision, recorded as
 [Doc 11 E.2 item 3](11_Phase0-5_Gap_Closure_Plan.md#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it).
 
-Replacing an authenticator retires the old factor, so it satisfies no future
-step-up. It does **not** touch session attestations already issued against it.
-Where the replacement was satisfied by the _current_ factor that is clearly
-right — the user holds the device. Where it was satisfied by a **recovery
-code**, the user did not have their authenticator, which is equally consistent
-with having lost it and with someone else holding it.
+**Resolved by the user, 21 Sep 2026:** replacement authorized by a recovery code must invalidate MFA attestations issued against the retired authenticator, requiring those sessions to verify MFA again. Replacement authorized by the current authenticator preserves existing attestations. The GoTrue login itself need not end.
 
-- **Invalidate on the recovery-code path** — closes the stolen-device case;
-  requires a user who was merely travelling without their phone to verify MFA again; the GoTrue login itself need not end.
-- **Leave as-is** — never interrupts a legitimate user; a stolen device's
-  session survives the replacement intended to shut it out.
-
-My proposal: invalidate on the recovery-code path only, and say so on the page
-before the user commits. Nothing currently depends on the answer, so this is
-not blocking anything except calling W1 accepted.
-
-**Evidence to return:** the decision, one line.
+**Engineering evidence still required (C-W1-4):** persist trusted verification-method/replacement provenance, revoke the relevant attestations atomically with factor activation and recovery-set rotation, explain the effect before confirmation, and prove both paths plus transaction rollback/concurrency. Do not ask for this policy decision again.
 
 ### W1-2 · Provide an email provider for invitations
 

@@ -21,7 +21,11 @@ if [ "$mode" = --browser ]; then
   docker build --build-arg "AXIOM_RELEASE_SHA=$revision" -f infra/docker/Dockerfile.marketing -t axiom-acceptance-marketing:local .
 fi
 containers=()
-cleanup() { for container in "${containers[@]}"; do docker rm -f "$container" >/dev/null 2>&1 || true; done; }
+network_id=$(docker network create "axiom-http-$$")
+cleanup() {
+  for container in "${containers[@]}"; do docker rm -f "$container" >/dev/null 2>&1 || true; done
+  docker network rm "$network_id" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 for environment in preprod production; do
   if [ "$environment" = preprod ]; then port=57400; web_port=57410; marketing_port=57420; else port=57401; web_port=57411; marketing_port=57421; fi
@@ -36,11 +40,13 @@ env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict
 target={'schemaVersion':1,'deploymentId':f'http-{environment}','environment':environment,'topology':'local-docker','syntheticFixtures':True,'expectedRevision':revision,'bffUrl':f'http://127.0.0.1:{port}','webUrl':f'http://127.0.0.1:{sys.argv[5]}','marketingUrl':f'http://127.0.0.1:{sys.argv[6]}','supabaseUrl':status['API_URL'],'anonKey':status['ANON_KEY'],'publishableKey':status['PUBLISHABLE_KEY'],'serviceKey':status['SERVICE_ROLE_KEY']}
 (root/f'{environment}.json').write_text(json.dumps(target))
 web={k:env[k] for k in ['NODE_ENV','ENVIRONMENT','AXIOM_AUTH_MODE','SUPABASE_URL','SUPABASE_ANON_KEY','AXIOM_REGION']}
-web['BFF_PUBLIC_URL']=f'http://host.docker.internal:{port}'
+# Linux containers cannot reach host ports published only on loopback.
+# Use private Docker DNS for SSR -> BFF; keep browser ports loopback-only.
+web['BFF_PUBLIC_URL']=f'http://bff-{environment}:4000'
 (root/f'{environment}-web.env').write_text(''.join(f'{k}={v}\n' for k,v in web.items()))
 PY
   containers+=("$container")
-  docker run -d --name "$container" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment.env" -p "127.0.0.1:$port:4000" "$image" >/dev/null
+  docker run -d --name "$container" --network "$network_id" --network-alias "bff-$environment" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment.env" -p "127.0.0.1:$port:4000" "$image" >/dev/null
   ready=false
   for attempt in $(seq 1 60); do
     if curl --silent --fail "http://127.0.0.1:$port/health" >/dev/null; then ready=true; break; fi
@@ -52,7 +58,7 @@ PY
       app_container="axiom-http-${environment}-${app}-$$"
       containers+=("$app_container")
       if [ "$app" = web ]; then app_port=$web_port; internal_port=3001; else app_port=$marketing_port; internal_port=3000; fi
-      docker run -d --name "$app_container" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment-web.env" -p "127.0.0.1:$app_port:$internal_port" "axiom-acceptance-${app}:local" >/dev/null
+      docker run -d --name "$app_container" --network "$network_id" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment-web.env" -p "127.0.0.1:$app_port:$internal_port" "axiom-acceptance-${app}:local" >/dev/null
       ready=false
       for attempt in $(seq 1 60); do
         if curl --silent --fail "http://127.0.0.1:$app_port/" >/dev/null; then ready=true; break; fi
