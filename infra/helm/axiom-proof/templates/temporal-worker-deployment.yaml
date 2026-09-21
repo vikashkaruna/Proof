@@ -1,0 +1,73 @@
+{{/*
+Chart.yaml has listed temporal-worker among the bundled services since 0.1.0,
+build-images pushes axiom-temporal-worker on every main build, and values.yaml
+carries a temporalWorker block — but no Deployment existed, so a Helm install
+brought up an agent runtime that dispatches durable work to a worker pool that
+was never scheduled. Workflows would be accepted and then simply never run.
+
+No Service and no HTTP probes: this polls a Temporal task queue outbound and
+serves nothing. Environment mirrors the temporal-worker service in
+docker-compose.staging.yml and .preprod.yml.
+*/}}
+{{- if .Values.temporalWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "axiom-proof.fullname" . }}-temporal-worker
+  labels:
+    {{- include "axiom-proof.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-worker
+spec:
+  replicas: {{ .Values.temporalWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "axiom-proof.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal-worker
+  template:
+    metadata:
+      labels:
+        {{- include "axiom-proof.podLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal-worker
+    spec:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      serviceAccountName: {{ include "axiom-proof.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: temporal-worker
+          image: "{{ .Values.image.registry }}/axiom-temporal-worker:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.config.temporalAddress }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.config.temporalNamespace }}
+            - name: TEMPORAL_TLS
+              value: {{ .Values.temporalWorker.env.TEMPORAL_TLS | quote }}
+            - name: TEMPORAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-temporal
+                  key: api-key
+            - name: AGENT_RUNTIME_URL
+              value: {{ .Values.config.agentRuntimeUrl }}
+            - name: AGENT_RUNTIME_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-internal
+                  key: agent-runtime-token
+          resources:
+            {{- toYaml .Values.temporalWorker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      automountServiceAccountToken: false
+{{- end }}

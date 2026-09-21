@@ -14,7 +14,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "axiom-proof.selectorLabels" . | nindent 8 }}
+        {{- include "axiom-proof.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
       imagePullSecrets:
