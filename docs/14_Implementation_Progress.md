@@ -1,5 +1,13 @@
 # W0 → W1 → W2 → W3 implementation progress
 
+## 22 September 2026 — accepted recovery replacement policy (Revision 29)
+
+Migration 0036 and BFF persist trusted challenge provenance and require it when activating a replacement. Recovery-authorized activation clears the account's existing MFA attestations in the same transaction as the factor/recovery-set swap; TOTP-authorized replacement preserves them. The browser explains this before confirmation and handles stale replacement authorization with a restart. Pending replacements begun before the migration must restart; active credentials are preserved during upgrade.
+
+SQL proves missing/unknown/foreign/stale provenance refusal, rollback at both recovery persistence and session retirement, unrelated-user isolation, and both concurrent login orderings. A new real-browser journey verifies two sessions lose access and independently re-verify. Acceptance fixtures now create a separate enrolled internal analyst per verifying journey; no replay or authority check was weakened. BFF 312 tests, workspace test/lint/typecheck and four real-Auth API parity configurations pass. All 60 dev-server browser journeys and three negative SQL mutations pass. Final container and exact merge CI outcomes are recorded in the saved checkpoint after execution. See [review 18](audits/18-recovery-replacement-review-2026-09-22.md).
+
+W0, W1, W2 and W3 remain partial; W4 execution remains pending. Tip 0036, 37 migrations, 51 public tables, W2 named targets 19/40.
+
 Acceptance fixture correction: the three analyst journeys now provision separate enrolled accounts. Shared TOTP counters caused parallel tests to spend each other’s codes; replay protection and retry limits are unchanged. The exact merge CI remains the completion gate.
 
 Started 20 September 2026 with authorisation to implement in order and commit/merge/push each verified milestone to staging. Goal remains active until the complete acceptance criteria are proved. Revision 9 review/handoff documents are the starting requirements, not a claim of current completion.

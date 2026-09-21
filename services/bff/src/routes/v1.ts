@@ -161,6 +161,7 @@ export function v1Routes(deps: Deps) {
     // its own device, which is why enrolment is ledgered loudly rather than
     // logged quietly.
     const existingFactorId = await deps.mfa.activeFactorId(user.id);
+    let replacement: { factorId: string; challengeId: string } | undefined;
     if (existingFactorId) {
       const stepUp = await deps.mfa.consumeChallenge({
         challengeId: parsed.data.mfaChallengeId ?? undefined,
@@ -183,12 +184,14 @@ export function v1Routes(deps: Deps) {
           401,
         );
       }
+      replacement = { factorId: existingFactorId, challengeId: stepUp.challengeId };
     }
 
     const result = await deps.mfa.beginTotpEnrolment({
       userId: user.id,
       accountName: user.email ?? user.id,
       label: parsed.data.label ?? null,
+      replacement,
     });
 
     await deps.ledger.append({
@@ -199,7 +202,12 @@ export function v1Routes(deps: Deps) {
       actionType: LedgerActionType.MFA_FACTOR_ENROLLED,
       targetRef: result.factorId,
       result: 'success',
-      detail: { factorType: 'totp', label: parsed.data.label ?? null, replacing: existingFactorId },
+      detail: {
+        factorType: 'totp',
+        label: parsed.data.label ?? null,
+        replacing: existingFactorId,
+        replacementChallengeId: replacement?.challengeId ?? null,
+      },
     });
 
     // The secret and the URI are returned exactly once. They are not readable
@@ -252,6 +260,18 @@ export function v1Routes(deps: Deps) {
         result: 'failure',
         detail: { purpose: 'enrolment', reason: result.reason, detail: result.detail },
       });
+      if (result.reason === 'replacement_authorization_changed') {
+        return c.json(
+          {
+            error: {
+              code: result.reason,
+              message:
+                'Your authenticator changed or the replacement authorization is no longer valid. Restart enrollment and verify your current factor.',
+            },
+          },
+          409,
+        );
+      }
       if (result.reason === 'activation_failed') {
         return c.json(
           {

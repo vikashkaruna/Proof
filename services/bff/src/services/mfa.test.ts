@@ -560,7 +560,35 @@ describe('encryption key', () => {
 describe('atomic activation and recovery set', () => {
   it('keeps the old credentials on persistence failure and permits a later retry', async () => {
     const old = await enrol();
-    const next = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'replacement' });
+    const issued = await mfa.issueChallenge({
+      userId: USER,
+      tenantId: TENANT,
+      purpose: 'enrolment',
+      boundResourceRef: old.factorId,
+      boundPayloadSha256: factorBindingSha256('enrolment', old.factorId),
+    });
+    if (!issued.ok) throw new Error('challenge not issued');
+    expect(
+      await mfa.verifyChallenge({
+        userId: USER,
+        challengeId: issued.challengeId,
+        code: old.recoveryCodes[2]!,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await mfa.consumeChallenge({
+        userId: USER,
+        challengeId: issued.challengeId,
+        purpose: 'enrolment',
+        boundResourceRef: old.factorId,
+        boundPayloadSha256: factorBindingSha256('enrolment', old.factorId),
+      }),
+    ).toMatchObject({ ok: true });
+    const next = await mfa.beginTotpEnrolment({
+      userId: USER,
+      accountName: 'replacement',
+      replacement: { factorId: old.factorId, challengeId: issued.challengeId },
+    });
     db.failNextRpc('finalize_totp_enrolment');
     const input = { userId: USER, code: generateTotp(next.secret, T0 + STEP), atMs: T0 + STEP };
     expect(await mfa.activateTotpEnrolment(input)).toMatchObject({
@@ -568,7 +596,8 @@ describe('atomic activation and recovery set', () => {
       reason: 'activation_failed',
     });
     expect(await mfa.activeFactorId(USER)).toBe(old.factorId);
-    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(10);
+    // The replacement proof already spent one code; the failed transaction spends no more.
+    expect((await mfa.status(USER)).recoveryCodesRemaining).toBe(9);
     const challenge = await satisfiedApprovalChallenge();
     expect(
       await mfa.verifyChallenge({

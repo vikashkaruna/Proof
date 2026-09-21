@@ -4,7 +4,7 @@ Acceptance fixture correction: the three analyst journeys now provision separate
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 28, reviewed staging `d386fad`, 21 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 29, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W3 only, and — the part that is usually missing — **exactly what
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **36 migrations, 0000 → 0035**.
+non-zero on a failing migration. Expect **37 migrations, 0000 → 0036**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -236,18 +236,20 @@ running under identical rules everywhere, which only the divergence lane tests.
 
 # W1 · Tenancy, RBAC, MFA, personas
 
-**Current status: Partial.** The suite now has 59 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment, invitation delivery and the accepted recovery-replacement session change remain open. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
+**Current status: Partial.** The suite now has 60 browser journeys (including W3 inventory/proposal coverage) under `AXIOM_AUTH_MODE=strict`. C-W1-1 and C-W1-2 are delivered locally; deployment and invitation delivery remain open; C-W1-4 is implemented by 0036. Atomic recovery-code refresh is delivered by 0032 (review 13). Deploy that migration with the new BFF; the old activation RPC is intentionally no longer available to the service role.
 
 ## OPERATOR steps
 
-### W1-1 · Decide the session-attestation posture (blocks W1 acceptance)
+### W1-1 · Deploy the accepted session-attestation posture
 
-Open decision, recorded as
+Accepted policy, recorded as
 [Doc 11 E.2 item 3](11_Phase0-5_Gap_Closure_Plan.md#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it).
 
 **Resolved by the user, 21 Sep 2026:** replacement authorized by a recovery code must invalidate MFA attestations issued against the retired authenticator, requiring those sessions to verify MFA again. Replacement authorized by the current authenticator preserves existing attestations. The GoTrue login itself need not end.
 
-**Engineering evidence still required (C-W1-4):** persist trusted verification-method/replacement provenance, revoke the relevant attestations atomically with factor activation and recovery-set rotation, explain the effect before confirmation, and prove both paths plus transaction rollback/concurrency. Do not ask for this policy decision again.
+**C-W1-4 implemented in Revision 29 / 0036.** The consumed challenge records its verified method; pending replacements retain factor/challenge provenance. Recovery activation atomically ends all existing MFA attestations for that account, including assurance retained from earlier TOTP replacements. Current-factor replacement preserves assurance. The UI explains the effect before confirmation. SQL rollback/concurrency and two-session browser coverage accompany this change; exact merge CI is in the checkpoint. Do not ask for this policy decision again.
+
+Apply through 0036 and deploy BFF/web together. Existing active credentials are unchanged during upgrade. Pending replacements without recorded provenance return `replacement_authorization_changed` (409): restart enrollment and prove the current factor again. Do not populate method fields by guessing how a historic challenge was verified. Verify that both existing sessions lose protected access on recovery activation, then regain it independently after fresh MFA. No password-session logout is required.
 
 ### W1-2 · Provide an email provider for invitations
 
@@ -281,7 +283,7 @@ each succeeded, and the exact error code if any did not.
 | C-W1-1 | **Delivered, Rev 23.** Purpose-bound revocation UI, atomic credential/session retirement (0031), negative/API/browser/SQL/concurrency tests                   |
 | C-W1-2 | **Delivered, Rev 23.** Quarantined founder enrollment, recovery-code save and explicit verification continuation; API remains denied until login MFA succeeds |
 | C-W1-3 | Invitation flow. Provider/domain evidence gates real delivery, not implementation of the internal workflow and adapter contract                               |
-| C-W1-4 | Implement the W1-1 decision, with browser journeys either way                                                                                                 |
+| C-W1-4 | **Delivered, Rev 29.** Atomic recovery session policy (0036), provenance guards, UI notice, SQL fault/race tests and two-session browser journey              |
 
 ## How I mark W1 Closed
 

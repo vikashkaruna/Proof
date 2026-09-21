@@ -146,7 +146,11 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
 
 /** Each verifying journey owns its counter; concurrent tests cannot spend its code. */
 export async function signInFreshAnalyst(page: Page, label: string): Promise<void> {
-  const who = await createMfaAccount(label, { role: 'axiom_analyst', withFactor: true });
+  const who = await createMfaAccount(label, {
+    role: 'axiom_analyst',
+    withFactor: true,
+    isInternal: true,
+  });
   if (!who.totpSecret) throw new Error('Analyst journey requires an enrolled factor');
   await signInAs(page, who.email, who.password);
   await selectTenant(page, 'a');
@@ -174,7 +178,11 @@ export const planUrl = (id: string) => `/plans/${id}`;
  */
 export async function createMfaAccount(
   label: string,
-  opts: { withFactor?: boolean; role?: 'approver' | 'founder' | 'admin' | 'axiom_analyst' } = {},
+  opts: {
+    withFactor?: boolean;
+    isInternal?: boolean;
+    role?: 'approver' | 'founder' | 'admin' | 'axiom_analyst';
+  } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;
@@ -207,7 +215,12 @@ export async function createMfaAccount(
 
   // The application profile is a separate row; without it the tenant resolver
   // has an authenticated user with nothing to resolve.
-  await admin('/rest/v1/users', { id, email, is_axiom_internal: false }, 'journey profile', 201);
+  await admin(
+    '/rest/v1/users',
+    { id, email, is_axiom_internal: opts.isInternal ?? false },
+    'journey profile',
+    201,
+  );
   await admin(
     '/rest/v1/tenant_users',
     {

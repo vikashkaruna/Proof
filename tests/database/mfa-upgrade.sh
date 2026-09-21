@@ -23,9 +23,19 @@ insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypt
 insert into public.user_mfa_factors(user_id,factor_type,status,code_hash) values
  ('00000000-0000-4000-8000-000000000081','recovery_code','active','old-hash');
 SQL
-before=$(sql -c "select md5(jsonb_agg(t order by id)::text) from public.user_mfa_factors t")
+before=$(sql -c "select md5(jsonb_agg(to_jsonb(t)-'replaces_factor_id'-'replacement_challenge_id' order by id)::text) from public.user_mfa_factors t")
 python3 scripts/migrate-database.py --container "$container" --user postgres --database mfa_upgrade_test > "$fixture_dir/upgrade.log"
-[ "$before" = "$(sql -c "select md5(jsonb_agg(t order by id)::text) from public.user_mfa_factors t")" ]
+[ "$before" = "$(sql -c "select md5(jsonb_agg(to_jsonb(t)-'replaces_factor_id'-'replacement_challenge_id' order by id)::text) from public.user_mfa_factors t")" ]
 [ "$(sql -c "select has_function_privilege('service_role','public.activate_totp_factor(uuid,uuid,bigint)','execute')")" = f ]
 [ "$(sql -c "select has_function_privilege('service_role','public.finalize_totp_enrolment(uuid,uuid,bigint,text[])','execute')")" = t ]
+sql <<'SQL'
+do $$ begin
+  begin
+    perform public.finalize_totp_enrolment('00000000-0000-4000-8000-000000000081','00000000-0000-4000-8000-000000000083',42,
+      (select array_agg('scrypt$'||md5(i::text)||'$'||repeat(md5(i::text),2)) from generate_series(1,10) i));
+    raise exception 'legacy replacement activated without provenance';
+  exception when sqlstate 'PT409' then null; end;
+end $$;
+SQL
+[ "$before" = "$(sql -c "select md5(jsonb_agg(to_jsonb(t)-'replaces_factor_id'-'replacement_challenge_id' order by id)::text) from public.user_mfa_factors t")" ]
 echo 'MFA upgrade: existing active/pending factors and recovery rows preserved; BFF must use atomic completion.'

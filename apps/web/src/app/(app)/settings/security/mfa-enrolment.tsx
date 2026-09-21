@@ -262,8 +262,9 @@ export function MfaEnrolment({
         body: JSON.stringify({ code: code.trim() }),
       });
       if (!res.ok) {
-        const { message } = await readError(res, 'That code was not accepted');
+        const { code: errorCode, message } = await readError(res, 'That code was not accepted');
         setError(message);
+        if (errorCode === 'replacement_authorization_changed') setPending(null);
         return;
       }
       const body = await res.json();
@@ -359,7 +360,7 @@ export function MfaEnrolment({
               codes if you no longer have it.
               {stepUp.purpose === 'factor_revocation'
                 ? ' Revoking ends your recovery codes and MFA-verified sessions. You must enrol again if your role requires MFA.'
-                : ' The new authenticator is only issued once this is satisfied.'}
+                : ' If you use a recovery code, activating the replacement ends all existing MFA verifications, including this session. You must verify again with the new authenticator where MFA is required.'}
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1.5">

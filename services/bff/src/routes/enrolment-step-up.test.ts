@@ -335,3 +335,87 @@ describe('activation persistence errors', () => {
     expect(await mfa.isEnrolled(USER)).toBe(false);
   });
 });
+
+describe('replacement session policy', () => {
+  for (const method of ['totp', 'recovery_code'] as const) {
+    it(`${method} replacement applies the accepted session policy`, async () => {
+      const app = await buildApp();
+      const old = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'policy' });
+      const activated = await mfa.activateTotpEnrolment({
+        userId: USER,
+        code: generateTotp(old.secret, T0),
+        atMs: T0,
+      });
+      if (!activated.ok) throw new Error('initial enrollment failed');
+      for (const sessionId of ['this-session', 'other-session'])
+        await mfa.attestSession({ userId: USER, sessionId, factorId: old.factorId });
+      fake.seed('mfa_session_attestations', { user_id: 'another-user', revoked_at: null });
+      // An older TOTP replacement can leave a valid assurance from a prior device.
+      const inherited = fake.seed('mfa_session_attestations', {
+        user_id: USER,
+        factor_id: 'older-device',
+        revoked_at: null,
+      });
+      const opened = await post(app, '/v1/mfa/challenge', JSON.stringify({ purpose: 'enrolment' }));
+      const { challengeId } = (await opened.json()) as { challengeId: string };
+      expect(
+        await mfa.verifyChallenge({
+          userId: USER,
+          challengeId,
+          code:
+            method === 'totp' ? generateTotp(old.secret, T0 + STEP) : activated.recoveryCodes[0]!,
+          atMs: T0 + STEP,
+        }),
+      ).toMatchObject({ ok: true, satisfiedWith: method });
+      expect(fake.rows('mfa_challenges').find((r) => r.id === challengeId)?.satisfied_with).toBe(
+        method,
+      );
+      const begun = await post(
+        app,
+        '/v1/mfa/enrol',
+        JSON.stringify({ mfaChallengeId: challengeId }),
+      );
+      expect(begun.status).toBe(201);
+      const next = (await begun.json()) as { secret: string; factorId: string };
+      expect(fake.rows('user_mfa_factors').find((r) => r.id === next.factorId)).toMatchObject({
+        replaces_factor_id: old.factorId,
+        replacement_challenge_id: challengeId,
+      });
+      expect(
+        (
+          await post(
+            app,
+            '/v1/mfa/enrol/activate',
+            JSON.stringify({ code: generateTotp(next.secret) }),
+          )
+        ).status,
+      ).toBe(200);
+      for (const sessionId of ['this-session', 'other-session']) {
+        const attestation = await mfa.sessionAttestation({ userId: USER, sessionId });
+        expect(attestation === null).toBe(method === 'recovery_code');
+      }
+      expect(Boolean(inherited.revoked_at)).toBe(method === 'recovery_code');
+      expect(
+        fake.rows('mfa_session_attestations').find((r) => r.user_id === 'another-user')?.revoked_at,
+      ).toBeNull();
+    });
+  }
+
+  it('refuses legacy pending replacement without trusted provenance', async () => {
+    const app = await buildApp();
+    await enrolFirstFactor();
+    const pending = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'legacy' });
+    const result = await post(
+      app,
+      '/v1/mfa/enrol/activate',
+      JSON.stringify({ code: generateTotp(pending.secret) }),
+    );
+    expect(result.status).toBe(409);
+    expect(await result.json()).toMatchObject({
+      error: { code: 'replacement_authorization_changed' },
+    });
+    expect(fake.rows('user_mfa_factors').find((r) => r.id === pending.factorId)?.status).toBe(
+      'pending',
+    );
+  });
+});
