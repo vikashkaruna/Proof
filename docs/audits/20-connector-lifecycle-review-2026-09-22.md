@@ -9,6 +9,8 @@ Baseline: staging `c79c303` (CI 35647963475 green), with no newer upstream work.
 - A lifecycle API must serialize with parent archival, invalidate stale edits and prevent re-enabling old grants. 0038 repeats/locks membership and orders parent/resource locks; disable revokes grants and archive revokes credential envelopes in the audit transaction.
 - TypeScript/Python YAML implementations interpret some scalars differently. Shared catalogue fixtures and strict numeric/boolean rules prevent ambiguous descriptor interpretation. Both reject aliases/tags/duplicates/unknown fields; manifests carry no addresses or secrets.
 
+A compiled-entry-point smoke check found the YAML catalogue absent from `dist`. The BFF build now copies the reviewed descriptor assets; both source and compiled registry imports are checked. Docker acceptance on the first implementation commit uses the established source entry point; final merge CI covers the packaging correction.
+
 ## Implementation boundary
 
 Human registration is inventory management, not an agent action against a client system. No connector executes, no target identity is provisioned, and no token is minted by this milestone. ReadConnector and WriteConnector are separate interfaces; context fields are not authority. W4.2–W4.4 must authenticate the workload and re-check the live descriptor, connector, parents, grants, scopes and approval on every invocation. Future transports must reject non-production writes even if an old metadata row suggests otherwise.
@@ -24,3 +26,5 @@ The catalogue contains two immutable PostgreSQL descriptor definitions (producti
 - Real-Auth API and browser journeys: lifecycle/replay, non-secret references, non-production label, unknown health, disabled edits, terminal archival, tenant isolation and lost-response retry. Exact committed container/CI outcomes are saved in the private checkpoint; pending or failed runs do not establish closure.
 
 Next implementation: W4.2 broker/vault/rotation, then W4.3 identity and W4.4 grants; complete W3 wizard/graph on those enforced boundaries. W4 execution and the full W3 roadmap remain open.
+
+The first container browser run on `0e14602` was not green: a generic alert selector counted Next's empty route announcer, and `getByLabel` could not match the implicit label containing option text despite a visible, correctly named combobox. Tests now use the accessible combobox role and scope alerts to main content. The owner fixture is tenant-A-only, so a forged B preference is expected to be ignored and an explicit B API request refused. These fixture corrections retain strict auth and zero retries; the complete lane must be rerun.

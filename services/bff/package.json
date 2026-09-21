@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-connector-descriptors.mjs",
     "start": "node dist/index.js",
     "lint": "axiom-lint",
     "typecheck": "tsc --noEmit",

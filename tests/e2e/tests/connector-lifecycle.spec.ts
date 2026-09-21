@@ -40,9 +40,9 @@ test('owner registers a connector without claiming connectivity and manages its 
     page.getByText('Connector execution is not yet available.', { exact: false }),
   ).toBeVisible();
   const create = page.getByRole('region', { name: 'Register connector', exact: true });
-  await create.getByLabel('System', { exact: true }).selectOption(system.id);
+  await create.getByRole('combobox', { name: 'System', exact: true }).selectOption(system.id);
   await create
-    .getByLabel('Descriptor', { exact: true })
+    .getByRole('combobox', { name: 'Descriptor', exact: true })
     .selectOption('41410000-0000-4000-8000-000000000002');
   await create.getByLabel('Registration name').fill(`Reference ${suffix}`);
   await create.getByLabel('Endpoint reference').fill(`crm_${suffix}`);
@@ -82,9 +82,13 @@ test('owner registers a connector without claiming connectivity and manages its 
 test('viewer reads real connector inventory without registration controls', async ({ page }) => {
   await signIn(page, 'viewer');
   await selectTenant(page, 'a');
+  const catalogue = page.waitForResponse((r) =>
+    r.url().endsWith('/api/bff/v1/connector-catalogue'),
+  );
   await page.goto('/connectors');
+  expect((await catalogue).status()).toBe(200);
   await expect(page.getByRole('heading', { name: 'Connectors', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create registration' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Enable registration' })).toHaveCount(0);
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
 });
