@@ -84,5 +84,17 @@ export default defineConfig({
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },
+        {
+          // The marketing site. The persona journeys do not touch it, but the
+          // public-surface specs do, and dropping it from here turned four
+          // dormant specs into ECONNREFUSED the moment the suite could run at
+          // all.
+          command: 'pnpm --filter @axiom/marketing dev',
+          port: 3000,
+          cwd: repoRoot,
+          env: webEnv,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
       ],
 });
