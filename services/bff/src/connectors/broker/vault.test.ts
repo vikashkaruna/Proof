@@ -16,6 +16,21 @@ const actor: VaultActor = {
 };
 const connectorId = '42420000-0000-4000-8000-000000000006' as ConnectorId;
 const descriptorId = '42420000-0000-4000-8000-000000000005';
+const profile = () =>
+  Buffer.from(
+    JSON.stringify({
+      version: 1,
+      grantType: 'client_credentials',
+      tokenEndpoint: 'https://auth.test.invalid/token',
+      clientAuth: {
+        method: 'client_secret_basic',
+        clientId: 'fixture',
+        clientSecret: 'fixture-client-secret',
+      },
+      allowedScopes: ['inventory.read'],
+      maxTokenLifetimeSeconds: 300,
+    }),
+  );
 /** In-memory wrapping service for storage-adapter tests only. Envelopes contain
  * opaque handles, never the fixture's clear DEKs. Crypto conformance is separate. */
 function wrapper(ref = 'fixture/key') {
@@ -133,12 +148,24 @@ function fixture() {
   };
 }
 describe('credential vault administrative adapter', () => {
+  it('rejects malformed and mismatched OAuth profiles before wrapping or persistence', async () => {
+    for (const secret of [Buffer.from('raw secret'), Buffer.from('{}'), profile()]) {
+      const f = fixture();
+      const key = wrapper();
+      await expect(
+        new CredentialVault(f.db, key).create(actor, connectorId, 'jwt_bearer', secret),
+      ).rejects.toThrow(VaultError);
+      expect(key.wrap).not.toHaveBeenCalled();
+      expect(f.requests.some((r) => r.body)).toBe(false);
+      expect(secret).toEqual(Buffer.alloc(secret.length));
+    }
+  });
   it('persists only authenticated ciphertext, scopes reads, rotates with CAS and returns safe receipts', async () => {
     const f = fixture();
     const initial = wrapper();
     const next = wrapper('fixture/new');
     const vault = new CredentialVault(f.db, initial);
-    const secret = Buffer.from('fixture-client-secret');
+    const secret = profile();
     const receipt = await vault.create(actor, connectorId, 'client_credentials', secret);
     expect(secret).toEqual(Buffer.alloc(secret.length));
     expect(receipt).toEqual({ credentialId: expect.any(String), revision: 1, revoked: false });
@@ -179,7 +206,7 @@ describe('credential vault administrative adapter', () => {
       },
       next,
     );
-    expect(decrypted.toString()).toBe('fixture-client-secret');
+    expect(decrypted).toEqual(profile());
     decrypted.fill(0);
     for (const request of f.requests.filter((r) =>
       ['connectors', 'connector_credentials', 'tenant_users'].includes(
@@ -195,7 +222,7 @@ describe('credential vault administrative adapter', () => {
     const f = fixture();
     f.setRole('viewer');
     const key = wrapper();
-    const secret = Buffer.from('sensitive');
+    const secret = profile();
     await expect(
       new CredentialVault(f.db, key).create(actor, connectorId, 'client_credentials', secret),
     ).rejects.toThrow(VaultError);
@@ -214,12 +241,7 @@ describe('credential vault administrative adapter', () => {
       const f = fixture();
       const key = wrapper();
       const vault = new CredentialVault(f.db, key);
-      const receipt = await vault.create(
-        actor,
-        connectorId,
-        'client_credentials',
-        Buffer.from('sensitive'),
-      );
+      const receipt = await vault.create(actor, connectorId, 'client_credentials', profile());
       f.patchStored(change);
       await expect(
         vault.rotate(actor, connectorId, receipt.credentialId as CredentialId, wrapper()),
@@ -231,12 +253,7 @@ describe('credential vault administrative adapter', () => {
     const f = fixture();
     const key = wrapper();
     const vault = new CredentialVault(f.db, key);
-    const receipt = await vault.create(
-      actor,
-      connectorId,
-      'client_credentials',
-      Buffer.from('sensitive'),
-    );
+    const receipt = await vault.create(actor, connectorId, 'client_credentials', profile());
     const before = JSON.stringify(f.stored());
     f.failRpc();
     await expect(

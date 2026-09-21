@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { OAuthProfileSchema } from './oauth-grants.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import {
@@ -170,6 +171,11 @@ export class CredentialVault {
     try {
       const context = await this.context(actor, connectorId);
       const identity = this.identity(actor, context, randomUUID() as CredentialId, grantType);
+      if (
+        secret.length > 32768 ||
+        OAuthProfileSchema.parse(JSON.parse(secret.toString('utf8'))).grantType !== grantType
+      )
+        throw new VaultError();
       const envelope = await sealCredential(identity, secret, this.wrapper);
       return await this.persist(actor, identity, 'create', context.connector.version, 0, envelope);
     } catch {
