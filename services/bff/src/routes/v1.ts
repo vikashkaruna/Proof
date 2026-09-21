@@ -938,22 +938,13 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: stepUp.reason, message } }, 401);
     }
 
-    // ── What is being approved, before it is signed ───────────────────
-    //
-    // Read first, because the digest goes INSIDE the signed spec: the token
-    // then says what was approved and not merely which rows. `issue_plan_approval`
-    // recomputes it under the action row locks and refuses if it has moved, so
-    // a token can only ever be persisted carrying a digest that was true at
-    // the moment it became authority.
-    //
-    // Both ends use the same SQL function, so they agree by construction
-    // rather than by two languages canonicalising JSON identically — the
-    // assumption R-05 disproved.
+    // Hash the SAME rows used by the MFA binding, never a newer database
+    // read. Migration 0028 compares this snapshot and the plan revision under
+    // the issuance locks; an intervening edit must require a fresh review.
     const correlationId = randomUUID();
-
     const { data: expectedDigest, error: digestErr } = await admin.rpc(
-      'action_set_content_digest',
-      { p_tenant_id: tenantId, p_plan_id: input.planId, p_action_ids: input.actionIds },
+      'reviewed_action_content_digest',
+      { p_actions: actions ?? [] },
     );
     if (digestErr || typeof expectedDigest !== 'string') {
       logger.error({ err: digestErr?.message, planId: input.planId }, 'content digest unreadable');
@@ -985,7 +976,8 @@ export function v1Routes(deps: Deps) {
     // token live with NO ledger entry, which is authority over a client's
     // estate with no tamper-evident record of who granted it.
     //
-    const { data: issuance, error: issueErr } = await admin.rpc('issue_plan_approval', {
+    const { data: issuance, error: issueErr } = await admin.rpc('issue_reviewed_plan_approval', {
+      p_expected_plan_version: plan.version,
       p_tenant_id: tenantId,
       p_plan_id: input.planId,
       p_action_ids: input.actionIds,
@@ -1031,23 +1023,22 @@ export function v1Routes(deps: Deps) {
       // burning a challenge and refusing costs a re-authentication, which is
       // the safe direction. Each of these is a refusal the route's own earlier
       // reads could not see, because they were taken before the row locks.
-      const message =
-        issued?.decision === 'content_changed'
-          ? 'An action changed while this approval was being issued. Re-read the plan and approve again.'
-          : issued?.decision === 'actions_not_ready'
-            ? 'A dry-run expired or a rollback became invalid while this approval was being issued.'
-            : issued?.decision === 'actions_in_flight'
-              ? 'Some of these actions are already executing or finished.'
-              : issued?.decision === 'actions_not_found'
-                ? 'Every requested action must belong to this tenant and plan.'
-                : 'This approval could not be issued.';
+      const message = ['content_changed', 'plan_changed'].includes(issued?.decision ?? '')
+        ? 'The plan or an action changed while this approval was being issued. Re-read the plan and approve again.'
+        : issued?.decision === 'actions_not_ready'
+          ? 'A dry-run expired or a rollback became invalid while this approval was being issued.'
+          : issued?.decision === 'actions_in_flight'
+            ? 'Some of these actions are already executing or finished.'
+            : issued?.decision === 'actions_not_found'
+              ? 'Every requested action must belong to this tenant and plan.'
+              : 'This approval could not be issued.';
       logger.warn(
         { decision: issued?.decision, planId: input.planId },
         'approval refused under row locks',
       );
       return c.json(
         { error: { code: issued?.decision ?? 'approval_refused', message } },
-        issued?.decision === 'content_changed' ? 409 : 422,
+        ['content_changed', 'plan_changed'].includes(issued?.decision ?? '') ? 409 : 422,
       );
     }
 

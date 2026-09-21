@@ -2,11 +2,23 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 13 — EXECUTOR SNAPSHOT ENFORCEMENT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `5a4d6a0`, including all eight Claude commits after `8877e75`; follow-up fixes include migration 0021.
+**Document:** 11 · **Revision 14 — REVIEWED APPROVAL SNAPSHOT** (21 Sep 2026) · **Status:** W0/W1/W2 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `369bcf7`, including atomic issuance (0026), its portability correction, and claim snapshot enforcement (0027).
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 
-## Revision 13 — current implementation checkpoint
+## Revision 14 — current implementation checkpoint
+
+Integrated staging `369bcf7` without discarding the other model's work. The follow-up review found a remaining gap: MFA verified the route's first action read, but the signed digest came from a **second live read after challenge consumption**. An edit between the reads became new signed authority; the two regression tests returned 201 before this correction.
+
+Migration **0028** adds a pure database digest helper for the exact action rows already verified by MFA. The route sends those server-read rows, not a client-provided snapshot. The issuance entrypoint locks and checks the reviewed plan revision and status, then delegates to the existing atomic action/token/ledger transaction. The underlying action digest representation is unchanged, including existing signed tokens; the old issuance entrypoint is no longer callable by `service_role`. Challenge consumption remains outside issuance, preserving the deliberate safe-side tradeoff.
+
+Delivered: action-edit and revision regression tests, digest compatibility against the 0026 implementation, positive issuance, direct-client/legacy-entrypoint restrictions, and actual writer-versus-issuer PostgreSQL races. Local acceptance: 258 BFF tests, typecheck/lint, 0000–0028 SQL and DSN suites, four concurrency suites, and all four real Auth/MFA parity labels. See [review 09](audits/09-reviewed-approval-snapshot-2026-09-21.md) and [saved session](15_Session_Handoff.md).
+
+W0/W1/W2 remain **partial**. Next W1 work is strict browser persona journeys and MFA key rotation; real executor snapshot verification belongs with the W4/W5 connector/executor implementation. W0 deployment acceptance remains constrained by the accepted no-billable/irreversible rule. W2 estate/system/engagement modeling is still pending. Migration allocation is through **0028**; previous revision sections are historical where they conflict with this one.
+
+---
+
+## Revision 13 — prior implementation checkpoint
 
 Migration 0027. Revision 12 verified the content digest when an approval was issued; nothing downstream checked it, so the token named which rows to execute and not what they contained.
 
@@ -27,7 +39,7 @@ Migration allocation is through **0027**. Everything Revision 12 records as rema
 
 ---
 
-## Revision 12 — current implementation checkpoint
+## Revision 12 — prior implementation checkpoint
 
 Continues from staging `8476d8c`. The 21 September review named atomic approval issuance as the next W1 safety slice; migration 0026 delivers it and the approve route is wired onto it.
 
@@ -45,7 +57,7 @@ Migration allocation is through **0026**. Everything Revision 11 records as rema
 
 ---
 
-## Revision 11 — current implementation checkpoint
+## Revision 11 — prior implementation checkpoint
 
 Reviewed and incorporated staging `ea27df9` and its ten commits after `84c3b16`; no accepted work was discarded. See [the saved session handoff](15_Session_Handoff.md), [progress](14_Implementation_Progress.md), and [21 September review](audits/07-staging-integration-review-2026-09-21.md). The previous revision below is historical where it conflicts with this checkpoint.
 

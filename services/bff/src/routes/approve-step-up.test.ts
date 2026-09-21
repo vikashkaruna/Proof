@@ -60,6 +60,7 @@ function seedApprovablePlan() {
     id: PLAN,
     tenant_id: TENANT,
     status: 'review',
+    version: 1,
     library_version: '0.1.1',
   });
   for (const id of [ACTION_A, ACTION_B]) {
@@ -85,9 +86,9 @@ async function buildApp(role: UserRole = UserRole.APPROVER) {
       verify: async () => ({ valid: true }),
       isActionCovered: () => true,
       markNonceUsed: vi.fn(),
-      issue: async () => ({
+      issue: async (_tenantId: string, input: Record<string, unknown>) => ({
         signature: 'sig',
-        spec: { nonce: 'nonce-1' },
+        spec: { ...input, nonce: 'nonce-1' },
       }),
     } as never,
     killSwitch: { isActive: async () => false } as never,
@@ -551,6 +552,45 @@ describe('POST /v1/plans/approve — the binding covers action content', () => {
     expect(fake.rows('approval_tokens')).toHaveLength(1);
   });
 
+  it('refuses a plan revision changed after MFA consumption', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    const consume = mfa.consumeChallenge.bind(mfa);
+    vi.spyOn(mfa, 'consumeChallenge').mockImplementation(async (opts) => {
+      const result = await consume(opts);
+      fake.rows('remediation_plans')[0]!.version = 2;
+      return result;
+    });
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'plan_changed' } });
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it.each(['parameters', 'dry_run_result'])(
+    'refuses %s edited after MFA consumption but before digest acquisition',
+    async (field) => {
+      const app = await buildApp();
+      const challengeId = await freshStepUp(app);
+      const consume = mfa.consumeChallenge.bind(mfa);
+      vi.spyOn(mfa, 'consumeChallenge').mockImplementation(async (opts) => {
+        const result = await consume(opts);
+        fake.rows('remediation_actions').find((row) => row.id === ACTION_A)![field] = {
+          changed: true,
+        };
+        return result;
+      });
+      const res = await post(
+        app,
+        '/v1/plans/approve',
+        approveBody({ mfaChallengeId: challengeId }),
+      );
+      expect(res.status).toBe(409);
+      expect(fake.rows('approval_tokens')).toHaveLength(0);
+      expect(fake.rows('audit_ledger')).toHaveLength(0);
+    },
+  );
+
   it('refuses at the database when content moves after the route has read it', async () => {
     // The window the step-up binding cannot see. The route verifies the
     // binding, then reads the content, then writes — and anything with update
@@ -561,7 +601,7 @@ describe('POST /v1/plans/approve — the binding covers action content', () => {
     // issuing function computes, which is exactly what a concurrent edit does.
     const app = await buildApp();
     const challengeId = await freshStepUp(app);
-    fake.onRpc('action_set_content_digest', () => 'digest-from-before-the-edit');
+    fake.onRpc('reviewed_action_content_digest', () => 'digest-from-before-the-edit');
 
     const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
 

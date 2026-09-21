@@ -1,6 +1,6 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11 Revision 12](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md) first. The most recent reviews are [audit 06](audits/06-resumed-implementation-review-2026-09-20.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md).
+> **Current status lives elsewhere.** Read [Doc 11 Revision 14](11_Phase0-5_Gap_Closure_Plan.md), [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md) first. The most recent reviews are [audit 06](audits/06-resumed-implementation-review-2026-09-20.md) and [audit 07](audits/07-staging-integration-review-2026-09-21.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
