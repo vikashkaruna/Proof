@@ -9,6 +9,8 @@
 
 ## Revision 36 — C-W0-5 service IAM isolation
 
+Cross-script follow-up: `sync-env.sh secrets` no longer creates IAM bindings, so it cannot restore access for the retired shared account. Secret creation/version failures now stop the command; Cloud Run sync merges environment changes instead of replacing managed bindings, preserves the Terraform-selected identity and stops on update failure. Seven executable tests use an isolated fake `gcloud` with synthetic inputs; they make no cloud requests and assert no secret output or IAM mutation. The deployment suite now has **17 tests**. Secret sync does not remove retiring-key resources/grants: finish rotation with the reviewed full Terraform plan/apply.
+
 Reviewed staging `a5ba641` and green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505): 17 applicable jobs passed; six exact-merge artifacts verify 61 SPIRE outcomes, five real Postgres audit outcomes and 63 browser/89 API checks per configuration. The runtime audit milestone is complete. No intervening upstream implementation was present.
 
 C-W0-5 engineering now assigns nine distinct Cloud Run identities with 29 explicit secret-level grants and a BFF-only conditional retiring MFA grant. Project-wide secret, artifact and Cloud SQL runtime roles are removed. Unused BFF database-password/Redis bindings are removed. The runtime now receives its actual Supabase URL/service key, and Temporal receives its strict environment and internal transport token. Every service rollout waits for required IAM grants/secret versions; deployment and teardown target the new resources. The sensitive MFA resource-count expression is corrected without exposing key material.
