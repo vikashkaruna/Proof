@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `e0db93d`, CI 35680568394 green. Backend dispatch/schema acceptance passed; Revision 39 UI correction requires its own exact-merge CI checkpoint. Assessment provenance and full worker/tool integration remain open.
+Current verified staging checkpoint: `180ae52`, CI 35681594813 green. Revision 39 UI correction is verified; Revision 40 tenant routing requires its own exact-merge gate. Assessment provenance and full worker/tool integration remain open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 40 — dynamic tenant routing
+
+Revision 39 is complete and green at staging `180ae52`, CI [35681594813](https://github.com/vikashkaruna/Proof/actions/runs/35681594813): 17 applicable jobs passed, with six exact-merge artifacts verifying 65 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging changes were present.
+
+Review found the browser BFF bridge translated only three demo slugs and otherwise targeted Meridian. Arbitrary customer slugs could therefore fail, or act in the wrong tenant when the caller belonged to both. The bridge now verifies the signed-in user and resolves its cookie through that user's RLS-scoped memberships. Unknown, stale and revoked selections return 403 without forwarding; lookup failure returns a sanitized 503. With no cookie it selects the first actual membership by stable tenant ID, matching the shared page context and app shell. Slug and UUID preferences both work. Explicit headers remain independently membership/MFA checked by the BFF. Only exact onboarding and tenant-discovery method/path pairs remain tenantless, with any incoming tenant header removed.
+
+Validation: **76 web unit tests**, including 17 route regressions, and one new **real Auth/PostgREST/BFF browser journey** covering custom-tenant reads and writes, slug/UUID SSR agreement, invalid-cookie mutation refusal, foreign-header denial and membership revocation. Workspace tests, lint, typecheck, format and security gates passed. This is real tenant-routing acceptance, not an injected BFF response. Expected full browser acceptance is now **66 journeys per configuration**; exact merge CI is recorded separately in the saved session checkpoint. No schema change: 0041 / 42 migrations / 52 public tables; W2 targets 19/40.
+
+**Remaining:** assessment source-data provenance, W4.3 isolated workers/private task tools/trust lifecycle/actor chains, W4.4 live grants/approval, full W3 wizard/readiness and graph, then W4.5/6/7. The overall goal remains active. SSR may still display a permitted fallback page for an invalid cookie, but implicit bridge operations refuse until the user selects a valid tenant. Portal's separate legacy selection/fallback logic should be consolidated during provenance review. See [review 29](audits/29-tenant-routing-review-2026-09-22.md).
 
 ## Revision 39 — confirmed agent results in the UI
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { selectTenantMembership, type TenantMembership } from '@/lib/tenant-selection';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
@@ -38,26 +39,60 @@ async function forward(request: NextRequest, context: RouteContext) {
     request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${accessToken}`);
-  // W1 follow-up: when no tenant has been selected this falls back to the first
-  // fixture tenant. That is a UX default, not an authorisation one — since W0.0
-  // the BFF verifies membership against `tenant_users` before honouring any
-  // X-Tenant-Id, so a caller who is not a member of the default gets a 403
-  // rather than another tenant's data.
-  if (!headers.has('x-tenant-id')) {
-    const activeTenantSlug = request.cookies.get('axiom_active_tenant')?.value;
-    const tenantMap: Record<string, string> = {
-      meridian: '00000000-0000-0000-0000-000000000001',
-      aarogya: '00000000-0000-0000-0000-000000000002',
-      streamline: '00000000-0000-0000-0000-000000000003',
-    };
-    const tenantId =
-      (activeTenantSlug && tenantMap[activeTenantSlug]) ||
-      (activeTenantSlug &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeTenantSlug)
-        ? activeTenantSlug
-        : '00000000-0000-0000-0000-000000000001');
-    headers.set('x-tenant-id', tenantId);
+  // These exact endpoints run before a caller has a tenant. The BFF still
+  // authenticates and authorizes them; the bridge supplies no tenant scope.
+  const tenantless =
+    (request.method === 'POST' && target.pathname === '/v1/organizations/onboard') ||
+    (request.method === 'GET' && target.pathname === '/v1/user/tenants');
+  if (tenantless) {
+    headers.delete('x-tenant-id');
+  } else if (!headers.has('x-tenant-id')) {
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return NextResponse.json(
+          { error: { code: 'unauthorized', message: 'Invalid session' } },
+          { status: 401 },
+        );
+      }
+      const { data, error } = await supabase
+        .from('tenant_users')
+        .select('tenant_id, tenants:tenant_id(slug)')
+        .eq('user_id', user.id);
+      if (error) throw new Error('membership_lookup_failed');
+      const selected = selectTenantMembership(
+        (data ?? []) as unknown as TenantMembership[],
+        request.cookies.get('axiom_active_tenant')?.value,
+      );
+      if (!selected) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'tenant_selection_required',
+              message: 'Select a tenant you belong to before continuing.',
+            },
+          },
+          { status: 403 },
+        );
+      }
+      headers.set('x-tenant-id', selected.tenant_id);
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'tenant_lookup_unavailable',
+            message: 'Unable to verify the selected tenant. Try again.',
+          },
+        },
+        { status: 503 },
+      );
+    }
   }
+  // Explicit headers are intentional selections. The BFF independently checks
+  // current membership and MFA for them, as it does for resolved cookies.
   // The browser is the client here, and a client is entitled to generate its
   // own idempotency key — but it must be stable across a retry or it buys
   // nothing. `Date.now()` + `Math.random()` is unique per attempt, so a

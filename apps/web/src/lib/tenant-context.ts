@@ -1,3 +1,4 @@
+import { selectTenantMembership } from './tenant-selection';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient, sessionIdFromAccessToken } from '@axiom/supabase';
@@ -195,7 +196,7 @@ export async function requireTenantContext(
     .eq('user_id', user.id);
 
   const rows = (memberships ?? []) as unknown as MembershipRow[];
-  const [firstMembership] = rows;
+  const firstMembership = selectTenantMembership(rows);
   if (!firstMembership) redirect('/onboarding');
 
   const cookieStore = await cookies();
@@ -205,9 +206,7 @@ export async function requireTenantContext(
   // The cookie is a *preference*, not an authorisation. If it names a tenant
   // the user is not a member of, it is ignored rather than honoured — the
   // previous code queried whatever slug the cookie carried.
-  const selected =
-    (wanted ? rows.find((r) => readTenant(r.tenants).slug === wanted) : undefined) ??
-    firstMembership;
+  const selected = selectTenantMembership(rows, wanted) ?? firstMembership;
 
   const tenant = readTenant(selected.tenants);
 

@@ -24,27 +24,29 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .select('tenant_id, role, tenants:tenant_id(slug, name)')
     .eq('user_id', user.id);
 
-  const tenants = (memberships ?? []).map((m) => {
-    // Handle Supabase single or array relationship type
-    const tenantRel = m.tenants as unknown;
-    let name = 'Unknown';
-    let slug = '';
-    if (Array.isArray(tenantRel) && tenantRel[0]) {
-      name = tenantRel[0].name ?? 'Unknown';
-      slug = tenantRel[0].slug ?? '';
-    } else if (tenantRel && typeof tenantRel === 'object' && 'name' in tenantRel) {
-      const rel = tenantRel as { name?: string; slug?: string };
-      name = rel.name ?? 'Unknown';
-      slug = rel.slug ?? '';
-    }
+  const tenants = [...(memberships ?? [])]
+    .sort((a, b) => a.tenant_id.localeCompare(b.tenant_id))
+    .map((m) => {
+      // Handle Supabase single or array relationship type
+      const tenantRel = m.tenants as unknown;
+      let name = 'Unknown';
+      let slug = '';
+      if (Array.isArray(tenantRel) && tenantRel[0]) {
+        name = tenantRel[0].name ?? 'Unknown';
+        slug = tenantRel[0].slug ?? '';
+      } else if (tenantRel && typeof tenantRel === 'object' && 'name' in tenantRel) {
+        const rel = tenantRel as { name?: string; slug?: string };
+        name = rel.name ?? 'Unknown';
+        slug = rel.slug ?? '';
+      }
 
-    return {
-      id: m.tenant_id,
-      role: m.role,
-      name,
-      slug,
-    };
-  });
+      return {
+        id: m.tenant_id,
+        role: m.role,
+        name,
+        slug,
+      };
+    });
 
   // The persona for the tenant currently being acted in — not a union across
   // memberships. Someone who owns tenant A and merely views tenant B must see
