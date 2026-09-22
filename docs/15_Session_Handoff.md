@@ -1,5 +1,15 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 43 — confirmed assessment runs and recovery
+
+Revision 42 is **complete and green** at staging `66a9ec4`, CI [35687544717](https://github.com/vikashkaruna/Proof/actions/runs/35687544717), with all 17 applicable jobs and seven exact-merge artifacts: 67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 11 real worker outcomes. No intervening upstream implementation was present.
+
+The next W4.3 component independently confirms a committed assessment after a lost worker response. Migration **0043** validates the task/run/packet binding, recomputes SQL digests and checks actual immutable start/completion receipts before atomically recording terminal run success and one `workload.task_completed` receipt. Retries do not duplicate it; audit failure leaves the earlier persisted assessment intact and the run unconfirmed. Existing cancellations or contradictory terminal records are preserved. Historical confirmation can occur after authority ends; it cannot revive task access or write findings. The BFF adapter accepts only trusted expected controller context, not worker success claims, and exposes no new worker/browser route.
+
+Validation: **624 BFF tests**, **187 Python tests**, workspace tests/lint/typecheck, acceptance TypeScript and format/security gates; **44 migrations, 13 concurrency suites, 9 populated upgrades**. Real worker acceptance now has **14 outcomes**, including deliberately lost response recovery and terminal task refusal. Exact follow-up CI and its seven artifacts are recorded separately in the saved session. Schema **0043**, **53 public tables**, W2 named targets **19/40**. See [review 32](audits/32-assessment-confirmation-review-2026-09-22.md).
+
+**Next:** trusted idempotent issuance/dispatch, bounded worker launch/private payload delivery and automated recovery scheduling; production trust/registration, remaining scoped workers and actor chains; W4.4 grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. The UI still uses the legacy runtime and default BFF startup keeps the new tools unavailable. Confirmation engineering is delivered; full production orchestration, W3/W4 and the overall goal remain partial. Preserve the W0/W1/W2 remainder.
+
 ## Revision 42 — isolated assessment worker and transactional tools
 
 Revision 41 is **complete and green** at staging `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559). All 17 applicable jobs passed; six exact-merge artifacts verify 67 browser/89 API outcomes per configuration, 61 SPIRE and five runtime-audit outcomes. No intervening other-model staging commits were found.

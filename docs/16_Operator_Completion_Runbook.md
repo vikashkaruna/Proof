@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559) green. Saved assessment provenance is verified. Revision 42 adds local isolated worker/scoped-persistence acceptance; production activation and full W3/W4 remain open.
+Verified staging checkpoint: `66a9ec4`, CI [35687544717](https://github.com/vikashkaruna/Proof/actions/runs/35687544717) green. Isolated worker/persistence acceptance is verified. Revision 43 adds controller confirmation/recovery; full production dispatch and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 42, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 43, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 43 — confirmation and recovery acceptance
+
+**ENGINEERING delivered:** service-only confirmation of an already committed assessment using independently checked task/run/packet and ledger receipts. It records terminal success and a finalization receipt atomically, once. A missing worker response is recoverable. Cancellation/conflicting terminal states are preserved; mandatory audit failure does not report success. The BFF adapter is private to the controller, and no worker or browser confirmation route is exposed.
+
+**Evidence:** migration 0043, 624 BFF and 187 Python tests, 44 migrations/13 concurrency suites/9 populated upgrades. Reuse the Revision 42 commands below; expect **14** worker outcomes now. The actual worker acceptance discards a terminal response, then confirms the stored result and proves the task cannot write again. Verify the successor merge's seven sanitized artifacts and exact revision before calling the follow-up green.
+
+**Recovery:** use the trusted expected tenant/run/engagement/correlation/input context. Confirmation can record a result that committed before a later halt, revocation or demotion; it grants no new permission. Missing result means unconfirmed; an existing cancellation or contradictory terminal state means conflict. Preserve the recorded state for review, and never blindly rerun the worker. A succeeded result is durable application/audit state, not WORM-sealed evidence.
+
+**Still ENGINEERING:** idempotent dispatch, bounded production worker launch/private payload delivery, automatic recovery scheduling, trust/registration, remaining workers/actor chains, W4.4 and full W3. Default tool activation stays disabled and UI dispatch remains legacy. Table count stays 53; W2 named targets 19/40. See [review 32](audits/32-assessment-confirmation-review-2026-09-22.md).
 
 ## Revision 42 — isolated assessment worker acceptance
 

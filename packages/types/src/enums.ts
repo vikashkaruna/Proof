@@ -192,6 +192,7 @@ export const LedgerActionType = {
   CONNECTOR_TOKEN_DENIED: 'connector.token_denied',
   WORKLOAD_TASK_DELEGATED: 'workload.task_delegated',
   WORKLOAD_TASK_REVOKED: 'workload.task_revoked',
+  WORKLOAD_TASK_COMPLETED: 'workload.task_completed',
   ESTATE_CREATED: 'estate.created',
   ESTATE_UPDATED: 'estate.updated',
   ESTATE_SYSTEM_CREATED: 'estate.system.created',
