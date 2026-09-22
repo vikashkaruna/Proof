@@ -1491,7 +1491,7 @@ Tenant-owned tables require `tenant_id`, row-bound RLS and tenant-consistent for
 
 *Your brief items 1, 3, 6, 7.*
 
-The original endpoint discarded `systems[]`; migration 0018 now preserves it as an onboarding intake proposal. Revision 26 adds live inventory management and explicit scope assignment, but proposal review/normalization and the complete wizard are still pending. Owners and tenant admins may approve staff-prepared proposals (accepted user decision).
+The original endpoint discarded `systems[]`; migration 0018 preserves it as an onboarding intake proposal. Live estate/system inventory management and explicit scope assignment are implemented. Migration 0035 and the proposal review UI add owner/admin approval and normalization into the live estate. The complete resumable wizard, readiness confirmation, drift handling and live relationship graph remain pending. Owners and tenant admins may approve staff-prepared proposals (accepted user decision).
 
 - **Model:** tenant → **estates** (1:N) → **systems** (1:N) → connectors (1:N). An estate is the unit an assessment binds to, so one client can run separate Axiom-Proof-bound assessments on, say, "India production" and "Singapore subsidiary" independently.
 - **Engagements bind to an estate**, not just a tenant — `engagements.estate_id`, with the control-library version already pinned.
