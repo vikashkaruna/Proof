@@ -193,6 +193,8 @@ export const LedgerActionType = {
   WORKLOAD_TASK_DELEGATED: 'workload.task_delegated',
   WORKLOAD_TASK_REVOKED: 'workload.task_revoked',
   WORKLOAD_TASK_COMPLETED: 'workload.task_completed',
+  WORKLOAD_DISPATCH_SCHEDULED: 'workload.dispatch_scheduled',
+  WORKLOAD_DISPATCH_SCHEDULE_REVIEW: 'workload.dispatch_schedule_review',
   ESTATE_CREATED: 'estate.created',
   ESTATE_UPDATED: 'estate.updated',
   ESTATE_SYSTEM_CREATED: 'estate.system.created',

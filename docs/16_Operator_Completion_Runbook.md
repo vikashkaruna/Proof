@@ -1,15 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `eb262fd`, CI [35697773545](https://github.com/vikashkaruna/Proof/actions/runs/35697773545) green. Revision 46 launch/reconciliation is verified. Revision 47 adds opaque scheduling and local controller transport; full production activation and W3/W4 remain open.
+Verified staging checkpoint: `694305e`, CI [35702650435](https://github.com/vikashkaruna/Proof/actions/runs/35702650435) green. Revision 47 opaque scheduling/transport is verified. Revision 48 adds durable pickup; full production activation and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 47, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 48, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 48 — durable pickup and scheduling recovery
+
+**ENGINEERING delivered:** migration 0045 adds scheduling metadata to the existing encrypted outbox, with no new table. The BFF `AssessmentScheduling` adapter polls one job through a service-only reservation function, configured with the exact Temporal namespace and optionally a trusted tenant shard. Attach it as `scheduling` when constructing `startAssessmentControllerSocket`. The scheduler receives only opaque job/workflow/lease metadata. Extend the explicit private worker command with `--assessment-outbox-pump` to enable polling; socket/owner options are mandatory. The default legacy worker is unchanged. Provision namespace producer ACLs and the restricted controller/scheduler group before enabling this mode. Workers must not join that group or obtain backend keys.
+
+**Bounds and receipts:** the pump polls every five seconds; a reservation lasts three minutes and can be acquired at most eight times. Each lease has a new UUID. An expired or replaced lease cannot acknowledge a submission. All restarts use `assessment-<tenant UUID>-<job UUID>` in the original namespace; a matching already-submitted acknowledgement returns the same ledger receipt. The recorded `workflow_run_id` is the observed Temporal execution, while `run_id` remains the application assessment run. `submitted` proves the trusted producer's scheduling acknowledgement only. Assessment persistence and process cleanup retain their separate confirmation paths. <!-- axiom-count-ok: polling/retry safety bounds, not statutory control counts -->
+
+**Uncertainty and recovery:** inspect `scheduling_status`, attempts, lease deadline, namespace, workflow IDs and receipt using a trusted backend/operator connection. A pending row with a live lease is still reserved. After expiry, the next poll may retry the stable ID. Claimed, expired, revoked or terminal task assignments can only look up an existing workflow; missing workflow history remains unconfirmed. After the final lease expires, another poll records `workload.dispatch_schedule_review` and changes the row to `needs_review`. Inspect the original namespace/execution and independently confirm the assessment before considering an explicitly authorized new job. Never reset `claimed_at`, edit attempt counters, renew task proofs or switch namespaces to force a retry. There is no operator reset endpoint. Workflow retention must cover the reconciliation window; an absent/expired history is not proof that work never ran. A namespace migration needs a separate reviewed reconciliation procedure.
+
+**Evidence:** 705 BFF tests, 112 Temporal tests, 46 migrations, 15 concurrency suites, 11 populated upgrades, real Auth/PostgREST parity, 61 SPIRE and 30 isolated-worker outcomes. The real combined probe deliberately loses submission and acknowledgement replies, reconstructs the producer, reacquires a lease, verifies the same execution and observes one worker launch per job. Only its synthetic fixture advances the lease clock; production has no clock override. It also retains lost-activity-response reconciliation and history/replay privacy checks. Final merge CI and exact-revision artifacts are saved in the session. See [review 37](audits/37-durable-assessment-pickup-review-2026-09-22.md).
+
+**Remaining ENGINEERING:** authenticated remote transport between distinct cloud service identities, production key provider/rotation/retention, per-job PID/tenant isolation, trust/registration and remaining agent scopes/actor chains; W4.4 live grants/approval, full W3 wizard/graph, W4.5/6/7 and W0/W1/W2 remainder. The local socket is not a cloud IAM workaround. Keep backend RPC timeouts bounded; a disconnected request can still commit SQL, requiring later receipt recovery. No public route, cloud deployment, real email or client mutation was activated.
 
 ## Revision 47 — opaque scheduling acceptance
 

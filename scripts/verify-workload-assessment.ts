@@ -20,6 +20,7 @@ import {
   SupabaseWorkloadTaskStore,
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
+import { AssessmentScheduling } from '../services/bff/src/workloads/assessment-scheduling.js';
 import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
 import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
 import { AssessmentChannel } from '../services/bff/src/workloads/assessment-channel.js';
@@ -531,6 +532,31 @@ print('isolated')`;
   }
   outcomes['controller-recovery-never-relaunches'] = true;
   phase = 'temporal-private-scheduling';
+  // Dedicated tenant shard keeps historical synthetic outbox fixtures out of
+  // this production-adapter poll, without adding caller-selected tenant input.
+  const scheduleTenantId = randomUUID(),
+    scheduleWorkloadId = randomUUID();
+  check(
+    await db.from('tenants').insert({
+      id: scheduleTenantId,
+      slug: `schedule-${scheduleTenantId}`,
+      name: 'Synthetic scheduling',
+    }),
+  );
+  check(
+    await db
+      .from('tenant_users')
+      .insert({ tenant_id: scheduleTenantId, user_id: actorId, role: 'owner' }),
+  );
+  check(
+    await db.from('workload_identities').insert({
+      id: scheduleWorkloadId,
+      tenant_id: scheduleTenantId,
+      agent_name: 'parikshan',
+      spiffe_id: 'spiffe://local.axiomproof.test/agent/parikshan',
+      status: 'active',
+    }),
+  );
   const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
   const schedulingDispatch = new AssessmentDispatch(db, wrapper);
   for (let n = 0; n < 2; n++) {
@@ -540,13 +566,13 @@ print('isolated')`;
     check(
       await db.from('engagements').insert({
         id: engagementId,
-        tenant_id: tenantId,
+        tenant_id: scheduleTenantId,
         library_version: version,
         title: 'Synthetic opaque scheduling',
       }),
     );
     const wire = JSON.stringify({
-      tenant_id: tenantId,
+      tenant_id: scheduleTenantId,
       engagement_id: engagementId,
       library_version: version,
       answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
@@ -554,9 +580,9 @@ print('isolated')`;
     await schedulingDispatch.enqueue(
       {
         jobId,
-        tenantId,
+        tenantId: scheduleTenantId,
         actorId,
-        workloadId,
+        workloadId: scheduleWorkloadId,
         estateId: null,
         engagementId,
         correlationId,
@@ -564,7 +590,7 @@ print('isolated')`;
       },
       wire,
     );
-    scheduledJobs.push({ tenantId, jobId });
+    scheduledJobs.push({ tenantId: scheduleTenantId, jobId });
   }
   phase = 'temporal-socket-setup';
   let scheduledLaunches = 0;
@@ -578,10 +604,48 @@ print('isolated')`;
   );
   const directory = await realpath(await mkdtemp('/tmp/axiom-schedule-'));
   await chmod(directory, 0o700);
+  const scheduling = new AssessmentScheduling(db, {
+    namespace: 'default',
+    tenantId: scheduleTenantId,
+  });
+  let polls = 0;
   const controllerSocket = await startAssessmentControllerSocket({
     directory,
     socketGroup: process.getgid!(),
     controller: new AssessmentController(schedulingDispatch, scheduledChannel, confirmation),
+    scheduling: {
+      async reserve() {
+        if (++polls === 2) {
+          // Acceptance fixture only: advance the persisted lease deadline after
+          // a lost start response, avoiding a three-minute test wall-clock wait.
+          // No task lifetime, claim or execution authority is changed.
+          execFileSync(
+            'docker',
+            [
+              'exec',
+              '-i',
+              'supabase_db_axiom-w0-parity',
+              'psql',
+              '-X',
+              '-U',
+              'postgres',
+              '-d',
+              'postgres',
+              '-v',
+              'ON_ERROR_STOP=1',
+              '-q',
+            ],
+            {
+              input: `update public.assessment_dispatch_jobs set scheduling_lease_until=clock_timestamp()-interval '1 second',scheduling_next_at=clock_timestamp()-interval '1 day' where id='${scheduledJobs[0]!.jobId}' and scheduling_status='pending';`,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              timeout: 10000,
+            },
+          );
+        }
+        return scheduling.reserve();
+      },
+      acknowledge: (request) => scheduling.acknowledge(request),
+    },
   });
   try {
     phase = 'temporal-probe-process';
@@ -624,6 +688,9 @@ print('isolated')`;
             failedPhase: z.enum([
               'setup',
               'schedule',
+              'pickup',
+              'recovery',
+              'empty',
               'result',
               'confirmation',
               'duplicate',
@@ -641,11 +708,43 @@ print('isolated')`;
           'temporal-private-controller-real-worker-confirmed': z.literal(true),
           'temporal-lost-reply-reconciles-without-relaunch': z.literal(true),
           'temporal-history-contains-only-opaque-job-metadata': z.literal(true),
+          'outbox-private-pickup-submits-and-acknowledges': z.literal(true),
+          'outbox-lost-start-reacquires-lease-without-new-execution': z.literal(true),
+          'outbox-lost-ack-stays-durably-submitted': z.literal(true),
         })
         .strict()
         .parse(JSON.parse(stdout));
       phase = 'temporal-launch-count';
       assert.equal(scheduledLaunches, 2);
+      const rows = check(
+        await db
+          .from('assessment_dispatch_jobs')
+          .select(
+            'scheduling_status,scheduling_attempts,workflow_namespace,workflow_run_id,scheduling_receipt',
+          )
+          .eq('tenant_id', scheduleTenantId),
+      );
+      assert(rows);
+      assert.equal(rows.length, 2);
+      assert(
+        rows.every(
+          (row) =>
+            row.scheduling_status === 'submitted' &&
+            row.workflow_namespace === 'default' &&
+            row.workflow_run_id &&
+            row.scheduling_receipt,
+        ),
+      );
+      assert.deepEqual(rows.map((row) => row.scheduling_attempts).sort(), [1, 2]);
+      const audits = check(
+        await db
+          .from('audit_ledger')
+          .select('id')
+          .eq('tenant_id', scheduleTenantId)
+          .eq('action_type', 'workload.dispatch_scheduled'),
+      );
+      assert(audits);
+      assert.equal(audits.length, 2);
       Object.assign(outcomes, result);
     } finally {
       clearTimeout(timer);

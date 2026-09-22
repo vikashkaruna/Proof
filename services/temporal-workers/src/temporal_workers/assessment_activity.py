@@ -12,7 +12,7 @@ from temporalio.exceptions import ApplicationError
 from .assessment_contracts import JobReference, validated_result
 
 
-class AssessmentControllerActivity:
+class PrivateAssessmentController:
     """Socket path is local worker configuration, never a workflow argument.
 
     Only the provisioned controller/scheduler OS group can traverse/connect to
@@ -56,13 +56,15 @@ class AssessmentControllerActivity:
             ):
                 raise ValueError("Private controller ancestor refused")
 
-    @activity.defn(name="assessment_controller_v1")
-    async def invoke(self, reference: dict, operation: str) -> dict:
+    async def request(self, operation: str, payload: dict):
         result = None
         try:
-            job = JobReference.model_validate(reference)
-            if operation not in {"run", "reconcile"}:
-                raise ValueError("Controller operation refused")
+            if (
+                operation
+                not in {"run", "reconcile", "scheduling/poll", "scheduling/ack"}
+                or len(json.dumps(payload).encode()) > 1024
+            ):
+                raise ValueError("Private operation refused")
             self.validate_socket()
             transport = httpx.AsyncHTTPTransport(uds=self.socket_path, retries=0)
             async with (
@@ -74,20 +76,37 @@ class AssessmentControllerActivity:
                     trust_env=False,
                 ) as client,
                 client.stream(
-                    "POST",
-                    f"http://controller/assessment/{operation}",
-                    json=job.model_dump(mode="json"),
+                    "POST", f"http://controller/assessment/{operation}", json=payload
                 ) as response,
             ):
                 if response.status_code != 200:
                     raise ValueError("Controller unavailable")
                 body = bytearray()
+                limit = 16384 if operation.startswith("scheduling/") else 4096
                 async for chunk in response.aiter_bytes(chunk_size=4096):
-                    if len(body) + len(chunk) > 4096:
+                    if len(body) + len(chunk) > limit:
                         raise ValueError("Controller response oversized")
                     body.extend(chunk)
-                result = validated_result(json.loads(body), job)
-        except Exception:  # noqa: BLE001 — sanitize all failures before Temporal history.
+                result = json.loads(body)
+        except Exception:  # noqa: BLE001 — no transport/validation detail crosses this boundary.
+            result = None
+        if result is None:
+            raise ValueError("Private controller unavailable")
+        return result
+
+
+class AssessmentControllerActivity(PrivateAssessmentController):
+    @activity.defn(name="assessment_controller_v1")
+    async def invoke(self, reference: dict, operation: str) -> dict:
+        result = None
+        try:
+            job = JobReference.model_validate(reference)
+            if operation not in {"run", "reconcile"}:
+                raise ValueError("Controller operation refused")
+            result = validated_result(
+                await self.request(operation, job.model_dump(mode="json")), job
+            )
+        except Exception:  # noqa: BLE001 — sanitize every failure before Temporal history.
             result = None
         if result is None:
             raise ApplicationError(

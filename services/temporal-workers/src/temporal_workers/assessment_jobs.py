@@ -112,11 +112,18 @@ async def start_assessment_job(client: Client, tenant_id: str, job_id: str):
             rpc_timeout=timedelta(seconds=15),
         )
     except WorkflowAlreadyStartedError:
-        handle = client.get_workflow_handle(workflow_id)
-        description = await handle.describe(rpc_timeout=timedelta(seconds=15))
-        if (
-            description.workflow_type != WORKFLOW_TYPE
-            or description.task_queue != TASK_QUEUE
-        ):
-            raise ValueError("Assessment workflow binding refused") from None
-        return handle
+        return await find_assessment_job(client, tenant_id, job_id)
+
+
+async def find_assessment_job(client: Client, tenant_id: str, job_id: str):
+    """Lookup only: expired authority must never start replacement work."""
+    job = JobReference(tenantId=tenant_id, jobId=job_id)
+    handle = client.get_workflow_handle(f"assessment-{job.tenantId}-{job.jobId}")
+    description = await handle.describe(rpc_timeout=timedelta(seconds=15))
+    if (
+        description.workflow_type != WORKFLOW_TYPE
+        or description.task_queue != TASK_QUEUE
+    ):
+        raise ValueError("Assessment workflow binding refused")
+    # Pin later reads to the execution that was actually observed.
+    return client.get_workflow_handle(handle.id, run_id=description.run_id)

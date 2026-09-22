@@ -15,6 +15,7 @@ from temporal_workers.assessment_jobs import (
     AssessmentJobWorkflow,
     start_assessment_job,
 )
+from temporal_workers.assessment_outbox import AssessmentOutboxPump
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.runtime import LoggingConfig, Runtime, TelemetryConfig
@@ -55,22 +56,77 @@ async def main():
             )
         return result
 
-    async with (
-        await WorkflowEnvironment.start_time_skipping() as env,
-        Worker(
-            env.client,
-            task_queue=TASK_QUEUE,
-            workflows=[AssessmentJobWorkflow],
-            activities=[invoke],
-        ),
-    ):
-        for job in jobs:
-            stage = "schedule"
-            handle = await start_assessment_job(
-                env.client, str(job.tenantId), str(job.jobId)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+
+        class LostStartClient:
+            namespace = env.client.namespace
+
+            async def start_workflow(self, *args, **kwargs):
+                await env.client.start_workflow(*args, **kwargs)
+                raise ValueError("synthetic lost submission response")
+
+        class LostAckController:
+            async def request(self, operation, payload):
+                value = await actual.request(operation, payload)
+                if operation == "scheduling/ack":
+                    raise ValueError("synthetic lost acknowledgement response")
+                return value
+
+        for index, job in enumerate(jobs):
+            # Persist and acknowledge before polling activities, then restart
+            # the worker with the actual private socket / Linux worker path.
+            async with Worker(
+                env.client,
+                task_queue=TASK_QUEUE,
+                workflows=[AssessmentJobWorkflow],
+                max_cached_workflows=0,
+            ):
+                stage = "pickup"
+                producer = AssessmentOutboxPump(
+                    LostStartClient() if index == 0 else env.client,
+                    actual if index == 0 else LostAckController(),
+                )
+                if await producer.tick() != {
+                    "reserved": 1,
+                    "acknowledged": 0,
+                    "unconfirmed": 1,
+                }:
+                    raise ValueError("Lost producer response was not detected")
+                if index == 0:
+                    before = await env.client.get_workflow_handle(
+                        f"assessment-{job.tenantId}-{job.jobId}"
+                    ).describe()
+                    stage = "recovery"
+                    if await AssessmentOutboxPump(env.client, actual).tick() != {
+                        "reserved": 1,
+                        "acknowledged": 1,
+                        "unconfirmed": 0,
+                    }:
+                        raise ValueError("Lease recovery was not acknowledged")
+                    after = await env.client.get_workflow_handle(
+                        f"assessment-{job.tenantId}-{job.jobId}"
+                    ).describe()
+                    if before.run_id != after.run_id:
+                        raise ValueError("Lost submission created a replacement")
+                else:
+                    stage = "empty"
+                    if await AssessmentOutboxPump(env.client, actual).tick() != {
+                        "reserved": 0,
+                        "acknowledged": 0,
+                        "unconfirmed": 0,
+                    }:
+                        raise ValueError("Lost acknowledgement was not durable")
+            handle = env.client.get_workflow_handle(
+                f"assessment-{job.tenantId}-{job.jobId}"
             )
-            stage = "result"
-            result = await asyncio.wait_for(handle.result(), 120)
+            async with Worker(
+                env.client,
+                task_queue=TASK_QUEUE,
+                workflows=[AssessmentJobWorkflow],
+                activities=[invoke],
+            ):
+                stage = "result"
+                result = await asyncio.wait_for(handle.result(), 120)
             stage = "confirmation"
             if result["status"] != "confirmed":
                 raise ValueError("Assessment was not confirmed")
@@ -117,6 +173,9 @@ async def main():
         "temporal-private-controller-real-worker-confirmed": True,
         "temporal-lost-reply-reconciles-without-relaunch": True,
         "temporal-history-contains-only-opaque-job-metadata": True,
+        "outbox-private-pickup-submits-and-acknowledges": True,
+        "outbox-lost-start-reacquires-lease-without-new-execution": True,
+        "outbox-lost-ack-stays-durably-submitted": True,
     }
 
 
