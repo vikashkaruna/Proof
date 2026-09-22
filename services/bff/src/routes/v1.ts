@@ -30,6 +30,7 @@ import { requireCapability } from '../middleware/authorize.js';
 import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
+import { canonicalJson, sha256 } from '@axiom/ledger';
 import { loadEnv } from '@axiom/config';
 import { LIBRARY_VERSION } from '@axiom/control-library';
 
@@ -2343,7 +2344,9 @@ export function v1Routes(deps: Deps) {
         .insert({
           tenant_id: tenantId,
           agent: name,
+          engagement_id: body.engagement_id ?? null,
           correlation_id: correlationId,
+          input_redacted_hash: await sha256(canonicalJson(input)),
           status: 'running',
           started_at: new Date().toISOString(),
           metadata: { requested_by: c.get('user').id },
@@ -2358,11 +2361,8 @@ export function v1Routes(deps: Deps) {
         );
       }
       runId = runRow.id;
-    } catch (e: unknown) {
-      logger.error(
-        { error: e instanceof Error ? e.message : 'unknown' },
-        'could not record initial agent_run row',
-      );
+    } catch {
+      logger.error({ agent: name, correlationId }, 'could not record initial agent_run row');
       return c.json(
         { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
         503,
@@ -2380,82 +2380,127 @@ export function v1Routes(deps: Deps) {
       occurredAt: new Date().toISOString(),
     });
 
+    // The runtime is an authenticated transport peer, not a source of arbitrary
+    // public fields or lifecycle authority. Bind its response to this dispatch.
+    const resultSchema = z.object({
+      agent: z.literal(name),
+      correlation_id: z.literal(correlationId),
+      status: z.enum(['succeeded', 'failed']),
+      latency_ms: z.number().int().nonnegative().max(2147483647),
+      input_tokens: z.number().int().nonnegative().max(2147483647),
+      output_tokens: z.number().int().nonnegative().max(2147483647),
+      cost_usd: z.number().nonnegative().max(9999.999999),
+      error: z.string().max(256).nullable(),
+      output: z.record(z.string(), z.unknown()).nullable(),
+      ledger_entry_ids: z.array(z.string().min(1).max(128)).max(1000),
+    });
+    type RuntimeResult = z.infer<typeof resultSchema>;
+    let result: RuntimeResult | null = null;
+    let failureCode = 'agent_invocation_failed';
     try {
       const res = await fetch(`${runtimeUrl}/agents/${name}/invoke`, {
         method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(120_000),
         headers: {
           'Content-Type': 'application/json',
           'X-Internal-Token': runtimeToken,
         },
-        body: JSON.stringify({
-          correlation_id: correlationId,
-          input,
-        }),
+        body: JSON.stringify({ correlation_id: correlationId, input }),
       });
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error('runtime_http_refused');
+      }
+      const parsedResult = resultSchema.parse(await res.json());
+      if (
+        parsedResult.status === 'succeeded' &&
+        (parsedResult.error !== null ||
+          parsedResult.output === null ||
+          parsedResult.ledger_entry_ids.length < 2 ||
+          new Set(parsedResult.ledger_entry_ids).size !== parsedResult.ledger_entry_ids.length)
+      )
+        throw new Error('runtime_result_refused');
+      if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
+        throw new Error('runtime_accounting_refused');
+      result = parsedResult;
+      if (result.status === 'failed') failureCode = 'agent_reported_failure';
+    } catch {
+      // Fetch, validation and provider errors may include private payloads or
+      // bearer credentials. Only fixed failure codes cross this boundary.
+      logger.error({ agent: name, correlationId }, 'agent runtime invocation refused');
+    }
 
-      const data = z
-        .object({
-          status: z.string().optional(),
-          latency_ms: z.number().optional(),
-          input_tokens: z.number().optional(),
-          output_tokens: z.number().optional(),
-          cost_usd: z.number().optional(),
-          error: z.string().nullable().optional(),
+    const succeeded = result?.status === 'succeeded';
+    const terminalStatus = succeeded ? 'succeeded' : 'failed';
+    try {
+      const { data: recorded, error } = await admin
+        .from('agent_runs')
+        .update({
+          status: terminalStatus,
+          completed_at: new Date().toISOString(),
+          latency_ms: result?.latency_ms ?? null,
+          input_tokens: result?.input_tokens ?? null,
+          output_tokens: result?.output_tokens ?? null,
+          total_tokens: result ? result.input_tokens + result.output_tokens : null,
+          cost_usd: result?.cost_usd ?? null,
+          error: succeeded ? null : failureCode,
+          output_redacted_hash:
+            succeeded && result ? await sha256(canonicalJson(result.output)) : null,
         })
-        .catchall(z.unknown())
-        .parse(await res.json());
-
-      if (runId) {
-        await admin
-          .from('agent_runs')
-          .update({
-            status: data.status === 'succeeded' ? 'succeeded' : 'failed',
-            completed_at: new Date().toISOString(),
-            latency_ms: data.latency_ms,
-            input_tokens: data.input_tokens,
-            output_tokens: data.output_tokens,
-            total_tokens: (data.input_tokens || 0) + (data.output_tokens || 0),
-            cost_usd: data.cost_usd,
-            error: data.error,
-          })
-          .eq('id', runId);
-      }
-
-      deps.realtime.broadcast({
-        type: 'agent.progress',
-        agent: name,
-        correlationId,
-        runId,
-        step: `${name}.completed`,
-        progress: 1.0,
-        message: `Agent ${name} ${data.status || 'finished'}`,
-        occurredAt: new Date().toISOString(),
-      });
-
-      return c.json(data, res.ok ? 200 : 502);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown runtime error';
-      if (runId) {
-        await admin
-          .from('agent_runs')
-          .update({
-            status: 'failed',
-            completed_at: new Date().toISOString(),
-            error: message,
-          })
-          .eq('id', runId);
-      }
-      logger.error({ agent: name, error: message }, 'failed to call agent runtime');
+        .eq('id', runId)
+        .eq('tenant_id', tenantId)
+        .eq('agent', name)
+        .eq('correlation_id', correlationId)
+        .eq('status', 'running')
+        .select('id,status')
+        .maybeSingle();
+      if (error || recorded?.id !== runId || recorded?.status !== terminalStatus)
+        throw new Error('completion_not_confirmed');
+    } catch {
+      // An ambiguous commit is not proof of failure or rollback. Do not write
+      // over a concurrently cancelled/terminal row, retry dispatch or publish
+      // an unconfirmed completion event. Reconcile the recorded run instead.
+      logger.error(
+        { agent: name, correlationId, runId },
+        'agent completion persistence unconfirmed',
+      );
       return c.json(
         {
           error: {
-            code: 'agent_invocation_failed',
-            message: `Could not invoke agent ${name}.`,
+            code: 'agent_completion_unconfirmed',
+            message: 'Could not confirm the recorded outcome. Inspect this run before retrying.',
+            runId,
+            correlationId,
+          },
+        },
+        503,
+      );
+    }
+
+    deps.realtime.broadcast({
+      type: 'agent.progress',
+      agent: name,
+      correlationId,
+      runId,
+      step: `${name}.${terminalStatus}`,
+      progress: 1,
+      message: `Agent ${name} ${terminalStatus}`,
+      occurredAt: new Date().toISOString(),
+    });
+    if (!succeeded)
+      return c.json(
+        {
+          error: {
+            code: failureCode,
+            message: `Could not complete agent ${name}.`,
+            runId,
+            correlationId,
           },
         },
         502,
       );
-    }
+    return c.json(result, 200);
   });
 
   return app;

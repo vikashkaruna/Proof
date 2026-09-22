@@ -1,10 +1,10 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `e46c1b7`, CI [35678105419](https://github.com/vikashkaruna/Proof/actions/runs/35678105419) green. C-W0-5 service IAM engineering is complete; deployed IAM acceptance and full W4.3 remain open. Revision 37 task delegation is the next exact-merge checkpoint.
+Verified staging checkpoint: `c88e3c1`, CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494) green. Task delegation component acceptance passed. Revision 38 dispatch/schema follow-up is the next checkpoint; deployed IAM acceptance and full W4.3 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 37, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 38, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -517,6 +517,14 @@ The controller must derive the actor from the authenticated session, hash the ex
 For every tool call, verify the SVID and proof through `WorkloadTaskAuthority` with the **server-selected** required scope. Use the resulting tenant/estate/engagement/input context rather than worker-supplied filters. Reads repeat membership, registration, task lifecycle/context, expiry, revocation and global/tenant halt checks. A removed internal-user flag invalidates internal-agent tasks. This lookup is a snapshot: domain mutations must recheck authority inside the write transaction, and external invocation requires the W4.4 controlled transport/grant/approval boundary. Existing issued external credentials need target-specific revocation; this component does not provide it.
 
 Run `pnpm --filter @axiom/bff test` and `./scripts/test-database.sh`. The latter includes SQL role refusals, audit fault injection, real concurrent issuance/demotion/revocation and populated 0040→0041 upgrade tests. These establish the component contracts, not physical worker isolation or end-to-end tool authorization. No application route is enabled here. Before closing W4.3, demonstrate isolated workers without backend/approval/storage credentials, authenticated trust delivery and registration lifecycle, the private task handoff, actual tenant/estate-aware tool calls and verified actor chains. Keep broker acquisition disabled until W4.4 also passes.
+
+### W4-3 continuation · confirmed invocation outcomes
+
+**ENGINEERING delivered in Revision 38:** the existing generic agent route validates the current Python runtime's response and confirms the exact terminal run update before returning output. Missing/foreign status, agent or correlation and contradictory success are refused; accounting is bounded to the existing SQL columns. Runtime-reported failure is HTTP 502. A completion write without a matching receipt is HTTP 503 `agent_completion_unconfirmed`, including run/correlation IDs, and emits no completion event. A confirmed cancellation or previous terminal outcome cannot be overwritten.
+
+Deploy BFF with the current runtime response contract (`agent`, `correlation_id`, `status`, accounting, `error`, `output`, `ledger_entry_ids`). Internal-token requests refuse redirects and have a 120-second deadline; long-running durable orchestration remains a separate integration task. Receipt identifiers in the response are protocol metadata, not independently verified delegation evidence.
+
+If a request returns `agent_completion_unconfirmed`, inspect the identified run and its ledger correlation before retrying. The worker may already have acted, or the database may have committed without returning a receipt. No automatic retry, rollback or reconciliation is claimed by this change. Keep any relevant delegated task revoked until its outcome is reconciled. The generic route still uses legacy shared runtime transport, and does not create a 0041 task delegation. Do not treat it as isolated connector execution.
 
 ## C-W0-5 · Deploy and verify service IAM isolation
 

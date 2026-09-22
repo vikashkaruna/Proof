@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 26](../docs/audits/26-workload-task-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 27](../docs/audits/27-agent-completion-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -39,3 +39,5 @@ the route map when a production surface changes to prevent drift from
 Revision 36 implements per-service Cloud Run IAM and tests its secret allowlists offline. Deployed IAM denial checks and per-agent runtime isolation remain pending; see Doc 16 and review 25.
 
 Revision 37 adds the private W4.3 task delegation component (0041); it is not wired into runtime/tool routes yet. Service IAM engineering passed exact staging CI 35678105419. Next: isolated workers, task handoff and every-tool scope/data enforcement, then W4.4, full W3 wizard/graph and W4.5/6/7.
+
+Revision 38 requires a validated runtime result and confirmed run persistence before reporting success. Unconfirmed completion returns a run ID for reconciliation; worker/task integration and connector execution remain pending.
