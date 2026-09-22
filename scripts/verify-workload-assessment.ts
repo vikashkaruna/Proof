@@ -21,6 +21,7 @@ import { GoogleSchedulerIdentity } from '../services/bff/src/workloads/scheduler
 import { startAssessmentControllerSocket } from '../services/bff/src/workloads/assessment-socket.js';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import type { TenantId } from '../packages/types/src/domain.js';
 import { JwtSvidVerifier } from '../services/bff/src/workloads/jwt-svid.js';
 import {
   WorkloadAuthenticator,
@@ -36,7 +37,11 @@ import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dis
 import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
 import { AssessmentChannel } from '../services/bff/src/workloads/assessment-channel.js';
 import { AssessmentController } from '../services/bff/src/workloads/assessment-controller.js';
-import type { DispatchKeyWrapper } from '../services/bff/src/workloads/dispatch-payload.js';
+import { DispatchKeyPolicy } from '../services/bff/src/workloads/dispatch-key-policy.js';
+import {
+  AwsDispatchKeyWrapper,
+  type DispatchAwsKmsPort,
+} from '../services/bff/src/workloads/dispatch-key-wrappers.js';
 import { TaskProof } from '../services/bff/src/workloads/tasks.js';
 import { AssessmentConfirmation } from '../services/bff/src/workloads/assessment-confirmation.js';
 import { AssessmentTools } from '../services/bff/src/workloads/assessment-tools.js';
@@ -71,6 +76,7 @@ async function main() {
     return reply.data;
   };
   const tenantId = randomUUID();
+  const scheduleTenants = { unix: randomUUID(), https: randomUUID() };
   const workloadId = randomUUID();
   const createdResponse = await db.auth.admin.createUser({
     email: `worker-${randomUUID()}@example.invalid`,
@@ -177,28 +183,64 @@ async function main() {
 
   const issuer = new WorkloadTaskIssuer(db);
   const confirmation = new AssessmentConfirmation(db);
-  // Local synthetic wrapping provider; the wrapping key never enters SQL, IPC,
-  // environment, process arguments or the isolated worker. Production requires KMS.
-  const wrappingKey = randomBytes(32);
-  const wrapper: DispatchKeyWrapper = {
-    async wrap(aad, key) {
-      const nonce = randomBytes(12),
-        cipher = createCipheriv('aes-256-gcm', wrappingKey, nonce);
-      cipher.setAAD(aad);
+  // Production dispatch adapter, local cryptographic KMS fixture. No cloud call
+  // or IAM claim. Keys remain in this controller fixture, never SQL/IPC/history.
+  const syntheticRef = () => `arn:aws:kms:ap-south-1:123456789012:key/${randomUUID()}`;
+  const fixtureRings = new Map(
+    [tenantId, ...Object.values(scheduleTenants)].map(
+      (tenant) => [tenant as TenantId, { primary: syntheticRef(), retiring: [] }] as const,
+    ),
+  );
+  let keyPolicy = new DispatchKeyPolicy('aws', fixtureRings);
+  const firstKeyRef = keyPolicy.primary(tenantId as TenantId);
+  const wrappingKeys = new Map(
+    [...fixtureRings.values()].map((ring) => [ring.primary, randomBytes(32)]),
+  );
+  const rotatedRef = syntheticRef();
+  wrappingKeys.set(rotatedRef, randomBytes(32));
+  keyPolicy = keyPolicy.withReadable(tenantId as TenantId, rotatedRef);
+  const kms: DispatchAwsKmsPort = {
+    async send(command) {
+      const request = command.input;
+      const keyRef = request.KeyId!;
+      const master = wrappingKeys.get(keyRef);
+      assert(master);
+      assert.equal(request.EncryptionAlgorithm, 'SYMMETRIC_DEFAULT');
+      assert.equal(
+        request.EncryptionContext?.axiomDispatchPurpose,
+        'axiom.assessment.dispatch.dek.v1',
+      );
+      assert.match(request.EncryptionContext!.axiomDispatchContext!, /^[a-f0-9]{64}$/);
+      const binding = Buffer.from(JSON.stringify(request.EncryptionContext));
+      if ('Plaintext' in request && request.Plaintext) {
+        assert.equal(request.Plaintext.byteLength, 32);
+        const nonce = randomBytes(12),
+          cipher = createCipheriv('aes-256-gcm', master, nonce);
+        cipher.setAAD(binding);
+        return {
+          KeyId: keyRef,
+          EncryptionAlgorithm: 'SYMMETRIC_DEFAULT',
+          CiphertextBlob: Buffer.concat([
+            nonce,
+            cipher.update(request.Plaintext),
+            cipher.final(),
+            cipher.getAuthTag(),
+          ]),
+        };
+      }
+      assert('CiphertextBlob' in request && request.CiphertextBlob);
+      const value = Buffer.from(request.CiphertextBlob),
+        decipher = createDecipheriv('aes-256-gcm', master, value.subarray(0, 12));
+      decipher.setAAD(binding);
+      decipher.setAuthTag(value.subarray(-16));
       return {
-        keyRef: 'local-synthetic/dispatch-v1',
-        wrappedKey: Buffer.concat([nonce, cipher.update(key), cipher.final(), cipher.getAuthTag()]),
+        KeyId: keyRef,
+        EncryptionAlgorithm: 'SYMMETRIC_DEFAULT',
+        Plaintext: Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]),
       };
     },
-    async unwrap(aad, keyRef, encrypted) {
-      assert.equal(keyRef, 'local-synthetic/dispatch-v1');
-      const value = Buffer.from(encrypted),
-        decipher = createDecipheriv('aes-256-gcm', wrappingKey, value.subarray(0, 12));
-      decipher.setAAD(aad);
-      decipher.setAuthTag(value.subarray(-16));
-      return Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]);
-    },
   };
+  let wrapper = new AwsDispatchKeyWrapper(keyPolicy, kms);
 
   // These probes run under the same UID and image as the actual worker.
   phase = 'physical-isolation';
@@ -266,6 +308,9 @@ print('isolated')`;
       inputHash,
     };
     const first = await new AssessmentDispatch(db, wrapper).enqueue(context, inputJson);
+    const rotating = keyPolicy.primary(tenantId as TenantId) === firstKeyRef;
+    keyPolicy = keyPolicy.withPrimary(tenantId as TenantId, rotatedRef);
+    wrapper = new AwsDispatchKeyWrapper(new DispatchKeyPolicy('aws', keyPolicy.snapshot()), kms);
     // Reconstruct the controller after a discarded response: stable job/run,
     // preserved ciphertext/proof, no new run or delegation audit.
     const dispatcher = new AssessmentDispatch(db, wrapper);
@@ -274,14 +319,20 @@ print('isolated')`;
     const stored = check(
       await db
         .from('assessment_dispatch_jobs')
-        .select('id,ciphertext,wrapped_key')
+        .select('id,key_ref,ciphertext,wrapped_key')
         .eq('id', jobId)
         .single(),
     );
     assert(!JSON.stringify(stored).includes(inputJson));
+    assert.equal(stored!.key_ref, rotating ? firstKeyRef : rotatedRef);
     const claimed = await dispatcher.claim(tenantId, jobId);
     assert.equal(claimed.runId, first.run_id);
     assert.equal(claimed.payload.reveal().inputJson, inputJson);
+    outcomes[
+      rotating
+        ? 'dispatch-kms-retained-key-opens-after-rotation'
+        : 'dispatch-kms-new-jobs-use-primary'
+    ] = true;
     await assert.rejects(() => dispatcher.claim(tenantId, jobId));
     assert.equal(
       check(
@@ -546,7 +597,7 @@ print('isolated')`;
     phase = `temporal-${transport}-scheduling`;
     // Dedicated tenant shard keeps historical synthetic outbox fixtures out of
     // this production-adapter poll, without adding caller-selected tenant input.
-    const scheduleTenantId = randomUUID(),
+    const scheduleTenantId = scheduleTenants[transport],
       scheduleWorkloadId = randomUUID();
     check(
       await db.from('tenants').insert({

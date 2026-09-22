@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `0edceda`, CI 35707610075 green. Revision 48 durable pickup is verified. Revision 49 adds authenticated HTTPS transport, subject to exact merge CI. Production composition/isolation, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303) green. Revision 49 remote transport is verified. Revision 50 adds dispatch KMS adapters and retained-key rotation preparation, subject to exact merge CI. Full key lifecycle, production composition/isolation, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 50 — tenant-bound dispatch KMS adapters
+
+Revision 49 is **complete and green** at staging `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening changes. The overall goal remains active.
+
+The private dispatch controller now has AWS and GCP KMS wrapping adapters. Trusted policy pins distinct per-tenant Mumbai key resources; an envelope cannot choose a new key, region or endpoint. Each call first validates the exact canonical, purpose-separated dispatch context. KMS receives only the random data key and a digest of the assignment context, keeping full job metadata and private answers/proofs out of provider audit context. Response key identity, algorithm, sizes and GCP CRC32C checks fail closed. Errors are sanitized and temporary key buffers are cleared where possible.
+
+Both adapters have a bounded call budget and retain one occupied provider slot until the actual call settles, even after timeout. Late plaintext is discarded and cleared. `DispatchKeyPolicy.withReadable()` prepares a reader policy with the new key while retaining the old primary; `withPrimary()` promotes only an already-readable key and retains all prior references. It does not deploy policy, fence old controllers, retire keys or change cloud IAM. Existing default startup remains unchanged; these adapters are supplied only to a trusted controller.
+
+**Validation:** **803 BFF tests**, including 53 new provider/policy regressions, workspace/lint/type checks and separate acceptance TypeScript. The real local outbox/controller/worker probe now uses the production AWS adapter against a local cryptographic KMS fixture; it proves old ciphertext survives primary rotation/controller reconstruction, new jobs use the new primary, and stable-ID retry preserves the original stored envelope. Existing Unix/HTTPS scheduling and lost-response checks are retained. Combined local acceptance passed **61 SPIRE and 35 isolated-worker outcomes**; final exact-merge results are saved in the session. No live KMS/IAM acceptance or cloud changes occurred. Schema remains **0045**, **54 public tables**, W2 named targets **19/40**. See [review 39](audits/39-dispatch-kms-review-2026-09-22.md).
+
+**Next:** persisted/fenced key-policy rollout and retained-job/backup inventory before any key retirement; per-job process/network/metadata isolation, trust registration and dedicated scheduler/controller deployment composition; remaining scoped workers and verified actor chains; W4.4 live grants/approval; full W3 resumable wizard/readiness/live graph; W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Provider adapters and additive policy preparation are delivered; full key lifecycle and production orchestration remain partial.
 
 ## Revision 49 — authenticated remote assessment transport
 

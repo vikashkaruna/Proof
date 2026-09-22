@@ -1,15 +1,31 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `0edceda`, CI [35707610075](https://github.com/vikashkaruna/Proof/actions/runs/35707610075) green. Revision 48 durable pickup is verified. Revision 49 adds authenticated remote transport; full production activation and W3/W4 remain open.
+Verified staging checkpoint: `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303) green. Revision 49 remote transport is verified. Revision 50 adds dispatch KMS adapters; key-policy rollout/retirement, full production activation and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 49, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 50, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 50 — dispatch KMS configuration and rotation gates
+
+**ENGINEERING delivered:** construct a `DispatchKeyPolicy` from a trusted `Map<TenantId, { primary, retiring }>` and supply either `AwsDispatchKeyWrapper` or `GcpDispatchKeyWrapper` to `AssessmentDispatch`. Use dedicated dispatch keys, separate from connector credential-vault, MFA and approval keys. Each tenant has distinct resources; no resource may be reused across tenants in the policy. AWS accepts canonical symmetric key ARNs only in `ap-south-1`, with the regional endpoint fixed in code. GCP accepts canonical CryptoKey resources only in `asia-south1`, with `asia-south1-cloudkms.googleapis.com` fixed in code. Aliases, key-version references and caller-selected endpoints are refused. The policy and provider are backend configuration, never browser/worker/scheduler input. No default listener or application route enables them.
+
+**IAM and data boundary:** grant the controller only encrypt/decrypt permission on its approved dispatch resources. Do not grant key administration, disable/destruction, or KMS access to the opaque scheduler or isolated worker. Provision symmetric `ENCRYPT_DECRYPT` GCP keys / AWS symmetric encryption keys. Provider context contains a purpose label and SHA-256 digest of the canonical assignment, not raw answers, task proofs or full job metadata. Do not log SDK requests/responses, DEKs, decrypted envelopes or raw exceptions. Buffers are cleared best-effort; JavaScript strings and SDK-internal copies cannot be guaranteed erased.
+
+**Deadline and uncertainty:** each provider call has a five-second caller budget; AWS receives an abort signal and disables SDK retries, while GCP receives a matching deadline and no retry policy. One call per adapter may remain outstanding until actual settlement; additional calls fail closed during that time. A late decrypted key is discarded and cleared. A timeout during `claim` leaves the claim uncertain and single-use. Independently reconcile the original job; never reset the claim or issue replacement authority automatically. <!-- axiom-count-ok: provider timeout safety bound, not statutory control count -->
+
+**Rotation preparation:** `policy.withReadable(tenant, newReference)` stages the new key for reading while preserving the old primary. After that reader policy is deployed everywhere, `withPrimary(tenant, newReference)` can promote it; promoting an unstaged reference is refused. Both return new immutable policies retaining all old references. It never changes the existing policy or calls a cloud administration API. Policies allow up to ten distinct readable references per tenant and refuse overflow; do not trim old keys to get past the limit. Persist the reviewed full policy through protected deployment configuration and stage a reader-first rollout: all readers must accept the new and old keys before any producer starts using the new primary. Until an implemented rollout fence and persisted policy revision exist, quiesce every old producer and outstanding enqueue before cutover. A stale writer can otherwise enqueue under an old primary after an empty inventory was observed. This helper alone is not distributed rotation orchestration. <!-- axiom-count-ok: key-ring safety limit, not statutory control count -->
+
+**Retirement remains ENGINEERING:** there is no key-removal/disable/destroy endpoint. Keep all required keys and versions readable while any job, uncertain claim, retained ciphertext, database backup or recovery obligation can need them. Provider version rotation does not rewrite earlier ciphertext; GCP stores the CryptoKey root in the envelope and the provider selects its ciphertext's version. A completed run or an empty live-job query alone does not authorize key deletion. Add persisted/fenced rollout, retained-artifact inventory and a reviewed retirement procedure before implementing that capability. Existing synthetic local envelopes must be reconciled in their original fixture; these production adapters do not import synthetic keys or make lost keys recoverable.
+
+**Acceptance evidence:** 803 BFF tests, including 53 new policy/provider cases. Run `python3 scripts/test-workload-identity.py --assessment` against isolated local parity for 61 identity and 35 worker outcomes. The real outbox/worker path uses the production AWS adapter with a simulated cryptographic KMS service to verify rotation, controller reconstruction and immutable idempotent envelopes. GCP checks use injected provider responses and authenticated local encryption fixtures. These are engineering acceptance, not effective cloud IAM/KMS evidence. Before activation, verify actual regional keys, controller workload credentials, denied worker/scheduler identities, retained-version decrypt, deadlines and private audit handling in the deployed target. No cloud apply or client mutation occurred. See [review 39](audits/39-dispatch-kms-review-2026-09-22.md).
+
+**Next ENGINEERING:** complete rollout fencing/retention, per-job isolation/trust and deployment composition, remaining workers/actor chains, W4.4 live grants, full W3 wizard/graph and W4.5/6/7. Preserve W0/W1/W2 open items. The overall goal remains active.
 
 ## Revision 49 — remote transport acceptance and deployment composition
 
