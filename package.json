@@ -50,11 +50,11 @@
     "env:sync": "./scripts/sync-env.sh preprod all"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.2",
     "husky": "^9.1.6",
-    "prettier": "^3.3.3",
+    "prettier": "^3.9.8",
     "tsx": "^4.23.13",
-    "turbo": "^2.10.12",
+    "turbo": "^2.11.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   },
