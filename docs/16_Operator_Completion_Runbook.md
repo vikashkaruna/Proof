@@ -1,15 +1,23 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `e0db93d`, CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394) green. Backend dispatch/schema acceptance passed. Revision 39 UI correction is the next checkpoint; assessment provenance, deployed IAM acceptance and full W4.3 remain open.
+Verified staging checkpoint: `180ae52`, CI [35681594813](https://github.com/vikashkaruna/Proof/actions/runs/35681594813) green. Revision 39 is verified; Revision 40 closes dynamic tenant routing subject to exact merge CI. Assessment provenance, deployed IAM acceptance and full W4.3 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 39, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 40, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 40 — tenant routing acceptance
+
+**ENGINEERING delivered:** arbitrary tenant slugs and UUIDs resolve through authenticated, RLS-scoped memberships. There is no demo-tenant fallback. Unknown/revoked cookie selections refuse before forwarding; query failure returns 503. Missing cookies use the same stable actual-membership default as the page context/app shell. Explicit headers still require BFF membership/MFA. Exact onboarding and discovery endpoints receive no tenant scope.
+
+**Evidence:** 17 route regressions (76 total web tests), plus real browser/Auth/BFF/PostgREST custom-tenant read/write, SSR slug/UUID agreement, foreign-header denial, invalid-cookie mutation refusal and revocation checks. Full exact-merge CI must verify 66 browser journeys and 89 API outcomes per configuration before this checkpoint is called green. Saved session records the final run and artifact revision. No operator action or deployment is required for this local engineering milestone.
+
+**Recovery:** choose a valid tenant in the app switcher after `tenant_selection_required`; retry a lookup outage once restored. Do not restore a hardcoded fallback or bypass the BFF gate. SSR's permitted fallback display is not permission to mutate through an invalid cookie. Assessment/portal provenance and W3/W4 execution gates below remain open.
 
 ## How to read this
 

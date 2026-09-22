@@ -43,3 +43,5 @@ Revision 37 adds the private W4.3 task delegation component (0041); it is not wi
 Revision 38 requires a validated runtime result and confirmed run persistence before reporting success. Unconfirmed completion returns a run ID for reconciliation; worker/task integration and connector execution remain pending.
 
 Revision 39 removes UI default-success and timer-driven assessment improvements. Assessment source-data fallbacks remain a separate C-W0-7 gap; current scores/cards are not end-to-end readiness evidence. See review 28 before continuing worker and W3/W4 integration.
+
+Revision 40 verifies Revision 39 CI and replaces the browser bridge demo mapping with user-scoped dynamic tenant routing. Real custom-tenant read/write and revocation acceptance is covered. Assessment provenance and full W3/W4 remain pending; see review 29 and the session handoff.
