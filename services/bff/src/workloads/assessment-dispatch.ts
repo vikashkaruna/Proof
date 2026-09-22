@@ -65,6 +65,45 @@ export class AssessmentDispatch {
       throw new DispatchRefused();
     }
   }
+  /** Opaque trusted-controller lookup for reconciliation, with no ciphertext or
+   * private proof/input. Historical confirmation does not renew task authority. */
+  async resolve(tenantId: string, jobId: string) {
+    try {
+      tenantId = z.uuid().parse(tenantId).toLowerCase();
+      jobId = z.uuid().parse(jobId).toLowerCase();
+      const { data, error } = await this.db
+        .from('assessment_dispatch_jobs')
+        .select('id,tenant_id,run_id,engagement_id,correlation_id,input_hash,claimed_at')
+        .eq('tenant_id', tenantId)
+        .eq('id', jobId)
+        .maybeSingle();
+      if (error) throw new DispatchRefused();
+      const row = z
+        .object({
+          id: z.literal(jobId),
+          tenant_id: z.literal(tenantId),
+          run_id: z.uuid(),
+          engagement_id: z.uuid(),
+          correlation_id: z.uuid(),
+          input_hash: z.string().regex(/^[a-f0-9]{64}$/),
+          claimed_at: z.iso.datetime({ offset: true }).nullable(),
+        })
+        .strict()
+        .parse(data);
+      return {
+        expected: {
+          tenantId,
+          runId: row.run_id,
+          engagementId: row.engagement_id,
+          correlationId: row.correlation_id,
+          inputHash: row.input_hash,
+        },
+        claimed: row.claimed_at !== null,
+      };
+    } catch {
+      throw new DispatchRefused();
+    }
+  }
   /** One delivery only. A lost claim response or failed decryption is uncertain:
    * reconcile the durable run; do not retry a launch with a new authority. */
   async claim(tenantId: string, jobId: string) {

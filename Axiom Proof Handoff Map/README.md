@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 34](../docs/audits/34-private-dispatch-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 35](../docs/audits/35-bounded-assessment-controller-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -51,3 +51,5 @@ Revision 41 replaces Assessment demonstration posture with a BFF projection of o
 Revision 42 delivers a real local isolated Parikshan worker and task-authorized, transactional library/findings tools (0042). Normal UI dispatch, production orchestration/finalization/reconciliation, trust lifecycle and the other worker paths remain open; this is not full W4.3 or connector activation. See review 31 and Doc 16 for acceptance and recovery.
 
 Revision 43 confirms already committed assessment runs from actual ledger receipts and recovers lost worker responses without duplicate completion. Production dispatch/launch/automated recovery and the remaining W3/W4 scope stay open. Revision 42 passed exact CI 35687544717; see review 32 and Doc 16 for the successor acceptance gate.
+
+Revision 46 connects bounded private worker launch to independent controller reconciliation. Real Linux process tests cover detached descendants, timeout, parent death and launch refusal; existing claims are never relaunched. Production scheduling/private transport, per-job isolation and key/trust setup remain pending alongside other workers, W4.4 grants and the full W3 wizard/graph. See review 35 and Doc 16.

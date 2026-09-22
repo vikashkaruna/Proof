@@ -3,7 +3,9 @@
 FROM python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322
 WORKDIR /worker
 RUN mkdir axiom && touch axiom/__init__.py
-COPY services/agent-runtime/src/axiom/assessment_worker.py services/agent-runtime/src/axiom/assessment_scoring.py services/agent-runtime/src/axiom/control_library_loader.py ./axiom/
+COPY services/agent-runtime/src/axiom/process_lifetime.py services/agent-runtime/src/axiom/assessment_supervisor.py services/agent-runtime/src/axiom/assessment_worker.py services/agent-runtime/src/axiom/assessment_scoring.py services/agent-runtime/src/axiom/control_library_loader.py ./axiom/
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 20003:20003
-ENTRYPOINT ["python", "-m", "axiom.assessment_worker"]
+# Default launch fails closed. A trusted controller must explicitly select the
+# root supervisor with private pipes; only its fixed child runs as UID 20003.
+ENTRYPOINT ["python", "-m", "axiom.assessment_supervisor"]

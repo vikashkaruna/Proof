@@ -3,7 +3,7 @@
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
 import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -19,6 +19,9 @@ import {
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
 import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
+import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
+import { AssessmentChannel } from '../services/bff/src/workloads/assessment-channel.js';
+import { AssessmentController } from '../services/bff/src/workloads/assessment-controller.js';
 import type { DispatchKeyWrapper } from '../services/bff/src/workloads/dispatch-payload.js';
 import { TaskProof } from '../services/bff/src/workloads/tasks.js';
 import { AssessmentConfirmation } from '../services/bff/src/workloads/assessment-confirmation.js';
@@ -132,6 +135,32 @@ async function main() {
     new SupabaseWorkloadTaskStore(db),
   );
   const router = workloadToolsRoutes(new AssessmentTools(authority, db));
+  const launchSupervised = () =>
+    spawn(
+      'docker',
+      [
+        'exec',
+        '--user',
+        '0',
+        '-i',
+        input.containerName,
+        'python',
+        '-m',
+        'axiom.assessment_supervisor',
+        '--private-stdio',
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+  const callTool = async (operation: string, request: unknown) => {
+    const response = await router.request(`/assessment/${operation}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error('tool_refused');
+    return response.json() as Promise<unknown>;
+  };
+
   const issuer = new WorkloadTaskIssuer(db);
   const confirmation = new AssessmentConfirmation(db);
   // Local synthetic wrapping provider; the wrapping key never enters SQL, IPC,
@@ -256,75 +285,36 @@ print('isolated')`;
       expiresAt: claimed.expiresAt,
       proof: new TaskProof(claimed.payload.reveal().taskProof),
     };
-    outcomes['encrypted-durable-dispatch-recovered-after-controller-restart'] = true;
+    outcomes['encrypted-durable-dispatch-recovered-after-controller-reconstruction'] = true;
     outcomes['idempotent-issuance-one-run-and-audit'] = true;
     outcomes['private-dispatch-claimed-once'] = true;
-    const child = spawn(
-      'docker',
-      [
-        'exec',
-        '--user',
-        '20003:20003',
-        '-i',
-        input.containerName,
-        'python',
-        '-m',
-        'axiom.assessment_worker',
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    const closed = once(child, 'close');
-    const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
-    // Private stderr is discarded; never forward it, even on assertion failure.
-    child.stderr.resume();
-    let buffer = '';
-    let result: Record<string, unknown> | undefined;
-    let count = 0;
     let completeRequest: unknown;
-    child.stdin.write(
-      JSON.stringify({
-        tenantId,
-        runId: task.runId,
-        taskProof: task.proof.reveal(),
-        inputJson: inputJson + (wrongInput ? ' ' : ''),
-        inputHash,
-        spiffeId: 'spiffe://local.axiomproof.test/agent/parikshan',
-      }) + '\n',
+    const channel = new AssessmentChannel(
+      launchSupervised,
+      {
+        start: (request) => callTool('start', request),
+        complete: async (request) => {
+          completeRequest = request;
+          await beforeComplete?.(task.runId);
+          return callTool('complete', request);
+        },
+      },
+      'spiffe://local.axiomproof.test/agent/parikshan',
     );
-    try {
-      for await (const chunk of child.stdout) {
-        buffer += String(chunk);
-        assert(buffer.length <= 1048576);
-        let newline;
-        while ((newline = buffer.indexOf('\n')) >= 0) {
-          const frame = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>;
-          buffer = buffer.slice(newline + 1);
-          if ('tool' in frame) {
-            assert(++count <= 2);
-            assert.equal(frame.tool, count === 1 ? 'assessment.start' : 'assessment.complete');
-            if (frame.tool === 'assessment.complete') {
-              completeRequest = frame.request;
-              await beforeComplete?.(task.runId);
-            }
-            const response = await router.request(
-              `/assessment/${count === 1 ? 'start' : 'complete'}`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(frame.request),
-              },
-            );
-            child.stdin.write(
-              JSON.stringify({ ok: response.ok, value: await response.json() }) + '\n',
-            );
-          } else {
-            assert(!result);
-            // Deliberately discard the terminal frame in the recovery case.
-            if (!loseWorkerResponse) result = frame;
+    const outcome = await channel.run(
+      wrongInput
+        ? {
+            ...claimed,
+            payload: new PrivateAssessmentPayload(inputHash, inputJson + ' ', task.proof),
           }
-        }
-      }
-      const [code] = await closed;
+        : claimed,
+    );
+    phase = `${name}-${outcome.workerStatus}-${outcome.cleanupConfirmed ? 'cleaned' : 'uncleaned'}`;
+    assert.equal(outcome.cleanupConfirmed, true);
+    // Model a lost controller-side channel response, then independently confirm
+    // the database below without relying on the private worker status.
+    const delivered = loseWorkerResponse ? undefined : outcome;
+    {
       const findings = check(
         await db
           .from('findings')
@@ -341,8 +331,7 @@ print('isolated')`;
       );
       assert(findings && records);
       if (beforeComplete || wrongInput) {
-        assert.equal(code, 1);
-        assert.deepEqual(result, { error: 'assessment_worker_failed' });
+        assert.equal(delivered?.workerStatus, 'failed');
         assert.equal(findings.length, 0);
         assert.equal(records.filter((r) => r.action_type === 'assessment.scored').length, 0);
         await assert.rejects(
@@ -355,10 +344,8 @@ print('isolated')`;
           }),
         );
       } else {
-        assert.equal(code, 0);
-        assert.equal(count, 2);
-        if (loseWorkerResponse) assert.equal(result, undefined);
-        else assert.equal((result!.result as { status: string }).status, 'persisted');
+        if (loseWorkerResponse) assert.equal(delivered, undefined);
+        else assert.equal(delivered?.workerStatus, 'persisted');
         assert.equal(findings.length, 2);
         assert.equal(findings.find((f) => f.control_id === 'WA-1')!.score, 0);
         assert.equal(findings.find((f) => f.control_id === 'WA-2')!.score, 100);
@@ -443,10 +430,6 @@ print('isolated')`;
         outcomes['terminal-confirmation-does-not-revive-task'] = true;
       }
       outcomes[name] = true;
-    } finally {
-      clearTimeout(timer);
-      child.stdin.end();
-      if (child.exitCode === null) child.kill('SIGKILL');
     }
   }
   await runCase('actual-worker-pinned-library-durable-findings');
@@ -479,6 +462,201 @@ print('isolated')`;
     trustCurrent = false;
   });
   trustCurrent = true;
+
+  phase = 'controller-reconciliation';
+  for (const lost of [false, true]) {
+    const engagementId = randomUUID(),
+      correlationId = randomUUID(),
+      jobId = randomUUID();
+    check(
+      await db.from('engagements').insert({
+        id: engagementId,
+        tenant_id: tenantId,
+        library_version: version,
+        title: 'Synthetic supervised controller',
+      }),
+    );
+    const wire = JSON.stringify({
+      tenant_id: tenantId,
+      engagement_id: engagementId,
+      library_version: version,
+      answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
+    });
+    const dispatcher = new AssessmentDispatch(db, wrapper);
+    const inputHash = createHash('sha256').update(wire).digest('hex');
+    const receipt = await dispatcher.enqueue(
+      {
+        jobId,
+        tenantId,
+        actorId,
+        workloadId,
+        estateId: null,
+        engagementId,
+        correlationId,
+        inputHash,
+      },
+      wire,
+    );
+    let launches = 0;
+    const actualChannel = new AssessmentChannel(
+      () => {
+        launches++;
+        return launchSupervised();
+      },
+      { start: (r) => callTool('start', r), complete: (r) => callTool('complete', r) },
+      'spiffe://local.axiomproof.test/agent/parikshan',
+    );
+    const controller = new AssessmentController(
+      dispatcher,
+      {
+        async run(claim) {
+          const outcome = await actualChannel.run(claim);
+          if (lost) throw new Error('synthetic channel response loss');
+          return outcome;
+        },
+      },
+      confirmation,
+    );
+    const result = await controller.run(tenantId, jobId);
+    assert.equal(result.status, 'confirmed');
+    assert.equal(result.runId, receipt.run_id);
+    assert.equal((await controller.run(tenantId, jobId)).status, 'confirmed');
+    assert.equal(launches, 1);
+    assert(!JSON.stringify(result).includes('answers'));
+    outcomes[
+      lost ? 'controller-confirms-after-channel-loss' : 'controller-claims-launches-and-confirms'
+    ] = true;
+  }
+  outcomes['controller-recovery-never-relaunches'] = true;
+  phase = 'supervisor-cleanup';
+  const treeProbe = `import json, os, signal, sys
+from axiom.assessment_supervisor import supervise
+from pathlib import Path
+os.environ['SYNTHETIC_PARENT_SECRET']='not-for-worker'
+program="""import os, signal, subprocess, sys, time
+assert os.getuid()==20003
+assert 'SYNTHETIC_PARENT_SECRET' not in os.environ
+try: os.kill(os.getppid(),signal.SIGSTOP)
+except PermissionError: pass
+else: raise RuntimeError('worker could stop supervisor')
+child=subprocess.Popen([sys.executable,'-c','import os,time; os.setsid(); time.sleep(60)'])
+print('isolated-tree',flush=True)
+time.sleep(60)
+"""
+code,report=supervise((sys.executable,'-c',program),seconds=0.5)
+assert code==124 and report['timed_out'] and report['cleanup_confirmed']
+assert not Path(f'/proc/self/task/{os.getpid()}/children').read_text().strip()
+print('reaped')`;
+  assert.equal(
+    execFileSync(
+      'docker',
+      ['exec', '--user', '0', input.containerName, 'python', '-c', treeProbe],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+    ).trim(),
+    'isolated-tree\nreaped',
+  );
+  outcomes['supervisor-drops-credentials-and-reaps-detached-descendants'] = true;
+  const idle = spawn(
+    'docker',
+    [
+      'exec',
+      '--user',
+      '0',
+      '-i',
+      input.containerName,
+      'python',
+      '-m',
+      'axiom.assessment_supervisor',
+      '--private-stdio',
+      '--deadline-seconds',
+      '0.5',
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  const idleClosed = once(idle, 'close');
+  idle.stderr.resume();
+  let report = '';
+  const idleTimer = setTimeout(() => idle.kill('SIGKILL'), 10000);
+  try {
+    for await (const chunk of idle.stdout) {
+      report += String(chunk);
+      assert(report.length < 1024);
+    }
+    const [code] = await idleClosed;
+    assert.equal(code, 124);
+    assert.deepEqual(JSON.parse(report), {
+      supervisor: { worker_exit: null, timed_out: true, cleanup_confirmed: true },
+    });
+  } finally {
+    clearTimeout(idleTimer);
+    idle.stdin.end();
+  }
+  outcomes['supervisor-bounds-idle-private-input'] = true;
+
+  phase = 'supervisor-parent-death';
+  const deathProbe = `import ctypes, os, signal, subprocess, sys, time
+from pathlib import Path
+assert ctypes.CDLL(None).prctl(36,1,0,0,0)==0
+worker="""import ctypes,os,signal,subprocess,sys,time
+from functools import partial
+from axiom.process_lifetime import bind_parent_lifetime
+value=ctypes.c_int()
+assert ctypes.CDLL(None).prctl(2,ctypes.byref(value),0,0,0)==0
+assert value.value==signal.SIGKILL
+subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],preexec_fn=partial(bind_parent_lifetime,os.getpid()))
+print('bound',flush=True)
+time.sleep(60)
+"""
+monitor_code='from axiom.assessment_supervisor import supervise; import sys; supervise((sys.executable,"-c",'+repr(worker)+'),seconds=5)'
+monitor=subprocess.Popen([sys.executable,'-c',monitor_code],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+assert monitor.stdout.readline().strip()==b'bound'
+monitor.kill();monitor.wait(timeout=2)
+deadline=time.monotonic()+3
+while time.monotonic()<deadline:
+ try:
+  pid,status=os.waitpid(-1,os.WNOHANG)
+  if pid: assert os.waitstatus_to_exitcode(status)==-signal.SIGKILL
+ except ChildProcessError: break
+ time.sleep(0.01)
+else: raise RuntimeError('process chain survived parent death')
+assert not Path(f'/proc/self/task/{os.getpid()}/children').read_text().strip()
+print('parent-death-clean')`;
+  assert.equal(
+    execFileSync(
+      'docker',
+      ['exec', '--user', '0', input.containerName, 'python', '-c', deathProbe],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+    ).trim(),
+    'parent-death-clean',
+  );
+  outcomes['kernel-parent-death-stops-fixed-worker-chain'] = true;
+
+  phase = 'supervisor-launch-guard';
+  const implicit = spawnSync(
+    'docker',
+    ['run', '--rm', '--network', 'none', 'axiom-assessment-worker:acceptance'],
+    { encoding: 'utf8', timeout: 10000 },
+  );
+  assert.equal(implicit.status, 78);
+  assert.equal(implicit.stdout, '');
+  const unprivileged = spawnSync(
+    'docker',
+    [
+      'exec',
+      '--user',
+      '20003:20003',
+      '-i',
+      input.containerName,
+      'python',
+      '-m',
+      'axiom.assessment_supervisor',
+      '--private-stdio',
+    ],
+    { encoding: 'utf8', input: '', timeout: 10000 },
+  );
+  assert.equal(unprivileged.status, 70);
+  assert.equal(unprivileged.stdout, '');
+  outcomes['supervisor-refuses-implicit-or-unprivileged-launch'] = true;
   phase = 'result';
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }));
