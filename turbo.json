@@ -56,6 +56,16 @@
     "clean": {
       "cache": false,
       "outputs": []
+    },
+    "@axiom/types#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "vitest.config.*",
+        "$TURBO_ROOT$/infra/supabase/migrations/*.sql"
+      ]
     }
   }
 }

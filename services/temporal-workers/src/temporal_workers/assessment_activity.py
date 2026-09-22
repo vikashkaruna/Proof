@@ -4,12 +4,17 @@ import asyncio
 import json
 import stat
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from .assessment_contracts import JobReference, validated_result
+from .assessment_contracts import JobReference, transport_payload, validated_result
+
+
+class AssessmentTransport(Protocol):
+    async def request(self, operation: str, payload: dict): ...
 
 
 class PrivateAssessmentController:
@@ -59,11 +64,8 @@ class PrivateAssessmentController:
     async def request(self, operation: str, payload: dict):
         result = None
         try:
-            if (
-                operation
-                not in {"run", "reconcile", "scheduling/poll", "scheduling/ack"}
-                or len(json.dumps(payload).encode()) > 1024
-            ):
+            payload = transport_payload(operation, payload)
+            if len(json.dumps(payload).encode()) > 1024:
                 raise ValueError("Private operation refused")
             self.validate_socket()
             transport = httpx.AsyncHTTPTransport(uds=self.socket_path, retries=0)
@@ -95,23 +97,29 @@ class PrivateAssessmentController:
         return result
 
 
+async def invoke_controller(
+    transport: AssessmentTransport, reference: dict, operation: str
+) -> dict:
+    result = None
+    try:
+        job = JobReference.model_validate(reference)
+        if operation not in {"run", "reconcile"}:
+            raise ValueError("Controller operation refused")
+        result = validated_result(
+            await transport.request(operation, job.model_dump(mode="json")), job
+        )
+    except Exception:  # noqa: BLE001 — sanitize every failure before Temporal history.
+        result = None
+    if result is None:
+        raise ApplicationError(
+            "assessment_unconfirmed",
+            type="assessment_unconfirmed",
+            non_retryable=True,
+        )
+    return result
+
+
 class AssessmentControllerActivity(PrivateAssessmentController):
     @activity.defn(name="assessment_controller_v1")
     async def invoke(self, reference: dict, operation: str) -> dict:
-        result = None
-        try:
-            job = JobReference.model_validate(reference)
-            if operation not in {"run", "reconcile"}:
-                raise ValueError("Controller operation refused")
-            result = validated_result(
-                await self.request(operation, job.model_dump(mode="json")), job
-            )
-        except Exception:  # noqa: BLE001 — sanitize every failure before Temporal history.
-            result = None
-        if result is None:
-            raise ApplicationError(
-                "assessment_unconfirmed",
-                type="assessment_unconfirmed",
-                non_retryable=True,
-            )
-        return result
+        return await invoke_controller(self, reference, operation)

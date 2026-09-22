@@ -2,11 +2,22 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
-import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import {
+  createHash,
+  randomUUID,
+  randomBytes,
+  createCipheriv,
+  createDecipheriv,
+  generateKeyPairSync,
+  sign,
+} from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath, chmod, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createRemoteAssessmentServer } from '../services/bff/src/workloads/assessment-remote.js';
+import { GoogleSchedulerIdentity } from '../services/bff/src/workloads/scheduler-identity.js';
 import { startAssessmentControllerSocket } from '../services/bff/src/workloads/assessment-socket.js';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -531,229 +542,357 @@ print('isolated')`;
     ] = true;
   }
   outcomes['controller-recovery-never-relaunches'] = true;
-  phase = 'temporal-private-scheduling';
-  // Dedicated tenant shard keeps historical synthetic outbox fixtures out of
-  // this production-adapter poll, without adding caller-selected tenant input.
-  const scheduleTenantId = randomUUID(),
-    scheduleWorkloadId = randomUUID();
-  check(
-    await db.from('tenants').insert({
-      id: scheduleTenantId,
-      slug: `schedule-${scheduleTenantId}`,
-      name: 'Synthetic scheduling',
-    }),
-  );
-  check(
-    await db
-      .from('tenant_users')
-      .insert({ tenant_id: scheduleTenantId, user_id: actorId, role: 'owner' }),
-  );
-  check(
-    await db.from('workload_identities').insert({
-      id: scheduleWorkloadId,
-      tenant_id: scheduleTenantId,
-      agent_name: 'parikshan',
-      spiffe_id: 'spiffe://local.axiomproof.test/agent/parikshan',
-      status: 'active',
-    }),
-  );
-  const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
-  const schedulingDispatch = new AssessmentDispatch(db, wrapper);
-  for (let n = 0; n < 2; n++) {
-    const engagementId = randomUUID(),
-      correlationId = randomUUID(),
-      jobId = randomUUID();
+  for (const transport of ['unix', 'https'] as const) {
+    phase = `temporal-${transport}-scheduling`;
+    // Dedicated tenant shard keeps historical synthetic outbox fixtures out of
+    // this production-adapter poll, without adding caller-selected tenant input.
+    const scheduleTenantId = randomUUID(),
+      scheduleWorkloadId = randomUUID();
     check(
-      await db.from('engagements').insert({
-        id: engagementId,
-        tenant_id: scheduleTenantId,
-        library_version: version,
-        title: 'Synthetic opaque scheduling',
+      await db.from('tenants').insert({
+        id: scheduleTenantId,
+        slug: `schedule-${scheduleTenantId}`,
+        name: 'Synthetic scheduling',
       }),
     );
-    const wire = JSON.stringify({
-      tenant_id: scheduleTenantId,
-      engagement_id: engagementId,
-      library_version: version,
-      answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
-    });
-    await schedulingDispatch.enqueue(
-      {
-        jobId,
-        tenantId: scheduleTenantId,
-        actorId,
-        workloadId: scheduleWorkloadId,
-        estateId: null,
-        engagementId,
-        correlationId,
-        inputHash: createHash('sha256').update(wire).digest('hex'),
-      },
-      wire,
+    check(
+      await db
+        .from('tenant_users')
+        .insert({ tenant_id: scheduleTenantId, user_id: actorId, role: 'owner' }),
     );
-    scheduledJobs.push({ tenantId: scheduleTenantId, jobId });
-  }
-  phase = 'temporal-socket-setup';
-  let scheduledLaunches = 0;
-  const scheduledChannel = new AssessmentChannel(
-    () => {
-      scheduledLaunches++;
-      return launchSupervised();
-    },
-    { start: (r) => callTool('start', r), complete: (r) => callTool('complete', r) },
-    'spiffe://local.axiomproof.test/agent/parikshan',
-  );
-  const directory = await realpath(await mkdtemp('/tmp/axiom-schedule-'));
-  await chmod(directory, 0o700);
-  const scheduling = new AssessmentScheduling(db, {
-    namespace: 'default',
-    tenantId: scheduleTenantId,
-  });
-  let polls = 0;
-  const controllerSocket = await startAssessmentControllerSocket({
-    directory,
-    socketGroup: process.getgid!(),
-    controller: new AssessmentController(schedulingDispatch, scheduledChannel, confirmation),
-    scheduling: {
-      async reserve() {
-        if (++polls === 2) {
-          // Acceptance fixture only: advance the persisted lease deadline after
-          // a lost start response, avoiding a three-minute test wall-clock wait.
-          // No task lifetime, claim or execution authority is changed.
-          execFileSync(
-            'docker',
-            [
-              'exec',
-              '-i',
-              'supabase_db_axiom-w0-parity',
-              'psql',
-              '-X',
-              '-U',
-              'postgres',
-              '-d',
-              'postgres',
-              '-v',
-              'ON_ERROR_STOP=1',
-              '-q',
-            ],
-            {
-              input: `update public.assessment_dispatch_jobs set scheduling_lease_until=clock_timestamp()-interval '1 second',scheduling_next_at=clock_timestamp()-interval '1 day' where id='${scheduledJobs[0]!.jobId}' and scheduling_status='pending';`,
-              stdio: ['pipe', 'pipe', 'pipe'],
-              timeout: 10000,
-            },
-          );
-        }
-        return scheduling.reserve();
-      },
-      acknowledge: (request) => scheduling.acknowledge(request),
-    },
-  });
-  try {
-    phase = 'temporal-probe-process';
-    const probe = spawn(
-      'uv',
-      [
-        'run',
-        '--no-sync',
-        '--project',
-        'services/temporal-workers',
-        'python',
-        'scripts/verify-assessment-scheduling.py',
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH } },
+    check(
+      await db.from('workload_identities').insert({
+        id: scheduleWorkloadId,
+        tenant_id: scheduleTenantId,
+        agent_name: 'parikshan',
+        spiffe_id: 'spiffe://local.axiomproof.test/agent/parikshan',
+        status: 'active',
+      }),
     );
-    probe.stderr.resume(); // Never forward SDK failures or private diagnostics.
-    probe.stdin.on('error', () => {});
-    const done = once(probe, 'close')
-      .then(([code]) => code)
-      .catch(() => null);
-    const timer = setTimeout(() => probe.kill('SIGTERM'), 150000);
-    let stdout = '';
-    try {
-      probe.stdin.end(
-        JSON.stringify({
-          socketPath: controllerSocket.socketPath,
-          controllerUid: process.getuid!(),
-          jobs: scheduledJobs,
+    const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
+    const schedulingDispatch = new AssessmentDispatch(db, wrapper);
+    for (let n = 0; n < 2; n++) {
+      const engagementId = randomUUID(),
+        correlationId = randomUUID(),
+        jobId = randomUUID();
+      check(
+        await db.from('engagements').insert({
+          id: engagementId,
+          tenant_id: scheduleTenantId,
+          library_version: version,
+          title: 'Synthetic opaque scheduling',
         }),
       );
-      for await (const chunk of probe.stdout) {
-        stdout += String(chunk);
-        if (stdout.length > 4096) throw new Error('Scheduling probe output refused');
+      const wire = JSON.stringify({
+        tenant_id: scheduleTenantId,
+        engagement_id: engagementId,
+        library_version: version,
+        answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
+      });
+      await schedulingDispatch.enqueue(
+        {
+          jobId,
+          tenantId: scheduleTenantId,
+          actorId,
+          workloadId: scheduleWorkloadId,
+          estateId: null,
+          engagementId,
+          correlationId,
+          inputHash: createHash('sha256').update(wire).digest('hex'),
+        },
+        wire,
+      );
+      scheduledJobs.push({ tenantId: scheduleTenantId, jobId });
+    }
+    phase = `temporal-${transport}-setup`;
+    let scheduledLaunches = 0;
+    const scheduledChannel = new AssessmentChannel(
+      () => {
+        scheduledLaunches++;
+        return launchSupervised();
+      },
+      { start: (r) => callTool('start', r), complete: (r) => callTool('complete', r) },
+      'spiffe://local.axiomproof.test/agent/parikshan',
+    );
+    const directory = await realpath(await mkdtemp('/tmp/axiom-schedule-'));
+    await chmod(directory, 0o700);
+    const scheduling = new AssessmentScheduling(db, {
+      namespace: 'default',
+      tenantId: scheduleTenantId,
+    });
+    let polls = 0;
+    const controllerOptions = {
+      controller: new AssessmentController(schedulingDispatch, scheduledChannel, confirmation),
+      scheduling: {
+        async reserve() {
+          if (++polls === 2) {
+            // Acceptance fixture only: advance the persisted lease deadline after
+            // a lost start response, avoiding a three-minute test wall-clock wait.
+            // No task lifetime, claim or execution authority is changed.
+            execFileSync(
+              'docker',
+              [
+                'exec',
+                '-i',
+                'supabase_db_axiom-w0-parity',
+                'psql',
+                '-X',
+                '-U',
+                'postgres',
+                '-d',
+                'postgres',
+                '-v',
+                'ON_ERROR_STOP=1',
+                '-q',
+              ],
+              {
+                input: `update public.assessment_dispatch_jobs set scheduling_lease_until=clock_timestamp()-interval '1 second',scheduling_next_at=clock_timestamp()-interval '1 day' where id='${scheduledJobs[0]!.jobId}' and scheduling_status='pending';`,
+                stdio: ['pipe', 'pipe', 'pipe'],
+                timeout: 10000,
+              },
+            );
+          }
+          return scheduling.reserve();
+        },
+        acknowledge: (request: unknown) => scheduling.acknowledge(request),
+      },
+    };
+    let endpoint: Record<string, unknown>;
+    let closeController: () => Promise<void> = async () => {};
+    const originalFetch = globalThis.fetch;
+    let keyFetches = 0;
+    try {
+      if (transport === 'unix') {
+        const socket = await startAssessmentControllerSocket({
+          directory,
+          socketGroup: process.getgid!(),
+          ...controllerOptions,
+        });
+        endpoint = { socketPath: socket.socketPath, controllerUid: process.getuid!() };
+        closeController = socket.close;
+      } else {
+        // Synthetic TLS/signing material is generated only for this local test.
+        // No production token, key or credential is loaded or written here.
+        const certPath = join(directory, 'tls.crt'),
+          keyPath = join(directory, 'tls.key');
+        execFileSync(
+          'openssl',
+          [
+            'req',
+            '-new',
+            '-newkey',
+            'rsa:2048',
+            '-nodes',
+            '-x509',
+            '-days',
+            '1',
+            '-subj',
+            '/CN=localhost',
+            '-addext',
+            'subjectAltName=DNS:localhost,IP:127.0.0.1',
+            '-keyout',
+            keyPath,
+            '-out',
+            certPath,
+          ],
+          { stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 },
+        );
+        const certificate = readFileSync(certPath, 'utf8');
+        let identity: GoogleSchedulerIdentity | undefined;
+        const server = createRemoteAssessmentServer({
+          ...controllerOptions,
+          tls: { key: readFileSync(keyPath), cert: certificate },
+          identity: {
+            async authorize(authorization) {
+              if (!identity) throw new Error('Fixture identity unavailable');
+              return identity.authorize(authorization);
+            },
+          },
+        });
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+        closeController = () =>
+          new Promise<void>((resolve, reject) =>
+            server.close((error) =>
+              error ? reject(new Error('Fixture close failed')) : resolve(),
+            ),
+          );
+        const address = server.address();
+        assert(address && typeof address !== 'string');
+        const origin = `https://127.0.0.1:${address.port}`;
+        const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+        const jwks = {
+          keys: [
+            {
+              ...pair.publicKey.export({ format: 'jwk' }),
+              kid: 'fixture',
+              alg: 'RS256',
+              use: 'sig',
+            },
+          ],
+        };
+        globalThis.fetch = async (resource, options) => {
+          if (String(resource) === 'https://www.googleapis.com/oauth2/v3/certs') {
+            keyFetches++;
+            return new Response(JSON.stringify(jwks), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return originalFetch(resource, options);
+        };
+        const subject = '123456789012345678901',
+          email = 'scheduler@synthetic.iam.gserviceaccount.com';
+        identity = new GoogleSchedulerIdentity({ audience: origin, subject, email });
+        const issue = (sub: string) => {
+          const encode = (value: unknown) =>
+            Buffer.from(JSON.stringify(value)).toString('base64url');
+          const now = Math.floor(Date.now() / 1000);
+          const value =
+            encode({ alg: 'RS256', kid: 'fixture', typ: 'JWT' }) +
+            '.' +
+            encode({
+              iss: 'https://accounts.google.com',
+              sub,
+              azp: sub,
+              email,
+              email_verified: true,
+              aud: origin,
+              iat: now,
+              exp: now + 300,
+            });
+          return (
+            value +
+            '.' +
+            sign('RSA-SHA256', Buffer.from(value), pair.privateKey).toString('base64url')
+          );
+        };
+        endpoint = {
+          origin,
+          certificate,
+          identityToken: issue(subject),
+          foreignIdentityToken: issue('999999999999999999999'),
+        };
       }
-      phase = `temporal-probe-output-launches-${scheduledLaunches}`;
-      const code = await done;
-      if (code !== 0) {
-        const failure = z
+      phase = `temporal-${transport}-probe-process`;
+      const probe = spawn(
+        'uv',
+        [
+          'run',
+          '--no-sync',
+          '--project',
+          'services/temporal-workers',
+          'python',
+          'scripts/verify-assessment-scheduling.py',
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH } },
+      );
+      probe.stderr.resume(); // Never forward SDK failures or private diagnostics.
+      probe.stdin.on('error', () => {});
+      const done = once(probe, 'close')
+        .then(([code]) => code)
+        .catch(() => null);
+      const timer = setTimeout(() => probe.kill('SIGTERM'), 150000);
+      let stdout = '';
+      try {
+        probe.stdin.end(
+          JSON.stringify({
+            ...endpoint,
+            jobs: scheduledJobs,
+          }),
+        );
+        for await (const chunk of probe.stdout) {
+          stdout += String(chunk);
+          if (stdout.length > 4096) throw new Error('Scheduling probe output refused');
+        }
+        phase = `temporal-probe-output-launches-${scheduledLaunches}`;
+        const code = await done;
+        if (code !== 0) {
+          const failure = z
+            .object({
+              failedPhase: z.enum([
+                'setup',
+                'remote-refusal',
+                'schedule',
+                'pickup',
+                'recovery',
+                'empty',
+                'result',
+                'confirmation',
+                'duplicate',
+                'history',
+                'calls',
+              ]),
+            })
+            .strict()
+            .safeParse(stdout ? JSON.parse(stdout) : null);
+          phase = `temporal-${transport}-${failure.success ? failure.data.failedPhase : 'process'}-launches-${scheduledLaunches}`;
+        }
+        assert.equal(code, 0);
+        const result = z
           .object({
-            failedPhase: z.enum([
-              'setup',
-              'schedule',
-              'pickup',
-              'recovery',
-              'empty',
-              'result',
-              'confirmation',
-              'duplicate',
-              'history',
-              'calls',
-            ]),
+            'temporal-private-controller-real-worker-confirmed': z.literal(true),
+            'temporal-lost-reply-reconciles-without-relaunch': z.literal(true),
+            'temporal-history-contains-only-opaque-job-metadata': z.literal(true),
+            'outbox-private-pickup-submits-and-acknowledges': z.literal(true),
+            'outbox-lost-start-reacquires-lease-without-new-execution': z.literal(true),
+            'outbox-lost-ack-stays-durably-submitted': z.literal(true),
+            remoteChecks: z.boolean(),
           })
           .strict()
-          .safeParse(stdout ? JSON.parse(stdout) : null);
-        phase = `temporal-${failure.success ? failure.data.failedPhase : 'process'}-launches-${scheduledLaunches}`;
+          .parse(JSON.parse(stdout));
+        phase = 'temporal-launch-count';
+        assert.equal(scheduledLaunches, 2);
+        const rows = check(
+          await db
+            .from('assessment_dispatch_jobs')
+            .select(
+              'scheduling_status,scheduling_attempts,workflow_namespace,workflow_run_id,scheduling_receipt',
+            )
+            .eq('tenant_id', scheduleTenantId),
+        );
+        assert(rows);
+        assert.equal(rows.length, 2);
+        assert(
+          rows.every(
+            (row) =>
+              row.scheduling_status === 'submitted' &&
+              row.workflow_namespace === 'default' &&
+              row.workflow_run_id &&
+              row.scheduling_receipt,
+          ),
+        );
+        assert.deepEqual(rows.map((row) => row.scheduling_attempts).sort(), [1, 2]);
+        const audits = check(
+          await db
+            .from('audit_ledger')
+            .select('id')
+            .eq('tenant_id', scheduleTenantId)
+            .eq('action_type', 'workload.dispatch_scheduled'),
+        );
+        assert(audits);
+        assert.equal(audits.length, 2);
+        const { remoteChecks, ...common } = result;
+        assert.equal(remoteChecks, transport === 'https');
+        if (remoteChecks) {
+          assert(keyFetches > 0);
+          outcomes['remote-https-scheduler-identity-and-pickup'] = true;
+          outcomes['remote-https-foreign-identity-refused-before-poll'] = true;
+          outcomes['remote-https-untrusted-certificate-refused'] = true;
+        }
+        Object.assign(outcomes, common);
+      } finally {
+        clearTimeout(timer);
+        if (probe.exitCode === null) probe.kill('SIGTERM');
       }
-      assert.equal(code, 0);
-      const result = z
-        .object({
-          'temporal-private-controller-real-worker-confirmed': z.literal(true),
-          'temporal-lost-reply-reconciles-without-relaunch': z.literal(true),
-          'temporal-history-contains-only-opaque-job-metadata': z.literal(true),
-          'outbox-private-pickup-submits-and-acknowledges': z.literal(true),
-          'outbox-lost-start-reacquires-lease-without-new-execution': z.literal(true),
-          'outbox-lost-ack-stays-durably-submitted': z.literal(true),
-        })
-        .strict()
-        .parse(JSON.parse(stdout));
-      phase = 'temporal-launch-count';
-      assert.equal(scheduledLaunches, 2);
-      const rows = check(
-        await db
-          .from('assessment_dispatch_jobs')
-          .select(
-            'scheduling_status,scheduling_attempts,workflow_namespace,workflow_run_id,scheduling_receipt',
-          )
-          .eq('tenant_id', scheduleTenantId),
-      );
-      assert(rows);
-      assert.equal(rows.length, 2);
-      assert(
-        rows.every(
-          (row) =>
-            row.scheduling_status === 'submitted' &&
-            row.workflow_namespace === 'default' &&
-            row.workflow_run_id &&
-            row.scheduling_receipt,
-        ),
-      );
-      assert.deepEqual(rows.map((row) => row.scheduling_attempts).sort(), [1, 2]);
-      const audits = check(
-        await db
-          .from('audit_ledger')
-          .select('id')
-          .eq('tenant_id', scheduleTenantId)
-          .eq('action_type', 'workload.dispatch_scheduled'),
-      );
-      assert(audits);
-      assert.equal(audits.length, 2);
-      Object.assign(outcomes, result);
     } finally {
-      clearTimeout(timer);
-      if (probe.exitCode === null) probe.kill('SIGTERM');
+      phase += '-close';
+      try {
+        await closeController();
+      } finally {
+        globalThis.fetch = originalFetch;
+        await rm(directory, { recursive: true, force: true });
+      }
     }
-  } finally {
-    phase += '-close';
-    await controllerSocket.close();
-    await rm(directory, { recursive: true, force: true });
   }
   phase = 'supervisor-cleanup';
   const treeProbe = `import json, os, signal, sys
