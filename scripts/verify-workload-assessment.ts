@@ -18,6 +18,7 @@ import {
   SupabaseWorkloadTaskStore,
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
+import { AssessmentConfirmation } from '../services/bff/src/workloads/assessment-confirmation.js';
 import { AssessmentTools } from '../services/bff/src/workloads/assessment-tools.js';
 import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.js';
 let phase = 'setup';
@@ -129,6 +130,7 @@ async function main() {
   );
   const router = workloadToolsRoutes(new AssessmentTools(authority, db));
   const issuer = new WorkloadTaskIssuer(db);
+  const confirmation = new AssessmentConfirmation(db);
   // These probes run under the same UID and image as the actual worker.
   phase = 'physical-isolation';
   const probe = `import os, pathlib, socket, importlib.util, json
@@ -163,6 +165,7 @@ print('isolated')`;
     name: string,
     beforeComplete?: (runId: string) => Promise<void>,
     wrongInput = false,
+    loseWorkerResponse = false,
   ) {
     phase = name;
     const engagementId = randomUUID();
@@ -181,6 +184,7 @@ print('isolated')`;
       answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
     });
     const inputHash = createHash('sha256').update(inputJson).digest('hex');
+    const correlationId = randomUUID();
     const task = await issuer.issue({
       tenantId,
       actorId,
@@ -188,7 +192,7 @@ print('isolated')`;
       agentName: 'parikshan',
       estateId: null,
       engagementId,
-      correlationId: randomUUID(),
+      correlationId,
       inputHash,
     });
     const child = spawn(
@@ -251,7 +255,8 @@ print('isolated')`;
             );
           } else {
             assert(!result);
-            result = frame;
+            // Deliberately discard the terminal frame in the recovery case.
+            if (!loseWorkerResponse) result = frame;
           }
         }
       }
@@ -276,10 +281,20 @@ print('isolated')`;
         assert.deepEqual(result, { error: 'assessment_worker_failed' });
         assert.equal(findings.length, 0);
         assert.equal(records.filter((r) => r.action_type === 'assessment.scored').length, 0);
+        await assert.rejects(
+          confirmation.confirm({
+            tenantId,
+            runId: task.runId,
+            engagementId,
+            correlationId,
+            inputHash,
+          }),
+        );
       } else {
         assert.equal(code, 0);
         assert.equal(count, 2);
-        assert.equal((result!.result as { status: string }).status, 'persisted');
+        if (loseWorkerResponse) assert.equal(result, undefined);
+        else assert.equal((result!.result as { status: string }).status, 'persisted');
         assert.equal(findings.length, 2);
         assert.equal(findings.find((f) => f.control_id === 'WA-1')!.score, 0);
         assert.equal(findings.find((f) => f.control_id === 'WA-2')!.score, 100);
@@ -323,6 +338,45 @@ print('isolated')`;
         );
         outcomes['retry-one-durable-receipt'] = true;
         outcomes['input-result-digests-no-private-ledger-data'] = true;
+        const expected = { tenantId, runId: task.runId, engagementId, correlationId, inputHash };
+        const recorded = await confirmation.confirm(expected);
+        assert.equal(recorded.status, 'succeeded');
+        assert.equal(recorded.result.posture_score, 50);
+        assert.deepEqual(await confirmation.confirm(expected), recorded);
+        const confirmedRun = check(
+          await db
+            .from('agent_runs')
+            .select('status,output_redacted_hash,error,total_tokens,cost_usd')
+            .eq('tenant_id', tenantId)
+            .eq('id', task.runId)
+            .single(),
+        );
+        assert.deepEqual(confirmedRun, {
+          status: 'succeeded',
+          output_redacted_hash: recorded.result_digest,
+          error: null,
+          total_tokens: 0,
+          cost_usd: 0,
+        });
+        assert.equal(
+          check(
+            await db
+              .from('audit_ledger')
+              .select('id')
+              .eq('tenant_id', tenantId)
+              .eq('target_ref', task.runId)
+              .eq('action_type', 'workload.task_completed'),
+          )!.length,
+          1,
+        );
+        outcomes['independent-terminal-confirmation-once'] = true;
+        const afterConfirmation = await router.request('/assessment/complete', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(completeRequest),
+        });
+        assert.equal(afterConfirmation.status, 403);
+        outcomes['terminal-confirmation-does-not-revive-task'] = true;
       }
       outcomes[name] = true;
     } finally {
@@ -332,6 +386,7 @@ print('isolated')`;
     }
   }
   await runCase('actual-worker-pinned-library-durable-findings');
+  await runCase('lost-worker-response-recovered', undefined, false, true);
   await runCase('changed-assignment-refused', undefined, true);
   await runCase('revoked-task-refused-before-write', async (runId) =>
     issuer.revoke(tenantId, actorId, runId, randomUUID()),

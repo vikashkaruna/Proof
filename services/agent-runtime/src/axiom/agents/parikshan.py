@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from ..assessment_scoring import score_assessment
+from ..assessment_scoring import AssessmentInput, score_assessment
 from ..control_library_loader import ControlLibrary, load_default_library
 from .base import AgentName, AutonomyLevel, BaseAgent
 
@@ -76,4 +76,15 @@ class ParikshanAgent(BaseAgent[ParikshanInput, ParikshanOutput]):
         self, *, correlation_id: str, input: ParikshanInput, **deps: Any
     ) -> ParikshanOutput:
         lib: ControlLibrary = deps.get("library") or load_default_library()
-        return ParikshanOutput.model_validate(score_assessment(lib, input))
+        return ParikshanOutput.model_validate(
+            score_assessment(
+                lib,
+                AssessmentInput(
+                    library_version=input.library_version,
+                    answers=input.answers,
+                    sdf_self_attested=input.sdf_self_attested,
+                    processes_children=input.processes_children,
+                    processes_health=input.processes_health,
+                ),
+            )
+        )
