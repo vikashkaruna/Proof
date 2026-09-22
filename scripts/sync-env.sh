@@ -462,8 +462,8 @@ do_secrets() {
   info "Synchronizing ${TARGET_ENV} secrets with GCP Secret Manager..."
 
   if ! command -v gcloud >/dev/null 2>&1; then
-    warn "gcloud CLI not installed. Skipping Secret Manager synchronization."
-    return 0
+    fail "gcloud CLI not installed. Secret Manager synchronization did not run."
+    return 1
   fi
 
   local project="$(get_val "AXIOM_PROJECT_ID" "$(get_val "GCP_PROJECT_ID" "axiom-proof")")"
@@ -489,8 +489,6 @@ do_secrets() {
     secret_pairs+=("axiom-${TARGET_ENV}-mfa-encryption-keys-previous:$(get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS")")
   fi
 
-  local sa="axiom-${TARGET_ENV}-cloudrun-sa@${project}.iam.gserviceaccount.com"
-
   for item in "${secret_pairs[@]}"; do
     local sec_name="${item%%:*}"
     local sec_val="${item#*:}"
@@ -501,25 +499,30 @@ do_secrets() {
 
     if gcloud secrets describe "$sec_name" --project="$project" >/dev/null 2>&1; then
       # Add version
-      echo -n "$sec_val" | gcloud secrets versions add "$sec_name" --data-file=- --project="$project" --quiet >/dev/null 2>&1 || true
+      if ! printf '%s' "$sec_val" | gcloud secrets versions add "$sec_name" --data-file=- --project="$project" --quiet >/dev/null 2>&1; then
+        fail "Secret version update failed: ${sec_name}"
+        return 1
+      fi
       pass "Updated secret version: ${sec_name}"
     else
       # Create secret
-      echo -n "$sec_val" | gcloud secrets create "$sec_name" \
+      if ! printf '%s' "$sec_val" | gcloud secrets create "$sec_name" \
         --data-file=- \
         --replication-policy="user-managed" \
         --locations="$region" \
-        --project="$project" --quiet >/dev/null 2>&1 || true
+        --project="$project" --quiet >/dev/null 2>&1; then
+        fail "Secret creation failed: ${sec_name}"
+        return 1
+      fi
       pass "Created new secret: ${sec_name}"
     fi
 
-    # Ensure Cloud Run SA has secretAccessor
-    gcloud secrets add-iam-policy-binding "$sec_name" \
-      --member="serviceAccount:${sa}" \
-      --role="roles/secretmanager.secretAccessor" \
-      --project="$project" --quiet >/dev/null 2>&1 || true
+    # IAM is owned by Terraform's reviewed per-service policy. A secret sync
+    # must never create an out-of-band grant or restore the retired shared SA.
+
   done
 
+  info "Secret access remains governed by Terraform; apply the reviewed deployment policy before rollout."
   pass "Secret Manager sync complete for environment '${TARGET_ENV}'."
 }
 
@@ -530,8 +533,8 @@ do_cloudrun() {
   info "Synchronizing Cloud Run environment variables for ${TARGET_ENV}..."
 
   if ! command -v gcloud >/dev/null 2>&1; then
-    warn "gcloud CLI not installed. Skipping Cloud Run sync."
-    return 0
+    fail "gcloud CLI not installed. Cloud Run synchronization did not run."
+    return 1
   fi
 
   local project="$(get_val "AXIOM_PROJECT_ID" "$(get_val "GCP_PROJECT_ID" "axiom-proof")")"
@@ -539,12 +542,15 @@ do_cloudrun() {
 
   # Marketing Cloud Run
   info "Updating marketing service: axiom-marketing-${TARGET_ENV}..."
-  gcloud run services update "axiom-marketing-${TARGET_ENV}" \
+  if ! gcloud run services update "axiom-marketing-${TARGET_ENV}" \
     --region="$region" \
     --project="$project" \
-    --set-env-vars="ENVIRONMENT=${TARGET_ENV},NODE_ENV=production,RESEND_FROM_EMAIL=$(get_val "RESEND_FROM_EMAIL" "Axiom Proof <onboarding@resend.dev>"),CONTACT_RECIPIENT_EMAIL=$(get_val "CONTACT_RECIPIENT_EMAIL" "vkkaruna@outlook.com"),CONTACT_FALLBACK_RECIPIENT_EMAIL=$(get_val "CONTACT_FALLBACK_RECIPIENT_EMAIL" "hello@axiomminds.ai")" \
+    --update-env-vars="ENVIRONMENT=${TARGET_ENV},NODE_ENV=production,RESEND_FROM_EMAIL=$(get_val "RESEND_FROM_EMAIL" "Axiom Proof <onboarding@resend.dev>"),CONTACT_RECIPIENT_EMAIL=$(get_val "CONTACT_RECIPIENT_EMAIL" "vkkaruna@outlook.com"),CONTACT_FALLBACK_RECIPIENT_EMAIL=$(get_val "CONTACT_FALLBACK_RECIPIENT_EMAIL" "hello@axiomminds.ai")" \
     --update-secrets="RESEND_API_KEY=axiom-${TARGET_ENV}-resend-api-key:latest" \
-    --quiet || warn "axiom-marketing-${TARGET_ENV} service update warning (continuing)"
+    --quiet; then
+    fail "Cloud Run service update failed: axiom-marketing-${TARGET_ENV}"
+    return 1
+  fi
 
   pass "Cloud Run environment synchronization complete."
 }
