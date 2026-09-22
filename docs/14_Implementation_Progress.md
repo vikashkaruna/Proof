@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `e0781c6`, CI 35688921423 green. Revision 43 confirmation/recovery is verified. Revision 44 fixes Temporal computation, failure handling and replay, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `d1becf0`, CI 35691631278 green. Revision 44 Temporal computation/replay is verified. Revision 45 adds private durable dispatch, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 45 — durable encrypted assessment dispatch
+
+Revision 44 is **complete and green** at staging `d1becf0`, CI [35691631278](https://github.com/vikashkaruna/Proof/actions/runs/35691631278), with 17 applicable jobs and eight exact-merge artifacts, including 67 Temporal tests. No intervening upstream implementation was present.
+
+Migration **0044** adds a private outbox atomically with task/run/audit delegation. A stable request UUID returns the same run after a lost response; changed context/input conflicts. The exact input and task proof are encrypted with a fresh data key and authenticated job/tenant/actor/workload/estate/engagement/correlation/input context, separated from connector credentials and approval keys. Only ciphertext and the existing proof hash reach storage. The controller can claim a live dispatch once. Lost claims, decryption failures and uncertain launches require reconciliation; they never silently renew or relaunch task authority. Actual tools still require fresh worker SVIDs.
+
+**Validation:** **645 BFF tests**, including 21 new encryption/adapter cases; real Auth/PostgREST parity across all four environment labels; **61 real SPIRE outcomes** and **17 isolated-worker outcomes**, now including controller reconstruction, idempotent issuance and single delivery through the encrypted outbox. Database acceptance passes **45 migrations, 14 concurrency suites and 10 populated upgrades**, covering atomic rollback, tenant/client isolation, expiry/demotion/revocation/archival/halt and competing enqueue/claim. Exact follow-up CI/artifacts are saved separately. Schema **0044**, **54 public tables**, W2 named targets **19/40**. See [review 34](audits/34-private-dispatch-review-2026-09-22.md).
+
+**Remaining:** bounded isolated launch/termination, scheduler/reconciliation and private job transport integration; production wrapping-key provider/rotation/retention and workload trust/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0/W1/W2 remainder. This controller remains private and the UI is not switched. A local synthetic wrapping provider proves encryption and restart behavior, not production KMS or Cloud Run attestation. The overall goal remains active.
 
 ## Revision 44 — truthful Temporal computation and replay
 

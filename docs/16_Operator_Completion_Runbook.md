@@ -11,6 +11,16 @@ through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
+## Revision 45 — private dispatch acceptance
+
+**ENGINEERING delivered:** migration 0044 makes delegation and the encrypted outbox atomic. Stable job IDs recover the original run without new audit/delegation or renewed expiry. A live controller claim delivers ciphertext once; fresh worker SVID checks still guard every actual tool. The domain-separated envelope binds the immutable job-to-run assignment and exact private input/proof. No browser/worker route exposes this controller.
+
+**Evidence:** 645 BFF tests, real Auth/PostgREST parity, 61 real SPIRE and 17 real isolated-worker outcomes; database rollback, concurrency and upgrade tests. The local wrapping provider holds a synthetic key only in controller memory. Exact-merge CI is the final gate and is saved in the session. Revision 44 is already green at `d1becf0` / CI 35691631278.
+
+**Recovery:** retry an uncertain enqueue with the same job/context/input to recover its receipt. Never choose a new request ID automatically. A claimed job cannot be claimed again, even if the claim response or decryption failed. Independently confirm the run using 0043; an absent result remains unconfirmed. Determine whether launch occurred before any explicitly authorized replacement request. Do not reset `claimed_at`, renew expired proofs, reinterpret timeout as rollback or restore direct table writes. Only opaque job references may enter workflow history; input, proofs and private IPC stay outside it.
+
+**Before activation:** implement bounded process cleanup, queue/reconciliation scheduling, production wrapping-key adapter and rotation/retention policy, private transport and production workload attestation. Preserve required old wrapping keys until pending jobs are reconciled. Encrypted payload storage is not WORM sealing. No cloud provision, key creation, real email or client mutation occurred. Full wizard/graph and W4 execution are still engineering work. See [review 34](audits/34-private-dispatch-review-2026-09-22.md).
+
 ## Revision 44 — Temporal computation acceptance
 
 **ENGINEERING delivered:** versioned `axiom.compliance.engagement.v2` on `axiom-compliance-v2`, deterministic correlation, valid activity arguments, strict result/context gates and truthful computation/review handoffs. HTTP calls require configured internal authentication, have bounded time/response size, refuse redirects and sanitize failures. No blind retry or fictitious persisted plan/approval is allowed.

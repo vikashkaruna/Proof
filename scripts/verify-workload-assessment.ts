@@ -2,7 +2,7 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -18,6 +18,9 @@ import {
   SupabaseWorkloadTaskStore,
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
+import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
+import type { DispatchKeyWrapper } from '../services/bff/src/workloads/dispatch-payload.js';
+import { TaskProof } from '../services/bff/src/workloads/tasks.js';
 import { AssessmentConfirmation } from '../services/bff/src/workloads/assessment-confirmation.js';
 import { AssessmentTools } from '../services/bff/src/workloads/assessment-tools.js';
 import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.js';
@@ -131,6 +134,29 @@ async function main() {
   const router = workloadToolsRoutes(new AssessmentTools(authority, db));
   const issuer = new WorkloadTaskIssuer(db);
   const confirmation = new AssessmentConfirmation(db);
+  // Local synthetic wrapping provider; the wrapping key never enters SQL, IPC,
+  // environment, process arguments or the isolated worker. Production requires KMS.
+  const wrappingKey = randomBytes(32);
+  const wrapper: DispatchKeyWrapper = {
+    async wrap(aad, key) {
+      const nonce = randomBytes(12),
+        cipher = createCipheriv('aes-256-gcm', wrappingKey, nonce);
+      cipher.setAAD(aad);
+      return {
+        keyRef: 'local-synthetic/dispatch-v1',
+        wrappedKey: Buffer.concat([nonce, cipher.update(key), cipher.final(), cipher.getAuthTag()]),
+      };
+    },
+    async unwrap(aad, keyRef, encrypted) {
+      assert.equal(keyRef, 'local-synthetic/dispatch-v1');
+      const value = Buffer.from(encrypted),
+        decipher = createDecipheriv('aes-256-gcm', wrappingKey, value.subarray(0, 12));
+      decipher.setAAD(aad);
+      decipher.setAuthTag(value.subarray(-16));
+      return Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]);
+    },
+  };
+
   // These probes run under the same UID and image as the actual worker.
   phase = 'physical-isolation';
   const probe = `import os, pathlib, socket, importlib.util, json
@@ -185,16 +211,54 @@ print('isolated')`;
     });
     const inputHash = createHash('sha256').update(inputJson).digest('hex');
     const correlationId = randomUUID();
-    const task = await issuer.issue({
+    const jobId = randomUUID();
+    const context = {
+      jobId,
       tenantId,
       actorId,
       workloadId,
-      agentName: 'parikshan',
       estateId: null,
       engagementId,
       correlationId,
       inputHash,
-    });
+    };
+    const first = await new AssessmentDispatch(db, wrapper).enqueue(context, inputJson);
+    // Reconstruct the controller after a discarded response: stable job/run,
+    // preserved ciphertext/proof, no new run or delegation audit.
+    const dispatcher = new AssessmentDispatch(db, wrapper);
+    const repeated = await dispatcher.enqueue(context, inputJson);
+    assert.deepEqual(repeated, first);
+    const stored = check(
+      await db
+        .from('assessment_dispatch_jobs')
+        .select('id,ciphertext,wrapped_key')
+        .eq('id', jobId)
+        .single(),
+    );
+    assert(!JSON.stringify(stored).includes(inputJson));
+    const claimed = await dispatcher.claim(tenantId, jobId);
+    assert.equal(claimed.runId, first.run_id);
+    assert.equal(claimed.payload.reveal().inputJson, inputJson);
+    await assert.rejects(() => dispatcher.claim(tenantId, jobId));
+    assert.equal(
+      check(
+        await db
+          .from('audit_ledger')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('target_ref', first.run_id)
+          .eq('action_type', 'workload.task_delegated'),
+      )!.length,
+      1,
+    );
+    const task = {
+      runId: claimed.runId,
+      expiresAt: claimed.expiresAt,
+      proof: new TaskProof(claimed.payload.reveal().taskProof),
+    };
+    outcomes['encrypted-durable-dispatch-recovered-after-controller-restart'] = true;
+    outcomes['idempotent-issuance-one-run-and-audit'] = true;
+    outcomes['private-dispatch-claimed-once'] = true;
     const child = spawn(
       'docker',
       [
