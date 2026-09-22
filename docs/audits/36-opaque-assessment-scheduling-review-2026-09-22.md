@@ -10,6 +10,8 @@ Reviewed upstream: staging `eb262fd`, Revision 46, exact CI [35697773545](https:
 - **The controller needed an explicit private transport boundary.** The local/on-prem Unix server requires an empty, owned private directory and protected ancestors, sets a restricted socket group and exposes only run/reconcile operations with strict size/time/response limits. The activity independently checks socket type, owner UID and permissions; it has no TCP, proxy or redirect fallback. No proof, SVID, assessment input or database credential enters this channel. The acceptance scheduler subprocess receives an environment allowlist rather than inherited host credentials.
 - **Private scheduling must not accidentally poll legacy payloads.** Explicit socket/owner CLI options select only the new assessment queue. The default legacy mode is preserved separately. Worker connection failures are logged without raw exception/credential details. Namespace ACLs remain mandatory: a workflow cannot remove private data that an unauthorized generic producer already placed in history.
 
+The roadmap scoping section also distinguishes declared scope strings from the implemented tenant/task-bound Parikshan authorization. Its earlier blanket statement that this context was inexpressible is superseded; remaining worker and connector enforcement stays open.
+
 ## Validation
 
 - **689 BFF tests**, including real Unix-socket requests, permission/refusal checks, malformed/oversized requests, private response rejection, disconnect/deadline behavior, confirmation-only recovery and late-claim cancellation.
