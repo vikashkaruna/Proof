@@ -11,13 +11,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import sys
+from functools import partial
 from uuid import UUID
 
 from .assessment_scoring import AssessmentInput, score_assessment
 from .control_library_loader import ControlLibrary, _parse_control
+from .process_lifetime import bind_parent_lifetime
 
 MAX_FRAME = 4 * 1024 * 1024
 
@@ -68,6 +71,7 @@ def fetch_svid(spiffe_id: str) -> str:
             "-output",
             "json",
         ],
+        preexec_fn=partial(bind_parent_lifetime, os.getpid()),
         capture_output=True,
         timeout=15,
         check=False,

@@ -232,3 +232,64 @@ describe('trusted durable dispatch adapter', () => {
     },
   );
 });
+
+describe('private dispatch reconciliation lookup', () => {
+  const row = {
+    id: context.jobId,
+    tenant_id: context.tenantId,
+    run_id: id(7),
+    engagement_id: context.engagementId,
+    correlation_id: context.correlationId,
+    input_hash: context.inputHash,
+    claimed_at: '2026-09-22T00:00:00+00:00',
+  };
+  it('selects owned opaque metadata only, without decrypting payloads', async () => {
+    const f = fixture();
+    const unwrap = vi.spyOn(f.wrapper, 'unwrap');
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(row), { headers: { 'content-type': 'application/json' } }),
+    );
+    const db = createClient('http://synthetic.invalid', 'synthetic', {
+      global: { fetch: fetcher },
+      auth: { persistSession: false },
+    });
+    expect(
+      await new AssessmentDispatch(db, f.wrapper).resolve(context.tenantId, context.jobId),
+    ).toEqual({
+      expected: {
+        tenantId: context.tenantId,
+        runId: id(7),
+        engagementId: context.engagementId,
+        correlationId: context.correlationId,
+        inputHash: context.inputHash,
+      },
+      claimed: true,
+    });
+    const url = new URL(String(fetcher.mock.calls[0]![0]));
+    expect(url.searchParams.get('tenant_id')).toBe('eq.' + context.tenantId);
+    expect(url.searchParams.get('id')).toBe('eq.' + context.jobId);
+    expect(url.searchParams.get('select')).not.toMatch(/ciphertext|wrapped_key|nonce|proof/);
+    expect(unwrap).not.toHaveBeenCalled();
+  });
+  it.each([
+    null,
+    { ...row, tenant_id: id(9) },
+    { ...row, id: id(9) },
+    { ...row, input_hash: 'invalid' },
+  ])('refuses unavailable or conflicting job metadata', async (value) => {
+    const f = fixture(),
+      db = createClient('http://synthetic.invalid', 'synthetic', {
+        global: {
+          fetch: async () =>
+            new Response(JSON.stringify(value), {
+              headers: { 'content-type': 'application/json' },
+            }),
+        },
+        auth: { persistSession: false },
+      });
+    await expect(
+      new AssessmentDispatch(db, f.wrapper).resolve(context.tenantId, context.jobId),
+    ).rejects.toThrow('Private assessment dispatch was refused.');
+  });
+});

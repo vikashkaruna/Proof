@@ -1,5 +1,15 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 46 — bounded assessment launch and reconciliation
+
+Revision 45 is **complete and green** at staging `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
+
+The trusted Linux supervisor runs the fixed worker under UID/GID 20003 with an allowlisted environment, resource limits, an independent deadline and descendant cleanup. It reaps detached descendants and binds the fixed worker/identity-CLI chain to parent death. The image refuses implicit startup and unprivileged supervisor launch. A bounded private channel validates task context, tool order and the final cleanup report; raw input, proofs and SVIDs never enter logs or workflow history. The private controller resolves an opaque owned job, claims at most once, and independently confirms SQL persistence after normal completion or a lost channel response. An already claimed job is reconciled without relaunch. Persistence confirmation and cleanup confirmation are separate results.
+
+**Validation:** **673 BFF tests**, **187 Python runtime tests**, workspace tests/lint/typecheck and acceptance TypeScript; **61 real SPIRE outcomes** and **24 isolated-worker outcomes**, including actual controller launch/recovery, detached descendant cleanup, idle timeout, parent-death termination and launch refusal. Exact follow-up merge CI/artifacts are recorded separately in the saved session. No migration: **0044**, **54 public tables**, W2 named targets **19/40**. See [review 35](audits/35-bounded-assessment-controller-review-2026-09-22.md).
+
+**Remaining:** opaque queue/reconciliation scheduling and private deployment transport; production wrapping-key provider/rotation/retention, per-job process isolation and workload attestation/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. This is local Linux process evidence, not deployed Cloud Run isolation. No public activation occurred. The overall goal remains active.
+
 ## Revision 45 — durable encrypted assessment dispatch
 
 Revision 44 is **complete and green** at staging `d1becf0`, CI [35691631278](https://github.com/vikashkaruna/Proof/actions/runs/35691631278), with 17 applicable jobs and eight exact-merge artifacts, including 67 Temporal tests. No intervening upstream implementation was present.

@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `d1becf0`, CI 35691631278 green. Revision 44 Temporal computation/replay is verified. Revision 45 adds private durable dispatch, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `61ee348`, CI 35693874727 green. Revision 45 encrypted dispatch is verified. Revision 46 adds bounded private launch and independent controller reconciliation, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 46 — bounded assessment launch and reconciliation
+
+Revision 45 is **complete and green** at staging `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
+
+The trusted Linux supervisor runs the fixed worker under UID/GID 20003 with an allowlisted environment, resource limits, an independent deadline and descendant cleanup. It reaps detached descendants and binds the fixed worker/identity-CLI chain to parent death. The image refuses implicit startup and unprivileged supervisor launch. A bounded private channel validates task context, tool order and the final cleanup report; raw input, proofs and SVIDs never enter logs or workflow history. The private controller resolves an opaque owned job, claims at most once, and independently confirms SQL persistence after normal completion or a lost channel response. An already claimed job is reconciled without relaunch. Persistence confirmation and cleanup confirmation are separate results.
+
+**Validation:** **673 BFF tests**, **187 Python runtime tests**, workspace tests/lint/typecheck and acceptance TypeScript; **61 real SPIRE outcomes** and **24 isolated-worker outcomes**, including actual controller launch/recovery, detached descendant cleanup, idle timeout, parent-death termination and launch refusal. Exact follow-up merge CI/artifacts are recorded separately in the saved session. No migration: **0044**, **54 public tables**, W2 named targets **19/40**. See [review 35](audits/35-bounded-assessment-controller-review-2026-09-22.md).
+
+**Remaining:** opaque queue/reconciliation scheduling and private deployment transport; production wrapping-key provider/rotation/retention, per-job process isolation and workload attestation/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. This is local Linux process evidence, not deployed Cloud Run isolation. No public activation occurred. The overall goal remains active.
 
 ## Revision 45 — durable encrypted assessment dispatch
 

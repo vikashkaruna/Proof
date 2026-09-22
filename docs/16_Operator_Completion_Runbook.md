@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `66a9ec4`, CI [35687544717](https://github.com/vikashkaruna/Proof/actions/runs/35687544717) green. Isolated worker/persistence acceptance is verified. Revision 43 adds controller confirmation/recovery; full production dispatch and W3/W4 remain open.
+Verified staging checkpoint: `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727) green. Encrypted dispatch acceptance is verified. Revision 46 adds bounded launch and controller reconciliation; full production dispatch and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 43, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 46, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 46 — bounded controller acceptance
+
+**ENGINEERING delivered:** the private controller connects opaque job lookup, single claim, fixed worker launch, authenticated BFF tools and independent database confirmation. The Linux root supervisor holds no backend credentials, drops worker privileges to UID/GID 20003, applies resource/environment limits and enforces its own deadline. Detached descendants are killed and reaped; a kernel parent-death binding protects the fixed worker and identity CLI. The bounded private channel refuses malformed, oversized, reordered or contradictory frames. Ordinary image startup and unprivileged supervisor activation fail closed.
+
+**Evidence:** 673 BFF tests, 187 Python tests and workspace/acceptance type checks; 61 SPIRE and 24 real isolated-worker outcomes. Actual controller completion, lost response recovery without another launch, detached child cleanup, timeout and abrupt supervisor death are exercised. Final exact-merge CI remains a separate saved gate. No schema change: 0044 / 54 public tables. See [review 35](audits/35-bounded-assessment-controller-review-2026-09-22.md).
+
+**Recovery:** schedule reconciliation using only the owned tenant/job reference. A claimed job must never be automatically relaunched or reset. An `unconfirmed` result can still finish an in-flight database operation; confirm again later. A `confirmed` result proves persistence, while `cleanupConfirmed` independently reports process cleanup (`null` when this call did not launch). Neither timeout nor missing cleanup proves rollback. Never put raw private frames, proofs, SVIDs or ciphertext into workflow histories or log sinks.
+
+**Before activation:** supply an authenticated opaque scheduler, bounded reconciliation, a production wrapping provider and retained-key policy, private controller transport, per-job PID/tenant isolation and workload attestation. The supervisor CLI requires explicit private FIFO stdio and root; those guards cannot detect external log collectors. Its worker remains unprivileged. Do not use a shared UID/PID namespace for concurrent tenant jobs or mount controller credentials into the worker. The local harness processes one job at a time and is not a production launcher. Keep public entry points disabled until these gates are met. No cloud deployment, real email or client mutation occurred. Remaining wizard/graph and W4 work are engineering tasks, not completed operator checks.
 
 ## Revision 45 — private dispatch acceptance
 
