@@ -1620,9 +1620,9 @@ Connector grants (W4.4) are issued only to those two internal workload identitie
 
 #### The missing dimension: scopes have no estate
 
-This is the gap your question exposes most sharply. Every scope today is **global to the agent**: `connector.read` means *all connectors, everywhere*, not *connector X in estate Y for tenant Z*.
+This is the gap your question exposes most sharply. A declared scope string alone is **global to the agent**: `connector.read` does not identify connector X in estate Y for tenant Z. The private delegation model now binds tasks to tenant, actor, workload, estate/engagement and input; the isolated Parikshan path checks that context on every tool call. Remaining worker/tool integrations and live connector grants are still pending.
 
-Under W3's multi-estate model — one client running separate assessments on "India production" and "Singapore subsidiary" — an agent authorised for one estate must not be able to read the other. **That is currently inexpressible.** Scopes become structured rather than flat:
+Under W3's multi-estate model — one client running separate assessments on "India production" and "Singapore subsidiary" — an agent authorised for one estate must not be able to read the other. Apply the same structured context to all enforced permissions, rather than treating a declared string as authorization:
 
 ```
 connector.read:<tenant>:<estate>:<connector>
