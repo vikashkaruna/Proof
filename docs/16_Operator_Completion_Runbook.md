@@ -1,10 +1,10 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `c88e3c1`, CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494) green. Task delegation component acceptance passed. Revision 38 dispatch/schema follow-up is the next checkpoint; deployed IAM acceptance and full W4.3 remain open.
+Verified staging checkpoint: `e0db93d`, CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394) green. Backend dispatch/schema acceptance passed. Revision 39 UI correction is the next checkpoint; assessment provenance, deployed IAM acceptance and full W4.3 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 38, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 39, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -525,6 +525,14 @@ Run `pnpm --filter @axiom/bff test` and `./scripts/test-database.sh`. The latter
 Deploy BFF with the current runtime response contract (`agent`, `correlation_id`, `status`, accounting, `error`, `output`, `ledger_entry_ids`). Internal-token requests refuse redirects and have a 120-second deadline; long-running durable orchestration remains a separate integration task. Receipt identifiers in the response are protocol metadata, not independently verified delegation evidence.
 
 If a request returns `agent_completion_unconfirmed`, inspect the identified run and its ledger correlation before retrying. The worker may already have acted, or the database may have committed without returning a receipt. No automatic retry, rollback or reconciliation is claimed by this change. Keep any relevant delegated task revoked until its outcome is reconciled. The generic route still uses legacy shared runtime transport, and does not create a 0041 task delegation. Do not treat it as isolated connector execution.
+
+### Invocation UI acceptance and remaining assessment provenance
+
+**ENGINEERING delivered in Revision 39:** Workbench, sidebar, generic modules and Assessment display success only for a matching confirmed BFF result. Assessment runs Parikshan only; its other displayed stages are not claimed as executed. It no longer changes scores, pass/fail counts or exposure through an animation. Server props supply the saved values after refresh. An ordinary ledger receipt is not sealed evidence.
+
+Run `pnpm --filter @axiom/web test` and `pnpm --filter @axiom/e2e exec playwright test agent-ui-communication.spec.ts --workers=1` after local Auth/persona setup. The new browser cases use real login/MFA followed by explicit response injection to verify pending/failure/success presentation. These are UI contract tests. The full committed container lane should now contain 65 journeys and 89 API outcomes per configuration; require exact source revision and no retries as before.
+
+**C-W0-7 remains ENGINEERING work:** before assessment readiness can close, remove fallback score 85, fabricated evidence/control rows and exposure, and hardcoded target-area outcome counts. Scope persisted findings and evidence to the selected owned engagement and its Control Library version, and tenant metadata to the active tenant. Preserve measured zero values, show missing results as unassessed and query failures as unavailable. Add empty/stale/foreign/version/error fixtures and browser acceptance. Current Workbench fleet/prompt/environment cards are static presentation, not operational health evidence. Do not use the old demonstration scripts' default-success output as acceptance.
 
 ## C-W0-5 · Deploy and verify service IAM isolation
 

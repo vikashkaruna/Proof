@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 38 — CONFIRMED DISPATCH OUTCOMES** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `c88e3c1`, green CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 39 — CONFIRMED UI OUTCOMES** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `e0db93d`, green CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 39 — confirmed agent results in the UI
+
+The backend/ledger-schema follow-up is green at staging `e0db93d`, CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394). All 17 applicable jobs passed; six exact-merge artifacts verify 61 identity, five audit and 63 browser/89 API outcomes per configuration. UI review then found independent false-success behavior that backend checks alone could not fix.
+
+A shared browser invocation helper now sends JSON and a fresh correlation ID, requires a matching successful BFF response, rejects non-success HTTP and contradictory/missing fields, and surfaces the bounded public error. Workbench no longer treats missing status as success or displays a green completion card for failure. Sidebar/module actions use the same contract. Assessment no longer advances five stages on a timer, adds 15 points, adjusts pass/fail counts or invents a lower exposure. It waits for Parikshan's confirmed result, marks **only Parikshan** complete and refreshes server props. Other stages remain not run. In-progress indicators use teal; an ordinary ledger receipt is not labelled sealed proof.
+
+Validation: **59 web unit tests** (19 new invocation tests), **four local browser journeys** including two new failure/confirmation regressions, workspace tests/lint/typecheck and format/security gates. The new browser cases sign in through real Auth/MFA, then inject explicitly labelled BFF responses to test UI behavior; they are not live worker/connector execution evidence. A delayed response is held beyond the removed animation duration and leaves scores/stages unchanged; failure shows an error, and confirmed success advances only the invoked agent. The next exact-merge browser acceptance should include **65 journeys per configuration**; API outcomes remain 89. No schema change: 0041, 42 migrations, 52 public tables, W2 named targets 19/40. See [review 28](audits/28-agent-ui-outcomes-review-2026-09-22.md).
+
+**Newly confirmed C-W0-7 provenance work remains open:** Assessment's server loader still invents a score of 85 for missing findings, fallback control/evidence rows and exposure, and its static target-area cards contain made-up pass counts. It mixes findings across engagements/library versions, and the tenant metadata query lacks an explicit active-tenant filter. Fix these with explicit unassessed/unavailable states and owned, version-bound persisted results before claiming end-to-end assessment readiness. Workbench's static fleet/prompt/environment labels also are not live health evidence. These are separate from the confirmed invocation UI correction; no full assessment or W3/W4 closure is claimed.
+
+**Next:** remove those assessment provenance fallbacks, then continue W4.3 isolated workers/private task handoff/scoped tools/trust lifecycle and verified actor chains, W4.4 live grants/approval, full W3 onboarding/readiness and graph, W4.5/6/7. Keep the overall goal active and broker/executor activation gated.
 
 ## Revision 38 — W4.3 confirmed dispatch outcomes
 

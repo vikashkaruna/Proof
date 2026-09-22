@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { AgentIcon } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
+import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 
 interface WorkbenchClientProps {
   userEmail: string;
@@ -107,6 +108,7 @@ export function AgentWorkbenchClient({
     status: string;
     latency_ms?: number;
     ledgerIds?: string[];
+    message?: string;
   } | null>(null);
 
   const handleRun = async () => {
@@ -115,18 +117,20 @@ export function AgentWorkbenchClient({
     setRunResult(null);
 
     try {
-      const res = await fetch(`/api/bff/v1/agents/${selectedAgent}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
+      const data = await invokeAgent(selectedAgent, { scope: 'workbench' });
       setRunResult({
-        status: data.status || 'succeeded',
+        status: data.status,
         latency_ms: data.latency_ms,
         ledgerIds: data.ledger_entry_ids,
       });
-    } catch {
-      setRunResult({ status: 'failed' });
+    } catch (error) {
+      setRunResult({
+        status: 'failed',
+        message:
+          error instanceof AgentInvocationError
+            ? error.message
+            : 'Could not confirm the agent outcome.',
+      });
     } finally {
       setIsExecuting(false);
     }
@@ -270,6 +274,7 @@ export function AgentWorkbenchClient({
             <div className="flex flex-wrap items-center gap-3">
               <select
                 value={selectedAgent}
+                disabled={isExecuting}
                 onChange={(e) => setSelectedAgent(e.target.value as AgentName)}
                 className="h-9 rounded-lg border border-[#e4e8ee] bg-white px-3 text-xs font-semibold text-[#1E2A4A] focus:outline-none focus:ring-2 focus:ring-[#0FB5A5]"
               >
@@ -298,10 +303,15 @@ export function AgentWorkbenchClient({
             </div>
 
             {runResult && (
-              <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50/70 p-3 text-xs text-teal-900">
+              <div
+                role={runResult.status === 'succeeded' ? 'status' : 'alert'}
+                className={`mt-3 rounded-lg border p-3 text-xs ${runResult.status === 'succeeded' ? 'border-teal-200 bg-teal-50/70 text-teal-900' : 'border-red-200 bg-red-50 text-red-900'}`}
+              >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">
-                    ✓ Execution Completed ({runResult.latency_ms}ms)
+                    {runResult.status === 'succeeded'
+                      ? `✓ Execution completed (${runResult.latency_ms}ms)`
+                      : runResult.message || 'Agent invocation failed.'}
                   </span>
                   {runResult.ledgerIds?.map((id) => (
                     <Link

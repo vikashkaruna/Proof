@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `c88e3c1`, CI 35679665494 green. Task delegation component acceptance passed; Revision 38 dispatch/schema follow-up requires its own exact-merge CI checkpoint. Full worker/tool integration remains open.
+Current verified staging checkpoint: `e0db93d`, CI 35680568394 green. Backend dispatch/schema acceptance passed; Revision 39 UI correction requires its own exact-merge CI checkpoint. Assessment provenance and full worker/tool integration remain open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 39 — confirmed agent results in the UI
+
+The backend/ledger-schema follow-up is green at staging `e0db93d`, CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394). All 17 applicable jobs passed; six exact-merge artifacts verify 61 identity, five audit and 63 browser/89 API outcomes per configuration. UI review then found independent false-success behavior that backend checks alone could not fix.
+
+A shared browser invocation helper now sends JSON and a fresh correlation ID, requires a matching successful BFF response, rejects non-success HTTP and contradictory/missing fields, and surfaces the bounded public error. Workbench no longer treats missing status as success or displays a green completion card for failure. Sidebar/module actions use the same contract. Assessment no longer advances five stages on a timer, adds 15 points, adjusts pass/fail counts or invents a lower exposure. It waits for Parikshan's confirmed result, marks **only Parikshan** complete and refreshes server props. Other stages remain not run. In-progress indicators use teal; an ordinary ledger receipt is not labelled sealed proof.
+
+Validation: **59 web unit tests** (19 new invocation tests), **four local browser journeys** including two new failure/confirmation regressions, workspace tests/lint/typecheck and format/security gates. The new browser cases sign in through real Auth/MFA, then inject explicitly labelled BFF responses to test UI behavior; they are not live worker/connector execution evidence. A delayed response is held beyond the removed animation duration and leaves scores/stages unchanged; failure shows an error, and confirmed success advances only the invoked agent. The next exact-merge browser acceptance should include **65 journeys per configuration**; API outcomes remain 89. No schema change: 0041, 42 migrations, 52 public tables, W2 named targets 19/40. See [review 28](audits/28-agent-ui-outcomes-review-2026-09-22.md).
+
+**Newly confirmed C-W0-7 provenance work remains open:** Assessment's server loader still invents a score of 85 for missing findings, fallback control/evidence rows and exposure, and its static target-area cards contain made-up pass counts. It mixes findings across engagements/library versions, and the tenant metadata query lacks an explicit active-tenant filter. Fix these with explicit unassessed/unavailable states and owned, version-bound persisted results before claiming end-to-end assessment readiness. Workbench's static fleet/prompt/environment labels also are not live health evidence. These are separate from the confirmed invocation UI correction; no full assessment or W3/W4 closure is claimed.
+
+**Next:** remove those assessment provenance fallbacks, then continue W4.3 isolated workers/private task handoff/scoped tools/trust lifecycle and verified actor chains, W4.4 live grants/approval, full W3 onboarding/readiness and graph, W4.5/6/7. Keep the overall goal active and broker/executor activation gated.
 
 ## Revision 38 — W4.3 confirmed dispatch outcomes
 

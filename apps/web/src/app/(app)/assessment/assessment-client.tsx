@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
+import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentIcon } from '@axiom/ui';
@@ -188,86 +189,44 @@ export function AssessmentClient({
   totalControlsCount,
 }: AssessmentClientProps) {
   const router = useRouter();
-  const [controls, setControls] = useState<ControlScore[]>(initialControls);
-  const [passCount, setPassCount] = useState<number>(initialPassCount);
-  const [partialCount, setPartialCount] = useState<number>(initialPartialCount);
-  const [failCount, setFailCount] = useState<number>(initialFailCount);
-  const [exposure, setExposure] = useState<string>(exposureText);
-
-  const [assessStage, setAssessStage] = useState<number>(-1);
-  const [hasCompleted, setHasCompleted] = useState<boolean>(false);
+  // Saved results come from server props. A local animation cannot change them.
+  const controls = initialControls;
+  const passCount = initialPassCount;
+  const partialCount = initialPartialCount;
+  const failCount = initialFailCount;
+  const exposure = exposureText;
+  const [assessRunning, setAssessRunning] = useState(false);
+  const [hasCompleted, setHasCompleted] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
   const [ledgerEntryId, setLedgerEntryId] = useState<string | null>(null);
-  const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
-
-  const assessRunning = assessStage >= 0;
-
-  useEffect(() => {
-    return () => {
-      timeoutsRef.current.forEach(clearTimeout);
-    };
-  }, []);
+  const inFlight = useRef(false);
 
   const runAssessment = async () => {
-    if (assessRunning) return;
-
-    timeoutsRef.current.forEach(clearTimeout);
-    timeoutsRef.current = [];
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setAssessRunning(true);
     setHasCompleted(false);
+    setRunError(null);
     setLedgerEntryId(null);
-    setAssessStage(0);
-
-    // Concurrently trigger real Parikshan backend agent run via BFF
-    fetch('/api/bff/v1/agents/parikshan/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'assessment_pipeline' }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.ledger_entry_ids && data.ledger_entry_ids.length > 0) {
-          setLedgerEntryId(data.ledger_entry_ids[0]);
-        }
-      })
-      .catch(() => {
-        // Tolerant in offline/test mode
-      });
-
-    // Step through the 5 stages matching the design rhythm (900ms per stage)
-    const step = (i: number) => {
-      if (i >= PIPELINE_STAGES.length) {
-        const tEnd = setTimeout(() => {
-          setAssessStage(-1);
-          setHasCompleted(true);
-          // Update evaluated controls and counts after completed assessment
-          setControls((prev) =>
-            prev.map((c) =>
-              c.status === 'partial' ? { ...c, score: Math.min(100, c.score + 15) } : c,
-            ),
-          );
-          setPassCount((prev) => Math.min(totalControlsCount, prev + 1));
-          setFailCount((prev) => Math.max(0, prev - 1));
-          setExposure('₹ 10.5 Cr');
-          router.refresh();
-        }, 700);
-        timeoutsRef.current.push(tEnd);
-        return;
-      }
-      setAssessStage(i);
-      const tNext = setTimeout(() => step(i + 1), 900);
-      timeoutsRef.current.push(tNext);
-    };
-
-    step(0);
+    try {
+      const result = await invokeAgent('parikshan', { scope: 'assessment_pipeline' });
+      setLedgerEntryId(result.ledger_entry_ids.at(-1) ?? null);
+      setHasCompleted(true);
+      router.refresh();
+    } catch (error) {
+      setRunError(
+        error instanceof AgentInvocationError
+          ? error.message
+          : 'Could not confirm the assessment outcome.',
+      );
+    } finally {
+      inFlight.current = false;
+      setAssessRunning(false);
+    }
   };
-
-  const currentStage =
-    assessStage >= 0 && assessStage < PIPELINE_STAGES.length
-      ? PIPELINE_STAGES[assessStage]
-      : undefined;
-
-  const pipelineMsg = currentStage
-    ? `${currentStage.agent} — ${currentStage.detail}`
-    : 'assessment complete · report generated · every step written to the ledger';
+  const pipelineMsg = assessRunning
+    ? 'Parikshan invocation in progress'
+    : 'Parikshan invocation completed. Displaying saved results.';
 
   return (
     <div className="mx-auto max-w-[1180px] animate-in fade-in-0 duration-200">
@@ -282,7 +241,7 @@ export function AssessmentClient({
               Assessment pipeline
             </h1>
             <div className="mt-0.5 text-[11.5px] text-[#a9b3ce]">
-              Parikshan scores against control library v25.11.2 · agents propose, you approve
+              Runs Parikshan only. Discovery, evidence sealing and report generation run separately.
             </div>
           </div>
 
@@ -296,22 +255,24 @@ export function AssessmentClient({
                 : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
             }`}
           >
-            {assessRunning ? 'Running…' : '▶ Run new assessment'}
+            {assessRunning ? 'Running Parikshan…' : 'Run Parikshan'}
           </button>
         </div>
 
         {/* 5-Stage Stepper Pipeline Row */}
         <div className="relative my-2 flex items-center gap-0">
           {PIPELINE_STAGES.map((p, i) => {
-            const isCompleted = assessStage > i || (hasCompleted && assessStage === -1);
-            const isActive = assessStage === i;
-            const dotBg = isCompleted ? '#0FB5A5' : isActive ? '#C9A227' : 'rgba(255,255,255,.12)';
+            const isCompleted = p.agentKey === 'parikshan' && hasCompleted;
+            const isActive = p.agentKey === 'parikshan' && assessRunning;
+            const dotBg = isCompleted || isActive ? '#0FB5A5' : 'rgba(255,255,255,.12)';
             const dotColor = isCompleted || isActive ? '#04322d' : '#ffffff';
             const mark = isCompleted ? '✓' : String(i + 1);
 
             return (
               <div
                 key={p.agent}
+                data-testid={`pipeline-${p.agentKey}`}
+                data-state={isCompleted ? 'completed' : isActive ? 'running' : 'not-run'}
                 className="group relative flex flex-1 flex-col items-center text-center"
               >
                 {/* Horizontal connector line to next step */}
@@ -319,10 +280,7 @@ export function AssessmentClient({
                   <div
                     className="absolute top-[17px] left-1/2 w-full h-[2px] z-0 transition-colors duration-500"
                     style={{
-                      backgroundColor:
-                        assessStage > i || (hasCompleted && assessStage === -1)
-                          ? '#0FB5A5'
-                          : 'rgba(255,255,255,.12)',
+                      backgroundColor: 'rgba(255,255,255,.12)',
                     }}
                   />
                 )}
@@ -331,7 +289,7 @@ export function AssessmentClient({
                 <div
                   className={`relative z-10 flex h-[34px] w-[34px] items-center justify-center rounded-full font-heading text-[13px] font-bold transition-all duration-300 select-none ${
                     isActive
-                      ? 'animate-pulse ring-4 ring-[#C9A227]/40 shadow-lg shadow-[#C9A227]/20 scale-105'
+                      ? 'animate-pulse ring-4 ring-[#0FB5A5]/40 shadow-lg shadow-[#0FB5A5]/20 scale-105'
                       : ''
                   }`}
                   style={{
@@ -362,16 +320,21 @@ export function AssessmentClient({
           })}
         </div>
 
-        {/* Live Pipeline Message or Ledger Proof */}
+        {runError && (
+          <p role="alert" className="mt-4 rounded-lg bg-white p-3 text-sm text-[#D9534F]">
+            {runError}
+          </p>
+        )}
+        {/* Confirmed invocation state */}
         {(assessRunning || hasCompleted) && (
           <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 text-center text-[12px] text-[#0FB5A5] font-medium animate-in fade-in-0 duration-150">
             <span>● {pipelineMsg}</span>
             {ledgerEntryId && (
               <Link
                 href={`/ledger?q=${ledgerEntryId}`}
-                className="font-mono text-[11px] underline text-[#C9A227] hover:text-white"
+                className="font-mono text-[11px] underline text-[#0FB5A5] hover:text-white"
               >
-                (Ledger proof #{ledgerEntryId})
+                (Ledger entry #{ledgerEntryId})
               </Link>
             )}
           </div>
@@ -381,7 +344,10 @@ export function AssessmentClient({
       {/* ============================================================ */}
       {/* 2. SUMMARY + EXPOSURE 3-CARD ROW                             */}
       {/* ============================================================ */}
-      <div className="mb-[18px] grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px] gap-4">
+      <div
+        data-testid="assessment-summary"
+        className="mb-[18px] grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px] gap-4"
+      >
         {/* Posture Distribution Card */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-[18px_20px] shadow-2xs">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[#8a909b]">

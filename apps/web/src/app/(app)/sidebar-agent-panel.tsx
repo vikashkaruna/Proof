@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { AgentName } from '@axiom/types';
+import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import { AgentIcon, type AgentIconState, Badge } from '@axiom/ui';
 import { agentAccents } from '@axiom/design-tokens';
 
@@ -256,44 +257,23 @@ export function SidebarAgentPanel({
     setLastRunResult(null);
 
     try {
-      const res = await fetch(`/api/bff/v1/agents/${agent.name}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: 'manual_trigger' }),
+      const data = await invokeAgent(agent.name, { scope: 'manual_trigger' });
+      setLastRunResult({
+        success: true,
+        status: 'succeeded',
+        message: `Agent ${agent.name} completed.`,
+        latency_ms: data.latency_ms,
+        ledgerIds: data.ledger_entry_ids,
       });
-
-      const data = await res.json();
-
-      if (data?.output?.status === 'denied' || data?.status === 'denied') {
-        setLastRunResult({
-          success: false,
-          status: 'denied',
-          message:
-            data.output?.error ||
-            'Refused: Mutating actions require an issued Human Approval Token (ADR-1 / ADR-3).',
-          latency_ms: data.latency_ms,
-        });
-      } else if (res.ok && (data.status === 'succeeded' || data.agent)) {
-        setLastRunResult({
-          success: true,
-          status: 'succeeded',
-          message: `Agent ${agent.name} executed successfully.`,
-          latency_ms: data.latency_ms,
-          ledgerIds: data.ledger_entry_ids,
-        });
-        router.refresh();
-      } else {
-        setLastRunResult({
-          success: false,
-          status: 'failed',
-          message: data?.error?.message || data?.error || 'Execution failed. Inspect system logs.',
-        });
-      }
-    } catch (err: any) {
+      router.refresh();
+    } catch (error) {
       setLastRunResult({
         success: false,
-        status: 'error',
-        message: err?.message || 'Network error invoking compliance agent',
+        status: 'failed',
+        message:
+          error instanceof AgentInvocationError
+            ? error.message
+            : 'Could not confirm the agent outcome.',
       });
     } finally {
       setIsExecuting(false);

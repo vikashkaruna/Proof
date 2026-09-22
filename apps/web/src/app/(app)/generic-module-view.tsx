@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentIcon } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
+import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 
 export interface ModuleCardRow {
   t: string;
@@ -85,44 +86,23 @@ export function GenericModuleView({
     setRunResult(null);
 
     try {
-      const res = await fetch(`/api/bff/v1/agents/${meta.agentKey}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: `${meta.agentKey}_module_screen` }),
+      const data = await invokeAgent(meta.agentKey, { scope: 'manual_trigger' });
+      setRunResult({
+        success: true,
+        status: 'succeeded',
+        message: `Agent ${meta.agentKey} completed.`,
+        latency_ms: data.latency_ms,
+        ledgerIds: data.ledger_entry_ids,
       });
-
-      const data = await res.json();
-
-      if (data?.output?.status === 'denied' || data?.status === 'denied') {
-        setRunResult({
-          success: false,
-          status: 'denied',
-          message:
-            data.output?.error ||
-            'Refused: Mutating actions require an issued Human Approval Token (ADR-1 / ADR-3).',
-          latency_ms: data.latency_ms,
-        });
-      } else if (res.ok && (data.status === 'succeeded' || data.agent)) {
-        setRunResult({
-          success: true,
-          status: 'succeeded',
-          message: `Agent ${meta.agentKey} executed successfully.`,
-          latency_ms: data.latency_ms,
-          ledgerIds: data.ledger_entry_ids,
-        });
-        router.refresh();
-      } else {
-        setRunResult({
-          success: false,
-          status: 'failed',
-          message: data?.error?.message || data?.error || 'Execution failed. Inspect system logs.',
-        });
-      }
-    } catch (err: any) {
+      router.refresh();
+    } catch (error) {
       setRunResult({
         success: false,
-        status: 'error',
-        message: err?.message || 'Network error invoking compliance agent',
+        status: 'failed',
+        message:
+          error instanceof AgentInvocationError
+            ? error.message
+            : 'Could not confirm the agent outcome.',
       });
     } finally {
       setIsExecuting(false);
