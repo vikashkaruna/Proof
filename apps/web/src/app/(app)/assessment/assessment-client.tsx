@@ -5,132 +5,10 @@ import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentIcon } from '@axiom/ui';
-import type { AgentName } from '@axiom/types';
-
-export interface ControlScore {
-  id: string;
-  name: string;
-  domain: string;
-  cite: string;
-  ev: string;
-  status: 'pass' | 'partial' | 'fail';
-  score: number;
-}
-
-export interface TargetAreaScan {
-  name: string;
-  code: string;
-  citation: string;
-  controlsCount: number;
-  passCount: number;
-  partialCount: number;
-  failCount: number;
-  highlight: string;
-}
-
-export const TARGET_AREAS: TargetAreaScan[] = [
-  {
-    name: 'Notice & Consent Management',
-    code: 'NOT',
-    citation: 'DPDPA §5, §6 & Rule 3',
-    controlsCount: 9,
-    passCount: 7,
-    partialCount: 1,
-    failCount: 1,
-    highlight: 'Multilingual notices (22 languages), purpose specifications & withdrawal workflows',
-  },
-  {
-    name: 'Principal Rights & DSAR Automation',
-    code: 'RTS',
-    citation: 'DPDPA §11–§14 & Rule 16',
-    controlsCount: 7,
-    passCount: 5,
-    partialCount: 2,
-    failCount: 0,
-    highlight: 'Access, correction, erasure, grievance redressal & nominee registration',
-  },
-  {
-    name: 'Retention & Purpose Limitation',
-    code: 'RET',
-    citation: 'DPDPA §8(7) & Rule 8',
-    controlsCount: 5,
-    passCount: 4,
-    partialCount: 1,
-    failCount: 0,
-    highlight: 'Automated data minimization, TTL retention policies & purpose cessation purging',
-  },
-  {
-    name: 'Purpose Limitation & Legitimate Uses',
-    code: 'PUR',
-    citation: 'DPDPA §6 & §7',
-    controlsCount: 4,
-    passCount: 4,
-    partialCount: 0,
-    failCount: 0,
-    highlight: 'Strict use bounding, secondary processing prevention & employment data checks',
-  },
-  {
-    name: 'Security Safeguards & Access Controls',
-    code: 'SEC',
-    citation: 'DPDPA §8(4), §8(5)',
-    controlsCount: 11,
-    passCount: 9,
-    partialCount: 2,
-    failCount: 0,
-    highlight: 'Encryption in transit & rest, RBAC isolation, credential rotation & WORM logs',
-  },
-  {
-    name: 'Cross-Border Transfers & Residency',
-    code: 'XBR',
-    citation: 'DPDPA §16 (ap-south-1)',
-    controlsCount: 3,
-    passCount: 3,
-    partialCount: 0,
-    failCount: 0,
-    highlight:
-      'Strict sovereign domestic residency in Mumbai (ap-south-1), zero unnotified foreign egress',
-  },
-  {
-    name: 'Breach Readiness & 72-Hour Reporting',
-    code: 'BRC',
-    citation: 'DPDPA Rule 7 & CERT-In',
-    controlsCount: 4,
-    passCount: 3,
-    partialCount: 1,
-    failCount: 0,
-    highlight:
-      'Automated 72-hour board clock, principal notification templates & incident runbooks',
-  },
-  {
-    name: 'Significant Data Fiduciary (SDF)',
-    code: 'SDF',
-    citation: 'DPDPA §10',
-    controlsCount: 4,
-    passCount: 3,
-    partialCount: 1,
-    failCount: 0,
-    highlight: 'Resident DPO mandate, periodic statutory compliance audit & DPIA execution',
-  },
-  {
-    name: "Children's & Sensitive Data Protection",
-    code: 'CHD',
-    citation: 'DPDPA §9',
-    controlsCount: 3,
-    passCount: 2,
-    partialCount: 1,
-    failCount: 0,
-    highlight: 'Verifiable parental consent, age verification gating & behavioral profiling ban',
-  },
-];
+import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 
 export interface AssessmentClientProps {
-  initialControls: ControlScore[];
-  initialPassCount: number;
-  initialPartialCount: number;
-  initialFailCount: number;
-  isSdf: boolean;
-  exposureText: string;
-  totalControlsCount: number;
+  snapshot: AssessmentSnapshot | null;
 }
 
 export interface PipelineStage {
@@ -161,7 +39,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     agentKey: 'parikshan',
     label: 'Assessment',
     hi: 'मूल्यांकन',
-    detail: 'scoring against control library v25.11.2',
+    detail: 'scoring against the assigned control library',
   },
   {
     agent: 'Saakshi',
@@ -179,22 +57,33 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   },
 ];
 
-export function AssessmentClient({
-  initialControls,
-  initialPassCount,
-  initialPartialCount,
-  initialFailCount,
-  isSdf,
-  exposureText,
-  totalControlsCount,
-}: AssessmentClientProps) {
+export function AssessmentClient({ snapshot }: AssessmentClientProps) {
   const router = useRouter();
-  // Saved results come from server props. A local animation cannot change them.
-  const controls = initialControls;
-  const passCount = initialPassCount;
-  const partialCount = initialPartialCount;
-  const failCount = initialFailCount;
-  const exposure = exposureText;
+  const controls = snapshot?.controls ?? [];
+  const passCount = snapshot?.summary.pass ?? 0;
+  const partialCount = snapshot?.summary.partial ?? 0;
+  const failCount = snapshot?.summary.fail ?? 0;
+  const unassessedCount = snapshot?.summary.unassessed ?? 0;
+  const totalControlsCount = controls.length;
+  const exposure =
+    snapshot?.exposureInr == null
+      ? 'Not assessed'
+      : new Intl.NumberFormat('en-IN', {
+          style: 'currency',
+          currency: 'INR',
+          maximumFractionDigits: 0,
+        }).format(snapshot.exposureInr);
+  const domains = [...new Set(controls.map((control) => control.domain))].map((domain) => {
+    const rows = controls.filter((control) => control.domain === domain);
+    return {
+      name: domain,
+      total: rows.length,
+      pass: rows.filter((row) => row.status === 'pass').length,
+      partial: rows.filter((row) => row.status === 'partial').length,
+      fail: rows.filter((row) => row.status === 'fail').length,
+      unassessed: rows.filter((row) => row.status === 'unassessed').length,
+    };
+  });
   const [assessRunning, setAssessRunning] = useState(false);
   const [hasCompleted, setHasCompleted] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -202,14 +91,22 @@ export function AssessmentClient({
   const inFlight = useRef(false);
 
   const runAssessment = async () => {
-    if (inFlight.current) return;
+    if (inFlight.current || !snapshot?.engagement) return;
     inFlight.current = true;
     setAssessRunning(true);
     setHasCompleted(false);
     setRunError(null);
     setLedgerEntryId(null);
     try {
-      const result = await invokeAgent('parikshan', { scope: 'assessment_pipeline' });
+      const result = await invokeAgent('parikshan', {
+        scope: 'assessment_pipeline',
+        ...(snapshot?.engagement
+          ? {
+              engagement_id: snapshot.engagement.id,
+              library_version: snapshot.engagement.libraryVersion,
+            }
+          : {}),
+      });
       setLedgerEntryId(result.ledger_entry_ids.at(-1) ?? null);
       setHasCompleted(true);
       router.refresh();
@@ -226,10 +123,32 @@ export function AssessmentClient({
   };
   const pipelineMsg = assessRunning
     ? 'Parikshan invocation in progress'
-    : 'Parikshan invocation completed. Displaying saved results.';
+    : 'Parikshan invocation completed. Saved results are refreshed separately.';
 
   return (
     <div className="mx-auto max-w-[1180px] animate-in fade-in-0 duration-200">
+      <div
+        data-testid="assessment-provenance"
+        className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
+      >
+        {!snapshot ? (
+          <p role="alert">
+            Saved assessment results are unavailable for this selection. Check the assessment or try
+            again.
+          </p>
+        ) : !snapshot.engagement ? (
+          <p>
+            No saved assessment exists for this tenant. Controls and exposure are not assessed.
+            Create an assessment before running Parikshan.
+          </p>
+        ) : (
+          <p>
+            {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
+            {snapshot.engagement.status}. Showing saved findings only; missing results are
+            unassessed. Score bands retain the existing 80/40 presentation thresholds.
+          </p>
+        )}
+      </div>
       {/* ============================================================ */}
       {/* 1. RUN PIPELINE HERO CARD (EXACT AXIOM PROOF APP DESIGN)     */}
       {/* ============================================================ */}
@@ -241,16 +160,17 @@ export function AssessmentClient({
               Assessment pipeline
             </h1>
             <div className="mt-0.5 text-[11.5px] text-[#a9b3ce]">
-              Runs Parikshan only. Discovery, evidence sealing and report generation run separately.
+              Runs Parikshan only for the displayed saved assessment. Discovery, evidence sealing
+              and report generation run separately.
             </div>
           </div>
 
           <button
             type="button"
             onClick={runAssessment}
-            disabled={assessRunning}
+            disabled={assessRunning || !snapshot?.engagement}
             className={`rounded-[9px] px-[18px] py-[10px] text-[12.5px] font-bold text-white transition-all shadow-xs ${
-              assessRunning
+              assessRunning || !snapshot?.engagement
                 ? 'cursor-default bg-white/15 opacity-80'
                 : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
             }`}
@@ -321,7 +241,11 @@ export function AssessmentClient({
         </div>
 
         {runError && (
-          <p role="alert" className="mt-4 rounded-lg bg-white p-3 text-sm text-[#D9534F]">
+          <p
+            data-testid="assessment-invocation-error"
+            role="alert"
+            className="mt-4 rounded-lg bg-white p-3 text-sm text-[#D9534F]"
+          >
             {runError}
           </p>
         )}
@@ -351,51 +275,57 @@ export function AssessmentClient({
         {/* Posture Distribution Card */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-[18px_20px] shadow-2xs">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-[#8a909b]">
-            Control posture (showing {passCount + partialCount + failCount} of {totalControlsCount})
+            {snapshot
+              ? `Control posture (${passCount + partialCount + failCount} assessed of ${totalControlsCount})`
+              : 'Control posture unavailable'}
           </div>
           <div className="mb-3 flex h-3 gap-1.5 overflow-hidden rounded-[20px]">
+            <div style={{ flex: passCount }} className="bg-[#0FB5A5]" title={`${passCount} Pass`} />
             <div
-              style={{ flex: Math.max(passCount, 1) }}
-              className="bg-[#0FB5A5]"
-              title={`${passCount} Pass`}
-            />
-            <div
-              style={{ flex: Math.max(partialCount, 1) }}
+              style={{ flex: partialCount }}
               className="bg-[#E0A82E]"
               title={`${partialCount} Partial`}
             />
+            <div style={{ flex: failCount }} className="bg-[#D9534F]" title={`${failCount} Fail`} />
             <div
-              style={{ flex: Math.max(failCount, 1) }}
-              className="bg-[#D9534F]"
-              title={`${failCount} Fail`}
+              style={{ flex: unassessedCount }}
+              className="bg-slate-300"
+              title={`${unassessedCount} Unassessed`}
             />
           </div>
           <div className="flex gap-[18px] text-[12px] text-[#2F3542]">
             <span>
-              <b className="font-heading text-[16px] text-[#0a8d80] font-bold">{passCount}</b> pass
+              <b className="font-heading text-[16px] text-[#0a8d80] font-bold">
+                {snapshot ? passCount : '—'}
+              </b>{' '}
+              pass
             </span>
             <span>
-              <b className="font-heading text-[16px] text-[#8a6d10] font-bold">{partialCount}</b>{' '}
+              <b className="font-heading text-[16px] text-[#8a6d10] font-bold">
+                {snapshot ? partialCount : '—'}
+              </b>{' '}
               partial
             </span>
             <span>
-              <b className="font-heading text-[16px] text-[#D9534F] font-bold">{failCount}</b> fail
+              <b className="font-heading text-[16px] text-[#D9534F] font-bold">
+                {snapshot ? failCount : '—'}
+              </b>{' '}
+              fail
             </span>
+            <span>{snapshot ? unassessedCount : '—'} unassessed</span>
           </div>
         </div>
 
         {/* SDF Self-Assessment Card */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-[18px_20px] shadow-2xs">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-[#8a909b]">
-            SDF self-assessment
+            Recorded SDF designation
           </div>
           <div className="font-heading text-[26px] font-bold text-[#1E2A4A] leading-tight">
-            {isSdf ? 'Significant Data Fiduciary' : 'Not designated'}
+            {!snapshot ? 'Unavailable' : snapshot.isSdf ? 'Designated' : 'Not recorded'}
           </div>
           <p className="mt-1 text-[11.5px] text-[#8a909b] leading-normal">
-            {isSdf
-              ? 'Meets Section 10 thresholds. Resident DPO & Data Protection Impact Assessments mandatory.'
-              : 'Below SDF thresholds on volume + sensitivity. Re-evaluated each scan.'}
+            Tenant profile value; this is not an automated statutory designation.
           </p>
         </div>
 
@@ -405,68 +335,32 @@ export function AssessmentClient({
             Penalty exposure estimate
           </div>
           <div className="font-heading text-[30px] font-bold text-[#D9534F] leading-tight">
-            {exposure}
+            {snapshot ? exposure : 'Unavailable'}
           </div>
           <p className="mt-1 text-[11px] text-[#a03734] leading-tight">
-            weighted across open gaps · max ₹250 cr / contravention · illustrative, not legal advice
+            Saved engagement estimate; no estimate is inferred from missing findings.
           </p>
         </div>
       </div>
 
       {/* ============================================================ */}
-      {/* 3. TARGET STATUTORY AUDIT AREAS SCANNED (9 DOMAINS · 46 CONTROLS) */}
-      {/* ============================================================ */}
-      <div className="mb-[18px] rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-2xs">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 mb-3">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
-            <h2 className="font-heading text-sm font-semibold text-[#1E2A4A] uppercase tracking-wider">
-              Target Statutory Audit Areas Scanned (9 Domains · 46 Controls)
-            </h2>
-          </div>
-          <span className="font-mono text-xs text-slate-500">
-            DPDPA 2023 Statutory Suite · ap-south-1
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {TARGET_AREAS.map((area) => (
-            <div
-              key={area.code}
-              className="rounded-xl border border-slate-100 bg-[#F8FAFC] p-3.5 hover:border-slate-300 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
-                    {area.code}
-                  </span>
-                  <h3 className="text-xs font-bold text-[#1E2A4A] mt-1 line-clamp-1">
-                    {area.name}
-                  </h3>
-                </div>
-                <span className="font-mono text-[10px] text-slate-400 shrink-0">
-                  {area.citation}
-                </span>
-              </div>
-              <p className="mt-1.5 text-[11px] text-slate-600 leading-snug line-clamp-2">
-                {area.highlight}
+      {/* Saved domain coverage, derived only from the selected library. */}
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-5">
+        <h2 className="font-heading text-sm font-semibold">
+          Saved control coverage ({domains.length} domains · {totalControlsCount} controls)
+        </h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {domains.map((domain) => (
+            <div key={domain.name} className="rounded-lg bg-slate-50 p-3 text-xs">
+              <h3 className="font-semibold">{domain.name}</h3>
+              <p>
+                {domain.total} controls · {domain.pass} pass · {domain.partial} partial ·{' '}
+                {domain.fail} fail · {domain.unassessed} unassessed
               </p>
-              <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-slate-200/60 text-[10.5px]">
-                <span className="text-slate-500 font-mono">{area.controlsCount} controls</span>
-                <div className="flex items-center gap-1.5 font-semibold">
-                  <span className="text-teal-700">{area.passCount} pass</span>
-                  {area.partialCount > 0 && (
-                    <span className="text-amber-700">· {area.partialCount} part</span>
-                  )}
-                  {area.failCount > 0 && (
-                    <span className="text-red-600">· {area.failCount} fail</span>
-                  )}
-                </div>
-              </div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
       {/* ============================================================ */}
       {/* 4. CONTROL TABLE (DYNAMIC CONTROLS & FINDINGS)               */}
@@ -484,17 +378,41 @@ export function AssessmentClient({
 
         {/* Table Rows */}
         <div className="divide-y divide-[#eef1f5]">
+          {controls.length === 0 && (
+            <p className="p-4 text-sm text-slate-500">
+              {snapshot ? 'No saved control results.' : 'Control results unavailable.'}
+            </p>
+          )}
           {controls.map((c) => {
             const stColor =
-              c.status === 'pass' ? '#0a8d80' : c.status === 'partial' ? '#8a6d10' : '#D9534F';
+              c.status === 'unassessed'
+                ? '#64748b'
+                : c.status === 'pass'
+                  ? '#0a8d80'
+                  : c.status === 'partial'
+                    ? '#8a6d10'
+                    : '#D9534F';
             const stBg =
-              c.status === 'pass' ? '#e6f7f5' : c.status === 'partial' ? '#fbf3df' : '#fbeceb';
+              c.status === 'unassessed'
+                ? '#f1f5f9'
+                : c.status === 'pass'
+                  ? '#e6f7f5'
+                  : c.status === 'partial'
+                    ? '#fbf3df'
+                    : '#fbeceb';
             const stLabel =
-              c.status === 'pass' ? 'PASS' : c.status === 'partial' ? 'PARTIAL' : 'FAIL';
+              c.status === 'unassessed'
+                ? 'UNASSESSED'
+                : c.status === 'pass'
+                  ? 'PASS'
+                  : c.status === 'partial'
+                    ? 'PARTIAL'
+                    : 'FAIL';
 
             return (
               <div
                 key={c.id}
+                data-testid={`assessment-control-${c.id}`}
                 className="grid grid-cols-[90px_1fr_150px_110px_90px_70px] items-center gap-2.5 px-[18px] py-3 hover:bg-[#F4F6F8]/60 transition-colors"
               >
                 {/* Control ID with Link to Controls */}
@@ -510,10 +428,13 @@ export function AssessmentClient({
                   <div className="text-[12.5px] font-medium text-[#2F3542] leading-snug">
                     {c.name}
                   </div>
+                  <p className="text-xs text-slate-500">
+                    {c.score === null ? 'No saved score' : `Saved score: ${c.score}`}
+                  </p>
                   <div className="mt-1.5 h-[5px] max-w-[160px] overflow-hidden rounded-[20px] bg-[#F4F6F8]">
                     <div
                       style={{
-                        width: `${c.score}%`,
+                        width: `${c.score ?? 0}%`,
                         backgroundColor: stColor,
                       }}
                       className="h-full rounded-[20px] transition-all duration-700"
@@ -525,16 +446,16 @@ export function AssessmentClient({
                 <span className="text-[11px] text-[#5b6270] truncate">{c.domain}</span>
 
                 {/* Statutory Citation */}
-                <span className="font-mono text-[10.5px] text-[#8a909b]">{c.cite}</span>
+                <span className="font-mono text-[10.5px] text-[#8a909b]">{c.cite || '—'}</span>
 
                 {/* Evidence Artifact Link */}
                 <div>
-                  {c.ev !== '—' ? (
+                  {c.evidenceIds.length > 0 ? (
                     <Link
-                      href={`/evidence?q=${c.ev}`}
-                      className="inline-block rounded-[5px] bg-[#f7f0d8] px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#8a6d10] hover:opacity-85"
+                      href={`/evidence?q=${c.evidenceIds[0]}`}
+                      className="inline-block rounded-[5px] bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-700 hover:opacity-85"
                     >
-                      ✦ {c.ev}
+                      {c.evidenceIds.length} cited
                     </Link>
                   ) : (
                     <span className="text-[10.5px] text-[#8a909b]">—</span>

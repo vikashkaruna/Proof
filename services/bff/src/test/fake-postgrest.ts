@@ -367,12 +367,14 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     let mode: 'select' | 'insert' | 'update' | 'delete' = 'select';
     let payload: Row | Row[] | null = null;
     let returning = false;
+    let rowLimit: number | undefined;
+    let exactCount = false;
     let ordering: { column: string; ascending: boolean } | null = null;
-    let settled: { data: unknown; error: { message: string } | null } | null = null;
+    let settled: { data: unknown; error: { message: string } | null; count?: number } | null = null;
 
     const matched = () => table(name).filter((row) => filters.every((f) => f(row)));
 
-    function run(): { data: unknown; error: { message: string } | null } {
+    function run(): { data: unknown; error: { message: string } | null; count?: number } {
       if (settled) return settled;
 
       if (failing.has(name)) {
@@ -410,10 +412,10 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
               String(a[column] ?? '').localeCompare(String(b[column] ?? '')) * (ascending ? 1 : -1),
           );
         }
-        data = rows;
+        data = rowLimit === undefined ? rows : rows.slice(0, rowLimit);
       }
 
-      settled = { data, error: null };
+      settled = { data, error: null, ...(exactCount ? { count: matched().length } : {}) };
       return settled;
     }
 
@@ -423,7 +425,12 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       ordering = { column, ascending: options.ascending ?? true };
       return builder;
     };
-    builder.select = () => {
+    builder.limit = (count: number) => {
+      rowLimit = count;
+      return builder;
+    };
+    builder.select = (_columns?: string, options?: { count?: string }) => {
+      exactCount = options?.count === 'exact';
       returning = true;
       return builder;
     };

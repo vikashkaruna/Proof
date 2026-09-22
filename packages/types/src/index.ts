@@ -8,3 +8,4 @@ export * from './estate';
 export * from './connectors';
 
 export * from './connector-contracts';
+export * from './assessment';
