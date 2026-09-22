@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 37 — TASK DELEGATION CORE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `e46c1b7`, green CI [35678105419](https://github.com/vikashkaruna/Proof/actions/runs/35678105419); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 38 — CONFIRMED DISPATCH OUTCOMES** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `c88e3c1`, green CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 38 — W4.3 confirmed dispatch outcomes
+
+Task delegation merge `c88e3c1` passed CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494), including all 17 applicable jobs. Six exact-merge artifacts confirm 61 SPIRE, five durable-audit and 63 browser/89 API outcomes per configuration. The follow-up below adds the missing shared ledger-event types and hardens the actual dispatch path.
+
+Follow-up review found the legacy BFF agent route ignored completion-update errors, accepted missing/foreign runtime response fields, returned HTTP 200 for a reported agent failure, and persisted raw transport/provider errors. The UI could consequently present a failed or unrecorded invocation as successful. These defects are fixed before task/worker integration proceeds.
+
+The BFF now records the owned engagement and exact input digest, validates the returned agent/correlation/status/accounting/output/receipt shape, and confirms a terminal database write matched the exact run, tenant, agent, correlation and prior `running` state. It preserves concurrent cancellations and completed rows. Successful output is returned only after a confirmed `succeeded` row; persistence uncertainty returns **503 `agent_completion_unconfirmed`**, includes the run/correlation IDs and emits no completion event. Runtime failures return **502**, with fixed safe errors; raw exception/error payloads are neither persisted nor logged. Unknown top-level runtime fields are stripped. Internal-token fetches reject redirects and have a 120-second deadline. Success requires output and at least two distinct reported audit receipts; this validates the protocol shape, not independent receipt provenance.
+
+Validation: **572 BFF tests**, including 26 new dispatch cases, and two shared-schema tests pinning all 74 SQL ledger actions to the TypeScript decoder. The missing 0041 task-event entries are now included. Also passed: workspace tests/lint/typecheck and format/security gates. Tests inject completion-write failures, concurrent terminal/context changes, runtime error bodies, malformed/mismatched responses, accounting overflow and unknown fields. No schema change beyond 0041: **42 migrations, 52 public tables**, W2 named targets **19/40**. Exact merge CI remains a separate gate recorded in the session checkpoint. See [review 27](audits/27-agent-completion-review-2026-09-22.md).
+
+**Next:** continue W4.3 physical worker isolation and scoped tools/task handoff, production trust/registration lifecycle and verified actor chains; then W4.4 live grants/approval, full W3 wizard/readiness and graph, W4.5/6/7. This correction still uses the legacy shared runtime transport and does not activate task authority or connector execution. A timeout or unconfirmed database receipt is not proof of rollback; inspect/reconcile the identified run before retrying. Automatic agent-run reconciliation and private task orchestration remain work to implement.
 
 ## Revision 37 — W4.3 task delegation core
 

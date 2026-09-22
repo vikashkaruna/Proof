@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canonicalJson, sha256 } from '@axiom/ledger';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
@@ -21,9 +22,24 @@ vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => state.db!.client 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const ENGAGEMENT = '33333333-3333-4333-8333-333333333333';
-const transport = vi.fn(
-  async () => new Response(JSON.stringify({ status: 'succeeded' }), { status: 200 }),
-);
+function success(init?: RequestInit, overrides: Record<string, unknown> = {}) {
+  const dispatch = JSON.parse(String(init?.body)) as { correlation_id: string };
+  return {
+    agent: 'drishti',
+    correlation_id: dispatch.correlation_id,
+    status: 'succeeded',
+    latency_ms: 1,
+    input_tokens: 2,
+    output_tokens: 3,
+    cost_usd: 0,
+    error: null,
+    output: { inventory: [] },
+    ledger_entry_ids: ['1', '2'],
+    ...overrides,
+  };
+}
+const transport = vi.fn<typeof fetch>();
+const broadcast = vi.fn();
 
 async function request(role: UserRole, agent: string, body: Record<string, unknown>) {
   const { v1Routes } = await import('./v1.js');
@@ -42,7 +58,7 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
       killSwitch: {} as never,
       ledger: {} as never,
       mfa: {} as never,
-      realtime: { broadcast: vi.fn(), subscribe: vi.fn() },
+      realtime: { broadcast, subscribe: vi.fn() },
     }),
   );
   return app.request(`/agents/${agent}/run`, {
@@ -54,8 +70,16 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
 
 beforeEach(() => {
   state.db = createFakeDb();
-  transport.mockClear();
+  transport.mockReset();
+  transport.mockImplementation(async (_url, init) => new Response(JSON.stringify(success(init))));
+  broadcast.mockReset();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.stubGlobal('fetch', transport);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('agent invocation authority', () => {
@@ -93,11 +117,138 @@ describe('agent invocation authority', () => {
     ).toBe(200);
     const call = transport.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(call[1].body)).input.tenant_id).toBe(A);
-    expect(state.db!.rows('agent_runs')[0]?.metadata).toEqual({ requested_by: 'test-user' });
+    const row = state.db!.rows('agent_runs')[0]!;
+    expect(row.metadata).toEqual({ requested_by: 'test-user' });
+    expect(row.engagement_id).toBe(ENGAGEMENT);
+    expect(row.status).toBe('succeeded');
+    expect(row.input_redacted_hash).toBe(
+      await sha256(canonicalJson(JSON.parse(String(call[1].body)).input)),
+    );
+    expect(row.output_redacted_hash).toBe(await sha256(canonicalJson({ inventory: [] })));
+    expect(call[1].redirect).toBe('error');
+    expect(call[1].signal).toBeInstanceOf(AbortSignal);
   });
   it('fails closed when it cannot persist the invocation', async () => {
     state.db!.failNext('agent_runs');
     expect((await request(UserRole.OWNER, 'drishti', {})).status).toBe(503);
     expect(transport).not.toHaveBeenCalled();
+  });
+});
+
+describe('confirmed runtime completion', () => {
+  it('returns no output or success event when the completion write fails', async () => {
+    transport.mockImplementation(async (_url, init) => {
+      state.db!.failNext('agent_runs');
+      return new Response(JSON.stringify(success(init)));
+    });
+    const res = await request(UserRole.OWNER, 'drishti', {});
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body).toMatchObject({ error: { code: 'agent_completion_unconfirmed' } });
+    expect(body).not.toHaveProperty('output');
+    expect(state.db!.rows('agent_runs')[0]?.status).toBe('running');
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it.each(['cancelled', 'succeeded'])(
+    'cannot overwrite concurrent %s completion',
+    async (status) => {
+      transport.mockImplementation(async (_url, init) => {
+        state.db!.rows('agent_runs')[0]!.status = status;
+        return new Response(JSON.stringify(success(init)));
+      });
+      const res = await request(UserRole.OWNER, 'drishti', {});
+      expect(res.status).toBe(503);
+      expect(state.db!.rows('agent_runs')[0]?.status).toBe(status);
+      expect(broadcast).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(['tenant_id', 'agent', 'correlation_id'])(
+    'cannot complete a run whose %s changed',
+    async (field) => {
+      transport.mockImplementation(async (_url, init) => {
+        state.db!.rows('agent_runs')[0]![field] = field === 'agent' ? 'sudhaar' : B;
+        return new Response(JSON.stringify(success(init)));
+      });
+      expect((await request(UserRole.OWNER, 'drishti', {})).status).toBe(503);
+      expect(state.db!.rows('agent_runs')[0]?.status).toBe('running');
+    },
+  );
+  it.each([
+    { status: undefined },
+    { status: 'running' },
+    { agent: 'sudhaar' },
+    { correlation_id: B },
+    { latency_ms: -1 },
+    { input_tokens: 1.5 },
+    { cost_usd: -1 },
+    { output: null },
+    { error: 'private-runtime-error' },
+    { ledger_entry_ids: [] },
+    { ledger_entry_ids: ['1', '1'] },
+    { input_tokens: Number.MAX_SAFE_INTEGER, output_tokens: 1 },
+    { input_tokens: 2147483647, output_tokens: 1 },
+    { latency_ms: 2147483648 },
+    { cost_usd: 10000 },
+  ])('refuses malformed or contradictory runtime completion (%j)', async (override) => {
+    transport.mockImplementation(
+      async (_url, init) => new Response(JSON.stringify(success(init, override))),
+    );
+    const res = await request(UserRole.OWNER, 'drishti', {});
+    expect(res.status).toBe(502);
+    expect(await res.text()).not.toContain('private-runtime-error');
+    expect(state.db!.rows('agent_runs')[0]?.status).toBe('failed');
+    expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_invocation_failed');
+    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.failed');
+  });
+  it('returns a non-success HTTP status for a runtime-reported failure and strips its payload', async () => {
+    transport.mockImplementation(
+      async (_url, init) =>
+        new Response(
+          JSON.stringify(
+            success(init, {
+              status: 'failed',
+              error: 'private-runtime-error',
+              output: { secret: 'private-output' },
+              private_extra: 'private-extra',
+            }),
+          ),
+        ),
+    );
+    const res = await request(UserRole.OWNER, 'drishti', {});
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body).toMatchObject({ error: { code: 'agent_reported_failure' } });
+    expect(JSON.stringify(body)).not.toMatch(/private-|output|ledger_entry_ids/);
+    expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_reported_failure');
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
+  });
+  it.each(['http', 'network', 'json'])(
+    'sanitizes %s errors in responses, database rows and logs',
+    async (kind) => {
+      transport.mockImplementation(async (_url, init) => {
+        if (kind === 'network') throw new Error('private-credential-in-url');
+        if (kind === 'json') return new Response('private-invalid-json');
+        return new Response(
+          JSON.stringify(success(init, { output: { secret: 'private-failure-body' } })),
+          { status: 500 },
+        );
+      });
+      const res = await request(UserRole.OWNER, 'drishti', {});
+      expect(res.status).toBe(502);
+      expect(await res.text()).not.toContain('private-');
+      expect(JSON.stringify(state.db!.rows('agent_runs'))).not.toContain('private-');
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
+    },
+  );
+  it('does not forward unknown top-level runtime fields on success', async () => {
+    transport.mockImplementation(
+      async (_url, init) =>
+        new Response(JSON.stringify(success(init, { private_extra: 'private-credential' }))),
+    );
+    const res = await request(UserRole.OWNER, 'drishti', {});
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain('private-credential');
+    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.succeeded');
   });
 });

@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `e46c1b7`, CI 35678105419 green. C-W0-5 engineering is complete; deployed IAM acceptance remains separate. Revision 37 task delegation requires its own exact-merge CI checkpoint.
+Current verified staging checkpoint: `c88e3c1`, CI 35679665494 green. Task delegation component acceptance passed; Revision 38 dispatch/schema follow-up requires its own exact-merge CI checkpoint. Full worker/tool integration remains open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 38 — W4.3 confirmed dispatch outcomes
+
+Task delegation merge `c88e3c1` passed CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494), including all 17 applicable jobs. Six exact-merge artifacts confirm 61 SPIRE, five durable-audit and 63 browser/89 API outcomes per configuration. The follow-up below adds the missing shared ledger-event types and hardens the actual dispatch path.
+
+Follow-up review found the legacy BFF agent route ignored completion-update errors, accepted missing/foreign runtime response fields, returned HTTP 200 for a reported agent failure, and persisted raw transport/provider errors. The UI could consequently present a failed or unrecorded invocation as successful. These defects are fixed before task/worker integration proceeds.
+
+The BFF now records the owned engagement and exact input digest, validates the returned agent/correlation/status/accounting/output/receipt shape, and confirms a terminal database write matched the exact run, tenant, agent, correlation and prior `running` state. It preserves concurrent cancellations and completed rows. Successful output is returned only after a confirmed `succeeded` row; persistence uncertainty returns **503 `agent_completion_unconfirmed`**, includes the run/correlation IDs and emits no completion event. Runtime failures return **502**, with fixed safe errors; raw exception/error payloads are neither persisted nor logged. Unknown top-level runtime fields are stripped. Internal-token fetches reject redirects and have a 120-second deadline. Success requires output and at least two distinct reported audit receipts; this validates the protocol shape, not independent receipt provenance.
+
+Validation: **572 BFF tests**, including 26 new dispatch cases, and two shared-schema tests pinning all 74 SQL ledger actions to the TypeScript decoder. The missing 0041 task-event entries are now included. Also passed: workspace tests/lint/typecheck and format/security gates. Tests inject completion-write failures, concurrent terminal/context changes, runtime error bodies, malformed/mismatched responses, accounting overflow and unknown fields. No schema change beyond 0041: **42 migrations, 52 public tables**, W2 named targets **19/40**. Exact merge CI remains a separate gate recorded in the session checkpoint. See [review 27](audits/27-agent-completion-review-2026-09-22.md).
+
+**Next:** continue W4.3 physical worker isolation and scoped tools/task handoff, production trust/registration lifecycle and verified actor chains; then W4.4 live grants/approval, full W3 wizard/readiness and graph, W4.5/6/7. This correction still uses the legacy shared runtime transport and does not activate task authority or connector execution. A timeout or unconfirmed database receipt is not proof of rollback; inspect/reconcile the identified run before retrying. Automatic agent-run reconciliation and private task orchestration remain work to implement.
 
 ## Revision 37 — W4.3 task delegation core
 
