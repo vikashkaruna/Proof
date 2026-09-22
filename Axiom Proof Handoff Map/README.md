@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 32](../docs/audits/32-assessment-confirmation-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 33](../docs/audits/33-temporal-orchestration-review-2026-09-22.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds

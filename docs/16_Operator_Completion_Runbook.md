@@ -11,6 +11,16 @@ through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
+## Revision 44 — Temporal computation acceptance
+
+**ENGINEERING delivered:** versioned `axiom.compliance.engagement.v2` on `axiom-compliance-v2`, deterministic correlation, valid activity arguments, strict result/context gates and truthful computation/review handoffs. HTTP calls require configured internal authentication, have bounded time/response size, refuse redirects and sanitize failures. No blind retry or fictitious persisted plan/approval is allowed.
+
+**Evidence:** 67 passing Temporal tests: real local test server, default sandboxed workers, history replay and pending-activity worker restart with synthetic agents; HTTP MockTransport regressions. These prove orchestration behavior, not a deployed cluster or live client execution. Exact-merge CI and the sanitized Temporal artifact are recorded in the saved session. Revision 43 is green at `e0781c6` / CI 35688921423.
+
+**Before deployment:** inspect old `ComplianceEngagementWorkflow` histories on `axiom-compliance`; explicitly reconcile and drain/migrate them with controlled compatible code. The v2 worker does not service the old queue. There is no in-repository producer to switch and no rollout occurred. Legacy raw computation payloads still enter history; private payload storage/history residency and access controls remain engineering gates. Never send SVIDs, task proofs or private worker frames through Temporal histories or container logs. An unconfirmed outcome requires checking persisted results/audit before any redispatch; it is not proof that the previous attempt had no effects.
+
+**Still ENGINEERING:** private isolated-worker dispatch, durable idempotency and recovery scheduling, remaining agent isolation/trust chains, W4.4 live grants/approval and full W3 wizard/graph. See [review 33](audits/33-temporal-orchestration-review-2026-09-22.md). This checkpoint does not authorize cloud provisioning or client mutations.
+
 ## Revision 43 — confirmation and recovery acceptance
 
 **ENGINEERING delivered:** service-only confirmation of an already committed assessment using independently checked task/run/packet and ledger receipts. It records terminal success and a finalization receipt atomically, once. A missing worker response is recoverable. Cancellation/conflicting terminal states are preserved; mandatory audit failure does not report success. The BFF adapter is private to the controller, and no worker or browser confirmation route is exposed.

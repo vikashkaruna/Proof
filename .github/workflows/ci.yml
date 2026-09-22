@@ -446,6 +446,16 @@ jobs:
         working-directory: services/temporal-workers
       - run: uv run pytest
         working-directory: services/temporal-workers
+        env:
+          AXIOM_TEMPORAL_ACCEPTANCE_REPORT: ../../.axiom-runtime/temporal/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: temporal-orchestration-acceptance
+          path: .axiom-runtime/temporal/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   test-python-gateway:
     name: Python (model gateway) tests

@@ -1,5 +1,15 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 44 — truthful Temporal computation and replay
+
+Revision 43 is **complete and green** at staging `e0781c6`, CI [35688921423](https://github.com/vikashkaruna/Proof/actions/runs/35688921423): all 17 applicable jobs and seven exact-merge artifacts (67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 14 worker/recovery outcomes). No intervening upstream implementation was present.
+
+Review found invalid activity argument dispatch, nondeterministic workflow UUID generation and a false `completed` result after agent failures. A new versioned workflow/queue validates stage context and results, uses deterministic correlation and positional arguments, stops on failure/uncertainty/escalation, and ends successful computation at `plan_persistence_required`. It cannot invent Sudhaar's absent persisted plan ID or claim approval/execution/verification. HTTP activity failures are bounded, sanitized and nonretryable pending reconciliation. See [review 33](audits/33-temporal-orchestration-review-2026-09-22.md).
+
+**Validation:** **67 Temporal tests**, including real test-server execution, sandboxed history replay and restart with a pending activity, using synthetic agents; separate HTTP transport/contract regressions. Final exact-merge CI and its sanitized revision-bound evidence are saved in the session. Existing real SPIRE/worker and database gates remain distinct. No schema change: **0043**, **53 public tables**, W2 named targets **19/40**.
+
+**Next:** trusted idempotent issuance/dispatch, bounded isolated launch/private payload delivery and scheduled recovery; production trust/registration, remaining scoped workers and actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. W0/W1/W2 remainder stays open. Legacy history migration and payload privacy require engineering before rollout; this new queue is not activated from the UI. Full production orchestration and the overall goal remain partial.
+
 ## Revision 43 — confirmed assessment runs and recovery
 
 Revision 42 is **complete and green** at staging `66a9ec4`, CI [35687544717](https://github.com/vikashkaruna/Proof/actions/runs/35687544717), with all 17 applicable jobs and seven exact-merge artifacts: 67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 11 real worker outcomes. No intervening upstream implementation was present.

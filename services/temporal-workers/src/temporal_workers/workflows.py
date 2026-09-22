@@ -1,263 +1,142 @@
-"""Axiom Proof — Compliance engagement workflow.
+"""Versioned engagement computation frontier.
 
-The single end-to-end workflow that drives an engagement from
-discovery to closure. Per Doc 04 §5.1, this is the Workflow/State
-Engine: a durable state machine that survives restarts and
-human-approval waits.
-
-The workflow is intentionally simple. It is a sequence of activity
-calls; each activity is an HTTP call into the agent runtime. The
-activities themselves are NOT long-running — the agent runtime
-returns a job ID and we poll (or use Temporal signals) for
-completion. The novelty of Temporal here is the durable state, not
-the per-activity parallelism.
+This workflow stops at a truthful plan-persistence/review handoff. It does not
+claim approval, execution, verification, persisted assessment or compliance
+closure from legacy runtime output. Private workload orchestration remains the
+next integration; proofs/SVIDs must never be placed in Temporal arguments.
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import timedelta
 from typing import Any
 
-from temporalio import activity, workflow
+from pydantic import ValidationError
+from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError, ApplicationError, CancelledError
 
-from .config import get_settings
+with workflow.unsafe.imports_passed_through():
+    from .activities import call_agent_runtime
+    from .contracts import (
+        EngagementInput,
+        ProtocolRefused,
+        validate_result,
+        validated_output,
+    )
 
-
-# ─── Activities — thin wrappers around agent-runtime HTTP calls ──────
-
-
-@activity.defn
-async def call_agent_runtime(
-    agent: str,
-    input: dict[str, Any],
-    correlation_id: str,
-) -> dict[str, Any]:
-    """Call an agent via the agent runtime's HTTP API.
-
-    SEC-11: the auth header here was the literal string
-    "{{AGENT_RUNTIME_INTERNAL_TOKEN}}" — a template that nothing ever
-    substituted — and the cluster URL was hardcoded. Both now come from
-    settings, which refuses to start a deployed worker without a real token.
-    """
-    import httpx
-
-    settings = get_settings()
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(
-            f"{settings.agent_runtime_url}/agents/{agent}/invoke",
-            json={"correlation_id": correlation_id, "input": input},
-            headers=settings.internal_headers,
-        )
-        r.raise_for_status()
-        return r.json()
+WORKFLOW_TYPE = "axiom.compliance.engagement.v2"
+TASK_QUEUE = "axiom-compliance-v2"
 
 
-@activity.defn
-async def persist_finding(
-    tenant_id: str,
-    engagement_id: str,
-    finding: dict[str, Any],
-) -> str:
-    """Persist a finding to Supabase. Returns the finding ID."""
-    import httpx
-
-    settings = get_settings()
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # This call carried no credential at all. /internal endpoints are not
-        # public, and network position is not authentication.
-        r = await client.post(
-            f"{settings.agent_runtime_url}/internal/persist-finding",
-            json={"tenant_id": tenant_id, "engagement_id": engagement_id, "finding": finding},
-            headers=settings.internal_headers,
-        )
-        r.raise_for_status()
-        return r.json()["id"]
-
-
-@activity.defn
-async def wait_for_human_approval(
-    plan_id: str,
-    correlation_id: str,
-    timeout_hours: int = 24,
-) -> dict[str, Any]:
-    """Block until a human approves the plan. Implements the per-Doc
-    04 §5.1 "survive a human taking days to approve" requirement.
-
-    In production this uses Temporal signals. For Phase 0/1 we poll
-    the DB at the configured cadence.
-    """
-    import asyncio
-
-    import httpx
-
-    settings = get_settings()
-
-    deadline_seconds = timeout_hours * 3600
-    poll_interval = 30
-    elapsed = 0
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        while elapsed < deadline_seconds:
-            # Likewise unauthenticated before W0.0. Plan status discloses
-            # whether an approval token exists for a plan.
-            r = await client.get(
-                f"{settings.agent_runtime_url}/internal/plan-status/{plan_id}",
-                headers=settings.internal_headers,
-            )
-            if r.status_code == 200:
-                status = r.json()
-                if status.get("approval_token_id"):
-                    return status
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-    raise TimeoutError(f"Approval timeout for plan {plan_id} after {timeout_hours}h")
-
-
-# ─── The workflow itself ────────────────────────────────────────────
-
-
-@workflow.defn(name="axiom.compliance.engagement")
+@workflow.defn(name=WORKFLOW_TYPE)
 class ComplianceEngagementWorkflow:
-    """The end-to-end engagement workflow.
-
-    Inputs (start):
-      tenant_id, engagement_id, library_version, findings (list)
-
-    State machine: discovery → classification → assessment →
-    evidence → planning → dry-run → approval → execution →
-    verification → closure.
-
-    Survives: workflow restarts, multi-day approval waits, partial
-    failures. Each phase emits to the audit ledger via the agent
-    runtime.
-    """
-
     def __init__(self) -> None:
-        self._state: dict[str, Any] = {}
-        self._approver_id: str | None = None
-        self._approval_token_id: str | None = None
+        self._state: dict[str, str] = {}
+        self._stage = "validating"
+
+    @workflow.query
+    def status(self) -> dict[str, Any]:
+        return {"stage": self._stage, "stages": dict(self._state)}
 
     @workflow.run
     async def run(self, input: dict[str, Any]) -> dict[str, Any]:
-        correlation_id = input.get("correlation_id") or str(uuid.uuid4())
-        tenant_id = input["tenant_id"]
-        engagement_id = input["engagement_id"]
-
-        retry = RetryPolicy(
-            initial_interval=timedelta(seconds=2),
-            maximum_interval=timedelta(minutes=1),
-            maximum_attempts=3,
-        )
-
-        # 1) Discovery
-        discovery = await workflow.execute_activity(
-            call_agent_runtime,
-            args={
-                "agent": "drishti",
-                "input": {
-                    "tenant_id": tenant_id,
-                    "engagement_id": engagement_id,
-                    "interview": input.get("interview", {}),
-                    "systems": input.get("systems", []),
-                },
-                "correlation_id": correlation_id,
-            },
-            start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=retry,
-        )
-        self._state["discovery"] = discovery
-
-        # 2) Classification
-        classification = await workflow.execute_activity(
-            call_agent_runtime,
-            args={
-                "agent": "vibhaag",
-                "input": {
-                    "tenant_id": tenant_id,
-                    "engagement_id": engagement_id,
-                    "inventory": discovery.get("output", {}).get("inventory", []),
-                },
-                "correlation_id": correlation_id,
-            },
-            start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=retry,
-        )
-        self._state["classification"] = classification
-
-        # 3) Assessment
-        assessment = await workflow.execute_activity(
-            call_agent_runtime,
-            args={
-                "agent": "parikshan",
-                "input": {
-                    "tenant_id": tenant_id,
-                    "engagement_id": engagement_id,
-                    "library_version": input.get("library_version", "0.1.0"),
-                    "answers": input.get("answers", {}),
-                },
-                "correlation_id": correlation_id,
-            },
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=retry,
-        )
-        self._state["assessment"] = assessment
-
-        # 4) Plan generation (Sudhaar)
-        plan = await workflow.execute_activity(
-            call_agent_runtime,
-            args={
-                "agent": "sudhaar",
-                "input": {
-                    "tenant_id": tenant_id,
-                    "engagement_id": engagement_id,
-                    "title": f"Plan for engagement {engagement_id}",
-                    "findings": assessment.get("output", {}).get("findings", []),
-                },
-                "correlation_id": correlation_id,
-            },
-            start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=retry,
-        )
-        self._state["plan"] = plan
-
-        # 5) Wait for human approval
-        # In production: the workflow sends a signal; the approver
-        # hits the BFF; the BFF issues the token; the BFF signals
-        # the workflow. For Phase 0/1, we poll.
+        assigned = None
         try:
-            approved = await workflow.execute_activity(
-                wait_for_human_approval,
-                args={
-                    "plan_id": plan.get("output", {}).get("plan_id"),
-                    "correlation_id": correlation_id,
-                    "timeout_hours": 24,
-                },
-                start_to_close_timeout=timedelta(hours=24),
-                retry_policy=retry,
+            assigned = EngagementInput.model_validate(input)
+        except ValidationError:
+            assigned = None
+        if assigned is None:
+            raise ApplicationError(
+                "invalid_engagement_input",
+                type="invalid_engagement_input",
+                non_retryable=True,
             )
-            self._state["approval"] = approved
-        except TimeoutError as e:
-            workflow.logger.error("approval timeout", error=str(e))
-            return {"status": "approval_timeout", "correlation_id": correlation_id, "state": self._state}
-
-        # 6) Execution (Karya) — Phase 3+
-        # In Phase 0/1 this is the BFF's internal/execute endpoint
-        # which currently just records the intent.
-        # 7) Verification — Phase 3+
-
+        correlation = str(assigned.correlation_id or workflow.uuid4())
+        context = {
+            "tenant_id": str(assigned.tenant_id),
+            "engagement_id": str(assigned.engagement_id),
+        }
+        outputs: dict[str, dict[str, Any]] = {}
+        # Legacy runtime dispatch has no durable idempotency handshake. A lost
+        # response must be reconciled before any repeat; never retry it blindly.
+        retry = RetryPolicy(maximum_attempts=1)
+        for agent in ("drishti", "vibhaag", "parikshan", "sudhaar"):
+            self._stage = agent
+            if agent == "drishti":
+                payload = {
+                    **context,
+                    "interview": assigned.interview,
+                    "systems": assigned.systems,
+                }
+            elif agent == "vibhaag":
+                payload = {**context, "inventory": outputs["drishti"]["inventory"]}
+            elif agent == "parikshan":
+                payload = {
+                    **context,
+                    "library_version": assigned.library_version,
+                    "answers": assigned.answers,
+                }
+            else:
+                payload = {
+                    **context,
+                    "title": f"Plan for engagement {assigned.engagement_id}",
+                    "findings": outputs["parikshan"]["findings"],
+                }
+            failure = None
+            try:
+                value = await workflow.execute_activity(
+                    call_agent_runtime,
+                    args=[agent, payload, correlation],
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry,
+                )
+                result = validate_result(value, agent, correlation)
+                output = validated_output(result, assigned.library_version)
+            except ActivityError as exc:
+                if isinstance(exc.cause, CancelledError):
+                    raise CancelledError()
+                failure = (
+                    "agent_reported_failure"
+                    if isinstance(exc.cause, ApplicationError)
+                    and exc.cause.type == "agent_reported_failure"
+                    else "agent_invocation_unconfirmed"
+                )
+            except ProtocolRefused as exc:
+                failure = exc.code
+            if failure:
+                self._state[agent] = (
+                    "failed" if failure == "agent_reported_failure" else "unconfirmed"
+                )
+                return {
+                    "status": self._state[agent],
+                    "stage": agent,
+                    "code": failure,
+                    "correlation_id": correlation,
+                    "stages": dict(self._state),
+                }
+            self._state[agent] = "computed"
+            outputs[agent] = output
+            if output.get("escalate") is True or (
+                agent == "drishti" and output["needs_live_connector"]
+            ):
+                self._stage = "review_required"
+                return {
+                    "status": "review_required",
+                    "stage": agent,
+                    "code": "live_connector_required"
+                    if agent == "drishti" and output["needs_live_connector"]
+                    else "agent_escalated",
+                    "correlation_id": correlation,
+                    "stages": dict(self._state),
+                }
+        # Sudhaar returns a proposal, not a stored plan ID. Do not poll a missing
+        # endpoint with None, invent an approval or label future phases complete.
+        self._stage = "plan_persistence_required"
         return {
-            "status": "completed",
-            "correlation_id": correlation_id,
-            "posture_score": (assessment.get("output") or {}).get("posture_score"),
-            "estimated_exposure_inr": (assessment.get("output") or {}).get("estimated_exposure_inr"),
-            "state": {
-                "discovery": "completed",
-                "classification": "completed",
-                "assessment": "completed",
-                "plan": "completed",
-                "approval": "received",
-            },
+            "status": "plan_persistence_required",
+            "correlation_id": correlation,
+            "stages": dict(self._state),
+            "assessment": outputs["parikshan"],
+            "proposal": outputs["sudhaar"],
         }

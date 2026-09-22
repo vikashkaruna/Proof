@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `66a9ec4`, CI 35687544717 green. Revision 42 isolated worker/persistence is verified. Revision 43 adds independently confirmed terminal runs and lost-response recovery, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `e0781c6`, CI 35688921423 green. Revision 43 confirmation/recovery is verified. Revision 44 fixes Temporal computation, failure handling and replay, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 44 — truthful Temporal computation and replay
+
+Revision 43 is **complete and green** at staging `e0781c6`, CI [35688921423](https://github.com/vikashkaruna/Proof/actions/runs/35688921423): all 17 applicable jobs and seven exact-merge artifacts (67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 14 worker/recovery outcomes). No intervening upstream implementation was present.
+
+Review found invalid activity argument dispatch, nondeterministic workflow UUID generation and a false `completed` result after agent failures. A new versioned workflow/queue validates stage context and results, uses deterministic correlation and positional arguments, stops on failure/uncertainty/escalation, and ends successful computation at `plan_persistence_required`. It cannot invent Sudhaar's absent persisted plan ID or claim approval/execution/verification. HTTP activity failures are bounded, sanitized and nonretryable pending reconciliation. See [review 33](audits/33-temporal-orchestration-review-2026-09-22.md).
+
+**Validation:** **67 Temporal tests**, including real test-server execution, sandboxed history replay and restart with a pending activity, using synthetic agents; separate HTTP transport/contract regressions. Final exact-merge CI and its sanitized revision-bound evidence are saved in the session. Existing real SPIRE/worker and database gates remain distinct. No schema change: **0043**, **53 public tables**, W2 named targets **19/40**.
+
+**Next:** trusted idempotent issuance/dispatch, bounded isolated launch/private payload delivery and scheduled recovery; production trust/registration, remaining scoped workers and actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. W0/W1/W2 remainder stays open. Legacy history migration and payload privacy require engineering before rollout; this new queue is not activated from the UI. Full production orchestration and the overall goal remain partial.
 
 ## Revision 43 — confirmed assessment runs and recovery
 
