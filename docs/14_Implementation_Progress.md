@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `41f9171`, CI 35665778056 green. The runtime audit slice below has passed local checks and awaits its own committed acceptance and merge CI.
+Current verified staging checkpoint: `a5ba641`, CI 35666946505 green. C-W0-5 configuration implementation is the next exact-merge checkpoint; deployed IAM acceptance remains separate.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 36 — C-W0-5 service IAM isolation
+
+Reviewed staging `a5ba641` and green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505): 17 applicable jobs passed; six exact-merge artifacts verify 61 SPIRE outcomes, five real Postgres audit outcomes and 63 browser/89 API checks per configuration. The runtime audit milestone is complete. No intervening upstream implementation was present.
+
+C-W0-5 engineering now assigns nine distinct Cloud Run identities with 29 explicit secret-level grants and a BFF-only conditional retiring MFA grant. Project-wide secret, artifact and Cloud SQL runtime roles are removed. Unused BFF database-password/Redis bindings are removed. The runtime now receives its actual Supabase URL/service key, and Temporal receives its strict environment and internal transport token. Every service rollout waits for required IAM grants/secret versions; deployment and teardown target the new resources. The sensitive MFA resource-count expression is corrected without exposing key material.
+
+Validation: ten permission-drift/target-coverage tests and four offline evaluated Terraform cases, plus configuration checks, formatting and shell validation. No provider apply or cloud resource change occurred. **C-W0-5 code is delivered; effective deployed IAM acceptance remains pending.** See [review 25](audits/25-service-iam-review-2026-09-22.md) for the access matrix, upgrade/rollback rules and proof limits.
+
+This is a prerequisite for W4.3, not completion of agent isolation: all ten agents still share the runtime service's backend, approval and storage credentials. Next implement credential-less workers, tenant/task delegation and every-tool scopes, then W4.4 live grants, full W3 wizard/readiness and graph, and W4.5/6/7. C-W0-6 contact persistence/mail, C-W0-7 scoring provenance, W1 invitations, W2 remaining targets and remote acceptance remain open. Migration tip 0040 and 51 public tables are unchanged.
 
 ## Revision 35 — W4.3 runtime audit hardening
 

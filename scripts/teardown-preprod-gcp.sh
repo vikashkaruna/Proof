@@ -203,10 +203,10 @@ if should_run_phase "services"; then
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
     info "Dry-run: Planning destruction of Cloud Run services..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_cloud_run_v2_service.bff       -target=google_cloud_run_v2_service.web       -target=google_cloud_run_v2_service.agent_runtime       -target=google_cloud_run_v2_service.model_gateway       -target=google_cloud_run_v2_service.temporal_worker       -target=google_cloud_run_v2_service.marketing       -target=google_cloud_run_v2_service_iam_member.bff_public       -target=google_cloud_run_v2_service_iam_member.web_public       -target=google_cloud_run_v2_service_iam_member.marketing_public || true
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_cloud_run_v2_service.bff       -target=google_cloud_run_v2_service.web       -target=google_cloud_run_v2_service.agent_runtime       -target=google_cloud_run_v2_service.model_gateway       -target=google_cloud_run_v2_service.temporal_worker       -target=google_cloud_run_v2_service.marketing       -target=google_cloud_run_v2_service.supabase_auth       -target=google_cloud_run_v2_service.supabase_rest       -target=google_cloud_run_v2_service.supabase_gateway       -target=google_cloud_run_v2_service_iam_member.agent_runtime_public       -target=google_cloud_run_v2_service_iam_member.model_gateway_public       -target=google_cloud_run_v2_service_iam_member.supabase_auth_public       -target=google_cloud_run_v2_service_iam_member.supabase_rest_public       -target=google_cloud_run_v2_service_iam_member.supabase_gateway_public       -target=google_cloud_run_v2_service_iam_member.bff_public       -target=google_cloud_run_v2_service_iam_member.web_public       -target=google_cloud_run_v2_service_iam_member.marketing_public || true
   else
     info "Destroying Cloud Run services..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_cloud_run_v2_service.bff       -target=google_cloud_run_v2_service.web       -target=google_cloud_run_v2_service.agent_runtime       -target=google_cloud_run_v2_service.model_gateway       -target=google_cloud_run_v2_service.temporal_worker       -target=google_cloud_run_v2_service.marketing       -target=google_cloud_run_v2_service_iam_member.bff_public       -target=google_cloud_run_v2_service_iam_member.web_public       -target=google_cloud_run_v2_service_iam_member.marketing_public || true
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_cloud_run_v2_service.bff       -target=google_cloud_run_v2_service.web       -target=google_cloud_run_v2_service.agent_runtime       -target=google_cloud_run_v2_service.model_gateway       -target=google_cloud_run_v2_service.temporal_worker       -target=google_cloud_run_v2_service.marketing       -target=google_cloud_run_v2_service.supabase_auth       -target=google_cloud_run_v2_service.supabase_rest       -target=google_cloud_run_v2_service.supabase_gateway       -target=google_cloud_run_v2_service_iam_member.agent_runtime_public       -target=google_cloud_run_v2_service_iam_member.model_gateway_public       -target=google_cloud_run_v2_service_iam_member.supabase_auth_public       -target=google_cloud_run_v2_service_iam_member.supabase_rest_public       -target=google_cloud_run_v2_service_iam_member.supabase_gateway_public       -target=google_cloud_run_v2_service_iam_member.bff_public       -target=google_cloud_run_v2_service_iam_member.web_public       -target=google_cloud_run_v2_service_iam_member.marketing_public || true
     pass "Cloud Run microservices destroyed"
   fi
   cd "$REPO_ROOT"
@@ -218,10 +218,10 @@ if should_run_phase "secrets"; then
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
     info "Dry-run: Planning destruction of Secret Manager secrets..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_secret_manager_secret_version.version       -target=google_secret_manager_secret.secret || true
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_secret_manager_secret_version.version       -target=google_secret_manager_secret.secret       -target=google_secret_manager_secret.mfa_previous_keys       -target=google_secret_manager_secret_version.mfa_previous_keys       -target=google_secret_manager_secret_iam_member.runtime_access       -target=google_secret_manager_secret_iam_member.mfa_previous_access || true
   else
     info "Destroying Secret Manager secrets..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_secret_manager_secret_version.version       -target=google_secret_manager_secret.secret || true
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_secret_manager_secret_version.version       -target=google_secret_manager_secret.secret       -target=google_secret_manager_secret.mfa_previous_keys       -target=google_secret_manager_secret_version.mfa_previous_keys       -target=google_secret_manager_secret_iam_member.runtime_access       -target=google_secret_manager_secret_iam_member.mfa_previous_access || true
     pass "Secret Manager secrets destroyed"
   fi
   cd "$REPO_ROOT"
@@ -248,10 +248,10 @@ if should_run_phase "base"; then
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
     info "Dry-run: Planning destruction of VPC Connector and Peering..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_project_iam_member.secret_accessor       -target=google_project_iam_member.artifact_reader       -target=google_project_iam_member.cloudsql_client       -target=google_service_account.cloudrun_sa       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
   else
     info "Destroying VPC Connector and Peering..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_project_iam_member.secret_accessor       -target=google_project_iam_member.artifact_reader       -target=google_project_iam_member.cloudsql_client       -target=google_service_account.cloudrun_sa       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
     pass "Serverless VPC connector and peering destroyed"
   fi
   cd "$REPO_ROOT"

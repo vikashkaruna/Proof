@@ -1,5 +1,15 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 36 — C-W0-5 service IAM isolation
+
+Reviewed staging `a5ba641` and green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505): 17 applicable jobs passed; six exact-merge artifacts verify 61 SPIRE outcomes, five real Postgres audit outcomes and 63 browser/89 API checks per configuration. The runtime audit milestone is complete. No intervening upstream implementation was present.
+
+C-W0-5 engineering now assigns nine distinct Cloud Run identities with 29 explicit secret-level grants and a BFF-only conditional retiring MFA grant. Project-wide secret, artifact and Cloud SQL runtime roles are removed. Unused BFF database-password/Redis bindings are removed. The runtime now receives its actual Supabase URL/service key, and Temporal receives its strict environment and internal transport token. Every service rollout waits for required IAM grants/secret versions; deployment and teardown target the new resources. The sensitive MFA resource-count expression is corrected without exposing key material.
+
+Validation: ten permission-drift/target-coverage tests and four offline evaluated Terraform cases, plus configuration checks, formatting and shell validation. No provider apply or cloud resource change occurred. **C-W0-5 code is delivered; effective deployed IAM acceptance remains pending.** See [review 25](audits/25-service-iam-review-2026-09-22.md) for the access matrix, upgrade/rollback rules and proof limits.
+
+This is a prerequisite for W4.3, not completion of agent isolation: all ten agents still share the runtime service's backend, approval and storage credentials. Next implement credential-less workers, tenant/task delegation and every-tool scopes, then W4.4 live grants, full W3 wizard/readiness and graph, and W4.5/6/7. C-W0-6 contact persistence/mail, C-W0-7 scoring provenance, W1 invitations, W2 remaining targets and remote acceptance remain open. Migration tip 0040 and 51 public tables are unchanged.
+
 ## Revision 35 — W4.3 runtime audit hardening
 
 Committed acceptance: source `956aa55` passed the real Postgres audit probe with all five outcomes and a clean source tree (`CI=true`, locked Python dependencies). Python unit tests passed 174/174; repository format checks and touched-file F/I lint passed. The merge CI result remains the final staging gate.
