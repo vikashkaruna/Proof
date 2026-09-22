@@ -45,3 +45,5 @@ Revision 38 requires a validated runtime result and confirmed run persistence be
 Revision 39 removes UI default-success and timer-driven assessment improvements. Assessment source-data fallbacks remain a separate C-W0-7 gap; current scores/cards are not end-to-end readiness evidence. See review 28 before continuing worker and W3/W4 integration.
 
 Revision 40 verifies Revision 39 CI and replaces the browser bridge demo mapping with user-scoped dynamic tenant routing. Real custom-tenant read/write and revocation acceptance is covered. Assessment provenance and full W3/W4 remain pending; see review 29 and the session handoff.
+
+Revision 41 replaces Assessment demonstration posture with a BFF projection of one owned assessment/library and real evidence references. Missing/error states are explicit and zero values preserved. Full worker persistence, requested-library execution, W3 wizard/graph and W4 grants remain open; see review 30.

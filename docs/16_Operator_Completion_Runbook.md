@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `180ae52`, CI [35681594813](https://github.com/vikashkaruna/Proof/actions/runs/35681594813) green. Revision 39 is verified; Revision 40 closes dynamic tenant routing subject to exact merge CI. Assessment provenance, deployed IAM acceptance and full W4.3 remain open.
+Verified staging checkpoint: `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802) green. Dynamic tenant routing is verified. Revision 41 fixes Assessment saved-results provenance subject to exact merge CI. Other C-W0-7 surfaces, deployed IAM acceptance and full W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 40, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 41, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 41 — saved assessment acceptance
+
+**ENGINEERING delivered:** BFF-owned read projection for one tenant/assessment/library, published library count validation, real owned evidence references, measured zeros, explicit missing/unavailable states and all saved controls. SSR calls the BFF. No fallback scores, exposure, evidence IDs or domain outcomes remain on Assessment. Parikshan invocation is disabled without readable saved context; successful invocation does not imply persisted findings.
+
+**Evidence:** 26 projection regressions (598 BFF tests), 76 web tests and five focused browser journeys. A unique immutable synthetic 20-control library proves real database reads, empty history, zero values, missing findings, stale evidence and foreign/historical selection. Corrected test fixtures to the actual SQL domain/status enums and uniform PostgREST bulk columns; did not relax schema rules. The full exact-merge gate should contain 67 browser/89 API outcomes per configuration. Record its revision and six sanitized artifacts in the saved session before calling the checkpoint green.
+
+**Operational meaning:** unavailable results require restoring the BFF/data source or a complete published baseline, not substituting demonstration data. Sets at the 1,000-row bound deliberately refuse until pagination is implemented. A citation link proves an owned metadata reference, not object-lock verification. This is a current persisted read, not an atomic sealed report. The existing score presentation bands remain 80/40; this work does not approve or change statutory scoring.
+
+**Still ENGINEERING:** q7/q11/q12 and benchmark semantics, portal fallbacks/static health labels, real Parikshan persistence and requested-library execution through scoped W4.3 tools, W4.4 execution gates and full W3 wizard/graph. No operator action, cloud deploy or client-side mutation is required for this read-projection milestone.
 
 ## Revision 40 — tenant routing acceptance
 
@@ -540,7 +550,7 @@ If a request returns `agent_completion_unconfirmed`, inspect the identified run 
 
 Run `pnpm --filter @axiom/web test` and `pnpm --filter @axiom/e2e exec playwright test agent-ui-communication.spec.ts --workers=1` after local Auth/persona setup. The new browser cases use real login/MFA followed by explicit response injection to verify pending/failure/success presentation. These are UI contract tests. The full committed container lane should now contain 65 journeys and 89 API outcomes per configuration; require exact source revision and no retries as before.
 
-**C-W0-7 remains ENGINEERING work:** before assessment readiness can close, remove fallback score 85, fabricated evidence/control rows and exposure, and hardcoded target-area outcome counts. Scope persisted findings and evidence to the selected owned engagement and its Control Library version, and tenant metadata to the active tenant. Preserve measured zero values, show missing results as unassessed and query failures as unavailable. Add empty/stale/foreign/version/error fixtures and browser acceptance. Current Workbench fleet/prompt/environment cards are static presentation, not operational health evidence. Do not use the old demonstration scripts' default-success output as acceptance.
+**C-W0-7 Assessment display correction is delivered in Revision 41:** the BFF projection removes invented values and binds persisted results to the owned engagement/library with explicit empty/error states. Its exact merge CI is the closure gate. Other C-W0-7 scoring/benchmark and presentation surfaces remain open. Current Workbench fleet/prompt/environment cards are static presentation, not operational health evidence. Do not use the old demonstration scripts' default-success output as acceptance.
 
 ## C-W0-5 · Deploy and verify service IAM isolation
 

@@ -10,7 +10,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { signInFreshAnalyst } from '../fixtures';
+import { signInFreshAnalyst, state } from '../fixtures';
 
 test.describe('Agent ↔ UI communication', () => {
   test.beforeEach(async ({ page }) => {
@@ -87,10 +87,57 @@ test('assessment waits for confirmation and never invents score improvements or 
   page,
 }) => {
   await signInFreshAnalyst(page, 'assessment-outcomes');
+  // The default persona library deliberately has zero controls. Give this
+  // invocation-only test a complete synthetic baseline so the button has a
+  // real owned assessment; runtime responses below remain explicit fixtures.
+  const engagement = crypto.randomUUID();
+  const library = `ui-invocation-${engagement}`;
+  async function seed(table: string, body: unknown) {
+    const response = await fetch(`${state.supabaseUrl}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        apikey: state.publishableKey,
+        Authorization: `Bearer ${state.serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(201);
+  }
+  await seed('control_libraries', {
+    version: library,
+    published_at: new Date().toISOString(),
+    published_by: 'browser-fixture',
+    change_log: 'Invocation fixture only',
+    control_count: 1,
+    is_current: false,
+  });
+  await seed('controls', {
+    id: 'UI-FIXTURE-01',
+    library_version: library,
+    title: 'Invocation fixture',
+    obligation: 'Fixture only',
+    domain: 'SEC',
+    severity: 'low',
+    citations: [],
+    evidence_required: [],
+    assessment_questions: [],
+    scoring: {},
+    remediation_patterns: [],
+    introduced_in_version: library,
+  });
+  await seed('engagements', {
+    id: engagement,
+    tenant_id: state.tenantA.id,
+    library_version: library,
+    title: 'Invocation UI fixture',
+  });
   let release: (() => void) | undefined;
   let mode: 'failure' | 'success' = 'failure';
   await page.route('**/api/bff/v1/agents/parikshan/run', async (route) => {
     const input = route.request().postDataJSON() as Record<string, unknown>;
+    expect(input.engagement_id).toBe(engagement);
+    expect(input.library_version).toBe(library);
     if (mode === 'failure') {
       await new Promise<void>((resolve) => {
         release = resolve;
@@ -118,7 +165,7 @@ test('assessment waits for confirmation and never invents score improvements or 
         },
       });
   });
-  await page.goto('/assessment');
+  await page.goto(`/assessment?engagement=${engagement}`);
   const summary = await page.getByTestId('assessment-summary').innerText();
   await page.clock.install();
   await page.getByRole('button', { name: 'Run Parikshan', exact: true }).click();
@@ -128,7 +175,7 @@ test('assessment waits for confirmation and never invents score improvements or 
   await expect(page.getByText('Parikshan invocation completed.', { exact: false })).toHaveCount(0);
   expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
   release!();
-  await expect(page.getByRole('main').getByRole('alert')).toContainText(
+  await expect(page.getByTestId('assessment-invocation-error')).toContainText(
     'Inspect this run before retrying.',
   );
   await expect(page.getByTestId('pipeline-parikshan')).toHaveAttribute('data-state', 'not-run');

@@ -1,3 +1,4 @@
+import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
@@ -112,6 +113,7 @@ interface Deps {
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', estateRoutes());
+  app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());
 

@@ -1,12 +1,26 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `180ae52`, CI 35681594813 green. Revision 39 UI correction is verified; Revision 40 tenant routing requires its own exact-merge gate. Assessment provenance and full worker/tool integration remain open.
+Current verified staging checkpoint: `f49c0c7`, CI 35682852802 green. Dynamic tenant routing is verified. Revision 41 corrects Assessment saved-data provenance; its exact merge CI is the next gate. Full W3/W4 and other C-W0-7 surfaces remain open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 41 — saved assessment provenance
+
+Revision 40 is complete and green at staging `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802). The exact-merge gate and six sanitized artifacts passed: 66 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging implementation was present.
+
+The new BFF `GET /v1/assessment` read projection requires posture-read capability and existing membership/MFA gates. It selects one owned assessment (latest by default, or an explicit ID), reads only that assessment's tenant/library-bound findings and evidence, verifies the published/deprecated library's declared count, and returns a validated shared contract. Empty history returns no invented controls or exposure. Missing findings are unassessed; measured zero scores/exposure remain zero. Failed queries, malformed/ambiguous rows, incomplete libraries and truncated result sets return a sanitized unavailable response. Evidence links contain full, real IDs cited by a finding and owned by the same tenant/assessment. Responses are private/no-store.
+
+Assessment SSR now consumes that BFF projection; it holds no privileged database credential or scoring rules. The page removes default score 85, made-up evidence IDs/control rows/exposure, static domain outcomes and the sixteen-row limit. Domain counts reflect the selected saved library. SDF is labelled as a recorded profile value, not an inferred legal designation. Existing 80/40 display bands are preserved and disclosed; the scoring model and immutable historical records are unchanged. An invocation requires a readable saved assessment and sends its engagement/library IDs. Completion refreshes saved data; it does not claim that the runtime persisted findings.
+
+Validation: **598 BFF tests**, including 26 new projection tests; **76 web tests**; five focused browser journeys, including one new real Auth/BFF/PostgREST provenance journey with an isolated 20-control synthetic library. The journey covers empty history, measured zeros, all controls, missing findings, stale evidence, historical selection and foreign-assessment refusal. Invocation tests still use explicitly injected runtime responses. Workspace tests/lint/typecheck and format/security gates passed. Expected full acceptance is now **67 browser journeys per configuration**, with 89 API outcomes unchanged; final exact-merge CI is recorded in the session checkpoint. No migration: 0041 / 42 migration files / 52 public tables; W2 targets 19/40.
+
+**Scope of closure:** the Assessment saved-results display defect is fixed. C-W0-7 remains partial: public q7/q11/q12 scoring semantics, heuristic benchmark provenance, portal demo fallbacks and static Workbench health labels remain. The projection is a live read of persisted rows, not a transactionally sealed report or WORM verification. Sets reaching 1,000 controls/findings/evidence records fail closed pending pagination. Evidence links use `findings.evidence_ids`; broader evidence linkage/provenance belongs to W8. Parikshan's write persistence and actual requested-library execution must be completed/tested with W4.3 tools; this change does not activate them.
+
+**Next order:** continue W4.3 credential-less workers/private task handoff/scoped tools/trust lifecycle/actor chains, then W4.4 live grants and approval, full W3 wizard/readiness and graph, then W4.5/6/7. Retain the W0 provenance/funnel and W1/W2 remainder in the register. The overall goal remains active. See [review 30](audits/30-assessment-provenance-review-2026-09-22.md).
 
 ## Revision 40 — dynamic tenant routing
 

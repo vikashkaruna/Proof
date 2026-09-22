@@ -2,10 +2,24 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 40 — DYNAMIC TENANT ROUTING** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `180ae52`, green CI [35681594813](https://github.com/vikashkaruna/Proof/actions/runs/35681594813); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 41 — SAVED ASSESSMENT PROVENANCE** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `f49c0c7`, green CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 41 — saved assessment provenance
+
+Revision 40 is complete and green at staging `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802). The exact-merge gate and six sanitized artifacts passed: 66 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging implementation was present.
+
+The new BFF `GET /v1/assessment` read projection requires posture-read capability and existing membership/MFA gates. It selects one owned assessment (latest by default, or an explicit ID), reads only that assessment's tenant/library-bound findings and evidence, verifies the published/deprecated library's declared count, and returns a validated shared contract. Empty history returns no invented controls or exposure. Missing findings are unassessed; measured zero scores/exposure remain zero. Failed queries, malformed/ambiguous rows, incomplete libraries and truncated result sets return a sanitized unavailable response. Evidence links contain full, real IDs cited by a finding and owned by the same tenant/assessment. Responses are private/no-store.
+
+Assessment SSR now consumes that BFF projection; it holds no privileged database credential or scoring rules. The page removes default score 85, made-up evidence IDs/control rows/exposure, static domain outcomes and the sixteen-row limit. Domain counts reflect the selected saved library. SDF is labelled as a recorded profile value, not an inferred legal designation. Existing 80/40 display bands are preserved and disclosed; the scoring model and immutable historical records are unchanged. An invocation requires a readable saved assessment and sends its engagement/library IDs. Completion refreshes saved data; it does not claim that the runtime persisted findings.
+
+Validation: **598 BFF tests**, including 26 new projection tests; **76 web tests**; five focused browser journeys, including one new real Auth/BFF/PostgREST provenance journey with an isolated 20-control synthetic library. The journey covers empty history, measured zeros, all controls, missing findings, stale evidence, historical selection and foreign-assessment refusal. Invocation tests still use explicitly injected runtime responses. Workspace tests/lint/typecheck and format/security gates passed. Expected full acceptance is now **67 browser journeys per configuration**, with 89 API outcomes unchanged; final exact-merge CI is recorded in the session checkpoint. No migration: 0041 / 42 migration files / 52 public tables; W2 targets 19/40.
+
+**Scope of closure:** the Assessment saved-results display defect is fixed. C-W0-7 remains partial: public q7/q11/q12 scoring semantics, heuristic benchmark provenance, portal demo fallbacks and static Workbench health labels remain. The projection is a live read of persisted rows, not a transactionally sealed report or WORM verification. Sets reaching 1,000 controls/findings/evidence records fail closed pending pagination. Evidence links use `findings.evidence_ids`; broader evidence linkage/provenance belongs to W8. Parikshan's write persistence and actual requested-library execution must be completed/tested with W4.3 tools; this change does not activate them.
+
+**Next order:** continue W4.3 credential-less workers/private task handoff/scoped tools/trust lifecycle/actor chains, then W4.4 live grants and approval, full W3 wizard/readiness and graph, then W4.5/6/7. Retain the W0 provenance/funnel and W1/W2 remainder in the register. The overall goal remains active. See [review 30](audits/30-assessment-provenance-review-2026-09-22.md).
 
 ## Revision 40 — dynamic tenant routing
 
