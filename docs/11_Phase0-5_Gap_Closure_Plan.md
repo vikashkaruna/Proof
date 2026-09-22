@@ -2,10 +2,20 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 35 — RUNTIME AUDIT HARDENING** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `41f9171`, green CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 36 — SERVICE IAM ISOLATION** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `a5ba641`, green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 36 — C-W0-5 service IAM isolation
+
+Reviewed staging `a5ba641` and green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505): 17 applicable jobs passed; six exact-merge artifacts verify 61 SPIRE outcomes, five real Postgres audit outcomes and 63 browser/89 API checks per configuration. The runtime audit milestone is complete. No intervening upstream implementation was present.
+
+C-W0-5 engineering now assigns nine distinct Cloud Run identities with 29 explicit secret-level grants and a BFF-only conditional retiring MFA grant. Project-wide secret, artifact and Cloud SQL runtime roles are removed. Unused BFF database-password/Redis bindings are removed. The runtime now receives its actual Supabase URL/service key, and Temporal receives its strict environment and internal transport token. Every service rollout waits for required IAM grants/secret versions; deployment and teardown target the new resources. The sensitive MFA resource-count expression is corrected without exposing key material.
+
+Validation: ten permission-drift/target-coverage tests and four offline evaluated Terraform cases, plus configuration checks, formatting and shell validation. No provider apply or cloud resource change occurred. **C-W0-5 code is delivered; effective deployed IAM acceptance remains pending.** See [review 25](audits/25-service-iam-review-2026-09-22.md) for the access matrix, upgrade/rollback rules and proof limits.
+
+This is a prerequisite for W4.3, not completion of agent isolation: all ten agents still share the runtime service's backend, approval and storage credentials. Next implement credential-less workers, tenant/task delegation and every-tool scopes, then W4.4 live grants, full W3 wizard/readiness and graph, and W4.5/6/7. C-W0-6 contact persistence/mail, C-W0-7 scoring provenance, W1 invitations, W2 remaining targets and remote acceptance remain open. Migration tip 0040 and 51 public tables are unchanged.
 
 ## Revision 35 — W4.3 runtime audit hardening
 

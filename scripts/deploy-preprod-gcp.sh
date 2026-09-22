@@ -458,11 +458,8 @@ if should_run_phase "base"; then
       -target=google_compute_global_address.private_ip_address \
       -target=google_service_networking_connection.private_vpc_connection \
       -target=google_vpc_access_connector.connector \
-      -target=google_service_account.cloudrun_sa \
+      -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
-      -target=google_project_iam_member.secret_accessor \
-      -target=google_project_iam_member.artifact_reader \
-      -target=google_project_iam_member.cloudsql_client \
       -target=google_storage_bucket.evidence_vault \
       -target=google_storage_hmac_key.s3_compat_key \
       -target=google_storage_bucket_iam_member.storage_admin \
@@ -476,11 +473,8 @@ if should_run_phase "base"; then
       -target=google_compute_global_address.private_ip_address \
       -target=google_service_networking_connection.private_vpc_connection \
       -target=google_vpc_access_connector.connector \
-      -target=google_service_account.cloudrun_sa \
+      -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
-      -target=google_project_iam_member.secret_accessor \
-      -target=google_project_iam_member.artifact_reader \
-      -target=google_project_iam_member.cloudsql_client \
       -target=google_storage_bucket.evidence_vault \
       -target=google_storage_hmac_key.s3_compat_key \
       -target=google_storage_bucket_iam_member.storage_admin \
@@ -512,7 +506,11 @@ if should_run_phase "db"; then
       -target=google_sql_database.axiom_db \
       -target=google_sql_user.axiom_user \
       -target=google_secret_manager_secret.secret \
-      -target=google_secret_manager_secret_version.version
+      -target=google_secret_manager_secret_version.version \
+      -target=google_secret_manager_secret.mfa_previous_keys \
+      -target=google_secret_manager_secret_version.mfa_previous_keys \
+      -target=google_secret_manager_secret_iam_member.runtime_access \
+      -target=google_secret_manager_secret_iam_member.mfa_previous_access
   else
     info "Applying Cloud SQL PostgreSQL & Secret Manager..."
     terraform apply -auto-approve $TF_VARS \
@@ -522,7 +520,11 @@ if should_run_phase "db"; then
       -target=google_sql_database.axiom_db \
       -target=google_sql_user.axiom_user \
       -target=google_secret_manager_secret.secret \
-      -target=google_secret_manager_secret_version.version
+      -target=google_secret_manager_secret_version.version \
+      -target=google_secret_manager_secret.mfa_previous_keys \
+      -target=google_secret_manager_secret_version.mfa_previous_keys \
+      -target=google_secret_manager_secret_iam_member.runtime_access \
+      -target=google_secret_manager_secret_iam_member.mfa_previous_access
     
     DB_NAME=$(terraform state show google_sql_database_instance.postgres 2>/dev/null | grep '^[[:space:]]*name[[:space:]]*=' | head -n1 | cut -d'"' -f2 || echo "")
     DB_PUBLIC_IP=$(terraform output -raw cloud_sql_public_ip 2>/dev/null || echo "")

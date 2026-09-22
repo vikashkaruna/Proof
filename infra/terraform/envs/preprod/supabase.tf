@@ -52,7 +52,7 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["supabase_auth"].email
 
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -159,7 +159,13 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
     }
   }
 
-  depends_on = [google_project_service.apis]
+  depends_on = [
+    google_project_service.apis,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── PostgREST (Supabase REST) ────────────────────────────────────────────────
@@ -169,7 +175,7 @@ resource "google_cloud_run_v2_service" "supabase_rest" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["supabase_rest"].email
 
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -238,7 +244,13 @@ resource "google_cloud_run_v2_service" "supabase_rest" {
     }
   }
 
-  depends_on = [google_project_service.apis]
+  depends_on = [
+    google_project_service.apis,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── The single origin ────────────────────────────────────────────────────────
@@ -248,7 +260,7 @@ resource "google_cloud_run_v2_service" "supabase_gateway" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["supabase_gateway"].email
 
     scaling {
       min_instance_count = 1
@@ -288,6 +300,10 @@ resource "google_cloud_run_v2_service" "supabase_gateway" {
     google_project_service.apis,
     google_cloud_run_v2_service.supabase_auth,
     google_cloud_run_v2_service.supabase_rest,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
   ]
 }
 

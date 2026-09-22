@@ -14,6 +14,10 @@ variable "environment" {
   description = "Deployment environment name"
   type        = string
   default     = "preprod"
+  validation {
+    condition     = contains(["staging", "preprod", "production", "onprem"], var.environment)
+    error_message = "Use a supported strict deployment environment: staging, preprod, production or onprem."
+  }
 }
 
 variable "cloud_sql_tier" {

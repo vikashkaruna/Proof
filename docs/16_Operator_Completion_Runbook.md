@@ -1,10 +1,10 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `41f9171`, CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056) green for the identity foundation. Runtime audit hardening is the next acceptance checkpoint; full W4.3 activation remains gated below.
+Verified staging checkpoint: `a5ba641`, CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505) green. Runtime audit hardening is complete; C-W0-5 service IAM implementation is the next checkpoint. Full W4.3 remains open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 35, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 36, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -210,9 +210,9 @@ date. I make the change and the gate re-validates.
 ### Additional engineering findings from Revision 28
 
 - **C-W0-4 delivered in Revision 30:** BFF-owned durable gap-scan snapshots, opaque hashed ownership for reads/resends, no memory fallback, explicit email delivery configuration. Migration 0037 preserves legacy cookies/snapshots. Browser and real process-restart acceptance cover persistence and foreign denial; exact committed evidence is in the session checkpoint.
-- **C-W0-5:** isolate Cloud Run service identities and secret permissions. Environment injection now separates scoped SSR keys from BFF keys, but the existing shared Cloud Run service account still needs least-privilege IAM review.
+- **C-W0-5 engineering delivered in Revision 36:** nine service identities, explicit secret-level allowlists and rollout ordering. See the deployment/effective-policy acceptance steps below; offline tests do not prove permissions in an existing cloud project.
 
-The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending. C-W0-5 and the following findings remain engineering responsibilities:
+The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending. C-W0-5 deployed acceptance remains open; the following findings remain engineering responsibilities:
 
 - **C-W0-6:** contact inquiries still use process memory and SSR-owned mail; disabled delivery can claim success. Move this separate workflow behind BFF and test durable persistence/accurate dispatch outcomes.
 - **C-W0-7:** reconcile q7/q11/q12 question/control scoring semantics and benchmark provenance. The current readiness benchmarks/percentiles are heuristics, not measured peer evidence. Stored historic reports remain immutable snapshots.
@@ -223,7 +223,7 @@ For report rollout, apply 0037 and deploy BFF/marketing together; seed the publi
 
 I flip **W0 → Closed** when the remaining C-W0-5/6/7 findings are resolved with tests and all of these hold, and not before:
 
-1. Your W0-5 evidence shows **39 migrations applied** against a real deployed
+1. Your W0-5 evidence shows **all 41 migration files through 0040 applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -507,3 +507,13 @@ from the new baseline — the same chain every checkpoint uses.
 **Runtime audit corrections delivered in Revision 35:** staging/preprod/production use the actual append RPC; invalid configuration or missing/malformed receipts fail closed. Memory is limited to explicit local development/test. The base agent records safe phase/receipt/failure-code metadata and input/output digests, revalidates models, and refuses success after completion-audit failure. Returned errors/logs omit raw validation and exception payloads. Existing audit history is preserved; no migration rewrites prior records.
 
 Run `./scripts/start-parity-supabase.sh`, then from `services/agent-runtime` run `uv run python ../../scripts/verify-runtime-audit.py`. The probe accepts only the isolated loopback parity API on port 56321, creates synthetic tenant/audit rows and leaves append-only evidence intact. No real cloud resources or client actions are used. Only `.axiom-runtime/runtime-audit/results.json` is publishable; require `passed: true`, `dirty: false` and the expected revision for release evidence. CI runs it after strict Auth/PostgREST parity. The ledger's actual receipt is a positive bigint, not a UUID. A completion-audit failure means intervention/reconciliation is needed if a future mutating tool already acted; it does not mean a rollback occurred. Every-tool/physical isolation still remains W4.3 work.
+
+## C-W0-5 · Deploy and verify service IAM isolation
+
+Engineering validation is offline: `python3 scripts/check-cloudrun-iam.py`, `python3 -m unittest discover -s tests/deployment -p 'test_*.py'`, and `terraform -chdir=infra/terraform/envs/preprod test`. All providers in the Terraform test are mocked; its four evaluated runs make no cloud changes. The approved secret matrix and limitations are in [review 25](audits/25-service-iam-review-2026-09-22.md).
+
+For an authorized cloud rollout, use the normal deployment script and review the **full services-phase plan**, not only the base/database targets. It must create nine distinct identities, bind each service to its own identity, add 29 secret-level grants (plus the BFF retiring-key grant only during rotation), and remove the old shared account and its project-level secret/SQL/artifact grants. No manual state removal is needed. Base/database-only targeting cannot prove the retired permissions were removed. Existing project/folder/organization grants must also be reviewed; this module cannot remove grants it does not manage.
+
+Verify active revisions use the intended identities and that web/marketing cannot access approval, MFA, service-role or evidence keys, nor impersonate a privileged identity. Verify the positive paths for each service's allowed secrets and the conditional BFF retiring-key path. Record only identities, resource names and allowed/denied outcomes, never secret values or tokens. Repeat strict API/browser acceptance against the deployed revision. For rollback, redeploy the prior reviewed image using the new service identity and approved bindings; do not route traffic to a retired revision that depends on the old shared identity.
+
+This closes the shared Cloud Run IAM finding only after effective-policy evidence passes. It does not attest isolated agents, GCP WORM equivalence, private internal ingress, database-role isolation or a restricted SQL network allowlist. W4.3 worker isolation and W0's other gates remain mandatory. No cloud apply was performed by the implementing session.

@@ -35,3 +35,5 @@ right" into "a screen wired to the right route, agent, and entities". The real
 web/marketing apps and backend now exist alongside these references, so update
 the route map when a production surface changes to prevent drift from
 [`../docs/04_Solution_Architecture.md`](../docs/04_Solution_Architecture.md).
+
+Revision 36 implements per-service Cloud Run IAM and tests its secret allowlists offline. Deployed IAM denial checks and per-agent runtime isolation remain pending; see Doc 16 and review 25.

@@ -179,6 +179,8 @@ jobs:
       - uses: actions/checkout@v5
       - run: ./scripts/check-tfvars-coverage.sh
       - run: python3 scripts/check-cloudrun-auth-wiring.py
+      - run: python3 scripts/check-cloudrun-iam.py
+      - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
       # Every surface that runs the BFF must be able to carry BOTH halves of
       # the MFA key ring. Rotation landed with the retiring list wired into
       # the Compose files only, so Cloud Run and Helm could start the BFF with
@@ -231,6 +233,9 @@ jobs:
             terraform -chdir="${env}" validate
             echo "::endgroup::"
           done
+
+      - name: Offline Terraform runtime IAM and MFA rotation tests
+        run: terraform -chdir=infra/terraform/envs/preprod test -no-color
 
   # ─── W0.1 deployment manifests render ────────────────────────────
   # The Helm chart had never been rendered anywhere. No job invoked helm and

@@ -79,7 +79,7 @@ resource "google_secret_manager_secret_version" "version" {
 # stops existing here at the same moment it stops being needed, rather than
 # lingering as a live decryption key nobody is watching.
 resource "google_secret_manager_secret" "mfa_previous_keys" {
-  count     = var.mfa_encryption_keys_previous != "" ? 1 : 0
+  count     = nonsensitive(var.mfa_encryption_keys_previous != "") ? 1 : 0
   secret_id = "axiom-${var.environment}-mfa-encryption-keys-previous"
 
   replication {
@@ -94,7 +94,7 @@ resource "google_secret_manager_secret" "mfa_previous_keys" {
 }
 
 resource "google_secret_manager_secret_version" "mfa_previous_keys" {
-  count       = var.mfa_encryption_keys_previous != "" ? 1 : 0
+  count       = nonsensitive(var.mfa_encryption_keys_previous != "") ? 1 : 0
   secret      = google_secret_manager_secret.mfa_previous_keys[0].id
   secret_data = var.mfa_encryption_keys_previous
 }
