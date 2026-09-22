@@ -14,6 +14,8 @@ import { createApprovalEngine } from './services/approval.js';
 import { createKillSwitchService } from './services/kill-switch.js';
 import { createLedgerService } from './services/ledger.js';
 import { createMfaService } from './services/mfa.js';
+import { workloadToolsRoutes } from './routes/workload-tools.js';
+import type { AssessmentTools } from './workloads/assessment-tools.js';
 import { startRealtimeChannel } from './services/realtime.js';
 
 /**
@@ -28,12 +30,16 @@ import { startRealtimeChannel } from './services/realtime.js';
  * Idempotency reads `user` and `tenantId` from the context, so it cannot run
  * before the two middlewares that set them.
  */
-export function createApp() {
+export function createApp(options: { assessmentTools?: AssessmentTools } = {}) {
   const env = loadEnv();
   const app = new Hono();
 
   // ─── Cross-cutting middleware ────────────────────────────────────────
-  app.use('*', logger());
+  app.use('*', async (c, next) => {
+    // Private tool traffic must never enter request logs, including query strings.
+    if (c.req.path.startsWith('/internal/workload-tools')) return next();
+    return logger()(c, next);
+  });
   app.use('*', secureHeaders());
   app.use(
     '*',
@@ -68,6 +74,9 @@ export function createApp() {
   app.get('/ready', async (c) =>
     c.json({ status: 'ready', killSwitch: await killSwitch.isActive() }),
   );
+
+  // Private workload authority is independent of human session middleware.
+  app.route('/internal/workload-tools', workloadToolsRoutes(options.assessmentTools));
 
   // Public routes (no auth) — gap-scan, public marketing endpoints
   app.route('/public', publicRoutes());

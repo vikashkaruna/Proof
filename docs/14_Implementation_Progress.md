@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `f49c0c7`, CI 35682852802 green. Dynamic tenant routing is verified. Revision 41 corrects Assessment saved-data provenance; its exact merge CI is the next gate. Full W3/W4 and other C-W0-7 surfaces remain open.
+Current verified staging checkpoint: `39f973f`, CI 35684322559 green. Revision 41 saved assessment provenance is verified. Revision 42 adds the isolated Parikshan/scoped-persistence path subject to exact merge CI. Full W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 42 — isolated assessment worker and transactional tools
+
+Revision 41 is **complete and green** at staging `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559). All 17 applicable jobs passed; six exact-merge artifacts verify 67 browser/89 API outcomes per configuration, 61 SPIRE and five runtime-audit outcomes. No intervening other-model staging commits were found.
+
+Delivered the representative W4.3 Parikshan path: a separate credential-less worker image, exact assigned-input binding, worker-acquired SVIDs, BFF tools that reauthenticate every operation, and migration **0042** for a pinned library snapshot and atomic findings/score/audit persistence. Library mismatch now also fails closed in the legacy agent; scoring formulas are preserved. Expiry, task revocation, demotion, estate archival and halt state are checked under transaction locks; mandatory audit failure rolls back the result. Identical retries return one receipt. Ordinary BFF startup keeps the internal tool routes unavailable until a trusted controller is supplied.
+
+Validation: **610 BFF tests**, **187 Python tests**, workspace tests/lint/typecheck and acceptance TypeScript checks. Real local SPIRE/isolated worker/BFF/PostgREST acceptance passes **11 outcomes**, including actual UID attestation, no worker backend credentials/network, persisted scores, idempotency and mid-task authority refusals. Database acceptance covers **43 migrations, 12 concurrency suites and 8 populated upgrades**. The first race fixture and a load-related existing MFA timeout were resolved and retested; see [review 31](audits/31-isolated-assessment-worker-review-2026-09-22.md). Exact-merge CI, including the new seventh worker artifact, is recorded separately in the saved session. Tip **0042**, **53 public tables**; W2 named targets remain **19/40**.
+
+**Still in progress:** production controller/private task transport, terminal run confirmation and restart reconciliation, production trust/registration lifecycle, the other nine isolated worker/tool paths and verified actor chains. The UI still invokes the legacy runtime. The new persistence tool leaves its delegated run `running` for controller finalization; a lost response requires checking the stored packet. Local UID attestation is not production Cloud Run proof. W4.3 remains partial and connector execution stays gated.
+
+**Next order:** finish W4.3 orchestration/scoped workers, W4.4 live grants/approval, full W3 resumable onboarding/readiness and graph, then W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and remaining W2 targets. The overall goal stays active.
 
 ## Revision 41 — saved assessment provenance
 

@@ -8,6 +8,7 @@ from axiom.agents.parikshan import (
     ParikshanInput,
     ParikshanOutput,
 )
+from axiom.control_library_loader import load_default_library
 
 
 @pytest.mark.asyncio
@@ -18,6 +19,7 @@ async def test_parikshan_full_compliance():
         ParikshanInput(
             tenant_id="t1",
             engagement_id="e1",
+            library_version=load_default_library().version,
             answers={},
             sdf_self_attested=False,
             processes_children=False,
@@ -44,6 +46,7 @@ async def test_parikshan_with_yes_answers_for_some_controls():
         ParikshanInput(
             tenant_id="t1",
             engagement_id="e1",
+            library_version=load_default_library().version,
             answers={},
         )
     )
@@ -57,6 +60,7 @@ async def test_parikshan_ignores_unknown_question_ids():
         ParikshanInput(
             tenant_id="t1",
             engagement_id="e1",
+            library_version=load_default_library().version,
             answers={"DPDPA-GOV-001": {"not-a-question": True}},
         )
     )
@@ -64,3 +68,12 @@ async def test_parikshan_ignores_unknown_question_ids():
     output = ParikshanOutput.model_validate(out.output)
     finding = next(item for item in output.findings if item.control_id == "DPDPA-GOV-001")
     assert finding.score <= 50
+
+
+@pytest.mark.asyncio
+async def test_parikshan_refuses_a_different_library_version():
+    out = await ParikshanAgent().invoke(
+        ParikshanInput(tenant_id="t1", engagement_id="e1", library_version="unavailable-version")
+    )
+    assert out.status == "failed"
+    assert out.output is None

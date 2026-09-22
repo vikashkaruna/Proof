@@ -54,6 +54,7 @@
     "build:controls-json": "tsx scripts/build-controls-json.mjs"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "@types/node": "^26.5.1",
     "husky": "^9.1.6",
     "prettier": "^3.3.3",

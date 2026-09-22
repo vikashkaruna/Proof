@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 42 — isolated assessment worker and transactional tools
+
+Revision 41 is **complete and green** at staging `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559). All 17 applicable jobs passed; six exact-merge artifacts verify 67 browser/89 API outcomes per configuration, 61 SPIRE and five runtime-audit outcomes. No intervening other-model staging commits were found.
+
+Delivered the representative W4.3 Parikshan path: a separate credential-less worker image, exact assigned-input binding, worker-acquired SVIDs, BFF tools that reauthenticate every operation, and migration **0042** for a pinned library snapshot and atomic findings/score/audit persistence. Library mismatch now also fails closed in the legacy agent; scoring formulas are preserved. Expiry, task revocation, demotion, estate archival and halt state are checked under transaction locks; mandatory audit failure rolls back the result. Identical retries return one receipt. Ordinary BFF startup keeps the internal tool routes unavailable until a trusted controller is supplied.
+
+Validation: **610 BFF tests**, **187 Python tests**, workspace tests/lint/typecheck and acceptance TypeScript checks. Real local SPIRE/isolated worker/BFF/PostgREST acceptance passes **11 outcomes**, including actual UID attestation, no worker backend credentials/network, persisted scores, idempotency and mid-task authority refusals. Database acceptance covers **43 migrations, 12 concurrency suites and 8 populated upgrades**. The first race fixture and a load-related existing MFA timeout were resolved and retested; see [review 31](audits/31-isolated-assessment-worker-review-2026-09-22.md). Exact-merge CI, including the new seventh worker artifact, is recorded separately in the saved session. Tip **0042**, **53 public tables**; W2 named targets remain **19/40**.
+
+**Still in progress:** production controller/private task transport, terminal run confirmation and restart reconciliation, production trust/registration lifecycle, the other nine isolated worker/tool paths and verified actor chains. The UI still invokes the legacy runtime. The new persistence tool leaves its delegated run `running` for controller finalization; a lost response requires checking the stored packet. Local UID attestation is not production Cloud Run proof. W4.3 remains partial and connector execution stays gated.
+
+**Next order:** finish W4.3 orchestration/scoped workers, W4.4 live grants/approval, full W3 resumable onboarding/readiness and graph, then W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and remaining W2 targets. The overall goal stays active.
+
 ## Revision 41 — saved assessment provenance
 
 **CI correction:** the first assessment merge `fadf0d0` / CI 35683997539 failed on a count-gate false positive for the documented 1,000-row query bound and an E2E reference to a nonexistent fixture field. The bound now has the gate's explicit explanatory marker. The browser test uses the real tenant-A assessment ID, asserts 404 `engagement_not_found` through the BFF, and verifies the unavailable page. This replaces the earlier invalid-ID-only check. Run the separate acceptance TypeScript project and control-count gate before the successor merge. The failed merge is not closure evidence.

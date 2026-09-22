@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802) green. Dynamic tenant routing is verified. Revision 41 fixes Assessment saved-results provenance subject to exact merge CI. Other C-W0-7 surfaces, deployed IAM acceptance and full W3/W4 remain open.
+Verified staging checkpoint: `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559) green. Saved assessment provenance is verified. Revision 42 adds local isolated worker/scoped-persistence acceptance; production activation and full W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 41, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 42, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 42 — isolated assessment worker acceptance
+
+**ENGINEERING delivered:** separate credential-less Parikshan image, private exact-input task envelope, worker-acquired JWT-SVIDs, fixed BFF tool scopes and migration 0042. The full pinned library is read from the owned engagement. Findings, scores, review status and audit receipt commit atomically; audit failure/expiry rolls back; retries cannot duplicate results. Existing assessments are preserved. Database inventory is now 53 public tables and 43 migrations; W2's named set remains 19/40.
+
+**Evidence to verify:** run `./scripts/test-database.sh`, workspace tests/typecheck/lint, `pnpm exec tsc -p scripts/tsconfig.acceptance.json`, Python tests, then `./scripts/start-parity-supabase.sh` and `python3 scripts/test-workload-identity.py --assessment`. Expected worker artifact: 11 passing outcomes, plus the existing 61 identity outcomes. The new CI step runs in the real Auth/PostgREST parity lane. Confirm the exact merge revision, `dirty: false`, and all seven sanitized acceptance artifacts before calling this milestone green. Never upload private status files, SVIDs or stdio frames.
+
+**Recovery and boundary:** the persistence receipt establishes a committed result, not a completed orchestration or sealed WORM object. The task run remains `running` until the future controller independently confirms/finalizes it. If a worker stops or a response is lost, inspect the owned packet/receipt before retrying or creating another engagement. Never change a historical library or overwrite existing findings to make a retry pass. Disable tool activation on uncertainty; do not grant the worker service credentials. The short halt-table SHARE lock must be load-tested before broad deployment.
+
+**Still ENGINEERING:** production controller, idempotent dispatch and restart reconciliation; remaining scoped workers; production trust/registration renewal; actor chains; W4.4 grants; full W3 wizard/readiness/graph. The ordinary app keeps the new routes unavailable and the UI uses the legacy runtime until those gates are implemented. Local Unix UID attestation does not prove Cloud Run attestation. No new operator permission or cloud resource change is needed for this local milestone. See [review 31](audits/31-isolated-assessment-worker-review-2026-09-22.md).
 
 ## Revision 41 — saved assessment acceptance
 

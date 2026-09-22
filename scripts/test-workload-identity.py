@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -62,6 +63,11 @@ def main() -> None:
     temp = Path(tempfile.mkdtemp(prefix="run-", dir=state))
     name = "axiom-spire-test-" + uuid.uuid4().hex[:12]
     started = False
+    assessment = sys.argv[1:] == ["--assessment"]
+    if assessment:
+        (ROOT / ".axiom-runtime/workload-assessment/results.json").unlink(missing_ok=True)
+    if sys.argv[1:] and not assessment:
+        raise RuntimeError("unknown acceptance mode")
     try:
         print("Workload identity acceptance: Docker preflight.", flush=True)
         architecture = run(["docker", "info", "--format", "{{.Architecture}}"]).stdout.strip()
@@ -144,8 +150,12 @@ plugins {
 """
         (temp / "server.conf").write_text(server)
         (temp / "agent.conf").write_text(agent)
+        selected_image = IMAGE
+        if assessment:
+            selected_image = "axiom-assessment-worker:acceptance"
+            run(["docker", "build", "-f", "infra/docker/Dockerfile.assessment-worker", "-t", selected_image, "."], timeout=240)
         run(
-            ["docker", "run", "-d", "--name", name, "--network", "none", IMAGE, "sleep", "1200"],
+            ["docker", "run", "-d", "--name", name, "--network", "none", "--user", "0", "--entrypoint", "sleep", selected_image, "1200"],
             timeout=180,
         )
         started = True
@@ -327,6 +337,22 @@ plugins {
         ):
             raise RuntimeError("verifier failed")
         outcomes.update(verified["outcomes"])
+        if assessment:
+            print("Workload assessment acceptance: isolated worker and real scoped persistence.", flush=True)
+            worker_check = run(
+                ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
+                data=json.dumps({"containerName": name, "jwks": cases[2]["jwks"]}), timeout=180, required=False,
+            )
+            if worker_check.returncode:
+                import re
+                label = re.fullmatch(r"Workload assessment failed at ([a-z-]+)\. Private output withheld\.\n", worker_check.stderr)
+                if label:
+                    print("Worker acceptance failure phase: " + label[1], flush=True)
+                raise RuntimeError("worker acceptance failed")
+            verified_worker = json.loads(worker_check.stdout)
+            if verified_worker.get("passed") is not True:
+                raise RuntimeError("worker acceptance failed")
+            print(f"Workload assessment passed: {len(verified_worker['outcomes'])} outcomes.", flush=True)
         result_path.write_text(
             json.dumps(
                 {
@@ -343,7 +369,7 @@ plugins {
             + "\n"
         )
         print(
-            f"Isolated SPIRE/BFF verification passed: {len(outcomes)} outcomes. No application identity or client access was enabled."
+            f"Isolated SPIRE/BFF verification passed: {len(outcomes)} outcomes. No production identity or client access was enabled."
         )
     finally:
         if started:
