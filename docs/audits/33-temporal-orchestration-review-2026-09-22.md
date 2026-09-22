@@ -1,0 +1,25 @@
+# Temporal orchestration review — 22 September 2026
+
+Reviewed staging `e0781c6`, green CI [35688921423](https://github.com/vikashkaruna/Proof/actions/runs/35688921423). All 17 applicable jobs and seven exact-merge artifacts passed. No intervening other-model changes were present. Revision 43 assessment confirmation/recovery is complete; the overall goal remains active.
+
+## Findings and implementation
+
+The legacy workflow passed dictionaries as Temporal activity `args` (the SDK expects a positional sequence), used nondeterministic `uuid.uuid4()` in workflow code, and advanced after failed or missing agent results. It could report `completed` without execution or verification. Sudhaar returns a proposal, not a persisted `plan_id`; the subsequent approval poll targeted an unimplemented endpoint with no valid plan. The old persistence activity also targeted an absent endpoint.
+
+The replacement computation workflow has a new type, **`axiom.compliance.engagement.v2`**, and queue, **`axiom-compliance-v2`**. It uses positional arguments and `workflow.uuid4()`, requires an explicit library version, and validates every result's agent/correlation, status, accounting bounds, audit-reference shape and consumed output fields. These references are claimed runtime audit IDs, not independent database receipt verification. Failed or ambiguous stages stop later dispatch. Escalation or required live connectivity produces `review_required`. Successful computation ends at **`plan_persistence_required`** with the assessment and proposal; it does not claim persistence, approval, execution, verification or closure. The two unused activities pointing to nonexistent endpoints are removed.
+
+The HTTP activity permits only the four computation agents, requires configured internal authentication, refuses redirects, limits response bytes and total invocation time, and emits fixed nonretryable errors without private HTTP/validation exception causes. One attempt is deliberate: the legacy runtime lacks a durable idempotency handshake, so a lost response needs reconciliation before redispatch. No connector write or approval capability was added.
+
+## Evidence
+
+Tests use a real ephemeral Temporal test server and default sandboxed Python workers, with explicitly synthetic agent activities. They cover four-stage argument/context flow, each stage's failure/malformed/context/transport refusal, escalation, missing library/invalid authority input, deterministic replay and a worker restart with an activity already scheduled durably. HTTP boundary tests use MockTransport, not a live agent service. This distinction is part of acceptance: these tests do not prove deployed Temporal, live connector execution or integration of the isolated Parikshan worker.
+
+**67 tests pass** on the locked Temporal Python SDK 1.33.0: 14 configuration tests, 25 HTTP/contract cases and 28 real server cases. The restart fixture initially stalled on sticky routing to the departed worker; disabling caching in that first test worker makes the durable queue boundary explicit. Production worker cache settings are unchanged. Changed Python files pass Ruff; format, security and control-count gates pass. Exact-merge CI is recorded in the saved session. CI retains a sanitized revision-bound test outcome artifact; synthetic raw workflow histories and private inputs are not published. Schema remains **0043**, **53 public tables**, W2 named targets **19/40**.
+
+## Operator boundary and remaining work
+
+Before a real rollout, inventory old `ComplianceEngagementWorkflow` histories on `axiom-compliance`. The new worker does not poll that queue or replay those histories. Reconcile any completed side effects and explicitly drain/migrate outstanding work using a compatible controlled worker; do not simply rename the old histories or replay the new command graph against them. No in-repository producer currently submits Temporal engagements; this commit does not switch the UI or deploy a worker. Keep the old image available for review/recovery, not automatic redispatch.
+
+The legacy computation path still puts interview/assessment/proposal data in Temporal history. It is not the private isolated-worker channel. Before activation, implement approved history residency/access/retention or private payload storage with opaque job references. Never put SVIDs, task proofs, connector credentials or private worker frames in workflow/activity arguments, histories or logs. A timeout/transport refusal means unconfirmed outcome, not rollback. Query saved results and audit before deciding a retry.
+
+Next: trusted idempotent issuance/dispatch, bounded isolated launch/private payload delivery and scheduled reconciliation; remaining scoped workers, production trust/registration and actor chains; W4.4 live grants/approval; full W3 resumable onboarding/readiness and live graph; W4.5/6/7. W0 deployed/contact/provenance work, W1 invitations and remaining W2 targets are preserved. This milestone fixes orchestration false completion; it does not close these workstreams.

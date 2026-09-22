@@ -15,7 +15,8 @@ from typing import Any
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from .workflows import ComplianceEngagementWorkflow, call_agent_runtime, persist_finding, wait_for_human_approval
+from .activities import call_agent_runtime
+from .workflows import TASK_QUEUE, ComplianceEngagementWorkflow
 
 
 async def handle_health(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -59,9 +60,9 @@ async def run_worker_loop(
             logging.info(f"temporal_worker.connected address={address} namespace={namespace}")
             worker = Worker(
                 client,
-                task_queue="axiom-compliance",
+                task_queue=TASK_QUEUE,
                 workflows=[ComplianceEngagementWorkflow],
-                activities=[call_agent_runtime, persist_finding, wait_for_human_approval],
+                activities=[call_agent_runtime],
             )
             backoff = 2
             await worker.run()
