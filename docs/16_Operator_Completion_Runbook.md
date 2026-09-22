@@ -13,6 +13,8 @@ than something either of us asserts.
 
 ## Revision 41 — saved assessment acceptance
 
+Initial merge `fadf0d0` / CI 35683997539 failed acceptance-script type checking and the control-count prose gate. Corrections use a real cross-tenant assessment ID with an explicit 404 assertion and annotate the query-bound count. Verify the successor merge; do not use the failed run as closure evidence.
+
 **ENGINEERING delivered:** BFF-owned read projection for one tenant/assessment/library, published library count validation, real owned evidence references, measured zeros, explicit missing/unavailable states and all saved controls. SSR calls the BFF. No fallback scores, exposure, evidence IDs or domain outcomes remain on Assessment. Parikshan invocation is disabled without readable saved context; successful invocation does not imply persisted findings.
 
 **Evidence:** 26 projection regressions (598 BFF tests), 76 web tests and five focused browser journeys. A unique immutable synthetic 20-control library proves real database reads, empty history, zero values, missing findings, stale evidence and foreign/historical selection. Corrected test fixtures to the actual SQL domain/status enums and uniform PostgREST bulk columns; did not relax schema rules. The full exact-merge gate should contain 67 browser/89 API outcomes per configuration. Record its revision and six sanitized artifacts in the saved session before calling the checkpoint green.

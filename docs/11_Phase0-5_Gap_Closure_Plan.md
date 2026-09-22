@@ -9,6 +9,8 @@
 
 ## Revision 41 — saved assessment provenance
 
+**CI correction:** the first assessment merge `fadf0d0` / CI 35683997539 failed on a count-gate false positive for the documented 1,000-row query bound and an E2E reference to a nonexistent fixture field. The bound now has the gate's explicit explanatory marker. The browser test uses the real tenant-A assessment ID, asserts 404 `engagement_not_found` through the BFF, and verifies the unavailable page. This replaces the earlier invalid-ID-only check. Run the separate acceptance TypeScript project and control-count gate before the successor merge. The failed merge is not closure evidence.
+
 Revision 40 is complete and green at staging `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802). The exact-merge gate and six sanitized artifacts passed: 66 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging implementation was present.
 
 The new BFF `GET /v1/assessment` read projection requires posture-read capability and existing membership/MFA gates. It selects one owned assessment (latest by default, or an explicit ID), reads only that assessment's tenant/library-bound findings and evidence, verifies the published/deprecated library's declared count, and returns a validated shared contract. Empty history returns no invented controls or exposure. Missing findings are unassessed; measured zero scores/exposure remain zero. Failed queries, malformed/ambiguous rows, incomplete libraries and truncated result sets return a sanitized unavailable response. Evidence links contain full, real IDs cited by a finding and owned by the same tenant/assessment. Responses are private/no-store.

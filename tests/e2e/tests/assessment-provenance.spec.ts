@@ -159,7 +159,14 @@ test('assessment displays owned saved results, missing findings and zero exposur
     'Saved score: 100',
   );
   await expect(page.getByTestId(`assessment-control-${zeroControl}`)).toContainText('UNASSESSED');
-  await page.goto(`/assessment?engagement=${state.engagementB}`);
+  // This user also belongs to A. Its assessment is still foreign to the
+  // actively selected custom tenant and must produce 404, not a validation error.
+  const foreign = await page.request.get(
+    `/api/bff/v1/assessment?engagementId=${state.engagementA}`,
+  );
+  expect(foreign.status()).toBe(404);
+  expect((await foreign.json()).error.code).toBe('engagement_not_found');
+  await page.goto(`/assessment?engagement=${state.engagementA}`);
   await expect(page.getByTestId('assessment-provenance')).toContainText(
     'Saved assessment results are unavailable',
   );
