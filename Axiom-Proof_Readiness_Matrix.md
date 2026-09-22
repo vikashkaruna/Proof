@@ -1,5 +1,8 @@
 # Axiom Proof — Platform Deployment Readiness Matrix & Production Audit Report
 
+> **22 September 2026 implementation update (Revision 37):** The August scorecard below is historical, not current release evidence. Use [Doc 11](docs/11_Phase0-5_Gap_Closure_Plan.md), [handoff](docs/15_Session_Handoff.md) and [operator runbook](docs/16_Operator_Completion_Runbook.md) for current status. C-W0-5 IAM engineering passed exact staging CI 35678105419; deployed effective IAM acceptance remains open. Migration 0041 adds the backend-only `workload_task_delegations` table (42 migration files, 52 public tables). It binds runs to explicit task proofs; legacy runs gain no authority. This ancillary table does not close another W2 named target: 19/40 delivered, 21 pending. W3 wizard/graph and W4 runtime/tool/connector execution remain incomplete.
+
+
 **Document Status:** Authoritative Repository & Deployment Audit  
 **Target Platform:** Axiom Proof (DPDPA 2023 & DPDP Rules 2025 Agentic Compliance Platform)  
 **Company:** Axiom Minds Private Limited (`axiomminds.ai`)  

@@ -49,6 +49,7 @@ bash tests/database/concurrent-estate.sh "$container"
 bash tests/database/concurrent-connector.sh "$container"
 bash tests/database/concurrent-credential-vault.sh "$container"
 bash tests/database/concurrent-proposal.sh "$container"
+bash tests/database/concurrent-workload-task.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.
@@ -58,5 +59,6 @@ bash tests/database/connector-upgrade.sh "$container"
 bash tests/database/connector-lifecycle-upgrade.sh "$container"
 bash tests/database/credential-vault-upgrade.sh "$container"
 bash tests/database/gap-scan-upgrade.sh "$container"
+bash tests/database/workload-task-upgrade.sh "$container"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."
