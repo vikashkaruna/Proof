@@ -18,6 +18,8 @@ Reviewed upstream: `61ee348`, Revision 45; exact CI [35693874727](https://github
 - No database migration changed. The prior green database evidence remains 45 migrations, 14 concurrency suites and 10 populated upgrades; exact follow-up merge CI reruns those gates. Tip 0044, 54 public tables, W2 named targets 19/40.
 - Exact follow-up merge CI is the final combined-source gate, saved in the private session checkpoint with revision-bound sanitized artifacts. Local WIP results alone are not clean-commit release evidence.
 
+The roadmap cross-check also corrected the original W3 section: proposal normalization and owner/admin review are already delivered in 0035. The complete resumable wizard/readiness flow remains pending; do not repeat the completed proposal work.
+
 ## Next implementation and limits
 
 Implement authenticated opaque scheduling/reconciliation and the private deployment transport; production key wrapping/rotation/retention, per-job namespace isolation and workload trust/registration; then remaining scoped workers and actor chains. Continue W4.4 grants/approval, full W3 resumable wizard/readiness and live graph, then W4.5/6/7. Retain W0 contact/scoring/provenance/deployed acceptance, W1 invitations and remaining W2 targets.
