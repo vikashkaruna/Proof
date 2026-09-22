@@ -6,6 +6,8 @@ import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv }
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtemp, realpath, chmod, rm } from 'node:fs/promises';
+import { startAssessmentControllerSocket } from '../services/bff/src/workloads/assessment-socket.js';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { JwtSvidVerifier } from '../services/bff/src/workloads/jwt-svid.js';
@@ -528,6 +530,132 @@ print('isolated')`;
     ] = true;
   }
   outcomes['controller-recovery-never-relaunches'] = true;
+  phase = 'temporal-private-scheduling';
+  const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
+  const schedulingDispatch = new AssessmentDispatch(db, wrapper);
+  for (let n = 0; n < 2; n++) {
+    const engagementId = randomUUID(),
+      correlationId = randomUUID(),
+      jobId = randomUUID();
+    check(
+      await db.from('engagements').insert({
+        id: engagementId,
+        tenant_id: tenantId,
+        library_version: version,
+        title: 'Synthetic opaque scheduling',
+      }),
+    );
+    const wire = JSON.stringify({
+      tenant_id: tenantId,
+      engagement_id: engagementId,
+      library_version: version,
+      answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
+    });
+    await schedulingDispatch.enqueue(
+      {
+        jobId,
+        tenantId,
+        actorId,
+        workloadId,
+        estateId: null,
+        engagementId,
+        correlationId,
+        inputHash: createHash('sha256').update(wire).digest('hex'),
+      },
+      wire,
+    );
+    scheduledJobs.push({ tenantId, jobId });
+  }
+  phase = 'temporal-socket-setup';
+  let scheduledLaunches = 0;
+  const scheduledChannel = new AssessmentChannel(
+    () => {
+      scheduledLaunches++;
+      return launchSupervised();
+    },
+    { start: (r) => callTool('start', r), complete: (r) => callTool('complete', r) },
+    'spiffe://local.axiomproof.test/agent/parikshan',
+  );
+  const directory = await realpath(await mkdtemp('/tmp/axiom-schedule-'));
+  await chmod(directory, 0o700);
+  const controllerSocket = await startAssessmentControllerSocket({
+    directory,
+    socketGroup: process.getgid!(),
+    controller: new AssessmentController(schedulingDispatch, scheduledChannel, confirmation),
+  });
+  try {
+    phase = 'temporal-probe-process';
+    const probe = spawn(
+      'uv',
+      [
+        'run',
+        '--no-sync',
+        '--project',
+        'services/temporal-workers',
+        'python',
+        'scripts/verify-assessment-scheduling.py',
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH } },
+    );
+    probe.stderr.resume(); // Never forward SDK failures or private diagnostics.
+    probe.stdin.on('error', () => {});
+    const done = once(probe, 'close')
+      .then(([code]) => code)
+      .catch(() => null);
+    const timer = setTimeout(() => probe.kill('SIGTERM'), 150000);
+    let stdout = '';
+    try {
+      probe.stdin.end(
+        JSON.stringify({
+          socketPath: controllerSocket.socketPath,
+          controllerUid: process.getuid!(),
+          jobs: scheduledJobs,
+        }),
+      );
+      for await (const chunk of probe.stdout) {
+        stdout += String(chunk);
+        if (stdout.length > 4096) throw new Error('Scheduling probe output refused');
+      }
+      phase = `temporal-probe-output-launches-${scheduledLaunches}`;
+      const code = await done;
+      if (code !== 0) {
+        const failure = z
+          .object({
+            failedPhase: z.enum([
+              'setup',
+              'schedule',
+              'result',
+              'confirmation',
+              'duplicate',
+              'history',
+              'calls',
+            ]),
+          })
+          .strict()
+          .safeParse(stdout ? JSON.parse(stdout) : null);
+        phase = `temporal-${failure.success ? failure.data.failedPhase : 'process'}-launches-${scheduledLaunches}`;
+      }
+      assert.equal(code, 0);
+      const result = z
+        .object({
+          'temporal-private-controller-real-worker-confirmed': z.literal(true),
+          'temporal-lost-reply-reconciles-without-relaunch': z.literal(true),
+          'temporal-history-contains-only-opaque-job-metadata': z.literal(true),
+        })
+        .strict()
+        .parse(JSON.parse(stdout));
+      phase = 'temporal-launch-count';
+      assert.equal(scheduledLaunches, 2);
+      Object.assign(outcomes, result);
+    } finally {
+      clearTimeout(timer);
+      if (probe.exitCode === null) probe.kill('SIGTERM');
+    }
+  } finally {
+    phase += '-close';
+    await controllerSocket.close();
+    await rm(directory, { recursive: true, force: true });
+  }
   phase = 'supervisor-cleanup';
   const treeProbe = `import json, os, signal, sys
 from axiom.assessment_supervisor import supervise

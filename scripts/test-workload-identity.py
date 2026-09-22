@@ -341,11 +341,11 @@ plugins {
             print("Workload assessment acceptance: isolated worker and real scoped persistence.", flush=True)
             worker_check = run(
                 ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
-                data=json.dumps({"containerName": name, "jwks": cases[2]["jwks"]}), timeout=180, required=False,
+                data=json.dumps({"containerName": name, "jwks": cases[2]["jwks"]}), timeout=300, required=False,
             )
             if worker_check.returncode:
                 import re
-                label = re.fullmatch(r"Workload assessment failed at ([a-z-]+)\. Private output withheld\.\n", worker_check.stderr)
+                label = re.fullmatch(r"Workload assessment failed at ([a-z0-9-]{1,100})\. Private output withheld\.\n", worker_check.stderr)
                 if label:
                     print("Worker acceptance failure phase: " + label[1], flush=True)
                 raise RuntimeError("worker acceptance failed")

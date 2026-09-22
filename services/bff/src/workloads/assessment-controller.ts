@@ -11,7 +11,15 @@ export class AssessmentController {
     private readonly channel: Pick<AssessmentChannel, 'run'>,
     private readonly confirmation: Pick<AssessmentConfirmation, 'confirm'>,
   ) {}
-  async run(tenantId: string, jobId: string) {
+  async run(tenantId: string, jobId: string, signal?: AbortSignal) {
+    return this.execute(tenantId, jobId, true, signal);
+  }
+  /** Recovery never claims or launches, even when an earlier request never
+   * reached the controller. Missing persistence stays unconfirmed. */
+  async reconcile(tenantId: string, jobId: string) {
+    return this.execute(tenantId, jobId, false);
+  }
+  private async execute(tenantId: string, jobId: string, launch: boolean, signal?: AbortSignal) {
     let job: Awaited<ReturnType<AssessmentDispatch['resolve']>>;
     try {
       job = await this.dispatch.resolve(tenantId, jobId);
@@ -19,7 +27,7 @@ export class AssessmentController {
       return { status: 'unconfirmed' as const, cleanupConfirmed: null };
     }
     let cleanupConfirmed: boolean | null = null;
-    if (!job.claimed) {
+    if (launch && !job.claimed && !signal?.aborted) {
       try {
         const claim = await this.dispatch.claim(tenantId, jobId);
         if (
@@ -31,7 +39,10 @@ export class AssessmentController {
           claim.context.inputHash !== job.expected.inputHash
         )
           throw new Error('dispatch binding');
-        cleanupConfirmed = (await this.channel.run(claim)).cleanupConfirmed;
+        // A claim can commit after the private request has disconnected. Never
+        // launch from that late response; preserve it for confirmation only.
+        if (signal?.aborted) throw new Error('controller request ended');
+        cleanupConfirmed = (await this.channel.run(claim, signal)).cleanupConfirmed;
       } catch {
         cleanupConfirmed = false;
       }

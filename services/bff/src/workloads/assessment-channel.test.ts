@@ -137,6 +137,19 @@ describe('private supervised worker channel', () => {
     expect(f.tools.complete).not.toHaveBeenCalled();
     expect(f.process.kill).toHaveBeenCalled();
   });
+  it('does not launch after cancellation and terminates an already running channel', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    const f = fixture([]);
+    await f.channel.run(claim, abort.signal);
+    expect(f.launch).not.toHaveBeenCalled();
+    const running = fixture([], 0, true);
+    const controller = new AbortController();
+    const result = running.channel.run(claim, controller.signal);
+    controller.abort();
+    expect(await result).toEqual({ workerStatus: 'unconfirmed', cleanupConfirmed: false });
+    expect(running.process.kill).toHaveBeenCalled();
+  });
   it('does not launch an expired assignment', async () => {
     const f = fixture([]);
     await f.channel.run({ ...claim, expiresAt: 0 });
@@ -204,6 +217,23 @@ describe('controller persistence reconciliation', () => {
     f.dispatch.claim.mockRejectedValue(new Error('claimed'));
     await f.controller.run(id(1), id(2));
     expect(f.dispatch.claim).toHaveBeenCalledTimes(1);
+    expect(f.channel.run).not.toHaveBeenCalled();
+    expect(f.confirmation.confirm).toHaveBeenCalled();
+  });
+  it('confirmation-only recovery never claims even an unclaimed job', async () => {
+    const f = controller(false);
+    await f.controller.reconcile(id(1), id(2));
+    expect(f.dispatch.claim).not.toHaveBeenCalled();
+    expect(f.channel.run).not.toHaveBeenCalled();
+  });
+  it('does not launch from a claim response that arrives after cancellation', async () => {
+    const f = controller(false);
+    const abort = new AbortController();
+    f.dispatch.claim.mockImplementation(async () => {
+      abort.abort();
+      return claim;
+    });
+    await f.controller.run(id(1), id(2), abort.signal);
     expect(f.channel.run).not.toHaveBeenCalled();
     expect(f.confirmation.confirm).toHaveBeenCalled();
   });

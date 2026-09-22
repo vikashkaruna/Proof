@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 47 — opaque Temporal scheduling and private controller transport
+
+Revision 46 is **complete and green** at staging `eb262fd`, CI [35697773545](https://github.com/vikashkaruna/Proof/actions/runs/35697773545): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
+
+A separate `axiom.assessment.job.v1` workflow on `axiom-assessment-v1` now carries only validated tenant/job references and confirmed receipt metadata. Stable workflow IDs refuse duplicate execution, including after completion or cancellation. One launch attempt is followed by bounded confirmation-only reconciliation; timeout, loss or restart cannot retry the launch. The controller refuses a claim response arriving after cancellation and stops the private channel on disconnect. Persistence and cleanup remain independent observations.
+
+The local/on-prem controller transport is a protected Unix socket with checked owner UID, directory/socket permissions, strict request/result limits and one active operation. Only provisioned controller/scheduler principals may use its OS group. The dedicated worker mode is explicit and does not poll legacy workflows. This transport does not replace distinct Cloud Run service identities or authorize sharing backend credentials with Temporal; authenticated remote transport for separate cloud services remains work to deliver.
+
+**Validation:** **689 BFF tests**, **94 Temporal tests**, workspace tests/lint/typecheck and acceptance TypeScript; **61 real SPIRE outcomes** and **27 isolated-worker outcomes**, now including real Temporal → socket → controller → isolated worker → Postgres confirmation, lost-reply recovery with exactly one launch per job, stable scheduling and history/replay privacy checks. Final exact-merge CI/artifacts are recorded separately. No migration: **0044**, **54 public tables**, W2 named targets **19/40**. See [review 36](audits/36-opaque-assessment-scheduling-review-2026-09-22.md).
+
+**Remaining:** durable outbox-to-producer pickup and restart recovery; authenticated transport for separate deployed services, production wrapping-key lifecycle, per-job isolation and workload trust/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Namespace producer ACLs and distinct-UID deployed denial/lifecycle checks are not proved by local tests. No public activation or cloud deployment occurred. The overall goal remains active.
+
 ## Revision 46 — bounded assessment launch and reconciliation
 
 Revision 45 is **complete and green** at staging `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
