@@ -56,7 +56,8 @@ export class AssessmentChannel {
     private readonly spiffeId: string,
     private readonly deadlineMs = 70000,
   ) {}
-  async run(claim: ClaimedAssessment): Promise<ChannelOutcome> {
+  async run(claim: ClaimedAssessment, signal?: AbortSignal): Promise<ChannelOutcome> {
+    let onAbort: (() => void) | undefined;
     let child: ChildProcessWithoutNullStreams | undefined,
       timer: ReturnType<typeof setTimeout> | undefined,
       stopped = false;
@@ -73,7 +74,8 @@ export class AssessmentChannel {
           inputHash: claim.context.inputHash,
           spiffeId: this.spiffeId,
         }) + '\n';
-      if (Buffer.byteLength(wire) > MAX_FRAME || claim.expiresAt <= Date.now()) return unknown;
+      if (signal?.aborted || Buffer.byteLength(wire) > MAX_FRAME || claim.expiresAt <= Date.now())
+        return unknown;
       child = this.launch();
       // Attach before writes/iteration so synchronous launch or early close cannot
       // leak an unhandled error. Stderr is drained but never inspected or forwarded.
@@ -91,6 +93,7 @@ export class AssessmentChannel {
       const handle = async () => {
         let buffer = Buffer.alloc(0),
           total = 0;
+        if (stopped) throw new Error('channel closed');
         process.stdin.write(wire);
         for await (const chunk of process.stdout) {
           if (stopped) throw new Error('channel closed');
@@ -174,15 +177,15 @@ export class AssessmentChannel {
       };
       const deadline = Math.min(this.deadlineMs, claim.expiresAt - Date.now());
       const expired = new Promise<ChannelOutcome>((resolve) => {
-        timer = setTimeout(
-          () => {
-            stopped = true;
-            process.stdin.end();
-            process.kill('SIGTERM');
-            resolve(unknown);
-          },
-          Math.max(1, deadline),
-        );
+        onAbort = () => {
+          stopped = true;
+          process.stdin.end();
+          process.kill('SIGTERM');
+          resolve(unknown);
+        };
+        timer = setTimeout(onAbort, Math.max(1, deadline));
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
       return await Promise.race([handle(), expired]);
     } catch {
@@ -190,6 +193,7 @@ export class AssessmentChannel {
     } finally {
       stopped = true;
       if (timer) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
       child?.stdin.end();
       if (child && child.exitCode === null) child.kill('SIGTERM');
     }

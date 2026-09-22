@@ -1,15 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727) green. Encrypted dispatch acceptance is verified. Revision 46 adds bounded launch and controller reconciliation; full production dispatch and W3/W4 remain open.
+Verified staging checkpoint: `eb262fd`, CI [35697773545](https://github.com/vikashkaruna/Proof/actions/runs/35697773545) green. Revision 46 launch/reconciliation is verified. Revision 47 adds opaque scheduling and local controller transport; full production activation and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 46, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 47, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 47 — opaque scheduling acceptance
+
+**ENGINEERING delivered:** new workflow `axiom.assessment.job.v1`, queue `axiom-assessment-v1`, and trusted `start_assessment_job(client, tenant_id, job_id)` producer. It validates IDs before history submission, fixes the workflow ID to tenant/job, rejects execution reuse and recovers an existing execution after a lost scheduling response. The workflow invokes `run` once, then at most three `reconcile` activities. All activities have one attempt, bounded schedule/execution time and sanitized errors. Overall producer execution timeout is ten minutes. Reconciliation cannot claim an unclaimed job. Cancellation, timeout or missing cleanup is not rollback.
+
+**Local/on-prem transport:** construct the trusted BFF controller with a dedicated, empty, controller-owned directory initially mode 0700. `startAssessmentControllerSocket` binds only a Unix socket, changes it to 0660 and the containing directory to 0710 for a dedicated scheduler group, and checks protected ancestors. The activity independently verifies owner UID, socket type and permissions. Provision group membership to trusted controller/scheduler principals only. The fixed worker must never join that group. A single operation remains reserved until controller work actually settles, even after an HTTP deadline/disconnect. No task input, proof, SVID or database credential crosses this socket.
+
+**Explicit worker mode:** `python -m temporal_workers.worker --assessment-controller-socket /protected/controller.sock --assessment-controller-uid <controller-uid>` polls only the opaque assessment queue. Both arguments are required together and contain no secret. Without them the existing legacy queue remains unchanged. Use the trusted producer; do not submit private inputs directly with a generic Temporal client. Namespace ACLs must enforce who can start workflows: validation inside a workflow cannot erase payloads already submitted to history. Legacy histories are not migrated automatically.
+
+**Evidence:** 689 BFF and 94 Temporal tests, workspace/acceptance checks, 61 SPIRE and 27 real worker outcomes. Actual Temporal-to-Docker/Postgres runs prove normal confirmation and recovery after a lost activity reply with no duplicate launch. Real server tests additionally exercise timeout, cancellation, stable scheduling, pending-worker restart and sandboxed replay. Local transport tests verify file ownership/permissions and refusal, using the host UID; deployed distinct-UID denial and lifecycle remain unverified. Exact final merge CI and sanitized artifacts are saved in the session. See [review 36](audits/36-opaque-assessment-scheduling-review-2026-09-22.md).
+
+**Before activation:** implement durable pickup between the encrypted outbox commit and producer submission, with stable-ID recovery after a crash. The Unix transport is local/on-prem; separate Cloud Run services still need authenticated remote transport while preserving their distinct IAM identities. Do not colocate them under a shared privileged identity to bypass that gate. Complete production key wrapping/rotation/retention, per-job PID/tenant isolation, trust/registration and remaining agent scopes. Configure bounded database transport, namespace ACLs and private diagnostic handling. The socket refuses an occupied directory; after a crash, confirm the old process has stopped before removing its stale socket. Public entry points remain disabled. W4.4 grants, full wizard/graph, W4.5/6/7 and W0/W1/W2 remainder stay open.
 
 ## Revision 46 — bounded controller acceptance
 
