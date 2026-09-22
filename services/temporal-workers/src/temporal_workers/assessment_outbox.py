@@ -2,13 +2,11 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
 
-from pydantic import AwareDatetime, Field
 from temporalio.client import Client
 
-from .assessment_activity import PrivateAssessmentController
-from .assessment_contracts import JobReference
+from .assessment_activity import AssessmentTransport
+from .assessment_contracts import ScheduleExecution, ScheduleReceipt, ScheduleTicket
 from .assessment_jobs import (
     TASK_QUEUE,
     WORKFLOW_TYPE,
@@ -17,27 +15,8 @@ from .assessment_jobs import (
 )
 
 
-class ScheduleBinding(JobReference):
-    namespace: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$", max_length=255)
-    workflowId: str = Field(pattern=r"^assessment-[a-f0-9-]{36}-[a-f0-9-]{36}$")
-
-
-class ScheduleTicket(ScheduleBinding):
-    leaseId: UUID
-    leaseUntil: AwareDatetime
-    startBefore: AwareDatetime | None
-
-
-class ScheduleExecution(ScheduleBinding):
-    workflowRunId: UUID
-
-
-class ScheduleReceipt(ScheduleExecution):
-    receipt: str = Field(pattern=r"^[1-9][0-9]*$", max_length=30)
-
-
 class AssessmentOutboxPump:
-    def __init__(self, client: Client, controller: PrivateAssessmentController):
+    def __init__(self, client: Client, controller: AssessmentTransport):
         self.client = client
         self.controller = controller
 

@@ -1,15 +1,29 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `694305e`, CI [35702650435](https://github.com/vikashkaruna/Proof/actions/runs/35702650435) green. Revision 47 opaque scheduling/transport is verified. Revision 48 adds durable pickup; full production activation and W3/W4 remain open.
+Verified staging checkpoint: `0edceda`, CI [35707610075](https://github.com/vikashkaruna/Proof/actions/runs/35707610075) green. Revision 48 durable pickup is verified. Revision 49 adds authenticated remote transport; full production activation and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 48, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 49, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 49 — remote transport acceptance and deployment composition
+
+**ENGINEERING delivered:** `GoogleSchedulerIdentity` verifies the scheduler against a configured canonical HTTPS audience, immutable numeric service-account subject and verified service-account email. Signing keys come only from Google's fixed JWKS endpoint with bounded fetching/cache age; token-selected key URLs, stale-key outages, wrong audiences/accounts and malformed claims are refused. `createRemoteAssessmentServer` creates an explicit backend listener using this identity adapter, the existing controller and optional scheduling adapter. It is not installed in `createApp()` or default BFF startup. Choose direct TLS with a key/certificate chain, or `tls: 'platform'` only behind a trusted TLS terminator. Never expose platform mode over plaintext public networking.
+
+**Scheduler command:** use `python -m temporal_workers.worker --assessment-controller-origin https://CONTROLLER_SERVICE.run.app --assessment-outbox-pump`. The origin must be canonical, with no path, trailing slash, credentials, query or fragment, and must exactly match the verifier audience. It cannot be combined with socket/UID options. Google workload metadata supplies an in-memory ID token; no environment endpoint override, downloaded service key or CLI credential fallback exists. The client sends both `X-Serverless-Authorization` for platform authentication and signed `Authorization` for independent application verification. No token enters workflow history, logs or saved diagnostics. HTTP body schemas allow only opaque job/lease/receipt metadata before network transmission.
+
+**Identity and isolation gates:** provision a dedicated opaque scheduler identity with only its Temporal credential and narrowly scoped controller invocation permission. The existing legacy Temporal service's `agent_runtime_internal_token` grant supports the old queue and must not be inherited by the new scheduler. The existing public BFF invoker policy cannot serve as the scheduler authentication boundary. Controller keys and backend permissions stay with backend services. Do not run untrusted workers in a controller container that exposes the controller's metadata identity, filesystem, network or backend environment. Dropping a child process UID is not proof of separate cloud workload identity. Production composition, per-job isolation and attestation remain engineering work before activation.
+
+**Bounds and lifecycle:** Google service-account ID tokens are bearer credentials and remain valid until expiry; disabling an account is not application-level instantaneous revocation. Remove a compromised principal from the controller's configured allowlist through a controlled rollout, alongside platform IAM containment. The verifier caps token lifetime at one hour and signing-key cache age at one minute; metadata retrieval is bounded to three seconds, within the overall request budget. The controller aborts on identity expiry/disconnect and holds the operation slot until the backend call settles. A failed request can still commit SQL; use the existing stable-ID/lease and confirmation paths. No retry resets a claim or authorizes connector access. <!-- axiom-count-ok: transport safety bounds, not statutory control counts -->
+
+**Evidence:** 750 BFF and 146 Temporal tests; 61 SPIRE and 33 isolated-worker outcomes, including actual verified TLS, rejected foreign identity/certificate, durable pickup and lost-response recovery. The local test uses a synthetic signing authority and fixture Google key response; metadata transport is separately mocked. Neither proves a deployed Google identity or effective IAM. Verify actual scheduler subject/email, audience, ingress/header behavior, denied principals, namespace ACLs, timeouts and private logging in deployment acceptance. No cloud apply or live grant occurred. Schema remains 0045 / 54 public tables. See [review 38](audits/38-remote-assessment-transport-review-2026-09-22.md).
+
+**Remaining ENGINEERING:** production wrapping provider and key lifecycle, process/network/metadata isolation, trust/registration, remaining scoped workers and verified actor chains, deployment composition, W4.4 live grants/approval, full W3 wizard/graph and W4.5/6/7. W0/W1/W2 remainder remains in the register. The transport component is implemented; production orchestration and the overall goal are still partial.
 
 ## Revision 48 — durable pickup and scheduling recovery
 

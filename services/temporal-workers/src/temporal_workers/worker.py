@@ -22,6 +22,7 @@ from .assessment_activity import AssessmentControllerActivity
 from .assessment_jobs import TASK_QUEUE as ASSESSMENT_QUEUE
 from .assessment_jobs import AssessmentJobWorkflow
 from .assessment_outbox import AssessmentOutboxPump
+from .assessment_remote import RemoteAssessmentControllerActivity
 from .workflows import TASK_QUEUE, ComplianceEngagementWorkflow
 
 log = logging.getLogger(__name__)
@@ -52,7 +53,10 @@ async def handle_health(
 
 
 def build_workers(
-    client: Client, controller: AssessmentControllerActivity | None = None
+    client: Client,
+    controller: AssessmentControllerActivity
+    | RemoteAssessmentControllerActivity
+    | None = None,
 ):
     # Explicit private mode is a separate worker process/queue. It must not
     # also poll legacy workflows carrying raw interview/assessment payloads.
@@ -80,7 +84,9 @@ async def run_worker_loop(
     namespace: str,
     api_key: str | None,
     tls_config: Any,
-    controller: AssessmentControllerActivity | None = None,
+    controller: AssessmentControllerActivity
+    | RemoteAssessmentControllerActivity
+    | None = None,
     outbox_pump: bool = False,
 ) -> None:
     if outbox_pump and controller is None:
@@ -118,13 +124,17 @@ async def run_worker_loop(
             backoff = min(backoff * 2, 60)
 
 
-async def main():
+def assessment_options(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--assessment-controller-socket")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--assessment-controller-socket")
+    mode.add_argument("--assessment-controller-origin")
     parser.add_argument("--assessment-controller-uid", type=int)
     parser.add_argument("--assessment-outbox-pump", action="store_true")
-    args = parser.parse_args()
-    if args.assessment_outbox_pump and not args.assessment_controller_socket:
+    args = parser.parse_args(argv)
+    if args.assessment_outbox_pump and not (
+        args.assessment_controller_socket or args.assessment_controller_origin
+    ):
         parser.error("Outbox pickup requires private controller configuration")
     if bool(args.assessment_controller_socket) != (
         args.assessment_controller_uid is not None
@@ -133,12 +143,19 @@ async def main():
             "Private controller socket and owner UID must be configured together"
         )
     controller = (
-        AssessmentControllerActivity(
+        RemoteAssessmentControllerActivity(args.assessment_controller_origin)
+        if args.assessment_controller_origin
+        else AssessmentControllerActivity(
             args.assessment_controller_socket, args.assessment_controller_uid
         )
         if args.assessment_controller_socket
         else None
     )
+    return controller, args.assessment_outbox_pump
+
+
+async def main():
+    controller, outbox_pump = assessment_options()
     logging.basicConfig(level=logging.INFO)
     port = int(os.environ.get("PORT", "8080"))
     server = await asyncio.start_server(handle_health, "0.0.0.0", port)
@@ -194,7 +211,7 @@ async def main():
             api_key,
             tls_config,
             controller,
-            args.assessment_outbox_pump,
+            outbox_pump,
         )
     )
 

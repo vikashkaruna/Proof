@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `694305e`, CI 35702650435 green. Revision 47 scheduling/transport is verified. Revision 48 adds durable outbox pickup and acknowledgement, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `0edceda`, CI 35707610075 green. Revision 48 durable pickup is verified. Revision 49 adds authenticated HTTPS transport, subject to exact merge CI. Production composition/isolation, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 49 — authenticated remote assessment transport
+
+Revision 48 is **complete and green** at staging `0edceda`, CI [35707610075](https://github.com/vikashkaruna/Proof/actions/runs/35707610075): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening changes. The overall goal remains active.
+
+The assessment scheduler now has an explicit HTTPS mode using its assigned Google service identity, with no downloaded key, proxy, redirect or credential-file fallback. The controller independently verifies the signed token's issuer, audience, immutable service-account subject, verified email and lifetime against a fixed, bounded Google signing-key source. Forwarded identity headers cannot substitute for that verification. Identity expiry, request cancellation and disconnect retain the single-operation guard until actual controller work settles. Local Unix transport reuses the same bounded protocol; both clients reject private or unknown fields before transmission.
+
+`--assessment-controller-origin` selects only the opaque assessment queue and is mutually exclusive with socket mode. Optional `--assessment-outbox-pump` retains durable lease/ack recovery. The remote server is an explicitly constructed backend listener, absent from default public BFF startup. Its platform-TLS mode requires a trusted TLS terminator; direct TLS uses verified certificates. This is transport authentication, not connector grant authority, account revocation or a verified agent actor chain.
+
+**Validation:** **750 BFF tests**, **146 Temporal tests**, workspace/lint/type checks, acceptance TypeScript, **61 SPIRE outcomes** and **33 isolated-worker outcomes**. Actual TLS and Unix connections both run Temporal → controller → isolated worker → Postgres, including lost submission/ack/activity replies and one launch per job. The TLS probe refuses a signed foreign-principal token and an untrusted certificate before polling. Its signing keys, Google key response and service identity are synthetic; live Google metadata/IAM is not proved by local acceptance. Metadata transport and refusal are exercised separately with HTTP fixtures. The ledger test cache now includes all migration inputs, verified against the actual Turbo input inventory and direct ledger tests. No migration change: **0045**, **54 public tables**, W2 named targets **19/40**. Final exact-merge CI/artifacts are saved separately. See [review 38](audits/38-remote-assessment-transport-review-2026-09-22.md).
+
+**Next:** production wrapping-key lifecycle, per-job process/network/metadata isolation and workload trust/registration, plus deployment composition for a dedicated opaque scheduler and controller with least-privilege IAM. The legacy Temporal service still has runtime-token access for its legacy queue; do not reuse that grant in the opaque scheduler. Remaining scoped workers and verified actor chains, W4.4 live grants/approval, full W3 resumable wizard/readiness and graph, and W4.5/6/7 stay open. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. No public activation, cloud deployment or client mutation occurred.
 
 ## Revision 48 — durable outbox scheduling pickup
 

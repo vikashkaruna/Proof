@@ -1,11 +1,13 @@
 """Real Temporal -> private socket -> BFF/isolated-worker acceptance subprobe.
 
-Only opaque IDs and a local socket path enter this process. stdout contains
+Only opaque IDs and private transport configuration enter this process.
+Synthetic remote identity tokens travel over private stdin, never argv/env/history. stdout contains
 allowlisted boolean outcomes; never print raw exceptions, results or histories.
 """
 
 import asyncio
 import json
+import ssl
 import sys
 
 from temporal_workers.assessment_activity import AssessmentControllerActivity
@@ -16,6 +18,7 @@ from temporal_workers.assessment_jobs import (
     start_assessment_job,
 )
 from temporal_workers.assessment_outbox import AssessmentOutboxPump
+from temporal_workers.assessment_remote import RemoteAssessmentControllerActivity
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.runtime import LoggingConfig, Runtime, TelemetryConfig
@@ -32,15 +35,58 @@ async def main():
         Runtime(telemetry=TelemetryConfig(logging=LoggingConfig(filter="off")))
     )
     assignment = json.load(sys.stdin)
+    local_fields = {"socketPath", "controllerUid", "jobs"}
+    remote_fields = {
+        "origin",
+        "certificate",
+        "identityToken",
+        "foreignIdentityToken",
+        "jobs",
+    }
     if (
-        set(assignment) != {"socketPath", "controllerUid", "jobs"}
+        set(assignment) not in (local_fields, remote_fields)
         or len(assignment["jobs"]) != 2
     ):
         raise ValueError("Invalid acceptance assignment")
     jobs = [JobReference.model_validate(job) for job in assignment["jobs"]]
-    actual = AssessmentControllerActivity(
-        assignment["socketPath"], assignment["controllerUid"]
-    )
+    remote_checks = set(assignment) == remote_fields
+    if remote_checks:
+
+        class SyntheticIdentity:
+            def __init__(self, value):
+                self._value = value
+
+            async def token(self, _audience):
+                return self._value
+
+        trusted_tls = ssl.create_default_context(cadata=assignment["certificate"])
+        actual = RemoteAssessmentControllerActivity(
+            assignment["origin"],
+            SyntheticIdentity(assignment["identityToken"]),
+            trusted_tls,
+        )
+        stage = "remote-refusal"
+        for refused in (
+            RemoteAssessmentControllerActivity(
+                assignment["origin"],
+                SyntheticIdentity(assignment["foreignIdentityToken"]),
+                trusted_tls,
+            ),
+            RemoteAssessmentControllerActivity(
+                assignment["origin"], SyntheticIdentity(assignment["identityToken"])
+            ),
+        ):
+            failed = False
+            try:
+                await refused.request("scheduling/poll", {})
+            except ValueError:
+                failed = True
+            if not failed:
+                raise ValueError("Remote transport refusal missing")
+    else:
+        actual = AssessmentControllerActivity(
+            assignment["socketPath"], assignment["controllerUid"]
+        )
     calls = []
     lost_job = jobs[1].jobId
 
@@ -176,6 +222,7 @@ async def main():
         "outbox-private-pickup-submits-and-acknowledges": True,
         "outbox-lost-start-reacquires-lease-without-new-execution": True,
         "outbox-lost-ack-stays-durably-submitted": True,
+        "remoteChecks": remote_checks,
     }
 
 
