@@ -2,10 +2,20 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 44 — TEMPORAL COMPUTATION AND REPLAY** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `e0781c6`, green CI [35688921423](https://github.com/vikashkaruna/Proof/actions/runs/35688921423); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 45 — PRIVATE ASSESSMENT DISPATCH** (22 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `d1becf0`, green CI [35691631278](https://github.com/vikashkaruna/Proof/actions/runs/35691631278); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 45 — durable encrypted assessment dispatch
+
+Revision 44 is **complete and green** at staging `d1becf0`, CI [35691631278](https://github.com/vikashkaruna/Proof/actions/runs/35691631278), with 17 applicable jobs and eight exact-merge artifacts, including 67 Temporal tests. No intervening upstream implementation was present.
+
+Migration **0044** adds a private outbox atomically with task/run/audit delegation. A stable request UUID returns the same run after a lost response; changed context/input conflicts. The exact input and task proof are encrypted with a fresh data key and authenticated job/tenant/actor/workload/estate/engagement/correlation/input context, separated from connector credentials and approval keys. Only ciphertext and the existing proof hash reach storage. The controller can claim a live dispatch once. Lost claims, decryption failures and uncertain launches require reconciliation; they never silently renew or relaunch task authority. Actual tools still require fresh worker SVIDs.
+
+**Validation:** **645 BFF tests**, including 21 new encryption/adapter cases; real Auth/PostgREST parity across all four environment labels; **61 real SPIRE outcomes** and **17 isolated-worker outcomes**, now including controller reconstruction, idempotent issuance and single delivery through the encrypted outbox. Database acceptance passes **45 migrations, 14 concurrency suites and 10 populated upgrades**, covering atomic rollback, tenant/client isolation, expiry/demotion/revocation/archival/halt and competing enqueue/claim. Exact follow-up CI/artifacts are saved separately. Schema **0044**, **54 public tables**, W2 named targets **19/40**. See [review 34](audits/34-private-dispatch-review-2026-09-22.md).
+
+**Remaining:** bounded isolated launch/termination, scheduler/reconciliation and private job transport integration; production wrapping-key provider/rotation/retention and workload trust/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0/W1/W2 remainder. This controller remains private and the UI is not switched. A local synthetic wrapping provider proves encryption and restart behavior, not production KMS or Cloud Run attestation. The overall goal remains active.
 
 ## Revision 44 — truthful Temporal computation and replay
 

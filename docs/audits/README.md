@@ -1,6 +1,6 @@
 # Audit Reports
 
-Latest review: [33 — Temporal orchestration](33-temporal-orchestration-review-2026-09-22.md).
+Latest review: [34 — private assessment dispatch](34-private-dispatch-review-2026-09-22.md).
 C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
 [Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 
