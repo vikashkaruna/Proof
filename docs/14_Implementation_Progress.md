@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `a5ba641`, CI 35666946505 green. C-W0-5 configuration implementation is the next exact-merge checkpoint; deployed IAM acceptance remains separate.
+Current verified staging checkpoint: `e46c1b7`, CI 35678105419 green. C-W0-5 engineering is complete; deployed IAM acceptance remains separate. Revision 37 task delegation requires its own exact-merge CI checkpoint.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 37 — W4.3 task delegation core
+
+**Previous milestone complete and green:** C-W0-5 service IAM engineering, staging `e46c1b7`, CI [35678105419](https://github.com/vikashkaruna/Proof/actions/runs/35678105419). All 17 applicable jobs passed. Six sanitized artifacts match that exact merge: 61 SPIRE outcomes, five real Postgres runtime-audit outcomes, and 63 browser/89 API checks per local preprod/production configuration. Effective deployed IAM acceptance remains open. A fresh upstream review found no intervening other-model commits.
+
+Migration **0041** introduces private, short-lived task delegations tied to an agent run, current initiator membership, tenant, workload registration, optional estate/engagement, input digest, scopes and deadline. Issuance and revocation append ledger events in the same transaction. The BFF generates an independent random 256-bit task proof, persists only its SHA-256 digest and redacts ordinary serialization. A visible run UUID alone is insufficient. Each authorization repeats SVID/registration validation and a live task lookup; current membership/internal status, run/context, registration, halt state, expiry and revocation all constrain access. The deadline is bounded by both task and SVID expiry. Tenant admins may issue/revoke tenant tasks; internal-only agents still require a verified internal founder/analyst. Generic issuance refuses Karya.
+
+**Delivered component, not runtime activation:** no browser or worker receives direct SQL access; no HTTP route consumes this component yet. Legacy runs receive no implicit delegation. The issuer is a trusted BFF interface, not a public API; the controller must derive actor identity and input digest, apply idempotency and deliver proof privately. The SQL lookup does not verify JWTs or replace contract checks. Task authority is a fresh snapshot, not a lock spanning an external action. Connector grants, dry-run/rollback and approval remain separate W4.4 gates; broker defaults and the execution stub remain disabled.
+
+Validation: **546 BFF tests**, workspace tests/lint/typecheck, and the real Docker PostgreSQL suite with all **42 migrations**, eleven concurrency suites and seven populated upgrade suites passed locally. New tests cover task/tenant/workload/proof/scope refusal, mid-lookup expiry, safe proof handling, live revocation, failed-audit rollback, both issuance/demotion lock orderings and concurrent revocation producing one ledger event. The 0040→0041 upgrade preserves historical runs byte-for-byte and grants them no authority. Exact merge/container CI is a separate release gate, recorded in the session checkpoint after execution. Tip **0041**, **52 public tables**; W2 named targets remain **19/40**. See [review 26](audits/26-workload-task-review-2026-09-22.md).
+
+**Next in order:** W4.3 credential-less worker execution, production trust/registration lifecycle, private task handoff and every-tool tenant/estate enforcement, then verified token exchange/actor chains and W4.4 live grants/approval. Complete the full W3 onboarding/readiness wizard and graph next, then W4.5/6/7. W0/W1/W2/W3/W4 and the overall goal remain partial. Do not treat these tested internal components as proof of live connector execution.
 
 ## Revision 36 — C-W0-5 service IAM isolation
 

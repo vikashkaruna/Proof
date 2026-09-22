@@ -1,10 +1,10 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `a5ba641`, CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505) green. Runtime audit hardening is complete; C-W0-5 service IAM implementation is the next checkpoint. Full W4.3 remains open.
+Verified staging checkpoint: `e46c1b7`, CI [35678105419](https://github.com/vikashkaruna/Proof/actions/runs/35678105419) green. C-W0-5 service IAM engineering is complete; deployed IAM acceptance and full W4.3 remain open. Revision 37 task delegation is the next exact-merge checkpoint.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 36, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 37, 22 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -144,7 +144,7 @@ or directly, if you are driving it yourself:
 ```
 
 The runner enforces TLS, records checksums, refuses edited history, and exits
-non-zero on a failing migration. Expect **41 migrations, 0000 → 0040**.
+non-zero on a failing migration. Expect **42 migrations, 0000 → 0041**.
 
 **Evidence to return:** the runner's final summary — the count applied, and the
 last migration name. If it refuses on a checksum, send that line verbatim and
@@ -223,7 +223,7 @@ For report rollout, apply 0037 and deploy BFF/marketing together; seed the publi
 
 I flip **W0 → Closed** when the remaining C-W0-5/6/7 findings are resolved with tests and all of these hold, and not before:
 
-1. Your W0-5 evidence shows **all 41 migration files through 0040 applied** against a real deployed
+1. Your W0-5 evidence shows **all 42 migration files through 0041 applied** against a real deployed
    database, with the runner's own checksum summary.
 2. Your W0-8 curl shows **401** from the deployed BFF for an unauthenticated
    request.
@@ -507,6 +507,16 @@ from the new baseline — the same chain every checkpoint uses.
 **Runtime audit corrections delivered in Revision 35:** staging/preprod/production use the actual append RPC; invalid configuration or missing/malformed receipts fail closed. Memory is limited to explicit local development/test. The base agent records safe phase/receipt/failure-code metadata and input/output digests, revalidates models, and refuses success after completion-audit failure. Returned errors/logs omit raw validation and exception payloads. Existing audit history is preserved; no migration rewrites prior records.
 
 Run `./scripts/start-parity-supabase.sh`, then from `services/agent-runtime` run `uv run python ../../scripts/verify-runtime-audit.py`. The probe accepts only the isolated loopback parity API on port 56321, creates synthetic tenant/audit rows and leaves append-only evidence intact. No real cloud resources or client actions are used. Only `.axiom-runtime/runtime-audit/results.json` is publishable; require `passed: true`, `dirty: false` and the expected revision for release evidence. CI runs it after strict Auth/PostgREST parity. The ledger's actual receipt is a positive bigint, not a UUID. A completion-audit failure means intervention/reconciliation is needed if a future mutating tool already acted; it does not mean a rollback occurred. Every-tool/physical isolation still remains W4.3 work.
+
+### W4-3 continuation · task delegation core (0041)
+
+**ENGINEERING delivered:** `WorkloadTaskIssuer`, `WorkloadTaskAuthority`, the private PostgREST adapter and atomic delegation/revocation RPCs. Apply 0041 before deploying a controller that consumes them. Historical runs remain unchanged and cannot acquire task authority. The additive migration may remain during an application rollback; never edit prior migration history or manufacture delegations for old runs.
+
+The controller must derive the actor from the authenticated session, hash the exact assigned input, resolve the current workload registration and select scopes from the agent contract. Apply request idempotency at the controller. Deliver the random proof only to the assigned isolated worker over the private authenticated channel; never put it in browser data, environment dumps, process arguments, logs, audit detail or Temporal history. A lost proof cannot be recovered from SQL: revoke that task and deliberately issue a new one. Generic issuance rejects Karya; do not bypass that rejection to test execution.
+
+For every tool call, verify the SVID and proof through `WorkloadTaskAuthority` with the **server-selected** required scope. Use the resulting tenant/estate/engagement/input context rather than worker-supplied filters. Reads repeat membership, registration, task lifecycle/context, expiry, revocation and global/tenant halt checks. A removed internal-user flag invalidates internal-agent tasks. This lookup is a snapshot: domain mutations must recheck authority inside the write transaction, and external invocation requires the W4.4 controlled transport/grant/approval boundary. Existing issued external credentials need target-specific revocation; this component does not provide it.
+
+Run `pnpm --filter @axiom/bff test` and `./scripts/test-database.sh`. The latter includes SQL role refusals, audit fault injection, real concurrent issuance/demotion/revocation and populated 0040→0041 upgrade tests. These establish the component contracts, not physical worker isolation or end-to-end tool authorization. No application route is enabled here. Before closing W4.3, demonstrate isolated workers without backend/approval/storage credentials, authenticated trust delivery and registration lifecycle, the private task handoff, actual tenant/estate-aware tool calls and verified actor chains. Keep broker acquisition disabled until W4.4 also passes.
 
 ## C-W0-5 · Deploy and verify service IAM isolation
 
