@@ -15,7 +15,10 @@ const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
-async function fixture(deadlineMs = 5000) {
+async function fixture(
+  deadlineMs = 5000,
+  scheduling?: Parameters<typeof startAssessmentControllerSocket>[0]['scheduling'],
+) {
   const directory = await realpath(await mkdtemp('/tmp/ax-controller-'));
   await chmod(directory, 0o700);
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
@@ -28,6 +31,7 @@ async function fixture(deadlineMs = 5000) {
   };
   const socket = await startAssessmentControllerSocket({
     directory,
+    scheduling,
     controller,
     socketGroup: process.getgid!(),
     deadlineMs,
@@ -141,6 +145,22 @@ describe('private controller socket', () => {
     req.destroy();
     await vi.waitFor(() => expect(signal?.aborted).toBe(true));
     release!();
+  });
+  it('enables scheduling only with a trusted adapter and keeps it separate from execution', async () => {
+    const disabled = await fixture();
+    expect((await call(disabled.socketPath, {}, '/assessment/scheduling/poll')).status).toBe(503);
+    const scheduling = { reserve: vi.fn(async () => ({ jobs: [] })), acknowledge: vi.fn() };
+    const f = await fixture(5000, scheduling);
+    expect((await call(f.socketPath, {}, '/assessment/scheduling/poll')).status).toBe(200);
+    expect(
+      (await call(f.socketPath, { tenantId: id(9) }, '/assessment/scheduling/poll')).status,
+    ).toBe(503);
+    expect(
+      (await call(f.socketPath, { input: 'private-marker' }, '/assessment/scheduling/ack')).status,
+    ).toBe(503);
+    expect(scheduling.reserve).toHaveBeenCalledTimes(1);
+    expect(scheduling.acknowledge).not.toHaveBeenCalled();
+    expect(f.controller.run).not.toHaveBeenCalled();
   });
   it('refuses a directory accessible by other principals before binding', async () => {
     const directory = await realpath(await mkdtemp('/tmp/ax-controller-'));

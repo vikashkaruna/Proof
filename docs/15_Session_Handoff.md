@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 48 — durable outbox scheduling pickup
+
+Revision 47 is **complete and green** at staging `694305e`, CI [35702650435](https://github.com/vikashkaruna/Proof/actions/runs/35702650435): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes. The overall goal remains active.
+
+Migration **0045** closes the persisted-outbox-to-Temporal submission crash window with namespace-bound leases, a stable workflow ID and a mandatory, fenced submission receipt. Polling skips locked jobs. A crashed or uncertain producer leaves its lease to expire; a fresh producer recovers the same execution. Expired, claimed, revoked or terminal task assignments permit existing-workflow lookup only. Scheduling never resets a claim, extends task authority, decrypts payloads or proves assessment completion. Exhausted attempts become an audited `needs_review` handoff. Shared ledger action types include both scheduling events.
+
+The private BFF socket adds bounded poll/ack operations through a trusted configured adapter. The scheduler holds no database or task credentials. Automatic pickup requires explicit `--assessment-outbox-pump` together with the private socket/owner options; ordinary startup is unchanged. Each acknowledgement binds tenant, job, current lease, configured namespace, canonical workflow ID and observed Temporal execution ID. Namespace changes cannot silently resubmit a previously reserved job elsewhere.
+
+**Validation:** **705 BFF tests**, **112 Temporal tests**, workspace tests/lint/typecheck, acceptance TypeScript, real Auth/PostgREST parity, **61 SPIRE outcomes** and **30 isolated-worker outcomes**. The actual Temporal → private socket → isolated Linux worker → Postgres path now proves pickup, lost submission response with a newly acquired lease and unchanged execution, lost acknowledgement after a committed receipt, and one worker launch per job. The acceptance fixture alone advances a lease deadline to avoid waiting; it does not alter task expiry or claim state. Database acceptance passes **46 migrations, 15 concurrency suites and 11 populated upgrades**, including stale-producer fencing, one audit receipt, mandatory audit rollback and preservation of existing live/claimed/expired jobs. Exact final merge CI/artifacts are saved separately. Schema **0045**, **54 public tables**, W2 named targets **19/40**. See [review 37](audits/37-durable-assessment-pickup-review-2026-09-22.md).
+
+**Next:** authenticated remote controller transport preserving distinct cloud service IAM; production wrapping-key lifecycle, per-job isolation and trust/registration; remaining scoped workers and verified actor chains; W4.4 live grants/approval; full W3 resumable wizard/readiness and graph; W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Local engineering is delivered; deployed namespace ACLs, distinct-UID denial and production controller/database timeouts still need acceptance. No public activation or cloud deployment occurred. This closes the durable pickup component, not full W3/W4 or the overall goal.
+
 ## Revision 47 — opaque Temporal scheduling and private controller transport
 
 Revision 46 is **complete and green** at staging `eb262fd`, CI [35697773545](https://github.com/vikashkaruna/Proof/actions/runs/35697773545): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.

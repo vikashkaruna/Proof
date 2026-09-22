@@ -3,6 +3,12 @@ import { chmod, chown, lstat, readdir, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { AssessmentController } from './assessment-controller.js';
+import {
+  type AssessmentScheduling,
+  schedulingTicket,
+  schedulingAcknowledgement,
+  schedulingReceipt,
+} from './assessment-scheduling.js';
 
 const assignment = z.object({ tenantId: z.uuid(), jobId: z.uuid() }).strict();
 const outcome = z.discriminatedUnion('status', [
@@ -41,6 +47,7 @@ export async function startAssessmentControllerSocket(options: {
   directory: string;
   socketGroup: number;
   controller: Pick<AssessmentController, 'run' | 'reconcile'>;
+  scheduling?: Pick<AssessmentScheduling, 'reserve' | 'acknowledge'>;
   deadlineMs?: number;
 }) {
   const deadline = z
@@ -97,7 +104,12 @@ export async function startAssessmentControllerSocket(options: {
     try {
       if (
         request.method !== 'POST' ||
-        !['/assessment/run', '/assessment/reconcile'].includes(request.url ?? '') ||
+        ![
+          '/assessment/run',
+          '/assessment/reconcile',
+          '/assessment/scheduling/poll',
+          '/assessment/scheduling/ack',
+        ].includes(request.url ?? '') ||
         request.headers['content-type'] !== 'application/json' ||
         request.headers['content-encoding']
       )
@@ -105,18 +117,38 @@ export async function startAssessmentControllerSocket(options: {
       let body = Buffer.alloc(0);
       for await (const chunk of request) {
         body = Buffer.concat([body, Buffer.from(chunk as Uint8Array)]);
-        if (body.length > 512 || abort.signal.aborted) throw new Error('Private request refused');
+        if (
+          body.length > (request.url === '/assessment/scheduling/ack' ? 1024 : 512) ||
+          abort.signal.aborted
+        )
+          throw new Error('Private request refused');
       }
-      const job = assignment.parse(
-        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)),
-      );
+      const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
       if (abort.signal.aborted) throw new Error('Private request ended');
-      const result = outcome.parse(
-        await (request.url === '/assessment/run'
-          ? options.controller.run(job.tenantId, job.jobId, abort.signal)
-          : options.controller.reconcile(job.tenantId, job.jobId)),
-      );
-      if (!abort.signal.aborted) send(response, 200, { ...job, ...result });
+      if (request.url === '/assessment/scheduling/poll') {
+        z.object({}).strict().parse(value);
+        if (!options.scheduling) throw new Error('Scheduling unavailable');
+        const result = z
+          .object({ jobs: z.array(schedulingTicket).max(1) })
+          .strict()
+          .parse(await options.scheduling.reserve());
+        if (!abort.signal.aborted) send(response, 200, result);
+      } else if (request.url === '/assessment/scheduling/ack') {
+        if (!options.scheduling) throw new Error('Scheduling unavailable');
+        const acknowledgement = schedulingAcknowledgement.parse(value);
+        const result = schedulingReceipt.parse(
+          await options.scheduling.acknowledge(acknowledgement),
+        );
+        if (!abort.signal.aborted) send(response, 200, result);
+      } else {
+        const job = assignment.parse(value);
+        const result = outcome.parse(
+          await (request.url === '/assessment/run'
+            ? options.controller.run(job.tenantId, job.jobId, abort.signal)
+            : options.controller.reconcile(job.tenantId, job.jobId)),
+        );
+        if (!abort.signal.aborted) send(response, 200, { ...job, ...result });
+      }
     } catch {
       send(response, 503, { error: 'assessment_unconfirmed' });
     } finally {

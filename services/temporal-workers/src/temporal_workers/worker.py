@@ -21,6 +21,7 @@ from .activities import call_agent_runtime
 from .assessment_activity import AssessmentControllerActivity
 from .assessment_jobs import TASK_QUEUE as ASSESSMENT_QUEUE
 from .assessment_jobs import AssessmentJobWorkflow
+from .assessment_outbox import AssessmentOutboxPump
 from .workflows import TASK_QUEUE, ComplianceEngagementWorkflow
 
 log = logging.getLogger(__name__)
@@ -80,7 +81,10 @@ async def run_worker_loop(
     api_key: str | None,
     tls_config: Any,
     controller: AssessmentControllerActivity | None = None,
+    outbox_pump: bool = False,
 ) -> None:
+    if outbox_pump and controller is None:
+        raise ValueError("Outbox pickup requires private controller configuration")
     backoff = 2
     while True:
         try:
@@ -95,6 +99,10 @@ async def run_worker_loop(
             workers = build_workers(client, controller)
             backoff = 2
             tasks = [asyncio.create_task(worker.run()) for worker in workers]
+            if outbox_pump:
+                tasks.append(
+                    asyncio.create_task(AssessmentOutboxPump(client, controller).run())
+                )
             try:
                 await asyncio.gather(*tasks)
             finally:
@@ -114,7 +122,10 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--assessment-controller-socket")
     parser.add_argument("--assessment-controller-uid", type=int)
+    parser.add_argument("--assessment-outbox-pump", action="store_true")
     args = parser.parse_args()
+    if args.assessment_outbox_pump and not args.assessment_controller_socket:
+        parser.error("Outbox pickup requires private controller configuration")
     if bool(args.assessment_controller_socket) != (
         args.assessment_controller_uid is not None
     ):
@@ -177,7 +188,14 @@ async def main():
         )
 
     worker_task = asyncio.create_task(
-        run_worker_loop(address, namespace, api_key, tls_config, controller)
+        run_worker_loop(
+            address,
+            namespace,
+            api_key,
+            tls_config,
+            controller,
+            args.assessment_outbox_pump,
+        )
     )
 
     async with server:

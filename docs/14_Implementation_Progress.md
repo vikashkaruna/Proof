@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `eb262fd`, CI 35697773545 green. Revision 46 bounded launch/reconciliation is verified. Revision 47 adds opaque Temporal scheduling and a private local controller transport, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `694305e`, CI 35702650435 green. Revision 47 scheduling/transport is verified. Revision 48 adds durable outbox pickup and acknowledgement, subject to exact merge CI. Full production orchestration, W3/W4 and W0/W1/W2 remainder stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 48 — durable outbox scheduling pickup
+
+Revision 47 is **complete and green** at staging `694305e`, CI [35702650435](https://github.com/vikashkaruna/Proof/actions/runs/35702650435): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes. The overall goal remains active.
+
+Migration **0045** closes the persisted-outbox-to-Temporal submission crash window with namespace-bound leases, a stable workflow ID and a mandatory, fenced submission receipt. Polling skips locked jobs. A crashed or uncertain producer leaves its lease to expire; a fresh producer recovers the same execution. Expired, claimed, revoked or terminal task assignments permit existing-workflow lookup only. Scheduling never resets a claim, extends task authority, decrypts payloads or proves assessment completion. Exhausted attempts become an audited `needs_review` handoff. Shared ledger action types include both scheduling events.
+
+The private BFF socket adds bounded poll/ack operations through a trusted configured adapter. The scheduler holds no database or task credentials. Automatic pickup requires explicit `--assessment-outbox-pump` together with the private socket/owner options; ordinary startup is unchanged. Each acknowledgement binds tenant, job, current lease, configured namespace, canonical workflow ID and observed Temporal execution ID. Namespace changes cannot silently resubmit a previously reserved job elsewhere.
+
+**Validation:** **705 BFF tests**, **112 Temporal tests**, workspace tests/lint/typecheck, acceptance TypeScript, real Auth/PostgREST parity, **61 SPIRE outcomes** and **30 isolated-worker outcomes**. The actual Temporal → private socket → isolated Linux worker → Postgres path now proves pickup, lost submission response with a newly acquired lease and unchanged execution, lost acknowledgement after a committed receipt, and one worker launch per job. The acceptance fixture alone advances a lease deadline to avoid waiting; it does not alter task expiry or claim state. Database acceptance passes **46 migrations, 15 concurrency suites and 11 populated upgrades**, including stale-producer fencing, one audit receipt, mandatory audit rollback and preservation of existing live/claimed/expired jobs. Exact final merge CI/artifacts are saved separately. Schema **0045**, **54 public tables**, W2 named targets **19/40**. See [review 37](audits/37-durable-assessment-pickup-review-2026-09-22.md).
+
+**Next:** authenticated remote controller transport preserving distinct cloud service IAM; production wrapping-key lifecycle, per-job isolation and trust/registration; remaining scoped workers and verified actor chains; W4.4 live grants/approval; full W3 resumable wizard/readiness and graph; W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Local engineering is delivered; deployed namespace ACLs, distinct-UID denial and production controller/database timeouts still need acceptance. No public activation or cloud deployment occurred. This closes the durable pickup component, not full W3/W4 or the overall goal.
 
 ## Revision 47 — opaque Temporal scheduling and private controller transport
 
