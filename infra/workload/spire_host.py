@@ -56,6 +56,7 @@ def layout(role: str) -> dict[str, tuple[Path, int, int]]:
             'controller_files.py': (PREFIX / 'controller_files.py', 0o600, 65536),
             'controller_placement.py': (PREFIX / 'controller_placement.py', 0o600, 65536),
             'controller_runtime.py': (PREFIX / 'controller_runtime.py', 0o600, 65536),
+            'controller_transition.py': (PREFIX / 'controller_transition.py', 0o600, 65536),
             'spire_health.py': (PREFIX / 'spire_health.py', 0o600, 65536),
             'health.service': (Path('/etc/systemd/system/axiom-spire-health.service'), 0o644, 16384),
         })

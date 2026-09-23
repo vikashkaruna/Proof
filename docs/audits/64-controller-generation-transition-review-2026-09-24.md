@@ -1,0 +1,31 @@
+# Revision 75 — reviewed controller generation transition
+
+## Baseline and scope
+
+Revision 74 is complete at staging `fb4bcdf8aa5d24d813772ae5da1fbb3fc242572f`, [CI 35900630429](https://github.com/vikashkaruna/Proof/actions/runs/35900630429): 19 applicable jobs and 13 exact-revision reports. PR 40 delivered reviewed issuance; PR 41 restored the pinned Supabase CLI's supported registry fallback after two initial staging image-acquisition failures. Those failures are preserved diagnostics, not closure evidence. Schema 0051 / 52 migrations / 55 public + 3 private credential tables and W2's 19/40 remain unchanged.
+
+The next engineering slice binds a separately issued credential and immutable file generation to a reviewed host unit transition. It does not issue credentials, activate cloud resources, prove application readiness or retire predecessor authority. See the [operator contract](../../infra/workload/CONTROLLER_TRANSITIONS.md) for inputs and ordered commands.
+
+## Authority and state machine
+
+The root-only isolated CLI accepts a protected request/hash binding tenant, external change record, exact previous/new runtime profiles, exact previous/new generations and latest predecessor transition. This is manual infrastructure administration; hashes and change-record UUIDs are not human signatures and cannot replace application signed approval, dry-run and validated rollback. The planning agent has no added writes. No public API, application permissions, database migration or secret environment setting changes.
+
+The operator stops the existing unit separately. Taking its lifetime lock before asking systemd to stop would deadlock stop-post recovery, so the helper never stops a service. Publication acquires the existing runtime lock followed by the enrollment lock, validates the exact immutable input files, and checks the loaded canonical unit is disabled/inactive or failed, has no process/job, no drop-ins/alternate fragment/transient state and no pending reload. It then reinspects every retained exact-ID container against protected name/image/label ownership, a valid stopped receipt and actual stopped state. A trusted daemon administrator's restart behind a saved receipt is detected. Missing containers, incomplete journals, created-plus-start-intent uncertainty and unknown observations are preserved and refused.
+
+Preparation durably records request, old/new unit bytes and hashes of the settled attempt snapshot before an atomic same-directory unit replacement. The new immutable profile is delivered without changing existing profile bytes. Publication acknowledgement is written after replacement; explicit identical-request resume can reconcile a crash on either side of that rename without adopting a name or overwriting a foreign unit. Incomplete preparation cannot be repaired automatically. A 1 MiB preparation bound is checked before journal creation, preventing an unreadable oversized prepared record. This is not a retention system: all historical IDs remain inspectable and no garbage collection is provided.
+
+The operator separately reloads systemd. Confirmation rechecks the loaded unit, request/profile/generation bindings and live stopped state, then creates a receipt last. No helper invocation calls start/stop/enable/reload. Loaded-state observation is not proof of the human who reloaded or of application readiness. Root and system-manager/daemon administration remain trusted; there is no claimed transactional systemd lock.
+
+Runtime admission requires a complete single confirmed transition chain, the latest profile and exact current unit bytes, and rechecks prior stopped containers before existing real placement/image/environment/file/private binding checks. A separately reviewed reverse transition can return to an earlier generation. The existing actual entrypoint still rejects expired/revoked/foreign credentials, and only the separate issuer operation retires authority. No claim/task reset, mutable current symlink, automatic restart, renewal or rollback is introduced.
+
+The new helper is included in protected runner delivery. Existing installation refuses different helper bytes; upgrading an older installed bundle remains a separately reviewed host deployment gate. Native acceptance starts from a fresh reviewed bundle, so it cannot be represented as evidence of an in-place production upgrade.
+
+## Verification
+
+Local deployment passes **214 tests**, including 17 new transition cases with real private filesystem journals and injected systemd/Docker observations. Coverage includes permissions/links, strict request fields and duplicate observations, concurrent lifetime locks, stale stop receipts, missing/foreign IDs, uncertain starts, incomplete preparation, interruptions before/after rename and before confirmation, confirmation input/state races, changed units/history, competing/stale reviews, reverse transitions and preparation-size refusal. The existing 16 Docker host-delivery outcomes pass against the pinned Ubuntu image. A review also removed an accidental fixture-only import from the isolated runtime wrapper before hosted execution.
+
+Eight new native outcomes exercise the actual production transition CLI with root/systemd/Docker on fresh hosted Ubuntu: live-lifetime refusal, enabled/drop-in refusal, restarted old exact-ID refusal, interrupted publication and explicit resume, unconfirmed admission refusal, a new protected read-only generation in a fresh container, a separately reviewed reverse transition and stale-predecessor refusal. The fixture substitutes only local placement and a synthetic controller process. Separate actual issuer/backend/entrypoint acceptance remains 86 outcomes. Native execution and full source/exact-staging gates are pending; no pending result is claimed as green.
+
+## Remaining gates
+
+After source and exact staging acceptance, continue actual secret publication/replication and effective inherited IAM with per-principal allow/deny evidence, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery. No cloud provisioning/apply is authorized or performed. W0–W4 and the overall roadmap remain incomplete. This milestone delivers a reviewed host transition mechanism; live production credential cutover still needs actual deployment, unexpired credentials and verified application readiness.

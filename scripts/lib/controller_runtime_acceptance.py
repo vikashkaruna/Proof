@@ -9,6 +9,7 @@ import shutil
 import time
 import uuid
 from pathlib import Path
+from lib.controller_transition_acceptance import accept as transition_acceptance
 
 
 def accept(root, prefix, alpine, tenant, service_config, manifest_sha, api_volume, health_volume, foreign, run, control, active, wait_for):
@@ -22,8 +23,9 @@ def accept(root, prefix, alpine, tenant, service_config, manifest_sha, api_volum
     controller_root = Path('/etc/axiom/controllers')/tenant
     helper = '/opt/axiom/spire/1.15.3/controller_runtime.py'
     cli = ['/usr/bin/python3', '-I', '-B', helper]
-    ids = set(); profile_path = None; outcomes = {}
-    if state.exists() or any(p.exists() for p in units): raise ValueError('fresh controller fixture required')
+    ids = set(); profile_path = None; outcomes = {}; profile_paths = set()
+    transitions = Path('/var/lib/axiom-controller-transitions')/tenant
+    if state.exists() or transitions.exists() or any(p.exists() for p in units): raise ValueError('fresh controller fixture required')
     try:
         # Deliberately synthetic executable at the production command location.
         # No backend, real TLS, task, token or workload identity is consumed.
@@ -55,7 +57,7 @@ ENTRYPOINT ["/sbin/tini","--","node","--import","/app/node_modules/tsx/dist/load
         value = {'schemaVersion': 1, 'tenantId': tenant, 'placementFile': str(placement_path), 'placementSha256': hashlib.sha256(placed_raw).hexdigest(), 'backendUrl': 'https://synthetic.invalid'}
         raw = encode(value); sha = hashlib.sha256(raw).hexdigest()
         review = directory/'runtime.json'; review.write_bytes(raw); review.chmod(0o600)
-        profile_path = profiles/(sha+'.json')
+        profile_path = profiles/(sha+'.json'); profile_paths.add(profile_path)
         run([*cli, '--install', str(review), sha]); run([*cli, '--install', str(review), sha])
         assert all(p.stat().st_uid == 0 and p.stat().st_mode & 511 == 0o600 for p in (units[0], profile_path))
         run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(units[0])])
@@ -175,6 +177,8 @@ except Exception as error:
         outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
         # A successfully stopped unit may already be unloaded by systemd;
         # reset-failed is unnecessary here and would refuse an unloaded unit.
+        outcomes.update(transition_acceptance(directory,tenant,sha,file_sha,review,placed,file_review,payload,units[0],units[1],wrapper,helper,cli,run,control,wait_for,current,running,attempts,profile_paths))
+        completed_attempts = len(attempts())
         (directory/'uncertain-start').write_text('fixture')
         control('start', fixture_unit, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
@@ -198,7 +202,7 @@ except Exception as error:
         assert run(['docker', 'inspect', '--format', '{{.State.Status}}', uncertain_id]).stdout.strip() == b'created'
         assert run([*cli, '--run', sha], check=False).returncode != 0
         assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
-        assert len(attempts()) == 7
+        assert len(attempts()) == completed_attempts+2
         outcomes['controller-uncertain-create-preserves-intent-without-adoption-or-start'] = True
         return outcomes
     finally:
@@ -223,6 +227,7 @@ except Exception as error:
                     run(['docker', 'rm', '-f', identifier], check=False)
         for path in units: path.unlink(missing_ok=True)
         control('daemon-reload')
-        if profile_path: profile_path.unlink(missing_ok=True)
+        for path in profile_paths: path.unlink(missing_ok=True)
+        shutil.rmtree(transitions,ignore_errors=True)
         shutil.rmtree(state, ignore_errors=True)
         run(['docker', 'image', 'rm', image], check=False)
