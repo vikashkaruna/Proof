@@ -6,7 +6,9 @@ Native fixture correction: the deliberate observer restart/crash/stop sequence e
 
 ## Fresh task checkpoint — Revision 71 remains in progress
 
-The user requested a fresh task and a status stop at each logical milestone. Use [Doc 17's concise continuation brief](17_Fresh_Session_Brief.md) for the saved branch, completed work, remaining priorities, decisions and validation limits. Revision 70 placement preflight is on staging `616ed02` (exact gate: CI 35861740826). The supervisor draft is saved separately on `codex/controller-supervision`; it is **not merged to staging or approved for activation**. Its 13 new unit tests pass (154 deployment tests total), and 16 host-delivery outcomes pass; the new native lifecycle fixture is unrun and a local private-port confinement probe was correctly refused. Complete review and native acceptance before claiming this draft green. The overall roadmap remains partial.
+Revision 70 is **complete and green** at staging `616ed02`, CI [35861740826](https://github.com/vikashkaruna/Proof/actions/runs/35861740826): all 19 applicable jobs and 13 exact-revision artifacts verified. This includes 33 native runner, 17 native issuer, 16 host-delivery, 71 assessment, 61 identity and five protected-trust outcomes. The supervisor remains a separate unverified draft.
+
+The user requested a fresh task and a status stop at each logical milestone. Use [Doc 17's concise continuation brief](17_Fresh_Session_Brief.md) for the saved branch, completed work, remaining priorities, decisions and validation limits. Revision 70 placement preflight is verified green on staging `616ed02`. The supervisor draft is saved separately on `codex/controller-supervision`; it is **not merged to staging or approved for activation**. Its 13 new unit tests pass (154 deployment tests total), and 16 host-delivery outcomes pass; the new native lifecycle fixture is unrun and a local private-port confinement probe was correctly refused. Complete review and native acceptance before claiming this draft green. The overall roadmap remains partial.
 
 ## Revision 70 — reviewed tenant-to-VM placement check
 

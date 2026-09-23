@@ -6,7 +6,7 @@ The user requested a fresh task and explicit status stops at logical milestones.
 
 - Revision 69: dedicated private Mumbai runner **VM per tenant**, each with a separate service account, address and state disk; shared separate private issuer; public APIs on Cloud Run. Staging `55282ea9239cd7df867367855b1d1b06b0cbb55c`, CI 35859815075, all 19 applicable jobs and 13 exact-revision artifacts verified green.
 - Earlier completed components retained: estate inventory and owner/admin proposal review; connector registry/contracts/lifecycle and credential/OAuth core; MFA recovery replacement assurance revocation; isolated assessment worker and durable encrypted dispatch, independent confirmation, key-policy rotation and configurable retention (default 90 days); pinned SPIRE host/enrollment/health/volume delivery, exact controller-role admission and protected controller files.
-- Revision 70: tenant/VM placement preflight shipped to staging `616ed0239ef27fce4f483a951baccd02132a65d0`. It binds reviewed tenant/file generation/node to fixed nonsensitive GCP metadata, Mumbai zone and active private interface. All 141 deployment tests and 16 Docker host-delivery checks pass locally. CI 35861740826 is the exact-merge gate; verify its final result and artifacts before declaring it green. This preflight alone does not activate a controller or complete W4.
+- Revision 70: tenant/VM placement preflight shipped to staging `616ed0239ef27fce4f483a951baccd02132a65d0`. It binds reviewed tenant/file generation/node to fixed nonsensitive GCP metadata, Mumbai zone and active private interface. All 141 deployment tests and 16 Docker host-delivery checks pass locally. CI [35861740826](https://github.com/vikashkaruna/Proof/actions/runs/35861740826) is verified **green**, with all 19 applicable jobs and 13 exact-revision artifacts checked. This preflight alone does not activate a controller or complete W4.
 
 ## Saved implementation in progress — Revision 71
 
@@ -22,7 +22,7 @@ A local Docker creation probe was **refused**, not green: its observation report
 
 ## Next order and remaining scope
 
-1. Confirm Revision 70 exact-merge CI; then review/fix/finish Revision 71 and run real native systemd/Docker acceptance plus existing regression gates. Keep the old 33 runner outcomes and separate actual production-entrypoint checks. Document exactly what is synthetic versus real.
+1. Revision 70 exact-merge CI is verified green. Review/fix/finish Revision 71 and run real native systemd/Docker acceptance plus existing regression gates. Keep the old 33 runner outcomes and separate actual production-entrypoint checks. Document exactly what is synthetic versus real.
 2. After green source/CI, update Docs 11–16, the map, audit and session; merge with `--no-ff` and push staging. Report a logical-milestone status and stop for the user.
 3. Subsequent work: effective tenant-scoped backend/secret/IAM/KMS permissions, private TLS/DNS, opaque scheduler deployment; real GCP IIT/caller/KMS and Mumbai backup/restore remain external acceptance gates. No cloud provisioning/apply is authorized in this session.
 4. Broader roadmap remains incomplete: W0 remote deployments/parity; W1 invitations/email/deployed acceptance; W2 **19/40 named target tables delivered** (schema tip 0048, 49 migrations, 55 public tables); W3 full resumable wizard/sustenance/live graph; W4 remaining worker/actor chains, live connector grants and later execution lifecycle; later W5–W10 phase gates. Do not equate completed infrastructure components with whole W0–W4 or goal completion.
