@@ -79,3 +79,5 @@ Revision 60 adds bounded issuer-sync health enforcement, preserving one-time cla
 Revision 61 adds read-only persistent SPIRE disk/state admission and explicit blank-disk checks. Supervised installation and actual cloud mount-loss acceptance remain pending; no deployment was activated.
 
 Revision 62 adds protected pinned host bundles and initialized-state-only systemd units. Delivery and native issuer lifecycle have dedicated acceptance gates; first enrollment and complete runner/controller activation remain pending. Read Docs 11–16 and the saved session before resuming.
+
+Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker delivery and 11 native issuer lifecycle outcomes. The broader combined CI result remains in the saved session.
