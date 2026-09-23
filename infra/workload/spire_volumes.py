@@ -20,7 +20,7 @@ OPTIONS='bind,ro,nosuid,nodev,noexec'
 
 
 def daemon_namespace() -> None:
-    raw=enrollment.control('show','--property=MainPID','--value','docker.service').decode('ascii').strip()
+    raw=enrollment.command(['/usr/bin/systemctl','show','--property=MainPID','--value','docker.service'],timeout=3).decode('ascii').strip()
     if not raw.isdigit() or int(raw)<=0:
         raise ValueError('Docker daemon process refused')
     process=Path('/proc')/raw

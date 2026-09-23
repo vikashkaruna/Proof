@@ -62,6 +62,12 @@ ENTRYPOINT ["/sbin/tini","--","node","--import","/app/node_modules/tsx/dist/load
         assert control('is-enabled', production, check=False).returncode != 0
         assert not state.exists()
         outcomes['controller-unit-delivery-is-reviewed-disabled-and-idempotent'] = True
+        original_unit = units[0].read_bytes()
+        units[0].write_bytes(original_unit+b'\n# conflicting fixture delivery\n')
+        assert run([*cli, '--install', str(review), sha], check=False).returncode != 0
+        assert units[0].read_bytes() != original_unit
+        units[0].write_bytes(original_unit)
+        outcomes['controller-install-conflict-preserved-without-replacement'] = True
         control('daemon-reload'); control('start', production, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', production).stdout.strip() == b'failed')
         assert not list(state.glob('*/intent.json'))
@@ -96,7 +102,12 @@ def uncertain(*args,**kwargs):
   raise ValueError('fixture lost create response')
  return result
 runtime.docker=uncertain
-runtime.main()
+try: runtime.main()
+except Exception as error:
+ import traceback
+ frames=[frame.name+':'+str(frame.lineno) for frame in traceback.extract_tb(error.__traceback__)]
+ Path(__file__).with_name('failure-location').write_text(' / '.join(frames))
+ raise
 '''); wrapper.chmod(0o600)
         units[1].write_bytes(units[0].read_bytes().replace((helper+' --run').encode(), (str(wrapper)+' --run').encode())); units[1].chmod(0o600)
         control('daemon-reload')
@@ -111,6 +122,9 @@ runtime.main()
             return run(['docker', 'inspect', '--format', '{{.State.Running}}', identifier], check=False).stdout.strip() == b'true'
         control('start', fixture_unit); wait_for(running)
         first = current(); first_id = json.loads((first/'container.json').read_text())['containerId']
+        assert run([*cli, '--run', sha], check=False).returncode != 0
+        assert running() and len(attempts()) == 1
+        outcomes['controller-concurrent-start-refused-without-disturbing-owner'] = True
         control('stop', fixture_unit)
         assert (first/'stopped.json').exists()
         observation = json.loads(run(['docker', 'inspect', first_id]).stdout)[0]
@@ -141,6 +155,21 @@ runtime.main()
         assert (third/'stopped.json').exists()
         assert run(['docker', 'inspect', '--format', '{{.State.Running}}', original_id]).stdout.strip() == b'false'
         outcomes['controller-explicit-owned-recovery-needs-no-placement-service'] = True
+        control('reset-failed', fixture_unit); control('start', fixture_unit); wait_for(running)
+        killed = current()
+        control('kill', '--kill-whom=main', '--signal=SIGKILL', fixture_unit)
+        wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
+        assert (killed/'stopped.json').exists()
+        outcomes['controller-wrapper-death-recovers-exact-id-through-stop-post'] = True
+        control('reset-failed', fixture_unit); control('start', fixture_unit); wait_for(running)
+        dependent = current()
+        control('stop', 'axiom-spire-health.service')
+        wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'inactive')
+        assert (dependent/'stopped.json').exists()
+        control('reset-failed', 'axiom-spire-health.service'); control('start', 'axiom-spire-health.service')
+        wait_for(lambda: json.loads(Path('/run/spire-health/status.json').read_text()).get('healthy') is True)
+        assert not active(fixture_unit)
+        outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
         control('reset-failed', fixture_unit); (directory/'uncertain').write_text('fixture')
         control('start', fixture_unit)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
@@ -150,10 +179,12 @@ runtime.main()
         assert run(['docker', 'inspect', '--format', '{{.State.Status}}', uncertain_id]).stdout.strip() == b'created'
         assert run([*cli, '--run', sha], check=False).returncode != 0
         assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
-        assert len(attempts()) == 4
+        assert len(attempts()) == 6
         outcomes['controller-uncertain-create-preserves-intent-without-adoption-or-start'] = True
         return outcomes
     finally:
+        if (directory/'failure-location').exists():
+            print('Synthetic controller fixture last failure location: '+(directory/'failure-location').read_text())
         for name in (fixture_unit, production): control('stop', name, check=False)
         # These IDs were captured from fixture-owned receipts or its explicit
         # create-response interception, never inferred from a production name.

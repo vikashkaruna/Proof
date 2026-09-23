@@ -31,6 +31,24 @@ def intended():
         return runtime.spec(PROFILE, SHA, READY, ATTEMPT)
 
 
+def observed_container(spec):
+    # Docker inspect contract; native acceptance independently exercises the CLI.
+    return {'Id': ID, 'Name': '/'+spec['name'], 'Image': IMAGE,
+            'Config': {'Labels': spec['labels'], 'User': '20000:20000', 'Entrypoint': runtime.ENTRYPOINT,
+                       'Cmd': ['--serve', '/run/controller-secrets/service.json'], 'WorkingDir': '/app/services/bff',
+                       'Hostname': spec['name'], 'OpenStdin': False, 'Tty': False, 'StopSignal': 'SIGTERM',
+                       'StopTimeout': 90, 'Env': spec['env']},
+            'HostConfig': {'NetworkMode': 'bridge', 'IpcMode': 'private', 'CgroupnsMode': 'private',
+                           'ReadonlyRootfs': True, 'Privileged': False, 'PidMode': '', 'UTSMode': '',
+                           'CapAdd': None, 'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'],
+                           'GroupAdd': [spec['group']], 'PidsLimit': 128, 'Memory': 536870912, 'MemorySwap': 536870912,
+                           'LogConfig': {'Type': 'none', 'Config': {}}, 'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0},
+                           'PortBindings': {'8443/tcp': [{'HostIp': spec['privateIp'], 'HostPort': '8443'}]},
+                           'Mounts': spec['mounts'], 'AutoRemove': False, 'PublishAllPorts': False,
+                           'OomKillDisable': False, 'UsernsMode': '', 'Runtime': 'runc'},
+            'State': {'Status': 'created', 'Running': False}}
+
+
 class RuntimePolicyTests(unittest.TestCase):
     def test_profile_refuses_credentials_or_alternate_authority(self):
         runtime.profile(PROFILE)
@@ -39,7 +57,7 @@ class RuntimePolicyTests(unittest.TestCase):
 
     def test_unit_preserves_daemon_namespace_and_bounded_stop_without_restart(self):
         unit = runtime.unit(PROFILE, SHA).decode()
-        self.assertIn('Restart=no', unit); self.assertIn('TimeoutStopSec=130', unit)
+        self.assertIn('Restart=no', unit); self.assertIn('TimeoutStopSec=180', unit)
         self.assertIn('--stop '+TENANT+' '+SHA, unit)
         self.assertIn('Type=exec', unit)
         self.assertNotIn('ProtectSystem=', unit); self.assertNotIn('PrivateTmp=', unit)
@@ -71,6 +89,38 @@ class RuntimePolicyTests(unittest.TestCase):
             with self.subTest(key=key), patch.object(runtime, 'observation', return_value={**observed, key: value}), self.assertRaises(ValueError): runtime.owned(ID, spec)
         with patch.object(runtime, 'observation') as inspect, self.assertRaises(ValueError): runtime.owned('short-id', spec)
         inspect.assert_not_called()
+
+
+    def test_created_confinement_accepts_exact_contract_and_refuses_every_changed_field(self):
+        spec = intended(); observed = observed_container(spec)
+        with patch.object(runtime, 'observation', return_value=observed): runtime.created(ID, spec)
+        for section in ('Config', 'HostConfig'):
+            for key, value in observed[section].items():
+                altered = copy.deepcopy(observed)
+                altered[section][key] = not value if isinstance(value, bool) else 'unexpected'
+                with self.subTest(section=section, key=key), patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError):
+                    runtime.created(ID, spec)
+
+    def test_private_binding_refuses_desktop_rewrite_public_wildcard_and_extra_port(self):
+        spec = intended()
+        ports = [{'8443/tcp': [{'HostIp': ip, 'HostPort': port}]} for ip, port in
+                 [('127.0.0.1', ''), ('0.0.0.0', '8443'), ('::', '8443'), ('10.0.0.12', '8443'), ('10.0.0.11', '')]]
+        ports.append({'8443/tcp': [{'HostIp': '10.0.0.11', 'HostPort': '8443'}], '80/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '80'}]})
+        for bindings in ports:
+            altered = observed_container(spec); altered['HostConfig']['PortBindings'] = bindings
+            with self.subTest(bindings=bindings), patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
+
+    def test_unrequested_host_authority_and_started_container_are_refused(self):
+        spec = intended()
+        for key in ('Binds', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'VolumesFrom', 'Links', 'ExtraHosts', 'Tmpfs', 'Sysctls', 'StorageOpt', 'CgroupParent', 'Dns', 'DnsOptions', 'DnsSearch'):
+            altered = observed_container(spec); altered['HostConfig'][key] = ['unrequested']
+            with self.subTest(key=key), patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
+        altered = observed_container(spec); altered['State']['Status'] = 'running'
+        with patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
+
+    def test_namespace_probe_uses_short_fixed_deadline(self):
+        with patch.object(runtime.enrollment, 'command', return_value=b'0\n') as command, self.assertRaises(ValueError): runtime.volumes.daemon_namespace()
+        command.assert_called_once_with(['/usr/bin/systemctl', 'show', '--property=MainPID', '--value', 'docker.service'], timeout=3)
 
 
 class RuntimeLifetimeTests(unittest.TestCase):
@@ -181,6 +231,61 @@ class RuntimeLifetimeTests(unittest.TestCase):
         runtime.enrollment.create(other/'intent.json', (self.attempt/'intent.json').read_bytes())
         with self.assertRaises(ValueError): runtime.stop(TENANT, self.sha)
         self.assertEqual(len(self.calls), 1)
+
+
+    def test_failed_confinement_leaves_unstarted_intent_without_adoption(self):
+        self.mocks['created'].side_effect = ValueError('confinement refused')
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        self.assertTrue((self.attempt/'intent.json').exists())
+        self.assertFalse((self.attempt/'container.json').exists())
+        self.assertEqual(len(self.calls), 1)
+
+    def test_receipt_persistence_failure_never_starts_container(self):
+        create = runtime.enrollment.create
+        def fail_receipt(path, data):
+            if path.name == 'container.json': raise OSError('disk failure')
+            return create(path, data)
+        with patch.object(runtime.enrollment, 'create', side_effect=fail_receipt), self.assertRaises(OSError): runtime.run(self.sha)
+        self.assertTrue((self.attempt/'intent.json').exists())
+        self.assertEqual(len(self.calls), 1)
+
+    def test_signal_during_create_records_id_then_stops_without_start(self):
+        original = self.docker
+        def interrupted(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if args[0] == 'create': signal.raise_signal(signal.SIGTERM)
+            return result
+        self.mocks['docker'].side_effect = interrupted
+        runtime.run(self.sha)
+        self.assertTrue((self.attempt/'stopped.json').exists())
+        self.assertEqual(len(self.calls), 1)
+
+    def test_stop_timeout_preserves_unresolved_attempt_and_explicit_retry(self):
+        original = self.docker
+        def timeout(*args, **kwargs):
+            if args[:2] == ('container', 'stop'): raise ValueError('stop uncertain')
+            return original(*args, **kwargs)
+        self.mocks['docker'].side_effect = timeout
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        self.assertFalse((self.attempt/'stopped.json').exists())
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        self.mocks['docker'].side_effect = original
+        runtime.stop(TENANT, self.sha)
+        self.assertTrue((self.attempt/'stopped.json').exists())
+
+    def test_corrupt_intent_profile_or_name_cannot_stop_container(self):
+        self.fail_start = True
+        self.mocks['owned'].side_effect = ValueError('unavailable')
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        path = self.attempt/'intent.json'; original = runtime.enrollment.load(path)
+        for field in ('name', 'labels'):
+            altered = copy.deepcopy(original)
+            if field == 'name': altered['spec']['name'] = 'foreign'
+            else: altered['spec']['labels'][runtime.LABEL+'profile'] = 'e'*64
+            path.write_bytes(runtime.enrollment.encode(altered))
+            before = len(self.calls)
+            with self.assertRaises(ValueError): runtime.stop(TENANT, self.sha)
+            self.assertEqual(len(self.calls), before)
 
 
 if __name__ == '__main__': unittest.main()

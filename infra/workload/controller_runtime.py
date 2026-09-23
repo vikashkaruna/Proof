@@ -74,7 +74,7 @@ ExecStart=/usr/bin/python3 -I -B {host.PREFIX}/controller_runtime.py --run {expe
 ExecStopPost=/usr/bin/python3 -I -B {host.PREFIX}/controller_runtime.py --stop {value['tenantId']} {expected}
 Restart=no
 TimeoutStartSec=180
-TimeoutStopSec=130
+TimeoutStopSec=180
 KillMode=control-group
 NoNewPrivileges=yes
 LimitCORE=0
@@ -173,7 +173,7 @@ def spec(value: dict, expected: str, ready: dict, attempt: str) -> dict:
 
 
 def arguments(value: dict) -> list[str]:
-    args = ['create', '--pull', 'never', '--name', value['name'], '--hostname', value['name'], '--user', '20000:20000', '--group-add', value['group'], '--network', 'bridge', '--ipc', 'private', '--cgroupns', 'private', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '512m', '--memory-swap', '512m', '--log-driver', 'none', '--restart', 'no', '--stop-signal', 'SIGTERM', '--publish', value['privateIp']+':8443:8443/tcp']
+    args = ['create', '--pull', 'never', '--name', value['name'], '--hostname', value['name'], '--user', '20000:20000', '--group-add', value['group'], '--network', 'bridge', '--ipc', 'private', '--cgroupns', 'private', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '512m', '--memory-swap', '512m', '--log-driver', 'none', '--restart', 'no', '--stop-signal', 'SIGTERM', '--stop-timeout', '90', '--publish', value['privateIp']+':8443:8443/tcp']
     for key, item in value['labels'].items(): args += ['--label', key+'='+item]
     for item in value['env']: args += ['--env', item]
     for mount in value['mounts']:
@@ -197,7 +197,9 @@ def created(identifier: str, intended: dict) -> None:
     config, setup = actual['Config'], actual['HostConfig']
     expected_config = {'User': '20000:20000', 'Entrypoint': ENTRYPOINT, 'Cmd': ['--serve', '/run/controller-secrets/service.json'], 'WorkingDir': '/app/services/bff', 'Hostname': intended['name'], 'OpenStdin': False, 'Tty': False, 'StopSignal': 'SIGTERM'}
     expected_host = {'NetworkMode': 'bridge', 'IpcMode': 'private', 'CgroupnsMode': 'private', 'ReadonlyRootfs': True, 'Privileged': False, 'PidMode': '', 'UTSMode': '', 'CapAdd': None, 'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'], 'GroupAdd': [intended['group']], 'PidsLimit': 128, 'Memory': 536870912, 'MemorySwap': 536870912, 'LogConfig': {'Type': 'none', 'Config': {}}, 'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}, 'PortBindings': {'8443/tcp': [{'HostIp': intended['privateIp'], 'HostPort': '8443'}]}, 'Mounts': intended['mounts']}
-    if any(config.get(key) != value for key, value in expected_config.items()) or any(setup.get(key) != value for key, value in expected_host.items()) or sorted(config.get('Env', [])) != sorted(intended['env']) or any(setup.get(key) for key in ('Binds', 'Devices', 'DeviceRequests', 'VolumesFrom', 'Links', 'ExtraHosts', 'Tmpfs')) or actual.get('State', {}).get('Status') != 'created':
+    expected_config['StopTimeout'] = 90
+    expected_host.update(AutoRemove=False, PublishAllPorts=False, OomKillDisable=False, UsernsMode='', Runtime='runc')
+    if any(config.get(key) != value for key, value in expected_config.items()) or any(setup.get(key) != value for key, value in expected_host.items()) or sorted(config.get('Env', [])) != sorted(intended['env']) or any(setup.get(key) for key in ('Binds', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'VolumesFrom', 'Links', 'ExtraHosts', 'Tmpfs', 'Sysctls', 'StorageOpt', 'CgroupParent', 'Dns', 'DnsOptions', 'DnsSearch')) or actual.get('State', {}).get('Status') != 'created':
         raise ValueError('created controller confinement refused')
 
 
@@ -219,10 +221,10 @@ def pending(directory: Path) -> list[Path]:
 
 def stop_attempt(directory: Path, expected: str) -> None:
     intent = enrollment.load(directory/'intent.json')
-    if set(intent) != {'schemaVersion', 'profileSha256', 'spec'} or intent['schemaVersion'] != 1 or intent['profileSha256'] != expected or intent['spec']['labels'].get(LABEL+'attempt') != directory.name or intent['spec']['labels'].get(LABEL+'tenant') != directory.parent.name:
+    if set(intent) != {'schemaVersion', 'profileSha256', 'spec'} or type(intent['schemaVersion']) is not int or intent['schemaVersion'] != 1 or intent['profileSha256'] != expected or intent['spec']['labels'] != {LABEL+'attempt': directory.name, LABEL+'tenant': directory.parent.name, LABEL+'profile': expected} or intent['spec']['name'] != 'axiom-controller-'+directory.name:
         raise ValueError('runtime intent refused')
     record = enrollment.load(directory/'container.json')
-    if set(record) != {'schemaVersion', 'containerId'} or record['schemaVersion'] != 1: raise ValueError('container receipt refused')
+    if set(record) != {'schemaVersion', 'containerId'} or type(record['schemaVersion']) is not int or record['schemaVersion'] != 1: raise ValueError('container receipt refused')
     identifier = record['containerId']
     actual = owned(identifier, intent['spec'])
     if actual.get('State', {}).get('Running'):

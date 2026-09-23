@@ -96,11 +96,11 @@ class InspectTests(unittest.TestCase):
 class MountedMappingTests(unittest.TestCase):
     def test_foreign_daemon_namespace_cannot_hide_active_mounts(self):
         for inode,owner in ((2,0),(3,0),(2,99)):
-            with patch.object(volumes.enrollment,'control',return_value=b'123\n'),patch.object(Path,'stat',side_effect=[SimpleNamespace(st_uid=owner),SimpleNamespace(st_dev=1,st_ino=inode),SimpleNamespace(st_dev=1,st_ino=2)]):
+            with patch.object(volumes.enrollment,'command',return_value=b'123\n'),patch.object(Path,'stat',side_effect=[SimpleNamespace(st_uid=owner),SimpleNamespace(st_dev=1,st_ino=inode),SimpleNamespace(st_dev=1,st_ino=2)]):
                 if inode==2 and owner==0:volumes.daemon_namespace()
                 else:
                     with self.assertRaises(ValueError):volumes.daemon_namespace()
-        with patch.object(volumes.enrollment,'control',return_value=b'0\n'):
+        with patch.object(volumes.enrollment,'command',return_value=b'0\n'):
             with self.assertRaises(ValueError):volumes.daemon_namespace()
 
     def test_active_bind_requires_original_inode_and_read_only_flags(self):
