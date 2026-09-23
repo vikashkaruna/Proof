@@ -174,7 +174,7 @@ except Exception as error:
         assert not active(fixture_unit)
         outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
         control('reset-failed', fixture_unit); (directory/'uncertain-start').write_text('fixture')
-        control('start', fixture_unit)
+        control('start', fixture_unit, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
         queued = current(); queued_id = json.loads((queued/'container.json').read_text())['containerId']; ids.add(queued_id)
         assert (queued/'start.json').exists() and not (queued/'stopped.json').exists()
@@ -188,7 +188,7 @@ except Exception as error:
         (directory/'uncertain-start').unlink()
         outcomes['controller-uncertain-start-remains-blocked-until-owned-stop-observed'] = True
         control('reset-failed', fixture_unit); (directory/'uncertain').write_text('fixture')
-        control('start', fixture_unit)
+        control('start', fixture_unit, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
         uncertain_id = (directory/'created-id').read_text().strip(); ids.add(uncertain_id)
         last = next(p for p in attempts() if not (p/'container.json').exists())
@@ -201,6 +201,8 @@ except Exception as error:
         return outcomes
     finally:
         print('Synthetic controller fixture completed checks: '+', '.join(sorted(outcomes)))
+        for name in (fixture_unit, 'axiom-spire-health.service', 'axiom-spire-runner.service'):
+            print('Synthetic fixture unit status '+name+': '+control('show', '--property=ActiveState,SubState,Result', name, check=False).stdout.decode().strip().replace('\n', ' '))
         if (directory/'failure-location').exists():
             print('Synthetic controller fixture last failure location: '+(directory/'failure-location').read_text())
         for name in (fixture_unit, production): control('stop', name, check=False)
