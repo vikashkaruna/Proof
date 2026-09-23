@@ -2,7 +2,14 @@
 set -euo pipefail
 container="$1"
 result_dir=$(mktemp -d)
-trap 'rm -rf "$result_dir"' EXIT
+cleanup() {
+ local pid running_pids
+ running_pids=$(jobs -pr)
+ for pid in $running_pids; do kill "$pid" 2>/dev/null || true; done
+ for pid in $running_pids; do wait "$pid" 2>/dev/null || true; done
+ rm -rf "$result_dir"
+}
+trap cleanup EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
 index=0
 fixture() {
@@ -26,18 +33,31 @@ barrier() {
   if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
   sleep 0.05
  done
- echo 'Registration concurrency barrier not reached'; exit 1
+ echo "Registration concurrency barrier not reached: $1 $2 $3"; exit 1
 }
 race() {
- sql -c "set application_name='registration-first'; begin; set local role service_role; $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
+ # Keep the first writer's transaction open until the second writer is
+ # demonstrably blocked. A fixed pg_sleep window can elapse while a busy
+ # hosted runner is launching/observing the second Docker exec.
+ local gate="$result_dir/gate-$index"
+ mkfifo "$gate"
+ sql < "$gate" > "$result_dir/gate" 2>&1 &
+ local gate_pid=$!
+ exec 9> "$gate"
+ printf "set application_name='registration-gate'; begin; select pg_advisory_xact_lock(777701,%s);\n" "$index" >&9
+ barrier registration-gate state 'idle in transaction'
+ sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-first'; begin; set local role service_role; $1; select pg_advisory_xact_lock(777701,$index); commit;" > "$result_dir/first" 2>&1 &
  local first_pid=$!
- barrier registration-first wait_event PgSleep
- sql -c "set application_name='registration-second'; set role service_role; $2;" > "$result_dir/second" 2>&1 &
+ barrier registration-first wait_event advisory
+ sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-second'; set role service_role; $2;" > "$result_dir/second" 2>&1 &
  local second_pid=$!
  barrier registration-second wait_event_type Lock
+ printf 'commit;\n' >&9
+ exec 9>&-
+ wait "$gate_pid" || { cat "$result_dir/gate"; exit 1; }
  wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
  wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
-}
+ }
 fixture
 race "select $scope.manage(1,'disabled')" "select $scope.finish_tool()"
 grep -q task_refused "$result_dir/second"
