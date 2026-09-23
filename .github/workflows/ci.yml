@@ -32,6 +32,11 @@ jobs:
       - run: pnpm exec tsc -p scripts/tsconfig.acceptance.json
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: ./scripts/test-deployed-http.sh --browser
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -136,6 +141,11 @@ jobs:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/test-strict-parity.sh
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -199,6 +209,11 @@ jobs:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/start-parity-supabase.sh
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: pnpm --filter @axiom/e2e exec playwright test

@@ -12,6 +12,8 @@ Actual CLI and BFF-consumer acceptance against the existing isolated Docker back
 
 **Next and limits:** renewal creates a reviewed fresh credential; it does not switch a running host. Protected generation transition and actual secret publication remain next, followed by effective inherited/cloud IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial, W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Source/staging results are recorded only after verification in this task's `.axiom-runtime/revision74` checkpoint.
 
+**Staging recovery in progress:** PR 40 merged to `88b2f31`, but CI 35897974592 attempts 1 and 2 failed before tests on image registry/auth/rate-limit startup errors. Clearing the setup action's GHCR-only override restores the pinned CLI's supported registry fallback for the three isolated CI stacks. Service versions and checks remain unchanged; renewed full source/exact-merge acceptance is required. See audit 63 for the diagnostic boundary.
+
 ## Current work and continuation
 
 - Worktree: `/Users/vikash/.codex/worktrees/750f/Axiom Proof`; branch `codex/revision74-controller-credential-lifecycle`, based on verified Revision 73 staging `5efb40d`. Do not edit the original checkout or old `w0-w3-closure` checkout; their WIP is preserved. Do not reload or fork the old conversation.

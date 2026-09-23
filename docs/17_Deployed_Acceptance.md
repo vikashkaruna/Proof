@@ -12,6 +12,8 @@ Actual CLI and BFF-consumer acceptance against the existing isolated Docker back
 
 This runner creates synthetic tenants, accounts, MFA factors, assessments, estate inventory, connector registrations, proposals and approval fixtures. Use an **isolated acceptance deployment**, never a client production database. A production-configured acceptance stack uses production security rules with synthetic data. It does not execute connector actions. Fixture rows and append-only ledger events remain after the run; reset/dispose of the isolated database through its normal operator lifecycle. Do not delete audit history to clean up a shared deployment.
 
+**Staging recovery in progress:** PR 40 merged to `88b2f31`, but CI 35897974592 attempts 1 and 2 failed before tests on image registry/auth/rate-limit startup errors. Clearing the setup action's GHCR-only override restores the pinned CLI's supported registry fallback for the three isolated CI stacks. Service versions and checks remain unchanged; renewed full source/exact-merge acceptance is required. See audit 63 for the diagnostic boundary.
+
 ## Prepare the target
 
 1. Deploy BFF, web and marketing from the same clean Git revision. Supply `--build-arg AXIOM_RELEASE_SHA=<40-character SHA>` to each Docker build. The image retains that revision; do not override it with an unrelated runtime value. The preprod image builder supplies it for clean checkouts. A dirty build has no trustworthy release identity.
