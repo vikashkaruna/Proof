@@ -4,9 +4,9 @@ The user requested one bounded milestone per task, with explicit completed/pendi
 
 ## Current source and integration gate
 
-- Last verified staging checkpoint: Revision 70, `616ed0239ef27fce4f483a951baccd02132a65d0`, CI [35861740826](https://github.com/vikashkaruna/Proof/actions/runs/35861740826), all 19 applicable jobs and 13 exact-revision artifacts green.
+- Prior staging baseline: Revision 70, `616ed0239ef27fce4f483a951baccd02132a65d0`, CI [35861740826](https://github.com/vikashkaruna/Proof/actions/runs/35861740826), all 19 applicable jobs and 13 exact-revision artifacts green.
 - Original WIP is preserved on `codex/controller-supervision` at `b7fe4f03cd742636955f8231df9d8f5699a076a8` (implementation checkpoint `1912444`). It is not the finished Revision 71 evidence.
-- Current task owns `codex/revision71-controller-review` in `/Users/vikash/.codex/worktrees/750f/Axiom Proof`, with [PR 37](https://github.com/vikashkaruna/Proof/pull/37). Native/source CI and exact staging integration must pass before claiming completion. Final confirmed source, merge, CI and artifact outcomes are recorded in Doc 15 and `.axiom-runtime/revision71`.
+- Current task owns `codex/revision71-controller-review` in `/Users/vikash/.codex/worktrees/750f/Axiom Proof`, with [PR 37](https://github.com/vikashkaruna/Proof/pull/37). Source [CI 35868902682](https://github.com/vikashkaruna/Proof/actions/runs/35868902682) passes all 19 applicable jobs and 13 exact-revision result artifacts, including 45 native runner outcomes with the earlier 33 preserved. Exact staging integration is recorded at the milestone stop; read this task’s `.axiom-runtime/session-checkpoint.json` or inspect the staging CI before continuing. The verified source checkpoint is recorded in Doc 15; final exact-merge CI and artifacts are recorded in this task’s `.axiom-runtime/revision71` and `.axiom-runtime/session-checkpoint.json`.
 - Do not edit `/Users/vikash/Axiom Proof` or `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`. Both are separate task checkouts. Do not reload/fork the old conversation.
 
 ## Revision 71 scope
