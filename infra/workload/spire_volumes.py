@@ -20,7 +20,7 @@ OPTIONS='bind,ro,nosuid,nodev,noexec'
 
 
 def daemon_namespace() -> None:
-    raw=enrollment.control('show','--property=MainPID','--value','docker.service').decode('ascii').strip()
+    raw=enrollment.command(['/usr/bin/systemctl','show','--property=MainPID','--value','docker.service'],timeout=3).decode('ascii').strip()
     if not raw.isdigit() or int(raw)<=0:
         raise ValueError('Docker daemon process refused')
     process=Path('/proc')/raw
@@ -61,12 +61,23 @@ def sources() -> dict:
     return result
 
 
+def health_snapshot() -> bytes:
+    path = SOURCES['health']/'status.json'
+    try:
+        return host.read_file(path,4096,0o644)
+    except host.RetiredSnapshot:
+        # The observer atomically replaces this live file. Discard the retired
+        # inode and perform one new fully protected read; never accept nlink=0,
+        # relax static-file checks, or retry other protection failures.
+        return host.read_file(path,4096,0o644)
+
+
 def live(expected: str) -> tuple[dict,dict]:
     binding=enrollment.installed(expected,'runner')
     state.check('--ready','runner')
     active('axiom-spire-runner.service');active('axiom-spire-health.service')
     identity=sources()
-    raw=host.read_file(SOURCES['health']/'status.json',4096,0o644)
+    raw=health_snapshot()
     value=json.loads(raw,object_pairs_hook=host.unique);now=time.time_ns()//1000000
     fields={'schemaVersion','healthy','nodeId','observedAtMs','syncAtMs','certificateExpiresAtMs'}
     if not isinstance(value,dict) or set(value)!=fields or type(value['schemaVersion']) is not int or value['schemaVersion']!=1 or value['healthy'] is not True or value['nodeId']!=binding['nodeId']:

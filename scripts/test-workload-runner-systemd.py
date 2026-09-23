@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from lib.spire_host_bundle import prepare, selected_binary
 from lib.spire_deployment import VERSION, deployment_bundle
+from lib.controller_runtime_acceptance import accept as controller_runtime_acceptance
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('native_fixture',ROOT/'scripts/test-workload-host-systemd.py')
@@ -216,6 +217,7 @@ def main():
         outcomes['controller-file-consumer-has-read-only-files-without-daemon']=True
         assert file_consumer(20003,'cat /run/controller-secrets/backend.key').returncode!=0
         outcomes['controller-private-files-refuse-worker-uid']=True
+        outcomes.update(controller_runtime_acceptance(root,prefix,ALPINE,tenant,service_config,manifest_sha,api_volume,health_volume,consumer,run,control,active,wait_for))
         saved=(delivered/'backend.key').read_bytes();(delivered/'backend.key').write_bytes(b'changed-by-test-root')
         assert run([*delivery,'--check',tenant,file_sha],check=False).returncode!=0
         assert run([*delivery,'--install',str(private),file_sha],check=False).returncode!=0
@@ -316,5 +318,5 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as error:
-        frames=[f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-runner-systemd.py','test-workload-host-systemd.py','spire_host.py')]
+        frames=[f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-runner-systemd.py','test-workload-host-systemd.py','controller_runtime_acceptance.py','spire_host.py')]
         print('Native runner acceptance refused at '+' / '.join(frames)+'. Private diagnostics withheld.',file=sys.stderr);sys.exit(1)
