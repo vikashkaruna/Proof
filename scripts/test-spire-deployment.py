@@ -17,6 +17,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import traceback
 import uuid
 from pathlib import Path
 
@@ -49,6 +50,11 @@ def main() -> None:
     output = state / "results.json"
     output.unlink(missing_ok=True)
     temp = Path(tempfile.mkdtemp(prefix="run-", dir=state))
+    # Linux bind mounts preserve the host runner's UID. Capability-less root
+    # must be able to read these PUBLIC fixture inputs without DAC overrides.
+    # No token/private key is ever stored here; node/issuer state stays in their
+    # separate private volumes. Production review bundles remain mode 0600.
+    temp.chmod(0o755)
     prefix = "axiom-spire-deploy-" + uuid.uuid4().hex[:12]
     issuer, node, network = prefix + "-issuer", prefix + "-node", prefix + "-net"
     volumes = [prefix + suffix for suffix in ("-issuer-state", "-node-state", "-api")]
@@ -78,7 +84,8 @@ def main() -> None:
                     raise RuntimeError("missing binary")
                 (temp / binary).write_bytes(stream.read())
                 (temp / binary).chmod(0o755)
-        run(["docker", "pull", IMAGE], timeout=180)
+        if run(["docker", "image", "inspect", IMAGE], required=False).returncode:
+            run(["docker", "pull", IMAGE], timeout=180)
         image = run(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"]).stdout.strip()
         run(["docker", "build", "-t", wrong_tag, "-"], data=f"FROM {IMAGE}\nLABEL axiom.acceptance.variant=wrong-image\n", timeout=120)
         wrong_image = run(["docker", "image", "inspect", wrong_tag, "--format", "{{.Id}}"]).stdout.strip()
@@ -97,6 +104,8 @@ def main() -> None:
         # join-token switch, hostname override or arbitrary plugin interface.
         (temp / "server-test.conf").write_text(bundle["server.conf"].replace('bind_address = "10.23.0.10"', 'bind_address = "0.0.0.0"').replace('NodeAttestor "gcp_iit" { plugin_data { projectid_allow_list = ["axiom-local-test"] use_instance_metadata = false } }', 'NodeAttestor "join_token" { plugin_data {} }'))
         (temp / "agent-test.conf").write_text(bundle["agent.conf"].replace('server_address = "10.23.0.10"', 'server_address = "issuer"').replace('NodeAttestor "gcp_iit"', 'NodeAttestor "join_token"'))
+        for config in temp.glob("*.conf"):
+            config.chmod(0o644)
         for volume in volumes:
             run(["docker", "volume", "create", volume])
             created_volumes.append(volume)
@@ -140,6 +149,7 @@ def main() -> None:
         server = ["docker", "exec", issuer, "spire-server"]
         bootstrap = run(server + ["bundle", "show", "-socketPath", SERVER_SOCKET, "-format", "pem"]).stdout
         (temp / "bootstrap.pem").write_text(bootstrap)
+        (temp / "bootstrap.pem").chmod(0o644)
         # /spire/agent is reserved for node attestors and cannot be used as a
         # join-token alias. Substitute only this parent in the local fixture.
         parent = "spiffe://deployment.axiomproof.test/node/acceptance"
@@ -271,6 +281,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        print("SPIRE deployment acceptance failed; private diagnostics withheld.", file=sys.stderr)
+    except Exception as error:
+        locations = [f"{frame.name}:{frame.lineno}" for frame in traceback.extract_tb(error.__traceback__) if frame.filename == __file__]
+        print(f"SPIRE deployment acceptance failed at {' / '.join(locations)}; private diagnostics withheld.", file=sys.stderr)
         sys.exit(1)

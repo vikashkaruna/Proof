@@ -10,6 +10,8 @@ The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptanc
 
 ## Revision 59 — exact node/image admission and separate SPIRE persistence
 
+**CI follow-up:** initial merge `bf20863`, CI 35827110239, passed the existing identity checks but failed the new fixture before enrollment on Linux. Its capability-less root could not read host-runner-owned owner-only bind-mounted configuration. Only non-secret test configuration/CA files and their directory now have explicit read access through read-only mounts; private node/issuer volumes and production owner-only bundles are unchanged. Fixture failures report source function/line locations without raw diagnostics. Corrective exact-merge evidence is recorded in the session.
+
 Revision 58 is **complete and green** at staging `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits.
 
 **Delivered:** an offline, strict SPIRE policy renderer prepares the separate issuer/node configurations and two proposed registrations for the implemented controller and Parikshan worker. Each registration requires the exact GCP project/immutable instance parent, intended UID and Docker image configuration digest. Tags, extra fields, unsafe addresses and malformed identities are refused. Persistent issuer registry/signing-key and node-key paths, protected initial CA, disabled rebootstrap, authenticated verifier access and separate admin sockets are explicit. Rendering never starts services, enrolls nodes, applies registrations or overwrites a reviewed bundle. Release metadata pins SPIRE 1.15.3; host installation and mount guards remain open.
