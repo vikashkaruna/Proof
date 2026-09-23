@@ -203,7 +203,7 @@ export async function verifyControllerEntrypoint(input: {
       'node',
       input.image,
       '-e',
-      `const fs=require('node:fs'),https=require('node:https'),http=require('node:http');let reads=0,refused=0;const server=https.createServer({key:fs.readFileSync('${DIRECTORY}/tls.key'),cert:fs.readFileSync('${DIRECTORY}/tls.crt')},(req,res)=>{if(req.method==='GET'&&req.url==='/ready'){res.writeHead(204).end();return;}if(req.method==='GET'&&req.url==='/observations'){res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({reads,refused}));return;}if(req.method!=='GET'||!req.url.startsWith('/rest/v1/assessment_dispatch_key_policies?')){refused++;res.writeHead(405).end();return;}reads++;const upstream=http.request({hostname:'host.docker.internal',port:56321,path:req.url,method:'GET',headers:req.headers,timeout:5000},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});upstream.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});upstream.on('timeout',()=>upstream.destroy());req.pipe(upstream);});server.listen(8443,'0.0.0.0');`,
+      `const fs=require('node:fs'),https=require('node:https'),http=require('node:http');let reads=0,refused=0;const server=https.createServer({key:fs.readFileSync('${DIRECTORY}/tls.key'),cert:fs.readFileSync('${DIRECTORY}/tls.crt')},(req,res)=>{if(req.method==='GET'&&req.url==='/ready'){res.writeHead(204).end();return;}if(req.method==='GET'&&req.url==='/observations'){res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({reads,refused}));return;}if(req.method!=='GET'||!(req.url.startsWith('/rest/v1/assessment_dispatch_key_policies?')||req.url==='/rest/v1/rpc/current_assessment_controller_tenant')){refused++;res.writeHead(405).end();return;}reads++;const upstream=http.request({hostname:'host.docker.internal',port:56321,path:req.url,method:'GET',headers:req.headers,timeout:5000},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});upstream.on('error',()=>{if(!res.headersSent)res.writeHead(503);res.end();});upstream.on('timeout',()=>upstream.destroy());req.pipe(upstream);});server.listen(8443,'0.0.0.0');`,
     ]);
     await required(['network', 'connect', 'bridge', proxy]);
     phase = 'backend-ready';
@@ -340,7 +340,11 @@ export async function verifyControllerEntrypoint(input: {
     const environment = JSON.parse(
       await required(['inspect', '--format', '{{json .Config.Env}}', controller]),
     ) as string[];
-    for (const value of [input.serviceKey, input.privateKey])
+    for (const value of [
+      input.serviceKey,
+      JSON.parse(input.serviceKey).accessToken,
+      input.privateKey,
+    ])
       assert(environment.every((entry) => !entry.includes(value)));
     outcomes['vm-entrypoint-container-env-excludes-backend-and-tls-secrets'] = true;
     phase = 'backend-observations';

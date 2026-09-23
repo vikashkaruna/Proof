@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { readControllerFile, controllerBackendCredentials } from './controller-files.js';
+import {
+  readControllerFile,
+  controllerBackendCredentials,
+  requireControllerBackend,
+} from './controller-files.js';
 import { mkdtemp, writeFile, chmod, symlink, rm, realpath } from 'node:fs/promises';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantId } from '@axiom/types';
@@ -319,18 +323,37 @@ it('refuses a missing runner image or socket volume before reading backend state
   expect(f.load).not.toHaveBeenCalled();
 });
 
+const encodedJwt = (claims: object) =>
+  [
+    Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+    Buffer.from(JSON.stringify(claims)).toString('base64url'),
+    Buffer.from('synthetic-signature-not-a-real-signer').toString('base64url'),
+  ].join('.');
+const backendCredential = (claims: object = {}) => ({
+  schemaVersion: 1,
+  apiKey: encodedJwt({ role: 'anon' }),
+  accessToken: encodedJwt({
+    role: 'axiom_assessment_controller',
+    sub: randomUUID(),
+    tenant_id: tenant,
+    iat: Math.floor(Date.now() / 1000) - 1,
+    exp: Math.floor(Date.now() / 1000) + 300,
+    ...claims,
+  }),
+});
 const backendEnvironment = {
   AXIOM_REGION: 'ap-south-1',
   SUPABASE_URL: 'https://backend.example.test',
 };
 it('loads a protected backend key without putting it in the environment', async () => {
   const f = await protectedFile();
-  const value = 'synthetic-backend-fixture-key-for-startup';
-  await writeFile(f.filename, value + '\n');
+  const value = backendCredential();
+  await writeFile(f.filename, JSON.stringify(value) + '\n');
   const env = { ...backendEnvironment };
-  expect(await controllerBackendCredentials(f.filename, env)).toEqual({
+  expect(await controllerBackendCredentials(f.filename, env, tenant)).toEqual({
     url: backendEnvironment.SUPABASE_URL,
-    serviceKey: value,
+    apiKey: value.apiKey,
+    accessToken: value.accessToken,
   });
   expect(env).toEqual(backendEnvironment);
 });
@@ -345,12 +368,16 @@ it.each([
   'UNREVIEWED_SETTING',
 ])('refuses broad or secret-bearing controller environment: %s', async (name) => {
   const f = await protectedFile();
-  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await writeFile(f.filename, JSON.stringify(backendCredential()));
   await expect(
-    controllerBackendCredentials(f.filename, {
-      ...backendEnvironment,
-      [name]: 'synthetic-private-value',
-    }),
+    controllerBackendCredentials(
+      f.filename,
+      {
+        ...backendEnvironment,
+        [name]: 'synthetic-private-value',
+      },
+      tenant,
+    ),
   ).rejects.toThrow(/^Controller backend credentials refused$/);
 });
 it.each([
@@ -364,40 +391,52 @@ it.each([
 ])('refuses malformed backend key files without exposing their content %#', async (value) => {
   const f = await protectedFile();
   await writeFile(f.filename, value);
-  await expect(controllerBackendCredentials(f.filename, backendEnvironment)).rejects.toThrow(
-    /^Controller backend credentials refused$/,
-  );
+  await expect(
+    controllerBackendCredentials(f.filename, backendEnvironment, tenant),
+  ).rejects.toThrow(/^Controller backend credentials refused$/);
 });
 it('does not fall back to environment credentials for missing or exposed files', async () => {
   const f = await protectedFile();
-  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await writeFile(f.filename, JSON.stringify(backendCredential()));
   await chmod(f.filename, 0o644);
-  await expect(controllerBackendCredentials(f.filename, backendEnvironment)).rejects.toThrow(
-    /^Controller backend credentials refused$/,
-  );
   await expect(
-    controllerBackendCredentials('/missing/backend.key', {
-      ...backendEnvironment,
-      SUPABASE_SERVICE_KEY: 'synthetic-backend-fixture-key-for-startup',
-    }),
+    controllerBackendCredentials(f.filename, backendEnvironment, tenant),
+  ).rejects.toThrow(/^Controller backend credentials refused$/);
+  await expect(
+    controllerBackendCredentials(
+      '/missing/backend.key',
+      {
+        ...backendEnvironment,
+        SUPABASE_SERVICE_KEY: 'synthetic-backend-fixture-key-for-startup',
+      },
+      tenant,
+    ),
   ).rejects.toThrow(/^Controller backend credentials refused$/);
 });
 it('accepts mounted cloud identity file paths but rejects inline credential values', async () => {
   const f = await protectedFile();
-  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await writeFile(f.filename, JSON.stringify(backendCredential()));
   expect(
     (
-      await controllerBackendCredentials(f.filename, {
-        ...backendEnvironment,
-        GOOGLE_APPLICATION_CREDENTIALS: '/run/identity/credentials.json',
-      })
+      await controllerBackendCredentials(
+        f.filename,
+        {
+          ...backendEnvironment,
+          GOOGLE_APPLICATION_CREDENTIALS: '/run/identity/credentials.json',
+        },
+        tenant,
+      )
     ).url,
   ).toBe(backendEnvironment.SUPABASE_URL);
   await expect(
-    controllerBackendCredentials(f.filename, {
-      ...backendEnvironment,
-      GOOGLE_APPLICATION_CREDENTIALS: '{"private_key":"synthetic"}',
-    }),
+    controllerBackendCredentials(
+      f.filename,
+      {
+        ...backendEnvironment,
+        GOOGLE_APPLICATION_CREDENTIALS: '{"private_key":"synthetic"}',
+      },
+      tenant,
+    ),
   ).rejects.toThrow(/^Controller backend credentials refused$/);
 });
 
@@ -408,8 +447,8 @@ it.each([
   { SUPABASE_URL: backendEnvironment.SUPABASE_URL },
 ])('refuses unsafe backend transport or missing regional binding %#', async (env) => {
   const f = await protectedFile();
-  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
-  await expect(controllerBackendCredentials(f.filename, env)).rejects.toThrow(
+  await writeFile(f.filename, JSON.stringify(backendCredential()));
+  await expect(controllerBackendCredentials(f.filename, env, tenant)).rejects.toThrow(
     /^Controller backend credentials refused$/,
   );
 });
@@ -422,4 +461,58 @@ it('refuses controller role admission before accessing backend policy or dispatc
   );
   expect(f.from).not.toHaveBeenCalled();
   expect(f.rpc).not.toHaveBeenCalled();
+});
+
+it.each([
+  { role: 'service_role' },
+  { tenant_id: foreign },
+  { sub: 'invalid' },
+  { exp: 1 },
+  { iat: Math.floor(Date.now() / 1000) + 100 },
+  { exp: Math.floor(Date.now() / 1000) + 7200 },
+])('rejects broad, foreign or expired controller credential claims %#', async (claims) => {
+  const f = await protectedFile();
+  await writeFile(f.filename, JSON.stringify(backendCredential(claims)));
+  await expect(
+    controllerBackendCredentials(f.filename, backendEnvironment, tenant),
+  ).rejects.toThrow('Controller backend credentials refused');
+});
+
+it.each([null, foreign, { tenantId: tenant }])(
+  'refuses an unattested backend tenant response %#',
+  async (data) => {
+    const db = {
+      rpc: vi.fn(() => ({ abortSignal: vi.fn(async () => ({ data, error: null })) })),
+    } as unknown as SupabaseClient;
+    await expect(requireControllerBackend(db, tenant)).rejects.toThrow(
+      'Controller backend scope refused',
+    );
+  },
+);
+it('requires a successful bounded read-only backend scope check', async () => {
+  const abortSignal = vi.fn(async () => ({ data: tenant, error: null }));
+  const rpc = vi.fn(() => ({ abortSignal }));
+  await requireControllerBackend({ rpc } as unknown as SupabaseClient, tenant);
+  expect(rpc).toHaveBeenCalledWith('current_assessment_controller_tenant', {}, { get: true });
+  expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+});
+it('refuses a backend authorization error even with a matching response', async () => {
+  const db = {
+    rpc: vi.fn(() => ({
+      abortSignal: vi.fn(async () => ({ data: tenant, error: { code: '42501' } })),
+    })),
+  } as unknown as SupabaseClient;
+  await expect(requireControllerBackend(db, tenant)).rejects.toThrow(
+    'Controller backend scope refused',
+  );
+});
+it('refuses a service-role gateway key even with a scoped bearer credential', async () => {
+  const f = await protectedFile();
+  await writeFile(
+    f.filename,
+    JSON.stringify({ ...backendCredential(), apiKey: encodedJwt({ role: 'service_role' }) }),
+  );
+  await expect(
+    controllerBackendCredentials(f.filename, backendEnvironment, tenant),
+  ).rejects.toThrow('Controller backend credentials refused');
 });
