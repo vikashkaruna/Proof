@@ -61,3 +61,5 @@ Revision 50 verifies remote transport at staging `b40685f` / CI 35711878303 and 
 Revision 53 verifies persisted policy fencing at staging `a01604b` / CI 35813509615 and runs each private assessment in a separate constrained container. Real SPIRE/Postgres acceptance covers concurrent job isolation, read-only files, metadata refusal and bounded cleanup. Production trust/runner composition, remaining workers, live grants and full W3/W4 remain open; see review 42 and Doc 16.
 
 Revision 54 verifies per-job isolation at staging `c17f428` / CI 35814929318 and adds audited, version-checked workload registration. Disable permanently revokes old tasks/grants; re-enable cannot restore them. The user selected a dedicated Mumbai VM runner for higher environments with public APIs on Cloud Run. Deployment/trust composition and the remaining W3/W4 scope are still open; see review 43 and Doc 16.
+
+Revision 54 CI follow-up: initial merge `1e1207d` failed shared fixture setup, now corrected to audited registration and explicit direct-write refusal. Exact corrective merge CI is required before claiming this milestone green.

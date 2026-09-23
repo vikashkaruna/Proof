@@ -115,6 +115,7 @@ async function main() {
   }
   const viewer = await createUser();
   const owner = await createUser();
+  const registrationOwnerA = await createUser();
   const tenantA = randomUUID();
   const tenantB = randomUUID();
   assert.equal(
@@ -130,6 +131,7 @@ async function main() {
     (
       await apiRequest('/rest/v1/tenant_users', 'POST', [
         { tenant_id: tenantA, user_id: viewer.id, role: 'viewer' },
+        { tenant_id: tenantA, user_id: registrationOwnerA.id, role: 'owner' },
         { tenant_id: tenantB, user_id: owner.id, role: 'owner' },
       ])
     ).status,
@@ -227,20 +229,44 @@ async function main() {
       assurance: 'high',
     },
   ]);
-  await seedConnectorTable('workload_identities', [
-    {
-      id: identityA,
-      tenant_id: tenantA,
-      agent_name: 'drishti',
-      spiffe_id: 'spiffe://parity/agent/drishti',
-    },
-    {
-      id: identityB,
-      tenant_id: tenantB,
-      agent_name: 'karya',
-      spiffe_id: 'spiffe://parity/agent/karya',
-    },
-  ]);
+  // Exercise the service-only audited lifecycle, including the direct-write
+  // boundary. Keep the viewer persona unprivileged in its own tenant.
+  for (const [tenantId, workloadId, actorId, agent] of [
+    [tenantA, identityA, registrationOwnerA.id, 'drishti'],
+    [tenantB, identityB, owner.id, 'karya'],
+  ] as const) {
+    const binding = {
+      id: workloadId,
+      tenant_id: tenantId,
+      agent_name: agent,
+      spiffe_id: `spiffe://parity/agent/${agent}`,
+    };
+    const direct = await apiRequest('/rest/v1/workload_identities', 'POST', binding);
+    assert.equal(direct.status, 403, 'Direct service registration refused');
+    for (const [version, registrationStatus] of [
+      [0, 'disabled'],
+      [1, 'active'],
+    ] as const) {
+      const response = await apiRequest('/rest/v1/rpc/manage_workload_identity', 'POST', {
+        p_tenant_id: tenantId,
+        p_actor_id: actorId,
+        p_correlation_id: randomUUID(),
+        p_workload_id: workloadId,
+        p_expected_version: version,
+        p_agent: agent,
+        p_spiffe_id: binding.spiffe_id,
+        p_status: registrationStatus,
+      });
+      assert.equal(response.status, 200, 'Reviewed fixture registration');
+      const receipt = (await response.json()) as Record<string, unknown>;
+      assert.equal(receipt.tenant_id, tenantId, 'Registration tenant binding');
+      assert.equal(receipt.workload_id, workloadId, 'Registration workload binding');
+      assert.equal(receipt.status, registrationStatus, 'Registration status');
+      assert.equal(receipt.version, version + 1, 'Registration revision');
+      assert.equal(typeof receipt.receipt, 'string', 'Durable registration receipt');
+      assert.match(String(receipt.receipt), /^[1-9][0-9]*$/, 'Registration receipt ID');
+    }
+  }
   for (const [tenant_id, connector_id, workload_identity_id, agent_name, internal_scope] of [
     [tenantA, connectorA, identityA, 'drishti', 'connector.read'],
     [tenantB, connectorB, identityB, 'karya', 'connector.write'],
