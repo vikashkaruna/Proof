@@ -155,7 +155,16 @@ def main():
         workload=f"spiffe://{policy['trustDomain']}/controller/assessment"
         cli('entry','create','-parentID',expected,'-spiffeID',workload,'-selector','unix:uid:20000','-selector','docker:image_config_digest:'+image_id,'-jwtSVIDTTL','300')
         fetch=['/usr/local/bin/spire-agent','api','fetch','jwt','-socketPath','/run/workload/api.sock','-audience','axiom-native-volume-fixture','-spiffeID',workload,'-output','json']
-        wait_for(lambda:run(['docker','exec',consumer,*fetch],check=False,timeout=10).returncode==0)
+        def admitted():
+            result=run(['docker','exec',consumer,*fetch],check=False,timeout=10)
+            if result.returncode!=0:return False
+            response=json.loads(result.stdout)
+            if not isinstance(response,list):raise ValueError('identity response refused')
+            groups=[part['svids'] for part in response if isinstance(part,dict) and 'svids' in part]
+            if len(groups)!=1 or not isinstance(groups[0],list) or len(groups[0])!=1 or groups[0][0].get('spiffe_id')!=workload:
+                raise ValueError('unexpected admitted identity')
+            return True
+        wait_for(admitted)
         outcomes['native-node-admits-exact-container-image-and-uid']=True
         assert run(['docker','exec','--user','20003:20003',consumer,*fetch],check=False,timeout=10).returncode!=0
         outcomes['native-node-refuses-wrong-consumer-uid']=True
@@ -169,7 +178,7 @@ def main():
         assert Path('/run/workload').stat().st_ino==inode and health()['nodeId']==expected
         outcomes['normal-restart-preserves-socket-directory-and-node']=True
         run([*volume_cli,'--check',manifest_sha])
-        wait_for(lambda:run(['docker','exec',consumer,*fetch],check=False,timeout=10).returncode==0)
+        wait_for(admitted)
         assert run(['docker','exec',consumer,'stat','-c','%i','/run/workload/api.sock']).stdout.strip()==str(Path('/run/workload/api.sock').stat().st_ino).encode()
         outcomes['consumer-reconnects-through-replaced-socket-in-same-directory']=True
         prior_pid=control('show','--property=MainPID','--value',HEALTH).stdout.strip()

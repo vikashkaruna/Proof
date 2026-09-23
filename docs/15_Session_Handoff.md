@@ -1,5 +1,7 @@
 # Axiom Proof — implementation session handoff
 
+Acceptance review: the initial native volume run passed 24 outcomes at `f955fc7` (CI 35851973750). Successful workload requests now also assert exactly one returned SVID with the intended SPIFFE ID, both before and after socket replacement. Final closure requires the strengthened exact-merge run.
+
 Native fixture correction: the deliberate observer restart/crash/stop sequence exhausted the production three-starts-per-minute budget. The fixture now verifies `start-limit-hit` and explicitly resets only its failed test unit before the independent outage scenario. Production limits remain unchanged; the failed initial run is not closure evidence.
 
 ## Revision 65 — protected host socket and health volumes
