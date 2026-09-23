@@ -8,6 +8,10 @@ Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
 
+## Fresh task checkpoint — Revision 71 remains in progress
+
+The user requested a fresh task and a status stop at each logical milestone. Use [Doc 17's concise continuation brief](17_Fresh_Session_Brief.md) for the saved branch, completed work, remaining priorities, decisions and validation limits. Revision 70 placement preflight is on staging `616ed02` (exact gate: CI 35861740826). The supervisor draft is saved separately on `codex/controller-supervision`; it is **not merged to staging or approved for activation**. Its 13 new unit tests pass (154 deployment tests total), and 16 host-delivery outcomes pass; the new native lifecycle fixture is unrun and a local private-port confinement probe was correctly refused. Complete review and native acceptance before claiming this draft green. The overall roadmap remains partial.
+
 ## Revision 70 — reviewed tenant-to-VM placement check
 
 Revision 69 is **complete and green** at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075): all 19 applicable jobs and 13 exact-revision artifacts verified. This includes 33 native runner, 17 native issuer, 16 host-delivery, 71 assessment and five protected-trust outcomes. This revision continues the accepted dedicated runner VM per tenant decision.

@@ -11,6 +11,10 @@ through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
+## Fresh task checkpoint — Revision 71 remains in progress
+
+The user requested a fresh task and a status stop at each logical milestone. Use [Doc 17's concise continuation brief](17_Fresh_Session_Brief.md) for the saved branch, completed work, remaining priorities, decisions and validation limits. Revision 70 placement preflight is on staging `616ed02` (exact gate: CI 35861740826). The supervisor draft is saved separately on `codex/controller-supervision`; it is **not merged to staging or approved for activation**. Its 13 new unit tests pass (154 deployment tests total), and 16 host-delivery outcomes pass; the new native lifecycle fixture is unrun and a local private-port confinement probe was correctly refused. Complete review and native acceptance before claiming this draft green. The overall roadmap remains partial.
+
 ## Revision 70 procedure — read-only tenant placement preflight
 
 1. Prepare a fresh reviewed runner bundle containing `controller_files.py` and `controller_placement.py`. The existing installer refuses replacement of differing installed helpers; this is not an in-place host upgrade mechanism. Follow the protected host-delivery procedure and review an upgrade separately if the host is already populated.

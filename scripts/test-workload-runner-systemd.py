@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from lib.spire_host_bundle import prepare, selected_binary
 from lib.spire_deployment import VERSION, deployment_bundle
+from lib.controller_runtime_acceptance import accept as controller_runtime_acceptance
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('native_fixture',ROOT/'scripts/test-workload-host-systemd.py')
@@ -216,6 +217,7 @@ def main():
         outcomes['controller-file-consumer-has-read-only-files-without-daemon']=True
         assert file_consumer(20003,'cat /run/controller-secrets/backend.key').returncode!=0
         outcomes['controller-private-files-refuse-worker-uid']=True
+        outcomes.update(controller_runtime_acceptance(root,prefix,ALPINE,tenant,service_config,manifest_sha,api_volume,health_volume,consumer,run,control,active,wait_for))
         saved=(delivered/'backend.key').read_bytes();(delivered/'backend.key').write_bytes(b'changed-by-test-root')
         assert run([*delivery,'--check',tenant,file_sha],check=False).returncode!=0
         assert run([*delivery,'--install',str(private),file_sha],check=False).returncode!=0
