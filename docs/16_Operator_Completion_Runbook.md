@@ -1,15 +1,26 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373) green, with 17 applicable jobs and ten verified artifacts. Revision 61 adds read-only persistent SPIRE state admission; supervised host activation and broader W3/W4 remain open.
+Verified staging checkpoint before this revision’s merge: `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173) green, with 17 applicable jobs and ten verified artifacts. Revision 62 adds protected SPIRE host delivery and normal restart units; exact merge acceptance is saved in the session. Initial enrollment, full runner activation and broader W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 61, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 62, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 62 operator gate — protected host files
+
+1. Select a reviewed Ubuntu 24.04 image with Python 3.12, systemd 255, `blkid` and (runner only) Docker. Review image provenance separately from the SPIRE release checksum. Keep issuer and runner roles on separate hosts. This revision does not select a cloud image or create either VM.
+2. Copy `infra/workload/host-policy.example.json` to private working storage, replace every example identity/address/UUID/image digest and select the actual architecture/role. The state UUID must come from the intended disk's superblock. For runners, independently review the issuer CA fingerprint and set `bootstrapCaSha256` to the exact delivered PEM bytes. A matching digest proves reviewed byte delivery, not issuer identity by itself.
+3. Obtain the SPIRE 1.15.3 musl archive for that architecture. Run `python3 scripts/prepare-workload-host.py policy.json archive.tar.gz NEW_DIRECTORY [bootstrap.pem]`. The offline preparer refuses existing output and checks the archive pins. Review all generated files and preserve the printed manifest SHA256 out of band.
+4. Deliver the reviewed bundle through a trusted channel to an absolute, root-owned directory with protected ancestors and owner-only files on the target. Use a separately trusted copy of `infra/workload/spire_host.py`: `/usr/bin/python3 -I -B spire_host.py --check-bundle /root/reviewed-bundle REVIEWED_SHA256`, then `--install` with the same arguments. Installation checks the host profile and all existing destinations before delivery; manifest publication is last. It never repairs or overwrites a conflict. Partial files require review; identical complete files can be reused. It never invokes service activation.
+5. **Stop at file delivery until enrollment/recovery is reviewed.** Normal units require an already initialized state disk and identical protected marker. They cannot initialize an empty disk, create that marker, reenroll a replacement node or enable rebootstrap. Do not use test fixture initialization on a real host. A reviewed first-enrollment workflow and full runner/controller activation acceptance remain next work.
+6. Preserve `/run/workload` and `/run/spire-health` as root-owned 0755 directories; only their intended sockets/metadata reach containers. Admin sockets remain private. Review Docker service and image provenance, exact node/UID/image registrations, socket-volume mapping, TLS, IAM and backup policy before deployment. This revision's installer is not an upgrade or uninstall tool.
+
+**Required evidence:** deployment unit tests; both-role real Docker delivery results; native Ubuntu systemd results showing blank/missing/changed state refusal, actual mount disappearance stopping SPIRE, and remount/restart retaining the original CA and registration. CI publishes only sanitized booleans and source revision. Native tests format only their own verified loop-backed fixture on a disposable GitHub runner; they refuse ordinary/local invocation. Runner units currently have syntax/delivery coverage; complete runner/observer supervision and GCP metadata attestation remain unproven. `systemd-analyze verify` alone is not lifecycle evidence. See [review 51](audits/51-spire-host-delivery-review-2026-09-23.md).
 
 ## Revision 61 — persistent state guard before supervised startup
 

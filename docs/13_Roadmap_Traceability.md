@@ -11,6 +11,16 @@
 
 **Status:** `Partial` = source foundation exists, required journey/evidence incomplete; `Pending` = intended capability not delivered (a stub or prototype does not qualify); `Gated` = roadmap demand/funding/safety condition precedes delivery; `External` = not provable from repository. `Source complete` is used only for individual committed changes in [Doc 12](12_Implementation_Handoff.md), not whole phases.
 
+## Current delivery addendum — Revision 62 (23 September 2026)
+
+| Roadmap scope                            | Implemented in this revision                                                                                                  | Remaining acceptance                                                                                 |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| W4.3 separate issuer/runner hosts        | Pinned, bounded host bundle; protected first installation; initialized-state-only systemd units; protected CA digest delivery | Explicit first enrollment, marker workflow, runner/observer runtime acceptance and real GCP identity |
+| Persistent trust and fail-closed restart | Integrity preflight; UUID mount/service dependency; native disposable Linux mount-loss and recovery test gate                 | Deployed disk replacement, Mumbai backup/restore, operational recovery approval                      |
+| W3/W4 end-to-end execution               | Existing estate/proposal, registry, assessment/controller milestones retained                                                 | Full wizard/readiness/graph, other workers, live grants, controller/scheduler deployment             |
+
+Revision 61's verified base is `13ce160` / CI 35833267173. Revision 62 exact-merge results are recorded in the session. Prepared host files do not constitute cloud deployment or complete W4.3. Schema remains 0048 / 49 migrations / 55 tables; W2 targets remain 19/40.
+
 ## Current delivery addendum — Revision 61 (23 September 2026)
 
 This addendum updates current implementation traceability without treating the historical phase tables below as current completion claims. Verified baseline: staging `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373). Final Revision 61 merge evidence is recorded in the saved session.

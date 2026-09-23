@@ -77,6 +77,25 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  workload-host:
+    name: Protected SPIRE host and native restart (W4.3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: /usr/bin/python3 scripts/test-workload-host.py
+      - name: Disposable native systemd and loop-device fixture
+        run: sudo -E /usr/bin/python3 scripts/test-workload-host-systemd.py --isolated-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-host-acceptance
+          path: |
+            .axiom-runtime/workload-host/results.json
+            .axiom-runtime/workload-host-systemd/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   database-security:
     name: Fresh migrations and direct-client RLS
     runs-on: ubuntu-latest
@@ -406,6 +425,7 @@ jobs:
         database-security,
         strict-auth-parity,
         deployed-http-acceptance,
+        workload-host,
       ]
     name: Lint + typecheck
     runs-on: ubuntu-latest

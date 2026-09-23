@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "platform": "ubuntu-24.04",
+  "architecture": "amd64",
+  "role": "issuer",
+  "filesystemUuid": "11111111-1111-4111-8111-111111111111",
+  "spirePolicy": {
+    "schemaVersion": 1,
+    "trustDomain": "preprod.axiomproof.test",
+    "projectId": "replace-project",
+    "runnerInstanceId": "1",
+    "issuerPrivateIp": "10.0.0.10",
+    "controllerImageConfigDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "assessmentImageConfigDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "bootstrapCaSha256": null
+}
