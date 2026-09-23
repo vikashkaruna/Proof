@@ -132,14 +132,15 @@ StandardError=null
 WantedBy=multi-user.target
 '''
     result = {'state.mount':mount.encode(), 'spire.service':main.encode()}
-    if role == 'issuer':
+    if role in ('issuer', 'runner'):
         enroll = main.split('[Install]')[0].replace(
-            'Description=Axiom SPIRE issuer (initialized state only)',
-            'Description=Axiom explicitly permitted first issuer initialization')
-        enroll = enroll.replace('ExecStartPre=/usr/bin/python3 -I -B '+prefix+'/spire_state.py --ready issuer',
-            'ExecStartPre=/usr/bin/python3 -I -B '+prefix+'/spire_enrollment.py --permit issuer\n'
-            'ExecStartPre=/usr/bin/python3 -I -B '+prefix+'/spire_state.py --empty issuer')
+            f'Description=Axiom SPIRE {role} (initialized state only)',
+            f'Description=Axiom explicitly permitted first {role} initialization')
+        enroll = enroll.replace('ExecStartPre=/usr/bin/python3 -I -B '+prefix+f'/spire_state.py --ready {role}',
+            'ExecStartPre=/usr/bin/python3 -I -B '+prefix+f'/spire_enrollment.py --permit {role}\n'
+            'ExecStartPre=/usr/bin/python3 -I -B '+prefix+f'/spire_state.py --empty {role}')
         enroll = enroll.replace('Restart=on-failure', 'Restart=no\nRuntimeMaxSec=60')
+        enroll = enroll.replace('Wants=axiom-spire-health.service\n', '')
         result['enroll.service'] = enroll.encode()
 
     if runner:
@@ -198,7 +199,7 @@ def prepare(value: object, archive: bytes, ca: bytes | None = None) -> tuple[byt
     node = json.loads(policy_bundle['release.json'])['expectedNodeId'] if role == 'runner' else None
     binding = state_policy({'schemaVersion':1, 'role':role, 'filesystemUuid':value['filesystemUuid'], 'trustDomain':value['spirePolicy']['trustDomain'], 'nodeId':node})
     payload = {binary_name:binary, 'state.json':(json.dumps(binding,indent=2)+'\n').encode(), 'spire.conf':policy_bundle['server.conf' if role=='issuer' else 'agent.conf'].encode(), **units(role,binding['filesystemUuid'],node)}
-    for name in ('spire_host.py','spire_state.py') + (('spire_health.py',) if role=='runner' else ('spire_enrollment.py',)):
+    for name in ('spire_host.py','spire_state.py','spire_enrollment.py') + (('spire_health.py',) if role=='runner' else ()):
         payload[name] = (ROOT/'infra/workload'/name).read_bytes()
     if role == 'runner':
         expected = value['bootstrapCaSha256']

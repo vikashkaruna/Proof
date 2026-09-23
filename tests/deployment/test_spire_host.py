@@ -100,6 +100,18 @@ class BundleTests(unittest.TestCase):
         for value in (None,{**policy(),'extra':True},{**policy(),'platform':'debian-12'},{**policy(),'schemaVersion':True},{**policy(),'filesystemUuid':'../disk'}):
             with self.assertRaises(ValueError):self.prepare(value=value) if value is not None else bundles.prepare(None,b'')
 
+    def test_runner_initialization_keeps_normal_hardening_without_health_start(self):
+        _,files=self.prepare(policy('runner'),ca=CA)
+        initial=files['enroll.service'].decode();normal=files['spire.service'].decode()
+        self.assertIn('--permit runner',initial);self.assertIn('--empty runner',initial)
+        self.assertIn('--ready runner',normal);self.assertNotIn('--empty runner',normal)
+        self.assertIn('BindsTo=var-lib-spire.mount docker.service',initial)
+        self.assertIn('RuntimeMaxSec=60',initial);self.assertIn('Restart=no',initial)
+        self.assertNotIn('Wants=axiom-spire-health.service',initial)
+        self.assertNotIn('[Install]',initial);self.assertNotIn('joinToken',initial)
+        self.assertIn('rebootstrap_mode = "never"',files['spire.conf'].decode())
+        self.assertIn('NodeAttestor "gcp_iit"',files['spire.conf'].decode())
+
     def test_ca_requires_separate_reviewed_hash(self):
         for value,ca in ((policy('runner'),None),(policy('runner'),CA+b'changed'),(policy(),CA),({**policy(),'bootstrapCaSha256':'a'*64},None)):
             with self.subTest(role=value['role']),self.assertRaises(ValueError):self.prepare(value,ca=ca)

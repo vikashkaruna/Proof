@@ -2,7 +2,7 @@
 """Destructive fixture ONLY on a fresh GitHub-hosted Ubuntu VM, never user hosts.
 
 Formats only a newly allocated, backing-file-verified loop device. Product code
-never formats, enrolls, mounts or enables anything. Fixture resources are private.
+never formats or mounts disks or automatically enables services. Fixture resources are private.
 """
 import hashlib
 import json

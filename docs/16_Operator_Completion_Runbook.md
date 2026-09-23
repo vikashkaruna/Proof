@@ -1,15 +1,26 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663) green, with 18 applicable jobs and 12 verified artifacts. Revision 63 adds explicit issuer initialization and separate reviewed marker publication. Runner enrollment, full activation and the broader roadmap remain open; exact final-merge evidence is saved in the session.
+Verified staging checkpoint before this revision’s merge: `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663) green, with 18 applicable jobs and 12 verified artifacts. Revisions 63–64 add explicit issuer/runner initialization and separate reviewed marker publication. The runner native gate, full activation and broader roadmap remain open at this source checkpoint; exact final-merge evidence is saved in the session.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 63, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 64, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 64 operator gate — runner enrollment
+
+After issuer trust review, prepare the runner bundle with the approved CA fingerprint, exact GCP project/instance node and runner filesystem UUID. Confirm the static installation and loaded units. Normal runner services must be disabled/stopped; the observer and initialization units must be static/stopped. Prepare/mount the empty intended disk separately.
+
+1. Run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --initialize runner REVIEWED_MANIFEST_SHA256` as root. No join-token or alternate-attestation argument exists in the production command. It records the request, checks actual node identity/recent sync and leaves stopped, unmarked state with a receipt.
+2. Review `/etc/axiom/spire/initialization-receipt.json` against the intended node/disk, independently delivered CA and installed manifest. This is historical enrollment evidence, not current workload readiness. The public issuer exports from Revision 63 remain the CA-delivery source; runner receipts expose only bounded node/sync metadata and hashes.
+3. Before the observed node certificate expires, run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --seal runner REVIEWED_RECEIPT_SHA256`. It records review and publishes the marker, without enabling/starting normal services. Expired evidence, changed state or interrupted requests require explicit recovery; do not clear files to retry.
+4. Keep activation gated on reviewed workload registrations, protected host-to-container socket delivery, controller policy/credentials and the remaining runtime prerequisites. Normal startup requires the sealed state and starts the separately supervised observer. Consumers must still enforce current health age and exact node binding.
+
+Native CI uses an explicitly substituted local join-token fixture on a fresh hosted VM. It is not a GCP deployment or evidence of effective cloud permissions. At this source checkpoint its expanded gate is pending; final exact-merge results belong in the saved session.
 
 ## Revision 63 operator gate — explicit issuer initialization
 

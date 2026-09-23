@@ -96,6 +96,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  workload-runner-host:
+    name: Native SPIRE runner and observer lifecycle (W4.3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: /usr/bin/python3 scripts/test-workload-host.py
+      - name: Disposable runner systemd and loop-device fixture
+        run: sudo -E /usr/bin/python3 scripts/test-workload-runner-systemd.py --isolated-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-runner-host-acceptance
+          path: .axiom-runtime/workload-runner-systemd/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   database-security:
     name: Fresh migrations and direct-client RLS
     runs-on: ubuntu-latest

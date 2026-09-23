@@ -1,0 +1,9 @@
+# Review 53 — reviewed runner enrollment and supervised lifecycle
+
+The issuer workflow alone left runners unable to initialize a bound empty disk safely. This revision reuses the protected request/permit/receipt and separate marker-review workflow for runners, retaining production GCP IIT, reviewed bootstrap trust and `rebootstrap_mode=never`. The exact expected node and recent issuer sync are read through the protected admin socket before shutdown. The receipt binds stopped key/cache bytes, and sealing refuses expired node evidence or changed CA/state. No normal service or health observer is started by sealing.
+
+Review found initialization must not inherit the normal runner unit's observer `Wants`: otherwise first enrollment could publish operational readiness before review. The new static unit omits that relationship; normal startup retains it. The helper requires an inactive observer before initialization and publication.
+
+Local validation: 105 deployment tests and 16 Docker host outcomes. A separate native Ubuntu gate uses a fresh verified loop device, pinned SPIRE binary and isolated local issuer. Its separately hashed test bundle substitutes local join-token attestation and one exact generated node-format predicate; production has no local-token switch. The gate exercises installed enrollment/sealing, node/observer startup, observer failure/expiry, issuer loss/recovery, mount loss/recovery, missing-key refusal and Docker dependency loss. Exact-merge native/combined results are pending until verified. No GCP attestation or cloud activation is claimed.
+
+Next: protected socket/metadata volumes, complete controller admission and lifecycle, then scoped IAM/KMS, TLS and scheduler delivery. Historical enrollment receipts never substitute for current observer health or application authorization. No schema or business approval rules change.
