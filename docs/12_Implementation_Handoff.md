@@ -1,14 +1,14 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 50](audits/50-spire-state-admission-review-2026-09-23.md).
+> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 51](audits/51-spire-host-delivery-review-2026-09-23.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
-## Current handoff — Revision 61 (23 September 2026)
+## Current handoff — Revision 62 (23 September 2026)
 
-Revision 60's issuer-sync gate is staged at `3e505c5` / CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373). Revision 61 adds the read-only persistent-disk/state guard and strict offline binding preparation. Ready checks reject lost/foreign key state; the separate empty check cannot start or initialize SPIRE. Exact-merge CI/artifact results live in the saved session.
+Revision 61 is green at `13ce160` / CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173). Revision 62 adds pinned host bundles, protected first-file delivery and initialized-state-only systemd units on Ubuntu 24.04. Docker delivery and a dedicated native systemd/loop-device CI gate accompany the 77 deployment tests. Exact merge evidence is saved in the session; do not equate prepared units with deployed services.
 
-Resume in `codex/w0-w3-closure`, preserving other checkouts. Next wire checksum-pinned host installation, explicit first enrollment/marker delivery and supervision with mount-loss stop behavior, then CA delivery, IAM/KMS, TLS, opaque scheduler and actual cloud acceptance. The current guard is executable source, not an installed service or a tested GCP mount. Real local tests cover SPIRE file compatibility; mount identity is covered by controlled unit fixtures. Docs 11 and 14–16 give evidence and operator gates. Remaining workers/actor chains, live grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement remain open. Terraform is default-off; cloud apply is not authorized.
+Resume in `codex/w0-w3-closure`, preserving the original checkout. Next complete explicit first enrollment/marker delivery and runner/observer lifecycle acceptance, then socket-volume mapping, full controller admission, scoped IAM/KMS, private TLS and the opaque scheduler. Installer retries preserve identical files and refuse upgrades/conflicts. No cloud provisioning was performed; Terraform remains default-off. Remaining workers, grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement are still open. Docs 11 and 14–16 carry current evidence and closure gates.
 
 ## Historical review snapshot
 

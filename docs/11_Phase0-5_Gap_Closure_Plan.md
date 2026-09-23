@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 61 — PERSISTENT STATE ADMISSION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `3e505c5`, green CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 62 — PROTECTED HOST DELIVERY** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `13ce160`, green CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 62 — protected SPIRE host delivery and normal restart
+
+Revision 61 is **complete and green** at `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173): 17 applicable jobs and ten exact-revision artifacts verified. Fresh upstream review found no intervening implementation.
+
+**Implemented:** an offline bundle preparer verifies the pinned SPIRE 1.15.3 archive before reading a fixed, bounded inventory; it rejects links, traversal, unexpected members and wrong ELF architecture. A reviewed manifest binds the selected binary, configuration, state guard, runtime helper, service units and (for runners) separately fingerprinted bootstrap CA. The root-only installer supports Ubuntu 24.04 / Python 3.12 / systemd 255 on amd64 or arm64, protects fixed destinations, refuses conflicting files and preserves identical files on retry. Installation never formats, mounts, initializes, enrolls, reloads, enables or starts services. It is first installation, not an in-place upgrade mechanism.
+
+**Normal startup:** generated units require installed-file integrity and the ready-state guard before launching SPIRE. They bind the service to the UUID-bound state mount; runner services also depend on Docker, and the health observer follows the node/mount lifetime. Startup/readiness/shutdown are bounded. Protected runtime directories preserve the workload socket-directory inode across restarts. The normal units cannot use the empty-state check or automatically recover lost keys. Initial enrollment and marker installation remain separate reviewed procedures.
+
+**Validation:** 77 deployment tests, including 19 new host tests. Local Docker acceptance passes all 16 outcomes, checking both real pinned binaries, root-protected delivery, unit syntax, idempotence, disabled services, manifest refusal and tamper refusal. A separate native Ubuntu CI fixture uses only a newly allocated, backing-file-verified loop device to exercise actual systemd startup, missing marker/key refusal, mount loss and original trust/registry recovery. Exact merge results and outcome counts are saved in the session; a new gate is not considered green until that run succeeds. See [review 51](audits/51-spire-host-delivery-review-2026-09-23.md).
+
+**Remaining, in order:** explicit first enrollment/marker workflow and full runner/observer supervision acceptance; host-to-container socket delivery and production controller admission; scoped IAM/KMS, private TLS/DNS, opaque scheduler deployment and Mumbai backup/restore. Actual GCP attestation, effective cloud permissions and deployment remain external acceptance gates. Other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open. No cloud apply occurred; Terraform stays default-off. Schema remains **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 named targets remain **19/40**.
 
 ## Revision 61 — read-only persistent SPIRE state admission
 

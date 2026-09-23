@@ -44,3 +44,28 @@ Primary references: [SPIRE GCP IIT](https://github.com/spiffe/spire/blob/v1.15.3
 `--empty <role>` verifies a blank bound disk and changes nothing. `--ready <role>` requires initialized private keys and issuer registry or node recovery data. Both bind the fixed GCP device alias, actual superblock UUID and dedicated whole ext4 mount (`rw,nosuid,nodev,noexec`), with canonical/root-protected ancestry. Ready refuses fresh/missing state instead of reenrolling. The marker binds reviewed configuration; it does not authenticate cloud instance identity, prove backup freshness or validate cryptographic keys. SPIRE and the issuer-sync gate still do their independent checks.
 
 See [Doc 16](../../docs/16_Operator_Completion_Runbook.md) for modes, paths, permissions and refusal handling. The guard is not installed or supervised by this revision. Pinned installation, explicit first enrollment, mount-loss stop behavior and real GCP block-device acceptance remain pending. Local acceptance now has 24 outcomes; its new file checks use actual SPIRE state read-only, while mount/superblock cases are controlled unit fixtures. No host disk was formatted or cloud resource applied.
+
+## Protected host delivery (Revision 62)
+
+`scripts/prepare-workload-host.py` prepares a fresh private bundle from
+`host-policy.example.json`, the pinned SPIRE musl archive and (for runners) an
+independently fingerprinted issuer CA PEM. Replace every example value. Supported
+host profile: Ubuntu 24.04, Python 3.12, systemd 255, amd64/arm64; runners also
+require Docker. No new environment parameters are introduced.
+
+`spire_host.py --check-bundle /root/reviewed SHA256` validates protected delivery;
+`--install` writes only fixed paths, checks all conflicts before writing and
+publishes the manifest last. Trust the installer independently and review the
+manifest digest out of band. Existing identical files retain their inodes;
+foreign/partial files are refused without repair. This is first installation,
+not an upgrade mechanism. No service command, disk change or enrollment occurs.
+
+The prepared systemd units check installed integrity and `spire_state.py --ready`
+before launch, bind SPIRE to the UUID mount, and keep the health observer tied to
+the runner. Missing keys or markers cannot trigger initialization. First
+enrollment and marker installation remain explicitly separate, unfinished work.
+See Doc 16 for delivery steps and outstanding activation gates. Docker verifies
+both roles; the dedicated native Ubuntu CI fixture exercises actual issuer
+startup/mount-loss/recovery. It is restricted to fresh GitHub-hosted runners and
+formats only a newly allocated loop device whose backing file it verifies.
+Actual GCP identity and full runner/controller activation remain pending.
