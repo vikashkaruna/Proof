@@ -58,6 +58,7 @@ services:
       - '0.0.0.0:${BFF_PORT:-4000}:4000'
     environment:
       - NODE_ENV=production
+      - AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS=${AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS:-90}
       - ENVIRONMENT=preprod
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - AXIOM_REGION=${AXIOM_REGION:-asia-south1}

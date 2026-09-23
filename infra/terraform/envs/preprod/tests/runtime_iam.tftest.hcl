@@ -97,3 +97,21 @@ run "unsupported_environment_is_refused" {
   }
   expect_failures = [var.environment]
 }
+
+run "assessment_retention_configuration" {
+  command = plan
+  variables {
+    assessment_dispatch_retention_days = 30
+  }
+  assert {
+    condition     = one([for setting in google_cloud_run_v2_service.bff.template[0].containers[0].env : setting.value if setting.name == "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS"]) == "30"
+    error_message = "Explicit retention must reach only backend maintenance configuration."
+  }
+}
+run "invalid_assessment_retention_refused" {
+  command = plan
+  variables {
+    assessment_dispatch_retention_days = 0
+  }
+  expect_failures = [var.assessment_dispatch_retention_days]
+}

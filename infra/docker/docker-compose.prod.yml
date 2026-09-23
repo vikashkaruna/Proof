@@ -21,6 +21,7 @@ services:
     image: axiom-bff:prod
     environment:
       - NODE_ENV=production
+      - AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS=${AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS:-90}
       - ENVIRONMENT=production
       - AXIOM_MFA_ENCRYPTION_KEY=${AXIOM_MFA_ENCRYPTION_KEY:?Set the distinct persistent MFA encryption key}
       - AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}

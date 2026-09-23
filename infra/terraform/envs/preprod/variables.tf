@@ -214,3 +214,13 @@ variable "report_email_mode" {
     error_message = "Use disabled or delivery."
   }
 }
+
+variable "assessment_dispatch_retention_days" {
+  description = "Days to retain private dispatch ciphertext after independent completion; separate from sealed evidence."
+  type        = number
+  default     = 90
+  validation {
+    condition     = var.assessment_dispatch_retention_days >= 1 && var.assessment_dispatch_retention_days <= 36500 && floor(var.assessment_dispatch_retention_days) == var.assessment_dispatch_retention_days
+    error_message = "Assessment dispatch retention must be an integer from 1 to 36500 days."
+  }
+}

@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 51 — configurable completed-dispatch retention
+
+Revision 50 is **complete and green** at staging `7485880`, CI [35715172231](https://github.com/vikashkaruna/Proof/actions/runs/35715172231): 17 applicable jobs and eight exact-revision artifacts passed. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+The accepted policy is now implemented as backend `AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS`, default **90 days**, configurable from **1 to 36500 whole days**. Migration **0046** removes only the nonce, encrypted input/proof and wrapped data key for a delivered, independently confirmed successful assessment whose confirmation age has reached the configured period. It revalidates assignment bindings, result/library digests and immutable execution receipts before cleanup. Unconfirmed, cancelled, undelivered and conflicting jobs retain their payloads. A conflict returns a review state and stops maintenance.
+
+Cleanup and its append-only audit receipt commit atomically. Job/run/scheduling identity, single-use delivery, original enqueue receipts, findings and confirmed results survive. One candidate per transaction and task-first locking avoid duplicate purge receipts and lock-order reversal. A new explicit backend maintenance entrypoint supports `--once` and `--watch`; default BFF startup is unchanged. It needs database credentials, not approval/MFA/model/KMS secrets. Watch polls one candidate per minute and stops on errors or review. A timed-out call is uncertain and requires receipt inspection before restart. Docker, Cloud Run variables/env sync and Helm carry the setting; no recurring cloud job was deployed.
+
+**Validation:** **820 BFF tests**, **68 config tests**, workspace tests/typecheck/lint/security gates, separate acceptance TypeScript, real local Auth/PostgREST with **61 SPIRE and 39 worker outcomes**. Database tests cover role isolation, configurable age, audit rollback, idempotent recovery, conflicting state, concurrent cleanup/confirmation and upgrade of populated old outboxes. Schema tip **0046**, **54 public tables**, **47 migrations / 16 concurrency suites / 12 populated upgrades**; W2 named targets remain **19/40**. Final exact-merge CI/artifacts are recorded in the saved session. See [review 40](audits/40-dispatch-retention-review-2026-09-23.md).
+
+**Remaining:** persisted key-policy revisions and both enqueue/claim rollout fences, retained-backup inventory and reviewed key retirement; per-job process/network/metadata isolation, trust registration and dedicated scheduler/controller deployment; remaining scoped workers/verified actor chains; W4.4 grants; full W3 resumable wizard/readiness/live graph; W4.5/6/7. W0 contact/provenance/deployed acceptance, W1 invitation/email lifecycle and the 21 remaining W2 targets stay open. Live-row cleanup is not physical WAL/backup erasure or permission to destroy keys. Sealed evidence, audit and consent retention are unchanged.
+
 ## Revision 50 — tenant-bound dispatch KMS adapters
 
 Revision 49 is **complete and green** at staging `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening changes. The overall goal remains active.

@@ -76,6 +76,10 @@ resource "google_cloud_run_v2_service" "bff" {
         value = local.model_gateway_url
       }
       env {
+        name  = "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS"
+        value = tostring(var.assessment_dispatch_retention_days)
+      }
+      env {
         name  = "BFF_CORS_ORIGINS"
         value = "${local.marketing_url},${local.web_service_url},https://axiomproof.ai,https://app.axiomproof.ai,https://preprod.axiomproof.ai,https://preprod-app.axiomproof.ai,http://localhost:3000,http://localhost:3001"
       }

@@ -1,15 +1,35 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303) green. Revision 49 remote transport is verified. Revision 50 adds dispatch KMS adapters; key-policy rollout/retirement, full production activation and W3/W4 remain open.
+Verified staging checkpoint: `7485880`, CI [35715172231](https://github.com/vikashkaruna/Proof/actions/runs/35715172231) green. Revision 51 adds configurable completed-dispatch retention. Full production activation, key rollout/retirement and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 50, 22 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 51, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 51 — completed-dispatch retention maintenance
+
+**ENGINEERING delivered:** migration `0046`, `AssessmentRetention` and the explicit `services/bff/src/assessment-retention-worker.ts` entrypoint. Set `AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS=90` in the protected backend environment, or another integer from 1 to 36500. This setting is separate from `AXIOM_EVIDENCE_RETENTION_DAYS` and consent retention. The timer starts at `workload_assessment_packets.finalized_at`, the independent confirmation, not earlier computation or enqueue time. Docker examples/overlays, Cloud Run's `assessment_dispatch_retention_days` variable and env sync carry the default/override. Helm uses `config.assessmentDispatchRetentionDays`. Application validation rejects malformed values. None of these settings starts cleanup automatically.
+
+**Explicit operation:** after migrating the intended environment, run from the repository root with a protected absolute env-file path:
+
+```bash
+pnpm --filter @axiom/bff exec tsx --env-file=/absolute/protected/backend.env src/assessment-retention-worker.ts --once
+```
+
+Use `--watch` instead for one candidate every minute; this limits a single process to at most 1440 candidates per day. No maintenance process is currently provisioned in higher environments. Compose/Cloud Run/Helm BFF services continue ordinary startup. A separately supervised maintenance job must receive its intended backend environment and database credential. Do not grant that credential to the scheduler or isolated worker. The scoped maintenance loader requires strict auth and database configuration; it does not require approval, MFA, model, runtime or KMS secrets. No cloud operation was performed in this milestone.
+
+**Output and recovery:** output is one strict JSON receipt: `idle`, `purged` with tenant/job/receipt/time/effective days, or `review` with tenant/job. Review stops the process without purging the conflicting job. Investigate bindings, result/library digests and the three execution receipts; do not force-delete data or reset claims to bypass review. Errors also stop watch mode. The RPC has a ten-second caller budget and a two-second database lock timeout. A timeout/disconnect may occur after commit: inspect `assessment_dispatch_jobs.payload_purged_at`, `payload_purge_receipt`, `payload_retention_days` and the referenced `workload.dispatch_payload_purged` ledger event before restarting. Never log ciphertext, task proofs, private status files or raw backend errors. SIGINT/SIGTERM stop the poller; an in-flight operation may still commit. <!-- axiom-count-ok: maintenance capacity and timeout bounds, not statutory controls -->
+
+**Data boundary:** only delivered, confirmed successful, sufficiently old and consistently bound jobs qualify. The transaction nulls `nonce`, `ciphertext` and `wrapped_key`; keeps `key_ref`, identity, claims and scheduling metadata; and appends mandatory audit. Audit failure rolls back removal. Findings, confirmation packets, original enqueue receipts and sealed evidence remain intact. A retry cannot re-enqueue a new run or deliver the old payload again. Concurrent pollers skip a busy task and cannot emit duplicate purge receipts. Unresolved/failed/cancelled/undelivered payloads remain for separate recovery policy.
+
+**Acceptance:** 820 BFF / 68 config tests, 47 migrations, 16 concurrency suites and 12 populated upgrades; local real Auth/PostgREST + SPIRE pass 61 identity and 39 worker outcomes. Use `./scripts/test-database.sh`, workspace checks, `pnpm exec tsc -p scripts/tsconfig.acceptance.json` and `python3 scripts/test-workload-identity.py --assessment`. Only synthetic test fixtures advance confirmation age. Exact merge CI and sanitized artifacts are saved in the session. See [review 40](audits/40-dispatch-retention-review-2026-09-23.md).
+
+**Still ENGINEERING:** logical live-row removal does not erase WAL, backups, replicas or copied ciphertext. Preserve old KMS keys/versions until all retained artifacts and recovery obligations are accounted for. Both enqueue and claim need persisted key-policy rollout fences before distributed promotion/retirement. No key destruction or physical-erasure guarantee is delivered. Continue per-job isolation/trust and dedicated service composition, remaining workers, grants and full W3 wizard/graph. The overall goal remains incomplete.
 
 ## Revision 50 — dispatch KMS configuration and rotation gates
 

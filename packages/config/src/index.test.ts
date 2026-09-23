@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   loadWebEnv,
+  loadAssessmentRetentionEnv,
   isWebAuthBypassEnabled,
   loadEnv,
   resetEnvCache,
@@ -389,5 +390,48 @@ describe('explicit SSR configuration boundary', () => {
     );
     resetEnvCache();
     expect(isWebAuthBypassEnabled({ ENVIRONMENT: 'local' })).toBe(false);
+  });
+});
+
+describe('assessment retention maintenance configuration', () => {
+  const source = {
+    ENVIRONMENT: 'preprod',
+    NODE_ENV: 'production',
+    SUPABASE_URL: 'https://preprod.supabase.co',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+  it('defaults to 90 days without unrelated backend credentials', () => {
+    const env = loadAssessmentRetentionEnv(source);
+    expect(env.AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS).toBe(90);
+    expect(Object.isFrozen(env)).toBe(true);
+    expect(env).not.toHaveProperty('APPROVAL_SIGNING_KEY');
+    expect(env).not.toHaveProperty('AXIOM_MFA_ENCRYPTION_KEY');
+  });
+  it.each(['1', '30', '36500'])('accepts explicit days %s', (value) => {
+    expect(
+      loadAssessmentRetentionEnv({ ...source, AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: value })
+        .AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS,
+    ).toBe(Number(value));
+  });
+  it.each(['', '0', '-1', '1.5', '1e2', '090', '36501', 'NaN'])(
+    'rejects invalid retention %s',
+    (value) => {
+      expect(() =>
+        loadAssessmentRetentionEnv({ ...source, AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: value }),
+      ).toThrow('Invalid assessment retention environment configuration.');
+    },
+  );
+  it('refuses bypass and placeholder credentials without exposing their values', () => {
+    expect(() =>
+      loadAssessmentRetentionEnv({ ...source, ENVIRONMENT: 'local', AXIOM_AUTH_MODE: 'bypass' }),
+    ).toThrow();
+    expect(() => loadAssessmentRetentionEnv({ ...source, SUPABASE_SERVICE_KEY: '' })).toThrow();
+  });
+  it('does not expose the maintenance setting to SSR', () => {
+    resetEnvCache();
+    expect(
+      loadWebEnv({ ...source, AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: '30' }),
+    ).not.toHaveProperty('AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS');
   });
 });
