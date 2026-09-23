@@ -104,17 +104,6 @@ def uncertain(*args,**kwargs):
   raise ValueError('fixture lost create response')
  return result
 runtime.docker=uncertain
-original_created=runtime.created
-def checked(identifier,intended):
- try: original_created(identifier,intended)
- except Exception:
-  actual=runtime.owned(identifier,intended)
-  def summary(mount):
-   expected=next((m for m in intended['mounts'] if m['Target']==mount.get('Target')),None)
-   return {**{key:mount.get(key) for key in ('Type','Target','ReadOnly','VolumeOptions','BindOptions','Consistency')},'sourceMatches':expected is not None and expected['Source']==mount.get('Source'),'keys':sorted(mount)}
-  Path(__file__).with_name('mount-diagnostic').write_text(json.dumps({'requested':[summary(m) for m in intended['mounts']],'observed':[summary(m) for m in actual['HostConfig']['Mounts']]}))
-  raise
-runtime.created=checked
 try: runtime.main()
 except Exception as error:
  import traceback
@@ -213,8 +202,6 @@ except Exception as error:
     finally:
         if (directory/'failure-location').exists():
             print('Synthetic controller fixture last failure location: '+(directory/'failure-location').read_text())
-        if (directory/'mount-diagnostic').exists():
-            print('Synthetic controller mount diagnostic: '+(directory/'mount-diagnostic').read_text())
         for name in (fixture_unit, production): control('stop', name, check=False)
         # These IDs were captured from fixture-owned receipts or its explicit
         # create-response interception, never inferred from a production name.

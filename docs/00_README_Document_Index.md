@@ -4,8 +4,8 @@
 
 **Compiled:** August 2026
 
-**Implementation status.** W0, W1 and W2 are **partial**; migration allocation runs
-through 0033. Nothing has been deployed, no evidence bucket is locked and no action
+**Implementation status.** W0 through W4 are **partial**; migration allocation runs
+through 0048 (49 migrations, 55 public tables; 19/40 W2 named targets delivered). Nothing has been deployed, no evidence bucket is locked and no action
 has executed against a client estate — the earlier Phase 3 _audit_ completion was
 not completion of the Phase 3 product. Start with
 [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the
@@ -13,8 +13,8 @@ current checkpoint and whose workstream status register carries W0–W10, then
 [Doc 14 implementation progress](14_Implementation_Progress.md)
 and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head
 this all rests on. The most recent reviews are
-[audit 13](audits/13-atomic-mfa-recovery-review-2026-09-21.md) and
-[audit 14](audits/14-connector-foundation-review-2026-09-21.md). Doc 12 is a
+[audit 59](audits/59-controller-placement-review-2026-09-23.md) and
+[audit 60](audits/60-controller-supervision-review-2026-09-23.md). Doc 12 is a
 historical snapshot kept for its design reasoning; do not resume from it.
 
 _This block deliberately names no revision number or commit. It was four revisions

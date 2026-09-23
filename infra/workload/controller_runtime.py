@@ -192,9 +192,26 @@ def owned(identifier: str, intended: dict) -> dict:
     return actual
 
 
+def canonical_mounts(value: object) -> list[dict]:
+    if not isinstance(value, list) or any(not isinstance(mount, dict) for mount in value):
+        raise ValueError('mount observation refused')
+    result = []
+    for mount in value:
+        mount = dict(mount)
+        options = mount.get('VolumeOptions')
+        # Some native Docker clients serialize the unspecified driver as an
+        # empty object. Only that empty representation is equivalent to absent;
+        # a driver name/options, changed source, permission or NoCopy is not.
+        if mount.get('Type') == 'volume' and isinstance(options, dict) and options.get('DriverConfig') == {}:
+            mount['VolumeOptions'] = {key: item for key, item in options.items() if key != 'DriverConfig'}
+        result.append(mount)
+    return result
+
+
 def created(identifier: str, intended: dict) -> None:
     actual = owned(identifier, intended)
     config, setup = actual['Config'], actual['HostConfig']
+    setup = {**setup, 'Mounts': canonical_mounts(setup.get('Mounts'))}
     expected_config = {'User': '20000:20000', 'Entrypoint': ENTRYPOINT, 'Cmd': ['--serve', '/run/controller-secrets/service.json'], 'WorkingDir': '/app/services/bff', 'Hostname': intended['name'], 'OpenStdin': False, 'Tty': False, 'StopSignal': 'SIGTERM'}
     expected_host = {'NetworkMode': 'bridge', 'IpcMode': 'private', 'CgroupnsMode': 'private', 'ReadonlyRootfs': True, 'Privileged': False, 'PidMode': '', 'UTSMode': '', 'CapAdd': None, 'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'], 'GroupAdd': [intended['group']], 'PidsLimit': 128, 'Memory': 536870912, 'MemorySwap': 536870912, 'LogConfig': {'Type': 'none', 'Config': {}}, 'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}, 'PortBindings': {'8443/tcp': [{'HostIp': intended['privateIp'], 'HostPort': '8443'}]}, 'Mounts': intended['mounts']}
     expected_config['StopTimeout'] = 90

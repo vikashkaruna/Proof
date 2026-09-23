@@ -118,6 +118,18 @@ class RuntimePolicyTests(unittest.TestCase):
         altered = observed_container(spec); altered['State']['Status'] = 'running'
         with patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
 
+    def test_native_empty_driver_representation_accepts_no_driver_authority(self):
+        spec = intended(); observed = copy.deepcopy(observed_container(spec))
+        for mount in observed['HostConfig']['Mounts']:
+            if mount['Type'] == 'volume': mount['VolumeOptions']['DriverConfig'] = {}
+        with patch.object(runtime, 'observation', return_value=observed): runtime.created(ID, spec)
+        for driver in ({'Name': 'nfs'}, {'Options': {'device': '/etc'}}, None, {'Name': ''}):
+            altered = copy.deepcopy(observed); altered['HostConfig']['Mounts'][2]['VolumeOptions']['DriverConfig'] = driver
+            with self.subTest(driver=driver), patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
+        for field, value in [('Source', 'foreign'), ('Target', '/other'), ('ReadOnly', False), ('VolumeOptions', {'NoCopy': False, 'DriverConfig': {}})]:
+            altered = copy.deepcopy(observed); altered['HostConfig']['Mounts'][2][field] = value
+            with self.subTest(field=field), patch.object(runtime, 'observation', return_value=altered), self.assertRaises(ValueError): runtime.created(ID, spec)
+
     def test_namespace_probe_uses_short_fixed_deadline(self):
         with patch.object(runtime.enrollment, 'command', return_value=b'0\n') as command, self.assertRaises(ValueError): runtime.volumes.daemon_namespace()
         command.assert_called_once_with(['/usr/bin/systemctl', 'show', '--property=MainPID', '--value', 'docker.service'], timeout=3)
