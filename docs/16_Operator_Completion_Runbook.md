@@ -4,12 +4,22 @@ Revisions 67–68 are **complete and green** together at `a7df79f`, CI [35857993
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 69, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 70, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 70 procedure — read-only tenant placement preflight
+
+1. Prepare a fresh reviewed runner bundle containing `controller_files.py` and `controller_placement.py`. The existing installer refuses replacement of differing installed helpers; this is not an in-place host upgrade mechanism. Follow the protected host-delivery procedure and review an upgrade separately if the host is already populated.
+2. Deliver the controller generation using the now-bundled file helper. Create a root-owned `0600` regular placement file with protected canonical ancestry, using `infra/workload/controller-placement.example.json`. Set the tenant UUID, exact controller-manifest SHA, and the zone/private address from **that same tenant's** Terraform runner output. The installed SPIRE node must bind that runner's project and immutable instance ID. Independently review the profile SHA; do not merely calculate and accept an unreviewed file on the target.
+3. In the Docker daemon's host mount namespace run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/controller_placement.py --check PRIVATE_PROFILE_PATH REVIEWED_PROFILE_SHA256`. This rechecks protected files, actual VM metadata, the assigned private interface and live volumes. It neither publishes a readiness receipt nor starts/enables a service. Success is point-in-time preflight; the pending supervisor must run it again immediately before activation.
+4. Metadata is read directly from the fixed IPv4 link-local GCP endpoint with the Google request/response header, using only tenant attribute, instance ID, project ID, zone and primary-interface private IP. No token endpoints, configurable metadata URL, ambient proxy or redirect are accepted. Missing metadata, wrong placement, stale/unready SPIRE volumes and changed files fail closed. Never replace this with a local-mode fallback on a real runner.
+5. Keep the activation gate closed until supervised lifecycle, effective tenant-scoped backend/secret/KMS permissions and private TLS/scheduler acceptance are complete. Stop/recovery must be able to use durable ownership even when metadata or issuer health is unavailable. The local HTTP tests are transport fixtures, not real GCP attestation. The native SPIRE fixture remains explicitly local join-token identity and cannot satisfy this production GCP check.
+
+See [review 59](audits/59-controller-placement-review-2026-09-23.md). No cloud resources were created or changed.
 
 ## Revision 69 placement decision — one runner VM per tenant
 

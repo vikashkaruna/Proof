@@ -1,12 +1,22 @@
 # Implementation progress — W0 through W4
 
-Revisions 67–68 are **complete and green** together at `a7df79f`, CI [35857993698](https://github.com/vikashkaruna/Proof/actions/runs/35857993698): all 19 applicable jobs and 13 exact-revision artifacts verified. Evidence includes 33 native runner outcomes (all prior 24 retained), 71 assessment outcomes and five protected-trust outcomes. The initial native fixture hash-format mismatch was corrected without weakening production checks. Revision 69 implements the accepted dedicated runner VM per tenant; its final combined merge gate remains pending. The broader roadmap remains partial.
+Revision 70 adds reviewed tenant-to-VM placement preflight, with 141 deployment tests and 16 disposable host-delivery outcomes green locally. Revision 69 is pushed at `55282ea`; exact-merge evidence is recorded in the saved checkpoint. Full supervised activation and the broader roadmap remain open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 70 — reviewed tenant-to-VM placement check
+
+Revision 69 is pushed at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075); its final combined result is recorded separately. This revision continues the accepted dedicated runner VM per tenant decision.
+
+**Implemented:** a protected, hash-reviewed placement profile binds a tenant and controller file generation to a Mumbai zone and private IPv4 address. A read-only root helper compares fixed GCP instance metadata with the installed SPIRE GCP node identity, checks the address belongs to exactly one active non-loopback host interface, verifies protected controller files and live runtime-volume mappings, then reobserves placement and file bindings before returning. The helper and file installer are now included in the checksum-reviewed runner bundle. Metadata reads use only five fixed nonsensitive paths, no proxy/redirect/alternate endpoint, bounded responses and an enforced total child-process deadline. No access or identity token is requested.
+
+**Validation:** 14 new tests include actual local HTTP responses, proxy bypass, redirects, response bounds, a real trickling-child timeout, tenant/node/address mismatch and composition refusal. All 141 deployment tests and 16 disposable Ubuntu file-delivery outcomes pass locally. Native/system-wide evidence still requires exact-merge CI. See [review 59](audits/59-controller-placement-review-2026-09-23.md).
+
+**Boundary and next:** this supplies the preflight for supervised activation; it does not start a controller or yet integrate a host supervisor. Metadata is an observation of the trusted host placement, not cryptographic GCP attestation, continuous authorization, effective IAM or backend credential scoping. Next integrate this check into the supervised container lifetime, preserving exact container ownership, private binding and graceful shutdown. Then complete private TLS/DNS/secret delivery, scoped IAM/KMS and opaque scheduler deployment. Actual GCP identity and Mumbai recovery remain external; other W3/W4 and W0/W1/W2 obligations remain open. No cloud provisioning or schema/application-approval changes.
 
 ## Revision 69 — dedicated runner VM per tenant
 
