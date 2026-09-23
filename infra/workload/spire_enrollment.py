@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""Explicit issuer initialization and separate receipt-bound marker publication.
+
+Root-reviewed host administration, not application agent approval. Never repairs,
+formats, mounts, reenrolls, enables services or overwrites earlier decisions.
+"""
+from __future__ import annotations
+
+import contextlib
+import base64
+import ssl
+import fcntl
+import hashlib
+import json
+import os
+import re
+import selectors
+import stat
+import subprocess
+import sys
+import time
+import traceback
+import uuid
+from pathlib import Path
+
+# -I excludes the script directory. Only the fixed protected installation is
+# admitted for sibling imports; no cwd/PYTHONPATH/plugin search is required.
+sys.path.insert(0, '/opt/axiom/spire/1.15.3')
+import spire_host as host
+import spire_state as state
+
+DIRECTORY = Path('/etc/axiom/spire')
+REQUEST = DIRECTORY/'initialization-request.json'
+RECEIPT = DIRECTORY/'initialization-receipt.json'
+APPROVAL = DIRECTORY/'initialization-approval.json'
+BUNDLE = DIRECTORY/'initialization-bundle.json'
+CA = DIRECTORY/'initialization-ca.pem'
+PERMIT = Path('/run/axiom-spire-enrollment.json')
+LOCK = Path('/run/axiom-spire-enrollment.lock')
+NORMAL = 'axiom-spire-issuer.service'
+INITIAL = 'axiom-spire-enroll-issuer.service'
+ENV = {'PATH':'/usr/local/bin:/usr/bin:/usr/sbin', 'HOME':'/nonexistent', 'LC_ALL':'C'}
+
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha(value: object) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value):
+        raise ValueError('review digest refused')
+    return value
+
+
+def encode(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'))+'\n').encode()
+
+
+def load(path: Path, maximum=16384) -> dict:
+    value = json.loads(host.read_file(path, maximum, 0o600), object_pairs_hook=host.unique)
+    if not isinstance(value, dict):
+        raise ValueError('record refused')
+    return value
+
+
+def absent(path: Path) -> None:
+    if path.exists() or path.is_symlink():
+        raise ValueError('existing record refused')
+
+
+def create(path: Path, data: bytes) -> None:
+    host.protected_directory(path.parent)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(data); stream.flush(); os.fsync(stream.fileno())
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+@contextlib.contextmanager
+def exclusive():
+    host.protected_directory(LOCK.parent)
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_nlink != 1 or stat.S_IMODE(meta.st_mode) != 0o600:
+            raise ValueError('enrollment lock refused')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)
+
+
+def command(args: list[str], timeout=3, maximum=65536) -> bytes:
+    # Bounded stdout and fixed diagnostics: even a misbehaving subprocess cannot
+    # dump certificates, tokens or arbitrary private output into host logs.
+    with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV) as process:
+        try:
+            with selectors.DefaultSelector() as selector:
+                assert process.stdout is not None
+                selector.register(process.stdout, selectors.EVENT_READ)
+                data = bytearray(); deadline = time.monotonic()+timeout
+                while True:
+                    remaining = deadline-time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        raise ValueError('enrollment command timed out')
+                    chunk = os.read(process.stdout.fileno(), 4096)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > maximum:
+                        raise ValueError('enrollment output refused')
+                remaining = deadline-time.monotonic()
+                if remaining <= 0 or process.wait(timeout=remaining) != 0:
+                    raise ValueError('enrollment command refused')
+                return bytes(data)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
+def control(*args: str) -> bytes:
+    return command(['/usr/bin/systemctl', *args], timeout=40)
+
+
+def idle(unit: str) -> None:
+    properties = ('ActiveState','MainPID','Job','UnitFileState','FragmentPath','DropInPaths','NeedDaemonReload','Transient')
+    fields = dict(line.split('=', 1) for line in control('show', *('--property='+key for key in properties), unit).decode('ascii').splitlines())
+    if set(fields) != set(properties) or fields['ActiveState'] not in ('inactive','failed') or fields['MainPID'] != '0' or fields['Job'] not in ('','0') or fields['UnitFileState'] != ('disabled' if unit == NORMAL else 'static'):
+        raise ValueError('running queued or enabled service refused')
+    if fields['FragmentPath'] != '/etc/systemd/system/'+unit or fields['DropInPaths'] or fields['NeedDaemonReload'] != 'no' or fields['Transient'] != 'no':
+        raise ValueError('loaded service configuration refused')
+
+
+def installed(expected: str) -> dict:
+    sha(expected)
+    host.installed('issuer')
+    if digest(host.read_file(host.PREFIX/'manifest.json', 16384, 0o600)) != expected:
+        raise ValueError('installation review refused')
+    value = state.policy(load(state.CONFIG, 4096))
+    if value['role'] != 'issuer':
+        raise ValueError('enrollment role refused')
+    return value
+
+
+def process_start(pid: int) -> str:
+    if type(pid) is not int or pid <= 0:
+        raise ValueError('permit process refused')
+    path = Path('/proc')/str(pid)/'stat'
+    if path.stat().st_uid != 0:
+        raise ValueError('permit owner refused')
+    raw = path.read_text()  # Kernel-generated one-line record, not operator input.
+    if len(raw) > 4096:
+        raise ValueError('permit process refused')
+    parts = raw[raw.rfind(')')+2:].split()
+    return parts[19]
+
+
+def permit() -> None:
+    value = load(PERMIT)
+    if set(value) != {'schemaVersion','requestSha256','manifestSha256','pid','processStart','createdAtMs','expiresAtMs'} or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
+        raise ValueError('permit refused')
+    now = time.time_ns()//1000000
+    created, expiry = value['createdAtMs'], value['expiresAtMs']
+    if type(created) is not int or type(expiry) is not int or not created <= now < expiry or expiry-created != 60000:
+        raise ValueError('permit expired')
+    if process_start(value['pid']) != value['processStart']:
+        raise ValueError('permit process changed')
+    request_raw = host.read_file(REQUEST, 16384, 0o600)
+    request = json.loads(request_raw, object_pairs_hook=host.unique)
+    if digest(request_raw) != sha(value['requestSha256']) or request.get('manifestSha256') != value['manifestSha256']:
+        raise ValueError('permit request changed')
+    if installed(value['manifestSha256']) != request.get('binding'):
+        raise ValueError('permit binding changed')
+    # Unit starts only while the explicit CLI still owns its exclusive lock.
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(exclusive())
+        except BlockingIOError:
+            return
+        raise ValueError('permit owner absent')
+
+
+def normalized(value: object) -> object:
+    if isinstance(value, dict):
+        return {key:normalized(item) for key,item in value.items()}
+    if isinstance(value, list):
+        return sorted((normalized(item) for item in value), key=lambda item:json.dumps(item,sort_keys=True))
+    return value
+
+
+def bootstrap(value: dict) -> bytes:
+    certificates = []
+    for key in value['keys']:
+        if key.get('use') != 'x509-svid':
+            continue
+        chain = key.get('x5c')
+        if not isinstance(chain, list) or len(chain) != 1 or not isinstance(chain[0], str):
+            raise ValueError('initial CA encoding refused')
+        der = base64.b64decode(chain[0], validate=True)
+        if not 32 <= len(der) <= 16384 or der[0] != 0x30:
+            raise ValueError('initial CA encoding refused')
+        certificates.append(der)
+    if len(set(certificates)) != len(certificates):
+        raise ValueError('duplicate initial CA refused')
+    # The pinned SPIRE issuer supplies these certificates. This conversion is
+    # byte-preserving export for review, not an independent crypto validator.
+    return ''.join(ssl.DER_cert_to_PEM_cert(der) for der in sorted(certificates)).encode('ascii')
+
+
+def trust_summary(raw: bytes) -> dict:
+    value = json.loads(raw, object_pairs_hook=host.unique)
+    if not isinstance(value, dict) or not isinstance(value.get('keys'), list) or not 2 <= len(value['keys']) <= 64:
+        raise ValueError('initial issuer bundle refused')
+    counts = {'x509-svid':0, 'jwt-svid':0}
+    for key in value['keys']:
+        if not isinstance(key, dict) or key.get('use') not in counts or key.get('kty') not in ('EC','RSA') or set(key) & {'d','p','q','dp','dq','qi','oth','k'}:
+            raise ValueError('initial issuer authority refused')
+        counts[key['use']] += 1
+    if any(number == 0 for number in counts.values()):
+        raise ValueError('initial issuer authorities incomplete')
+    return {'bundleSha256':digest(encode(normalized(value))), 'bootstrapCaSha256':digest(bootstrap(value)), 'x509Authorities':counts['x509-svid'], 'jwtAuthorities':counts['jwt-svid']}
+
+
+def trust() -> tuple[dict, bytes, bytes]:
+    raw = command(['/usr/local/bin/spire-server','bundle','show','-socketPath','/run/spire-server/api.sock','-format','spiffe'])
+    summary = trust_summary(raw)
+    value = json.loads(raw, object_pairs_hook=host.unique)
+    return summary, encode(normalized(value)), bootstrap(value)
+
+
+def fingerprint() -> dict:
+    state.check('--unsealed','issuer')
+    data = state.STATE/'server'
+    # A stopped, fresh SQLite store must have no uncheckpointed side files.
+    if {p.name for p in data.iterdir()} != {'keys.json','db.sqlite3'}:
+        raise ValueError('initial state inventory refused')
+    result = {'keysSha256':digest(state.private_file(data/'keys.json', 1024*1024)),
+              'registrySha256':digest(state.private_file(data/'db.sqlite3', 64*1024*1024))}
+    state.check('--unsealed','issuer')
+    return result
+
+
+def initialize(expected: str) -> str:
+    binding = installed(expected)
+    idle(NORMAL); idle(INITIAL)
+    for path in (REQUEST, RECEIPT, APPROVAL, PERMIT, BUNDLE, CA):
+        absent(path)
+    state.check('--empty','issuer')
+    now = time.time_ns()//1000000
+    request = {'schemaVersion':1, 'operationId':str(uuid.uuid4()), 'action':'initialize-issuer', 'manifestSha256':expected, 'binding':binding, 'requestedAtMs':now}
+    request_raw = encode(request)
+    # The reviewed request is durable BEFORE starting the mutating process.
+    create(REQUEST, request_raw)
+    authorization = {'schemaVersion':1, 'requestSha256':digest(request_raw), 'manifestSha256':expected, 'pid':os.getpid(), 'processStart':process_start(os.getpid()), 'createdAtMs':now, 'expiresAtMs':now+60000}
+    create(PERMIT, encode(authorization))
+    try:
+        control('start', INITIAL)
+        observation, public_bundle, ca = trust()
+        if (observation, public_bundle, ca) != trust():
+            raise ValueError('initial trust changed during observation')
+    finally:
+        try:
+            control('stop', INITIAL)
+            idle(INITIAL)
+        finally:
+            PERMIT.unlink(missing_ok=True)
+    idle(NORMAL)
+    if installed(expected) != binding:
+        raise ValueError('initial binding changed')
+    evidence = {'schemaVersion':1, 'requestSha256':digest(request_raw), 'manifestSha256':expected,
+                'binding':binding, 'trust':observation, 'state':fingerprint(), 'completedAtMs':time.time_ns()//1000000}
+    create(BUNDLE, public_bundle); create(CA, ca)
+    raw = encode(evidence); create(RECEIPT, raw)
+    return digest(raw)
+
+
+def seal(expected_receipt: str) -> None:
+    sha(expected_receipt)
+    raw = host.read_file(RECEIPT, 16384, 0o600)
+    if digest(raw) != expected_receipt:
+        raise ValueError('receipt review refused')
+    value = json.loads(raw, object_pairs_hook=host.unique)
+    if not isinstance(value, dict) or set(value) != {'schemaVersion','requestSha256','manifestSha256','binding','trust','state','completedAtMs'} or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
+        raise ValueError('receipt refused')
+    binding = installed(value['manifestSha256'])
+    request = host.read_file(REQUEST, 16384, 0o600)
+    requested = json.loads(request, object_pairs_hook=host.unique)
+    if digest(request) != sha(value['requestSha256']) or requested.get('manifestSha256') != value['manifestSha256'] or requested.get('binding') != binding or value['binding'] != binding:
+        raise ValueError('receipt binding changed')
+    public = host.read_file(BUNDLE, 65536, 0o600)
+    ca = host.read_file(CA, 65536, 0o600)
+    if not isinstance(value['trust'], dict) or digest(public) != value['trust'].get('bundleSha256') or digest(ca) != value['trust'].get('bootstrapCaSha256'):
+        raise ValueError('reviewed public trust changed')
+    idle(NORMAL); idle(INITIAL)
+    absent(PERMIT); absent(APPROVAL); absent(state.STATE/'.axiom-state.json')
+    if fingerprint() != value['state']:
+        raise ValueError('stopped state changed after review')
+    # Persist the separate review before publishing the marker. Partial writes
+    # stay fail-closed for explicit recovery; no retry overwrites prior records.
+    approval = {'schemaVersion':1, 'action':'seal-issuer-initialization', 'receiptSha256':expected_receipt, 'manifestSha256':value['manifestSha256'], 'binding':binding, 'approvedAtMs':time.time_ns()//1000000}
+    create(APPROVAL, encode(approval))
+    if installed(value['manifestSha256']) != binding or fingerprint() != value['state']:
+        raise ValueError('state changed before publication')
+    idle(NORMAL); idle(INITIAL)
+    create(state.STATE/'.axiom-state.json', encode(binding))
+    state.check('--ready','issuer')
+
+
+def main() -> None:
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise ValueError('root Linux enrollment required')
+    os.umask(0o077)
+    args = sys.argv[1:]
+    if args == ['--permit','issuer']:
+        permit(); return
+    if len(args) != 3 or args[1] != 'issuer' or args[0] not in ('--initialize','--seal'):
+        raise ValueError('enrollment invocation refused')
+    with exclusive():
+        if args[0] == '--initialize':
+            result = initialize(args[2])
+            print('Issuer stopped with unmarked state. Review receipt SHA256 '+result+' before separate marker publication.')
+        else:
+            seal(args[2]); print('Reviewed issuer marker published. Normal services remain disabled and stopped.')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        frames = [f'{frame.name}:{frame.lineno}' for frame in traceback.extract_tb(error.__traceback__) if Path(frame.filename).name in ('spire_enrollment.py','spire_host.py','spire_state.py')]
+        print('SPIRE enrollment refused at '+' / '.join(frames)+'; existing state and review records require inspection.', file=sys.stderr)
+        sys.exit(1)

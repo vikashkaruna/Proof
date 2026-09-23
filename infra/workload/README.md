@@ -69,3 +69,28 @@ both roles; the dedicated native Ubuntu CI fixture exercises actual issuer
 startup/mount-loss/recovery. It is restricted to fresh GitHub-hosted runners and
 formats only a newly allocated loop device whose backing file it verifies.
 Actual GCP identity and full runner/controller activation remain pending.
+
+## Explicit issuer initialization (Revision 63)
+
+The issuer bundle now includes `spire_enrollment.py` and a separate static
+`axiom-spire-enroll-issuer.service`. Normal units still use only `--ready`.
+The initial unit requires an explicit live permit and empty state, never
+restarts automatically, and has a 60-second runtime limit. It is not enabled.
+
+After protected installation, reviewed unit loading and separately prepared
+empty-disk mounting, `--initialize issuer MANIFEST_SHA256` records the request,
+initializes under service hardening, observes public X.509/JWT trust and stops.
+Review the protected receipt, then invoke `--seal issuer RECEIPT_SHA256` to
+record that separate decision and publish the marker. Both use the installed
+helper through `/usr/bin/python3 -I -B`; root/Linux, installed-file integrity,
+loaded-unit identity, disabled/inactive normal services and exact mount binding
+are required. No command formats, mounts, repairs, enables or overwrites.
+
+An interrupted attempt stays unmarked for explicit recovery. Request, receipt
+and approval files live under `/etc/axiom/spire`; the runtime permit and lock
+stay under `/run`. No environment parameters are added. These are root
+administrative records, not application mutation-approval tokens or a signed
+human identity assertion. Runner enrollment and full node/controller activation
+remain next. See Doc 16 for exact operator steps and boundaries.
+
+Initialization also exports root-protected public `initialization-bundle.json` and `initialization-ca.pem` under `/etc/axiom/spire`. Review these while the issuer remains stopped. Their hashes are bound to the receipt and rechecked before sealing; no private key material is exported.

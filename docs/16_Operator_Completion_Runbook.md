@@ -1,15 +1,29 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173) green, with 17 applicable jobs and ten verified artifacts. Revision 62 adds protected SPIRE host delivery and normal restart units; exact merge acceptance is saved in the session. Initial enrollment, full runner activation and broader W3/W4 remain open.
+Verified staging checkpoint before this revision’s merge: `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663) green, with 18 applicable jobs and 12 verified artifacts. Revision 63 adds explicit issuer initialization and separate reviewed marker publication. Runner enrollment, full activation and the broader roadmap remain open; exact final-merge evidence is saved in the session.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 62, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 63, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 63 operator gate — explicit issuer initialization
+
+This is deployment code for a reviewed host, not authorization to provision or initialize a higher environment in this development session. Application mutation approval tokens remain a separate mechanism.
+
+1. Finish protected first-file delivery from Revision 62, with the new initialization helper/unit included in the reviewed manifest. This remains a fresh installation contract: the installer refuses differing existing files. An upgrade path for already installed hosts is not implemented.
+2. Review and load the installed units with the service manager. Before initialization the normal issuer unit must be disabled and inactive, and the initialization unit must be inactive/static. Drop-ins, transient units, unexpected fragment paths, pending reloads, queued jobs and live processes are refused.
+3. Separately prepare and mount the intended empty disk. The CLI will verify its fixed device alias, real UUID, whole ext4 mount, private directory and required mount flags. It never formats or mounts a disk. Existing keys, marker or request/receipt/approval files require recovery review rather than a fresh attempt.
+4. As root, invoke `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --initialize issuer REVIEWED_MANIFEST_SHA256`. It records the request before starting a bounded initialization unit, observes both signing authority types, stops the issuer and writes `/etc/axiom/spire/initialization-receipt.json`. The state remains unmarked; normal startup must still fail.
+5. Review the request and receipt against the intended host/disk, trust domain and independently approved trust delivery. Review `/etc/axiom/spire/initialization-bundle.json` and `/etc/axiom/spire/initialization-ca.pem` while the issuer remains stopped. Their SHA-256 fingerprints are bound to the receipt and rechecked at sealing. The receipt contains fingerprints, not private keys. The trusted pinned SPIRE process supplies the live bundle; the helper does not replace SPIRE cryptographic validation. Verify that shutdown completed and investigate any interruption. These root-owned records document administrative review, not a signed application approval or proof of who typed the command.
+6. Supply the separately reviewed receipt hash to `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --seal issuer REVIEWED_RECEIPT_SHA256`. It refuses changed bytes/configuration/state or active/enabled services, records the approval first and creates the identical bound marker without overwrite. It does not enable/start normal services. Proceed with separately reviewed registrations, CA delivery and operational activation only after remaining prerequisites are satisfied.
+7. Failed or interrupted operations retain their records/state for review. Never erase keys, remove a request, rewrite a receipt/marker, disable the checks or rerun with an empty-disk fallback to recover automatically. Marker publication cannot be replayed. Explicit failure recovery and runner enrollment remain subsequent implementation/acceptance work.
+
+The native fixture now exercises the same installed CLI and checks refusal without a permit, wrong receipt, changed stopped state and replay, plus all prior mount-loss/recovery outcomes. Full exact-merge results are saved in the session. See [review 52](audits/52-issuer-initial-enrollment-review-2026-09-23.md).
 
 ## Revision 62 operator gate — protected host files
 

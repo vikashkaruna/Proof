@@ -66,6 +66,15 @@ class BundleTests(unittest.TestCase):
                 self.assertIn('ReadWritePaths=/run/spire-health',health)
                 self.assertIn('spiffe://preprod.axiomproof.test/spire/agent/gcp_iit/replace-project/1',health)
 
+    def test_initialization_is_explicit_bounded_and_not_a_boot_unit(self):
+        _,files=self.prepare()
+        initial=files['enroll.service'].decode();normal=files['spire.service'].decode()
+        self.assertIn('spire_enrollment.py --permit issuer',initial)
+        self.assertLess(initial.index('--permit issuer'),initial.index('--empty issuer'))
+        self.assertIn('Restart=no',initial);self.assertIn('RuntimeMaxSec=60',initial)
+        self.assertNotIn('[Install]',initial);self.assertNotIn('--empty',normal)
+        self.assertNotIn('--permit',normal);self.assertIn('--ready issuer',normal)
+
     def test_bad_checksum_precedes_archive_parsing(self):
         with patch.object(bundles.tarfile,'open') as parser:
             with self.assertRaises(ValueError):bundles.selected_binary(b'bad','amd64','issuer')

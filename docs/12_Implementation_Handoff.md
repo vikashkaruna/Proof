@@ -1,14 +1,14 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 51](audits/51-spire-host-delivery-review-2026-09-23.md).
+> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 52](audits/52-issuer-initial-enrollment-review-2026-09-23.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
-## Current handoff — Revision 62 (23 September 2026)
+## Current handoff — Revision 63 (23 September 2026)
 
-Revision 61 is green at `13ce160` / CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173). Revision 62 adds pinned host bundles, protected first-file delivery and initialized-state-only systemd units on Ubuntu 24.04. Docker delivery and a dedicated native systemd/loop-device CI gate accompany the 77 deployment tests. Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker and 11 native systemd outcomes from clean source. Combined final-merge evidence is saved in the session; do not equate tested issuer units with full deployed runner/controller services.
+Revision 62 is green at `00dc35d` / CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663): 18 jobs and 12 verified artifacts. Revision 63 adds explicit issuer initialization and separate receipt-hash review before publishing its state marker. Normal startup remains initialized-state-only. Local validation passes 96 deployment tests and 16 Docker outcomes; expanded native/combined exact-merge evidence is saved in the session.
 
-Resume in `codex/w0-w3-closure`, preserving the original checkout. Next complete explicit first enrollment/marker delivery and runner/observer lifecycle acceptance, then socket-volume mapping, full controller admission, scoped IAM/KMS, private TLS and the opaque scheduler. Installer retries preserve identical files and refuse upgrades/conflicts. No cloud provisioning was performed; Terraform remains default-off. Remaining workers, grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement are still open. Docs 11 and 14–16 carry current evidence and closure gates.
+Resume automatically in plan order in `codex/w0-w3-closure`, preserving the original checkout. Next implement reviewed runner enrollment and full node/observer lifecycle, then socket-volume mapping, full controller admission, IAM/KMS, private TLS and the opaque scheduler. Failed initialization requires explicit recovery; never delete state or overwrite review records to make a retry succeed. No cloud resources were provisioned. Remaining workers, live grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement remain open.
 
 ## Historical review snapshot
 
