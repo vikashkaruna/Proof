@@ -1,0 +1,19 @@
+# Review 45 — dedicated VM controller composition
+
+Reviewed staging `4b67a74`, CI [35818471736](https://github.com/vikashkaruna/Proof/actions/runs/35818471736): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model changes. The earlier protected-trust milestone is green; the entire roadmap remains incomplete.
+
+## Findings and implementation
+
+The existing isolation, trust, dispatch, scheduling and HTTP components lacked an explicit service composition for the accepted Mumbai VM target. `composeVmAssessmentController` now wires them with one reviewed tenant/namespace, persisted key-policy recovery and fresh protected Workload API trust. Tenant checks precede private metadata lookup as well as claims and acknowledgements. Startup checks availability but cannot publish policies or register/activate workloads. AWS/GCP wrappers retain their fixed regional boundaries. Public BFF startup is unchanged.
+
+A separate controller service reads strict protected files, requires explicit check/serve mode, HTTPS backend configuration and direct TLS with a current audience-matching certificate. The dedicated image runs under UID 20000; operators grant the trusted controller the specific local daemon group. Workers retain their prior isolation and receive no controller credentials. Error and shutdown paths keep private material out of logs; uncertain work remains subject to durable independent confirmation.
+
+The acceptance harness now exercises the composition inside a real registered controller container. The controller obtains live SPIRE bundles and launches the actual isolated assessment worker, with real scoped persistence and independent confirmation. Synthetic provider ports replace cloud KMS IO and scheduler signing only; registration, task, trust, SQL, launch and tenant checks are real. Reconstruction returns the same receipt without relaunch. Existing captured-trust edge cases remain separately tested. Initial harness issues (an undeclared root test dependency and Docker Desktop's daemon-side socket source) were corrected without loosening runtime boundaries.
+
+## Validation
+
+Focused composition/file/startup tests cover read-only startup, stale policy, unavailable trust/runtime, tenant rejection before metadata/RPC, unsafe configuration and protected files. All **930 BFF tests**, workspace tests/lint/typecheck, acceptance TypeScript and security/control gates pass. Real local integration passes **61 identity, 60 worker and three protected-trust outcomes**, preserving prior outcomes. Initial full-suite runs under heavy local CPU load exposed test-fixture deadlines and excessive fork concurrency; limiting BFF test workers to four and giving successful local trust reads the normal 2500 ms budget corrected this. The explicit silent-stream test retains its 200 ms deadline; no production timeout changed. Exact merge CI is the final gate: 17 applicable jobs and nine sanitized JSON artifacts are expected. No migration changed (0048, 49 migrations, 55 tables, 18 concurrency suites, 14 populated upgrades); W2 named coverage remains 19/40.
+
+## Remaining gates
+
+Provisionable Mumbai VM and protected SPIRE node bootstrap, application/node lifecycle composition, image admission, issuer health, service supervision and opaque scheduler deployment remain open. The read-only startup check cannot establish actual cloud IAM/KMS readiness. Direct daemon access makes this controller part of the trusted host boundary. Service-role database credentials are held only by the trusted controller; a narrower database credential design remains separate work. Do not count these fixtures as cloud deployment or live connector execution. Continue remaining workers/verified actor chains, W4.4 grants, full W3 resumable wizard/readiness/live graph, W4.5–7, W0/W1/W2 remainder and backup-aware key retirement. No cloud apply, external client mutation or WORM change occurred.

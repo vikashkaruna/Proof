@@ -33,6 +33,19 @@ COPY services/bff ./services/bff
 COPY packages ./packages
 RUN pnpm --filter @axiom/bff build
 
+# Explicit dedicated runner image. Deployment supplies only this trusted
+# controller with the daemon group/socket; workers never inherit either.
+FROM build AS assessment-controller
+RUN apk add --no-cache docker-cli tini
+ENV NODE_ENV=production TSX_DISABLE_CACHE=1
+USER 20000:20000
+WORKDIR /app/services/bff
+ENTRYPOINT ["/sbin/tini", "--", "node", "--import", "/app/node_modules/tsx/dist/loader.mjs", "src/assessment-controller-service.ts"]
+CMD []
+
+FROM assessment-controller AS vm-controller-acceptance
+COPY scripts/verify-vm-controller.ts /app/scripts/verify-vm-controller.ts
+
 # Test-only controller: no source/token mounts or backend credentials at runtime.
 # The normal final runtime target does not contain this acceptance script.
 FROM build AS workload-trust-acceptance

@@ -8,6 +8,8 @@ export default defineConfig({
     // process.env before importing them.
     isolate: true,
     pool: 'forks',
+    // Bound CPU-heavy MFA fixtures and local RPC tests on shared developer hosts.
+    maxWorkers: 4,
     include: ['src/**/*.test.ts'],
   },
 });

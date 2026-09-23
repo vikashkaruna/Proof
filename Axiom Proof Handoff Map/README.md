@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 43](../docs/audits/43-workload-registration-lifecycle-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 45](../docs/audits/45-vm-controller-composition-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -65,3 +65,5 @@ Revision 54 verifies per-job isolation at staging `c17f428` / CI 35814929318 and
 Revision 54 CI follow-up: initial merge `1e1207d` failed shared fixture setup, now corrected to audited registration and explicit direct-write refusal. Corrective merge `0081948` / CI 35817381642 is verified green, with 17 applicable jobs and eight exact-revision artifacts.
 
 Revision 55 adds a protected local Workload API signing-bundle source with fail-closed rereads and real SPIRE controller checks. VM/controller deployment and production composition remain open. See review 44 and Doc 16; verify nine exact-merge JSON artifacts before closure.
+
+Revision 56 composes the private VM controller with protected live SPIRE trust, persisted tenant policy, isolated assessment execution and independent confirmation. Production VM/node/scheduler deployment remains pending; see Doc 16 for protected configuration and operating prerequisites. Revision 55 is verified green at staging `4b67a74`; final Revision 56 merge evidence is recorded in the session.

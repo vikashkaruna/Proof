@@ -20,6 +20,7 @@ afterEach(async () => {
 });
 async function fixture(
   handler?: (call: ServerWritableStream<Record<string, never>, BundleResponse>) => void,
+  timeoutMs = 2500,
 ) {
   const directory = await mkdtemp('/tmp/ax-trust-');
   const socketPath = `${directory}/api.sock`;
@@ -47,7 +48,7 @@ async function fixture(
     server.forceShutdown();
     await rm(directory, { recursive: true, force: true });
   });
-  const source = new WorkloadApiJwtTrust({ socketPath, trustDomains: [domain], timeoutMs: 200 });
+  const source = new WorkloadApiJwtTrust({ socketPath, trustDomains: [domain], timeoutMs });
   return {
     source,
     server,
@@ -122,7 +123,7 @@ it('bounds a silent stream and cancels it', async () => {
     call.on('cancelled', () => {
       cancelled = true;
     });
-  });
+  }, 200);
   const start = Date.now();
   expect(await f.source.load(domain)).toBeNull();
   expect(Date.now() - start).toBeLessThan(1500);
