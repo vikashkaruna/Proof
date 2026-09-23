@@ -1,12 +1,24 @@
 # Implementation progress — W0 through W4
 
-Current verified staging checkpoint: `7485880`, CI [35715172231](https://github.com/vikashkaruna/Proof/actions/runs/35715172231) green. Revision 51 implements the accepted configurable 90-day private dispatch retention policy; exact merge verification is saved in the session. Full key lifecycle, production composition/isolation, W3/W4 and W0/W1/W2 remainder stay open.
+Current verified staging checkpoint: `9e4fdaa`, CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922) green. Revision 52 adds persisted dispatch policy and transactional enqueue/claim fences; final exact merge verification is saved in the session. Production composition/isolation, backup-aware key retirement, W3/W4 and W0/W1/W2 remainder remain open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 52 — persisted dispatch policy and transactional fences
+
+Revision 51 is **complete and green** at staging `9e4fdaa`, CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922): 17 applicable jobs and eight verified acceptance artifacts. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+Migration **0047** persists each tenant's dispatch provider, primary/readable key references, monotonic revision, canonical configuration fingerprint and mandatory publication receipt. The service-only publisher checks a trusted authenticated owner/admin or internal founder identity and compare-and-set revision. Bootstrap accounts for all historical outbox references, including purged rows; cross-tenant key reuse is refused. Updates retain every readable reference and can promote only a previously staged key. Publication and audit commit atomically; immediate lost-response retries recover the original receipt.
+
+Both enqueue and claim now share a per-tenant transaction lock with policy publication. A stale writer cannot create new work; a stale reader cannot consume a single-use claim. Original actor/context checks still govern historical receipt recovery, which never creates authority. The former implementations are private and no longer executable by service/client roles. Production AWS/GCP adapters expose a fingerprint derived from their actual immutable local policy; `AssessmentDispatch` captures configured revisions rather than accepting policy assertions from a request. Startup can recover the stored revision only when that local fingerprint matches. Existing provider patterns were also tightened to reject trailing line terminators.
+
+**Validation:** **846 BFF tests**, workspace tests/lint/typecheck/security and separate acceptance TypeScript; **48 migrations, 17 concurrency suites and 13 populated upgrades**. Local real Auth/PostgREST/SPIRE acceptance passes **61 identity and 43 worker outcomes**, proving staged publication, stale reader/writer refusal, durable revision recovery and retained-key decryption after promotion. Concurrent publication tests cover both ordering directions and competing cross-tenant reservation. Schema tip **0047**, **55 public tables**; W2 named targets remain **19/40**. Final exact-merge CI/artifacts are saved in the session. See [review 41](audits/41-dispatch-policy-fencing-review-2026-09-23.md).
+
+**Next:** per-job process/network/cloud-metadata isolation, workload trust/registration and dedicated controller/scheduler deployment composition; remaining scoped workers and verified actor chains; W4.4 grants; full W3 resumable wizard/readiness/live graph; W4.5/6/7. Backup inventory and reviewed key retirement remain open. A matching configuration does not prove live KMS IAM/decrypt readiness, deploy controllers or revoke already-issued tasks. No key removal/destruction, public activation or cloud deployment was performed. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and the remaining 21 W2 targets.
 
 ## Revision 51 — configurable completed-dispatch retention
 

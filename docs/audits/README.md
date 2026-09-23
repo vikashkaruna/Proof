@@ -1,6 +1,6 @@
 # Audit Reports
 
-Latest review: [40 — completed-dispatch retention](40-dispatch-retention-review-2026-09-23.md).
+Latest review: [41 — persisted dispatch policy and controller fencing](41-dispatch-policy-fencing-review-2026-09-23.md).
 C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
 [Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 

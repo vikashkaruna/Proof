@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 52 — persisted dispatch policy and transactional fences
+
+Revision 51 is **complete and green** at staging `9e4fdaa`, CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922): 17 applicable jobs and eight verified acceptance artifacts. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+Migration **0047** persists each tenant's dispatch provider, primary/readable key references, monotonic revision, canonical configuration fingerprint and mandatory publication receipt. The service-only publisher checks a trusted authenticated owner/admin or internal founder identity and compare-and-set revision. Bootstrap accounts for all historical outbox references, including purged rows; cross-tenant key reuse is refused. Updates retain every readable reference and can promote only a previously staged key. Publication and audit commit atomically; immediate lost-response retries recover the original receipt.
+
+Both enqueue and claim now share a per-tenant transaction lock with policy publication. A stale writer cannot create new work; a stale reader cannot consume a single-use claim. Original actor/context checks still govern historical receipt recovery, which never creates authority. The former implementations are private and no longer executable by service/client roles. Production AWS/GCP adapters expose a fingerprint derived from their actual immutable local policy; `AssessmentDispatch` captures configured revisions rather than accepting policy assertions from a request. Startup can recover the stored revision only when that local fingerprint matches. Existing provider patterns were also tightened to reject trailing line terminators.
+
+**Validation:** **846 BFF tests**, workspace tests/lint/typecheck/security and separate acceptance TypeScript; **48 migrations, 17 concurrency suites and 13 populated upgrades**. Local real Auth/PostgREST/SPIRE acceptance passes **61 identity and 43 worker outcomes**, proving staged publication, stale reader/writer refusal, durable revision recovery and retained-key decryption after promotion. Concurrent publication tests cover both ordering directions and competing cross-tenant reservation. Schema tip **0047**, **55 public tables**; W2 named targets remain **19/40**. Final exact-merge CI/artifacts are saved in the session. See [review 41](audits/41-dispatch-policy-fencing-review-2026-09-23.md).
+
+**Next:** per-job process/network/cloud-metadata isolation, workload trust/registration and dedicated controller/scheduler deployment composition; remaining scoped workers and verified actor chains; W4.4 grants; full W3 resumable wizard/readiness/live graph; W4.5/6/7. Backup inventory and reviewed key retirement remain open. A matching configuration does not prove live KMS IAM/decrypt readiness, deploy controllers or revoke already-issued tasks. No key removal/destruction, public activation or cloud deployment was performed. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and the remaining 21 W2 targets.
+
 ## Revision 51 — configurable completed-dispatch retention
 
 Revision 50 is **complete and green** at staging `7485880`, CI [35715172231](https://github.com/vikashkaruna/Proof/actions/runs/35715172231): 17 applicable jobs and eight exact-revision artifacts passed. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.

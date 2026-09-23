@@ -18,6 +18,8 @@ export const dispatchContextSchema = z
   .strict();
 export type DispatchContext = z.infer<typeof dispatchContextSchema>;
 export interface DispatchKeyWrapper {
+  /** Production providers bind the exact immutable local configuration. */
+  policyFingerprint?(tenant: string): string;
   wrap(context: Uint8Array, key: Uint8Array): Promise<{ keyRef: string; wrappedKey: Uint8Array }>;
   /** Return caller-owned bytes: the payload adapter clears them after use. */
   unwrap(context: Uint8Array, keyRef: string, wrappedKey: Uint8Array): Promise<Uint8Array>;

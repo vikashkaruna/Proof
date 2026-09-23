@@ -35,7 +35,8 @@ export class DispatchKeyPolicy {
         const ring = ringSchema.parse(value);
         if (this.#rings.has(tenant)) throw new DispatchRefused();
         for (const key of [ring.primary, ...ring.retiring]) {
-          if (!patterns[provider].test(key) || owners.has(key)) throw new DispatchRefused();
+          if (key.trim() !== key || !patterns[provider].test(key) || owners.has(key))
+            throw new DispatchRefused();
           owners.add(key);
         }
         this.#rings.set(
@@ -47,6 +48,22 @@ export class DispatchKeyPolicy {
     } catch {
       throw new DispatchRefused();
     }
+  }
+  fingerprint(tenant: TenantId): string {
+    const ring = this.#rings.get(tenant);
+    if (!ring) throw new DispatchRefused();
+    return createHash('sha256')
+      .update(
+        [
+          'axiom.dispatch.key-policy.v1',
+          tenant,
+          this.provider,
+          ring.primary,
+          ...[ring.primary, ...ring.retiring].sort(),
+        ].join('\n'),
+        'utf8',
+      )
+      .digest('hex');
   }
   primary(tenant: TenantId): string {
     const ring = this.#rings.get(tenant);
