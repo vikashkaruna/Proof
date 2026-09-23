@@ -300,6 +300,7 @@ jobs:
 
       - name: Offline private issuer and runner boundary tests
         run: |
+          python3 scripts/check-workload-iam.py
           terraform -chdir=infra/terraform/modules/workload-vms init -backend=false -input=false
           terraform -chdir=infra/terraform/modules/workload-vms validate
           terraform -chdir=infra/terraform/modules/workload-vms test -no-color

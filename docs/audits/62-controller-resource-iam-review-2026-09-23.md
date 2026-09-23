@@ -1,0 +1,31 @@
+# Revision 73 — tenant controller resource IAM
+
+Revision 72 restricted database authority. This revision supplies the corresponding desired Google Cloud secret/KMS policy for each dedicated tenant runner. It does not claim that effective cloud permissions have been deployed or verified.
+
+## Declared boundary
+
+An optional `controller_permissions.dispatch_keys` object names a primary dispatch CryptoKey and up to nine retiring keys. Keys must be canonical Mumbai resources in the reviewed project. Duplicate references, shared keys between tenants, foreign projects/regions, key-version paths and a zero tenant UUID are refused. Omitting the object preserves the prior host-only configuration, with no controller secrets or grants. The root remains disabled by default and enables the Cloud KMS API only when controller permissions are requested; removing configuration does not disable that shared API.
+
+Each opted-in tenant receives two empty Secret Manager containers, for scoped backend credential JSON and the controller leaf TLS key/certificate bundle. Both have one user-managed replica in `asia-south1` and tenant/purpose labels. The runner's dedicated service account receives `roles/secretmanager.secretAccessor` on those exact resources and `roles/cloudkms.cryptoKeyDecrypter` on each exact declared key. No issuer, scheduler, browser or shared BFF identity receives these grants. Producer encryption, secret publication, key management, identity impersonation and project/folder/organization authority are outside this module's runtime grants.
+
+Terraform receives only resource references and creates no secret versions, private keys, signing material or dispatch KMS keys. Secret containers have `prevent_destroy` to require deliberate retirement review; this is a Terraform guard, not WORM or protection from cloud administrators. Changing the key inventory can remove IAM bindings, so operators must preserve every key still required by dispatches and retained backups. Neither this module nor primary promotion retires cryptographic material.
+
+The non-secret output binds tenant, project, runner service account, backend/TLS secret resources, primary/retiring keys and the existing backend key-policy fingerprint. Review it against the protected controller configuration and persisted policy before activation. Primary promotion changes the fingerprint while retaining all declared readable-key grants.
+
+## Verification
+
+Evaluated Terraform mock-provider tests cover default-off behavior, exact resource/principal/role mappings, Mumbai replication, key isolation, invalid inputs, root composition and promotion without losing old grants. Fingerprints were cross-checked with the BFF's actual `DispatchKeyPolicy` implementation. A separate source inventory gate rejects unreviewed resources, secret versions, data sources, provisioners, impersonation or broader IAM roles; mutation tests demonstrate those refusals. These checks prove the configuration contract, not cloud IAM effectiveness.
+
+Local/source/exact-merge evidence is recorded after verification. No cloud state was read or changed and no cloud provisioning/apply occurred. Schema remains 0049 / 50 migrations / 55 public tables plus the private credential registry; W2 remains 19/40 named targets.
+
+## Required deployment evidence — still pending
+
+On an explicitly authorized deployment, retain the complete reviewed Terraform plan and applied resource IDs. Verify the tenant's service account on the actual VM and the same identity used by the controller. Compare the emitted key-policy fingerprint and secret inventory with the persisted backend policy and protected host generation. Verify the exact secret replication/labels and key purposes/locations; dispatch keys must be distinct from credential-vault keys.
+
+Review effective organization, folder, project, key-ring, key and secret grants, group membership, conditional bindings, service-account impersonation and applicable deny policies. Resource-level member additions do not remove inherited or externally managed permissions. An attached identity or an OAuth scope is not proof of least privilege. Check every tenant in the reviewed deployment inventory, including issuer, scheduler and non-controller principals, rather than sampling only the positive path.
+
+Using each actual VM/controller identity, require successful access only to its own synthetic backend/TLS secret versions and successful decryption of a synthetic dispatch under its primary and retained keys. Require denied access to every other reviewed tenant's secrets/keys, JWT signing keys and broad backend credentials; require denied encryption, secret publication/destruction, KMS administration and impersonation. Exercise expiry/revocation through the actual scoped backend token too. A synthetic decrypt failure caused by invalid ciphertext is not evidence of IAM denial; check the authorization result. Preserve only sanitized pass/fail evidence, resource IDs, policy revisions and source hashes, never tokens, secret payloads, plaintext DEKs or private keys.
+
+Credential issuance/renewal and protected file-generation rollout, private TLS/DNS, opaque scheduler, real GCP attestation/caller identity/KMS operations and Mumbai restore remain separate activation gates. Existing host supervision and local fixtures do not satisfy them.
+
+References: [Cloud KMS resource hierarchy and roles](https://docs.cloud.google.com/kms/docs/reference/permissions-and-roles) documents CryptoKey-level decryption grants and key-version limitations. [Secret Manager IAM](https://docs.cloud.google.com/secret-manager/docs/access-control) documents secret-level access and the VM OAuth-scope prerequisite. Terraform uses the repository's `hashicorp/google ~> 5.25` provider, validated locally at 5.45.2.

@@ -27,7 +27,7 @@ variables {
 run "existing_deployment_does_not_create_workload_hosts" {
   command = apply
   assert {
-    condition     = length(module.workload_vms) == 0 && output.workload_vm_hosts == null
+    condition     = length(module.workload_vms) == 0 && output.workload_vm_hosts == null && output.workload_controller_permissions == null && !contains(keys(google_project_service.apis), "cloudkms.googleapis.com")
     error_message = "Existing deployments must not silently create issuer or runner VMs."
   }
 }
@@ -43,11 +43,37 @@ run "explicit_configuration_composes_private_hosts" {
   }
   assert {
     condition = (
-      length(module.workload_vms) == 1 && output.workload_vm_hosts.issuer.name == "axiom-preprod-issuer" &&
+      length(module.workload_vms) == 1 && length(output.workload_controller_permissions) == 0 && !contains(keys(google_project_service.apis), "cloudkms.googleapis.com") && output.workload_vm_hosts.issuer.name == "axiom-preprod-issuer" &&
       toset(keys(output.workload_vm_hosts.runners)) == toset(["11111111-1111-4111-8111-111111111111"]) &&
       output.workload_vm_hosts.runners["11111111-1111-4111-8111-111111111111"].zone == "asia-south1-a" &&
       output.workload_vm_hosts.runners["11111111-1111-4111-8111-111111111111"].tenant_id == "11111111-1111-4111-8111-111111111111"
     )
     error_message = "Explicit configuration must compose exactly the intended Mumbai hosts."
+  }
+}
+
+run "explicit_permissions_compose_with_tenant_host" {
+  command = apply
+  variables {
+    workload_vms = {
+      zone       = "asia-south1-a"
+      boot_image = "projects/axiom-vm-fixture/global/images/reviewed-runner-20260923"
+      tenants = {
+        "11111111-1111-4111-8111-111111111111" = {
+          controller_permissions = {
+            dispatch_keys = { primary = "projects/axiom-vm-fixture/locations/asia-south1/keyRings/dispatch/cryptoKeys/tenant-a-current" }
+          }
+        }
+      }
+    }
+  }
+  assert {
+    condition = (
+      google_project_service.apis["cloudkms.googleapis.com"].service == "cloudkms.googleapis.com" && !google_project_service.apis["cloudkms.googleapis.com"].disable_on_destroy &&
+      toset(keys(output.workload_controller_permissions)) == toset(["11111111-1111-4111-8111-111111111111"]) &&
+      output.workload_controller_permissions["11111111-1111-4111-8111-111111111111"].runnerServiceAccount == output.workload_vm_hosts.runners["11111111-1111-4111-8111-111111111111"].service_account &&
+      output.workload_controller_permissions["11111111-1111-4111-8111-111111111111"].keys.primary == "projects/axiom-vm-fixture/locations/asia-south1/keyRings/dispatch/cryptoKeys/tenant-a-current"
+    )
+    error_message = "The root must preserve reviewed per-tenant permissions and bind them to the same dedicated host identity."
   }
 }
