@@ -22,9 +22,13 @@
       "email": "assessment-scheduler@example-project.iam.gserviceaccount.com"
     }
   },
-  "listen": { "host": "127.0.0.1", "port": 8443 },
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8443
+  },
   "tls": {
     "keyFile": "/run/axiom-controller/tls.key",
     "certFile": "/run/axiom-controller/tls.crt"
-  }
+  },
+  "backendServiceKeyFile": "/run/axiom-controller/backend.key"
 }

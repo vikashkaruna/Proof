@@ -1,5 +1,19 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 58 — protected controller credential delivery
+
+Revision 57 is **complete and green** at staging `24d5a40`, CI [35822811715](https://github.com/vikashkaruna/Proof/actions/runs/35822811715): 17 applicable jobs and nine exact-revision artifacts verified.
+
+**Review finding:** before enabling Docker workload/image attestation, remove raw backend credentials from the controller container environment. The SPIRE Docker attestor can include container environment values in workload selectors. No Docker attestor has been enabled by the preceding milestones; this closes a deployment prerequisite before activation.
+
+**Delivered:** the dedicated controller now requires `backendServiceKeyFile` in its protected service configuration. It reads the backend key from that owner-only, bounded, canonical regular file directly into the database client, without putting it into `process.env`. Raw `SUPABASE_SERVICE_KEY`, static AWS secret variables, legacy runtime/Temporal credentials, `NODE_OPTIONS` and other unreviewed environment settings are refused. The explicit non-secret environment allowlist retains regional/backend location and reviewed provider file-path settings; provider files remain the operator's protection responsibility. There is no environment or inline-secret fallback. The ordinary public BFF credential contract is unchanged.
+
+A single terminal newline in a secret-manager file is supported. Empty, short, oversized, non-ASCII, embedded-whitespace and extra-line inputs fail with fixed error text. The read buffer is cleared after use; strings/SDK copies remain in the trusted controller's memory. Protected configuration, backend key and TLS files stay outside the image and repository. `--env-file` is not a substitute, because Docker records those values in container configuration.
+
+**Validation:** all **952 BFF tests** (22 new), workspace tests/lint/typecheck, acceptance TypeScript and security/control gates pass. Real local integration passes **61 identity / 62 worker / three protected-trust outcomes**, retaining all earlier 60 worker outcomes. The built image refuses default startup with fixed output. Final exact-merge CI is recorded in the saved session. New tests cover protected reads, refusal of broad environments and unsafe backend transport/region, file permissions, malformed content and provider file paths. The real composed-controller fixture adds protected-file loading and checks Docker's recorded environment for absence of its backend, wrapping and TLS private-key values. Fixture secrets still arrive through private stdin; the short-lived test key file is on a private tmpfs and removed before execution. This is preparation for image attestation, not a claim that the attestor or production bootstrap is deployed.
+
+**Remaining:** persistent issuer/node bootstrap, exact node and immutable-image admission, protected trust/configuration mounts, scoped cloud IAM/KMS, TLS/DNS, supervision/health/backups and dedicated opaque scheduler deployment. VM foundation remains default-off; no cloud apply or external client mutation occurred. Full W3/W4, W0/W1/W2 remainder and backup-aware key retirement remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, with W2 named targets **19/40**. See [review 47](audits/47-controller-credential-delivery-review-2026-09-23.md).
+
 ## Revision 57 — separate private Mumbai issuer and runner foundation
 
 Revision 56 is **complete and green** at staging `df409cb`, CI [35821680808](https://github.com/vikashkaruna/Proof/actions/runs/35821680808): 17 applicable jobs and nine exact-revision artifacts verified.

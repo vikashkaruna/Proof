@@ -2,6 +2,9 @@
  * only on private stdin. Outputs fixed labels, never requests or raw errors. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { writeFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { controllerBackendCredentials } from '../services/bff/src/workloads/controller-files.js';
 import { createDecipheriv, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { request } from 'node:https';
 import { createClient } from '@supabase/supabase-js';
@@ -27,7 +30,50 @@ async function main() {
     .strict()
     .parse(JSON.parse(readFileSync(0, 'utf8')));
   assert.equal(process.getuid!(), 20000);
-  const db = createClient('http://host.docker.internal:56321', input.serviceKey, {
+  phase = 'protected-credentials';
+  const backendFile = '/run/controller-test/backend.key';
+  let backend: Awaited<ReturnType<typeof controllerBackendCredentials>>;
+  try {
+    await writeFile(backendFile, input.serviceKey + '\n', { mode: 0o600, flag: 'wx' });
+    backend = await controllerBackendCredentials(backendFile, {
+      ...process.env,
+      AXIOM_REGION: 'ap-south-1',
+      SUPABASE_URL: 'https://backend.fixture.test',
+    });
+    assert.equal(backend.serviceKey, input.serviceKey);
+  } finally {
+    await rm(backendFile, { force: true });
+  }
+  const hostname = process.env.HOSTNAME!;
+  assert.match(hostname, /^[a-f0-9]{12,64}$/);
+  const recordedEnv = z.array(z.string()).parse(
+    JSON.parse(
+      execFileSync(
+        '/usr/bin/docker',
+        [
+          '--host',
+          'unix:///run/docker.sock',
+          'inspect',
+          '--format',
+          '{{json .Config.Env}}',
+          hostname,
+        ],
+        {
+          encoding: 'utf8',
+          timeout: 5000,
+          maxBuffer: 16384,
+          env: { PATH: '/usr/local/bin:/usr/bin:/bin', DOCKER_CONFIG: '/nonexistent' },
+        },
+      ),
+    ),
+  );
+  for (const value of [input.serviceKey, input.tls.key, ...Object.values(input.fixtureKeys)])
+    assert(recordedEnv.every((entry) => !entry.includes(value)));
+  const outcomes: Record<string, boolean> = {
+    'vm-controller-protected-file-backend-credential': true,
+    'vm-controller-credentials-absent-from-container-env': true,
+  };
+  const db = createClient('http://host.docker.internal:56321', backend.serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const awsKms: DispatchAwsKmsPort = {
@@ -62,9 +108,7 @@ async function main() {
   phase = 'startup';
   const ports = { awsKms, schedulerKeys };
   const service = await composeVmAssessmentController(input.config, db, ports);
-  const outcomes: Record<string, boolean> = {
-    'vm-controller-live-trust-and-durable-policy-startup': true,
-  };
+  outcomes['vm-controller-live-trust-and-durable-policy-startup'] = true;
   phase = 'stale-policy';
   const altered = structuredClone(input.config);
   altered.keys.primary = `arn:aws:kms:ap-south-1:123456789012:key/${randomUUID()}`;

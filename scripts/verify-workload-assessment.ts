@@ -992,6 +992,8 @@ except Exception as error:
         'never',
         '-i',
         '--read-only',
+        '--tmpfs',
+        '/run/controller-test:rw,noexec,nosuid,nodev,size=1m,uid=20000,gid=20000,mode=0700',
         '--cap-drop',
         'ALL',
         '--security-opt',
@@ -1097,7 +1099,7 @@ except Exception as error:
       .object({ passed: z.literal(true), outcomes: z.record(z.string(), z.literal(true)) })
       .strict()
       .parse(JSON.parse(result.stdout));
-    assert.equal(Object.keys(verified.outcomes).length, 6);
+    assert.equal(Object.keys(verified.outcomes).length, 8);
     Object.assign(outcomes, verified.outcomes);
   } finally {
     const remaining = execFileSync(
