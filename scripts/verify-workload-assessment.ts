@@ -57,6 +57,8 @@ async function main() {
     .object({
       containerName: z.string().regex(/^axiom-spire-test-[a-f0-9]{12}$/),
       jwks: z.unknown(),
+      healthVolume: z.string().regex(/^axiom-spire-health-[a-f0-9]+$/),
+      issuerNodeId: z.string(),
       controllerImage: z
         .string()
         .regex(/^sha256:[a-f0-9]{64}$/)
@@ -1016,6 +1018,8 @@ except Exception as error:
         socketMount,
         '--mount',
         `type=volume,src=${input.launcher.workloadApiVolume},dst=/run/workload,readonly`,
+        '--mount',
+        `type=volume,src=${input.healthVolume},dst=/run/spire-health,readonly`,
         '--entrypoint',
         'node',
         input.controllerImage,
@@ -1057,6 +1061,7 @@ except Exception as error:
               tenantId,
               trustDomain: 'local.axiomproof.test',
               workloadSocket: '/run/workload/api.sock',
+              issuerNodeId: input.issuerNodeId,
               namespace: 'vm-controller-fixture',
               launcher: {
                 ...input.launcher,
@@ -1099,7 +1104,7 @@ except Exception as error:
       .object({ passed: z.literal(true), outcomes: z.record(z.string(), z.literal(true)) })
       .strict()
       .parse(JSON.parse(result.stdout));
-    assert.equal(Object.keys(verified.outcomes).length, 8);
+    assert.equal(Object.keys(verified.outcomes).length, 9);
     Object.assign(outcomes, verified.outcomes);
   } finally {
     const remaining = execFileSync(

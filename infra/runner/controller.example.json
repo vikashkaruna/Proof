@@ -4,6 +4,7 @@
     "tenantId": "11111111-1111-4111-8111-111111111111",
     "trustDomain": "runner.example.invalid",
     "workloadSocket": "/run/workload/api.sock",
+    "issuerNodeId": "spiffe://runner.example.invalid/spire/agent/gcp_iit/example-project/1",
     "namespace": "axiom-preprod",
     "launcher": {
       "executable": "/usr/bin/docker",

@@ -1,8 +1,16 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 16](audits/16-onboarding-proposal-review-2026-09-21.md).
+> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 49](audits/49-issuer-sync-health-review-2026-09-23.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
+
+## Current handoff — Revision 60 (23 September 2026)
+
+The last verified staging baseline is `1c72489` / CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827). Exact node/UID/image admission preparation and separate SPIRE persistence are green. Revision 60 implements the next issuer-sync health gate: a root observer publishes bounded metadata, the dedicated controller requires its exact node binding and freshness, and stale health cannot consume a new dispatch claim or authorize scoped tools. Confirmation of already persisted work remains available. Final merge evidence is saved in the session checkpoint; use the latest CI before deployment.
+
+Resume in the existing `codex/w0-w3-closure` worktree, preserving other checkouts. Next implement supervised pinned host installation, persistent-disk guards and protected CA delivery, followed by scoped IAM/KMS, TLS/production startup, opaque scheduler and real cloud acceptance. Then remaining workers/actor chains, W4.4 grants and full W3 wizard/readiness/graph. W0/W1/W2 remainder and backup-aware key retirement persist. The VM module is still default-off; this is not permission to apply cloud resources. Docs 11 and 14–16 carry the complete current scope, tests and operator steps.
+
+## Historical review snapshot
 
 **As of 20 September 2026 · reviewed source: `2c54fcd` plus three uncommitted analyst files.**
 

@@ -45,6 +45,7 @@ CMD []
 
 FROM assessment-controller AS vm-controller-acceptance
 COPY scripts/verify-vm-controller.ts /app/scripts/verify-vm-controller.ts
+COPY scripts/verify-issuer-sync.ts /app/scripts/verify-issuer-sync.ts
 
 # Test-only controller: no source/token mounts or backend credentials at runtime.
 # The normal final runtime target does not contain this acceptance script.

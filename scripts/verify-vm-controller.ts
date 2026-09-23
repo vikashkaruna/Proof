@@ -109,6 +109,16 @@ async function main() {
   const ports = { awsKms, schedulerKeys };
   const service = await composeVmAssessmentController(input.config, db, ports);
   outcomes['vm-controller-live-trust-and-durable-policy-startup'] = true;
+  const { IssuerSyncHealth } = await import('../services/bff/src/workloads/issuer-sync-health.js');
+  await new IssuerSyncHealth(input.config.issuerNodeId).requireFresh();
+  await assert.rejects(
+    composeVmAssessmentController(
+      { ...input.config, issuerNodeId: input.config.issuerNodeId + '-foreign' },
+      db,
+      ports,
+    ),
+  );
+  outcomes['vm-controller-root-owned-live-issuer-sync-required'] = true;
   phase = 'stale-policy';
   const altered = structuredClone(input.config);
   altered.keys.primary = `arn:aws:kms:ap-south-1:123456789012:key/${randomUUID()}`;

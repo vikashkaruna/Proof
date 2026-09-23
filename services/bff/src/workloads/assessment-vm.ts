@@ -23,6 +23,7 @@ import {
 } from './dispatch-key-wrappers.js';
 import { JwtSvidVerifier, workloadTrustDomain } from './jwt-svid.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
+import { issuerNodeId, IssuerSyncHealth, SyncedWorkloadTrust } from './issuer-sync-health.js';
 import { WorkloadAuthenticator, SupabaseWorkloadRegistrationStore } from './registration.js';
 import { WorkloadTaskAuthority, SupabaseWorkloadTaskStore } from './tasks.js';
 import { GoogleSchedulerIdentity, schedulerIdentityConfiguration } from './scheduler-identity.js';
@@ -33,6 +34,7 @@ export const vmControllerConfiguration = z
     tenantId: z.uuid().transform((s) => s.toLowerCase()),
     trustDomain: workloadTrustDomain,
     workloadSocket: z.literal('/run/workload/api.sock'),
+    issuerNodeId,
     namespace: z
       .string()
       .min(1)
@@ -73,10 +75,15 @@ export async function composeVmAssessmentController(
     );
     const launch = assessmentContainerFactory(config.launcher);
     const identity = new GoogleSchedulerIdentity(config.scheduler, ports.schedulerKeys);
-    const trust = new WorkloadApiJwtTrust({
-      socketPath: config.workloadSocket,
-      trustDomains: [config.trustDomain],
-    });
+    const health = new IssuerSyncHealth(config.issuerNodeId);
+    if (health.domain !== config.trustDomain) throw new Error('node trust domain refused');
+    const trust = new SyncedWorkloadTrust(
+      new WorkloadApiJwtTrust({
+        socketPath: config.workloadSocket,
+        trustDomains: [config.trustDomain],
+      }),
+      health,
+    );
     // Preflight is read-only. Never publish a key policy or register/activate a
     // workload merely because this process starts. Every tool rechecks trust.
     await verifyAssessmentContainerRuntime(config.launcher);
@@ -118,10 +125,17 @@ export async function composeVmAssessmentController(
         },
         claim: async (tenantId, jobId) => {
           requireTenant(tenantId);
+          await health.requireFresh();
           return dispatch.claim(tenantId, jobId);
         },
       },
-      channel,
+      {
+        async run(...args: Parameters<AssessmentChannel['run']>) {
+          // Expiry after a claim requires reconciliation, never a claim reset.
+          await health.requireFresh();
+          return channel.run(...args);
+        },
+      },
       new AssessmentConfirmation(db),
     );
     const scheduling = new AssessmentScheduling(db, {
