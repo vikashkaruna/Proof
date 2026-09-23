@@ -18,6 +18,10 @@ PREFIX = Path('/opt/axiom/spire') / VERSION
 OWNER = 0
 
 
+class RetiredSnapshot(ValueError):
+    """An open file was unlinked, for example by atomic status publication."""
+
+
 def unique(pairs):
     result = {}
     for key, value in pairs:
@@ -85,10 +89,14 @@ def read_file(path: Path, maximum: int, mode: int | None = None) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         meta = os.fstat(fd)
-        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != OWNER or meta.st_nlink != 1 or meta.st_mode & 0o022 or not 0 < meta.st_size <= maximum:
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != OWNER or meta.st_mode & 0o022 or not 0 < meta.st_size <= maximum:
             raise ValueError('file protection refused')
         if mode is not None and stat.S_IMODE(meta.st_mode) != mode:
             raise ValueError('file mode refused')
+        if meta.st_nlink == 0:
+            raise RetiredSnapshot('unlinked file refused')
+        if meta.st_nlink != 1:
+            raise ValueError('file link protection refused')
         with os.fdopen(os.dup(fd), 'rb') as stream:
             data = stream.read(maximum + 1)
         if len(data) != meta.st_size:

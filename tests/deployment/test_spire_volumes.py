@@ -93,6 +93,37 @@ class InspectTests(unittest.TestCase):
             volumes.inspect(expected)
             docker.assert_called_once_with('volume','inspect',expected['Name'])
 
+class HealthSnapshotTests(unittest.TestCase):
+    def test_atomic_refresh_discards_unlinked_snapshot_and_reads_protected_replacement(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);path=root/'status.json';replacement=root/'next.json'
+            path.write_bytes(b'old');path.chmod(0o644);replacement.write_bytes(b'new');replacement.chmod(0o644)
+            original=os.fstat; calls=[]
+            def changed(fd):
+                if not calls: os.replace(replacement,path)
+                meta=original(fd);calls.append(meta.st_nlink);return meta
+            with patch.object(volumes.host,'OWNER',os.geteuid()),patch.object(volumes.host,'protected_directory'),patch.dict(volumes.SOURCES,health=root),patch.object(os,'fstat',side_effect=changed):
+                self.assertEqual(volumes.health_snapshot(),b'new')
+            self.assertEqual(calls,[0,1])
+
+    def test_retired_health_snapshot_retry_is_bounded_and_other_failures_never_retry(self):
+        with patch.object(volumes.host,'read_file',side_effect=volumes.host.RetiredSnapshot('retired')) as read:
+            with self.assertRaises(volumes.host.RetiredSnapshot):volumes.health_snapshot()
+            self.assertEqual(read.call_count,2)
+        with patch.object(volumes.host,'read_file',side_effect=ValueError('unsafe file')) as read:
+            with self.assertRaises(ValueError):volumes.health_snapshot()
+            self.assertEqual(read.call_count,1)
+
+    def test_hardlinked_or_writable_health_snapshot_remains_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);path=root/'status.json';path.write_bytes(b'status');path.chmod(0o644)
+            linked=root/'link';os.link(path,linked)
+            with patch.object(volumes.host,'OWNER',os.geteuid()),patch.object(volumes.host,'protected_directory'),patch.dict(volumes.SOURCES,health=root):
+                with self.assertRaises(ValueError):volumes.health_snapshot()
+                linked.unlink();path.chmod(0o666)
+                with self.assertRaises(ValueError):volumes.health_snapshot()
+
+
 class MountedMappingTests(unittest.TestCase):
     def test_foreign_daemon_namespace_cannot_hide_active_mounts(self):
         for inode,owner in ((2,0),(3,0),(2,99)):
