@@ -52,14 +52,14 @@ def main():
         raise ValueError('dedicated hosted CI required')
     os.umask(0o077)
     destinations=[x[0] for x in host.layout('runner').values()]+[host.PREFIX/'manifest.json']
-    if any(p.exists() or p.is_symlink() for p in destinations+[STATE,ALIAS,Path('/etc/axiom/spire'),Path('/opt/axiom/spire'),Path('/run/spire-admin'),Path('/run/workload'),Path('/run/spire-health')]):
+    if any(p.exists() or p.is_symlink() for p in destinations+[STATE,ALIAS,Path('/etc/axiom/spire'),Path('/opt/axiom/spire'),Path('/run/spire-admin'),Path('/run/workload'),Path('/run/spire-health'),Path('/etc/axiom/controllers')]):
         raise ValueError('existing host resources refused')
     interfaces=json.loads(run(['/usr/sbin/ip','-j','address','show']).stdout)
     if any(a.get('local')==IP.split('/')[0] for i in interfaces for a in i.get('addr_info',[])) or not active('docker.service'):
         raise ValueError('fresh fixture network and Docker required')
     root=Path(tempfile.mkdtemp(prefix='axiom-runner-',dir='/root'))
     prefix='axiom-runner-'+uuid.uuid4().hex[:12];image=prefix+':issuer'
-    loop=None;installed=False;address_added=False;modes={};outcomes={};backing=root/'state.img';consumer=prefix+'-consumer';wrong_image=prefix+':foreign';volume_names=[]
+    loop=None;installed=False;address_added=False;modes={};outcomes={};backing=root/'state.img';consumer=prefix+'-consumer';wrong_image=prefix+':foreign';volume_names=[];controller_base=None
     try:
         archive=(ROOT/f'.axiom-runtime/workload-host/spire-{VERSION}-linux-amd64-musl.tar.gz').read_bytes()
         server=selected_binary(archive,'amd64','issuer')[1]
@@ -173,6 +173,67 @@ def main():
         run(['docker','build','-t',wrong_image,str(foreign_context)],timeout=120)
         assert run(['docker','run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--user','20000:20000','--mount',f'type=volume,src={api_volume},dst=/run/workload,readonly,volume-nocopy','--entrypoint',fetch[0],wrong_image,*fetch[1:]],check=False,timeout=15).returncode!=0
         outcomes['native-node-refuses-wrong-consumer-image']=True
+        # Protected controller files are delivered separately from activation.
+        helper=root/'controller_files.py';helper.write_bytes((ROOT/'infra/workload/controller_files.py').read_bytes());helper.chmod(0o600)
+        tenant=str(uuid.uuid4());controller_base=Path('/etc/axiom/controllers')/tenant
+        private=root/'controller-source';private.mkdir(mode=0o700)
+        service_config={'controller':{'schemaVersion':1,'tenantId':tenant,'trustDomain':policy['trustDomain'],'workloadSocket':'/run/workload/api.sock','issuerNodeId':expected,'namespace':'native-file-fixture','launcher':{'executable':'/usr/bin/docker','dockerHost':'unix:///run/docker.sock','image':image_id,'workloadApiVolume':api_volume},'keys':{'provider':'aws','primary':'fixture-not-runtime-ready','retiring':[]},'scheduler':{'audience':'https://controller.fixture.test:8443','subject':'123','email':'fixture@example.test'}},'listen':{'host':'0.0.0.0','port':8443},'tls':{'keyFile':'/run/controller-secrets/tls.key','certFile':'/run/controller-secrets/tls.crt'},'backendServiceKeyFile':'/run/controller-secrets/backend.key'}
+        def controller_bundle(config):
+            data={'service.json':json.dumps(config).encode(),'backend.key':b'synthetic-native-private-not-real-00000000','tls.key':b'synthetic-native-tls-not-real','tls.crt':b'synthetic-native-certificate-not-real'}
+            review={'schemaVersion':1,'tenantId':tenant,'spireManifestSha256':manifest_sha,'controllerImage':image_id,'files':{k:hashlib.sha256(v).hexdigest() for k,v in data.items()}}
+            raw=(json.dumps(review,sort_keys=True,indent=2)+'\n').encode()
+            for key,value in {'manifest.json':raw,**data}.items():(private/key).write_bytes(value);(private/key).chmod(0o600)
+            return hashlib.sha256(raw).hexdigest()
+        file_sha=controller_bundle(service_config)
+        source_files=root/'controller-input';source_files.mkdir(mode=0o700)
+        for filename in ('service.json','backend.key','tls.key','tls.crt'):
+            (source_files/filename).write_bytes((private/filename).read_bytes());(source_files/filename).chmod(0o600)
+        review_input=json.loads((private/'manifest.json').read_text());review_input.pop('files')
+        review_file=root/'controller-review.json';review_file.write_text(json.dumps(review_input));review_file.chmod(0o600)
+        prepared=root/'controller-prepared'
+        preparer=['/usr/bin/python3','-I','-B',str(ROOT/'scripts/prepare-controller-files.py'),str(review_file),str(source_files),str(prepared)]
+        result=run(preparer)
+        assert result.stdout==('Controller review bundle prepared: '+file_sha+'; no host or service changed.\n').encode()
+        assert (prepared/'manifest.json').read_bytes()==(private/'manifest.json').read_bytes()
+        assert run(preparer,check=False).returncode!=0
+        assert not controller_base.exists()
+        outcomes['controller-review-preparer-is-fresh-only-and-does-not-install']=True
+        delivery=['/usr/bin/python3','-I','-B',str(helper)]
+        run([*delivery,'--install',str(private),file_sha]);run([*delivery,'--check',tenant,file_sha])
+        delivered=controller_base/file_sha/'files'
+        assert all(p.stat().st_uid==20000 and p.stat().st_gid==20000 and p.stat().st_mode&511==0o400 for p in delivered.iterdir())
+        assert all(p.stat().st_uid==0 and p.stat().st_mode&511==0o700 for p in (controller_base.parent,controller_base,controller_base/file_sha))
+        outcomes['controller-private-files-bind-reviewed-node-and-manifest']=True
+        before_files={p.name:p.stat().st_ino for p in delivered.iterdir()}
+        run([*delivery,'--install',str(private),file_sha])
+        assert before_files=={p.name:p.stat().st_ino for p in delivered.iterdir()}
+        outcomes['controller-file-identical-retry-preserves-inodes']=True
+        def file_consumer(uid,command):
+            return run(['docker','run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--user',str(uid)+':'+str(uid),'--mount',f'type=bind,src={delivered},dst=/run/controller-secrets,readonly','--entrypoint','/bin/sh',image,'-c',command],check=False,timeout=15)
+        assert file_consumer(20000,'cat /run/controller-secrets/backend.key').stdout==b'synthetic-native-private-not-real-00000000'
+        assert file_consumer(20000,'chmod 600 /run/controller-secrets/backend.key').returncode!=0
+        assert file_consumer(20000,'test ! -e /run/docker.sock && test ! -e /run/spire-admin/api.sock').returncode==0
+        outcomes['controller-file-consumer-has-read-only-files-without-daemon']=True
+        assert file_consumer(20003,'cat /run/controller-secrets/backend.key').returncode!=0
+        outcomes['controller-private-files-refuse-worker-uid']=True
+        saved=(delivered/'backend.key').read_bytes();(delivered/'backend.key').write_bytes(b'changed-by-test-root')
+        assert run([*delivery,'--check',tenant,file_sha],check=False).returncode!=0
+        assert run([*delivery,'--install',str(private),file_sha],check=False).returncode!=0
+        assert (delivered/'backend.key').read_bytes()==b'changed-by-test-root'
+        (delivered/'backend.key').write_bytes(saved)
+        outcomes['controller-file-tampering-refused-without-repair']=True
+        service_config['controller']['issuerNodeId']=expected+'-foreign';foreign_sha=controller_bundle(service_config)
+        assert run([*delivery,'--install',str(private),foreign_sha],check=False).returncode!=0
+        assert not (controller_base/foreign_sha).exists()
+        outcomes['controller-foreign-node-file-delivery-refused-before-writes']=True
+        service_config['controller']['issuerNodeId']=expected;service_config['controller']['namespace']='incomplete-fixture';partial_sha=controller_bundle(service_config)
+        partial=controller_base/partial_sha;partial.mkdir(mode=0o700);(partial/'manifest.json').write_bytes((private/'manifest.json').read_bytes());(partial/'manifest.json').chmod(0o600)
+        partial_inode=(partial/'manifest.json').stat().st_ino
+        assert run([*delivery,'--install',str(private),partial_sha],check=False).returncode!=0
+        assert (partial/'manifest.json').stat().st_ino==partial_inode and {p.name for p in partial.iterdir()}=={'manifest.json'}
+        outcomes['controller-partial-generation-preserved-for-review']=True
+        run([*delivery,'--check',tenant,file_sha])
+        outcomes['controller-delivery-does-not-require-or-claim-runtime-activation']=True
         before_restart=health()['observedAtMs']
         control('restart',SERVICE);wait_for(lambda:healthy() and health()['observedAtMs']>before_restart)
         assert Path('/run/workload').stat().st_ino==inode and health()['nodeId']==expected
@@ -247,6 +308,8 @@ def main():
         for path,(inode,mode) in modes.items():
             if path.lstat().st_ino!=inode:raise ValueError('fixture ancestry changed')
             path.chmod(mode)
+        if controller_base is not None and controller_base.parent==Path('/etc/axiom/controllers'):
+            shutil.rmtree(controller_base,ignore_errors=True)
         shutil.rmtree(root)
 
 
