@@ -38,6 +38,7 @@ import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dis
 import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
 import { AssessmentChannel } from '../services/bff/src/workloads/assessment-channel.js';
 import { AssessmentController } from '../services/bff/src/workloads/assessment-controller.js';
+import { DispatchPolicyStore } from '../services/bff/src/workloads/dispatch-policy-store.js';
 import { DispatchKeyPolicy } from '../services/bff/src/workloads/dispatch-key-policy.js';
 import {
   AwsDispatchKeyWrapper,
@@ -199,7 +200,25 @@ async function main() {
   );
   const rotatedRef = syntheticRef();
   wrappingKeys.set(rotatedRef, randomBytes(32));
+  const policyStore = new DispatchPolicyStore(db);
+  const policyRevisions = new Map<string, number>();
+  const initialPolicy = await policyStore.publish(
+    keyPolicy,
+    tenantId as TenantId,
+    actorId,
+    randomUUID(),
+    0,
+  );
+  policyRevisions.set(tenantId, initialPolicy.revision);
   keyPolicy = keyPolicy.withReadable(tenantId as TenantId, rotatedRef);
+  const stagedPolicy = await policyStore.publish(
+    keyPolicy,
+    tenantId as TenantId,
+    actorId,
+    randomUUID(),
+    initialPolicy.revision,
+  );
+  policyRevisions.set(tenantId, stagedPolicy.revision);
   const kms: DispatchAwsKmsPort = {
     async send(command) {
       const request = command.input;
@@ -308,13 +327,54 @@ print('isolated')`;
       correlationId,
       inputHash,
     };
-    const first = await new AssessmentDispatch(db, wrapper).enqueue(context, inputJson);
+    const first = await new AssessmentDispatch(db, wrapper, policyRevisions).enqueue(
+      context,
+      inputJson,
+    );
     const rotating = keyPolicy.primary(tenantId as TenantId) === firstKeyRef;
+    const staleDispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
     keyPolicy = keyPolicy.withPrimary(tenantId as TenantId, rotatedRef);
+    if (rotating) {
+      const published = await policyStore.publish(
+        keyPolicy,
+        tenantId as TenantId,
+        actorId,
+        randomUUID(),
+        policyRevisions.get(tenantId)!,
+      );
+      policyRevisions.set(tenantId, published.revision);
+      await assert.rejects(() => staleDispatcher.claim(tenantId, jobId));
+      assert.equal(
+        check(
+          await db.from('assessment_dispatch_jobs').select('claimed_at').eq('id', jobId).single(),
+        )!.claimed_at,
+        null,
+      );
+      outcomes['policy-stale-reader-preserves-unconsumed-claim'] = true;
+      const staleJob = randomUUID();
+      await assert.rejects(() =>
+        staleDispatcher.enqueue({ ...context, jobId: staleJob }, inputJson),
+      );
+      assert.equal(
+        check(
+          await db.from('assessment_dispatch_jobs').select('id').eq('id', staleJob).maybeSingle(),
+        ),
+        null,
+      );
+      outcomes['policy-stale-writer-cannot-create-job'] = true;
+      outcomes['policy-reviewed-reader-stage-and-primary-promotion'] = true;
+    }
+    const recoveredRevision = await new DispatchPolicyStore(db).currentRevision(
+      keyPolicy,
+      tenantId as TenantId,
+    );
+    assert.equal(recoveredRevision, policyRevisions.get(tenantId));
+    policyRevisions.set(tenantId, recoveredRevision);
+    outcomes['policy-revision-recovered-from-durable-store'] = true;
     wrapper = new AwsDispatchKeyWrapper(new DispatchKeyPolicy('aws', keyPolicy.snapshot()), kms);
     // Reconstruct the controller after a discarded response: stable job/run,
     // preserved ciphertext/proof, no new run or delegation audit.
-    const dispatcher = new AssessmentDispatch(db, wrapper);
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
     const repeated = await dispatcher.enqueue(context, inputJson);
     assert.deepEqual(repeated, first);
     const stored = check(
@@ -608,7 +668,7 @@ print('isolated')`;
       library_version: version,
       answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
     });
-    const dispatcher = new AssessmentDispatch(db, wrapper);
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
     const inputHash = createHash('sha256').update(wire).digest('hex');
     const receipt = await dispatcher.enqueue(
       {
@@ -681,8 +741,16 @@ print('isolated')`;
         status: 'active',
       }),
     );
+    const schedulingPolicy = await policyStore.publish(
+      keyPolicy,
+      scheduleTenantId as TenantId,
+      actorId,
+      randomUUID(),
+      0,
+    );
+    policyRevisions.set(scheduleTenantId, schedulingPolicy.revision);
     const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
-    const schedulingDispatch = new AssessmentDispatch(db, wrapper);
+    const schedulingDispatch = new AssessmentDispatch(db, wrapper, policyRevisions);
     for (let n = 0; n < 2; n++) {
       const engagementId = randomUUID(),
         correlationId = randomUUID(),

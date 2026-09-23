@@ -1,3 +1,4 @@
+import type { TenantId } from '@axiom/types';
 import { crc32c } from '@aws-crypto/crc32c';
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { KeyManagementServiceClient, type protos } from '@google-cloud/kms';
@@ -109,6 +110,9 @@ export class AwsDispatchKeyWrapper implements DispatchKeyWrapper {
   ) {
     if (policy.provider !== 'aws') throw new DispatchRefused();
   }
+  policyFingerprint(tenant: string): string {
+    return this.policy.fingerprint(tenant as TenantId);
+  }
   async wrap(context: Uint8Array, key: Uint8Array) {
     let plaintext: Buffer | undefined;
     try {
@@ -186,6 +190,9 @@ export class GcpDispatchKeyWrapper implements DispatchKeyWrapper {
     }),
   ) {
     if (policy.provider !== 'gcp') throw new DispatchRefused();
+  }
+  policyFingerprint(tenant: string): string {
+    return this.policy.fingerprint(tenant as TenantId);
   }
   async wrap(context: Uint8Array, key: Uint8Array) {
     let plaintext: Buffer | undefined;

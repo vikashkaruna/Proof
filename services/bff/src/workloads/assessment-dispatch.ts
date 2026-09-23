@@ -32,16 +32,45 @@ const claimed = sealedDispatchSchema
 /** Trusted controller only. No browser/worker route. The caller supplies a stable
  * job ID and authenticated context; returning a receipt never grants authority. */
 export class AssessmentDispatch {
+  readonly #revisions = new Map<string, number>();
   constructor(
     private readonly db: SupabaseClient,
     private readonly wrapper: DispatchKeyWrapper,
-  ) {}
+    revisions: ReadonlyMap<string, number> = new Map(),
+  ) {
+    try {
+      for (const [tenant, revision] of revisions) {
+        const canonical = z.uuid().parse(tenant).toLowerCase();
+        if (this.#revisions.has(canonical)) throw new DispatchRefused();
+        this.#revisions.set(canonical, z.number().int().positive().max(2147483647).parse(revision));
+      }
+    } catch {
+      throw new DispatchRefused();
+    }
+  }
+  private policyBinding(tenant: string) {
+    const revision = this.#revisions.get(tenant);
+    if (!this.wrapper.policyFingerprint) {
+      if (revision !== undefined) throw new DispatchRefused();
+      return {};
+    }
+    if (revision === undefined) throw new DispatchRefused();
+    return {
+      p_policy_revision: revision,
+      p_policy_fingerprint: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .parse(this.wrapper.policyFingerprint(tenant)),
+    };
+  }
   async enqueue(context: DispatchContext, inputJson: string) {
     try {
       const c = dispatchContextSchema.parse(context);
+      const binding = this.policyBinding(c.tenantId);
       const proof = new TaskProof(randomBytes(32).toString('base64url'));
       const sealed = await sealDispatch(c, inputJson, proof, this.wrapper);
       const { data, error } = await this.db.rpc('enqueue_assessment_dispatch', {
+        ...binding,
         p_job_id: c.jobId,
         p_tenant_id: c.tenantId,
         p_actor_id: c.actorId,
@@ -111,6 +140,7 @@ export class AssessmentDispatch {
       tenantId = z.uuid().parse(tenantId).toLowerCase();
       jobId = z.uuid().parse(jobId).toLowerCase();
       const { data, error } = await this.db.rpc('claim_assessment_dispatch', {
+        ...this.policyBinding(tenantId),
         p_tenant_id: tenantId,
         p_job_id: jobId,
       });
