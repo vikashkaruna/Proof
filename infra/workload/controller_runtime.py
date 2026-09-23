@@ -199,8 +199,14 @@ def created(identifier: str, intended: dict) -> None:
     expected_host = {'NetworkMode': 'bridge', 'IpcMode': 'private', 'CgroupnsMode': 'private', 'ReadonlyRootfs': True, 'Privileged': False, 'PidMode': '', 'UTSMode': '', 'CapAdd': None, 'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'], 'GroupAdd': [intended['group']], 'PidsLimit': 128, 'Memory': 536870912, 'MemorySwap': 536870912, 'LogConfig': {'Type': 'none', 'Config': {}}, 'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}, 'PortBindings': {'8443/tcp': [{'HostIp': intended['privateIp'], 'HostPort': '8443'}]}, 'Mounts': intended['mounts']}
     expected_config['StopTimeout'] = 90
     expected_host.update(AutoRemove=False, PublishAllPorts=False, OomKillDisable=False, UsernsMode='', Runtime='runc')
-    if any(config.get(key) != value for key, value in expected_config.items()) or any(setup.get(key) != value for key, value in expected_host.items()) or sorted(config.get('Env', [])) != sorted(intended['env']) or any(setup.get(key) for key in ('Binds', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'VolumesFrom', 'Links', 'ExtraHosts', 'Tmpfs', 'Sysctls', 'StorageOpt', 'CgroupParent', 'Dns', 'DnsOptions', 'DnsSearch')) or actual.get('State', {}).get('Status') != 'created':
-        raise ValueError('created controller confinement refused')
+    mismatches = ['Config.'+key for key, value in expected_config.items() if config.get(key) != value]
+    mismatches += ['HostConfig.'+key for key, value in expected_host.items() if setup.get(key) != value]
+    if sorted(config.get('Env', [])) != sorted(intended['env']): mismatches.append('Config.Env')
+    mismatches += ['HostConfig.'+key for key in ('Binds', 'Devices', 'DeviceRequests', 'DeviceCgroupRules', 'VolumesFrom', 'Links', 'ExtraHosts', 'Tmpfs', 'Sysctls', 'StorageOpt', 'CgroupParent', 'Dns', 'DnsOptions', 'DnsSearch') if setup.get(key)]
+    if actual.get('State', {}).get('Status') != 'created': mismatches.append('State.Status')
+    if mismatches:
+        # Field names only; never dump environment, mounts or inspected values.
+        raise ValueError('created controller confinement refused: '+','.join(mismatches))
 
 
 def pending(directory: Path) -> list[Path]:
@@ -210,7 +216,7 @@ def pending(directory: Path) -> list[Path]:
         tenant(path.name); host.protected_directory(path)
         if stat.S_IMODE(path.stat().st_mode) != 0o700: raise ValueError('attempt protection refused')
         inventory = {p.name for p in path.iterdir()}
-        if not {'intent.json'} <= inventory <= {'intent.json', 'container.json', 'stopped.json'}: raise ValueError('attempt inventory refused')
+        if not {'intent.json'} <= inventory <= {'intent.json', 'container.json', 'start.json', 'stopped.json'}: raise ValueError('attempt inventory refused')
         if 'stopped.json' not in inventory: result.append(path)
         else:
             receipt = enrollment.load(path/'stopped.json')
@@ -227,6 +233,15 @@ def stop_attempt(directory: Path, expected: str) -> None:
     if set(record) != {'schemaVersion', 'containerId'} or type(record['schemaVersion']) is not int or record['schemaVersion'] != 1: raise ValueError('container receipt refused')
     identifier = record['containerId']
     actual = owned(identifier, intent['spec'])
+    start = directory/'start.json'
+    if start.exists() or start.is_symlink():
+        if enrollment.load(start) != {'schemaVersion': 1, 'containerId': identifier}:
+            raise ValueError('start intent refused')
+        # A timed-out start can still be in flight inside the daemon while
+        # inspect reports "created". Do not certify that object as stopped or
+        # allow a new lifetime while its activation remains uncertain.
+        if actual.get('State', {}).get('Status') == 'created':
+            raise ValueError('controller start remains uncertain')
     if actual.get('State', {}).get('Running'):
         # Application allows 85 seconds; Docker has a longer grace period. Stop
         # never calls placement, SPIRE, DNS, KMS or a backend service.
@@ -272,6 +287,7 @@ def run(expected: str) -> None:
                 if repeated != ready or reviewed(path, expected) != value: raise ValueError('runtime admission changed')
                 if not stopping:
                     created(identifier, intended)
+                    enrollment.create(destination/'start.json', enrollment.encode({'schemaVersion': 1, 'containerId': identifier}))
                     docker('container', 'start', identifier, timeout=20)
                 while not stopping:
                     actual = owned(identifier, intended)

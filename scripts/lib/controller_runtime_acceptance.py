@@ -96,6 +96,8 @@ def local_placement(path,sha):
 placement.check=local_placement
 original=runtime.docker
 def uncertain(*args,**kwargs):
+ if args[:2]==('container','start') and Path(__file__).with_name('uncertain-start').exists():
+  raise ValueError('fixture queued start without state transition')
  result=original(*args,**kwargs)
  if args[0]=='create' and Path(__file__).with_name('uncertain').exists():
   Path(__file__).with_name('created-id').write_bytes(result)
@@ -106,6 +108,7 @@ try: runtime.main()
 except Exception as error:
  import traceback
  frames=[frame.name+':'+str(frame.lineno) for frame in traceback.extract_tb(error.__traceback__)]
+ if str(error).startswith('created controller confinement refused: '):frames.append(str(error))
  Path(__file__).with_name('failure-location').write_text(' / '.join(frames))
  raise
 '''); wrapper.chmod(0o600)
@@ -170,6 +173,20 @@ except Exception as error:
         wait_for(lambda: json.loads(Path('/run/spire-health/status.json').read_text()).get('healthy') is True)
         assert not active(fixture_unit)
         outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
+        control('reset-failed', fixture_unit); (directory/'uncertain-start').write_text('fixture')
+        control('start', fixture_unit)
+        wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
+        queued = current(); queued_id = json.loads((queued/'container.json').read_text())['containerId']; ids.add(queued_id)
+        assert (queued/'start.json').exists() and not (queued/'stopped.json').exists()
+        assert run(['docker', 'inspect', '--format', '{{.State.Status}}', queued_id]).stdout.strip() == b'created'
+        assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
+        assert run([*cli, '--run', sha], check=False).returncode != 0
+        # Fixture-only simulation of the daemon eventually completing the
+        # uncertain request. Production never reissues start during recovery.
+        run(['docker', 'start', queued_id]); run([*cli, '--stop', tenant, sha])
+        assert (queued/'stopped.json').exists()
+        (directory/'uncertain-start').unlink()
+        outcomes['controller-uncertain-start-remains-blocked-until-owned-stop-observed'] = True
         control('reset-failed', fixture_unit); (directory/'uncertain').write_text('fixture')
         control('start', fixture_unit)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
@@ -179,7 +196,7 @@ except Exception as error:
         assert run(['docker', 'inspect', '--format', '{{.State.Status}}', uncertain_id]).stdout.strip() == b'created'
         assert run([*cli, '--run', sha], check=False).returncode != 0
         assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
-        assert len(attempts()) == 6
+        assert len(attempts()) == 7
         outcomes['controller-uncertain-create-preserves-intent-without-adoption-or-start'] = True
         return outcomes
     finally:

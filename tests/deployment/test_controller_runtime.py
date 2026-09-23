@@ -273,6 +273,23 @@ class RuntimeLifetimeTests(unittest.TestCase):
         runtime.stop(TENANT, self.sha)
         self.assertTrue((self.attempt/'stopped.json').exists())
 
+    def test_uncertain_start_still_created_cannot_certify_stopped_or_relaunch(self):
+        original = self.docker
+        def queued(*args, **kwargs):
+            if args[:2] == ('container', 'start'):
+                self.assertEqual(runtime.enrollment.load(self.attempt/'start.json'), {'schemaVersion': 1, 'containerId': ID})
+                raise ValueError('start request timed out before state transition')
+            return original(*args, **kwargs)
+        self.mocks['docker'].side_effect = queued
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        with self.assertRaises(ValueError): runtime.stop(TENANT, self.sha)
+        with self.assertRaises(ValueError): runtime.run(self.sha)
+        self.assertFalse((self.attempt/'stopped.json').exists())
+        # Only the eventual observed running process can now be stopped safely.
+        self.status = 'running'; self.mocks['docker'].side_effect = original
+        runtime.stop(TENANT, self.sha)
+        self.assertTrue((self.attempt/'stopped.json').exists())
+
     def test_corrupt_intent_profile_or_name_cannot_stop_container(self):
         self.fail_start = True
         self.mocks['owned'].side_effect = ValueError('unavailable')
