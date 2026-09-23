@@ -1,15 +1,23 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `24e6a87`, CI [35850300471](https://github.com/vikashkaruna/Proof/actions/runs/35850300471), all 19 applicable jobs and 13 exact-revision artifacts verified. Issuer/runner enrollment and native lifecycles are green. Revision 65 adds protected socket/health volume delivery; expanded native evidence is pending until verified. Full controller activation and the broader roadmap remain open.
+Verified staging checkpoint before this revision’s merge: `66e6147`, CI [35852588998](https://github.com/vikashkaruna/Proof/actions/runs/35852588998), all 19 applicable jobs and 13 exact-revision artifacts verified. Protected runtime volumes and 24 native runner/container outcomes are green. Revision 66 adds actual controller entrypoint acceptance; final expanded CI evidence is pending. Full host/controller activation and the broader roadmap remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 65, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 66, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 66 acceptance boundary — actual controller entrypoint
+
+The local Docker gate now calls the inherited production `--check` and `--serve` entrypoint using owner-only files, HTTPS to the real isolated Supabase stack and actual SPIRE/health volumes. It verifies credential permissions, TLS audience hostname, exact node health, invalid caller refusal, no startup claim or forbidden backend-operation attempts, and graceful shutdown. The synthetic backend proxy exists only inside the disposable fixture network; it is not a deployable plaintext fallback. Secrets are absent from Docker environment and argv.
+
+This verifies the entrypoint contract, not completed host delivery or operational activation. Next prepare protected controller configuration/credential/TLS delivery, immutable image admission and supervised container lifetime. Host preflight must run in the Docker daemon’s mount namespace; then the controller itself remains in its constrained container namespace. Preserve UID 20000, read-only runtime volumes and the separate worker UID 20003. Only the trusted controller receives daemon access.
+
+Deployment still needs valid Google caller identity, real scoped KMS/secret permissions, private DNS/TLS, actual GCP IIT and Mumbai backup/restore. The local fixture neither decrypts via a real cloud KMS nor submits an authorized scheduler job through this entrypoint. Existing composition tests separately exercise worker persistence with fixture provider ports. Do not activate the cloud module from these local results alone.
 
 ## Revision 65 operator gate — host socket/health delivery
 

@@ -2,6 +2,7 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
+import { verifyControllerEntrypoint } from './lib/controller-entrypoint-acceptance.js';
 import {
   createHash,
   randomUUID,
@@ -954,7 +955,7 @@ except Exception as error:
         '-subj',
         '/CN=localhost',
         '-addext',
-        'subjectAltName=IP:127.0.0.1,DNS:localhost',
+        'subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:backend.fixture.test,DNS:controller.fixture.test',
       ],
       { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
     );
@@ -1068,7 +1069,7 @@ except Exception as error:
                 executable: '/usr/bin/docker',
                 dockerHost: 'unix:///run/docker.sock',
               },
-              keys: { provider: 'aws', ...ring },
+              keys: { provider: 'aws', primary: ring.primary, retiring: [...ring.retiring] },
               scheduler: {
                 audience: 'https://localhost',
                 subject: '123456789',
@@ -1106,6 +1107,69 @@ except Exception as error:
       .parse(JSON.parse(result.stdout));
     assert.equal(Object.keys(verified.outcomes).length, 9);
     Object.assign(outcomes, verified.outcomes);
+    phase = 'vm-production-entrypoint';
+    const entrypointPendingJob = randomUUID();
+    await dispatcher.enqueue(
+      {
+        jobId: entrypointPendingJob,
+        tenantId,
+        actorId,
+        workloadId,
+        estateId: null,
+        engagementId,
+        correlationId: randomUUID(),
+        inputHash: createHash('sha256').update(wire).digest('hex'),
+      },
+      wire,
+    );
+    const beforeClaims = check(
+      await db
+        .from('assessment_dispatch_jobs')
+        .select('id,claimed_at')
+        .eq('tenant_id', tenantId)
+        .order('id'),
+    );
+    assert(beforeClaims?.some((job) => job.id === entrypointPendingJob && job.claimed_at === null));
+    Object.assign(
+      outcomes,
+      await verifyControllerEntrypoint({
+        image: input.controllerImage,
+        config: {
+          schemaVersion: 1,
+          tenantId: tenantId as TenantId,
+          trustDomain: 'local.axiomproof.test',
+          workloadSocket: '/run/workload/api.sock',
+          issuerNodeId: input.issuerNodeId,
+          namespace: 'vm-controller-fixture',
+          launcher: {
+            ...input.launcher,
+            executable: '/usr/bin/docker',
+            dockerHost: 'unix:///run/docker.sock',
+          },
+          keys: { provider: 'aws', primary: ring.primary, retiring: [...ring.retiring] },
+          scheduler: {
+            audience: 'https://controller.fixture.test:8443',
+            subject: '123456789',
+            email: 'scheduler@fixture.iam.gserviceaccount.com',
+          },
+        },
+        healthVolume: input.healthVolume,
+        serviceKey: status.SERVICE_ROLE_KEY!,
+        certificate: readFileSync(join(vmDirectory, 'cert.pem'), 'utf8'),
+        privateKey: readFileSync(join(vmDirectory, 'key.pem'), 'utf8'),
+        daemonGroup: group,
+        dockerHost: input.launcher.dockerHost,
+      }),
+    );
+    const afterClaims = check(
+      await db
+        .from('assessment_dispatch_jobs')
+        .select('id,claimed_at')
+        .eq('tenant_id', tenantId)
+        .order('id'),
+    );
+    assert.deepEqual(afterClaims, beforeClaims);
+    outcomes['vm-entrypoint-startup-and-refusal-do-not-claim-jobs'] = true;
   } finally {
     const remaining = execFileSync(
       'docker',
@@ -1696,7 +1760,11 @@ print('parent-death-clean')`;
   );
   process.stdout.write(JSON.stringify({ passed: true, outcomes }) + '\n');
 }
-main().catch(() => {
+main().catch((error: unknown) => {
+  const entrypoint =
+    error instanceof Error &&
+    /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
+  if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
   process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);
   process.exitCode = 1;
 });

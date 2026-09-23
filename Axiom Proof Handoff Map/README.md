@@ -87,3 +87,5 @@ Revision 63 separates first issuer initialization from normal restart and requir
 Revision 64 extends reviewed enrollment to the runner, with exact-node/sync/CA evidence and separate marker publication. A native runner/observer gate is added; final results are recorded after exact-merge CI verification. Host socket/container delivery and full controller activation are next.
 
 Revision 65 implements protected, reviewed local Docker mappings from the native node socket/health directories. The native gate adds a real unprivileged consumer and exact image/UID checks; final evidence is saved after exact-merge validation. Controller delivery/admission/supervision, private TLS and scoped IAM/KMS are next.
+
+Revision 66 adds actual inherited controller entrypoint acceptance: protected files, real HTTPS backend and SPIRE startup, TLS/node/permission refusal, invalid caller rejection, clean shutdown and no claims. Controller host delivery/supervision and cloud activation remain pending.
