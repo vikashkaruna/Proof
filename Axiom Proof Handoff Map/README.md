@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 56](../docs/audits/56-controller-role-admission-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 57](../docs/audits/57-controller-protected-files-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -91,3 +91,5 @@ Revision 65 implements protected, reviewed local Docker mappings from the native
 Revision 66 adds actual inherited controller entrypoint acceptance: protected files, real HTTPS backend and SPIRE startup, TLS/node/permission refusal, invalid caller rejection, clean shutdown and no claims. Controller host delivery/supervision and cloud activation remain pending.
 
 Revision 67 adds exact controller workload admission before backend policy reads. Protected host delivery/supervision and cloud acceptance remain pending; see Docs 11–16 for evidence boundaries.
+
+Revision 68 adds reviewed protected controller file delivery. It does not activate the controller; supervised lifetime and cloud readiness remain pending.

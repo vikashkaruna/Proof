@@ -4,12 +4,23 @@ Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://git
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 67, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 68, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 68 procedure — protected controller files, without activation
+
+1. Prepare a private, canonical input directory containing only `service.json`, `backend.key`, `tls.key` and `tls.crt`, all owner-only `0600` regular files. Input ancestry must be controlled by the current owner/root and not writable by group/world. Do not use `/tmp`, symlinks or hard links. Retrieve real credentials through the environment's protected secret-delivery process; never paste them into shell arguments or this repository.
+2. Copy `infra/workload/controller-review.example.json` into a private review file and replace every placeholder with the intended tenant UUID, installed runner manifest SHA and reviewed immutable controller image ID. The service configuration must bind that tenant and installed node/domain, `/run/workload/api.sock`, `/usr/bin/docker`, `unix:///run/docker.sock`, and the installed `axiom-workload-api-<filesystemUuid>` volume. Use `listen: {host: "0.0.0.0", port: 8443}` inside the future container. Its backend/TLS paths must be `/run/controller-secrets/backend.key`, `/run/controller-secrets/tls.key` and `/run/controller-secrets/tls.crt`. Keep the remaining configuration compatible with the existing controller service schema.
+3. Run `python3 scripts/prepare-controller-files.py PRIVATE_REVIEW_JSON PRIVATE_INPUT_DIR FRESH_OUTPUT_DIR`. Review the manifest and intended bindings; record its SHA. The command creates a fresh private bundle and refuses overwrite. Transfer it using protected delivery to a root-owned canonical `0700` source directory with root-owned `0600` files on the approved runner. Review the installer code too; execute only a trusted root-controlled copy of `infra/workload/controller_files.py`, with the already reviewed SPIRE helpers installed under `/opt/axiom/spire/1.15.3`.
+4. As root, invoke `/usr/bin/python3 -I -B REVIEWED_CONTROLLER_FILES_PY --install ROOT_OWNED_SOURCE_DIR REVIEWED_MANIFEST_SHA`. Files are placed at `/etc/axiom/controllers/<tenant>/<manifestSHA>/files`. Root-only host ancestry prevents unrelated host UID 20000 processes reaching them. The intended container receives this directory read-only at `/run/controller-secrets`; it sees UID/GID 20000 files with mode `0400`. No container, volume mapping, registration or unit is created by this command.
+5. Before future activation, run the same reviewed helper with `--check TENANT_UUID REVIEWED_MANIFEST_SHA`. This verifies the delivered generation against the current installed runner binding without needing the source bundle. Full controller `--check`, live volume/health checks, image admission and private host-IP publishing remain separate supervised-start gates. A file receipt is not runtime readiness or application approval.
+6. Preserve a partial or altered generation for operator review. There is no automatic repair, overwrite, switch of active generation, credential rotation or deletion. Completed identical delivery is idempotent. A later credential change requires a fresh reviewed generation and the still-pending controlled activation/retirement procedure.
+
+Nine native checks are added to the runner gate; treat them as pending until the exact merge passes. Cloud credentials, actual certificate validity and backend/KMS reachability are not proven by copying files. The local preparer validation and ten new deployment tests cover the source and generation contract.
 
 ## Revision 67 operator boundary — exact controller registration
 
