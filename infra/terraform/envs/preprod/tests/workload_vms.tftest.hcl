@@ -36,16 +36,18 @@ run "explicit_configuration_composes_private_hosts" {
   command = apply
   variables {
     workload_vms = {
-      zone                     = "asia-south1-a"
-      boot_image               = "projects/axiom-vm-fixture/global/images/reviewed-runner-20260923"
-      controller_source_ranges = ["10.10.16.0/28"]
+      zone       = "asia-south1-a"
+      boot_image = "projects/axiom-vm-fixture/global/images/reviewed-runner-20260923"
+      tenants    = { "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = ["10.10.16.0/28"] } }
     }
   }
   assert {
-    condition = length(module.workload_vms) == 1 && alltrue([
-      for role, host in output.workload_vm_hosts :
-      host.zone == "asia-south1-a" && host.name == "axiom-preprod-${role}"
-    ])
+    condition = (
+      length(module.workload_vms) == 1 && output.workload_vm_hosts.issuer.name == "axiom-preprod-issuer" &&
+      toset(keys(output.workload_vm_hosts.runners)) == toset(["11111111-1111-4111-8111-111111111111"]) &&
+      output.workload_vm_hosts.runners["11111111-1111-4111-8111-111111111111"].zone == "asia-south1-a" &&
+      output.workload_vm_hosts.runners["11111111-1111-4111-8111-111111111111"].tenant_id == "11111111-1111-4111-8111-111111111111"
+    )
     error_message = "Explicit configuration must compose exactly the intended Mumbai hosts."
   }
 }

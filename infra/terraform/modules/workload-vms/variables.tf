@@ -43,14 +43,19 @@ variable "boot_image" {
   }
 }
 
-variable "controller_source_ranges" {
-  description = "Reviewed private IPv4 /24–/32 scheduler ranges. Empty means no remote controller ingress. Signed scheduler authentication remains mandatory."
-  type        = set(string)
-  default     = []
+variable "tenants" {
+  description = "Dedicated runner per canonical tenant UUID. Scheduler ranges are reviewed independently per tenant; empty ranges disable controller ingress."
+  type = map(object({
+    controller_source_ranges = optional(set(string), [])
+  }))
   validation {
-    condition = length(var.controller_source_ranges) <= 8 && alltrue([
-      for cidr in var.controller_source_ranges : can(cidrhost(cidr, 0)) && can(regex("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)[0-9.]+/(2[4-9]|3[0-2])$", cidr))
+    condition = length(var.tenants) > 0 && length(var.tenants) <= 100 && alltrue([
+      for tenant, settings in var.tenants :
+      can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", tenant)) &&
+      length(settings.controller_source_ranges) <= 8 && alltrue([
+        for cidr in settings.controller_source_ranges : can(cidrhost(cidr, 0)) && can(regex("^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)[0-9.]+/(2[4-9]|3[0-2])$", cidr))
+      ])
     ])
-    error_message = "Allow only a bounded set of private IPv4 /24–/32 scheduler ranges."
+    error_message = "Declare 1–100 canonical lowercase tenant UUIDs; each may allow at most eight private IPv4 /24–/32 scheduler ranges."
   }
 }
