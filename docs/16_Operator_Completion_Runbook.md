@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes. Revision 67 adds exact controller workload admission; its final combined CI evidence remains pending. Host delivery/supervision and broader roadmap work remain open.
+Revisions 67–68 are **complete and green** together at `a7df79f`, CI [35857993698](https://github.com/vikashkaruna/Proof/actions/runs/35857993698): all 19 applicable jobs and 13 exact-revision artifacts verified. Evidence includes 33 native runner outcomes (all prior 24 retained), 71 assessment outcomes and five protected-trust outcomes. The initial native fixture hash-format mismatch was corrected without weakening production checks. Revision 69 implements dedicated tenant runner placement; its combined gate is pending. Full supervised activation and the broader roadmap remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 68, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 69, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 69 placement decision — one runner VM per tenant
+
+The user selected **dedicated runner VM per tenant**. Keep the separate private issuer and public Cloud Run APIs. Configure `workload_vms.tenants` as a map of canonical tenant UUIDs to optional `controller_source_ranges`; the previous top-level range setting and single `hosts.runner` output are superseded. Use `workload_vm_hosts.runners[TENANT_UUID]` and `workload_vm_hosts.issuer` for reviewed private references. The example stays disabled with `workload_vms = null`.
+
+Each tenant receives a separate runner identity, address, instance and state disk. Controller ingress is evaluated independently for each tenant; an empty range set leaves that runner closed. The module accepts 1–100 tenants per reviewed batch, at most eight private IPv4 /24–/32 scheduler ranges per tenant. Batches and provider quotas are deployment constraints, not tenant entitlement settings. No cloud apply has occurred.
+
+Before activation, bind the service configuration's tenant UUID, SPIRE node/instance identity, file-generation manifest and private endpoint to the **same** tenant's reviewed host output. The new VM metadata/labels document placement; the pending host supervisor must enforce this correspondence. Complete tenant-scoped backend/secret/KMS permissions and signed scheduler identity separately. A dedicated VM or service-account attachment alone is not proof of those permissions.
+
+Do not reassign an old runner by changing labels or blindly importing it under a tenant key. The resource/output shape has changed. If an earlier module was applied elsewhere, stop at a reviewed Terraform migration/retirement plan: preserve issuer identity, node state and existing disks; retain deletion protection and `prevent_destroy`. There are no automatic state moves, resource deletions or tenant retirement actions in this change. Offline provider-mock tests are not a real cloud plan or GCP attestation.
 
 ## Revision 68 procedure — protected controller files, without activation
 
@@ -134,7 +144,7 @@ The native fixture now exercises the same installed CLI and checks refusal witho
 
 **Accepted placement:** a separate private Mumbai SPIRE issuer VM alongside the dedicated runner; public APIs remain on Cloud Run. `infra/terraform/modules/workload-vms` implements the host/resource boundary. The GCP preprod root (including its supported environment naming) composes it only when `workload_vms` is non-null. The legacy AWS production topology is not silently replaced.
 
-**Default and configuration:** keep `workload_vms = null` until bootstrap and operating gates are complete. The tfvars example includes the disabled setting and a commented shape with `zone`, `boot_image` and `controller_source_ranges`. Select one of the Mumbai zones and a reviewed named, Secure Boot-compatible GCP image; image families are refused. Optional scheduler ranges must be private IPv4 /24–/32 ranges, at most eight. Empty ranges create no controller ingress. No new environment variable, static credential or cloud API call is introduced by this code change.
+**Default and configuration:** keep `workload_vms = null` until bootstrap and operating gates are complete. The tfvars example includes the disabled setting and a commented shape with `zone`, `boot_image` and per-tenant `tenants[TENANT_UUID].controller_source_ranges`. Select one of the Mumbai zones and a reviewed named, Secure Boot-compatible GCP image; image families are refused. Optional scheduler ranges must be private IPv4 /24–/32 ranges, at most eight. Empty ranges create no controller ingress. No new environment variable, static credential or cloud API call is introduced by this code change.
 
 **Prepared boundary:** issuer and runner have separate service accounts, private reserved addresses and persistent disks; no public network interface. Initial sizes are e2-small with 20 GB state for the issuer and e2-standard-2 with 50 GB state for the runner, plus separate boot disks. These are initial sizing choices, not capacity or availability guarantees. OS Login/2FA, disabled serial access, blocked project SSH keys and shielded-VM options are explicit. There is no SSH/IAP ingress or implicit administration grant. Both service accounts currently have no resource IAM grants from this module; do not reuse the broad BFF identity when adding reviewed secret/KMS access.
 

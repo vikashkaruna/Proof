@@ -11,25 +11,30 @@ variables {
   boot_image  = "projects/axiom-vm-fixture/global/images/reviewed-runner-20260923"
   network     = "https://www.googleapis.com/compute/v1/projects/axiom-vm-fixture/global/networks/private"
   subnetwork  = "https://www.googleapis.com/compute/v1/projects/axiom-vm-fixture/regions/asia-south1/subnetworks/private"
+  tenants = {
+    "11111111-1111-4111-8111-111111111111" = {}
+    "22222222-2222-4222-8222-222222222222" = {}
+  }
 }
 
 run "private_separate_hosts_and_state" {
   command = apply
   assert {
-    condition = length(google_compute_instance.host) == 2 && alltrue([
-      for role, host in google_compute_instance.host :
+    condition = length(google_compute_instance.host) == 3 && alltrue([
+      for key, host in google_compute_instance.host :
       host.zone == "asia-south1-a" && host.deletion_protection && !host.can_ip_forward &&
       host.network_interface[0].network == var.network &&
       host.network_interface[0].stack_type == "IPV4_ONLY" &&
       length(host.network_interface[0].access_config) == 0 &&
       length(host.network_interface[0].ipv6_access_config) == 0 &&
-      host.service_account[0].email == google_service_account.host[role].email &&
-      host.attached_disk[0].source == google_compute_disk.state[role].id
+      host.service_account[0].email == google_service_account.host[key].email &&
+      host.attached_disk[0].source == google_compute_disk.state[key].id &&
+      host.attached_disk[0].device_name == "axiom-${local.hosts[key].role}-state"
     ])
-    error_message = "Issuer and runner must have separate private instances, identities and state."
+    error_message = "Issuer and each tenant runner need private instances, identities and state."
   }
   assert {
-    condition = length(distinct([for identity in google_service_account.host : identity.account_id])) == 2 && alltrue([
+    condition = length(distinct([for identity in google_service_account.host : identity.account_id])) == 3 && alltrue([
       for host in google_compute_instance.host :
       host.shielded_instance_config[0].enable_secure_boot &&
       host.shielded_instance_config[0].enable_vtpm &&
@@ -48,39 +53,66 @@ run "private_separate_hosts_and_state" {
     error_message = "No scheduler range means no controller ingress."
   }
   assert {
-    condition = (
-      google_compute_firewall.spire.source_service_accounts == toset([google_service_account.host["runner"].email]) &&
-      google_compute_firewall.spire.target_service_accounts == toset([google_service_account.host["issuer"].email]) &&
-      one(google_compute_firewall.spire.allow).ports == tolist(["8081"]) &&
-      google_compute_firewall.spire_egress.destination_ranges == toset(["${google_compute_address.host["issuer"].address}/32"]) &&
-      google_compute_firewall.spire.priority < google_compute_firewall.deny_ingress.priority &&
-      google_compute_firewall.spire_egress.priority < google_compute_firewall.deny_egress.priority
-    )
-    error_message = "SPIRE traffic must be limited to the reviewed runner/issuer direction and port."
+    condition = alltrue([
+      for key, runner in local.runners :
+      google_compute_firewall.spire[key].source_service_accounts == toset([google_service_account.host[key].email]) &&
+      google_compute_firewall.spire[key].target_service_accounts == toset([google_service_account.host["issuer"].email]) &&
+      one(google_compute_firewall.spire[key].allow).ports == tolist(["8081"]) &&
+      google_compute_firewall.spire_egress[key].destination_ranges == toset(["${google_compute_address.host["issuer"].address}/32"]) &&
+      google_compute_firewall.spire_egress[key].target_service_accounts == toset([google_service_account.host[key].email]) &&
+      google_compute_firewall.spire[key].priority < google_compute_firewall.deny_ingress["issuer"].priority &&
+      google_compute_firewall.spire_egress[key].priority < google_compute_firewall.deny_egress[key].priority
+    ])
+    error_message = "SPIRE traffic must bind each runner only to the issuer direction and port."
   }
   assert {
-    condition = (
-      one(google_compute_firewall.deny_ingress.deny).protocol == "all" &&
-      one(google_compute_firewall.deny_egress.deny).protocol == "all" &&
-      one(google_compute_firewall.https_egress.allow).protocol == "tcp" &&
-      one(google_compute_firewall.https_egress.allow).ports == tolist(["443"])
-    )
-    error_message = "Unlisted traffic must be denied; generic host egress is HTTPS only."
+    condition = alltrue([
+      for key, host in local.hosts :
+      one(google_compute_firewall.deny_ingress[key].deny).protocol == "all" &&
+      one(google_compute_firewall.deny_egress[key].deny).protocol == "all" &&
+      one(google_compute_firewall.https_egress[key].allow).protocol == "tcp" &&
+      one(google_compute_firewall.https_egress[key].allow).ports == tolist(["443"]) &&
+      google_compute_firewall.deny_ingress[key].target_service_accounts == toset([google_service_account.host[key].email]) &&
+      google_compute_firewall.deny_egress[key].target_service_accounts == toset([google_service_account.host[key].email]) &&
+      google_compute_firewall.https_egress[key].target_service_accounts == toset([google_service_account.host[key].email])
+    ])
+    error_message = "Each host needs its own deny boundaries and HTTPS-only generic egress."
   }
 }
 
-run "explicit_scheduler_ingress" {
+run "dedicated_tenant_resources_and_independent_ingress" {
   command = apply
   variables {
-    controller_source_ranges = ["10.10.16.0/28"]
+    tenants = {
+      "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = ["10.10.16.0/28"] }
+      "22222222-2222-4222-8222-222222222222" = {}
+    }
   }
   assert {
     condition = (
-      google_compute_firewall.controller[0].source_ranges == toset(["10.10.16.0/28"]) &&
-      google_compute_firewall.controller[0].target_service_accounts == toset([google_service_account.host["runner"].email]) &&
-      one(google_compute_firewall.controller[0].allow).ports == tolist(["8443"])
+      length(google_compute_instance.host) == 3 && length(google_compute_disk.state) == 3 &&
+      length(google_compute_address.host) == 3 && length(google_service_account.host) == 3 &&
+      length(distinct([for host in google_compute_instance.host : host.name])) == 3 &&
+      length(distinct([for disk in google_compute_disk.state : disk.name])) == 3 &&
+      length(distinct([for identity in google_service_account.host : identity.account_id])) == 3 &&
+      toset(keys(output.hosts.runners)) == toset(keys(var.tenants)) && output.hosts.issuer.tenant_id == null &&
+      alltrue([for tenant, host in output.hosts.runners : host.tenant_id == tenant &&
+        google_compute_instance.host["runner-${tenant}"].metadata["axiom-tenant-id"] == tenant &&
+        google_compute_instance.host["runner-${tenant}"].labels["axiom_tenant"] == tenant &&
+      google_compute_disk.state["runner-${tenant}"].labels["axiom_tenant"] == tenant])
     )
-    error_message = "Only the explicit scheduler range may reach the runner TLS port."
+    error_message = "Each tenant must receive its own runner, identity, address and disk, alongside one issuer."
+  }
+  assert {
+    condition = (
+      length(google_compute_firewall.controller) == 1 &&
+      google_compute_firewall.controller["runner-11111111-1111-4111-8111-111111111111"].source_ranges == toset(["10.10.16.0/28"]) &&
+      google_compute_firewall.controller["runner-11111111-1111-4111-8111-111111111111"].target_service_accounts == toset([google_service_account.host["runner-11111111-1111-4111-8111-111111111111"].email]) &&
+      one(google_compute_firewall.controller["runner-11111111-1111-4111-8111-111111111111"].allow).ports == tolist(["8443"]) &&
+      !contains(keys(google_compute_firewall.controller), "runner-22222222-2222-4222-8222-222222222222") &&
+      length(google_compute_firewall.spire) == 2 && length(google_compute_firewall.spire_egress) == 2
+    )
+    error_message = "One tenant's scheduler range must not open another tenant's controller."
   }
 }
 
@@ -101,24 +133,49 @@ run "reject_mutable_image_family" {
 }
 run "reject_public_controller_ingress" {
   command = plan
-  variables { controller_source_ranges = ["0.0.0.0/0"] }
-  expect_failures = [var.controller_source_ranges]
+  variables { tenants = { "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = ["0.0.0.0/0"] } } }
+  expect_failures = [var.tenants]
 }
 run "reject_private_prefix_covering_public_space" {
   command = plan
-  variables { controller_source_ranges = ["10.0.0.0/1"] }
-  expect_failures = [var.controller_source_ranges]
+  variables { tenants = { "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = ["10.0.0.0/1"] } } }
+  expect_failures = [var.tenants]
 }
 run "reject_invalid_ipv4" {
   command = plan
-  variables { controller_source_ranges = ["10.999.0.0/28"] }
-  expect_failures = [var.controller_source_ranges]
+  variables { tenants = { "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = ["10.999.0.0/28"] } } }
+  expect_failures = [var.tenants]
+}
+run "reject_unbound_runner" {
+  command = plan
+  variables { tenants = {} }
+  expect_failures = [var.tenants]
+}
+run "reject_noncanonical_tenant" {
+  command = plan
+  variables { tenants = { "other-tenant" = {} } }
+  expect_failures = [var.tenants]
 }
 run "production_identity_name_bounds" {
   command = apply
-  variables { name_prefix = "axiom-production" }
+  variables { name_prefix = "abcdefghijklmnopqrstuvw" }
   assert {
-    condition     = alltrue([for identity in google_service_account.host : length(identity.account_id) <= 30])
-    error_message = "Production service account names must fit provider limits."
+    condition = (
+      alltrue([for identity in google_service_account.host : length(identity.account_id) <= 30]) &&
+      alltrue([for instance in google_compute_instance.host : length(instance.name) <= 63]) &&
+      alltrue([for firewall in google_compute_firewall.deny_ingress : length(firewall.name) <= 63])
+    )
+    error_message = "Maximum permitted prefixes must still fit provider resource-name limits."
   }
+}
+
+run "reject_oversized_tenant_batch" {
+  command = plan
+  variables { tenants = { for index in range(101) : format("%08x-0000-4000-8000-000000000000", index) => {} } }
+  expect_failures = [var.tenants]
+}
+run "reject_excess_scheduler_ranges" {
+  command = plan
+  variables { tenants = { "11111111-1111-4111-8111-111111111111" = { controller_source_ranges = [for index in range(9) : "10.10.${index}.0/24"] } } }
+  expect_failures = [var.tenants]
 }
