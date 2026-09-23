@@ -37,7 +37,13 @@ bash tests/database/migration-runner.sh "$container"
 docker exec "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q -c "alter role service_role nobypassrls;"
 for suite in tests/database/*.test.sql; do
   echo "Testing $(basename "$suite")"
-  sql < "$suite"
+  if [ "$(basename "$suite")" = controller-credential-issuance.test.sql ]; then
+    # The production migration deliberately grants no issuer membership to
+    # postgres. Only this disposable test session assumes the private role.
+    docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  else
+    sql < "$suite"
+  fi
 done
 bash tests/database/concurrent-idempotency.sh "$container"
 bash tests/database/concurrent-onboarding.sh "$container"
@@ -57,6 +63,7 @@ bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"
 bash tests/database/concurrent-dispatch-key-policy.sh "$container"
 bash tests/database/concurrent-workload-registration.sh "$container"
+bash tests/database/concurrent-controller-issuance.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.
@@ -74,5 +81,6 @@ bash tests/database/assessment-scheduling-upgrade.sh "$container"
 bash tests/database/assessment-retention-upgrade.sh "$container"
 bash tests/database/dispatch-key-policy-upgrade.sh "$container"
 bash tests/database/workload-registration-upgrade.sh "$container"
+bash tests/database/controller-issuance-upgrade.sh "$container"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."

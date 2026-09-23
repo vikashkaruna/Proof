@@ -1,5 +1,15 @@
 # Deployed acceptance: API and browser parity
 
+## Revision 74 — reviewed controller credential issuance
+
+**Verified baseline:** Revision 73 is complete on staging `5efb40d8d6b6e0a0788b961d028d0203fa608e97`; [CI 35890118690](https://github.com/vikashkaruna/Proof/actions/runs/35890118690) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 39](https://github.com/vikashkaruna/Proof/pull/39) is merged. The full roadmap remains active and incomplete; continue in plan order after each green milestone.
+
+**Implemented, acceptance in progress:** an isolated manual operator CLI now creates protected tenant-scoped controller credentials, records immutable reviewed issuance/retirement, permits one successor per predecessor, recovers an uncertain result only through explicit identical-request resume, and permanently revokes retired authority. Signing and operator database credentials stay outside runners. The private issuer role has no application/table write grants or provisioned login/membership. Its change-record UUID is not proof of human signature and never replaces application approval/dry-run/rollback rules. No public issuance route or automatic renewal was added.
+
+Actual CLI and BFF-consumer acceptance against the existing isolated Docker backend passes **eight new checks**, bringing assessment to **86 outcomes** with all prior 78 retained; identity remains 61 and protected trust five. A clean-database extension-schema failure is corrected by append-only migration 0051, preserving already-applied 0050. Database concurrency/upgrade, protected-file/transport tests and combined source/exact staging CI complete the closure gate. See [audit 63](audits/63-controller-credential-issuance-review-2026-09-23.md) and the [issuer operator contract](../infra/credential-issuer/README.md).
+
+**Next and limits:** renewal creates a reviewed fresh credential; it does not switch a running host. Protected generation transition and actual secret publication remain next, followed by effective inherited/cloud IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial, W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Source/staging results are recorded only after verification in this task's `.axiom-runtime/revision74` checkpoint.
+
 This runner creates synthetic tenants, accounts, MFA factors, assessments, estate inventory, connector registrations, proposals and approval fixtures. Use an **isolated acceptance deployment**, never a client production database. A production-configured acceptance stack uses production security rules with synthetic data. It does not execute connector actions. Fixture rows and append-only ledger events remain after the run; reset/dispose of the isolated database through its normal operator lifecycle. Do not delete audit history to clean up a shared deployment.
 
 ## Prepare the target

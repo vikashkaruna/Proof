@@ -1,5 +1,15 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
+## Revision 74 — reviewed controller credential issuance
+
+**Verified baseline:** Revision 73 is complete on staging `5efb40d8d6b6e0a0788b961d028d0203fa608e97`; [CI 35890118690](https://github.com/vikashkaruna/Proof/actions/runs/35890118690) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 39](https://github.com/vikashkaruna/Proof/pull/39) is merged. The full roadmap remains active and incomplete; continue in plan order after each green milestone.
+
+**Implemented, acceptance in progress:** an isolated manual operator CLI now creates protected tenant-scoped controller credentials, records immutable reviewed issuance/retirement, permits one successor per predecessor, recovers an uncertain result only through explicit identical-request resume, and permanently revokes retired authority. Signing and operator database credentials stay outside runners. The private issuer role has no application/table write grants or provisioned login/membership. Its change-record UUID is not proof of human signature and never replaces application approval/dry-run/rollback rules. No public issuance route or automatic renewal was added.
+
+Actual CLI and BFF-consumer acceptance against the existing isolated Docker backend passes **eight new checks**, bringing assessment to **86 outcomes** with all prior 78 retained; identity remains 61 and protected trust five. A clean-database extension-schema failure is corrected by append-only migration 0051, preserving already-applied 0050. Database concurrency/upgrade, protected-file/transport tests and combined source/exact staging CI complete the closure gate. See [audit 63](audits/63-controller-credential-issuance-review-2026-09-23.md) and the [issuer operator contract](../infra/credential-issuer/README.md).
+
+**Next and limits:** renewal creates a reviewed fresh credential; it does not switch a running host. Protected generation transition and actual secret publication remain next, followed by effective inherited/cloud IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial, W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Source/staging results are recorded only after verification in this task's `.axiom-runtime/revision74` checkpoint.
+
 ## Revision 73 — tenant controller secret/KMS permission configuration
 
 **Verified baseline:** Revision 72 is complete on staging `3c2ff1e53452ac3d2762da9652322050624ee486`, [CI 35879582618, attempt 2](https://github.com/vikashkaruna/Proof/actions/runs/35879582618/attempts/2): all 19 applicable jobs and 13 exact-revision reports passed. The 78 assessment outcomes retain every earlier 71; all 45 native runner outcomes and both configurations' 89 API/67 browser outcomes are preserved. [PR 38](https://github.com/vikashkaruna/Proof/pull/38) is merged. The first staging attempt and redundant documentation PR run were cancelled before closure; only successful attempt 2 is evidence.
@@ -30,7 +40,7 @@ Revision 71 is complete and verified on staging; Revision 72 backend scoping is 
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 73, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 74, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
@@ -185,11 +195,13 @@ The native fixture now exercises the same installed CLI and checks refusal witho
 
 ## Revision 58 — keep controller credentials out of container metadata
 
+**Current contract:** Revision 72 replaced the raw key with protected JSON containing `schemaVersion`, anonymous `apiKey` and tenant-scoped `accessToken`. Revision 74 supplies reviewed issuance/revocation; use the [issuer procedure](../infra/credential-issuer/README.md). The old raw-key format below is historical and must not be deployed.
+
 **Required before Docker workload attestation:** the private controller no longer accepts `SUPABASE_SERVICE_KEY` in its environment. Add `backendServiceKeyFile` to the protected service JSON; the [updated template](../infra/runner/controller.example.json) uses `/run/axiom-controller/backend.key`. Deliver the key separately as a read-only, protected regular file owned by UID 20000 (or root if actually readable), mode `0600`, under operator-controlled directories. Symlinks, group/world-readable files and unsafe paths are refused. Preserve the existing regional/HTTPS backend bindings. No new environment variable is introduced; the ordinary BFF still uses its existing configuration.
 
 **Minimal environment:** the dedicated entrypoint accepts only its documented source allowlist: ordinary Node/container path/version/locale settings, `AXIOM_REGION=ap-south-1`, HTTPS `SUPABASE_URL`, provider region/project/role settings, and canonical absolute provider/trust-file paths. See `controllerEnvironment` in `services/bff/src/workloads/controller-files.ts`. It rejects shared BFF/Temporal/agent environments and static raw credential variables, including `SUPABASE_SERVICE_KEY`, AWS access/session keys and `NODE_OPTIONS`. Run its explicit image target with a deliberately assembled environment; invoking it from a broad interactive shell will fail closed. Attached cloud identity or protected mounted provider files are separate from backend key delivery. The path check does not independently validate provider-file ownership or contents; protect those through deployment configuration too.
 
-**File content:** the backend key must be 32–8192 printable non-whitespace ASCII characters, optionally followed by one LF or CRLF. No multi-line/inline JSON credential, extra whitespace or fallback environment key is accepted. Errors remain fixed text; do not diagnose by printing the key or complete configuration. The temporary read buffer is cleared, but the database client necessarily retains the credential in process memory. Keep dumps and controller process access protected.
+**Historical file content, superseded by Revision 72:** the former backend key had to be 32–8192 printable non-whitespace ASCII characters, optionally followed by one LF or CRLF. No multi-line/inline JSON credential, extra whitespace or fallback environment key is accepted. Errors remain fixed text; do not diagnose by printing the key or complete configuration. The temporary read buffer is cleared, but the database client necessarily retains the credential in process memory. Keep dumps and controller process access protected.
 
 **Container metadata:** do not use `docker --env-file` for this credential—it still populates Docker `Config.Env`. Do not pass raw credentials through argv, labels, Terraform state, instance metadata, image build arguments or logs. The future SPIRE Docker attestor emits environment selectors, so protected runtime file delivery must precede enabling that attestor. Worker containers remain without backend/KMS credentials; only the trusted controller receives the protected backend key mount. TLS keys likewise remain protected files. No Docker attestor has been activated in this milestone.
 
