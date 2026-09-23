@@ -35,6 +35,8 @@ config:
   supabaseServiceKey: ""
   s3EvidenceBucket: axiom-proof-evidence
   bffPublicUrl: ""
+  # Private dispatch ciphertext after confirmed completion; not sealed evidence.
+  assessmentDispatchRetentionDays: 90
   modelGatewayUrl: http://axiom-model-gateway:8001
   agentRuntimeUrl: http://axiom-agent-runtime:8000
   temporalAddress: ap-south-1.aws.api.temporal.io:7233

@@ -334,6 +334,9 @@ tfvar_value() {
     kubernetes_version)         get_val "AXIOM_KUBERNETES_VERSION" "1.29" ;;
     domain_name)                get_val "AXIOM_DOMAIN_NAME" "axiomproof.ai" ;;
 
+    # Private dispatch inputs/proofs; independent from sealed evidence.
+    assessment_dispatch_retention_days) get_val "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS" "90" ;;
+
     # ── Evidence retention ──
     # Applied as a COMPLIANCE-mode Object Lock, which nobody including the
     # project owner can shorten or delete before it expires. It had no
@@ -389,7 +392,7 @@ tfvar_value() {
 # `type = number` variable.
 tfvar_is_number() {
   case "$1" in
-    cloud_sql_disk_size_gb|retention_days) return 0 ;;
+    cloud_sql_disk_size_gb|retention_days|assessment_dispatch_retention_days) return 0 ;;
     *) return 1 ;;
   esac
 }

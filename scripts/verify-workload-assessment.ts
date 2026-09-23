@@ -32,6 +32,7 @@ import {
   SupabaseWorkloadTaskStore,
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
+import { AssessmentRetention } from '../services/bff/src/workloads/assessment-retention.js';
 import { AssessmentScheduling } from '../services/bff/src/workloads/assessment-scheduling.js';
 import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
 import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
@@ -493,6 +494,66 @@ print('isolated')`;
         });
         assert.equal(afterConfirmation.status, 403);
         outcomes['terminal-confirmation-does-not-revive-task'] = true;
+        if (name === 'actual-worker-pinned-library-durable-findings') {
+          const retention = new AssessmentRetention(db, { retentionDays: 90, tenantId });
+          assert.deepEqual(await retention.purgeNext(), { status: 'idle' });
+          outcomes['retention-preserves-recent-confirmation'] = true;
+          // Synthetic local fixture only: advance its confirmation age. No
+          // production clock override or backend write route is introduced.
+          execFileSync(
+            'docker',
+            [
+              'exec',
+              '-i',
+              'supabase_db_axiom-w0-parity',
+              'psql',
+              '-X',
+              '-U',
+              'postgres',
+              '-d',
+              'postgres',
+              '-v',
+              'ON_ERROR_STOP=1',
+              '-q',
+            ],
+            {
+              input: `update public.workload_assessment_packets set finalized_at=clock_timestamp()-interval '91 days' where tenant_id='${tenantId}' and run_id='${task.runId}';`,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              timeout: 10000,
+            },
+          );
+          const receipt = await retention.purgeNext();
+          assert.equal(receipt.status, 'purged');
+          assert(
+            receipt.status === 'purged' && receipt.jobId === jobId && receipt.retentionDays === 90,
+          );
+          const cleaned = check(
+            await db
+              .from('assessment_dispatch_jobs')
+              .select('nonce,ciphertext,wrapped_key,payload_purge_receipt,claimed_at')
+              .eq('id', jobId)
+              .single(),
+          );
+          assert(
+            cleaned &&
+              cleaned.nonce === null &&
+              cleaned.ciphertext === null &&
+              cleaned.wrapped_key === null &&
+              cleaned.payload_purge_receipt &&
+              cleaned.claimed_at,
+          );
+          outcomes['retention-purges-private-bytes-with-durable-receipt'] = true;
+          assert.deepEqual(await retention.purgeNext(), { status: 'idle' });
+          assert.deepEqual(await dispatcher.enqueue(context, inputJson), first);
+          await assert.rejects(() => dispatcher.claim(tenantId, jobId));
+          outcomes['retention-preserves-idempotency-and-single-use-claim'] = true;
+          assert.deepEqual(await confirmation.confirm(expected), recorded);
+          assert.equal(
+            check(await db.from('findings').select('id').eq('engagement_id', engagementId))!.length,
+            2,
+          );
+          outcomes['retention-preserves-confirmed-result-and-findings'] = true;
+        }
       }
       outcomes[name] = true;
     }

@@ -122,6 +122,13 @@ const EnvFields = z.object({
     .transform((v) => Number(v)),
   BFF_PUBLIC_URL: z.string().url().optional(),
   BFF_CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001'),
+  // Private dispatch inputs/proofs only; never evidence, audit or consent records.
+  AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: z
+    .string()
+    .regex(/^[1-9][0-9]{0,4}$/)
+    .default('90')
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(36500)),
 
   // MFA (W1). Separate from the approval signing key on purpose: these
   // protect different things, and compromising one should not hand over the
@@ -307,8 +314,10 @@ function validatePublicEnvironment(env: WebEnv, ctx: z.RefinementCtx): void {
   }
 }
 
-const EnvSchema = EnvFields.superRefine((env, ctx) => {
-  validatePublicEnvironment(env, ctx);
+function validateBackendDatabaseEnvironment(
+  env: Pick<z.infer<typeof EnvFields>, 'ENVIRONMENT' | 'NODE_ENV' | 'SUPABASE_SERVICE_KEY'>,
+  ctx: z.RefinementCtx,
+): void {
   const hardened = env.ENVIRONMENT
     ? HARDENED_ENVIRONMENTS.has(env.ENVIRONMENT)
     : env.NODE_ENV === 'production';
@@ -327,6 +336,52 @@ const EnvSchema = EnvFields.superRefine((env, ctx) => {
       message: 'Valid production SUPABASE_SERVICE_KEY is required',
     });
   }
+}
+
+const AssessmentRetentionEnvSchema = EnvFields.pick({
+  AXIOM_RELEASE_SHA: true,
+  NODE_ENV: true,
+  ENVIRONMENT: true,
+  AXIOM_AUTH_MODE: true,
+  SUPABASE_URL: true,
+  SUPABASE_ANON_KEY: true,
+  SUPABASE_SERVICE_KEY: true,
+  AXIOM_REGION: true,
+  AWS_REGION: true,
+  AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: true,
+}).superRefine((env, ctx) => {
+  validatePublicEnvironment(env, ctx);
+  validateBackendDatabaseEnvironment(env, ctx);
+  if (!env.SUPABASE_SERVICE_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SUPABASE_SERVICE_KEY'],
+      message: 'Assessment maintenance requires a database credential.',
+    });
+  }
+  if (env.AXIOM_AUTH_MODE !== 'strict') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['AXIOM_AUTH_MODE'],
+      message: 'Assessment maintenance requires strict mode.',
+    });
+  }
+});
+
+/** Dedicated maintenance needs database access, not signing/MFA/model credentials. */
+export function loadAssessmentRetentionEnv(source: NodeJS.ProcessEnv = process.env) {
+  const parsed = AssessmentRetentionEnvSchema.safeParse(normalizeEnv(source));
+  if (!parsed.success) throw new Error('Invalid assessment retention environment configuration.');
+  return Object.freeze(parsed.data);
+}
+
+const EnvSchema = EnvFields.superRefine((env, ctx) => {
+  validatePublicEnvironment(env, ctx);
+  validateBackendDatabaseEnvironment(env, ctx);
+  const hardened = env.ENVIRONMENT
+    ? HARDENED_ENVIRONMENTS.has(env.ENVIRONMENT)
+    : env.NODE_ENV === 'production';
+  if (!hardened) return;
   if (!env.APPROVAL_SIGNING_KEY) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
