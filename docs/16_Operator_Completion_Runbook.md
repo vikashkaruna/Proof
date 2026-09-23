@@ -1,15 +1,21 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `66e6147`, CI [35852588998](https://github.com/vikashkaruna/Proof/actions/runs/35852588998), all 19 applicable jobs and 13 exact-revision artifacts verified. Protected runtime volumes and 24 native runner/container outcomes are green. Revision 66 adds actual controller entrypoint acceptance; final expanded CI evidence is pending. Full host/controller activation and the broader roadmap remain open.
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes. Revision 67 adds exact controller workload admission; its final combined CI evidence remains pending. Host delivery/supervision and broader roadmap work remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 66, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 67, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 67 operator boundary — exact controller registration
+
+Before starting the controller, review a registration for exactly `spiffe://<reviewed-domain>/controller/assessment`, under the exact approved node, UID 20000 and immutable controller image digest. Set JWT-SVID TTL to at most 300 seconds. Another registered workload's access to JWT bundles is insufficient. The startup request uses the fixed `axiom-controller-startup` audience and rejects a missing, different, ambiguous, expired or unverifiable identity before reading backend policy. Keep worker UID 20003 separate and retain protected socket/health mappings.
+
+Do not diagnose this refusal by dumping SVIDs, loosening selectors, sharing the node admin socket, extending the accepted lifetime or bypassing issuer health. Verify the reviewed registration and current node/issuer state. This is process startup admission, not continuous controller-role reattestation or an application approval; existing per-tool task/identity checks still apply. Host delivery/supervision and deployment acceptance remain the next pending work.
 
 ## Revision 66 acceptance boundary — actual controller entrypoint
 

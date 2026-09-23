@@ -22,3 +22,44 @@ export const fetchJwtBundles: MethodDefinition<Record<string, never>, BundleResp
   responseSerialize: definition.serialize,
   responseDeserialize: definition.deserialize,
 };
+
+export type SvidRequest = { audience: string[]; spiffeId: string };
+export type SvidResponse = { svids: Array<{ spiffeId: string; svid: string; hint?: string }> };
+const svidDefinitions = fromJSON(
+  {
+    nested: {
+      JWTSVIDRequest: {
+        fields: {
+          audience: { rule: 'repeated', type: 'string', id: 1 },
+          spiffeId: { type: 'string', id: 2 },
+        },
+      },
+      JWTSVID: {
+        fields: {
+          spiffeId: { type: 'string', id: 1 },
+          svid: { type: 'string', id: 2 },
+          hint: { type: 'string', id: 3 },
+        },
+      },
+      JWTSVIDResponse: { fields: { svids: { rule: 'repeated', type: 'JWTSVID', id: 1 } } },
+    },
+  },
+  { arrays: true },
+);
+const svidRequest = svidDefinitions.JWTSVIDRequest as MessageTypeDefinition<
+  SvidRequest,
+  SvidRequest
+>;
+const svidResponse = svidDefinitions.JWTSVIDResponse as MessageTypeDefinition<
+  SvidResponse,
+  SvidResponse
+>;
+export const fetchJwtSvid: MethodDefinition<SvidRequest, SvidResponse> = {
+  path: '/SpiffeWorkloadAPI/FetchJWTSVID',
+  requestStream: false,
+  responseStream: false,
+  requestSerialize: svidRequest.serialize,
+  requestDeserialize: svidRequest.deserialize,
+  responseSerialize: svidResponse.serialize,
+  responseDeserialize: svidResponse.deserialize,
+};

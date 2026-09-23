@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantId } from '@axiom/types';
 import { afterEach, expect, it, vi } from 'vitest';
 import { composeVmAssessmentController, vmControllerConfiguration } from './assessment-vm.js';
+import * as controllerIdentity from './controller-identity.js';
 import * as containerRuntime from './assessment-container.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
 import { IssuerSyncHealth } from './issuer-sync-health.js';
@@ -69,7 +70,12 @@ function fixture() {
   const load = vi
     .spyOn(WorkloadApiJwtTrust.prototype, 'load')
     .mockResolvedValue({ revision: 'fixture', validUntil: Date.now() + 10000, jwks: {} });
-  return { db, row, from, rpc, load, health };
+  const admission = vi
+    .spyOn(controllerIdentity, 'requireControllerIdentity')
+    .mockImplementation(async (_, trust) => {
+      if (!(await trust.load(config.trustDomain))) throw new Error('identity refused');
+    });
+  return { db, row, from, rpc, load, health, admission };
 }
 it('refuses unsynchronized issuer state before consuming any dispatch or reading trust', async () => {
   const f = fixture();
@@ -171,13 +177,13 @@ it('starts only after recovering the exact persisted policy and checking protect
   expect(f.load).toHaveBeenCalledWith(config.trustDomain);
   expect(service.identity).toBeDefined();
 });
-it('refuses stale policy before opening trust or consuming a dispatch', async () => {
+it('refuses stale policy after identity admission without consuming a dispatch', async () => {
   const f = fixture();
   f.row.fingerprint = '0'.repeat(64);
   await expect(composeVmAssessmentController(config, f.db)).rejects.toThrow(
     'VM assessment controller configuration refused',
   );
-  expect(f.load).not.toHaveBeenCalled();
+  expect(f.admission).toHaveBeenCalledOnce();
   expect(f.rpc).not.toHaveBeenCalled();
 });
 it('refuses unavailable trust before any mutation', async () => {
@@ -406,4 +412,14 @@ it.each([
   await expect(controllerBackendCredentials(f.filename, env)).rejects.toThrow(
     /^Controller backend credentials refused$/,
   );
+});
+
+it('refuses controller role admission before accessing backend policy or dispatch', async () => {
+  const f = fixture();
+  f.admission.mockRejectedValue(new Error('Controller workload identity refused'));
+  await expect(composeVmAssessmentController(config, f.db)).rejects.toThrow(
+    'VM assessment controller configuration refused',
+  );
+  expect(f.from).not.toHaveBeenCalled();
+  expect(f.rpc).not.toHaveBeenCalled();
 });

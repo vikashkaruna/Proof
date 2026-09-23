@@ -3,13 +3,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { requireControllerIdentity } from '../services/bff/src/workloads/controller-identity.js';
 import { WorkloadApiJwtTrust } from '../services/bff/src/workloads/workload-api-trust.js';
 import { JwtSvidVerifier } from '../services/bff/src/workloads/jwt-svid.js';
 let phase = 'input';
 async function main() {
   const input = z
     .object({
-      mode: z.enum(['registered', 'unregistered', 'unavailable']),
+      mode: z.enum(['registered', 'unregistered', 'unavailable', 'wrong-role']),
       token: z.string().max(16384),
     })
     .strict()
@@ -27,6 +28,14 @@ async function main() {
     },
     trust,
   );
+  const admit = () =>
+    requireControllerIdentity(
+      {
+        socketPath: '/run/workload/api.sock',
+        trustDomain: 'local.axiomproof.test',
+      },
+      trust,
+    );
   phase = 'load';
   if (input.mode === 'registered') {
     assert(await trust.load('local.axiomproof.test'));
@@ -36,6 +45,12 @@ async function main() {
     phase = 'currentness';
     assert(await trust.stillCurrent(identity.trustDomain, identity.bundleRevision));
     assert.equal(await trust.load('foreign.test'), null);
+    phase = 'controller-role';
+    await admit();
+  } else if (input.mode === 'wrong-role') {
+    assert(await trust.load('local.axiomproof.test'));
+    phase = 'worker-role-refused';
+    await assert.rejects(admit(), { message: 'Controller workload identity refused' });
   } else {
     assert.equal(await trust.load('local.axiomproof.test'), null);
     await assert.rejects(verifier.verify(input.token), {
