@@ -12,12 +12,12 @@ const algorithms = [
   'PS384',
   'PS512',
 ] as const;
-const domain = z
+export const workloadTrustDomain = z
   .string()
   .min(1)
   .max(255)
   .regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/)
-  .refine((s) => !s.includes('..'));
+  .refine((s) => !s.includes('..') && s.trim() === s);
 const header = z
   .object({
     alg: z.enum(algorithms),
@@ -48,12 +48,12 @@ const publicKey = z.discriminatedUnion('kty', [
     })
     .strict(),
 ]);
-const jwks = z.object({ keys: z.array(publicKey).min(1).max(32) }).strict();
+export const jwtPublicBundle = z.object({ keys: z.array(publicKey).min(1).max(32) }).strict();
 const configSchema = z
   .object({
     audience: z.string().min(1).max(2048),
     trustDomains: z
-      .array(domain)
+      .array(workloadTrustDomain)
       .min(1)
       .max(20)
       .refine((v) => new Set(v).size === v.length),
@@ -97,11 +97,12 @@ export interface VerifiedWorkloadIdentity {
  * segments or dot segments. The registered exact ID supplies the agent name;
  * no authorization is inferred from path spelling or custom JWT claims. */
 export function parseWorkloadSpiffeId(value: unknown): { spiffeId: string; trustDomain: string } {
-  if (typeof value !== 'string' || value.length > 2048) throw new WorkloadIdentityRefused();
+  if (typeof value !== 'string' || value.length > 2048 || value.trim() !== value)
+    throw new WorkloadIdentityRefused();
   const match = /^spiffe:\/\/([^/]+)\/([A-Za-z0-9._/-]+)$/.exec(value);
   if (
     !match ||
-    !domain.safeParse(match[1]).success ||
+    !workloadTrustDomain.safeParse(match[1]).success ||
     match[2]!.split('/').some((p) => !p || p === '.' || p === '..')
   )
     throw new WorkloadIdentityRefused();
@@ -134,7 +135,7 @@ export class JwtSvidVerifier {
         .object({
           revision: z.string().min(1).max(256),
           validUntil: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-          jwks,
+          jwks: jwtPublicBundle,
         })
         .strict()
         .parse(supplied);

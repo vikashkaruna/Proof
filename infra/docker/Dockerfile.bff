@@ -33,6 +33,11 @@ COPY services/bff ./services/bff
 COPY packages ./packages
 RUN pnpm --filter @axiom/bff build
 
+# Test-only controller: no source/token mounts or backend credentials at runtime.
+# The normal final runtime target does not contain this acceptance script.
+FROM build AS workload-trust-acceptance
+COPY scripts/verify-workload-trust.ts /app/scripts/verify-workload-trust.ts
+
 # ─── runtime ───────────────────────────────────────────────────────
 FROM base AS runtime
 ARG AXIOM_RELEASE_SHA

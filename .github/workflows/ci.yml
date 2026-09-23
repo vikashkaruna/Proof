@@ -117,6 +117,13 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-trust-acceptance
+          path: .axiom-runtime/workload-trust/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Stop the isolated parity project
         if: always()
         run: supabase stop --workdir .axiom-runtime/parity --no-backup

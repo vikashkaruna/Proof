@@ -62,4 +62,6 @@ Revision 53 verifies persisted policy fencing at staging `a01604b` / CI 35813509
 
 Revision 54 verifies per-job isolation at staging `c17f428` / CI 35814929318 and adds audited, version-checked workload registration. Disable permanently revokes old tasks/grants; re-enable cannot restore them. The user selected a dedicated Mumbai VM runner for higher environments with public APIs on Cloud Run. Deployment/trust composition and the remaining W3/W4 scope are still open; see review 43 and Doc 16.
 
-Revision 54 CI follow-up: initial merge `1e1207d` failed shared fixture setup, now corrected to audited registration and explicit direct-write refusal. Exact corrective merge CI is required before claiming this milestone green.
+Revision 54 CI follow-up: initial merge `1e1207d` failed shared fixture setup, now corrected to audited registration and explicit direct-write refusal. Corrective merge `0081948` / CI 35817381642 is verified green, with 17 applicable jobs and eight exact-revision artifacts.
+
+Revision 55 adds a protected local Workload API signing-bundle source with fail-closed rereads and real SPIRE controller checks. VM/controller deployment and production composition remain open. See review 44 and Doc 16; verify nine exact-merge JSON artifacts before closure.

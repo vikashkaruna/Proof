@@ -2,14 +2,24 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 54 — WORKLOAD REGISTRATION LIFECYCLE** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Document:** 11 · **Revision 55 — PROTECTED WORKLOAD TRUST** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
 **Reviewed staging:** `c17f428`, green CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
+## Revision 55 — protected Workload API trust source
+
+Revision 54 is **complete and green** at staging `0081948`, CI [35817381642](https://github.com/vikashkaruna/Proof/actions/runs/35817381642): 17 applicable jobs and eight exact-revision artifacts verified. The shared-fixture regression is fixed and all four local topology and both container/browser environments pass. The overall goal remains incomplete.
+
+**Delivered:** `WorkloadApiJwtTrust` obtains public JWT signing bundles from an explicitly configured, protected local Unix socket using the standard `FetchJWTBundles` RPC. It accepts only configured trust domains, applies bounded transport/message/key limits and validates the same public-key schema used by the verifier. Every load uses a new bounded stream; a second independent read must match the domain-bound bundle fingerprint after signature verification. Missing, changed, malformed, private-key-bearing, unavailable or timed-out bundles fail closed, with no cached fallback or private transport error output. Local snapshots expire after ten seconds. Identity/domain parsing now rejects trailing line terminators.
+
+**Validation:** 908 BFF tests (26 new), workspace tests/lint/typecheck and acceptance TypeScript. A dedicated test controller container, UID-attested by real SPIRE, validates a real worker SVID using freshly retrieved bundles; an unregistered controller and a paused node are refused. It uses a read-only root/socket mount, no network, no capabilities and no backend credentials. The loader's cache is explicitly disabled. Existing **61 identity / 54 worker** outcomes remain; **three protected-trust outcomes** have a separate CI artifact. Expect nine exact-revision JSON artifacts on the next merge. Schema is unchanged: **0048 / 55 public tables / 49 migrations / 18 concurrency suites / 14 upgrades**; W2 named targets **19/40**. See [review 44](audits/44-protected-workload-trust-review-2026-09-23.md).
+
+**Next:** compose the dedicated Mumbai VM controller, protected SPIRE node/bootstrap and opaque scheduler using this adapter. Public APIs stay on Cloud Run. Socket ownership/mount protection and issuer replication health remain operator/deployment responsibilities; a fresh local read does not prove instantaneous global key revocation. This component does not deploy a VM, activate public broker execution, enroll production nodes or replace the existing host assessment harness's captured test trust. Complete those integration gates, then remaining workers/verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph and W4.5/6/7. W0/W1/W2 remainder and backup-aware key retirement remain open.
+
 ## Revision 54 — audited workload registration lifecycle
 
-**CI follow-up:** initial Revision 54 merge `1e1207d` failed CI [35816732842](https://github.com/vikashkaruna/Proof/actions/runs/35816732842) because the shared strict-parity/container fixture still attempted a direct service-role registration insert. Both failing lanes hit the same correctly enforced permission boundary. The fixture now uses disabled registration followed by audited activation, verifies bound receipts and explicitly proves direct service writes return 403. A separate tenant-A owner preserves the viewer isolation persona. All four local topology parity runs and acceptance TypeScript pass; the corrective exact-merge CI remains the completion gate.
+**CI follow-up:** initial Revision 54 merge `1e1207d` failed CI [35816732842](https://github.com/vikashkaruna/Proof/actions/runs/35816732842) because the shared strict-parity/container fixture still attempted a direct service-role registration insert. Both failing lanes hit the same correctly enforced permission boundary. The fixture now uses disabled registration followed by audited activation, verifies bound receipts and explicitly proves direct service writes return 403. A separate tenant-A owner preserves the viewer isolation persona. All four local topology parity runs, both local container/browser environments and acceptance TypeScript pass. Corrective merge `0081948` is green in CI 35817381642 with 17 applicable jobs and eight verified exact-revision artifacts.
 
 
 Revision 53 is **complete and green** at staging `c17f428`, CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318): all 17 applicable jobs and eight exact-revision artifacts verified. Upstream review found no intervening other-model work. The overall goal remains incomplete.
