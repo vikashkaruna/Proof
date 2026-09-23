@@ -7,6 +7,12 @@ variable "workload_vms" {
     boot_image = string
     tenants = map(object({
       controller_source_ranges = optional(set(string), [])
+      controller_permissions = optional(object({
+        dispatch_keys = object({
+          primary  = string
+          retiring = optional(list(string), [])
+        })
+      }))
     }))
   })
   default = null
@@ -27,4 +33,15 @@ module "workload_vms" {
 
 output "workload_vm_hosts" {
   value = var.workload_vms == null ? null : module.workload_vms[0].hosts
+}
+
+output "workload_controller_permissions" {
+  description = "Reviewed permission inventory, not effective-IAM evidence or application readiness."
+  value       = var.workload_vms == null ? null : module.workload_vms[0].controller_permissions
+}
+
+locals {
+  workload_kms_required = var.workload_vms == null ? false : anytrue([
+    for settings in values(var.workload_vms.tenants) : settings.controller_permissions != null
+  ])
 }

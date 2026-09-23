@@ -8,8 +8,8 @@ terraform {
   }
 }
 
-# Infrastructure foundation only: no issuer/node startup, secret contents, IAM
-# grants, public interfaces or remote administration are implicitly enabled.
+# No issuer/node startup, secret contents, public interfaces or remote
+# administration. Controller permissions require explicit per-tenant opt-in.
 locals {
   runners = {
     for tenant, settings in var.tenants : "runner-${tenant}" => {
@@ -111,8 +111,8 @@ resource "google_compute_instance" "host" {
   service_account {
     email  = google_service_account.host[each.key].email
     scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-    # OAuth scope is a ceiling, not an IAM grant. No host identity has resource
-    # access until separately reviewed bootstrap/runtime bindings are prepared.
+    # OAuth scope is a ceiling, not an IAM grant. Optional controller bindings
+    # grant only reviewed per-tenant resources; the issuer gets none.
   }
   shielded_instance_config {
     enable_secure_boot          = true
