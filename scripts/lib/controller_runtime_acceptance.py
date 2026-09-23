@@ -200,6 +200,7 @@ except Exception as error:
         outcomes['controller-uncertain-create-preserves-intent-without-adoption-or-start'] = True
         return outcomes
     finally:
+        print('Synthetic controller fixture completed checks: '+', '.join(sorted(outcomes)))
         if (directory/'failure-location').exists():
             print('Synthetic controller fixture last failure location: '+(directory/'failure-location').read_text())
         for name in (fixture_unit, production): control('stop', name, check=False)

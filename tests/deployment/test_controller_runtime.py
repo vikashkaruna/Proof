@@ -60,6 +60,7 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertIn('Restart=no', unit); self.assertIn('TimeoutStopSec=180', unit)
         self.assertIn('--stop '+TENANT+' '+SHA, unit)
         self.assertIn('Type=exec', unit)
+        self.assertIn('KillMode=mixed', unit)
         self.assertNotIn('ProtectSystem=', unit); self.assertNotIn('PrivateTmp=', unit)
         self.assertNotIn(PROFILE['backendUrl'], unit)
 
