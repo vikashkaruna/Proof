@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { writeFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import { controllerBackendCredentials } from '../services/bff/src/workloads/controller-files.js';
+import {
+  controllerBackendCredentials,
+  requireControllerBackend,
+} from '../services/bff/src/workloads/controller-files.js';
 import { createDecipheriv, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { request } from 'node:https';
 import { createClient } from '@supabase/supabase-js';
@@ -35,12 +38,16 @@ async function main() {
   let backend: Awaited<ReturnType<typeof controllerBackendCredentials>>;
   try {
     await writeFile(backendFile, input.serviceKey + '\n', { mode: 0o600, flag: 'wx' });
-    backend = await controllerBackendCredentials(backendFile, {
-      ...process.env,
-      AXIOM_REGION: 'ap-south-1',
-      SUPABASE_URL: 'https://backend.fixture.test',
-    });
-    assert.equal(backend.serviceKey, input.serviceKey);
+    backend = await controllerBackendCredentials(
+      backendFile,
+      {
+        ...process.env,
+        AXIOM_REGION: 'ap-south-1',
+        SUPABASE_URL: 'https://backend.fixture.test',
+      },
+      input.config.tenantId,
+    );
+    assert.equal(backend.accessToken, JSON.parse(input.serviceKey).accessToken);
   } finally {
     await rm(backendFile, { force: true });
   }
@@ -67,15 +74,22 @@ async function main() {
       ),
     ),
   );
-  for (const value of [input.serviceKey, input.tls.key, ...Object.values(input.fixtureKeys)])
+  for (const value of [
+    input.serviceKey,
+    backend.accessToken,
+    input.tls.key,
+    ...Object.values(input.fixtureKeys),
+  ])
     assert(recordedEnv.every((entry) => !entry.includes(value)));
   const outcomes: Record<string, boolean> = {
     'vm-controller-protected-file-backend-credential': true,
     'vm-controller-credentials-absent-from-container-env': true,
   };
-  const db = createClient('http://host.docker.internal:56321', backend.serviceKey, {
+  const db = createClient('http://host.docker.internal:56321', backend.apiKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${backend.accessToken}` } },
   });
+  await requireControllerBackend(db, input.config.tenantId);
   const awsKms: DispatchAwsKmsPort = {
     async send(command) {
       const request = command.input;

@@ -6,6 +6,7 @@ import {
   controllerFilePath,
   readControllerFile,
   controllerBackendCredentials,
+  requireControllerBackend,
 } from './workloads/controller-files.js';
 import {
   composeVmAssessmentController,
@@ -35,7 +36,11 @@ export async function prepareControllerService(args: string[], env: NodeJS.Proce
     );
     // This entrypoint has no development credential/transport fallback. Local
     // integration supplies its real fixture DB client to the same composition.
-    const backend = await controllerBackendCredentials(config.backendServiceKeyFile, env);
+    const backend = await controllerBackendCredentials(
+      config.backendServiceKeyFile,
+      env,
+      config.controller.tenantId,
+    );
     const key = await readControllerFile(config.tls.keyFile);
     const cert = await readControllerFile(config.tls.certFile);
     const certificate = new X509Certificate(cert);
@@ -46,9 +51,11 @@ export async function prepareControllerService(args: string[], env: NodeJS.Proce
       now >= Date.parse(certificate.validTo)
     )
       throw new Error();
-    const db = createClient(backend.url, backend.serviceKey, {
+    const db = createClient(backend.url, backend.apiKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${backend.accessToken}` } },
     });
+    await requireControllerBackend(db, config.controller.tenantId);
     // HTTPS construction verifies the key/certificate pair before any listener.
     const components = await composeVmAssessmentController(config.controller, db);
     const server = createRemoteAssessmentServer({ ...components, tls: { key, cert } });

@@ -1,13 +1,23 @@
-# Bounded milestone handoff — Revision 71
+# Continuing implementation — Revision 72
 
-The user requested one bounded milestone per task, with explicit completed/pending status and a stop. This task reviews and finishes Revision 71 controller supervision only. Do not continue the next roadmap chunk without the user's direction. The old task's goal tracker was usageLimited, not complete; do not reset it or infer whole-goal completion.
+The user's 23 September instruction is to continue in plan order after every green milestone, report each milestone, and maintain the implementation/testing/documentation/no-fast-forward staging-merge cycle. It supersedes the earlier request to stop after one milestone. Use the existing isolated Docker parity stack where appropriate. No cloud provisioning/apply is authorized. The overall roadmap is incomplete; do not mark the whole goal complete because one revision passes.
 
 ## Current source and integration gate
 
+**Current checkpoint:** Revision 71 is complete on staging `fd747ad3125895fc49534db5229b72e7ea7e0f60`; [CI 35872098864](https://github.com/vikashkaruna/Proof/actions/runs/35872098864) passed all 19 applicable jobs and all 13 exact-revision acceptance reports, including 45 native runner outcomes. The user's 23 September continuation instruction supersedes the earlier one-milestone stop: proceed in plan order after each green milestone, updating implementation, tests, documentation and staging integration, and report each milestone.
+
+**Implemented, gate pending:** migration 0049 supplies a non-login, non-inheriting controller role, a private credential registry and tenant checks around the seven existing controller RPCs. RLS and column grants permit only registration, key-policy and opaque dispatch reads. Existing assessment logic, task/approval checks and ledger writes remain authoritative. No delegation, enqueue, policy publication, retention, direct table-write or general administration authority is granted. The existing public `has_tenant_role` read helper remains callable; it adds no write authority.
+
+The production entrypoint requires an owner-only JSON credential file containing an anonymous gateway key and a signed controller token, rejects broad/foreign/expired credentials, and obtains the effective registered tenant through a bounded read-only PostgREST check before listening. The backend verifies the signature; SQL rechecks registration, expiry and revocation per statement. Tokens last at most one hour and registry leases at most 24 hours. A running statement can still settle after revocation; preserve existing uncertain-result recovery and never reset a claim. Signing keys remain outside the runner.
+
+**Next:** finish exact source/staging gates for this backend boundary, then resource-level secret/KMS/IAM configuration and effective-policy acceptance, private TLS/DNS and opaque scheduler deployment. Credential issuance, renewal and reviewed host-generation replacement are deployment work, not automatic startup behavior. Real GCP IIT/caller/KMS and Mumbai recovery remain external gates. No cloud apply is authorized. W0/W1/W2/W3/W4 remain partial; W2 remains **19/40** named targets. Schema is **0049 / 50 migrations / 55 public tables**, plus the private credential registry. See [audit 61](audits/61-controller-backend-scope-review-2026-09-23.md).
+
 - Prior staging baseline: Revision 70, `616ed0239ef27fce4f483a951baccd02132a65d0`, CI [35861740826](https://github.com/vikashkaruna/Proof/actions/runs/35861740826), all 19 applicable jobs and 13 exact-revision artifacts green.
 - Original WIP is preserved on `codex/controller-supervision` at `b7fe4f03cd742636955f8231df9d8f5699a076a8` (implementation checkpoint `1912444`). It is not the finished Revision 71 evidence.
-- Current task owns `codex/revision71-controller-review` in `/Users/vikash/.codex/worktrees/750f/Axiom Proof`, with [PR 37](https://github.com/vikashkaruna/Proof/pull/37). Source [CI 35868902682](https://github.com/vikashkaruna/Proof/actions/runs/35868902682) passes all 19 applicable jobs and 13 exact-revision result artifacts, including 45 native runner outcomes with the earlier 33 preserved. Exact staging integration is recorded at the milestone stop; read this task’s `.axiom-runtime/session-checkpoint.json` or inspect the staging CI before continuing. The verified source checkpoint is recorded in Doc 15; final exact-merge CI and artifacts are recorded in this task’s `.axiom-runtime/revision71` and `.axiom-runtime/session-checkpoint.json`.
+- Revision 71 review used `codex/revision71-controller-review` in `/Users/vikash/.codex/worktrees/750f/Axiom Proof`, with [PR 37](https://github.com/vikashkaruna/Proof/pull/37). Source [CI 35868902682](https://github.com/vikashkaruna/Proof/actions/runs/35868902682) passes all 19 applicable jobs and 13 exact-revision result artifacts, including 45 native runner outcomes with the earlier 33 preserved. Revision 71 staging merge is `fd747ad`, CI 35872098864 green; read this task’s `.axiom-runtime/session-checkpoint.json` or inspect the staging CI before continuing. The verified source checkpoint is recorded in Doc 15; final exact-merge CI and artifacts are recorded in this task’s `.axiom-runtime/revision71` and `.axiom-runtime/session-checkpoint.json`.
 - Do not edit `/Users/vikash/Axiom Proof` or `/Users/vikash/.codex/worktrees/w0-w3-closure/Axiom Proof`. Both are separate task checkouts. Do not reload/fork the old conversation.
+
+Current active branch: `codex/revision72-controller-permissions`, based on verified Revision 71 staging. Revision 72 implementation and source/staging acceptance are in progress.
 
 ## Revision 71 scope
 
@@ -15,11 +25,11 @@ The runtime delivers reviewed protected profiles/disabled units and supervises a
 
 The new native lifecycle fixture uses a deliberately synthetic process and a fixture-only local-node placement substitution. Native Linux must verify exact private binding and ownership failure paths. The production GCP placement path must reject that local node. Separate actual controller-entrypoint, SPIRE identity and assessment gates remain mandatory; fixture success is not real GCP/IAM/KMS/TLS deployment acceptance. The local Docker Desktop port rewrite was reproduced and remains refused without weakening the guard.
 
-## Pending after this milestone — stop before starting
+## Pending in plan order
 
 Effective tenant-scoped backend/secret/IAM/KMS permissions, private TLS/DNS and opaque scheduler deployment remain next. Actual GCP IIT, valid cloud caller identity, real KMS and Mumbai backup/restore remain external gates. No cloud provisioning/apply is authorized.
 
-The broader roadmap is incomplete: W0 remote deployments/parity; W1 invitations/email/deployed acceptance; W2 **19/40 named target tables delivered** (schema 0048, 49 migrations, 55 public tables); W3 full resumable wizard/sustenance/live graph; W4 remaining worker/actor chains, live connector grants and later execution lifecycle; later W5–W10 phase gates. Completed supervision does not complete W4 or the overall goal.
+The broader roadmap is incomplete: W0 remote deployments/parity; W1 invitations/email/deployed acceptance; W2 **19/40 named target tables delivered** (schema 0049, 50 migrations, 55 public tables plus a private credential registry); W3 full resumable wizard/sustenance/live graph; W4 remaining worker/actor chains, live connector grants and later execution lifecycle; later W5–W10 phase gates. Completed supervision does not complete W4 or the overall goal.
 
 ## Standing constraints
 

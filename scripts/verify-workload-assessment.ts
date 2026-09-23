@@ -2,6 +2,10 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
+import {
+  controllerCredentialFixture,
+  verifyControllerCredentialScope,
+} from './lib/controller-credential-fixture.js';
 import { verifyControllerEntrypoint } from './lib/controller-entrypoint-acceptance.js';
 import {
   createHash,
@@ -906,6 +910,12 @@ except Exception as error:
   phase = 'vm-controller-integration';
   const vmDirectory = await mkdtemp(join(await realpath('.axiom-runtime'), 'vm-controller-'));
   const vmContainer = `axiom-vm-controller-${randomUUID()}`;
+  const controllerCredentials: ReturnType<typeof controllerCredentialFixture>[] = [];
+  const scopedCredential = () => {
+    const fixture = controllerCredentialFixture(tenantId, status);
+    controllerCredentials.push(fixture);
+    return fixture.credential;
+  };
   try {
     const engagementId = randomUUID(),
       jobId = randomUUID(),
@@ -1076,7 +1086,7 @@ except Exception as error:
                 email: 'scheduler@fixture.iam.gserviceaccount.com',
               },
             },
-            serviceKey: status.SERVICE_ROLE_KEY!,
+            serviceKey: scopedCredential(),
             jobId,
             foreignTenant: scheduleTenants.unix,
             fixtureKeys: Object.fromEntries(
@@ -1132,6 +1142,10 @@ except Exception as error:
     assert(beforeClaims?.some((job) => job.id === entrypointPendingJob && job.claimed_at === null));
     Object.assign(
       outcomes,
+      await verifyControllerCredentialScope(tenantId, scheduleTenants.unix, status),
+    );
+    Object.assign(
+      outcomes,
       await verifyControllerEntrypoint({
         image: input.controllerImage,
         config: {
@@ -1154,7 +1168,7 @@ except Exception as error:
           },
         },
         healthVolume: input.healthVolume,
-        serviceKey: status.SERVICE_ROLE_KEY!,
+        serviceKey: scopedCredential(),
         certificate: readFileSync(join(vmDirectory, 'cert.pem'), 'utf8'),
         privateKey: readFileSync(join(vmDirectory, 'key.pem'), 'utf8'),
         daemonGroup: group,
@@ -1171,6 +1185,7 @@ except Exception as error:
     assert.deepEqual(afterClaims, beforeClaims);
     outcomes['vm-entrypoint-startup-and-refusal-do-not-claim-jobs'] = true;
   } finally {
+    for (const credential of controllerCredentials) credential.revoke();
     const remaining = execFileSync(
       'docker',
       ['container', 'ls', '--all', '--filter', `name=^/${vmContainer}$`, '--format', '{{.Names}}'],

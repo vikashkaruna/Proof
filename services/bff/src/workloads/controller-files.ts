@@ -2,6 +2,8 @@ import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { decodeJwt } from 'jose';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const controllerFilePath = z
   .string()
@@ -81,7 +83,11 @@ const credentialFileEnvironment = [
   'NODE_EXTRA_CA_CERTS',
 ];
 
-export async function controllerBackendCredentials(filename: string, env: NodeJS.ProcessEnv) {
+export async function controllerBackendCredentials(
+  filename: string,
+  env: NodeJS.ProcessEnv,
+  tenantId: string,
+) {
   let bytes: Buffer | undefined;
   try {
     if (Object.keys(env).some((key) => env[key] !== undefined && !controllerEnvironment.has(key)))
@@ -98,19 +104,56 @@ export async function controllerBackendCredentials(filename: string, env: NodeJS
       })
       .parse(env);
     bytes = await readControllerFile(filename);
-    // Secret-manager files may end in one line terminator, but embedded or
-    // leading whitespace is not repaired. No inline/env fallback is supported.
-    const serviceKey = z
-      .string()
-      .min(32)
-      .max(8192)
-      .regex(/^[!-~]+$/)
-      .refine((s) => s.trim() === s)
-      .parse(bytes.toString('utf8').replace(/\r?\n$/, ''));
-    return { url: backend.SUPABASE_URL, serviceKey };
+    const credential = z
+      .object({
+        schemaVersion: z.literal(1),
+        apiKey: z.string().min(32).max(4096),
+        accessToken: z.string().min(32).max(4096),
+      })
+      .strict()
+      .parse(JSON.parse(bytes.toString('utf8')));
+    // Shape checks reject broad keys before any network request. They are not
+    // signature verification: PostgREST verifies the signed token, then the
+    // read-only database check below proves its current registered tenant.
+    if (decodeJwt(credential.apiKey).role !== 'anon') throw new Error();
+    const claims = z
+      .object({
+        role: z.literal('axiom_assessment_controller'),
+        sub: z.uuid(),
+        tenant_id: z.literal(z.uuid().parse(tenantId).toLowerCase()),
+        iat: z.number().int().nonnegative(),
+        exp: z.number().int().positive(),
+      })
+      .parse(decodeJwt(credential.accessToken));
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      claims.iat > now ||
+      claims.exp <= now ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 3600
+    )
+      throw new Error();
+    return {
+      url: backend.SUPABASE_URL,
+      apiKey: credential.apiKey,
+      accessToken: credential.accessToken,
+    };
   } catch {
     throw new Error('Controller backend credentials refused');
   } finally {
     bytes?.fill(0);
+  }
+}
+
+/** Read-only startup attestation by the backend. Never creates credentials or
+ * trusts the locally decoded tenant in place of database enforcement. */
+export async function requireControllerBackend(db: SupabaseClient, tenantId: string) {
+  try {
+    const { data, error } = await db
+      .rpc('current_assessment_controller_tenant', {}, { get: true })
+      .abortSignal(AbortSignal.timeout(10000));
+    if (error || data !== tenantId) throw new Error();
+  } catch {
+    throw new Error('Controller backend scope refused');
   }
 }

@@ -14,7 +14,8 @@ current checkpoint and whose workstream status register carries W0–W10, then
 and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head
 this all rests on. The most recent reviews are
 [audit 59](audits/59-controller-placement-review-2026-09-23.md) and
-[audit 60](audits/60-controller-supervision-review-2026-09-23.md). Doc 12 is a
+[audit 60](audits/60-controller-supervision-review-2026-09-23.md) and
+[audit 61](audits/61-controller-backend-scope-review-2026-09-23.md). Doc 12 is a
 historical snapshot kept for its design reasoning; do not resume from it.
 
 _This block deliberately names no revision number or commit. It was four revisions
