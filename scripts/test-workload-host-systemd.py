@@ -50,6 +50,23 @@ def cli(*args):
     return run(['/usr/local/bin/spire-server', *args, '-socketPath', '/run/spire-server/api.sock'])
 
 
+def normalized(value):
+    if isinstance(value, dict):
+        return {key:normalized(item) for key,item in value.items()}
+    if isinstance(value, list):
+        return sorted((normalized(item) for item in value), key=lambda item:json.dumps(item,sort_keys=True))
+    return value
+
+
+def trust():
+    # Include JWT signing keys as well as X.509 roots; output order is not state.
+    return normalized(json.loads(cli('bundle', 'show', '-format', 'spiffe').stdout))
+
+
+def registry():
+    return normalized(json.loads(cli('entry', 'show', '-output', 'json').stdout))
+
+
 def backing_matches(loop, backing):
     result = run(['/usr/sbin/losetup', '--json', '--output', 'NAME,BACK-FILE', loop])
     devices = json.loads(result.stdout)['loopdevices']
@@ -98,6 +115,15 @@ def main():
         ALIAS.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         host.protected_directory(ALIAS.parent)
         ALIAS.symlink_to(loop)
+        for destination in destinations:
+            for parent in destination.parents:
+                if parent.exists():
+                    try:
+                        host.protected_directory(parent)
+                    except ValueError:
+                        meta = parent.lstat()
+                        print(f'Fixture destination ancestry refused: {parent} uid={meta.st_uid} mode={oct(meta.st_mode & 0o7777)}', flush=True)
+                        raise
         host.install(directory, hashlib.sha256(metadata).hexdigest()); installed = True
         assert not STATE.exists() and not active(SERVICE)
         outcomes['delivery-does-not-activate-or-initialize']=True
@@ -116,8 +142,8 @@ def main():
         child = subprocess.Popen(['/usr/local/bin/spire-server', 'run', '-config', '/etc/axiom/spire/server.conf'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=ENV)
         host.wait_ready('issuer')
         cli('entry', 'create', '-parentID', 'spiffe://host.axiomproof.test/fixture-node', '-spiffeID', 'spiffe://host.axiomproof.test/fixture-workload', '-selector', 'unix:uid:20003')
-        before_bundle = cli('bundle', 'show').stdout
-        before_registry = cli('entry', 'show', '-output', 'json').stdout
+        before_bundle = trust()
+        before_registry = registry()
         child.terminate(); child.wait(timeout=30); child = None
         # Missing marker remains denied even after a real initialized issuer.
         assert run([*guard, '--ready', 'issuer'], check=False).returncode != 0
@@ -126,8 +152,8 @@ def main():
         run([*guard, '--ready', 'issuer'])
         outcomes['explicit-initialization-and-reviewed-marker-required']=True
         control('start', SERVICE); assert active(SERVICE)
-        assert cli('bundle', 'show').stdout == before_bundle
-        assert cli('entry', 'show', '-output', 'json').stdout == before_registry
+        assert trust() == before_bundle
+        assert registry() == before_registry
         outcomes['real-service-namespace-and-state-guard-pass']=True
         # Stop the mounted unit while SPIRE is live: BindsTo must stop its user.
         control('stop', MOUNT)
@@ -135,8 +161,8 @@ def main():
         assert not (STATE/'server').exists()
         outcomes['mount-loss-stops-live-issuer']=True
         control('start', SERVICE); assert active(SERVICE) and active(MOUNT)
-        assert cli('bundle', 'show').stdout == before_bundle
-        assert cli('entry', 'show', '-output', 'json').stdout == before_registry
+        assert trust() == before_bundle
+        assert registry() == before_registry
         outcomes['remount-restart-preserves-trust-and-registry']=True
         # Kernel mount disappearance, without asking systemd to stop SPIRE.
         run(['/usr/bin/umount', '--lazy', str(STATE)])
@@ -145,8 +171,8 @@ def main():
             time.sleep(0.25)
         assert not active(SERVICE) and not active(MOUNT)
         control('start', SERVICE)
-        assert cli('bundle', 'show').stdout == before_bundle
-        assert cli('entry', 'show', '-output', 'json').stdout == before_registry
+        assert trust() == before_bundle
+        assert registry() == before_registry
         outcomes['external-mount-disappearance-stops-and-recovers']=True
         control('stop', SERVICE)
         keys = STATE/'server/keys.json'; original = keys.read_bytes()
@@ -156,8 +182,8 @@ def main():
         assert not keys.exists() and saved.read_bytes() == original
         outcomes['missing-keys-refused-without-regeneration']=True
         saved.rename(keys); control('start', SERVICE)
-        assert cli('bundle', 'show').stdout == before_bundle
-        assert cli('entry', 'show', '-output', 'json').stdout == before_registry
+        assert trust() == before_bundle
+        assert registry() == before_registry
         outcomes['restored-original-state-recovers-original-trust']=True
         control('stop', SERVICE)
         config = Path('/etc/axiom/spire/server.conf'); original_config = config.read_bytes()
