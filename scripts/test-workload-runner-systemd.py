@@ -59,16 +59,17 @@ def main():
         raise ValueError('fresh fixture network and Docker required')
     root=Path(tempfile.mkdtemp(prefix='axiom-runner-',dir='/root'))
     prefix='axiom-runner-'+uuid.uuid4().hex[:12];image=prefix+':issuer'
-    loop=None;installed=False;address_added=False;modes={};outcomes={};backing=root/'state.img'
+    loop=None;installed=False;address_added=False;modes={};outcomes={};backing=root/'state.img';consumer=prefix+'-consumer';wrong_image=prefix+':foreign';volume_names=[]
     try:
         archive=(ROOT/f'.axiom-runtime/workload-host/spire-{VERSION}-linux-amd64-musl.tar.gz').read_bytes()
         server=selected_binary(archive,'amd64','issuer')[1]
         (root/'spire-server').write_bytes(server);(root/'spire-server').chmod(0o755)
+        (root/'spire-agent').write_bytes(selected_binary(archive,'amd64','runner')[1]);(root/'spire-agent').chmod(0o755)
         policy=json.loads((ROOT/'infra/workload/spire-policy.example.json').read_text())
         policy.update(trustDomain='runner.axiomproof.test',projectId='axiom-runner-test',issuerPrivateIp=IP.split('/')[0])
         configuration=deployment_bundle(policy)['server.conf'].replace('NodeAttestor "gcp_iit" { plugin_data { projectid_allow_list = ["axiom-runner-test"] use_instance_metadata = false } }','NodeAttestor "join_token" { plugin_data {} }')
         (root/'server.conf').write_text(configuration)
-        (root/'Dockerfile').write_text(f'FROM {ALPINE}\nCOPY spire-server /usr/local/bin/spire-server\nCOPY server.conf /etc/spire/server.conf\nENTRYPOINT ["/bin/sh","-c","umask 077; exec /usr/local/bin/spire-server run -config /etc/spire/server.conf"]\n')
+        (root/'Dockerfile').write_text(f'FROM {ALPINE}\nCOPY spire-server /usr/local/bin/spire-server\nCOPY spire-agent /usr/local/bin/spire-agent\nCOPY server.conf /etc/spire/server.conf\nENTRYPOINT ["/bin/sh","-c","umask 077; exec /usr/local/bin/spire-server run -config /etc/spire/server.conf"]\n')
         run(['docker','build','-t',image,str(root)],timeout=300)
         run(['/usr/sbin/ip','address','add',IP,'dev','lo']);address_added=True
         run(['docker','run','-d','--name',prefix,'--network','host','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--tmpfs','/var/lib/spire:rw,nosuid,nodev,noexec,mode=700','--tmpfs','/run/spire-server:rw,nosuid,nodev,mode=700',image])
@@ -127,19 +128,66 @@ def main():
         inode=Path('/run/workload').stat().st_ino
         assert active(SERVICE) and active(HEALTH) and health()['nodeId']==expected
         outcomes['native-runner-and-observer-start-with-exact-node']=True
+        volume_cli=['/usr/bin/python3','-I','-B',str(host.PREFIX/'spire_volumes.py')]
+        manifest_sha=hashlib.sha256(metadata).hexdigest()
+        api_volume='axiom-workload-api-'+identifier;health_volume='axiom-spire-health-'+identifier
+        volume_names=[api_volume,health_volume]
+        run(['docker','volume','create',health_volume])  # Deliberately foreign fixture mapping.
+        assert run([*volume_cli,'--prepare',manifest_sha],check=False).returncode!=0
+        assert not Path('/etc/axiom/spire/runtime-volumes.json').exists()
+        assert run(['docker','volume','inspect',api_volume],check=False).returncode!=0
+        run(['docker','volume','rm',health_volume])  # Only this fixture's own unused volume.
+        outcomes['foreign-volume-refused-before-record-or-peer-creation']=True
+        result=json.loads(run([*volume_cli,'--prepare',manifest_sha]).stdout)
+        assert result=={'workloadApiVolume':api_volume,'healthVolume':health_volume}
+        before_volume=run(['docker','volume','inspect',api_volume,health_volume]).stdout
+        run([*volume_cli,'--prepare',manifest_sha]);run([*volume_cli,'--check',manifest_sha])
+        assert run(['docker','volume','inspect',api_volume,health_volume]).stdout==before_volume
+        outcomes['reviewed-volume-mapping-is-idempotent-without-replacement']=True
+        run(['docker','run','-d','--name',consumer,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--user','20000:20000','--mount',f'type=volume,src={api_volume},dst=/run/workload,readonly,volume-nocopy','--mount',f'type=volume,src={health_volume},dst=/run/spire-health,readonly,volume-nocopy','--entrypoint','/bin/sleep',image,'600'])
+        run([*volume_cli,'--check',manifest_sha])
+        assert run(['docker','exec',consumer,'stat','-c','%d:%i','/run/workload']).stdout.strip()==f"{Path('/run/workload').stat().st_dev}:{inode}".encode()
+        assert run(['docker','exec',consumer,'touch','/run/workload/forbidden'],check=False).returncode!=0
+        assert run(['docker','exec',consumer,'test','-e','/run/docker.sock'],check=False).returncode!=0
+        assert run(['docker','exec',consumer,'test','-e','/run/spire-admin/api.sock'],check=False).returncode!=0
+        outcomes['consumer-has-original-read-only-directory-without-admin-or-docker']=True
+        image_id=run(['docker','image','inspect','--format','{{.Id}}',image]).stdout.decode().strip()
+        workload=f"spiffe://{policy['trustDomain']}/controller/assessment"
+        cli('entry','create','-parentID',expected,'-spiffeID',workload,'-selector','unix:uid:20000','-selector','docker:image_config_digest:'+image_id,'-jwtSVIDTTL','300')
+        fetch=['/usr/local/bin/spire-agent','api','fetch','jwt','-socketPath','/run/workload/api.sock','-audience','axiom-native-volume-fixture','-spiffeID',workload,'-output','json']
+        wait_for(lambda:run(['docker','exec',consumer,*fetch],check=False,timeout=10).returncode==0)
+        outcomes['native-node-admits-exact-container-image-and-uid']=True
+        assert run(['docker','exec','--user','20003:20003',consumer,*fetch],check=False,timeout=10).returncode!=0
+        outcomes['native-node-refuses-wrong-consumer-uid']=True
+        foreign_context=root/'foreign-image';foreign_context.mkdir(mode=0o700)
+        (foreign_context/'Dockerfile').write_text(f'FROM {image}\nLABEL axiom.fixture.variant="foreign"\n')
+        run(['docker','build','-t',wrong_image,str(foreign_context)],timeout=120)
+        assert run(['docker','run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--user','20000:20000','--mount',f'type=volume,src={api_volume},dst=/run/workload,readonly,volume-nocopy','--entrypoint',fetch[0],wrong_image,*fetch[1:]],check=False,timeout=15).returncode!=0
+        outcomes['native-node-refuses-wrong-consumer-image']=True
         before_restart=health()['observedAtMs']
         control('restart',SERVICE);wait_for(lambda:healthy() and health()['observedAtMs']>before_restart)
         assert Path('/run/workload').stat().st_ino==inode and health()['nodeId']==expected
         outcomes['normal-restart-preserves-socket-directory-and-node']=True
+        run([*volume_cli,'--check',manifest_sha])
+        wait_for(lambda:run(['docker','exec',consumer,*fetch],check=False,timeout=10).returncode==0)
+        assert run(['docker','exec',consumer,'stat','-c','%i','/run/workload/api.sock']).stdout.strip()==str(Path('/run/workload/api.sock').stat().st_ino).encode()
+        outcomes['consumer-reconnects-through-replaced-socket-in-same-directory']=True
         prior_pid=control('show','--property=MainPID','--value',HEALTH).stdout.strip()
         prior_observation=health()['observedAtMs']
         control('kill','--signal=KILL',HEALTH)
         wait_for(lambda:active(HEALTH) and healthy() and health()['observedAtMs']>prior_observation and control('show','--property=MainPID','--value',HEALTH).stdout.strip() not in (b'0',prior_pid))
         outcomes['observer-crash-recovers-under-supervision']=True
+        observed=json.loads(run(['docker','exec',consumer,'cat','/run/spire-health/status.json']).stdout)
+        assert observed['nodeId']==expected and observed['observedAtMs']>prior_observation
+        outcomes['consumer-observes-atomic-health-replacement']=True
         control('stop',HEALTH);observed=health()['observedAtMs']
         wait_for(lambda:time.time_ns()//1000000>=observed+10000)
         assert not healthy() and active(SERVICE)
         outcomes['stopped-observer-metadata-expires-with-live-node']=True
+        # Isolate the rate-limit case from time spent in container admission.
+        control('reset-failed',HEALTH)
+        for _ in range(3):
+            control('start',HEALTH);control('stop',HEALTH)
         assert control('start',HEALTH,check=False).returncode!=0
         assert control('show','--property=Result','--value',HEALTH).stdout.strip()==b'start-limit-hit'
         outcomes['observer-restart-storm-is-rate-limited']=True
@@ -177,7 +225,9 @@ def main():
         print(f'Native runner acceptance: {len(outcomes)} outcomes passed.')
     finally:
         control('start','docker.service',check=False);control('start','docker.socket',check=False)
-        run(['docker','unpause',prefix],check=False);run(['docker','rm','-f',prefix],check=False);run(['docker','image','rm',image],check=False)
+        run(['docker','unpause',prefix],check=False);run(['docker','rm','-f',consumer,prefix],check=False)
+        for name in volume_names:run(['docker','volume','rm',name],check=False)
+        run(['docker','image','rm',wrong_image,image],check=False)
         if installed:
             control('stop',INITIAL,HEALTH,SERVICE,check=False);control('stop',MOUNT,check=False)
             for path in destinations:path.unlink(missing_ok=True)
