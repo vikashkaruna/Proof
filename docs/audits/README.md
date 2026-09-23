@@ -1,6 +1,6 @@
 # Audit Reports
 
-Latest review: [45 — dedicated VM controller composition](45-vm-controller-composition-review-2026-09-23.md).
+Latest review: [46 — private Mumbai issuer and runner hosts](46-private-mumbai-hosts-review-2026-09-23.md).
 C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
 [Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 
