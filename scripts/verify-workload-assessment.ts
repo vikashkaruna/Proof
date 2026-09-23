@@ -32,6 +32,7 @@ import {
   SupabaseWorkloadTaskStore,
   WorkloadTaskIssuer,
 } from '../services/bff/src/workloads/tasks.js';
+import { WorkloadRegistrationLifecycle } from '../services/bff/src/workloads/registration-lifecycle.js';
 import { AssessmentRetention } from '../services/bff/src/workloads/assessment-retention.js';
 import { AssessmentScheduling } from '../services/bff/src/workloads/assessment-scheduling.js';
 import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
@@ -105,15 +106,28 @@ async function main() {
   check(
     await db.from('tenant_users').insert({ tenant_id: tenantId, user_id: actorId, role: 'owner' }),
   );
-  check(
-    await db.from('workload_identities').insert({
-      id: workloadId,
-      tenant_id: tenantId,
-      agent_name: 'parikshan',
-      spiffe_id: 'spiffe://local.axiomproof.test/agent/parikshan',
-      status: 'active',
-    }),
-  );
+  const lifecycle = new WorkloadRegistrationLifecycle(db);
+  const registrationVersions = new Map<string, number>();
+  const manageRegistration = async (
+    tenant: string,
+    workload: string,
+    status: 'active' | 'disabled',
+  ) => {
+    const receipt = await lifecycle.manage({
+      tenantId: tenant,
+      workloadId: workload,
+      actorId,
+      correlationId: randomUUID(),
+      expectedVersion: registrationVersions.get(workload) ?? 0,
+      agent: 'parikshan',
+      spiffeId: 'spiffe://local.axiomproof.test/agent/parikshan',
+      status,
+    });
+    registrationVersions.set(workload, receipt.version);
+    return receipt;
+  };
+  await manageRegistration(tenantId, workloadId, 'disabled');
+  await manageRegistration(tenantId, workloadId, 'active');
   const version = `worker-${randomUUID()}`;
   check(
     await db.from('control_libraries').insert({
@@ -825,10 +839,42 @@ except Exception as error:
   await runCase('revoked-task-refused-before-write', async (runId) =>
     issuer.revoke(tenantId, actorId, runId, randomUUID()),
   );
-  await runCase('disabled-registration-refused-before-write', async () => {
-    check(await db.from('workload_identities').update({ status: 'disabled' }).eq('id', workloadId));
+  let disabledRunId: string | undefined;
+  await runCase('disabled-registration-refused-before-write', async (runId) => {
+    disabledRunId = runId;
+    await manageRegistration(tenantId, workloadId, 'disabled');
   });
-  check(await db.from('workload_identities').update({ status: 'active' }).eq('id', workloadId));
+  const reactivated = await manageRegistration(tenantId, workloadId, 'active');
+  assert(disabledRunId);
+  const oldDelegation = check(
+    await db
+      .from('workload_task_delegations')
+      .select('revoked_at')
+      .eq('run_id', disabledRunId)
+      .single(),
+  );
+  assert(oldDelegation);
+  assert(oldDelegation.revoked_at !== null);
+  const deniedRebind = await db
+    .from('workload_identities')
+    .update({ spiffe_id: 'spiffe://foreign.test/agent/parikshan' })
+    .eq('id', workloadId);
+  assert.equal(deniedRebind.error?.code, '42501');
+  const activeRegistration = check(
+    await db
+      .from('workload_identities')
+      .select('spiffe_id,status,version,lifecycle_receipt')
+      .eq('id', workloadId)
+      .single(),
+  );
+  assert(activeRegistration);
+  assert.equal(activeRegistration.spiffe_id, 'spiffe://local.axiomproof.test/agent/parikshan');
+  assert.equal(activeRegistration.status, 'active');
+  assert.equal(activeRegistration.version, reactivated.version);
+  assert.equal(String(activeRegistration.lifecycle_receipt), reactivated.receipt);
+  outcomes['reviewed-registration-durable-receipts'] = true;
+  outcomes['registration-reactivation-preserves-task-revocation'] = true;
+  outcomes['service-role-cannot-rebind-workload-identity'] = true;
   await runCase('actor-demotion-refused-before-write', async () => {
     check(
       await db
@@ -933,15 +979,8 @@ except Exception as error:
         .from('tenant_users')
         .insert({ tenant_id: scheduleTenantId, user_id: actorId, role: 'owner' }),
     );
-    check(
-      await db.from('workload_identities').insert({
-        id: scheduleWorkloadId,
-        tenant_id: scheduleTenantId,
-        agent_name: 'parikshan',
-        spiffe_id: 'spiffe://local.axiomproof.test/agent/parikshan',
-        status: 'active',
-      }),
-    );
+    await manageRegistration(scheduleTenantId, scheduleWorkloadId, 'disabled');
+    await manageRegistration(scheduleTenantId, scheduleWorkloadId, 'active');
     const schedulingPolicy = await policyStore.publish(
       keyPolicy,
       scheduleTenantId as TenantId,

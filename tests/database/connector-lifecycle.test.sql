@@ -10,6 +10,8 @@ insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) value
 create function pg_temp.descriptor() returns jsonb language sql as $$ select '{"schemaVersion":1,"id":"41410000-0000-4000-8000-000000000001","target":"postgresql","version":"1.0.0","transport":"sql","targetBinding":"production","assurance":"high","auth":"cloud_iam","capabilities":{"enumerate":{"operation":"sql.enumerate","mutating":false}},"dataCategoryHints":[],"rateLimit":{"requestsPerSecond":5,"burst":10}}'::jsonb $$;
 create function pg_temp.manage(op text,id uuid,body jsonb) returns jsonb language sql as $$
  select public.manage_connector('41410000-0000-4000-8000-000000000021','41410000-0000-4000-8000-000000000011',op,id,body,pg_temp.descriptor(),gen_random_uuid()); $$;
+-- Disposable administrator fixture; not a service-role write path.
+insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values('41410000-0000-4000-8000-000000000061','41410000-0000-4000-8000-000000000021','drishti','spiffe://test/drishti');
 set local role service_role;
 do $$
 declare c uuid; result jsonb; events bigint; identity_id uuid;
@@ -24,7 +26,7 @@ begin
  perform pg_temp.ok(pg_temp.manage('transition',c,'{"expectedVersion":2,"status":"archived"}')->>'error'='invalid_transition','disable before archive');
  result:=public.manage_estate('41410000-0000-4000-8000-000000000021','41410000-0000-4000-8000-000000000011','estate.update','41410000-0000-4000-8000-000000000031','{"expectedVersion":1,"name":"Estate","status":"archived"}',gen_random_uuid());
  perform pg_temp.ok(result->>'error'='active_connectors','enabled registration blocks parent archive');
- insert into public.workload_identities(tenant_id,agent_name,spiffe_id) values ('41410000-0000-4000-8000-000000000021','drishti','spiffe://test/drishti') returning id into identity_id;
+ identity_id:='41410000-0000-4000-8000-000000000061';
  insert into public.connector_grants(tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values ('41410000-0000-4000-8000-000000000021',c,identity_id,'drishti','connector.read',now()+interval '1 hour');
  insert into public.connector_credentials(tenant_id,connector_id,grant_type,key_ref,algorithm,nonce,ciphertext,wrapped_data_key) values ('41410000-0000-4000-8000-000000000021',c,'cloud_iam','fixture','aes-256-gcm',decode(repeat('00',12),'hex'),decode(repeat('00',32),'hex'),decode('00','hex'));
  begin

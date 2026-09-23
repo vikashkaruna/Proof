@@ -190,6 +190,7 @@ export const LedgerActionType = {
   CONNECTOR_TOKEN_REQUESTED: 'connector.token_requested',
   CONNECTOR_TOKEN_ACQUIRED: 'connector.token_acquired',
   CONNECTOR_TOKEN_DENIED: 'connector.token_denied',
+  WORKLOAD_REGISTRATION_CHANGED: 'workload.registration_changed',
   WORKLOAD_TASK_DELEGATED: 'workload.task_delegated',
   WORKLOAD_TASK_REVOKED: 'workload.task_revoked',
   WORKLOAD_TASK_COMPLETED: 'workload.task_completed',

@@ -45,8 +45,9 @@ export interface RegisteredWorkload extends VerifiedWorkloadIdentity {
 }
 /** Identity and declaration check ONLY; not tenant task delegation or grant
  * authorization. The caller must still resolve the task/estate/connector grant,
- * kill switch and approval. Re-authenticate on every tool invocation. No route
- * consumes this adapter yet; the broker factory remains deny-all. */
+ * kill switch and approval. Re-authenticate on every tool invocation. No management route
+ * is enabled publicly by this adapter; private assessment tools use it explicitly.
+ * The connector broker factory remains deny-all. */
 export class WorkloadAuthenticator {
   readonly #scopes = new Map(
     Object.entries(AGENT_CONTRACTS).map(([name, contract]) => [

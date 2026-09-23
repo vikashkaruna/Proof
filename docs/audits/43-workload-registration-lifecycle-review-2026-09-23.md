@@ -1,0 +1,17 @@
+# Review 43 — workload registration lifecycle
+
+Reviewed staging `c17f428`, Revision 53, with green CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318), all 17 applicable jobs and eight exact-revision artifacts verified. No intervening upstream changes were found. Per-job isolation, private dispatch and previous identity/tool outcomes remain intact.
+
+## Findings and implementation
+
+- **Direct service writes could rebind or silently toggle identity.** Migration 0048 revokes direct identity writes. A service-only reviewed administration transaction fixes tenant/ID/agent/SPIFFE binding, checks current owner/admin or internal-founder membership and serializes compare-and-set status changes. New records start disabled; activation is explicit.
+- **Disable followed by re-enable could restore old authority.** Disable now revokes existing task proofs and connector grants permanently in the same transaction. Per-tool and issuance registration locks serialize both orderings. A completion already committed before disable remains available for independent confirmation; no old proof can write after reactivation.
+- **Administration lacked durable review and replay evidence.** Every change appends `workload.registration_changed`, recording actor, binding, status/version and revocation counts. Audit failure rolls back status and all revocations. Immediate matching retries recover the receipt; stale conflicting revisions cannot reverse later changes.
+- **Populated upgrades must not invent approval or rewrite identity.** Existing bindings/statuses/tasks remain intact and receive no fabricated receipt. Legacy noncanonical identities can be disabled; activation requires a new canonical binding, not an edit to historical references. Browser roles still cannot administer this table.
+- **Real acceptance used privileged table setup for runtime identity changes.** It now uses `WorkloadRegistrationLifecycle` over real PostgREST. The few legacy SQL fixtures needing direct inserts explicitly run those inserts as the disposable database administrator, preserving service-role refusal tests.
+
+## Validation and remaining gates
+
+882 BFF tests, workspace tests/lint/typecheck and acceptance TypeScript; 49 migrations, 18 concurrency suites and 14 populated upgrades. Local real Auth/PostgREST/SPIRE passes 61 identity and 54 worker outcomes, including all prior 51 worker outcomes. Tests cover role/tenant checks, service/client refusal, binding/revision conflicts, audit rollback for both tasks and grants, no resurrection, both ordering directions for disable/tool and disable/issuance, competing status updates and upgrade preservation. Final exact merge CI/artifacts are recorded in the saved session.
+
+This is tenant application registration, not SPIRE node enrollment, image admission, token exchange or external bearer revocation. The verifier must still obtain protected current trust, and every consuming tool must recheck live task/grant authority. No public management route or execution grant was activated. The user selected a dedicated Mumbai VM runner for higher environments, keeping public APIs on Cloud Run; its deployment/node bootstrap/bundle delivery and service composition are next. Remaining agents/actor chains, W4.4, full W3, W4.5–7 and W0/W1/W2 remainder stay open. No cloud deployment, client mutation, key destruction or WORM change occurred.

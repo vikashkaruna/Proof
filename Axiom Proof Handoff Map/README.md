@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 42](../docs/audits/42-per-job-container-isolation-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 43](../docs/audits/43-workload-registration-lifecycle-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -59,3 +59,5 @@ Revision 47 adds a separate opaque Temporal workflow with stable scheduling and 
 Revision 50 verifies remote transport at staging `b40685f` / CI 35711878303 and adds tenant-bound AWS/GCP dispatch KMS adapters. Local provider fixtures and the real outbox/worker path test integrity, rotation, retained keys and bounded failures. Distributed key-policy rollout/retirement, per-job isolation, deployment/trust and remaining W3/W4 work stay open; see review 39 and Doc 16.
 
 Revision 53 verifies persisted policy fencing at staging `a01604b` / CI 35813509615 and runs each private assessment in a separate constrained container. Real SPIRE/Postgres acceptance covers concurrent job isolation, read-only files, metadata refusal and bounded cleanup. Production trust/runner composition, remaining workers, live grants and full W3/W4 remain open; see review 42 and Doc 16.
+
+Revision 54 verifies per-job isolation at staging `c17f428` / CI 35814929318 and adds audited, version-checked workload registration. Disable permanently revokes old tasks/grants; re-enable cannot restore them. The user selected a dedicated Mumbai VM runner for higher environments with public APIs on Cloud Run. Deployment/trust composition and the remaining W3/W4 scope are still open; see review 43 and Doc 16.

@@ -13,6 +13,8 @@ insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_bindin
 create function pg_temp.envelope() returns jsonb language sql as $$ select jsonb_build_object('formatVersion',1,'algorithm','aes-256-gcm','grantType','client_credentials','descriptorSha256',content_sha256,'endpointRef','crm','targetBinding','production','keyRef','fixture/key','nonce',repeat('aa',12),'ciphertext',repeat('bb',32),'wrappedDataKey',repeat('cc',80)) from public.connector_descriptors where id=pg_temp.id(5) $$;
 create function pg_temp.manage(op text,rev int,body jsonb default pg_temp.envelope(),credential uuid default pg_temp.id(7)) returns jsonb language sql as $$
  select public.manage_connector_credential(pg_temp.id(2),pg_temp.id(1),pg_temp.id(6),credential,op,1,rev,body,gen_random_uuid()) $$;
+-- Disposable administrator fixture; application identity writes use the reviewed lifecycle.
+insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values(pg_temp.id(10),pg_temp.id(2),'drishti','spiffe://test/drishti');
 set local role service_role;
 do $$declare r jsonb; n bigint; begin
  r:=pg_temp.manage('create',0);
@@ -24,7 +26,6 @@ do $$declare r jsonb; n bigint; begin
  perform pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"descriptorSha256":null}')->>'error'='invalid_envelope','missing digest');
  perform pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"grantType":"jwt_bearer"}')->>'error'='invalid_envelope','descriptor auth family enforced');
  perform pg_temp.ok(public.manage_connector_credential(pg_temp.id(9),pg_temp.id(1),pg_temp.id(6),pg_temp.id(7),'rotate',1,1,pg_temp.envelope(),gen_random_uuid())->>'error'='forbidden','foreign tenant denied');
- insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values(pg_temp.id(10),pg_temp.id(2),'drishti','spiffe://test/drishti');
  insert into public.connector_grants(tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values(pg_temp.id(2),pg_temp.id(6),pg_temp.id(10),'drishti','connector.read',now()+interval '1 hour');
  select count(*) into n from public.audit_ledger;
  begin
