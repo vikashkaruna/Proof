@@ -2,6 +2,8 @@
 
 ## Revision 62 — protected SPIRE host delivery and normal restart
 
+**CI fixture correction:** initial native runs found GitHub's `/usr/local/bin` is root-owned but world-writable (0777). The production installer correctly refused it. Only the disposable CI fixture now prepares that known directory as 0755 and restores its original mode on exit; installed-file and parent protection remain unchanged. Failed initial runs are not closure evidence.
+
 Revision 61 is **complete and green** at `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173): 17 applicable jobs and ten exact-revision artifacts verified. Fresh upstream review found no intervening implementation.
 
 **Implemented:** an offline bundle preparer verifies the pinned SPIRE 1.15.3 archive before reading a fixed, bounded inventory; it rejects links, traversal, unexpected members and wrong ELF architecture. A reviewed manifest binds the selected binary, configuration, state guard, runtime helper, service units and (for runners) separately fingerprinted bootstrap CA. The root-only installer supports Ubuntu 24.04 / Python 3.12 / systemd 255 on amd64 or arm64, protects fixed destinations, refuses conflicting files and preserves identical files on retry. Installation never formats, mounts, initializes, enrolls, reloads, enables or starts services. It is first installation, not an in-place upgrade mechanism.

@@ -88,7 +88,7 @@ def main():
     if any(a.get('local') == IP.split('/')[0] for i in interfaces for a in i.get('addr_info', [])):
         raise ValueError('existing fixture address refused')
     root = Path(tempfile.mkdtemp(prefix='axiom-systemd-', dir='/root'))
-    loop = None; address_added = False; installed = False; child = None
+    loop = None; address_added = False; installed = False; child = None; fixture_bin_mode = None
     outcomes = {}; identifier = str(uuid.uuid4()); backing = root/'state.img'
     try:
         spire = json.loads((ROOT/'infra/workload/spire-policy.example.json').read_text())
@@ -115,6 +115,16 @@ def main():
         ALIAS.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         host.protected_directory(ALIAS.parent)
         ALIAS.symlink_to(loop)
+        # The hosted runner deliberately ships /usr/local/bin as root:0777.
+        # Prepare this disposable test image, without changing the installer or
+        # tolerating unsafe production ancestry. Restore that directory at exit.
+        bin_directory = Path('/usr/local/bin')
+        meta = bin_directory.lstat()
+        if bin_directory.resolve(strict=True) != bin_directory or meta.st_uid != 0:
+            raise ValueError('fixture executable prefix refused')
+        if meta.st_mode & 0o7777 == 0o777:
+            fixture_bin_mode = (meta.st_ino, 0o777)
+            bin_directory.chmod(0o755)
         for destination in destinations:
             for parent in destination.parents:
                 if parent.exists():
@@ -215,6 +225,11 @@ def main():
             ALIAS.unlink()
         if loop and backing_matches(loop, backing):
             run(['/usr/sbin/losetup', '--detach', loop])
+        if fixture_bin_mode is not None:
+            inode, mode = fixture_bin_mode
+            if Path('/usr/local/bin').lstat().st_ino != inode:
+                raise ValueError('fixture executable prefix changed')
+            Path('/usr/local/bin').chmod(mode)
         shutil.rmtree(root)
 
 
@@ -222,6 +237,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        frames = [f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if f.filename == __file__]
+        frames = [f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-host-systemd.py','spire_host.py','spire_state.py')]
         print('Native workload host acceptance refused at '+' / '.join(frames)+'. Private diagnostics withheld.', file=sys.stderr)
         sys.exit(1)

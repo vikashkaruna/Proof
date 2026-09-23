@@ -21,3 +21,5 @@ No product migrations, business permission changes or cloud apply. The installer
 Next: explicit first-enrollment/marker workflow and full runner supervision acceptance, then controller delivery and scoped cloud integration. Whole W3/W4 and W0/W1/W2 closure is not claimed.
 
 Initial staging CI 35839570772 passed both-role Docker delivery but the native fixture was refused by the installation boundary before service activation. It is not closure evidence. Native fixture diagnosis and exact-merge rerun remain required; trust comparison includes JWT keys as well as X.509 roots.
+
+The diagnostic rerun 35839909163 identified GitHub’s root-owned `/usr/local/bin` mode 0777. The installer correctly refuses this. The disposable hosted fixture now temporarily prepares that exact known directory as 0755 and restores its inode-bound original mode; it never changes product protection checks or arbitrary host paths. Full trust comparison includes JWT keys and X.509 roots.
