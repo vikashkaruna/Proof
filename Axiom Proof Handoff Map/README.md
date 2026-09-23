@@ -71,3 +71,5 @@ Revision 56 composes the private VM controller with protected live SPIRE trust, 
 Revision 57 prepares separate private Mumbai issuer and runner host resources, disabled by default and verified with offline Terraform tests. Issuer/node bootstrap and operational activation are still pending; no cloud resources were provisioned.
 
 Revision 58 requires protected file delivery of the private controller backend key, with a minimal non-secret environment, before the future Docker image attestor is enabled. The public BFF remains unchanged.
+
+Revision 59 prepares exact GCP-node, UID and immutable-image admission, with separate real SPIRE persistence/restart acceptance. Cached identity during issuer outage is demonstrated; production bootstrap and bounded issuer-sync health remain open. See the current handoff/runbook before activation.

@@ -61,6 +61,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: python3 scripts/test-workload-identity.py
+      - run: python3 scripts/test-spire-deployment.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spire-deployment-acceptance
+          path: .axiom-runtime/spire-deployment/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: workload-identity-acceptance
