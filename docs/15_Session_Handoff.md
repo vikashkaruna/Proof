@@ -1,12 +1,12 @@
 # Axiom Proof — implementation session handoff
 
-Revision 70 adds reviewed tenant-to-VM placement preflight, with 141 deployment tests and 16 disposable host-delivery outcomes green locally. Revision 69 is pushed at `55282ea`; exact-merge evidence is recorded in the saved checkpoint. Full supervised activation and the broader roadmap remain open.
+Revision 70 adds reviewed tenant-to-VM placement preflight, with 141 deployment tests and 16 disposable host-delivery outcomes green locally. Revision 69 is complete and green at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075), with all 19 applicable jobs and 13 exact-revision artifacts verified. Full supervised activation and the broader roadmap remain open.
 
 Native fixture correction: the deliberate observer restart/crash/stop sequence exhausted the production three-starts-per-minute budget. The fixture now verifies `start-limit-hit` and explicitly resets only its failed test unit before the independent outage scenario. Production limits remain unchanged; the failed initial run is not closure evidence.
 
 ## Revision 70 — reviewed tenant-to-VM placement check
 
-Revision 69 is pushed at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075); its final combined result is recorded separately. This revision continues the accepted dedicated runner VM per tenant decision.
+Revision 69 is **complete and green** at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075): all 19 applicable jobs and 13 exact-revision artifacts verified. This includes 33 native runner, 17 native issuer, 16 host-delivery, 71 assessment and five protected-trust outcomes. This revision continues the accepted dedicated runner VM per tenant decision.
 
 **Implemented:** a protected, hash-reviewed placement profile binds a tenant and controller file generation to a Mumbai zone and private IPv4 address. A read-only root helper compares fixed GCP instance metadata with the installed SPIRE GCP node identity, checks the address belongs to exactly one active non-loopback host interface, verifies protected controller files and live runtime-volume mappings, then reobserves placement and file bindings before returning. The helper and file installer are now included in the checksum-reviewed runner bundle. Metadata reads use only five fixed nonsensitive paths, no proxy/redirect/alternate endpoint, bounded responses and an enforced total child-process deadline. No access or identity token is requested.
 

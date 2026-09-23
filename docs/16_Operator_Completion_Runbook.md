@@ -1,6 +1,6 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Revisions 67–68 are **complete and green** together at `a7df79f`, CI [35857993698](https://github.com/vikashkaruna/Proof/actions/runs/35857993698): all 19 applicable jobs and 13 exact-revision artifacts verified. Evidence includes 33 native runner outcomes (all prior 24 retained), 71 assessment outcomes and five protected-trust outcomes. The initial native fixture hash-format mismatch was corrected without weakening production checks. Revision 69 implements dedicated tenant runner placement; its combined gate is pending. Full supervised activation and the broader roadmap remain open.
+Revision 69 is **complete and green** at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075): all 19 applicable jobs and 13 exact-revision artifacts verified. This includes 33 native runner, 17 native issuer, 16 host-delivery, 71 assessment and five protected-trust outcomes. Revision 70 placement preflight is locally green; its exact combined gate remains pending. Supervised activation and the broader roadmap remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
