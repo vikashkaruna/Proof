@@ -1,15 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `a01604b`, CI [35813509615](https://github.com/vikashkaruna/Proof/actions/runs/35813509615) green. Revision 53 adds per-job container isolation. Production trust/composition, key retirement and W3/W4 remain open.
+Verified staging checkpoint: `c17f428`, CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318) green. Revision 54 adds reviewed registration lifecycle. The selected dedicated Mumbai VM runner still needs deployment and production trust composition; W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 53, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 54, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 54 — reviewed tenant workload registration
+
+**ENGINEERING delivered:** migration `0048` adds `version`, `lifecycle_receipt` and `updated_at` to `workload_identities`, preserving existing bindings and statuses. Direct service-role INSERT/UPDATE/DELETE is revoked; owner/admin or internal-founder administration uses the service-only `manage_workload_identity` transaction through `WorkloadRegistrationLifecycle.manage`. Supply the authenticated, human-reviewed tenant/actor/correlation/workload IDs, exact agent/SPIFFE binding, expected version and desired status. Never derive the actor or review decision from an untrusted worker or request body without authentication. This administration does not grant client mutation or waive approval/dry-run/rollback.
+
+**Register, then activate:** use expected version zero and status `disabled` to create a reviewed binding, then activate against the returned version only after validating the separate node identity/trust setup. New/activated subjects must follow `spiffe://<trusted-domain>/agent/<agent-name>`; the independent verifier still controls which domains/bundles are actually trusted. Existing tenant/agent/subject bindings cannot be edited. A legacy noncanonical binding may be disabled without changing its historical identity; create a separate canonical registration instead of rewriting it. The migration does not fabricate approval receipts or automatically revoke existing tasks.
+
+**Disable and recover:** disable under the current version. The transaction serializes against task issuance and tool writes, revokes every still-unrevoked delegation/grant for that identity, advances the version and appends a mandatory human audit receipt. Previously committed findings remain. Re-enabling allows new reviewed tasks/grants only; old proofs and grants stay revoked. Immediate matching retries return the existing receipt without duplicate audit; stale conflicting revisions refuse. A ten-second caller timeout is uncertain: inspect the registration version/status/receipt before retrying. No external provider bearer token or SPIRE SVID is physically invalidated by this app-state change; every consuming tool must recheck live registration/task/grant authority. <!-- axiom-count-ok: caller timeout, not statutory controls -->
+
+**Verification:** run the database suite, workspace checks, acceptance TypeScript and `python3 scripts/test-workload-identity.py --assessment`. Expect **49 migrations / 18 concurrency suites / 14 upgrades**, **882 BFF tests**, **61 identity and 54 worker outcomes**. Test coverage includes service/client write refusal, owner/admin/internal-founder versus viewer/analyst/external-founder checks, binding immutability, audit rollback of status and task/grant revocations, receipt replay, no resurrection after re-enable, and both race orderings for disable versus tool completion/issuance. Populated upgrades preserve old state until explicit reviewed administration. Tip 0048, 55 public tables, named W2 targets 19/40. See [review 43](audits/43-workload-registration-lifecycle-review-2026-09-23.md); save exact merge CI and all eight artifacts before marking this component green.
+
+**Accepted next deployment target:** the user chose a **dedicated Mumbai VM runner** for higher environments, while public APIs stay on Cloud Run. Implement its controlled runner/controller/node-agent composition and protected node bootstrap/bundle delivery; keep opaque scheduler credentials separate. Only the trusted runner may control Docker, and jobs must retain Revision 53's profile. Do not expose Docker or issuer APIs publicly or give the public BFF a daemon socket. This decision is not a completed cloud deployment. Remaining scoped workers, verified actor chains, W4.4 grants, full W3 wizard/readiness/graph and W4.5/6/7 remain engineering work, with W0/W1/W2 and backup-aware retirement preserved.
 
 ## Revision 53 — trusted per-job container launcher
 

@@ -5,6 +5,10 @@
 **Axiom Minds Private Limited** · https://axiomminds.ai
 **Document:** 04 of 05 · **Version:** 1.0 · **Date:** August 2026
 
+## Accepted deployment clarification — 23 September 2026
+
+The user selected a **dedicated Mumbai VM runner** for isolated per-job workers and the SPIRE node agent in higher environments. Public APIs remain on Cloud Run. The runner belongs to the trusted backend layer; Docker control and node-attestation access are not exposed to public API processes or workers. Each job retains private namespaces, network denial, a read-only Workload API mount and scoped tool calls. Protected node bootstrap, trust-bundle delivery and controller/opaque-scheduler deployment composition remain implementation gates; this decision does not mean a VM was provisioned. See Doc 16, Revision 54, for the operator sequence. Local Docker/Supabase acceptance remains the development topology.
+
 ---
 
 ## 1. ARCHITECTURAL PRINCIPLES

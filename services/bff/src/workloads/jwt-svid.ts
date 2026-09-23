@@ -109,7 +109,8 @@ export function parseWorkloadSpiffeId(value: unknown): { spiffeId: string; trust
 }
 /** Verifies identity only. It grants no tool, tenant, estate or connector scope.
  * Current registration, tenant task authority and grants must be checked by the
- * consuming adapter on every invocation. No HTTP endpoint uses this yet. */
+ * consuming adapter on every invocation. Private assessment tools compose this
+ * explicitly; it does not enable public broker acquisition or management. */
 export class JwtSvidVerifier {
   readonly #config: z.infer<typeof configSchema>;
   constructor(

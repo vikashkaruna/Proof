@@ -9,6 +9,11 @@ insert into public.tenants(id,slug,name) values(pg_temp.id(11),'conn-a','A'),(pg
 insert into public.tenant_users(tenant_id,user_id,role) values(pg_temp.id(11),pg_temp.id(1),'axiom_analyst');
 insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(21),pg_temp.id(11),'prod','A'),(pg_temp.id(22),pg_temp.id(12),'prod','B');
 insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) values(pg_temp.id(31),pg_temp.id(11),pg_temp.id(21),'A','database'),(pg_temp.id(32),pg_temp.id(12),pg_temp.id(22),'B','database');
+-- Disposable administrator fixture; identity mutations are separately gated.
+insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values
+ (pg_temp.id(61),pg_temp.id(11),'drishti','spiffe://test/agent/drishti'),
+ (pg_temp.id(62),pg_temp.id(12),'karya','spiffe://test/agent/karya'),
+ (pg_temp.id(63),pg_temp.id(11),'sudhaar','spiffe://test/agent/sudhaar');
 set local role service_role;
 select pg_temp.ok((select not rolbypassrls from pg_roles where rolname=current_user),'service has no bypass');
 insert into public.connector_descriptors(id,slug,version,transport,target_binding,manifest) values(pg_temp.id(40),'postgres','1','sql','sandbox','{"read":"catalogue"}');
@@ -17,10 +22,6 @@ insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_bindin
  (pg_temp.id(52),pg_temp.id(12),pg_temp.id(32),pg_temp.id(40),'sandbox','B','fixture-b','high');
 insert into public.connector_credentials(tenant_id,connector_id,grant_type,key_ref,algorithm,nonce,ciphertext,wrapped_data_key)
  select tenant_id,id,'cloud_iam','fixture-key','aes-256-gcm',decode(repeat('aa',12),'hex'),decode(repeat('bb',32),'hex'),decode('cc','hex') from public.connectors;
-insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values
- (pg_temp.id(61),pg_temp.id(11),'drishti','spiffe://test/agent/drishti'),
- (pg_temp.id(62),pg_temp.id(12),'karya','spiffe://test/agent/karya'),
- (pg_temp.id(63),pg_temp.id(11),'sudhaar','spiffe://test/agent/sudhaar');
 insert into public.connector_grants(tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values
  (pg_temp.id(11),pg_temp.id(51),pg_temp.id(61),'drishti','connector.read',now()+interval '1 hour'),
  (pg_temp.id(12),pg_temp.id(52),pg_temp.id(62),'karya','connector.write',now()+interval '1 hour');
