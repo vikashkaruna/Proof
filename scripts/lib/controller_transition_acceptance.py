@@ -78,7 +78,9 @@ except Exception:sys.exit(1)
     assert control('is-enabled',production_path.name,check=False).stdout.strip()==b'disabled'
     assert control('show','--property=ActiveState','--value',production_path.name).stdout.strip()==b'inactive'
     for selected in (old_sha,next_sha):assert run([*cli,'--run',selected],check=False).returncode!=0
-    operation('confirm',False)  # unit bytes changed but systemd has not reloaded.
+    # Inactive unreferenced units may be garbage-collected and loaded afresh.
+    # NeedDaemonReload describes loaded state, not who invoked a reload; the
+    # deterministic stale-state refusal is covered by the state-machine tests.
     results['controller-transition-publishes-disabled-unit-and-blocks-unconfirmed-starts']=True
     control('daemon-reload');operation('confirm');operation('resume');operation('confirm')
     assert run([*cli,'--run',old_sha],check=False).returncode!=0
