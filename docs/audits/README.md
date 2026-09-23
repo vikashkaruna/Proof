@@ -1,6 +1,6 @@
 # Audit Reports
 
-Latest review: [50 — persistent SPIRE state admission](50-spire-state-admission-review-2026-09-23.md).
+Latest review: [63 — reviewed controller credential issuance](63-controller-credential-issuance-review-2026-09-23.md).
 C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
 [Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 

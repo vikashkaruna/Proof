@@ -1144,6 +1144,20 @@ except Exception as error:
       outcomes,
       await verifyControllerCredentialScope(tenantId, scheduleTenants.unix, status),
     );
+    phase = 'controller-credential-issuance';
+    const issued = execFileSync('python3', ['scripts/verify-controller-issuance.py'], {
+      input: JSON.stringify({ tenantId, foreignTenantId: scheduleTenants.unix }),
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120000,
+    });
+    const issuance = z
+      .object({ passed: z.literal(true), outcomes: z.record(z.string(), z.literal(true)) })
+      .strict()
+      .parse(JSON.parse(issued));
+    assert.equal(Object.keys(issuance.outcomes).length, 8);
+    Object.assign(outcomes, issuance.outcomes);
+
     Object.assign(
       outcomes,
       await verifyControllerEntrypoint({
