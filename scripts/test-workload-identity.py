@@ -66,6 +66,7 @@ def main() -> None:
     name = "axiom-spire-test-" + uuid.uuid4().hex[:12]
     started = False
     api_volume = "axiom-workload-api-" + uuid.uuid4().hex
+    health_volume = "axiom-spire-health-" + uuid.uuid4().hex
     volume_created = False
     assessment = sys.argv[1:] == ["--assessment"]
     if assessment:
@@ -145,6 +146,7 @@ plugins {
  server_address = "127.0.0.1"
  server_port = 8081
  socket_path = "/run/workload/api.sock"
+ admin_socket_path = "/run/spire-admin/api.sock"
  trust_bundle_path = "/root/bundle.pem"
 }
 plugins {
@@ -168,8 +170,9 @@ plugins {
         node_options = []
         if assessment:
             run(["docker", "volume", "create", api_volume])
+            run(["docker", "volume", "create", health_volume])
             volume_created = True
-            node_options = ["--pid", "host", "--mount", f"type=volume,src={api_volume},dst=/run/workload"]
+            node_options = ["--pid", "host", "--mount", f"type=volume,src={api_volume},dst=/run/workload", "--mount", f"type=volume,src={health_volume},dst=/run/spire-health"]
         run(
             ["docker", "run", "-d", "--name", name, "--network", "none", *node_options, "--user", "0", "--entrypoint", "sleep", selected_image, "1200"],
             timeout=180,
@@ -248,6 +251,13 @@ plugins {
             ]
         )
         wait("spire-agent", "/run/workload/api.sock")
+        if assessment:
+            node_info = json.loads(run(["docker", "exec", name, "spire-agent", "debug", "getinfo", "-socketPath", "/run/spire-admin/api.sock", "-output", "json"]).stdout)
+            identity = node_info["svid_chain"][0]["id"]
+            issuer_node_id = f"spiffe://{identity['trust_domain']}{identity['path']}"
+            run(["docker", "cp", str(ROOT / "infra/workload/spire_health.py"), f"{name}:/root/spire_health.py"])
+            run(["docker", "exec", name, "python", "/root/spire_health.py", "--once", issuer_node_id])
+            run(["docker", "exec", "-d", name, "python", "/root/spire_health.py", "--watch", issuer_node_id])
         for index, agent_name in enumerate(AGENTS):
             run(
                 prefix
@@ -398,7 +408,7 @@ plugins {
             worker_check = run(
                 ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
                 data=json.dumps({
-                    "containerName": name, "jwks": cases[2]["jwks"], "controllerImage": controller_image_id,
+                    "containerName": name, "jwks": cases[2]["jwks"], "controllerImage": controller_image_id, "healthVolume": health_volume, "issuerNodeId": issuer_node_id,
                     "launcher": {
                         "executable": shutil.which("docker"),
                         "dockerHost": run(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"]).stdout.strip(),
@@ -449,6 +459,7 @@ plugins {
             run(["docker", "rm", "-f", name], required=False)
         if volume_created:
             run(["docker", "volume", "rm", api_volume], required=False)
+            run(["docker", "volume", "rm", health_volume], required=False)
         shutil.rmtree(temp)
 
 

@@ -1,15 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765) green, with 17 applicable jobs and nine verified artifacts. Revision 59 adds node/image admission preparation and separate SPIRE persistence acceptance. Host activation and issuer-sync health remain open; W3/W4 are partial.
+Verified staging checkpoint before this revision’s merge: `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827) green, with 17 applicable jobs and ten verified artifacts. Revision 60 adds bounded issuer synchronization health; supervised host activation and broader W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 59, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 60, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 60 — require bounded issuer synchronization health
+
+**Node observer:** install the reviewed `infra/workload/spire_health.py` with Python 3.11+ and the checksum-pinned SPIRE 1.15.3 agent CLI. Run as root with explicit `--once <expected-node-spiffe-id>` or supervised `--watch <expected-node-spiffe-id>`. The CLI reads only `/run/spire-admin/api.sock` via the fixed `debug getinfo` operation; output is bounded to 64 KiB with a two-second deadline. Watch observes every two seconds after each query. It never formats disks, enrolls nodes, reads backend/KMS credentials or applies registrations. Service installation/supervision and mount guards are still the next deployment milestone; this code is not yet installed on a cloud host.
+
+**Separate metadata mount:** `/run/spire-health` must be root-owned, canonical, non-symlink and non-writable by group/world. The observer creates it as `0755` and atomically publishes root-owned `0644` `status.json`. This file contains only health metadata; backend key/TLS/config files remain owner-only. Mount the health directory read-only into the controller at the same path so atomic replacements are visible. Do not bind-mount just one file inode. Never mount the node admin socket or issuer/node key directories into the controller or workers. Protect ancestor paths and mounts through deployment too. The controller also checks parent/file ownership, write permissions, regular-file status, size and canonical paths; no fallback is permitted.
+
+**Binding/freshness:** add mandatory `issuerNodeId` to protected controller configuration, matching the exact reviewed node and trust domain. Production GCP binding comes from the prepared bundle's `expectedNodeId`, never a caller request; local join-token acceptance uses its actual attestor node ID. The consumer permits strictly less than ten seconds since observation and thirty seconds since successful issuer sync, capped by node certificate expiry. These are fixed safety bounds, not new environment settings. A fresh observation cannot renew old issuer state. SPIRE's debug response itself can be cached for five seconds; checks use the reported last sync, not HTTP/process/socket liveness. Maintain a trusted host clock; detected clock rollback/future timestamps fail closed.
+
+**Failure and recovery:** failed observations publish explicit unhealthy metadata. Publisher or node loss expires prior data; an alive node with an unreachable issuer loses authorization after the sync bound. Startup, claim, launch and scoped identity verification refuse stale health. A known stale snapshot before claim leaves the one-time claim untouched; expiry after claim remains unconfirmed and must be reconciled. Do not reset/reissue a claim or blindly resubmit an uncertain job when health recovers. No safely-retryable outage response was added: the existing unconfirmed/review contract remains. Independent confirmation of already persisted results still works during outage. Recover the issuer and observer, then verify a new successful sync and inspect durable job/receipt state before operator recovery actions.
+
+**Evidence:** 38 deployment tests and the BFF health/controller tests exercise malformed/future/stale/foreign observations, permissions, deadlines and no-claim/no-launch behavior. Separate real SPIRE acceptance now has 21 outcomes, including stale publisher/node and issuer-outage refusal despite cached local trust, followed by recovery. The real composed-controller acceptance now consumes the live root-owned snapshot. The retained earlier cached-identity observation is a baseline demonstration of raw Workload API behavior; the new gated composition is the enforcement path. Complete supervised state/CA bootstrap, scoped IAM/KMS, TLS/deployed startup, backup/restore and dedicated scheduler before activation. The Terraform module remains default-off.
 
 ## Revision 59 — prepare and verify exact node/image admission
 

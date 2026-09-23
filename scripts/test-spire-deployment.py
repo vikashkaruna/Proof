@@ -24,6 +24,7 @@ from pathlib import Path
 from lib.spire_deployment import RELEASE_SHA256, SERVER_SOCKET, VERSION, WORKLOAD_SOCKET, deployment_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON_IMAGE = "python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322"
 IMAGE = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
 
 
@@ -57,7 +58,7 @@ def main() -> None:
     temp.chmod(0o755)
     prefix = "axiom-spire-deploy-" + uuid.uuid4().hex[:12]
     issuer, node, network = prefix + "-issuer", prefix + "-node", prefix + "-net"
-    volumes = [prefix + suffix for suffix in ("-issuer-state", "-node-state", "-api")]
+    volumes = [prefix + suffix for suffix in ("-issuer-state", "-node-state", "-api", "-health")]
     wrong_tag = prefix + ":wrong-image"
     outcomes: dict[str, bool] = {}
     created_volumes: list[str] = []
@@ -91,10 +92,16 @@ def main() -> None:
         wrong_image = run(["docker", "image", "inspect", wrong_tag, "--format", "{{.Id}}"]).stdout.strip()
         if image == wrong_image:
             raise RuntimeError("distinct images required")
+        run(["docker", "build", "--target", "vm-controller-acceptance", "-f", "infra/docker/Dockerfile.bff", "-t", "axiom-spire-health-probe:acceptance", "."], timeout=300)
+        controller_image = run(["docker", "image", "inspect", "axiom-spire-health-probe:acceptance", "--format", "{{.Id}}"]).stdout.strip()
+        if run(["docker", "image", "inspect", PYTHON_IMAGE], required=False).returncode:
+            run(["docker", "pull", PYTHON_IMAGE], timeout=180)
+        shutil.copyfile(ROOT / "infra/workload/spire_health.py", temp / "spire_health.py")
+        (temp / "spire_health.py").chmod(0o644)
         policy = {
             "schemaVersion": 1, "trustDomain": "deployment.axiomproof.test",
             "projectId": "axiom-local-test", "runnerInstanceId": "1234567890",
-            "issuerPrivateIp": "10.23.0.10", "controllerImageConfigDigest": wrong_image,
+            "issuerPrivateIp": "10.23.0.10", "controllerImageConfigDigest": controller_image,
             "assessmentImageConfigDigest": image,
         }
         bundle = deployment_bundle(policy)
@@ -119,7 +126,9 @@ def main() -> None:
             if is_node:
                 # Only the trusted node sees host PIDs/cgroups and daemon.
                 mounts += ["--pid", "host", "--cgroupns", "host", "--mount", "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly", "--mount", f"type=volume,src={volumes[2]},dst=/run/workload"]
-            run(["docker", "run", "-d", "--name", name, "--network", network, "--network-alias", "node" if is_node else "issuer", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--log-driver", "none", "--memory", "256m", "--pids-limit", "128", "--tmpfs", "/run:rw,nosuid,nodev,noexec,size=8m", *mounts, "--entrypoint", "sleep", image, "1200"])
+            if is_node:
+                mounts += ["--mount", f"type=volume,src={volumes[3]},dst=/run/spire-health"]
+            run(["docker", "run", "-d", "--name", name, "--network", network, "--network-alias", "node" if is_node else "issuer", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--log-driver", "none", "--memory", "256m", "--pids-limit", "128", "--tmpfs", "/run:rw,nosuid,nodev,noexec,size=8m", *mounts, "--entrypoint", "sleep", PYTHON_IMAGE if is_node else image, "1200"])
 
         def wait(name: str, binary: str, socket: str) -> None:
             for _ in range(30):
@@ -190,7 +199,7 @@ def main() -> None:
         print("SPIRE deployment acceptance: node, UID and immutable-image boundaries.", flush=True)
         fetch(accepted=True)
         outcomes["exact-node-uid-image-assessment-admitted"] = True
-        fetch(20000, wrong_image, "controller/assessment", accepted=True)
+        fetch(20000, controller_image, "controller/assessment", accepted=True)
         outcomes["separate-controller-image-and-uid-admitted"] = True
         fetch(selected=wrong_image, accepted=False)
         outcomes["same-uid-wrong-image-refused"] = True
@@ -203,6 +212,44 @@ def main() -> None:
         fetch(20003, wrong_tag, accepted=False)
         outcomes["mutable-tag-cannot-bypass-config-digest"] = True
 
+        print("SPIRE deployment acceptance: protected issuer synchronization health.", flush=True)
+        node_info = json.loads(run(["docker", "exec", node, "spire-agent", "debug", "getinfo", "-socketPath", "/run/spire-admin/api.sock", "-output", "json"]).stdout)
+        identity = node_info["svid_chain"][0]["id"]
+        expected_node = f"spiffe://{identity['trust_domain']}{identity['path']}"
+
+        def publish_health(required: bool = True):
+            return run(["docker", "exec", node, "python", "/etc/axiom/spire/spire_health.py", "--once", expected_node], required=required)
+
+        def recover_health():
+            for _ in range(30):
+                if publish_health(False).returncode == 0:
+                    return
+                time.sleep(2)
+            raise RuntimeError("issuer health did not recover")
+
+        def health_probe(mode: str, binding: str = expected_node):
+            probe = prefix + f"-probe-{len(probes)}"
+            probes.append(probe)
+            result = run(["docker", "run", "--rm", "--name", probe, "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "20000", "--log-driver", "none", "--mount", f"type=volume,src={volumes[2]},dst=/run/workload,readonly", "--mount", f"type=volume,src={volumes[3]},dst=/run/spire-health,readonly", "--entrypoint", "node", controller_image, "--import", "/app/node_modules/tsx/dist/loader.mjs", "/app/scripts/verify-issuer-sync.ts", mode, binding], timeout=15)
+            if result.stdout != "Issuer sync probe passed.\n":
+                raise RuntimeError("health probe output refused")
+
+        recover_health()
+        health_probe("healthy")
+        outcomes["protected-root-health-and-live-trust-accepted-without-admin-access"] = True
+        health_probe("refused", expected_node + "-foreign")
+        outcomes["foreign-node-health-binding-refused"] = True
+        run(["docker", "exec", node, "chmod", "666", "/run/spire-health/status.json"])
+        health_probe("refused")
+        publish_health()
+        run(["docker", "exec", node, "sh", "-c", "printf '{}' > /run/spire-health/status.json"])
+        health_probe("refused")
+        publish_health()
+        outcomes["unsafe-permissions-and-malformed-health-file-refused"] = True
+        time.sleep(10.2)
+        health_probe("cached-refused")
+        outcomes["stopped-health-publisher-expires-despite-live-workload-api"] = True
+        publish_health()
         print("SPIRE deployment acceptance: persistent issuer and node restart.", flush=True)
         before_entries = json.loads(run(server + ["entry", "show", "-socketPath", SERVER_SOCKET, "-output", "json"]).stdout)
         # SPIFFE format includes JWT signing keys as well as X.509 roots.
@@ -212,6 +259,15 @@ def main() -> None:
         # This is a demonstrated LIMIT, not a readiness check. A live local
         # Workload API alone cannot establish issuer availability/freshness.
         outcomes["issuer-offline-cached-identity-demonstrates-health-gap"] = True
+        # Keep observing the live node. A fresh observation must not refresh a
+        # stale upstream sync. SPIRE may continue serving cached identity.
+        deadline = time.monotonic() + 35
+        while publish_health(False).returncode == 0:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("stale issuer remained healthy")
+            time.sleep(2)
+        health_probe("cached-refused")
+        outcomes["issuer-outage-refused-after-bounded-sync-age"] = True
         start_host(issuer, False)
         launch_server()
         if normalized(json.loads(run(server + ["entry", "show", "-socketPath", SERVER_SOCKET, "-output", "json"]).stdout)) != normalized(before_entries):
@@ -219,6 +275,18 @@ def main() -> None:
         if normalized(json.loads(run(server + ["bundle", "show", "-socketPath", SERVER_SOCKET, "-format", "spiffe"]).stdout)) != normalized(before_bundle):
             raise RuntimeError("issuer trust changed on restart")
         outcomes["issuer-recreation-preserves-registry-and-trust"] = True
+        recover_health()
+        health_probe("healthy")
+        outcomes["issuer-recovery-requires-renewed-synchronization"] = True
+        run(["docker", "pause", node])
+        try:
+            time.sleep(10.2)
+            health_probe("refused")
+        finally:
+            run(["docker", "unpause", node])
+        recover_health()
+        health_probe("healthy")
+        outcomes["paused-node-health-expires-and-recovers"] = True
         run(["docker", "rm", "-f", node])
         start_host(node, True)
         launch_node()  # No token, no re-enrollment or replacement key state.

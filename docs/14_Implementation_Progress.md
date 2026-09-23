@@ -1,12 +1,26 @@
 # Implementation progress — W0 through W4
 
-Last verified staging checkpoint before this revision’s merge: `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765) green. Revision 59 prepares exact node/image admission and verifies separate SPIRE host persistence. Final exact-merge evidence is saved in the session. Operational bootstrap, issuer-sync health, remaining W3/W4 and W0/W1/W2 work stay open.
+Last verified staging checkpoint before this revision’s merge: `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827) green. Revision 60 adds bounded issuer-sync health to the dedicated controller. Final exact-merge evidence is saved in the session. Protected host bootstrap, deployed acceptance and remaining W3/W4 and W0/W1/W2 work stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 60 — bounded issuer synchronization health
+
+Revision 59 is **complete and green** at staging `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827): 17 applicable jobs and ten exact-revision artifacts verified. Fresh review found no intervening staging changes.
+
+**Delivered:** a root-only node observer reads the fixed SPIRE admin `Debug.GetInfo` operation with a two-second deadline and bounded output. It publishes only node identity, observation/sync times and certificate expiry through an atomic root-owned metadata file. The controller receives that directory read-only, without the admin socket. Failed observations replace healthy state with an explicit denial; stopped publication expires automatically. Backend credentials and TLS/config files retain their separate owner-only protections.
+
+The dedicated controller now requires the exact `issuerNodeId`, matching its trust domain. Its health gate permits at most **ten seconds since observation**, **thirty seconds since successful issuer synchronization**, and the node certificate's remaining lifetime. Future/malformed timestamps, wrong nodes, unsafe file permissions, unavailable observations and detected backward clock movement fail closed. Every trust load is checked before and after Workload API I/O, with validity capped by both health checks and the signing-bundle deadline. Healthy local API caching can no longer bypass stale issuer health in this composition.
+
+**Execution/recovery:** startup, one-time claim, post-claim launch and every scoped identity/tool verification require current health. Known stale health does not consume a claim. Expiry after a committed claim prevents launch and remains unconfirmed; there is no reset or automatic relaunch. Independent reconciliation can still confirm previously persisted results while issuer health is unavailable. The existing conservative unconfirmed/review policy remains; this milestone does not add a new safely-retryable transport response or automatic outage resubmission.
+
+**Validation:** **976 BFF tests**, including 24 new health/controller checks; **38 deployment tests**, including ten new observer tests; workspace tests/lint/types and acceptance TypeScript. Separate real SPIRE admission/persistence acceptance increases from 14 to **21 outcomes**, adding protected healthy access, wrong-node and unsafe-file refusal, stopped publisher/node expiry, issuer outage refusal despite cached Workload API access, and fresh-sync recovery. Existing real controller/worker acceptance also reads the live root-owned observer snapshot. Final exact-merge CI and artifact counts are recorded in the saved session. See [review 49](audits/49-issuer-sync-health-review-2026-09-23.md).
+
+**Remaining:** supervised pinned host installation, persistent state-disk validation/initialization guards, protected CA delivery, scoped IAM/KMS, TLS/DNS, full deployed controller/worker admission, Mumbai backup/restore and opaque scheduler deployment. This gate bounds observed synchronization age; it is not instantaneous global revocation or proof of effective cloud IAM/firewalls. No cloud apply or public execution was enabled. Full W3/W4 and W0/W1/W2 remainder remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 named targets remain **19/40**.
 
 ## Revision 59 — exact node/image admission and separate SPIRE persistence
 

@@ -7,6 +7,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { composeVmAssessmentController, vmControllerConfiguration } from './assessment-vm.js';
 import * as containerRuntime from './assessment-container.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
+import { IssuerSyncHealth } from './issuer-sync-health.js';
+import { AssessmentDispatch } from './assessment-dispatch.js';
+import { AssessmentConfirmation } from './assessment-confirmation.js';
+import { AssessmentChannel } from './assessment-channel.js';
+import { PrivateAssessmentPayload } from './dispatch-payload.js';
+import { TaskProof } from './tasks.js';
 import { DispatchKeyPolicy } from './dispatch-key-policy.js';
 import {
   prepareControllerService,
@@ -20,6 +26,7 @@ const config = {
   tenantId: tenant,
   trustDomain: 'local.axiomproof.test',
   workloadSocket: '/run/workload/api.sock',
+  issuerNodeId: 'spiffe://local.axiomproof.test/spire/agent/gcp_iit/fixture-project/123',
   namespace: 'assessment-fixture',
   launcher: {
     executable: '/usr/bin/docker',
@@ -40,6 +47,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 function fixture() {
+  const health = vi
+    .spyOn(IssuerSyncHealth.prototype, 'validUntil')
+    .mockImplementation(async () => Date.now() + 10000);
   vi.spyOn(containerRuntime, 'verifyAssessmentContainerRuntime').mockResolvedValue();
   const policy = new DispatchKeyPolicy(
     'aws',
@@ -59,8 +69,100 @@ function fixture() {
   const load = vi
     .spyOn(WorkloadApiJwtTrust.prototype, 'load')
     .mockResolvedValue({ revision: 'fixture', validUntil: Date.now() + 10000, jwks: {} });
-  return { db, row, from, rpc, load };
+  return { db, row, from, rpc, load, health };
 }
+it('refuses unsynchronized issuer state before consuming any dispatch or reading trust', async () => {
+  const f = fixture();
+  f.health.mockResolvedValue(null);
+  await expect(composeVmAssessmentController(config, f.db)).rejects.toThrow(
+    'VM assessment controller configuration refused',
+  );
+  expect(f.load).not.toHaveBeenCalled();
+  expect(f.rpc).not.toHaveBeenCalled();
+});
+it('refuses a node from another trust domain', async () => {
+  const f = fixture();
+  await expect(
+    composeVmAssessmentController(
+      { ...config, issuerNodeId: config.issuerNodeId.replace('local.', 'foreign.') },
+      f.db,
+    ),
+  ).rejects.toThrow('VM assessment controller configuration refused');
+  expect(f.from).not.toHaveBeenCalled();
+});
+it('stale health prevents a one-time claim but permits independent completion recovery', async () => {
+  const f = fixture();
+  const service = await composeVmAssessmentController(config, f.db, { awsKms: { send: vi.fn() } });
+  const expected = {
+    tenantId: tenant,
+    runId: randomUUID(),
+    engagementId: randomUUID(),
+    correlationId: randomUUID(),
+    inputHash: 'a'.repeat(64),
+  };
+  vi.spyOn(AssessmentDispatch.prototype, 'resolve').mockResolvedValue({ expected, claimed: false });
+  const claim = vi.spyOn(AssessmentDispatch.prototype, 'claim');
+  const channel = vi
+    .spyOn(AssessmentChannel.prototype, 'run')
+    .mockResolvedValue({ workerStatus: 'unconfirmed', cleanupConfirmed: false });
+  const confirm = vi
+    .spyOn(AssessmentConfirmation.prototype, 'confirm')
+    .mockRejectedValue(new Error('unconfirmed'));
+  f.health.mockResolvedValue(null);
+  expect((await service.controller.run(tenant, randomUUID())).status).toBe('unconfirmed');
+  expect(claim).not.toHaveBeenCalled();
+  expect(channel).not.toHaveBeenCalled();
+  expect(confirm).toHaveBeenCalledWith(expected);
+  confirm.mockResolvedValue({
+    run_id: expected.runId,
+    finalized_receipt: '3',
+    result_digest: 'b'.repeat(64),
+  } as Awaited<ReturnType<AssessmentConfirmation['confirm']>>);
+  expect((await service.controller.reconcile(tenant, randomUUID())).status).toBe('confirmed');
+  expect(claim).not.toHaveBeenCalled();
+  expect(channel).not.toHaveBeenCalled();
+});
+it('health expiry after a committed claim prevents launch without restoring claim authority', async () => {
+  const f = fixture();
+  const service = await composeVmAssessmentController(config, f.db, { awsKms: { send: vi.fn() } });
+  const jobId = randomUUID();
+  const expected = {
+    tenantId: tenant,
+    runId: randomUUID(),
+    engagementId: randomUUID(),
+    correlationId: randomUUID(),
+    inputHash: 'a'.repeat(64),
+  };
+  vi.spyOn(AssessmentDispatch.prototype, 'resolve').mockResolvedValue({ expected, claimed: false });
+  const claim = vi.spyOn(AssessmentDispatch.prototype, 'claim').mockImplementation(async () => {
+    f.health.mockResolvedValue(null);
+    return {
+      runId: expected.runId,
+      context: {
+        ...expected,
+        jobId,
+        actorId: randomUUID(),
+        workloadId: randomUUID(),
+        estateId: null,
+      },
+      expiresAt: Date.now() + 300000,
+      payload: new PrivateAssessmentPayload(
+        expected.inputHash,
+        '{}',
+        new TaskProof(Buffer.alloc(32, 7).toString('base64url')),
+      ),
+    };
+  });
+  const channel = vi
+    .spyOn(AssessmentChannel.prototype, 'run')
+    .mockResolvedValue({ workerStatus: 'unconfirmed', cleanupConfirmed: false });
+  vi.spyOn(AssessmentConfirmation.prototype, 'confirm').mockRejectedValue(new Error('unconfirmed'));
+  expect((await service.controller.run(tenant, jobId)).status).toBe('unconfirmed');
+  expect(claim).toHaveBeenCalledOnce();
+  expect(channel).not.toHaveBeenCalled();
+  await service.controller.reconcile(tenant, jobId);
+  expect(claim).toHaveBeenCalledOnce();
+});
 it('starts only after recovering the exact persisted policy and checking protected trust, without writes', async () => {
   const f = fixture();
   const service = await composeVmAssessmentController(config, f.db, { awsKms: { send: vi.fn() } });

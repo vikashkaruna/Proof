@@ -73,3 +73,5 @@ Revision 57 prepares separate private Mumbai issuer and runner host resources, d
 Revision 58 requires protected file delivery of the private controller backend key, with a minimal non-secret environment, before the future Docker image attestor is enabled. The public BFF remains unchanged.
 
 Revision 59 prepares exact GCP-node, UID and immutable-image admission, with separate real SPIRE persistence/restart acceptance. Cached identity during issuer outage is demonstrated; production bootstrap and bounded issuer-sync health remain open. See the current handoff/runbook before activation.
+
+Revision 60 adds bounded issuer-sync health enforcement, preserving one-time claims and independent recovery. The node observer publishes root-owned metadata to the controller through a read-only mount; node admin access is not shared. Protected host bootstrap and deployment remain open.
