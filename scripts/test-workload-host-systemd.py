@@ -38,7 +38,7 @@ def run(argv, check=True, timeout=45):
     if check and result.returncode:
         # Only a fixed enrollment diagnostic with function/line locations may
         # reach CI logs; arbitrary subprocess output remains private.
-        if len(result.stderr) < 1024 and re.fullmatch(rb'SPIRE enrollment refused at [A-Za-z0-9_<>: /]+; existing state and review records require inspection.\n', result.stderr):
+        if len(result.stderr) < 1024 and re.fullmatch(rb'SPIRE (?:enrollment refused at [A-Za-z0-9_<>: /]+; existing state and review records|runtime volume operation refused at [A-Za-z0-9_<>: /]+; existing mappings and review record) require inspection.\n', result.stderr):
             print(result.stderr.decode('ascii').strip(), flush=True)
         raise RuntimeError('isolated systemd fixture operation refused')
     return result

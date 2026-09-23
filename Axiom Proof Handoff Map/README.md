@@ -85,3 +85,5 @@ Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker delivery and
 Revision 63 separates first issuer initialization from normal restart and requires a second receipt review before marker publication. Runner enrollment and full activation remain next; follow the latest Docs 11–16 and saved session.
 
 Revision 64 extends reviewed enrollment to the runner, with exact-node/sync/CA evidence and separate marker publication. A native runner/observer gate is added; final results are recorded after exact-merge CI verification. Host socket/container delivery and full controller activation are next.
+
+Revision 65 implements protected, reviewed local Docker mappings from the native node socket/health directories. The native gate adds a real unprivileged consumer and exact image/UID checks; final evidence is saved after exact-merge validation. Controller delivery/admission/supervision, private TLS and scoped IAM/KMS are next.

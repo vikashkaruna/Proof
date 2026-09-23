@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663) green, with 18 applicable jobs and 12 verified artifacts. Revisions 63–64 add explicit issuer/runner initialization and separate reviewed marker publication. The runner native gate, full activation and broader roadmap remain open at this source checkpoint; exact final-merge evidence is saved in the session.
+Verified staging checkpoint before this revision’s merge: `24e6a87`, CI [35850300471](https://github.com/vikashkaruna/Proof/actions/runs/35850300471), all 19 applicable jobs and 13 exact-revision artifacts verified. Issuer/runner enrollment and native lifecycles are green. Revision 65 adds protected socket/health volume delivery; expanded native evidence is pending until verified. Full controller activation and the broader roadmap remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 64, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 65, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 65 operator gate — host socket/health delivery
+
+1. Complete separate issuer and runner enrollment/marker review, approved node/image registrations and the reviewed normal node/observer startup. The socket preparation check needs a live node with current exact-node health; this does not activate the controller or client jobs. Node bootstrap and controller activation are separate gates.
+2. Review the new installed manifest and bundled `spire_volumes.py`. Supported Docker configuration is the local `/run/docker.sock` daemon with `/var/lib/docker` data root and the same mount namespace as the root preflight. Run the helper in the host namespace; private daemon/caller mount namespaces are refused. Arbitrary daemons, remote drivers, source paths and extra volume options are refused.
+3. Run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_volumes.py --prepare REVIEWED_MANIFEST_SHA256` as root. It records the fixed mapping in `/etc/axiom/spire/runtime-volumes.json` before creating missing volumes, validates existing mappings without replacement, and reports `workloadApiVolume` and `healthVolume`. A conflict is never deleted or repaired. After uncertainty, inspect the record and actual mappings; only an explicit identical reviewed retry is supported.
+4. Run the same helper with `--check REVIEWED_MANIFEST_SHA256` before controller activation, including after a host/Docker restart. This path makes no changes. It checks current health and runtime directory identity; an already mounted volume with a stale source inode is refused. The record is configuration evidence, not perpetual readiness or workload authorization.
+5. Use the reported workload volume at `/run/workload` with `readonly,volume-nocopy` for the controller and isolated workers. Only the controller needs the health volume at `/run/spire-health`, also read-only. Workers must receive neither the admin socket nor Docker socket. The controller remains gated on its separate admission, protected configuration/credentials, private TLS and scoped cloud permissions.
+
+Native CI covers a real unprivileged container consumer and local SPIRE image/UID admission. It does not prove full controller activation, GCP identity or effective IAM. Expanded exact-merge native results are pending at this source checkpoint; save confirmed results in the session before claiming closure.
 
 ## Revision 64 operator gate — runner enrollment
 
@@ -18,7 +28,7 @@ After issuer trust review, prepare the runner bundle with the approved CA finger
 1. Run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --initialize runner REVIEWED_MANIFEST_SHA256` as root. No join-token or alternate-attestation argument exists in the production command. It records the request, checks actual node identity/recent sync and leaves stopped, unmarked state with a receipt.
 2. Review `/etc/axiom/spire/initialization-receipt.json` against the intended node/disk, independently delivered CA and installed manifest. This is historical enrollment evidence, not current workload readiness. The public issuer exports from Revision 63 remain the CA-delivery source; runner receipts expose only bounded node/sync metadata and hashes.
 3. Before the observed node certificate expires, run `/usr/bin/python3 -I -B /opt/axiom/spire/1.15.3/spire_enrollment.py --seal runner REVIEWED_RECEIPT_SHA256`. It records review and publishes the marker, without enabling/starting normal services. Expired evidence, changed state or interrupted requests require explicit recovery; do not clear files to retry.
-4. Keep activation gated on reviewed workload registrations, protected host-to-container socket delivery, controller policy/credentials and the remaining runtime prerequisites. Normal startup requires the sealed state and starts the separately supervised observer. Consumers must still enforce current health age and exact node binding.
+4. Keep controller/client-job activation gated on reviewed workload registrations, protected host-to-container socket delivery, controller policy/credentials and the remaining runtime prerequisites. Separately reviewed normal node/observer startup supplies the live prerequisites for socket preparation. Normal startup requires the sealed state and starts the separately supervised observer. Consumers must still enforce current health age and exact node binding.
 
 Native CI uses an explicitly substituted local join-token fixture on a fresh hosted VM. It is not a GCP deployment or evidence of effective cloud permissions. At this source checkpoint its expanded gate is pending; final exact-merge results belong in the saved session.
 

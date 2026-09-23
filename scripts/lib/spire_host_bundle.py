@@ -199,7 +199,7 @@ def prepare(value: object, archive: bytes, ca: bytes | None = None) -> tuple[byt
     node = json.loads(policy_bundle['release.json'])['expectedNodeId'] if role == 'runner' else None
     binding = state_policy({'schemaVersion':1, 'role':role, 'filesystemUuid':value['filesystemUuid'], 'trustDomain':value['spirePolicy']['trustDomain'], 'nodeId':node})
     payload = {binary_name:binary, 'state.json':(json.dumps(binding,indent=2)+'\n').encode(), 'spire.conf':policy_bundle['server.conf' if role=='issuer' else 'agent.conf'].encode(), **units(role,binding['filesystemUuid'],node)}
-    for name in ('spire_host.py','spire_state.py','spire_enrollment.py') + (('spire_health.py',) if role=='runner' else ()):
+    for name in ('spire_host.py','spire_state.py','spire_enrollment.py') + (('spire_health.py','spire_volumes.py') if role=='runner' else ()):
         payload[name] = (ROOT/'infra/workload'/name).read_bytes()
     if role == 'runner':
         expected = value['bootstrapCaSha256']
