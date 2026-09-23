@@ -2,6 +2,8 @@
 
 This document is the authoritative, end-to-end deployment guide for Axiom Proof. It covers all lifecycle phases from local self-contained developer environments to multi-machine staging networks and AWS production Kubernetes clusters in `ap-south-1`.
 
+**Current workload-host decision (23 September 2026):** public APIs stay on Cloud Run; the user selected separate private Mumbai SPIRE issuer and runner VMs. The existing GCP preprod root now has a default-off `workload_vms` foundation. Bootstrap and activation are still pending. Use [Doc 16](16_Operator_Completion_Runbook.md) and the [module guide](../infra/terraform/modules/workload-vms/README.md) for current gates; the historical topology comparisons below do not override that decision.
+
 ---
 
 ## 1. Multi-Environment Architecture & Strategy

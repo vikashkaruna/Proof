@@ -38,3 +38,12 @@ axiom_founder_email     = "founder@axiomminds.ai"
 contact_recipient_email = "hello@axiomminds.ai"
 
 report_email_mode = "disabled"
+
+# Separate private Mumbai SPIRE issuer + runner foundation. Keep disabled until
+# bootstrap, state mounting, issuer enrollment, IAM and supervision are ready.
+workload_vms = null
+# workload_vms = {
+#   zone                     = "asia-south1-a"
+#   boot_image               = "projects/YOUR-PROJECT/global/images/REVIEWED-NAMED-IMAGE"
+#   controller_source_ranges = ["10.10.16.0/28"]
+# }

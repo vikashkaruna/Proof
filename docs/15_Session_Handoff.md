@@ -1,5 +1,19 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 57 — separate private Mumbai issuer and runner foundation
+
+Revision 56 is **complete and green** at staging `df409cb`, CI [35821680808](https://github.com/vikashkaruna/Proof/actions/runs/35821680808): 17 applicable jobs and nine exact-revision artifacts verified.
+
+**Accepted deployment decision:** the user selected a separate private Mumbai SPIRE issuer VM alongside the already-approved worker-runner VM. Public APIs stay on Cloud Run. This preserves the roadmap's single intra-perimeter trust domain; application registration remains distinct from node enrollment.
+
+**Delivered:** an opt-in Terraform module prepares separate issuer/runner service accounts, reserved private IPv4 addresses, shielded VMs and persistent state disks. Mumbai zone/subnet validation and explicit named-image selection reject other regions and image families. The default preprod configuration is `workload_vms = null`, so existing deployment flows create no new VMs. There are no resource IAM grants, secrets in metadata, bootstrap script, public IP or administrative ingress. OS Login/2FA, blocked project SSH keys, disabled serial access, VM deletion protection and configured state-disk destruction guards are explicit.
+
+Ingress permits only runner-to-issuer TCP 8081 and optional reviewed private scheduler ranges to runner TCP 8443, with lower-priority deny rules for other traffic. Generic host egress is HTTPS; runner-to-issuer has an exact-address exception. This is not a destination-filtered egress policy or proof of effective cloud rules. The existing networkless worker-container boundary remains essential. No NAT, proxy or implicit SSH path is created.
+
+**Validation:** module validation and **nine offline boundary tests**, plus root validation and **eight offline integration/IAM tests** (six existing and two new), pass with mocked providers and no cloud state or resources. CI now runs both suites. Application/schema acceptance is unchanged: **930 BFF / 61 identity / 60 worker / three protected-trust outcomes**, migration **0048**, **49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**. Exact staging merge results are saved in the session. See [review 46](audits/46-private-mumbai-hosts-review-2026-09-23.md).
+
+**Still pending:** issuer/node bootstrap and persistent key-state mounting, reviewed node/image admission, trust-bundle delivery, scoped KMS/secret grants, protected controller configuration, TLS/DNS, supervision/health, backup/restore, opaque scheduler deployment and real cloud-provider acceptance. The pair is a foundation, not HA or a running issuer/controller. Do not enable it operationally until those gates are implemented and reviewed. No cloud apply, client mutation or WORM change occurred. Continue remaining workers/verified actor chains, W4.4 grants, full W3 wizard/readiness/live graph, W4.5/6/7, W0/W1/W2 remainder and backup-aware key retirement. The overall goal remains incomplete.
+
 ## Revision 56 — dedicated VM assessment controller composition
 
 Revision 55 is **complete and green** at staging `4b67a74`, CI [35818471736](https://github.com/vikashkaruna/Proof/actions/runs/35818471736): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
