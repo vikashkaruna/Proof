@@ -70,6 +70,7 @@ def main() -> None:
     assessment = sys.argv[1:] == ["--assessment"]
     if assessment:
         (ROOT / ".axiom-runtime/workload-assessment/results.json").unlink(missing_ok=True)
+        (ROOT / ".axiom-runtime/workload-trust/results.json").unlink(missing_ok=True)
     if sys.argv[1:] and not assessment:
         raise RuntimeError("unknown acceptance mode")
     try:
@@ -158,6 +159,9 @@ plugins {
         if assessment:
             selected_image = "axiom-assessment-worker:acceptance"
             run(["docker", "build", "-f", "infra/docker/Dockerfile.assessment-worker", "-t", selected_image, "."], timeout=240)
+            trust_image = "axiom-workload-trust:acceptance"
+            run(["docker", "build", "--target", "workload-trust-acceptance", "-f", "infra/docker/Dockerfile.bff", "-t", trust_image, "."], timeout=300)
+            trust_image_id = run(["docker", "image", "inspect", trust_image, "--format", "{{.Id}}"]).stdout.strip()
         node_options = []
         if assessment:
             run(["docker", "volume", "create", api_volume])
@@ -259,8 +263,14 @@ plugins {
                     "300",
                 ]
             )
+        if assessment:
+            run(prefix + ["entry", "create", "-socketPath", "/run/server/api.sock",
+                "-parentID", "spiffe://local.axiomproof.test/node/acceptance",
+                "-spiffeID", "spiffe://local.axiomproof.test/controller/assessment",
+                "-selector", "unix:uid:20000"])
         cases = []
         outcomes: dict[str, bool] = {}
+        trust_outcomes: dict[str, bool] = {}
 
         def fetch(
             uid: int, agent_name: str, required: bool = True
@@ -347,6 +357,40 @@ plugins {
             raise RuntimeError("verifier failed")
         outcomes.update(verified["outcomes"])
         if assessment:
+            print("Workload trust acceptance: protected controller socket reads.", flush=True)
+            def check_trust(mode: str, uid: int):
+                print("Workload trust acceptance: " + mode + ".", flush=True)
+                checked = run(["docker", "run", "--rm", "--pull", "never", "-i",
+                    "--network", "none", "--read-only", "--cap-drop", "ALL",
+                    "--security-opt", "no-new-privileges:true", "--pids-limit", "64",
+                    "--memory", "256m", "--memory-swap", "256m", "--cpus", "1",
+                    "--log-driver", "none", "--user", str(uid), "--env", "TSX_DISABLE_CACHE=1",
+                    "--mount", f"type=volume,src={api_volume},dst=/run/workload,readonly",
+                    "--entrypoint", "node", trust_image_id, "--import", "/app/node_modules/tsx/dist/loader.mjs",
+                    "/app/scripts/verify-workload-trust.ts"],
+                    data=json.dumps({"mode": mode, "token": cases[2]["token"]}), timeout=30, required=False)
+                if checked.returncode:
+                    import re
+                    label = re.fullmatch(r"Protected Workload API acceptance refused at ([a-z-]{1,30})\.\n", checked.stderr)
+                    if label:
+                        print("Workload trust acceptance failure phase: " + label[1], flush=True)
+                    elif "ERR_MODULE_NOT_FOUND" in checked.stderr:
+                        print("Workload trust acceptance module packaging failure.", flush=True)
+                    elif "EROFS" in checked.stderr or "EACCES" in checked.stderr:
+                        print("Workload trust acceptance filesystem refusal.", flush=True)
+                    raise RuntimeError("protected trust acceptance failed")
+                if json.loads(checked.stdout) != {"passed": True, "mode": mode}:
+                    raise RuntimeError("protected trust acceptance failed")
+            check_trust("registered", 20000)
+            trust_outcomes["workload-api.registered-controller-bundle-verification"] = True
+            check_trust("unregistered", 29999)
+            trust_outcomes["workload-api.unregistered-controller-refusal"] = True
+            run(["docker", "pause", name])
+            try:
+                check_trust("unavailable", 20000)
+            finally:
+                run(["docker", "unpause", name])
+            trust_outcomes["workload-api.unavailable-node-refusal"] = True
             print("Workload assessment acceptance: isolated worker and real scoped persistence.", flush=True)
             worker_check = run(
                 ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
@@ -370,6 +414,15 @@ plugins {
             if verified_worker.get("passed") is not True:
                 raise RuntimeError("worker acceptance failed")
             print(f"Workload assessment passed: {len(verified_worker['outcomes'])} outcomes.", flush=True)
+        if assessment:
+            trust_result = ROOT / ".axiom-runtime/workload-trust/results.json"
+            trust_result.parent.mkdir(parents=True, exist_ok=True)
+            trust_result.write_text(json.dumps({
+                "schemaVersion": 1, "kind": "protected-workload-api-trust", "passed": True,
+                "revision": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+                "dirty": bool(run(["git", "status", "--porcelain"]).stdout),
+                "outcomes": trust_outcomes,
+            }, indent=2) + "\n")
         result_path.write_text(
             json.dumps(
                 {

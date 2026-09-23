@@ -13,6 +13,7 @@
     "lib/*.ts",
     "seed-personas.ts",
     "verify-workload-identity.ts",
+    "verify-workload-trust.ts",
     "verify-workload-assessment.ts",
     "verify-strict-parity.ts",
     "verify-gap-scan-durability.ts",

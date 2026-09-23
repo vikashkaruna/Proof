@@ -27,6 +27,8 @@
     "@axiom/supabase": "workspace:*",
     "@axiom/types": "workspace:*",
     "@google-cloud/kms": "^6.2.0",
+    "@grpc/grpc-js": "1.14.5",
+    "@grpc/proto-loader": "0.8.1",
     "@hono/node-server": "^2.1.1",
     "@supabase/supabase-js": "^2.116.0",
     "hono": "^4.13.7",

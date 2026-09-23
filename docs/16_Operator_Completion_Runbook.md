@@ -1,19 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `c17f428`, CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318) green. Revision 54 adds reviewed registration lifecycle. The selected dedicated Mumbai VM runner still needs deployment and production trust composition; W3/W4 remain open.
+Verified staging checkpoint: `0081948`, CI [35817381642](https://github.com/vikashkaruna/Proof/actions/runs/35817381642) green, with 17 applicable jobs and eight verified artifacts. Revision 54 adds reviewed registration lifecycle; Revision 55 adds protected Workload API signing-bundle delivery. The selected dedicated Mumbai VM runner still needs deployment and production trust composition; W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 54, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 55, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
 
+## Revision 55 — protected signing-bundle delivery
+
+Compose `WorkloadApiJwtTrust` only inside the trusted VM controller, with a reviewed absolute `socketPath` and explicit `trustDomains`. `timeoutMs` defaults to 2500 and is bounded to 100–5000 ms. No environment variable or default public-service startup is introduced in this component. The socket's parent directory and mount must be controlled by the trusted SPIRE node; workloads must not replace the socket, read node state, access Docker or inherit controller/database/cloud credentials. Production node enrollment and the dedicated Mumbai VM deployment are still pending.
+
+Each validation reads the complete local JWT bundle snapshot and independently reloads it after signature verification. Any unavailable/changed/missing/malformed bundle refuses the identity; do not substitute captured acceptance keys or a last-known-good cache. Ten-second snapshot validity bounds local use, not SPIRE server-to-node replication. Investigate issuer/node health before restarting validation after an outage. Tenant registration, task proof and live grants remain separate per-action checks; this adapter grants no authority by itself.
+
+**Verification:** workspace tests/lint/typecheck, acceptance TypeScript and `python3 scripts/test-workload-identity.py --assessment`. Expect **908 BFF tests**, **61 identity / 54 worker / three protected-trust outcomes**. The trust probe uses real SPIRE through a separate controller container; unregistered UID and paused-node checks must fail closed. The test-only Docker target disables the TypeScript loader cache so the filesystem stays read-only. The normal BFF image does not include its probe script. CI adds `workload-trust-acceptance`; collect **nine** exact-merge JSON artifacts before closure. The earlier registration correction is verified green in CI 35817381642. See [review 44](audits/44-protected-workload-trust-review-2026-09-23.md).
+
 ## Revision 54 — reviewed tenant workload registration
 
-**CI follow-up:** initial Revision 54 merge `1e1207d` failed CI [35816732842](https://github.com/vikashkaruna/Proof/actions/runs/35816732842) because the shared strict-parity/container fixture still attempted a direct service-role registration insert. Both failing lanes hit the same correctly enforced permission boundary. The fixture now uses disabled registration followed by audited activation, verifies bound receipts and explicitly proves direct service writes return 403. A separate tenant-A owner preserves the viewer isolation persona. All four local topology parity runs and acceptance TypeScript pass; the corrective exact-merge CI remains the completion gate.
+**CI follow-up:** initial Revision 54 merge `1e1207d` failed CI [35816732842](https://github.com/vikashkaruna/Proof/actions/runs/35816732842) because the shared strict-parity/container fixture still attempted a direct service-role registration insert. Both failing lanes hit the same correctly enforced permission boundary. The fixture now uses disabled registration followed by audited activation, verifies bound receipts and explicitly proves direct service writes return 403. A separate tenant-A owner preserves the viewer isolation persona. The corrective merge `0081948` is verified green in CI 35817381642.
 
 **ENGINEERING delivered:** migration `0048` adds `version`, `lifecycle_receipt` and `updated_at` to `workload_identities`, preserving existing bindings and statuses. Direct service-role INSERT/UPDATE/DELETE is revoked; owner/admin or internal-founder administration uses the service-only `manage_workload_identity` transaction through `WorkloadRegistrationLifecycle.manage`. Supply the authenticated, human-reviewed tenant/actor/correlation/workload IDs, exact agent/SPIFFE binding, expected version and desired status. Never derive the actor or review decision from an untrusted worker or request body without authentication. This administration does not grant client mutation or waive approval/dry-run/rollback.
 
