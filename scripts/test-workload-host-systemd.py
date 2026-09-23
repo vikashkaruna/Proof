@@ -46,6 +46,12 @@ def active(name):
     return control('is-active', '--quiet', name, check=False).returncode == 0
 
 
+def stopped(name):
+    state = control('show', '--property=ActiveState', '--value', name).stdout.strip()
+    pid = control('show', '--property=MainPID', '--value', name).stdout.strip()
+    return state in (b'inactive', b'failed') and pid == b'0'
+
+
 def cli(*args):
     return run(['/usr/local/bin/spire-server', *args, '-socketPath', '/run/spire-server/api.sock'])
 
@@ -88,7 +94,7 @@ def main():
     if any(a.get('local') == IP.split('/')[0] for i in interfaces for a in i.get('addr_info', [])):
         raise ValueError('existing fixture address refused')
     root = Path(tempfile.mkdtemp(prefix='axiom-systemd-', dir='/root'))
-    loop = None; address_added = False; installed = False; child = None; fixture_bin_mode = None
+    loop = None; address_added = False; installed = False; child = None; fixture_directory_modes = {}
     outcomes = {}; identifier = str(uuid.uuid4()); backing = root/'state.img'
     try:
         spire = json.loads((ROOT/'infra/workload/spire-policy.example.json').read_text())
@@ -115,16 +121,15 @@ def main():
         ALIAS.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         host.protected_directory(ALIAS.parent)
         ALIAS.symlink_to(loop)
-        # The hosted runner deliberately ships /usr/local/bin as root:0777.
-        # Prepare this disposable test image, without changing the installer or
-        # tolerating unsafe production ancestry. Restore that directory at exit.
-        bin_directory = Path('/usr/local/bin')
-        meta = bin_directory.lstat()
-        if bin_directory.resolve(strict=True) != bin_directory or meta.st_uid != 0:
-            raise ValueError('fixture executable prefix refused')
-        if meta.st_mode & 0o7777 == 0o777:
-            fixture_bin_mode = (meta.st_ino, 0o777)
-            bin_directory.chmod(0o755)
+        # The hosted runner ships these two root-owned directories as 0777.
+        # Prepare only this disposable image; production checks stay strict.
+        for image_directory in (Path('/usr/local/bin'), Path('/opt')):
+            meta = image_directory.lstat()
+            if image_directory.resolve(strict=True) != image_directory or meta.st_uid != 0:
+                raise ValueError('fixture image directory refused')
+            if meta.st_mode & 0o7777 == 0o777:
+                fixture_directory_modes[image_directory] = (meta.st_ino, 0o777)
+                image_directory.chmod(0o755)
         for destination in destinations:
             for parent in destination.parents:
                 if parent.exists():
@@ -167,7 +172,7 @@ def main():
         outcomes['real-service-namespace-and-state-guard-pass']=True
         # Stop the mounted unit while SPIRE is live: BindsTo must stop its user.
         control('stop', MOUNT)
-        assert not active(SERVICE) and not active(MOUNT)
+        assert stopped(SERVICE) and not active(MOUNT)
         assert not (STATE/'server').exists()
         outcomes['mount-loss-stops-live-issuer']=True
         control('start', SERVICE); assert active(SERVICE) and active(MOUNT)
@@ -177,9 +182,9 @@ def main():
         # Kernel mount disappearance, without asking systemd to stop SPIRE.
         run(['/usr/bin/umount', '--lazy', str(STATE)])
         deadline = time.monotonic()+30
-        while active(SERVICE) and time.monotonic()<deadline:
+        while not stopped(SERVICE) and time.monotonic()<deadline:
             time.sleep(0.25)
-        assert not active(SERVICE) and not active(MOUNT)
+        assert stopped(SERVICE) and not active(MOUNT)
         control('start', SERVICE)
         assert trust() == before_bundle
         assert registry() == before_registry
@@ -225,11 +230,10 @@ def main():
             ALIAS.unlink()
         if loop and backing_matches(loop, backing):
             run(['/usr/sbin/losetup', '--detach', loop])
-        if fixture_bin_mode is not None:
-            inode, mode = fixture_bin_mode
-            if Path('/usr/local/bin').lstat().st_ino != inode:
-                raise ValueError('fixture executable prefix changed')
-            Path('/usr/local/bin').chmod(mode)
+        for image_directory, (inode, mode) in fixture_directory_modes.items():
+            if image_directory.lstat().st_ino != inode:
+                raise ValueError('fixture image directory changed')
+            image_directory.chmod(mode)
         shutil.rmtree(root)
 
 

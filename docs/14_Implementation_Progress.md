@@ -10,7 +10,7 @@ The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptanc
 
 ## Revision 62 — protected SPIRE host delivery and normal restart
 
-**CI fixture correction:** initial native runs found GitHub's `/usr/local/bin` is root-owned but world-writable (0777). The production installer correctly refused it. Only the disposable CI fixture now prepares that known directory as 0755 and restores its original mode on exit; installed-file and parent protection remain unchanged. Failed initial runs are not closure evidence.
+**CI fixture correction:** initial native runs found GitHub's `/usr/local/bin` and `/opt` are root-owned but world-writable (0777). The production installer correctly refused it. Only the disposable CI fixture now prepares those two known directories as 0755 and restores their original modes on exit; installed-file and parent protection remain unchanged. Failed initial runs are not closure evidence.
 
 Revision 61 is **complete and green** at `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173): 17 applicable jobs and ten exact-revision artifacts verified. Fresh upstream review found no intervening implementation.
 
