@@ -3,7 +3,9 @@
 
 Requires Docker, pnpm, curl and Python 3.12+. Only allowlisted outcomes leave this
 process. Synthetic tokens travel in subprocess memory/stdin, never argv/logs/files.
-The container has no network, host PID access, Docker socket or backend credentials.
+The issuer has no network, Docker socket or backend credentials. In assessment
+mode only the trusted node issuer uses host PID visibility for cross-container
+attestation; every job has its own PID namespace and only a read-only API socket.
 """
 
 from __future__ import annotations
@@ -63,6 +65,8 @@ def main() -> None:
     temp = Path(tempfile.mkdtemp(prefix="run-", dir=state))
     name = "axiom-spire-test-" + uuid.uuid4().hex[:12]
     started = False
+    api_volume = "axiom-workload-api-" + uuid.uuid4().hex
+    volume_created = False
     assessment = sys.argv[1:] == ["--assessment"]
     if assessment:
         (ROOT / ".axiom-runtime/workload-assessment/results.json").unlink(missing_ok=True)
@@ -154,8 +158,13 @@ plugins {
         if assessment:
             selected_image = "axiom-assessment-worker:acceptance"
             run(["docker", "build", "-f", "infra/docker/Dockerfile.assessment-worker", "-t", selected_image, "."], timeout=240)
+        node_options = []
+        if assessment:
+            run(["docker", "volume", "create", api_volume])
+            volume_created = True
+            node_options = ["--pid", "host", "--mount", f"type=volume,src={api_volume},dst=/run/workload"]
         run(
-            ["docker", "run", "-d", "--name", name, "--network", "none", "--user", "0", "--entrypoint", "sleep", selected_image, "1200"],
+            ["docker", "run", "-d", "--name", name, "--network", "none", *node_options, "--user", "0", "--entrypoint", "sleep", selected_image, "1200"],
             timeout=180,
         )
         started = True
@@ -341,7 +350,15 @@ plugins {
             print("Workload assessment acceptance: isolated worker and real scoped persistence.", flush=True)
             worker_check = run(
                 ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
-                data=json.dumps({"containerName": name, "jwks": cases[2]["jwks"]}), timeout=300, required=False,
+                data=json.dumps({
+                    "containerName": name, "jwks": cases[2]["jwks"],
+                    "launcher": {
+                        "executable": shutil.which("docker"),
+                        "dockerHost": run(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"]).stdout.strip(),
+                        "image": run(["docker", "image", "inspect", selected_image, "--format", "{{.Id}}"]).stdout.strip(),
+                        "workloadApiVolume": api_volume,
+                    },
+                }), timeout=360, required=False,
             )
             if worker_check.returncode:
                 import re
@@ -374,6 +391,8 @@ plugins {
     finally:
         if started:
             run(["docker", "rm", "-f", name], required=False)
+        if volume_created:
+            run(["docker", "volume", "rm", api_volume], required=False)
         shutil.rmtree(temp)
 
 
