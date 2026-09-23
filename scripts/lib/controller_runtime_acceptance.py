@@ -173,7 +173,9 @@ except Exception as error:
         wait_for(lambda: json.loads(Path('/run/spire-health/status.json').read_text()).get('healthy') is True)
         assert not active(fixture_unit)
         outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
-        control('reset-failed', fixture_unit); (directory/'uncertain-start').write_text('fixture')
+        # A successfully stopped unit may already be unloaded by systemd;
+        # reset-failed is unnecessary here and would refuse an unloaded unit.
+        (directory/'uncertain-start').write_text('fixture')
         control('start', fixture_unit, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
         queued = current(); queued_id = json.loads((queued/'container.json').read_text())['containerId']; ids.add(queued_id)
