@@ -140,7 +140,12 @@ def main():
         wait_for(lambda:time.time_ns()//1000000>=observed+10000)
         assert not healthy() and active(SERVICE)
         outcomes['stopped-observer-metadata-expires-with-live-node']=True
-        control('start',HEALTH);wait_for(healthy)
+        assert control('start',HEALTH,check=False).returncode!=0
+        assert control('show','--property=Result','--value',HEALTH).stdout.strip()==b'start-limit-hit'
+        outcomes['observer-restart-storm-is-rate-limited']=True
+        # Deliberate fault scenarios exhausted the production start budget.
+        # Reset only this disposable fixture before the independent outage test.
+        control('reset-failed',HEALTH);control('start',HEALTH);wait_for(healthy)
         run(['docker','pause',prefix]);wait_for(lambda:health().get('healthy') is False,timeout=45)
         assert active(SERVICE)
         outcomes['issuer-outage-invalidates-health-despite-live-node']=True
@@ -152,7 +157,7 @@ def main():
         control('start',SERVICE);wait_for(healthy)
         assert Path('/run/workload').stat().st_ino==inode
         outcomes['remount-recovers-original-node-and-directory']=True
-        control('stop',SERVICE)
+        control('stop',SERVICE);control('reset-failed',SERVICE)
         keys=STATE/'agent/keys.json';saved=STATE/'agent/keys.fixture';original=keys.read_bytes();keys.rename(saved)
         assert control('start',SERVICE,check=False).returncode!=0
         control('stop',SERVICE);control('reset-failed',SERVICE)
