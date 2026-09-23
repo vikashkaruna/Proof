@@ -22,6 +22,7 @@ import {
   type DispatchGcpKmsPort,
 } from './dispatch-key-wrappers.js';
 import { JwtSvidVerifier, workloadTrustDomain } from './jwt-svid.js';
+import { requireControllerIdentity } from './controller-identity.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
 import { issuerNodeId, IssuerSyncHealth, SyncedWorkloadTrust } from './issuer-sync-health.js';
 import { WorkloadAuthenticator, SupabaseWorkloadRegistrationStore } from './registration.js';
@@ -87,8 +88,11 @@ export async function composeVmAssessmentController(
     // Preflight is read-only. Never publish a key policy or register/activate a
     // workload merely because this process starts. Every tool rechecks trust.
     await verifyAssessmentContainerRuntime(config.launcher);
+    await requireControllerIdentity(
+      { socketPath: config.workloadSocket, trustDomain: config.trustDomain },
+      trust,
+    );
     const revision = await new DispatchPolicyStore(db).currentRevision(policy, tenant);
-    if (!(await trust.load(config.trustDomain))) throw new Error('trust unavailable');
     const wrapper =
       config.keys.provider === 'aws'
         ? new AwsDispatchKeyWrapper(policy, ports.awsKms)

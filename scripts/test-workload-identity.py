@@ -280,7 +280,7 @@ plugins {
             run(prefix + ["entry", "create", "-socketPath", "/run/server/api.sock",
                 "-parentID", "spiffe://local.axiomproof.test/node/acceptance",
                 "-spiffeID", "spiffe://local.axiomproof.test/controller/assessment",
-                "-selector", "unix:uid:20000"])
+                "-selector", "unix:uid:20000", "-jwtSVIDTTL", "300"])
         cases = []
         outcomes: dict[str, bool] = {}
         trust_outcomes: dict[str, bool] = {}
@@ -396,6 +396,9 @@ plugins {
                     raise RuntimeError("protected trust acceptance failed")
             check_trust("registered", 20000)
             trust_outcomes["workload-api.registered-controller-bundle-verification"] = True
+            trust_outcomes["workload-api.exact-controller-role-admission"] = True
+            check_trust("wrong-role", 20003)
+            trust_outcomes["workload-api.registered-worker-bundles-do-not-admit-controller"] = True
             check_trust("unregistered", 29999)
             trust_outcomes["workload-api.unregistered-controller-refusal"] = True
             run(["docker", "pause", name])
