@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 55 — PROTECTED WORKLOAD TRUST** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `c17f428`, green CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 56 — VM CONTROLLER COMPOSITION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `4b67a74`, green CI [35818471736](https://github.com/vikashkaruna/Proof/actions/runs/35818471736); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 56 — dedicated VM assessment controller composition
+
+Revision 55 is **complete and green** at staging `4b67a74`, CI [35818471736](https://github.com/vikashkaruna/Proof/actions/runs/35818471736): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+**Delivered:** a separate, explicit VM controller entrypoint and Docker image target compose protected live SPIRE trust, registration/task checks, scoped assessment tools, persisted tenant key-policy recovery, regional AWS/GCP wrappers, per-job container isolation, independent confirmation and opaque scheduling. Each controller is configured for one tenant and namespace. Foreign runs/reconciliation are refused before metadata lookup, and foreign acknowledgements before RPC. Read-only startup checks require the reviewed immutable worker image, existing Workload API volume, exact durable policy and available protected trust. Startup never publishes policy, enrolls a node, activates registration or claims work.
+
+The protected deployment file is strict, bounded, regular, owner-only and not a symlink. The service requires explicit `--check` or `--serve`, regional backend configuration, direct TLS and a current certificate matching the scheduler audience hostname. Google scheduler subject, email and audience are pinned. The default public BFF is unchanged. Errors expose fixed status text; shutdown stops accepting work and drains with a bounded deadline. Uncertain work requires independent reconciliation, never automatic claim reset or relaunch.
+
+**Validation:** real local integration passes **61 identity / 60 worker / three protected-trust outcomes**, retaining all prior 54 worker outcomes. All **930 BFF tests**, workspace tests/lint/typecheck, acceptance TypeScript and security/control gates pass. Exact-merge CI remains the final gate and is recorded in the saved session. The new real integration starts a trusted UID-attested controller container, retrieves fresh signing bundles through its protected SPIRE socket, launches an isolated worker and persists/independently confirms its result through real Auth/PostgREST. It tests stale-policy refusal before claim, HTTPS identity and tenant refusal, reconstruction without relaunch and tenant-bound scheduling. Cloud KMS and scheduler signing use synthetic provider fixtures; production cloud IAM/KMS is not thereby verified. Existing captured-trust edge-case tests remain alongside the new composed path. Schema remains **0048 / 55 public tables / 49 migrations / 18 concurrency suites / 14 upgrades**; W2 named targets **19/40**. See [review 45](audits/45-vm-controller-composition-review-2026-09-23.md).
+
+**Next:** provisionable Mumbai VM/SPIRE node bootstrap, protected mounts and image admission, issuer health, controller/opaque-scheduler deployment and actual cloud-provider acceptance. No VM was provisioned or cloud apply performed. Then remaining workers/verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph and W4.5/6/7. Preserve W0/W1/W2 remainder, backup-aware key retirement and intentional later-workstream changes. This component is not whole-goal or live-connector completion.
 
 ## Revision 55 — protected Workload API trust source
 

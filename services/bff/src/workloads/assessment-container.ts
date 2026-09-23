@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { AssessmentProcessFactory } from './assessment-channel.js';
 
-const configuration = z
+export const assessmentContainerConfiguration = z
   .object({
     executable: z
       .string()
@@ -30,12 +31,12 @@ const configuration = z
  * socket is mounted into a worker. Image IDs must be reviewed and preloaded.
  */
 export function assessmentContainerFactory(
-  config: z.input<typeof configuration>,
+  config: z.input<typeof assessmentContainerConfiguration>,
 ): AssessmentProcessFactory {
   let args: readonly string[];
   let executable: string;
   try {
-    const value = configuration.parse(config);
+    const value = assessmentContainerConfiguration.parse(config);
     executable = value.executable;
     args = [
       '--host',
@@ -101,4 +102,45 @@ export function assessmentContainerFactory(
       },
     });
   };
+}
+
+/** Read-only startup gate. This proves availability of the reviewed immutable
+ * image and existing socket volume, not image admission or node enrollment. */
+export async function verifyAssessmentContainerRuntime(
+  config: z.input<typeof assessmentContainerConfiguration>,
+): Promise<void> {
+  try {
+    const value = assessmentContainerConfiguration.parse(config);
+    const inspect = promisify(execFile);
+    const options = {
+      timeout: 5000,
+      maxBuffer: 4096,
+      env: {
+        PATH: '/usr/local/bin:/usr/bin:/bin',
+        DOCKER_CONFIG: '/nonexistent/axiom-docker-config',
+      },
+    };
+    const image = await inspect(
+      value.executable,
+      ['--host', value.dockerHost, 'image', 'inspect', '--format', '{{.Id}}', value.image],
+      options,
+    );
+    if (image.stdout.trim() !== value.image) throw new Error();
+    const volume = await inspect(
+      value.executable,
+      [
+        '--host',
+        value.dockerHost,
+        'volume',
+        'inspect',
+        '--format',
+        '{{.Name}}',
+        value.workloadApiVolume,
+      ],
+      options,
+    );
+    if (volume.stdout.trim() !== value.workloadApiVolume) throw new Error();
+  } catch {
+    throw new Error('Assessment container runtime unavailable');
+  }
 }

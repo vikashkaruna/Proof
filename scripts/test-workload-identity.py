@@ -162,6 +162,9 @@ plugins {
             trust_image = "axiom-workload-trust:acceptance"
             run(["docker", "build", "--target", "workload-trust-acceptance", "-f", "infra/docker/Dockerfile.bff", "-t", trust_image, "."], timeout=300)
             trust_image_id = run(["docker", "image", "inspect", trust_image, "--format", "{{.Id}}"]).stdout.strip()
+            controller_image = "axiom-vm-controller:acceptance"
+            run(["docker", "build", "--target", "vm-controller-acceptance", "-f", "infra/docker/Dockerfile.bff", "-t", controller_image, "."], timeout=300)
+            controller_image_id = run(["docker", "image", "inspect", controller_image, "--format", "{{.Id}}"]).stdout.strip()
         node_options = []
         if assessment:
             run(["docker", "volume", "create", api_volume])
@@ -395,7 +398,7 @@ plugins {
             worker_check = run(
                 ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"],
                 data=json.dumps({
-                    "containerName": name, "jwks": cases[2]["jwks"],
+                    "containerName": name, "jwks": cases[2]["jwks"], "controllerImage": controller_image_id,
                     "launcher": {
                         "executable": shutil.which("docker"),
                         "dockerHost": run(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"]).stdout.strip(),

@@ -14,6 +14,7 @@
     "seed-personas.ts",
     "verify-workload-identity.ts",
     "verify-workload-trust.ts",
+    "verify-vm-controller.ts",
     "verify-workload-assessment.ts",
     "verify-strict-parity.ts",
     "verify-gap-scan-durability.ts",

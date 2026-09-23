@@ -57,6 +57,10 @@ async function main() {
     .object({
       containerName: z.string().regex(/^axiom-spire-test-[a-f0-9]{12}$/),
       jwks: z.unknown(),
+      controllerImage: z
+        .string()
+        .regex(/^sha256:[a-f0-9]{64}$/)
+        .length(71),
       launcher: z
         .object({
           executable: z.string(),
@@ -895,6 +899,221 @@ except Exception as error:
     trustCurrent = false;
   });
   trustCurrent = true;
+
+  phase = 'vm-controller-integration';
+  const vmDirectory = await mkdtemp(join(await realpath('.axiom-runtime'), 'vm-controller-'));
+  const vmContainer = `axiom-vm-controller-${randomUUID()}`;
+  try {
+    const engagementId = randomUUID(),
+      jobId = randomUUID(),
+      correlationId = randomUUID();
+    check(
+      await db.from('engagements').insert({
+        id: engagementId,
+        tenant_id: tenantId,
+        library_version: version,
+        title: 'Synthetic composed VM controller',
+      }),
+    );
+    const wire = JSON.stringify({
+      tenant_id: tenantId,
+      engagement_id: engagementId,
+      library_version: version,
+      answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
+    });
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
+    await dispatcher.enqueue(
+      {
+        jobId,
+        tenantId,
+        actorId,
+        workloadId,
+        estateId: null,
+        engagementId,
+        correlationId,
+        inputHash: createHash('sha256').update(wire).digest('hex'),
+      },
+      wire,
+    );
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        join(vmDirectory, 'key.pem'),
+        '-out',
+        join(vmDirectory, 'cert.pem'),
+        '-days',
+        '1',
+        '-subj',
+        '/CN=localhost',
+        '-addext',
+        'subjectAltName=IP:127.0.0.1,DNS:localhost',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+    );
+    // Bind sources are resolved by the Linux daemon, not the macOS client.
+    // Docker Desktop and CI expose their daemon socket at this fixed path.
+    const socketMount = 'type=bind,src=/var/run/docker.sock,dst=/run/docker.sock';
+    phase = 'vm-controller-daemon-group';
+    const group = execFileSync(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--network',
+        'none',
+        '--mount',
+        socketMount,
+        '--entrypoint',
+        'stat',
+        input.controllerImage,
+        '-c',
+        '%g',
+        '/run/docker.sock',
+      ],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+    ).trim();
+    assert.match(group, /^[0-9]{1,10}$/);
+    const ring = keyPolicy.snapshot().get(tenantId as TenantId)!;
+    phase = 'vm-controller-probe';
+    const child = spawn(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--name',
+        vmContainer,
+        '--pull',
+        'never',
+        '-i',
+        '--read-only',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges:true',
+        '--pids-limit',
+        '128',
+        '--memory',
+        '512m',
+        '--memory-swap',
+        '512m',
+        '--cpus',
+        '2',
+        '--log-driver',
+        'none',
+        '--user',
+        `20000:${group}`,
+        '--add-host',
+        'host.docker.internal:host-gateway',
+        '--mount',
+        socketMount,
+        '--mount',
+        `type=volume,src=${input.launcher.workloadApiVolume},dst=/run/workload,readonly`,
+        '--entrypoint',
+        'node',
+        input.controllerImage,
+        '--import',
+        '/app/node_modules/tsx/dist/loader.mjs',
+        '/app/scripts/verify-vm-controller.ts',
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (done, reject) => {
+        let stdout = '',
+          stderr = '';
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error('VM probe deadline'));
+        }, 110000);
+        child.once('error', () => {
+          clearTimeout(timer);
+          reject(new Error('VM probe start refused'));
+        });
+        child.stdout.on('data', (part) => {
+          stdout += String(part);
+          if (stdout.length > 16384) child.kill('SIGKILL');
+        });
+        child.stderr.on('data', (part) => {
+          stderr += String(part);
+          if (stderr.length > 16384) child.kill('SIGKILL');
+        });
+        child.stdin.on('error', () => {});
+        child.once('close', (code) => {
+          clearTimeout(timer);
+          done({ code, stdout, stderr });
+        });
+        child.stdin.end(
+          JSON.stringify({
+            config: {
+              schemaVersion: 1,
+              tenantId,
+              trustDomain: 'local.axiomproof.test',
+              workloadSocket: '/run/workload/api.sock',
+              namespace: 'vm-controller-fixture',
+              launcher: {
+                ...input.launcher,
+                executable: '/usr/bin/docker',
+                dockerHost: 'unix:///run/docker.sock',
+              },
+              keys: { provider: 'aws', ...ring },
+              scheduler: {
+                audience: 'https://localhost',
+                subject: '123456789',
+                email: 'scheduler@fixture.iam.gserviceaccount.com',
+              },
+            },
+            serviceKey: status.SERVICE_ROLE_KEY!,
+            jobId,
+            foreignTenant: scheduleTenants.unix,
+            fixtureKeys: Object.fromEntries(
+              [ring.primary, ...ring.retiring].map((keyRef) => [
+                keyRef,
+                wrappingKeys.get(keyRef)!.toString('base64'),
+              ]),
+            ),
+            tls: {
+              key: readFileSync(join(vmDirectory, 'key.pem'), 'utf8'),
+              cert: readFileSync(join(vmDirectory, 'cert.pem'), 'utf8'),
+            },
+          }),
+        );
+      },
+    );
+    if (result.code !== 0) {
+      const label =
+        /^VM controller acceptance failed at ([a-z-]{1,40})\. Private output withheld\.\n$/.exec(
+          result.stderr,
+        );
+      if (label) phase = `vm-controller-${label[1]}`;
+      throw new Error('composed controller probe refused');
+    }
+    const verified = z
+      .object({ passed: z.literal(true), outcomes: z.record(z.string(), z.literal(true)) })
+      .strict()
+      .parse(JSON.parse(result.stdout));
+    assert.equal(Object.keys(verified.outcomes).length, 6);
+    Object.assign(outcomes, verified.outcomes);
+  } finally {
+    const remaining = execFileSync(
+      'docker',
+      ['container', 'ls', '--all', '--filter', `name=^/${vmContainer}$`, '--format', '{{.Names}}'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+    ).trim();
+    if (remaining) {
+      assert.equal(remaining, vmContainer);
+      execFileSync('docker', ['rm', '-f', vmContainer], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10000,
+      });
+    }
+    await rm(vmDirectory, { recursive: true, force: true });
+  }
 
   phase = 'controller-reconciliation';
   for (const lost of [false, true]) {

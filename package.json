@@ -57,6 +57,7 @@
     "@supabase/supabase-js": "^2.116.0",
     "@types/node": "^26.5.1",
     "husky": "^9.1.6",
+    "jose": "6.2.12",
     "prettier": "^3.3.3",
     "tsx": "^4.23.13",
     "turbo": "^2.10.12",

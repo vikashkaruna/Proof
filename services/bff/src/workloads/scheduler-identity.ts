@@ -24,7 +24,7 @@ export function controllerOrigin(value: string): string {
     throw new Error('Controller origin refused');
   return url.origin;
 }
-const configuration = z
+export const schedulerIdentityConfiguration = z
   .object({
     audience: z.string().max(2048).transform(controllerOrigin),
     subject: z.string().regex(/^[0-9]{1,32}$/),
@@ -75,12 +75,12 @@ export function googleSchedulerKeys(): JWTVerifyGetKey {
  * service-account subject AND email so account recreation cannot inherit access.
  * Static policy changes require a controlled controller rollout. */
 export class GoogleSchedulerIdentity implements SchedulerIdentity {
-  private readonly config: z.infer<typeof configuration>;
+  private readonly config: z.infer<typeof schedulerIdentityConfiguration>;
   constructor(
     options: unknown,
     private readonly keys: JWTVerifyGetKey = googleSchedulerKeys(),
   ) {
-    this.config = configuration.parse(options);
+    this.config = schedulerIdentityConfiguration.parse(options);
   }
   async authorize(authorization: string | undefined) {
     try {

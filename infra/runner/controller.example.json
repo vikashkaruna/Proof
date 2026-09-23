@@ -1,0 +1,30 @@
+{
+  "controller": {
+    "schemaVersion": 1,
+    "tenantId": "11111111-1111-4111-8111-111111111111",
+    "trustDomain": "runner.example.invalid",
+    "workloadSocket": "/run/workload/api.sock",
+    "namespace": "axiom-preprod",
+    "launcher": {
+      "executable": "/usr/bin/docker",
+      "dockerHost": "unix:///run/docker.sock",
+      "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "workloadApiVolume": "axiom-workload-api-reviewed-node"
+    },
+    "keys": {
+      "provider": "gcp",
+      "primary": "projects/example-project/locations/asia-south1/keyRings/assessment/cryptoKeys/tenant-example",
+      "retiring": []
+    },
+    "scheduler": {
+      "audience": "https://controller.example.invalid",
+      "subject": "123456789012345678901",
+      "email": "assessment-scheduler@example-project.iam.gserviceaccount.com"
+    }
+  },
+  "listen": { "host": "127.0.0.1", "port": 8443 },
+  "tls": {
+    "keyFile": "/run/axiom-controller/tls.key",
+    "certFile": "/run/axiom-controller/tls.crt"
+  }
+}
