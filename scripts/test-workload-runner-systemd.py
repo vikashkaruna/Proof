@@ -181,7 +181,7 @@ def main():
         def controller_bundle(config):
             data={'service.json':json.dumps(config).encode(),'backend.key':b'synthetic-native-private-not-real-00000000','tls.key':b'synthetic-native-tls-not-real','tls.crt':b'synthetic-native-certificate-not-real'}
             review={'schemaVersion':1,'tenantId':tenant,'spireManifestSha256':manifest_sha,'controllerImage':image_id,'files':{k:hashlib.sha256(v).hexdigest() for k,v in data.items()}}
-            raw=(json.dumps(review,sort_keys=True,indent=2)+'\n').encode()
+            raw=(json.dumps(review,sort_keys=True,separators=(',', ':'))+'\n').encode()
             for key,value in {'manifest.json':raw,**data}.items():(private/key).write_bytes(value);(private/key).chmod(0o600)
             return hashlib.sha256(raw).hexdigest()
         file_sha=controller_bundle(service_config)
