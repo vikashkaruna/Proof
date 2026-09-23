@@ -40,10 +40,10 @@ def layout(role: str) -> dict[str, tuple[Path, int, int]]:
         'state.mount': (Path('/etc/systemd/system/var-lib-spire.mount'), 0o644, 16384),
         'spire.service': (Path('/etc/systemd/system') / f'axiom-spire-{role}.service', 0o644, 16384),
     }
-    if role == 'issuer':
+    if role in ('issuer', 'runner'):
         result.update({
             'spire_enrollment.py': (PREFIX / 'spire_enrollment.py', 0o600, 65536),
-            'enroll.service': (Path('/etc/systemd/system/axiom-spire-enroll-issuer.service'), 0o644, 16384),
+            'enroll.service': (Path('/etc/systemd/system') / f'axiom-spire-enroll-{role}.service', 0o644, 16384),
         })
     if role == 'runner':
         result.update({

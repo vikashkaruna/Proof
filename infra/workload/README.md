@@ -29,11 +29,11 @@ Docker attestation can emit container environment values as selectors. Use Revis
 
 The real local test validates both production configurations with checksum-pinned SPIRE, then substitutes local join-token attestation and a local parent alias **only in the fixture**. It runs issuer and node in separate containers with separate persistent volumes. It checks image/UID/parent refusals, issuer and node recreation without losing registration/trust, recovery without a join token, refusal after node state loss, and separated host mounts. There are no public listeners, application credentials or client mutations. The fixture's Alpine probe images test admission policy; they do not prove the complete production controller/worker deployment with Docker attestation.
 
-Revision 60 adds `spire_health.py`, a root-only observer of the fixed SPIRE admin `Debug.GetInfo` method. Its explicit `--once <expected-node-spiffe-id>` and `--watch <expected-node-spiffe-id>` modes publish only minimal root-owned metadata at `/run/spire-health/status.json`; watch observes every two seconds after each bounded query. Mount the directory read-only into the controller, preserving atomic replacements, and never expose the node admin socket. The metadata file is root-owned `0644` under a root-owned non-writable `0755` directory; backend credentials remain owner-only. The observer is implemented but host installation/supervision is still pending.
+Revision 60 adds `spire_health.py`, a root-only observer of the fixed SPIRE admin `Debug.GetInfo` method. Its explicit `--once <expected-node-spiffe-id>` and `--watch <expected-node-spiffe-id>` modes publish only minimal root-owned metadata at `/run/spire-health/status.json`; watch observes every two seconds after each bounded query. Mount the directory read-only into the controller, preserving atomic replacements, and never expose the node admin socket. The metadata file is root-owned `0644` under a root-owned non-writable `0755` directory; backend credentials remain owner-only. Revision 62 installs and supervises this observer; Revision 64 adds the native runner lifecycle gate described below.
 
 The dedicated controller requires `issuerNodeId` in its protected configuration and rejects observations older than ten seconds, upstream sync older than thirty seconds, expired node certificates, foreign nodes, invalid timestamps and unsafe files. Fresh metadata cannot refresh stale upstream state. Startup, claim, post-claim launch and scoped identity verification use the gate; historical confirmation remains available. The real test now has 21 outcomes, including issuer/publisher/node outages and recovery, while preserving the earlier demonstration that the raw Workload API can remain cached. An outage leaves uncertain jobs in their existing conservative review/reconciliation flow; it does not permit claim resets or automatic relaunches. See [Doc 16](../../docs/16_Operator_Completion_Runbook.md) for the operating contract.
 
-Still required: persistent mount/initialization guards, supervised host installation, verified CA delivery, scoped IAM/KMS, controller TLS/DNS and production entrypoint startup, effective GCP attestation/firewall acceptance, controlled enrollment/image replacement/revocation, Mumbai-only backup/restore, and a dedicated opaque scheduler. Existing application workload registration/task authorization remains independently required. No cloud resources were provisioned for this milestone.
+Current remainder after Revisions 61–64: host socket/container delivery, scoped IAM/KMS, controller TLS/DNS and production entrypoint startup, effective GCP attestation/firewall acceptance, controlled enrollment/image replacement/revocation, Mumbai-only backup/restore, and a dedicated opaque scheduler. Existing application workload registration/task authorization remains independently required. No cloud resources were provisioned for this milestone.
 
 Primary references: [SPIRE GCP IIT](https://github.com/spiffe/spire/blob/v1.15.3/doc/plugin_server_nodeattestor_gcp_iit.md), [Docker selectors](https://github.com/spiffe/spire/blob/v1.15.3/doc/plugin_agent_workloadattestor_docker.md), [agent configuration](https://github.com/spiffe/spire/blob/v1.15.3/doc/spire_agent.md), [server configuration](https://github.com/spiffe/spire/blob/v1.15.3/doc/spire_server.md).
 
@@ -43,7 +43,7 @@ Primary references: [SPIRE GCP IIT](https://github.com/spiffe/spire/blob/v1.15.3
 
 `--empty <role>` verifies a blank bound disk and changes nothing. `--ready <role>` requires initialized private keys and issuer registry or node recovery data. Both bind the fixed GCP device alias, actual superblock UUID and dedicated whole ext4 mount (`rw,nosuid,nodev,noexec`), with canonical/root-protected ancestry. Ready refuses fresh/missing state instead of reenrolling. The marker binds reviewed configuration; it does not authenticate cloud instance identity, prove backup freshness or validate cryptographic keys. SPIRE and the issuer-sync gate still do their independent checks.
 
-See [Doc 16](../../docs/16_Operator_Completion_Runbook.md) for modes, paths, permissions and refusal handling. The guard is not installed or supervised by this revision. Pinned installation, explicit first enrollment, mount-loss stop behavior and real GCP block-device acceptance remain pending. Local acceptance now has 24 outcomes; its new file checks use actual SPIRE state read-only, while mount/superblock cases are controlled unit fixtures. No host disk was formatted or cloud resource applied.
+See [Doc 16](../../docs/16_Operator_Completion_Runbook.md) for modes, paths, permissions and refusal handling. This historical Revision 61 checkpoint is extended by protected installation and explicit enrollment below. Real GCP block-device acceptance remains pending. Local acceptance now has 24 outcomes; its new file checks use actual SPIRE state read-only, while mount/superblock cases are controlled unit fixtures. No host disk was formatted or cloud resource applied.
 
 ## Protected host delivery (Revision 62)
 
@@ -63,7 +63,7 @@ not an upgrade mechanism. No service command, disk change or enrollment occurs.
 The prepared systemd units check installed integrity and `spire_state.py --ready`
 before launch, bind SPIRE to the UUID mount, and keep the health observer tied to
 the runner. Missing keys or markers cannot trigger initialization. First
-enrollment and marker installation remain explicitly separate, unfinished work.
+enrollment and marker installation are separate reviewed commands implemented below.
 See Doc 16 for delivery steps and outstanding activation gates. Docker verifies
 both roles; the dedicated native Ubuntu CI fixture exercises actual issuer
 startup/mount-loss/recovery. It is restricted to fresh GitHub-hosted runners and
@@ -90,7 +90,13 @@ An interrupted attempt stays unmarked for explicit recovery. Request, receipt
 and approval files live under `/etc/axiom/spire`; the runtime permit and lock
 stay under `/run`. No environment parameters are added. These are root
 administrative records, not application mutation-approval tokens or a signed
-human identity assertion. Runner enrollment and full node/controller activation
-remain next. See Doc 16 for exact operator steps and boundaries.
+human identity assertion. Runner enrollment is implemented below; full controller
+activation remains pending. See Doc 16 for exact operator steps and boundaries.
 
 Initialization also exports root-protected public `initialization-bundle.json` and `initialization-ca.pem` under `/etc/axiom/spire`. Review these while the issuer remains stopped. Their hashes are bound to the receipt and rechecked before sealing; no private key material is exported.
+
+## Reviewed runner first enrollment
+
+The same protected CLI accepts `--initialize runner MANIFEST_SHA256` and, after separate receipt review, `--seal runner RECEIPT_SHA256`. The manifest binds the approved bootstrap CA, GCP node and disk. Initialization requires a stopped observer and disabled/stopped normal runner, checks the exact live node and recent issuer sync, then stops and fingerprints its key/recovery state. Publication refuses expired node evidence and changed state/trust. The bounded static initial unit omits observer startup; ordinary restart remains ready-only and never reenrolls.
+
+`scripts/test-workload-runner-systemd.py --isolated-ci` is restricted to a fresh GitHub-hosted Ubuntu VM. It formats only its new backing-file-verified loop device. Its separately hashed test bundle replaces GCP attestation and the exact generated join-token node-format predicate solely for this fixture; production has no such switch. The gate covers native runner/observer lifecycle, not GCP identity or cloud activation.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit issuer initialization and separate receipt-bound marker publication.
+"""Explicit issuer/runner initialization and separate receipt-bound marker publication.
 
 Root-reviewed host administration, not application agent approval. Never repairs,
 formats, mounts, reenrolls, enables services or overwrites earlier decisions.
@@ -130,19 +130,19 @@ def control(*args: str) -> bytes:
 def idle(unit: str) -> None:
     properties = ('ActiveState','MainPID','Job','UnitFileState','FragmentPath','DropInPaths','NeedDaemonReload','Transient')
     fields = dict(line.split('=', 1) for line in control('show', *('--property='+key for key in properties), unit).decode('ascii').splitlines())
-    if set(fields) != set(properties) or fields['ActiveState'] not in ('inactive','failed') or fields['MainPID'] != '0' or fields['Job'] not in ('','0') or fields['UnitFileState'] != ('disabled' if unit == NORMAL else 'static'):
+    if set(fields) != set(properties) or fields['ActiveState'] not in ('inactive','failed') or fields['MainPID'] != '0' or fields['Job'] not in ('','0') or fields['UnitFileState'] != ('disabled' if unit in (NORMAL, 'axiom-spire-runner.service') else 'static'):
         raise ValueError('running queued or enabled service refused')
     if fields['FragmentPath'] != '/etc/systemd/system/'+unit or fields['DropInPaths'] or fields['NeedDaemonReload'] != 'no' or fields['Transient'] != 'no':
         raise ValueError('loaded service configuration refused')
 
 
-def installed(expected: str) -> dict:
+def installed(expected: str, role: str = 'issuer') -> dict:
     sha(expected)
-    host.installed('issuer')
+    host.installed(role)
     if digest(host.read_file(host.PREFIX/'manifest.json', 16384, 0o600)) != expected:
         raise ValueError('installation review refused')
     value = state.policy(load(state.CONFIG, 4096))
-    if value['role'] != 'issuer':
+    if value['role'] != role:
         raise ValueError('enrollment role refused')
     return value
 
@@ -160,7 +160,7 @@ def process_start(pid: int) -> str:
     return parts[19]
 
 
-def permit() -> None:
+def permit(role: str = 'issuer') -> None:
     value = load(PERMIT)
     if set(value) != {'schemaVersion','requestSha256','manifestSha256','pid','processStart','createdAtMs','expiresAtMs'} or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
         raise ValueError('permit refused')
@@ -174,7 +174,7 @@ def permit() -> None:
     request = json.loads(request_raw, object_pairs_hook=host.unique)
     if digest(request_raw) != sha(value['requestSha256']) or request.get('manifestSha256') != value['manifestSha256']:
         raise ValueError('permit request changed')
-    if installed(value['manifestSha256']) != request.get('binding'):
+    if installed(value['manifestSha256'], role) != request.get('binding'):
         raise ValueError('permit binding changed')
     # Unit starts only while the explicit CLI still owns its exclusive lock.
     with contextlib.ExitStack() as stack:
@@ -233,53 +233,92 @@ def trust() -> tuple[dict, bytes, bytes]:
     return summary, encode(normalized(value)), bootstrap(value)
 
 
-def fingerprint() -> dict:
-    state.check('--unsealed','issuer')
-    data = state.STATE/'server'
+def fingerprint(role: str = 'issuer') -> dict:
+    state.check('--unsealed',role)
+    data = state.STATE/('server' if role == 'issuer' else 'agent')
+    storage = 'db.sqlite3' if role == 'issuer' else 'agent-data.json'
     # A stopped, fresh SQLite store must have no uncheckpointed side files.
-    if {p.name for p in data.iterdir()} != {'keys.json','db.sqlite3'}:
+    if {p.name for p in data.iterdir()} != {'keys.json',storage}:
         raise ValueError('initial state inventory refused')
     result = {'keysSha256':digest(state.private_file(data/'keys.json', 1024*1024)),
-              'registrySha256':digest(state.private_file(data/'db.sqlite3', 64*1024*1024))}
-    state.check('--unsealed','issuer')
+              ('registrySha256' if role == 'issuer' else 'nodeStateSha256'):digest(state.private_file(data/storage, (64 if role == 'issuer' else 1)*1024*1024))}
+    state.check('--unsealed',role)
     return result
 
 
-def initialize(expected: str) -> str:
-    binding = installed(expected)
-    idle(NORMAL); idle(INITIAL)
+def services(role: str) -> tuple[str, str]:
+    if role not in ('issuer', 'runner'):
+        raise ValueError('enrollment role refused')
+    return f'axiom-spire-{role}.service', f'axiom-spire-enroll-{role}.service'
+
+
+def quiescent(role: str) -> None:
+    for unit in services(role):
+        idle(unit)
+    if role == 'runner':
+        idle('axiom-spire-health.service')
+
+
+def node_observation(binding: dict) -> dict:
+    # Import only the fixed protected sibling, checked by host.installed.
+    import spire_health
+    observed = spire_health.snapshot(spire_health.query(), binding['nodeId'], time.time_ns()//1000000)
+    return {**observed, 'bootstrapCaSha256':digest(host.read_file(DIRECTORY/'bootstrap.pem', 65536, 0o600))}
+
+
+def initialize(expected: str, role: str = 'issuer') -> str:
+    _, initial = services(role)
+    binding = installed(expected, role)
+    quiescent(role)
     for path in (REQUEST, RECEIPT, APPROVAL, PERMIT, BUNDLE, CA):
         absent(path)
-    state.check('--empty','issuer')
+    state.check('--empty',role)
     now = time.time_ns()//1000000
-    request = {'schemaVersion':1, 'operationId':str(uuid.uuid4()), 'action':'initialize-issuer', 'manifestSha256':expected, 'binding':binding, 'requestedAtMs':now}
+    request = {'schemaVersion':1, 'operationId':str(uuid.uuid4()), 'action':'initialize-'+role, 'manifestSha256':expected, 'binding':binding, 'requestedAtMs':now}
     request_raw = encode(request)
     # The reviewed request is durable BEFORE starting the mutating process.
     create(REQUEST, request_raw)
     authorization = {'schemaVersion':1, 'requestSha256':digest(request_raw), 'manifestSha256':expected, 'pid':os.getpid(), 'processStart':process_start(os.getpid()), 'createdAtMs':now, 'expiresAtMs':now+60000}
     create(PERMIT, encode(authorization))
     try:
-        control('start', INITIAL)
-        observation, public_bundle, ca = trust()
-        if (observation, public_bundle, ca) != trust():
-            raise ValueError('initial trust changed during observation')
+        control('start', initial)
+        if role == 'issuer':
+            observation, public_bundle, ca = trust()
+            if (observation, public_bundle, ca) != trust():
+                raise ValueError('initial trust changed during observation')
+        else:
+            observation = node_observation(binding)
+            second = node_observation(binding)
+            if second['syncAtMs'] < observation['syncAtMs'] or second['bootstrapCaSha256'] != observation['bootstrapCaSha256']:
+                raise ValueError('initial node observation changed')
+            observation = second
     finally:
         try:
-            control('stop', INITIAL)
-            idle(INITIAL)
+            control('stop', initial)
+            idle(initial)
         finally:
             PERMIT.unlink(missing_ok=True)
-    idle(NORMAL)
-    if installed(expected) != binding:
+    quiescent(role)
+    if installed(expected, role) != binding:
         raise ValueError('initial binding changed')
     evidence = {'schemaVersion':1, 'requestSha256':digest(request_raw), 'manifestSha256':expected,
-                'binding':binding, 'trust':observation, 'state':fingerprint(), 'completedAtMs':time.time_ns()//1000000}
-    create(BUNDLE, public_bundle); create(CA, ca)
+                'binding':binding, 'trust':observation, 'state':fingerprint(role), 'completedAtMs':time.time_ns()//1000000}
+    if role == 'issuer':
+        create(BUNDLE, public_bundle); create(CA, ca)
     raw = encode(evidence); create(RECEIPT, raw)
     return digest(raw)
 
 
-def seal(expected_receipt: str) -> None:
+def reviewed_node(observation: object, binding: dict) -> None:
+    now = time.time_ns()//1000000
+    if not isinstance(observation, dict) or observation.get('nodeId') != binding['nodeId'] or observation.get('healthy') is not True or type(observation.get('certificateExpiresAtMs')) is not int or observation['certificateExpiresAtMs'] <= now:
+        raise ValueError('reviewed node identity expired or changed')
+    if digest(host.read_file(DIRECTORY/'bootstrap.pem', 65536, 0o600)) != observation.get('bootstrapCaSha256'):
+        raise ValueError('reviewed node bootstrap changed')
+
+
+def seal(expected_receipt: str, role: str = 'issuer') -> None:
+    services(role)
     sha(expected_receipt)
     raw = host.read_file(RECEIPT, 16384, 0o600)
     if digest(raw) != expected_receipt:
@@ -287,28 +326,33 @@ def seal(expected_receipt: str) -> None:
     value = json.loads(raw, object_pairs_hook=host.unique)
     if not isinstance(value, dict) or set(value) != {'schemaVersion','requestSha256','manifestSha256','binding','trust','state','completedAtMs'} or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
         raise ValueError('receipt refused')
-    binding = installed(value['manifestSha256'])
+    binding = installed(value['manifestSha256'], role)
     request = host.read_file(REQUEST, 16384, 0o600)
     requested = json.loads(request, object_pairs_hook=host.unique)
     if digest(request) != sha(value['requestSha256']) or requested.get('manifestSha256') != value['manifestSha256'] or requested.get('binding') != binding or value['binding'] != binding:
         raise ValueError('receipt binding changed')
-    public = host.read_file(BUNDLE, 65536, 0o600)
-    ca = host.read_file(CA, 65536, 0o600)
-    if not isinstance(value['trust'], dict) or digest(public) != value['trust'].get('bundleSha256') or digest(ca) != value['trust'].get('bootstrapCaSha256'):
-        raise ValueError('reviewed public trust changed')
-    idle(NORMAL); idle(INITIAL)
+    if role == 'issuer':
+        public = host.read_file(BUNDLE, 65536, 0o600)
+        ca = host.read_file(CA, 65536, 0o600)
+        if not isinstance(value['trust'], dict) or digest(public) != value['trust'].get('bundleSha256') or digest(ca) != value['trust'].get('bootstrapCaSha256'):
+            raise ValueError('reviewed public trust changed')
+    else:
+        reviewed_node(value['trust'], binding)
+    quiescent(role)
     absent(PERMIT); absent(APPROVAL); absent(state.STATE/'.axiom-state.json')
-    if fingerprint() != value['state']:
+    if fingerprint(role) != value['state']:
         raise ValueError('stopped state changed after review')
     # Persist the separate review before publishing the marker. Partial writes
     # stay fail-closed for explicit recovery; no retry overwrites prior records.
-    approval = {'schemaVersion':1, 'action':'seal-issuer-initialization', 'receiptSha256':expected_receipt, 'manifestSha256':value['manifestSha256'], 'binding':binding, 'approvedAtMs':time.time_ns()//1000000}
+    approval = {'schemaVersion':1, 'action':'seal-'+role+'-initialization', 'receiptSha256':expected_receipt, 'manifestSha256':value['manifestSha256'], 'binding':binding, 'approvedAtMs':time.time_ns()//1000000}
     create(APPROVAL, encode(approval))
-    if installed(value['manifestSha256']) != binding or fingerprint() != value['state']:
+    if installed(value['manifestSha256'], role) != binding or fingerprint(role) != value['state']:
         raise ValueError('state changed before publication')
-    idle(NORMAL); idle(INITIAL)
+    quiescent(role)
+    if role == 'runner':
+        reviewed_node(value['trust'], binding)
     create(state.STATE/'.axiom-state.json', encode(binding))
-    state.check('--ready','issuer')
+    state.check('--ready',role)
 
 
 def main() -> None:
@@ -316,16 +360,16 @@ def main() -> None:
         raise ValueError('root Linux enrollment required')
     os.umask(0o077)
     args = sys.argv[1:]
-    if args == ['--permit','issuer']:
-        permit(); return
-    if len(args) != 3 or args[1] != 'issuer' or args[0] not in ('--initialize','--seal'):
+    if len(args) == 2 and args[0] == '--permit' and args[1] in ('issuer', 'runner'):
+        permit(args[1]); return
+    if len(args) != 3 or args[1] not in ('issuer', 'runner') or args[0] not in ('--initialize','--seal'):
         raise ValueError('enrollment invocation refused')
     with exclusive():
         if args[0] == '--initialize':
-            result = initialize(args[2])
-            print('Issuer stopped with unmarked state. Review receipt SHA256 '+result+' before separate marker publication.')
+            result = initialize(args[2], args[1])
+            print('SPIRE stopped with unmarked state. Review receipt SHA256 '+result+' before separate marker publication.')
         else:
-            seal(args[2]); print('Reviewed issuer marker published. Normal services remain disabled and stopped.')
+            seal(args[2], args[1]); print('Reviewed SPIRE marker published. Normal services remain disabled and stopped.')
 
 
 if __name__ == '__main__':

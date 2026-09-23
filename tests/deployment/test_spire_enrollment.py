@@ -182,4 +182,92 @@ class PrimitiveTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(),b'first');self.assertEqual(path.stat().st_mode & 0o777,0o600)
 
 
+
+class RunnerEnrollmentTests(unittest.TestCase):
+    setUp = EnrollmentTests.setUp
+
+    def control(self, *args):
+        if args == ('start', 'axiom-spire-enroll-runner.service'):
+            self.assertEqual(enroll.load(enroll.REQUEST)['action'], 'initialize-runner')
+            with patch.object(enroll,'exclusive',side_effect=BlockingIOError):
+                enroll.permit('runner')
+        return b''
+
+    @contextlib.contextmanager
+    def runner(self):
+        binding={**BINDING,'role':'runner','nodeId':'spiffe://test.axiomproof.test/spire/agent/gcp_iit/axiom-test/123'}
+        ca=self.base/'bootstrap.pem';enroll.create(ca,BOOTSTRAP)
+        observed={'schemaVersion':1,'healthy':True,'nodeId':binding['nodeId'],'observedAtMs':time.time_ns()//1000000,'syncAtMs':time.time_ns()//1000000,'certificateExpiresAtMs':time.time_ns()//1000000+60000,'bootstrapCaSha256':enroll.digest(BOOTSTRAP)}
+        with patch.object(enroll,'DIRECTORY',self.base),patch.object(enroll,'installed',return_value=binding),patch.object(enroll,'node_observation',return_value=observed):
+            yield binding,observed
+
+    def test_runner_records_exact_node_and_stops_without_health_publication(self):
+        with self.runner() as (binding,observed):
+            receipt=enroll.initialize(SHA,'runner')
+            self.assertEqual(enroll.load(enroll.RECEIPT)['trust'],observed)
+            self.assertFalse(enroll.BUNDLE.exists());self.assertFalse(enroll.CA.exists())
+            self.assertFalse((self.state/'.axiom-state.json').exists())
+            enroll.trust.assert_not_called()
+            enroll.idle.assert_any_call('axiom-spire-health.service')
+            enroll.control.assert_any_call('stop','axiom-spire-enroll-runner.service')
+            enroll.control.reset_mock();enroll.seal(receipt,'runner')
+            enroll.control.assert_not_called()
+            self.assertEqual(json.loads((self.state/'.axiom-state.json').read_text()),binding)
+            self.assertEqual(enroll.load(enroll.APPROVAL)['action'],'seal-runner-initialization')
+
+    def test_unavailable_stale_or_foreign_live_node_cannot_receive_receipt(self):
+        with self.runner(),patch.object(enroll,'node_observation',side_effect=ValueError('node refused')):
+            with self.assertRaises(ValueError):enroll.initialize(SHA,'runner')
+            self.assertFalse(enroll.RECEIPT.exists());self.assertTrue(enroll.REQUEST.exists())
+            enroll.control.assert_any_call('stop','axiom-spire-enroll-runner.service')
+
+    def test_regressing_sync_cannot_receive_receipt(self):
+        with self.runner() as (_,observed),patch.object(enroll,'node_observation',side_effect=[observed,{**observed,'syncAtMs':observed['syncAtMs']-1}]):
+            with self.assertRaises(ValueError):enroll.initialize(SHA,'runner')
+            self.assertFalse(enroll.RECEIPT.exists())
+
+    def test_runner_expired_review_cannot_publish_marker(self):
+        with self.runner() as (_,observed):
+            receipt=enroll.initialize(SHA,'runner')
+            with patch.object(enroll.time,'time_ns',return_value=observed['certificateExpiresAtMs']*1000000):
+                with self.assertRaisesRegex(ValueError,'expired'):enroll.seal(receipt,'runner')
+            self.assertFalse(enroll.APPROVAL.exists())
+
+    def test_expiry_during_sealing_leaves_approval_without_marker(self):
+        with self.runner() as (_,observed):
+            receipt=enroll.initialize(SHA,'runner')
+            moment=observed['certificateExpiresAtMs']*1000000
+            with patch.object(enroll.time,'time_ns',side_effect=[moment-1000000,moment-1000000,moment]):
+                with self.assertRaisesRegex(ValueError,'expired'):enroll.seal(receipt,'runner')
+            self.assertTrue(enroll.APPROVAL.exists());self.assertFalse((self.state/'.axiom-state.json').exists())
+
+    def test_runner_changed_bootstrap_cannot_publish_marker(self):
+        with self.runner():
+            receipt=enroll.initialize(SHA,'runner');(self.base/'bootstrap.pem').write_bytes(b'foreign')
+            with self.assertRaisesRegex(ValueError,'bootstrap changed'):enroll.seal(receipt,'runner')
+            self.assertFalse(enroll.APPROVAL.exists())
+
+    def test_running_observer_refuses_initialization_before_request(self):
+        with self.runner(),patch.object(enroll,'idle',side_effect=[None,None,ValueError('active observer')]):
+            with self.assertRaises(ValueError):enroll.initialize(SHA,'runner')
+            self.assertFalse(enroll.REQUEST.exists());enroll.control.assert_not_called()
+
+    def test_actual_node_observation_refuses_wrong_identity_and_stale_sync(self):
+        import spire_health
+        with self.runner() as (binding,_):
+            now=time.time_ns()//1000000
+            info={'svid_chain':[{'id':{'trust_domain':binding['trustDomain'],'path':binding['nodeId'].split(binding['trustDomain'])[1]},'expires_at':str(now//1000+60)}],'last_sync_success':str(now//1000)}
+            # Reach the actual function, bypassing only the fixed admin socket.
+            with patch.object(spire_health,'query',return_value=info):
+                observed=NODE_OBSERVATION(binding)
+                self.assertEqual(observed['nodeId'],binding['nodeId'])
+                info['last_sync_success']=str(now//1000-60)
+                with self.assertRaises(ValueError):NODE_OBSERVATION(binding)
+                info['last_sync_success']=str(now//1000)
+                info['svid_chain'][0]['id']['path']+='/other'
+                with self.assertRaises(ValueError):NODE_OBSERVATION(binding)
+
+NODE_OBSERVATION=enroll.node_observation
+
+
 if __name__=='__main__':unittest.main()

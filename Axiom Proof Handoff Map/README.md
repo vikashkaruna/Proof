@@ -83,3 +83,5 @@ Revision 62 adds protected pinned host bundles and initialized-state-only system
 Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker delivery and 11 native issuer lifecycle outcomes. The broader combined CI result remains in the saved session.
 
 Revision 63 separates first issuer initialization from normal restart and requires a second receipt review before marker publication. Runner enrollment and full activation remain next; follow the latest Docs 11–16 and saved session.
+
+Revision 64 extends reviewed enrollment to the runner, with exact-node/sync/CA evidence and separate marker publication. A native runner/observer gate is added; final results are recorded after exact-merge CI verification. Host socket/container delivery and full controller activation are next.
