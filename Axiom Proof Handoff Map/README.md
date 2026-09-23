@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 51](../docs/audits/51-spire-host-delivery-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 52](../docs/audits/52-issuer-initial-enrollment-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -81,3 +81,5 @@ Revision 61 adds read-only persistent SPIRE disk/state admission and explicit bl
 Revision 62 adds protected pinned host bundles and initialized-state-only systemd units. Delivery and native issuer lifecycle have dedicated acceptance gates; first enrollment and complete runner/controller activation remain pending. Read Docs 11–16 and the saved session before resuming.
 
 Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker delivery and 11 native issuer lifecycle outcomes. The broader combined CI result remains in the saved session.
+
+Revision 63 separates first issuer initialization from normal restart and requires a second receipt review before marker publication. Runner enrollment and full activation remain next; follow the latest Docs 11–16 and saved session.

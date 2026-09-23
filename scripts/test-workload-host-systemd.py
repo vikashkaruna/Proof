@@ -7,6 +7,7 @@ never formats, enrolls, mounts or enables anything. Fixture resources are privat
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ sys.path.insert(0, str(ROOT/'infra/workload'))
 import spire_host as host
 
 SERVICE = 'axiom-spire-issuer.service'
+INITIAL = 'axiom-spire-enroll-issuer.service'
 MOUNT = 'var-lib-spire.mount'
 STATE = Path('/var/lib/spire')
 ALIAS = Path('/dev/disk/by-id/google-axiom-issuer-state')
@@ -34,6 +36,10 @@ ENV = {'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'H
 def run(argv, check=True, timeout=45):
     result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=ENV)
     if check and result.returncode:
+        # Only a fixed enrollment diagnostic with function/line locations may
+        # reach CI logs; arbitrary subprocess output remains private.
+        if len(result.stderr) < 1024 and re.fullmatch(rb'SPIRE enrollment refused at [A-Za-z0-9_<>: /]+; existing state and review records require inspection.\n', result.stderr):
+            print(result.stderr.decode('ascii').strip(), flush=True)
         raise RuntimeError('isolated systemd fixture operation refused')
     return result
 
@@ -142,7 +148,7 @@ def main():
         host.install(directory, hashlib.sha256(metadata).hexdigest()); installed = True
         assert not STATE.exists() and not active(SERVICE)
         outcomes['delivery-does-not-activate-or-initialize']=True
-        run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(host.layout('issuer')['state.mount'][0]), str(host.layout('issuer')['spire.service'][0])])
+        run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(host.layout('issuer')['state.mount'][0]), str(host.layout('issuer')['spire.service'][0]), str(host.layout('issuer')['enroll.service'][0])])
         control('daemon-reload'); control('start', MOUNT)
         STATE.chmod(0o700)  # New disposable filesystem only; never product repair.
         guard = ['/usr/bin/python3', '-I', '-B', str(host.PREFIX/'spire_state.py')]
@@ -152,23 +158,51 @@ def main():
         assert not (STATE/'server').exists()
         outcomes['blank-state-refused-before-launch']=True
         run(['/usr/sbin/ip', 'address', 'add', IP, 'dev', 'lo']); address_added = True
-        Path('/run/spire-server').mkdir(mode=0o700, exist_ok=True)
-        # Explicit fixture initialization is separate from normal installed unit.
-        child = subprocess.Popen(['/usr/local/bin/spire-server', 'run', '-config', '/etc/axiom/spire/server.conf'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=ENV)
-        host.wait_ready('issuer')
-        cli('entry', 'create', '-parentID', 'spiffe://host.axiomproof.test/fixture-node', '-spiffeID', 'spiffe://host.axiomproof.test/fixture-workload', '-selector', 'unix:uid:20003')
-        before_bundle = trust()
-        before_registry = registry()
-        child.terminate(); child.wait(timeout=30); child = None
-        # Missing marker remains denied even after a real initialized issuer.
+        enrollment = ['/usr/bin/python3', '-I', '-B', str(host.PREFIX/'spire_enrollment.py')]
+        # Direct initial-unit start is refused without an explicit live permit.
+        assert control('start', INITIAL, check=False).returncode != 0
+        control('stop', INITIAL); control('reset-failed', INITIAL)
+        assert not (STATE/'server').exists()
+        outcomes['explicit-root-permit-required']=True
+        manifest_sha = hashlib.sha256(metadata).hexdigest()
+        run([*enrollment, '--initialize', 'issuer', manifest_sha], timeout=90)
+        assert stopped(INITIAL) and stopped(SERVICE)
+        receipt_path = Path('/etc/axiom/spire/initialization-receipt.json')
+        receipt_raw = receipt_path.read_bytes(); receipt = json.loads(receipt_raw)
+        receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
+        assert hashlib.sha256(Path('/etc/axiom/spire/initialization-bundle.json').read_bytes()).hexdigest() == receipt['trust']['bundleSha256']
+        assert hashlib.sha256(Path('/etc/axiom/spire/initialization-ca.pem').read_bytes()).hexdigest() == receipt['trust']['bootstrapCaSha256']
+        assert not (STATE/'.axiom-state.json').exists()
         assert run([*guard, '--ready', 'issuer'], check=False).returncode != 0
-        (STATE/'.axiom-state.json').write_bytes(payload['state.json'])
-        (STATE/'.axiom-state.json').chmod(0o600)
+        run([*guard, '--unsealed', 'issuer'])
+        outcomes['reviewed-initialization-stops-unmarked']=True
+        assert run([*enrollment, '--seal', 'issuer', '0'*64], check=False).returncode != 0
+        assert not Path('/etc/axiom/spire/initialization-approval.json').exists()
+        outcomes['receipt-hash-mismatch-refused']=True
+        keys = STATE/'server/keys.json'; original_keys = keys.read_bytes()
+        keys.write_bytes(original_keys+b' ')
+        assert run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0
+        assert not (STATE/'.axiom-state.json').exists()
+        assert not Path('/etc/axiom/spire/initialization-approval.json').exists()
+        keys.write_bytes(original_keys)
+        outcomes['changed-unsealed-state-refused']=True
+        run([*enrollment, '--seal', 'issuer', receipt_sha], timeout=90)
+        assert stopped(SERVICE) and stopped(INITIAL)
+        assert json.loads((STATE/'.axiom-state.json').read_text()) == json.loads(payload['state.json'])
+        approval = json.loads(Path('/etc/axiom/spire/initialization-approval.json').read_text())
+        assert approval['receiptSha256'] == receipt_sha
+        outcomes['reviewed-receipt-publishes-marker-only']=True
+        assert run([*enrollment, '--initialize', 'issuer', manifest_sha], check=False).returncode != 0
+        assert run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0
+        assert receipt_path.read_bytes() == receipt_raw
+        outcomes['sealed-state-cannot-be-reinitialized']=True
         run([*guard, '--ready', 'issuer'])
         outcomes['explicit-initialization-and-reviewed-marker-required']=True
         control('start', SERVICE); assert active(SERVICE)
-        assert trust() == before_bundle
-        assert registry() == before_registry
+        before_bundle = trust()
+        assert hashlib.sha256((json.dumps(before_bundle,sort_keys=True,separators=(',',':'))+'\n').encode()).hexdigest() == receipt['trust']['bundleSha256']
+        cli('entry', 'create', '-parentID', 'spiffe://host.axiomproof.test/fixture-node', '-spiffeID', 'spiffe://host.axiomproof.test/fixture-workload', '-selector', 'unix:uid:20003')
+        before_registry = registry()
         outcomes['real-service-namespace-and-state-guard-pass']=True
         # Stop the mounted unit while SPIRE is live: BindsTo must stop its user.
         control('stop', MOUNT)
@@ -220,7 +254,7 @@ def main():
         if child is not None:
             child.terminate(); child.wait(timeout=30)
         if installed:
-            control('stop', SERVICE, check=False); control('stop', MOUNT, check=False)
+            control('stop', INITIAL, check=False); control('stop', SERVICE, check=False); control('stop', MOUNT, check=False)
             for path in destinations:
                 path.unlink(missing_ok=True)
             control('daemon-reload'); control('reset-failed', SERVICE, MOUNT, check=False)
@@ -241,6 +275,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        frames = [f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-host-systemd.py','spire_host.py','spire_state.py')]
+        frames = [f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-host-systemd.py','spire_host.py','spire_state.py','spire_enrollment.py')]
         print('Native workload host acceptance refused at '+' / '.join(frames)+'. Private diagnostics withheld.', file=sys.stderr)
         sys.exit(1)

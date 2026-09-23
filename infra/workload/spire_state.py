@@ -146,6 +146,10 @@ def ready(value: dict) -> None:
     marker = json.loads(private_file(STATE / '.axiom-state.json', 4096), object_pairs_hook=unique)
     if policy(marker) != value:
         raise ValueError('state marker refused')
+    contents(value)
+
+
+def contents(value: dict) -> None:
     data = STATE / ('server' if value['role'] == 'issuer' else 'agent')
     directory(data, private=True)
     keys = json.loads(private_file(data / 'keys.json', 1024 * 1024), object_pairs_hook=unique)
@@ -178,7 +182,7 @@ def empty() -> None:
 
 
 def check(mode: str, role: str) -> None:
-    if mode not in ('--ready', '--empty') or role not in ('issuer', 'runner'):
+    if mode not in ('--ready', '--empty', '--unsealed') or role not in ('issuer', 'runner'):
         raise ValueError('invocation refused')
     ancestors(CONFIG.parent)
     value = policy(json.loads(private_file(CONFIG, 4096), object_pairs_hook=unique))
@@ -193,7 +197,15 @@ def check(mode: str, role: str) -> None:
         with open('/proc/self/mountinfo', encoding='ascii') as stream:
             return mount_binding(stream.read(4 * 1024 * 1024 + 1), device)
     before = current_mount()
-    ready(value) if mode == '--ready' else empty()
+    if mode == '--ready':
+        ready(value)
+    elif mode == '--empty':
+        empty()
+    else:
+        marker = STATE / '.axiom-state.json'
+        if marker.exists() or marker.is_symlink():
+            raise ValueError('existing marker refused')
+        contents(value)
     if current_mount() != before or mounted_device(value) != device:
         raise ValueError('mount changed')
 

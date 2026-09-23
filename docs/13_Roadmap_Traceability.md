@@ -11,6 +11,16 @@
 
 **Status:** `Partial` = source foundation exists, required journey/evidence incomplete; `Pending` = intended capability not delivered (a stub or prototype does not qualify); `Gated` = roadmap demand/funding/safety condition precedes delivery; `External` = not provable from repository. `Source complete` is used only for individual committed changes in [Doc 12](12_Implementation_Handoff.md), not whole phases.
 
+## Current delivery addendum — Revision 63 (23 September 2026)
+
+| Roadmap scope                   | Implemented                                                                                                                                      | Remaining                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| W4.3 first issuer enrollment    | Explicit manifest-bound initialization, bounded separate unit, durable request and stopped-state receipt, separately reviewed marker publication | Native exact-merge acceptance is recorded in the session; actual cloud activation and operational recovery remain external |
+| W4.3 node/controller activation | Previous protected delivery and initialized-state restart preserved                                                                              | Reviewed runner enrollment, full node/observer lifetime, socket mapping, controller/TLS/IAM/scheduler                      |
+| W3/W4 product journeys          | Existing estate/proposal/connector/assessment milestones retained                                                                                | Full wizard/readiness/graph, other workers, live grants and remaining W0/W1/W2                                             |
+
+Revision 62 base `00dc35d` / CI 35842199663 is green (18 jobs,12 artifacts). Revision 63 is a component increment, not whole-workstream closure. No schema or application approval change.
+
 ## Current delivery addendum — Revision 62 (23 September 2026)
 
 | Roadmap scope                            | Implemented in this revision                                                                                                  | Remaining acceptance                                                                                 |

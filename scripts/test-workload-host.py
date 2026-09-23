@@ -42,6 +42,7 @@ outcomes['no-state-initialization-or-service-enable']=True
 unit=host.layout(role)['spire.service'][0]
 units=[str(host.layout(role)['state.mount'][0]),str(unit)]
 if role=='runner':units.append(str(host.layout(role)['health.service'][0]))
+else:units.append(str(host.layout(role)['enroll.service'][0]))
 checked=subprocess.run(['systemd-analyze','verify','--man=no',*units],capture_output=True)
 if checked.returncode:
  # Unit diagnostics contain only generated fixture paths; record a fixed

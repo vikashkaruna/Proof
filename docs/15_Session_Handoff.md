@@ -1,5 +1,17 @@
 # Axiom Proof — implementation session handoff
 
+## Revision 63 — explicit issuer initialization and reviewed marker publication
+
+Revision 62 is **complete and green** at `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663): 18 applicable jobs and 12 exact-revision artifacts verified. No intervening staging work was found.
+
+**Implemented:** a separate, non-enabled issuer initialization unit and root administration CLI. Initialization requires the reviewed installed-manifest SHA, exact host/disk binding, an empty mounted state disk and inactive, disabled normal services. Loaded unit paths must match the reviewed files, with no drop-ins or pending reload. A durable request precedes startup; a short-lived permit binds the request, manifest, live CLI process and held exclusive lock. The initialization unit keeps normal service hardening, requires the empty-state guard and permit, has no restart policy and is bounded to 60 seconds. Normal restart units still require `--ready` and cannot initialize state.
+
+**Separate review:** the issuer is stopped before a protected receipt is produced. It records the bound installation/disk, the public X.509/JWT bundle fingerprint and private stopped-state fingerprints. A second explicit command requires the receipt SHA, unchanged installation and state, stopped units and absent marker/approval. It durably records that review before publishing the owner-only marker. Neither command enables or starts the normal service. Existing requests, markers, permits or approval records are never overwritten; failed/interrupted attempts remain unmarked for explicit recovery. These are root administrative review records, not application approval tokens or cryptographic proof of a human identity.
+
+**Validation:** 96 deployment unit tests (19 added), plus 16 real Docker delivery outcomes. Native issuer acceptance now uses the actual initializer and reviewed publication commands, adding direct-unit refusal without a permit, unmarked stopped initialization, wrong-receipt refusal, changed-state refusal, reviewed marker publication and replay refusal while retaining all prior lifecycle outcomes. The expanded native and combined exact-merge CI results are saved in the session; source preparation alone is not a green native gate. See [review 52](audits/52-issuer-initial-enrollment-review-2026-09-23.md).
+
+**Next in order:** equivalent reviewed runner enrollment and complete node/observer lifecycle acceptance; host socket-volume mapping and full controller admission; scoped IAM/KMS, TLS/DNS and opaque scheduler delivery. Actual GCP attestation, cloud activation and Mumbai backup/restore remain external gates. Continue with remaining workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder. No cloud provisioning occurred. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 targets remain **19/40**.
+
 ## Revision 62 — protected SPIRE host delivery and normal restart
 
 **CI fixture correction:** initial native runs found GitHub's `/usr/local/bin` and `/opt` are root-owned but world-writable (0777). The production installer correctly refused it. Only the disposable CI fixture now prepares those two known directories as 0755 and restores their original modes on exit; installed-file and parent protection remain unchanged. Failed initial runs are not closure evidence.
