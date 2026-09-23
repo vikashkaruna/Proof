@@ -1,15 +1,29 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `9e4fdaa`, CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922) green. Revision 52 adds persisted dispatch policy and transactional enqueue/claim fences. Production activation, key retirement and W3/W4 remain open.
+Verified staging checkpoint: `a01604b`, CI [35813509615](https://github.com/vikashkaruna/Proof/actions/runs/35813509615) green. Revision 53 adds per-job container isolation. Production trust/composition, key retirement and W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 52, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 53, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 53 — trusted per-job container launcher
+
+**ENGINEERING delivered locally:** `assessmentContainerFactory` in the backend returns the fixed private process factory consumed by `AssessmentChannel`. Its trusted configuration accepts only an absolute Docker executable path, explicit local `unix:///...` daemon endpoint, preloaded `sha256:<64 hex>` image ID and a dedicated `axiom-workload-api-...` volume. Build `infra/docker/Dockerfile.assessment-worker`, record the reviewed image ID, and provision only the node agent's Workload API socket in that volume. The SPIRE client release is pinned to 1.15.3 with architecture-specific checksums. Never mount issuer state, backend env, host directories or the Docker socket into a job. No new environment variable or public route is introduced.
+
+**Privilege separation:** compose this only in a dedicated trusted Docker runner/controller. It can control its local daemon; ordinary public BFF, frontend, opaque scheduler and worker processes must not inherit that access. The daemon/image/node agent are part of the trusted computing base. The fixed root supervisor receives only SETUID, SETGID and KILL, then launches the worker as UID 20003 with no effective capabilities and no-new-privileges. Jobs have private PID/network/cgroup namespaces, IPC disabled, read-only root/API mount, one CPU, 256 MiB memory with no additional swap, 64 processes, and log driver `none`. They cannot reach cloud metadata or a controller over IP; all tools remain on private framed pipes. Keep the reviewed Docker default seccomp profile. The image must be preloaded: runtime pulls are refused. <!-- axiom-count-ok: runtime resource limits, not statutory controls -->
+
+**Identity:** the local acceptance node alone uses host PID visibility for the Unix workload attestor. Workers get only the read-only Workload API socket. Two concurrent jobs are separately attested, and wrong/unknown UIDs are denied. This assumes a trusted daemon/controller controls who can mount the socket and which UID/image executes. UID-only registration is not production image admission or revocation. Rootful Linux Docker/Docker Desktop is the verified local topology; user-namespace remapping and alternative runtimes need their own attestation acceptance. Do not copy the fixture's synthetic join-token trust into higher environments. Production node attestation, protected bundle delivery, admission/registration lifecycle and revocation remain open.
+
+**Lifecycle:** use the factory with the existing bounded channel and independent database confirmation. Normal exit and interrupted input remove the container. Killing the Docker transport is not proof the job stopped; EOF may stop it promptly, otherwise the independent 65-second supervisor deadline bounds it. Acceptance waits for actual daemon-side removal. On daemon/host failure, keep the result unconfirmed and reconcile persisted receipts and owned container inventory before any recovery action. Do not reset a consumed claim or blindly relaunch. Containers share the host kernel; this is not VM isolation or physical memory erasure. <!-- axiom-count-ok: supervisor deadline, not statutory controls -->
+
+**Acceptance:** `python3 scripts/test-workload-identity.py --assessment` builds the pinned worker image and runs the actual factory against local Auth/PostgREST. Expect **61 identity and 51 worker outcomes**, including all previous 43 worker outcomes, concurrent namespace/file/metadata denials, real SVID tools, resource/log settings, graceful cleanup and abrupt transport death. Docker Desktop may expose inactive tunnel devices: tests require no active non-loopback interface and no route, then attempt actual denied connections. Run workspace tests/lint/typecheck and acceptance TypeScript; 862 BFF tests pass. Schema remains 0047/55 public tables. Verify all eight exact-merge artifacts before calling the milestone green; see [review 42](audits/42-per-job-container-isolation-review-2026-09-23.md).
+
+**Next ENGINEERING:** dedicated controller/scheduler/runner deployment composition and trust lifecycle, without adding daemon access to Cloud Run services; remaining scoped workers and verified actor chains; W4.4 grants; full W3 wizard/readiness/graph; W4.5/6/7. Local container isolation does not complete W4.3, authorize cloud apply or change the W0/W1/W2 remainder and backup-aware key retirement gates.
 
 ## Revision 52 — reviewed dispatch policy rollout
 

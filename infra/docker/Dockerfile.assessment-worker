@@ -1,6 +1,22 @@
 # A separate credential-less compute image. SPIRE Workload API/CLI provisioning
 # belongs to the attested launcher; no backend settings, clients or .env copy.
+# Pin and verify the Workload API client independently of the application image.
+# No SPIRE server, registration state or signing keys enter the worker image.
+FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS identity-client
+ARG TARGETARCH
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) digest=ca1a4d1155317bdd2afc7f36663828a10410c7c840e54725b90b4064b0a301c7 ;; \
+      arm64) digest=a9982b3ca7de489def22265fd4586d8e13091ecb6fddf6adcea9291313b18886 ;; \
+      *) exit 1 ;; \
+    esac; \
+    wget -q -O /tmp/spire.tar.gz "https://github.com/spiffe/spire/releases/download/v1.15.3/spire-1.15.3-linux-${TARGETARCH}-musl.tar.gz"; \
+    echo "$digest  /tmp/spire.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/spire.tar.gz -C /tmp spire-1.15.3/bin/spire-agent; \
+    cp /tmp/spire-1.15.3/bin/spire-agent /spire-agent
+
 FROM python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322
+COPY --from=identity-client /spire-agent /usr/local/bin/spire-agent
 WORKDIR /worker
 RUN mkdir axiom && touch axiom/__init__.py
 COPY services/agent-runtime/src/axiom/process_lifetime.py services/agent-runtime/src/axiom/assessment_supervisor.py services/agent-runtime/src/axiom/assessment_worker.py services/agent-runtime/src/axiom/assessment_scoring.py services/agent-runtime/src/axiom/control_library_loader.py ./axiom/

@@ -36,6 +36,7 @@ import { AssessmentRetention } from '../services/bff/src/workloads/assessment-re
 import { AssessmentScheduling } from '../services/bff/src/workloads/assessment-scheduling.js';
 import { AssessmentDispatch } from '../services/bff/src/workloads/assessment-dispatch.js';
 import { PrivateAssessmentPayload } from '../services/bff/src/workloads/dispatch-payload.js';
+import { assessmentContainerFactory } from '../services/bff/src/workloads/assessment-container.js';
 import { AssessmentChannel } from '../services/bff/src/workloads/assessment-channel.js';
 import { AssessmentController } from '../services/bff/src/workloads/assessment-controller.js';
 import { DispatchPolicyStore } from '../services/bff/src/workloads/dispatch-policy-store.js';
@@ -55,6 +56,14 @@ async function main() {
     .object({
       containerName: z.string().regex(/^axiom-spire-test-[a-f0-9]{12}$/),
       jwks: z.unknown(),
+      launcher: z
+        .object({
+          executable: z.string(),
+          dockerHost: z.string(),
+          image: z.string(),
+          workloadApiVolume: z.string(),
+        })
+        .strict(),
     })
     .strict()
     .parse(JSON.parse(readFileSync(0, 'utf8')));
@@ -157,22 +166,16 @@ async function main() {
     new SupabaseWorkloadTaskStore(db),
   );
   const router = workloadToolsRoutes(new AssessmentTools(authority, db));
-  const launchSupervised = () =>
-    spawn(
-      'docker',
-      [
-        'exec',
-        '--user',
-        '0',
-        '-i',
-        input.containerName,
-        'python',
-        '-m',
-        'axiom.assessment_supervisor',
-        '--private-stdio',
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+  const launchContainer = assessmentContainerFactory(input.launcher);
+  const jobNames: string[] = [];
+  const launchSupervised = () => {
+    const child = launchContainer();
+    const name = child.spawnargs[child.spawnargs.indexOf('--name') + 1]!;
+    assert.match(name, /^axiom-assessment-[a-f0-9-]{36}$/);
+    assert(!jobNames.includes(name));
+    jobNames.push(name);
+    return child;
+  };
   const callTool = async (operation: string, request: unknown) => {
     const response = await router.request(`/assessment/${operation}`, {
       method: 'POST',
@@ -262,36 +265,234 @@ async function main() {
   };
   let wrapper = new AwsDispatchKeyWrapper(keyPolicy, kms);
 
-  // These probes run under the same UID and image as the actual worker.
+  // Two live jobs use the exact production launcher; neither receives task data.
   phase = 'physical-isolation';
-  const probe = `import os, pathlib, socket, importlib.util, json
+  const held = [launchSupervised(), launchSupervised()];
+  const heldClosed = held.map((child) => {
+    child.stdout.resume();
+    child.stderr.resume();
+    return once(child, 'close');
+  });
+  const heldNames = jobNames.slice(-2);
+  const inspect = (name: string) =>
+    JSON.parse(
+      execFileSync('docker', ['inspect', name], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 5000,
+      }),
+    )[0] as {
+      State: { Running: boolean; Pid: number };
+      HostConfig: {
+        PidMode: string;
+        NetworkMode: string;
+        ReadonlyRootfs: boolean;
+        Privileged: boolean;
+        IpcMode: string;
+        LogConfig: { Type: string };
+        Memory: number;
+        MemorySwap: number;
+        PidsLimit: number;
+        NanoCpus: number;
+      };
+      Mounts: { Type: string; Destination: string; RW: boolean }[];
+    };
+  const exists = (name: string) => {
+    // A daemon error is uncertainty, never evidence of container removal.
+    const found = execFileSync(
+      'docker',
+      ['container', 'ls', '--all', '--filter', `name=^/${name}$`, '--format', '{{.Names}}'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 },
+    ).trim();
+    assert(found === '' || found === name);
+    return found === name;
+  };
+  try {
+    for (const name of heldNames) {
+      let ready = false;
+      for (let i = 0; i < 50; i++) {
+        try {
+          ready = inspect(name).State.Running;
+        } catch {
+          /* creation not yet visible */
+        }
+        if (ready) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert(ready);
+      phase = 'physical-isolation-profile';
+      const spec = inspect(name);
+      assert.equal(spec.HostConfig.PidMode, '');
+      assert.equal(spec.HostConfig.NetworkMode, 'none');
+      assert.equal(spec.HostConfig.IpcMode, 'none');
+      assert.equal(spec.HostConfig.ReadonlyRootfs, true);
+      assert.equal(spec.HostConfig.Privileged, false);
+      assert.equal(spec.HostConfig.LogConfig.Type, 'none');
+      assert.equal(spec.HostConfig.Memory, 256 * 1024 * 1024);
+      assert.equal(spec.HostConfig.MemorySwap, spec.HostConfig.Memory);
+      assert.equal(spec.HostConfig.PidsLimit, 64);
+      assert.equal(spec.HostConfig.NanoCpus, 1_000_000_000);
+      assert.equal(spec.Mounts.length, 1);
+      assert.deepEqual(
+        {
+          Type: spec.Mounts[0]!.Type,
+          Destination: spec.Mounts[0]!.Destination,
+          RW: spec.Mounts[0]!.RW,
+        },
+        { Type: 'volume', Destination: '/run/workload', RW: false },
+      );
+    }
+    const namespaces: string[] = [];
+    for (let index = 0; index < heldNames.length; index++) {
+      phase = 'physical-isolation-probe';
+      const peerPid = inspect(heldNames[1 - index]!).State.Pid;
+      const probe = `import os, pathlib, socket, importlib.util, errno, sys
 assert os.getuid() == 20003
 assert not any(k in os.environ for k in ['SUPABASE_URL','SUPABASE_SERVICE_KEY','APPROVAL_SIGNING_KEY','AWS_ACCESS_KEY_ID','GOOGLE_APPLICATION_CREDENTIALS','AGENT_RUNTIME_INTERNAL_TOKEN','MODEL_GATEWAY_API_KEY'])
-assert not pathlib.Path('/var/run/docker.sock').exists()
-assert not pathlib.Path('/worker/.env').exists()
-assert not pathlib.Path('/worker/axiom/settings.py').exists()
-assert not pathlib.Path('/worker/axiom/agents').exists()
-assert importlib.util.find_spec('supabase') is None
-assert importlib.util.find_spec('boto3') is None
-assert importlib.util.find_spec('httpx') is None
-for p in ['/root/join-token','/root/server.conf','/var/lib/spire/server/keys.json']:
- try: pathlib.Path(p).read_bytes()
- except PermissionError: pass
- else: raise Exception('issuer material readable')
-s=socket.socket(); s.settimeout(1)
-assert s.connect_ex(('1.1.1.1',443)) != 0
-print('isolated')`;
-  assert.equal(
-    execFileSync(
-      'docker',
-      ['exec', '--user', '20003:20003', input.containerName, 'python', '-c', probe],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
-    ).trim(),
-    'isolated',
-  );
-  outcomes['worker-uid-no-backend-credentials'] = true;
-  outcomes['worker-no-network-or-host-socket'] = true;
-  outcomes['issuer-material-unreadable'] = true;
+for path in ['/var/run/docker.sock','/worker/.env','/worker/axiom/settings.py','/worker/axiom/agents','/run/server','/var/lib/spire/server','/var/lib/spire/agent']:
+ assert not pathlib.Path(path).exists()
+for module in ['supabase','boto3','httpx']:
+ assert importlib.util.find_spec(module) is None
+for path in ['/tmp/forbidden','/worker/forbidden','/run/workload/forbidden']:
+ try: pathlib.Path(path).write_text('synthetic')
+ except OSError as e: assert e.errno in (errno.EROFS,errno.EACCES)
+ else: raise Exception('writable shared or persistent state')
+assert not pathlib.Path('/proc/'+sys.argv[1]).exists()
+try: os.kill(int(sys.argv[1]),0)
+except ProcessLookupError: pass
+else: raise Exception('foreign job process visible')
+assert pathlib.Path('/sys/fs/cgroup/memory.max').read_text().strip()=='268435456'
+assert pathlib.Path('/sys/fs/cgroup/pids.max').read_text().strip()=='64'
+status=pathlib.Path('/proc/self/status').read_text()
+assert 'CapEff:\t0000000000000000' in status
+assert 'NoNewPrivs:\t1' in status
+# Docker Desktop can expose inert tunnel devices; none may be UP.
+for _, interface in socket.if_nameindex():
+ if interface != 'lo': assert int(pathlib.Path('/sys/class/net',interface,'flags').read_text(),16) & 1 == 0
+assert not pathlib.Path('/proc/net/route').read_text().splitlines()[1:]
+for host,port in [('1.1.1.1',443),('169.254.169.254',80),('127.0.0.1',4000)]:
+ with socket.socket() as s:
+  s.settimeout(1)
+  assert s.connect_ex((host,port)) != 0
+with socket.socket(socket.AF_INET6) as s:
+ s.settimeout(1)
+ assert s.connect_ex(('fd00:ec2::254',80)) != 0
+print(os.readlink('/proc/self/ns/pid'))`;
+      const checkedProbe = `import sys
+try: exec(compile(${JSON.stringify(probe)}, '<probe>', 'exec'))
+except Exception as error:
+ trace=error.__traceback__
+ while trace.tb_next: trace=trace.tb_next
+ sys.stderr.write('probe-check-'+str(trace.tb_lineno))
+ sys.exit(1)`;
+      const probed = spawnSync(
+        'docker',
+        [
+          'exec',
+          '--user',
+          '20003:20003',
+          heldNames[index]!,
+          'python',
+          '-c',
+          checkedProbe,
+          String(peerPid),
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
+      );
+      if (probed.status !== 0) {
+        if (/^probe-check-[0-9]{1,3}$/.test(probed.stderr))
+          phase = 'physical-isolation-' + probed.stderr;
+        throw new Error('isolated probe refused');
+      }
+      namespaces.push(probed.stdout.trim());
+      phase = 'physical-isolation-identity';
+      for (const [uid, agent] of [
+        ['20003', 'karya'],
+        ['29999', 'parikshan'],
+      ]) {
+        const denied = spawnSync(
+          'docker',
+          [
+            'exec',
+            '--user',
+            uid!,
+            heldNames[index]!,
+            'spire-agent',
+            'api',
+            'fetch',
+            'jwt',
+            '-socketPath',
+            '/run/workload/api.sock',
+            '-audience',
+            'axiom-assessment-tools',
+            '-spiffeID',
+            `spiffe://local.axiomproof.test/agent/${agent}`,
+            '-output',
+            'json',
+          ],
+          { encoding: 'utf8', timeout: 15000 },
+        );
+        assert.equal(denied.status, 1);
+      }
+    }
+    phase = 'physical-isolation-namespaces';
+    assert.notEqual(namespaces[0], namespaces[1]);
+    outcomes['worker-uid-no-backend-credentials'] = true;
+    outcomes['worker-no-network-or-host-socket'] = true;
+    outcomes['issuer-material-unreadable'] = true;
+    outcomes['per-job-private-process-namespace'] = true;
+    outcomes['per-job-readonly-filesystem-and-api-mount'] = true;
+    outcomes['per-job-no-metadata-or-controller-network'] = true;
+    outcomes['per-job-resource-limits-and-no-log-driver'] = true;
+    outcomes['per-job-foreign-and-unregistered-svid-refused'] = true;
+  } finally {
+    for (const child of held) {
+      child.stdin.end();
+      child.kill('SIGTERM');
+    }
+    await Promise.all(heldClosed);
+    for (const name of heldNames) {
+      // Fail closed if normal bounded shutdown did not remove the container.
+      const remained = exists(name);
+      if (remained) spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore', timeout: 10000 });
+      if (remained) phase = 'physical-isolation-removal';
+      assert(!remained);
+    }
+  }
+  outcomes['per-job-aborted-input-container-removed'] = true;
+  phase = 'per-job-transport-death';
+  const detached = launchSupervised();
+  const detachedClosed = once(detached, 'close');
+  detached.stdout.resume();
+  detached.stderr.resume();
+  const detachedName = jobNames.at(-1)!;
+  try {
+    let started = false;
+    for (let i = 0; i < 50; i++) {
+      try {
+        started = inspect(detachedName).State.Running;
+      } catch {
+        /* daemon is creating */
+      }
+      if (started) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert(started);
+    detached.kill('SIGKILL'); // No graceful signal reaches the supervisor via the CLI.
+    await detachedClosed;
+    // EOF may close the task immediately; otherwise the independent 65s
+    // supervisor deadline must still stop it. Never infer cleanup from CLI exit.
+    const deadline = Date.now() + 70000;
+    while (exists(detachedName) && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    assert(!exists(detachedName));
+  } finally {
+    detached.kill('SIGKILL');
+    if (exists(detachedName))
+      spawnSync('docker', ['rm', '-f', detachedName], { stdio: 'ignore', timeout: 10000 });
+  }
+  outcomes['per-job-transport-death-bounded-removal'] = true;
+
   async function runCase(
     name: string,
     beforeComplete?: (runId: string) => Promise<void>,
@@ -1203,6 +1404,10 @@ print('parent-death-clean')`;
   assert.equal(unprivileged.status, 70);
   assert.equal(unprivileged.stdout, '');
   outcomes['supervisor-refuses-implicit-or-unprivileged-launch'] = true;
+  phase = 'per-job-cleanup';
+  assert(jobNames.length >= 8);
+  assert(jobNames.every((name) => !exists(name)));
+  outcomes['per-job-distinct-container-per-launch-and-removal'] = true;
   phase = 'result';
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }));

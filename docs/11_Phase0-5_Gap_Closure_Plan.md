@@ -2,10 +2,20 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 52 — DISPATCH POLICY FENCING** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `9e4fdaa`, green CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 53 — PER-JOB CONTAINER ISOLATION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `a01604b`, green CI [35813509615](https://github.com/vikashkaruna/Proof/actions/runs/35813509615); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 53 — separate containers for private assessment jobs
+
+Revision 52 is **complete and green** at staging `a01604b`, CI [35813509615](https://github.com/vikashkaruna/Proof/actions/runs/35813509615): all 17 applicable jobs and eight exact-revision artifacts verified. Fresh upstream review found no intervening other-model changes. The overall goal remains incomplete.
+
+**Delivered:** `assessmentContainerFactory` starts a new container for every private assessment. Trusted configuration pins a preloaded immutable image ID and a local Docker endpoint; request-provided commands, environment, mounts and network overrides are rejected. The fixed supervisor retains only the capabilities needed to drop identity and stop descendants; the worker runs as UID 20003 without effective capabilities. Containers have separate process/network/cgroup namespaces, no network route, read-only root and Workload API mount, bounded CPU/memory/processes, no swap allocation and disabled Docker log collection. Private task inputs and SVIDs stay in attached pipes. The worker image now includes a checksum-pinned SPIRE client, without issuer state or backend settings.
+
+**Validation:** 862 BFF tests, workspace tests/lint/typecheck and acceptance TypeScript. Real local Auth/PostgREST/SPIRE acceptance now runs each actual assessment in its own container: **61 identity and 51 worker outcomes**, preserving all prior 43 worker outcomes. Two simultaneous jobs cannot see or signal each other's host process; write attempts, metadata/controller/public-network connections and foreign/unregistered identities are refused. Tests inspect actual resource/mount/log settings and verify normal, aborted-input and abruptly killed-transport removal. The independent supervisor deadline remains authoritative after transport loss; CLI exit alone is not cleanup evidence. Final exact-merge CI/artifacts are recorded in the saved session. No migration changed: **0047**, **55 public tables**, **48 migrations / 17 concurrency suites / 13 upgrades**, W2 named targets **19/40**. See [review 42](audits/42-per-job-container-isolation-review-2026-09-23.md).
+
+**Trust boundary and remaining work:** the Docker daemon, launcher, reviewed image and node SPIRE agent are trusted. Only the node fixture sees host PIDs to attest cross-container callers; jobs never receive host PID access, the daemon socket, issuer files or backend/cloud credentials. UID selectors plus controlled socket access are local attestation evidence, not an image-admission policy or production registration lifecycle. Containers share a kernel. Higher-environment controller/scheduler/runner composition, trust bundle delivery and registration/revocation remain engineering work; Cloud Run services do not acquire a Docker socket. Continue remaining scoped workers and verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph, then W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations, the remaining 21 W2 targets and backup-aware key retirement. No cloud deployment, client mutation, key destruction or WORM change occurred.
 
 ## Revision 52 — persisted dispatch policy and transactional fences
 
