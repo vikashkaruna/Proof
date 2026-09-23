@@ -1,5 +1,7 @@
 # Review 53 — reviewed runner enrollment and supervised lifecycle
 
+Native fixture correction: the deliberate observer restart/crash/stop sequence exhausted the production three-starts-per-minute budget. The fixture now verifies `start-limit-hit` and explicitly resets only its failed test unit before the independent outage scenario. Production limits remain unchanged; the failed initial run is not closure evidence.
+
 The issuer workflow alone left runners unable to initialize a bound empty disk safely. This revision reuses the protected request/permit/receipt and separate marker-review workflow for runners, retaining production GCP IIT, reviewed bootstrap trust and `rebootstrap_mode=never`. The exact expected node and recent issuer sync are read through the protected admin socket before shutdown. The receipt binds stopped key/cache bytes, and sealing refuses expired node evidence or changed CA/state. No normal service or health observer is started by sealing.
 
 Review found initialization must not inherit the normal runner unit's observer `Wants`: otherwise first enrollment could publish operational readiness before review. The new static unit omits that relationship; normal startup retains it. The helper requires an inactive observer before initialization and publication.
