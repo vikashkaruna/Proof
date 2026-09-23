@@ -6,7 +6,7 @@
 
 ## Current handoff — Revision 62 (23 September 2026)
 
-Revision 61 is green at `13ce160` / CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173). Revision 62 adds pinned host bundles, protected first-file delivery and initialized-state-only systemd units on Ubuntu 24.04. Docker delivery and a dedicated native systemd/loop-device CI gate accompany the 77 deployment tests. Exact merge evidence is saved in the session; do not equate prepared units with deployed services.
+Revision 61 is green at `13ce160` / CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173). Revision 62 adds pinned host bundles, protected first-file delivery and initialized-state-only systemd units on Ubuntu 24.04. Docker delivery and a dedicated native systemd/loop-device CI gate accompany the 77 deployment tests. Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker and 11 native systemd outcomes from clean source. Combined final-merge evidence is saved in the session; do not equate tested issuer units with full deployed runner/controller services.
 
 Resume in `codex/w0-w3-closure`, preserving the original checkout. Next complete explicit first enrollment/marker delivery and runner/observer lifecycle acceptance, then socket-volume mapping, full controller admission, scoped IAM/KMS, private TLS and the opaque scheduler. Installer retries preserve identical files and refuse upgrades/conflicts. No cloud provisioning was performed; Terraform remains default-off. Remaining workers, grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement are still open. Docs 11 and 14–16 carry current evidence and closure gates.
 

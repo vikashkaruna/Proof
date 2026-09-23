@@ -19,7 +19,7 @@
 | Persistent trust and fail-closed restart | Integrity preflight; UUID mount/service dependency; native disposable Linux mount-loss and recovery test gate                 | Deployed disk replacement, Mumbai backup/restore, operational recovery approval                      |
 | W3/W4 end-to-end execution               | Existing estate/proposal, registry, assessment/controller milestones retained                                                 | Full wizard/readiness/graph, other workers, live grants, controller/scheduler deployment             |
 
-Revision 61's verified base is `13ce160` / CI 35833267173. Revision 62 exact-merge results are recorded in the session. Prepared host files do not constitute cloud deployment or complete W4.3. Schema remains 0048 / 49 migrations / 55 tables; W2 targets remain 19/40.
+Revision 61's verified base is `13ce160` / CI 35833267173. Revision 62 protected-host artifacts at `c493fc7` / CI 35841077123 verify 16 Docker and 11 native issuer outcomes; combined final-merge results are recorded in the session. Prepared host files do not constitute cloud deployment or complete W4.3. Schema remains 0048 / 49 migrations / 55 tables; W2 targets remain 19/40.
 
 ## Current delivery addendum — Revision 61 (23 September 2026)
 
