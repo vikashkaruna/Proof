@@ -1,6 +1,6 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `66e6147`, CI [35852588998](https://github.com/vikashkaruna/Proof/actions/runs/35852588998), all 19 applicable jobs and 13 exact-revision artifacts verified. Protected runtime volumes and 24 native runner/container outcomes are green. Revision 66 adds actual controller entrypoint acceptance; Revision 67 adds exact controller role admission. Final expanded CI evidence is pending. Full host/controller activation and the broader roadmap remain open.
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes. Revision 67 adds exact controller workload admission; its final combined CI evidence remains pending. Host delivery/supervision and broader roadmap work remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 

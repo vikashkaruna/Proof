@@ -3,11 +3,13 @@
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
 **Document:** 11 · **Revision 67 — EXACT CONTROLLER WORKLOAD ADMISSION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `66e6147`, green CI [35852588998](https://github.com/vikashkaruna/Proof/actions/runs/35852588998); estate and owner/admin proposal milestones retained.
+**Reviewed staging:** `1d7aa92`, green CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
 
 ## Revision 67 — exact controller workload admission
+
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes.
 
 **Review finding and fix:** a successful Workload API bundle read establishes access to trust material, but does not establish the controller role. Startup now requests the exact `spiffe://<domain>/controller/assessment` JWT-SVID for the fixed `axiom-controller-startup` audience. It requires one matching response, then verifies signature, subject, audience, lifetime and independently current trust under the existing exact-node health gate **before reading backend dispatch policy**. Transport is the configured protected Unix socket with bounded messages/deadline and no retries or alternate transport. The bearer is never returned, persisted or logged. This startup proof adds no tenant/task/action authority and does not replace job approvals or per-tool identity checks.
 

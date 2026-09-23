@@ -1,10 +1,12 @@
 # Axiom Proof — implementation session handoff
 
-Current review: Revision 65 is verified green at `66e6147`; Revision 66 merged as `1d7aa92` with 71 local assessment outcomes. Its first CI attempt failed persona Supabase startup before tests, so full green status remains pending. Revision 67 adds exact controller-role admission before backend policy access. Local validation passes 992 BFF tests, all workspace test tasks, lint/types/security gates, 71 real assessment outcomes, 61 identity outcomes and five protected-trust outcomes. Preserve the exact-merge gate before marking closure.
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes. Revision 67 adds exact controller workload admission and awaits its combined merge gate. The broader roadmap remains partial.
 
 Native fixture correction: the deliberate observer restart/crash/stop sequence exhausted the production three-starts-per-minute budget. The fixture now verifies `start-limit-hit` and explicitly resets only its failed test unit before the independent outage scenario. Production limits remain unchanged; the failed initial run is not closure evidence.
 
 ## Revision 67 — exact controller workload admission
+
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes.
 
 **Review finding and fix:** a successful Workload API bundle read establishes access to trust material, but does not establish the controller role. Startup now requests the exact `spiffe://<domain>/controller/assessment` JWT-SVID for the fixed `axiom-controller-startup` audience. It requires one matching response, then verifies signature, subject, audience, lifetime and independently current trust under the existing exact-node health gate **before reading backend dispatch policy**. Transport is the configured protected Unix socket with bounded messages/deadline and no retries or alternate transport. The bearer is never returned, persisted or logged. This startup proof adds no tenant/task/action authority and does not replace job approvals or per-tool identity checks.
 
