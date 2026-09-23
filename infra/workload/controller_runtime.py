@@ -24,6 +24,7 @@ import spire_volumes as volumes
 
 PROFILES = Path('/etc/axiom/controller-runtime')
 STATE = Path('/var/lib/axiom-controller')
+UNITS = Path('/etc/systemd/system')
 ENTRYPOINT = ['/sbin/tini', '--', 'node', '--import', '/app/node_modules/tsx/dist/loader.mjs', 'src/assessment-controller-service.ts']
 LABEL = 'ai.axiomproof.controller.'
 
@@ -88,7 +89,7 @@ WantedBy=multi-user.target
 '''.encode()
 
 
-def install(source: Path, expected: str) -> None:
+def delivery(source: Path, expected: str) -> tuple[dict, bytes, dict]:
     value = reviewed(source, expected)
     raw = host.read_file(source, 8192, 0o600)
     if enrollment.digest(raw) != expected: raise ValueError('runtime profile changed')
@@ -98,7 +99,12 @@ def install(source: Path, expected: str) -> None:
     placed = placement.profile(json.loads(placement_raw, object_pairs_hook=host.unique))
     if placed['tenantId'] != value['tenantId']: raise ValueError('runtime tenant mismatch')
     files.check(placed['tenantId'], placed['controllerManifestSha256'])
-    target = Path('/etc/systemd/system')/('axiom-controller-'+value['tenantId']+'.service')
+    return value, raw, placed
+
+
+def install(source: Path, expected: str) -> None:
+    value, raw, _ = delivery(source, expected)
+    target = UNITS/('axiom-controller-'+value['tenantId']+'.service')
     payload = unit(value, expected)
     destination = PROFILES/(expected+'.json')
     for path, data, mode in ((destination, raw, 0o600), (target, payload, 0o600)):
@@ -242,13 +248,19 @@ def pending(directory: Path) -> list[Path]:
     return result
 
 
-def stop_attempt(directory: Path, expected: str) -> None:
+def attempt_record(directory: Path, expected: str) -> tuple[dict, str]:
     intent = enrollment.load(directory/'intent.json')
     if set(intent) != {'schemaVersion', 'profileSha256', 'spec'} or type(intent['schemaVersion']) is not int or intent['schemaVersion'] != 1 or intent['profileSha256'] != expected or intent['spec']['labels'] != {LABEL+'attempt': directory.name, LABEL+'tenant': directory.parent.name, LABEL+'profile': expected} or intent['spec']['name'] != 'axiom-controller-'+directory.name:
         raise ValueError('runtime intent refused')
     record = enrollment.load(directory/'container.json')
     if set(record) != {'schemaVersion', 'containerId'} or type(record['schemaVersion']) is not int or record['schemaVersion'] != 1: raise ValueError('container receipt refused')
     identifier = record['containerId']
+    enrollment.sha(identifier)
+    return intent, identifier
+
+
+def stop_attempt(directory: Path, expected: str) -> None:
+    intent, identifier = attempt_record(directory, expected)
     actual = owned(identifier, intent['spec'])
     start = directory/'start.json'
     if start.exists() or start.is_symlink():
@@ -271,6 +283,25 @@ def stop_attempt(directory: Path, expected: str) -> None:
     enrollment.create(directory/'stopped.json', enrollment.encode({'schemaVersion': 1, 'containerId': identifier}))
 
 
+def settled(directory: Path) -> dict:
+    """Reinspect every exact journal-owned ID; a saved stop receipt is not live proof."""
+    if pending(directory): raise ValueError('unresolved controller attempt refused')
+    result = {}
+    for path in sorted(directory.iterdir()):
+        if path.name == 'lock': continue
+        intent = enrollment.load(path/'intent.json'); expected = enrollment.sha(intent.get('profileSha256'))
+        intent, identifier = attempt_record(path, expected)
+        receipt = enrollment.load(path/'stopped.json')
+        if type(receipt.get('schemaVersion')) is not int or receipt != {'schemaVersion':1,'containerId':identifier}: raise ValueError('stop receipt refused')
+        actual = owned(identifier, intent['spec']); status = actual.get('State', {})
+        if status.get('Running') is not False or status.get('Status') not in ('created','exited'): raise ValueError('old controller not stopped')
+        if (path/'start.json').exists() or (path/'start.json').is_symlink():
+            start = enrollment.load(path/'start.json')
+            if type(start.get('schemaVersion')) is not int or start != {'schemaVersion':1,'containerId':identifier} or status['Status']=='created': raise ValueError('old start remains uncertain')
+        result[path.name] = {p.name:enrollment.digest(host.read_file(p,16384,0o600)) for p in sorted(path.iterdir())}
+    return result
+
+
 def stop(identifier: str, expected: str) -> None:
     enrollment.sha(expected)
     with locked(identifier) as directory:
@@ -288,6 +319,8 @@ def run(expected: str) -> None:
     try:
         with locked(value['tenantId']) as directory:
             if pending(directory): raise ValueError('unresolved controller attempt requires review')
+            import controller_transition
+            controller_transition.admit(value['tenantId'], expected, directory)
             with enrollment.exclusive(): ready = placement.check(Path(value['placementFile']), value['placementSha256'])
             attempt = str(uuid.uuid4()); intended = spec(value, expected, ready, attempt)
             if reviewed(path, expected) != value: raise ValueError('runtime profile changed')

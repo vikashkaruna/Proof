@@ -5,7 +5,7 @@
 **Compiled:** August 2026
 
 **Implementation status.** W0 through W4 are **partial**; migration allocation runs
-through 0051 (52 migrations, 55 public tables plus three private credential tables; 19/40 W2 named targets delivered). Nothing has been deployed, no evidence bucket is locked and no action
+through 0051 (52 migrations, 55 public tables plus three private credential tables; 19/40 W2 named targets delivered). No cloud/client deployment has been completed by this implementation cycle; existing isolated Docker services support testing. No production evidence bucket is locked and no action
 has executed against a client estate — the earlier Phase 3 _audit_ completion was
 not completion of the Phase 3 product. Start with
 [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the
@@ -17,7 +17,8 @@ this all rests on. The most recent reviews are
 [audit 60](audits/60-controller-supervision-review-2026-09-23.md) and
 [audit 61](audits/61-controller-backend-scope-review-2026-09-23.md) and
 [audit 62](audits/62-controller-resource-iam-review-2026-09-23.md) and
-[audit 63](audits/63-controller-credential-issuance-review-2026-09-23.md). Doc 12 is a
+[audit 63](audits/63-controller-credential-issuance-review-2026-09-23.md) and
+[audit 64](audits/64-controller-generation-transition-review-2026-09-24.md). Doc 12 is a
 historical snapshot kept for its design reasoning; do not resume from it.
 
 _This block deliberately names no revision number or commit. It was four revisions

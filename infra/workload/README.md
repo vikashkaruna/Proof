@@ -118,3 +118,7 @@ The isolated assessment gate now invokes the dedicated image’s inherited `--ch
 ## Reviewed tenant placement (Revision 70)
 
 The runner bundle now includes the controller file installer and `controller_placement.py`. Prepare a protected profile from `controller-placement.example.json`, binding the controller generation to the same tenant's reviewed runner zone/private address. The `--check PROFILE_PATH REVIEWED_SHA256` command compares fixed GCP metadata with the exact installed node and active private host interface, rechecks live runtime mappings and protected files, and refuses changed inputs. It performs no activation and produces no reusable readiness token. The supervisor integration remains pending. See [Doc 16](../../docs/16_Operator_Completion_Runbook.md) for the procedure and the separate cloud/authorization gates.
+
+## Reviewed generation transition
+
+The runner bundle includes `controller_transition.py` and the runtime admission guard. The [operator procedure](CONTROLLER_TRANSITIONS.md) covers exact previous/new generation review, separate stop, non-activating atomic unit publication, explicit interrupted-publication recovery, loaded-unit confirmation and a separately reviewed reverse transition. Every historical exact-ID stopped container is rechecked. The workflow never issues/revokes credentials or claims application readiness; actual cloud deployment and replacement of older helper bundles remain explicit external gates.

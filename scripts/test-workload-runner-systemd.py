@@ -318,5 +318,5 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as error:
-        frames=[f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-runner-systemd.py','test-workload-host-systemd.py','controller_runtime_acceptance.py','spire_host.py')]
+        frames=[f'{f.name}:{f.lineno}' for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in ('test-workload-runner-systemd.py','test-workload-host-systemd.py','controller_runtime_acceptance.py','controller_transition_acceptance.py','spire_host.py')]
         print('Native runner acceptance refused at '+' / '.join(frames)+'. Private diagnostics withheld.',file=sys.stderr);sys.exit(1)
