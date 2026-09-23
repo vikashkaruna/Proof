@@ -1,14 +1,14 @@
 # Axiom Proof — implementation handoff
 
-> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 49](audits/49-issuer-sync-health-review-2026-09-23.md).
+> **Current status lives elsewhere.** Read [Doc 11](11_Phase0-5_Gap_Closure_Plan.md), whose newest revision section is the current checkpoint, then [Doc 14 implementation progress](14_Implementation_Progress.md) and [Doc 15 session handoff](15_Session_Handoff.md), which names the staging head this rests on. The most recent review is [audit 50](audits/50-spire-state-admission-review-2026-09-23.md).
 >
 > Everything below is the **original 20 September snapshot**, kept for its design reasoning. Its commit tables, workspace paths and in-progress notes are historical and several are now wrong — the analyst work is committed, R-01 through R-11 have mixed closure, and staging has moved many times since. Do not resume from them.
 
-## Current handoff — Revision 60 (23 September 2026)
+## Current handoff — Revision 61 (23 September 2026)
 
-The last verified staging baseline is `1c72489` / CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827). Exact node/UID/image admission preparation and separate SPIRE persistence are green. Revision 60 implements the next issuer-sync health gate: a root observer publishes bounded metadata, the dedicated controller requires its exact node binding and freshness, and stale health cannot consume a new dispatch claim or authorize scoped tools. Confirmation of already persisted work remains available. Final merge evidence is saved in the session checkpoint; use the latest CI before deployment.
+Revision 60's issuer-sync gate is staged at `3e505c5` / CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373). Revision 61 adds the read-only persistent-disk/state guard and strict offline binding preparation. Ready checks reject lost/foreign key state; the separate empty check cannot start or initialize SPIRE. Exact-merge CI/artifact results live in the saved session.
 
-Resume in the existing `codex/w0-w3-closure` worktree, preserving other checkouts. Next implement supervised pinned host installation, persistent-disk guards and protected CA delivery, followed by scoped IAM/KMS, TLS/production startup, opaque scheduler and real cloud acceptance. Then remaining workers/actor chains, W4.4 grants and full W3 wizard/readiness/graph. W0/W1/W2 remainder and backup-aware key retirement persist. The VM module is still default-off; this is not permission to apply cloud resources. Docs 11 and 14–16 carry the complete current scope, tests and operator steps.
+Resume in `codex/w0-w3-closure`, preserving other checkouts. Next wire checksum-pinned host installation, explicit first enrollment/marker delivery and supervision with mount-loss stop behavior, then CA delivery, IAM/KMS, TLS, opaque scheduler and actual cloud acceptance. The current guard is executable source, not an installed service or a tested GCP mount. Real local tests cover SPIRE file compatibility; mount identity is covered by controlled unit fixtures. Docs 11 and 14–16 give evidence and operator gates. Remaining workers/actor chains, live grants, full W3 wizard/readiness/graph, W0/W1/W2 and backup-aware key retirement remain open. Terraform is default-off; cloud apply is not authorized.
 
 ## Historical review snapshot
 

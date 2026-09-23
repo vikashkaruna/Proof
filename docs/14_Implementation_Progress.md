@@ -1,12 +1,26 @@
 # Implementation progress — W0 through W4
 
-Last verified staging checkpoint before this revision’s merge: `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827) green. Revision 60 adds bounded issuer-sync health to the dedicated controller. Final exact-merge evidence is saved in the session. Protected host bootstrap, deployed acceptance and remaining W3/W4 and W0/W1/W2 work stay open.
+Last verified staging checkpoint before this revision’s merge: `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373) green. Revision 61 adds read-only persistent SPIRE state admission. Final exact-merge evidence is saved in the session. Protected host bootstrap, deployed acceptance and remaining W3/W4 and W0/W1/W2 work stay open.
 
 Committed source `6aa901c` passed 63 browser journeys and 89 API/restart outcomes in each local preprod/production container configuration, with zero retries and matching sanitized results. Workspace tests/lint/typecheck/build/format and the production dependency audit also passed. Exact staging merge CI remains the final gate and is recorded in the private session checkpoint.
 
 Committed identity source `fe60f83` passed all 61 SPIRE/BFF outcomes with `dirty: false`, plus 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration, zero retries and matching parity. Follow-up runtime authentication fix `9b15cbb` passed all 144 Python tests. Exact merge CI is the final combined-source gate; its result is saved in the session checkpoint.
 
 The first W4.3 merge CI (`2c3f8f6`, run 35665201335) passed real SPIRE acceptance but failed harness type checking because the root verifier script imported undeclared Zod. Root development dependency `zod` is now explicitly pinned to the already-used 4.5.4 version. Local dependency resolution had hidden that omission. The failed run is not closure evidence; the follow-up merge must pass the exact combined gate.
+
+## Revision 61 — read-only persistent SPIRE state admission
+
+Revision 60 is **complete and green** at `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373): 17 applicable jobs and ten exact-revision artifacts verified. No intervening staging implementation was found at this checkpoint.
+
+**Review finding:** SPIRE's disk key managers accept an absent key file as an empty store. A healthy process or an attached disk alone cannot distinguish approved first enrollment from accidental state loss. Automatic host startup therefore needs an explicit state gate before launching SPIRE.
+
+**Delivered:** a read-only Linux/root state check and offline owner-only binding preparer. The binding names issuer or runner, the reviewed filesystem UUID and trust domain, plus the exact expected GCP node for runners. The guard binds the fixed Terraform disk-device alias to the actual superblock UUID and mounted device, requires a separate whole ext4 filesystem at `/var/lib/spire` with `rw,nosuid,nodev,noexec`, refuses root-device/subtree/stacked/nested mounts, checks protected ancestors and owner-only state, and rechecks mount identity after reading. The ready path requires an identical protected disk marker, nonempty key records and issuer SQLite or node recovery state. Missing, malformed, aliased, oversized, foreign or unsafe files fail closed with fixed output. It never formats, mounts, repairs, initializes or changes permissions.
+
+`--empty` is only a read-only first-initialization precondition: the bound disk must be empty apart from an empty protected `lost+found`. It cannot authorize service startup. `--ready` is the future supervised-start prerequisite; it refuses fresh/missing state. Initial enrollment, approved state-marker installation and recovery remain explicit operator procedures pending the supervised installer. The marker is a configuration binding, not a cryptographic attestation, backup freshness proof or permission to reenroll. Existing issuer-sync health and application authorization remain required.
+
+**Validation:** 58 deployment unit tests (20 new); real separate SPIRE acceptance adds read-only issuer key/registry and node key/recovery checks plus refusal of empty node state before starting the agent, for 24 outcomes. The disposable fixture now explicitly initializes private volume directories and starts SPIRE with owner-only umask. This proves actual SPIRE file compatibility, not GCP block-device activation: mount/superblock failures use controlled unit fixtures, and real host mount-loss/systemd acceptance remains open. Final exact-merge CI/artifact results are saved in the session. See [review 50](audits/50-spire-state-admission-review-2026-09-23.md).
+
+**Remaining:** supervised checksum-pinned installation, reviewed first enrollment/marker delivery, mount-loss stop behavior, protected CA delivery, scoped IAM/KMS, TLS/DNS, complete deployed controller/worker admission, Mumbai backup/restore and opaque scheduler deployment. No cloud resources or live state were changed; Terraform remains default-off. Full W3/W4 and W0/W1/W2 remain partial. Schema remains **0048 / 49 migrations / 55 tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**.
 
 ## Revision 60 — bounded issuer synchronization health
 
