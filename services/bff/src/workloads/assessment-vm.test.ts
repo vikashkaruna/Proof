@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readControllerFile, controllerBackendCredentials } from './controller-files.js';
 import { mkdtemp, writeFile, chmod, symlink, rm, realpath } from 'node:fs/promises';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantId } from '@axiom/types';
@@ -8,7 +9,6 @@ import * as containerRuntime from './assessment-container.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
 import { DispatchKeyPolicy } from './dispatch-key-policy.js';
 import {
-  readControllerFile,
   prepareControllerService,
   controllerServiceConfiguration,
 } from '../assessment-controller-service.js';
@@ -209,4 +209,99 @@ it('refuses a missing runner image or socket volume before reading backend state
   expect(f.from).not.toHaveBeenCalled();
   expect(f.rpc).not.toHaveBeenCalled();
   expect(f.load).not.toHaveBeenCalled();
+});
+
+const backendEnvironment = {
+  AXIOM_REGION: 'ap-south-1',
+  SUPABASE_URL: 'https://backend.example.test',
+};
+it('loads a protected backend key without putting it in the environment', async () => {
+  const f = await protectedFile();
+  const value = 'synthetic-backend-fixture-key-for-startup';
+  await writeFile(f.filename, value + '\n');
+  const env = { ...backendEnvironment };
+  expect(await controllerBackendCredentials(f.filename, env)).toEqual({
+    url: backendEnvironment.SUPABASE_URL,
+    serviceKey: value,
+  });
+  expect(env).toEqual(backendEnvironment);
+});
+it.each([
+  'SUPABASE_SERVICE_KEY',
+  'AGENT_RUNTIME_INTERNAL_TOKEN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'TEMPORAL_API_KEY',
+  'NODE_OPTIONS',
+  'UNREVIEWED_SETTING',
+])('refuses broad or secret-bearing controller environment: %s', async (name) => {
+  const f = await protectedFile();
+  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await expect(
+    controllerBackendCredentials(f.filename, {
+      ...backendEnvironment,
+      [name]: 'synthetic-private-value',
+    }),
+  ).rejects.toThrow(/^Controller backend credentials refused$/);
+});
+it.each([
+  '',
+  'short',
+  ' leading-synthetic-key-that-is-long-enough',
+  'embedded\nsynthetic-key-that-is-long-enough',
+  'x'.repeat(8193),
+  'synthetic-backend-key-long-enough\n\n',
+  'synthetic-backend-key-long-enough\uFFFD',
+])('refuses malformed backend key files without exposing their content %#', async (value) => {
+  const f = await protectedFile();
+  await writeFile(f.filename, value);
+  await expect(controllerBackendCredentials(f.filename, backendEnvironment)).rejects.toThrow(
+    /^Controller backend credentials refused$/,
+  );
+});
+it('does not fall back to environment credentials for missing or exposed files', async () => {
+  const f = await protectedFile();
+  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await chmod(f.filename, 0o644);
+  await expect(controllerBackendCredentials(f.filename, backendEnvironment)).rejects.toThrow(
+    /^Controller backend credentials refused$/,
+  );
+  await expect(
+    controllerBackendCredentials('/missing/backend.key', {
+      ...backendEnvironment,
+      SUPABASE_SERVICE_KEY: 'synthetic-backend-fixture-key-for-startup',
+    }),
+  ).rejects.toThrow(/^Controller backend credentials refused$/);
+});
+it('accepts mounted cloud identity file paths but rejects inline credential values', async () => {
+  const f = await protectedFile();
+  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  expect(
+    (
+      await controllerBackendCredentials(f.filename, {
+        ...backendEnvironment,
+        GOOGLE_APPLICATION_CREDENTIALS: '/run/identity/credentials.json',
+      })
+    ).url,
+  ).toBe(backendEnvironment.SUPABASE_URL);
+  await expect(
+    controllerBackendCredentials(f.filename, {
+      ...backendEnvironment,
+      GOOGLE_APPLICATION_CREDENTIALS: '{"private_key":"synthetic"}',
+    }),
+  ).rejects.toThrow(/^Controller backend credentials refused$/);
+});
+
+it.each([
+  { ...backendEnvironment, SUPABASE_URL: 'http://backend.example.test' },
+  { ...backendEnvironment, SUPABASE_URL: 'https://user:synthetic@backend.example.test' },
+  { ...backendEnvironment, AXIOM_REGION: 'us-east-1' },
+  { SUPABASE_URL: backendEnvironment.SUPABASE_URL },
+])('refuses unsafe backend transport or missing regional binding %#', async (env) => {
+  const f = await protectedFile();
+  await writeFile(f.filename, 'synthetic-backend-fixture-key-for-startup');
+  await expect(controllerBackendCredentials(f.filename, env)).rejects.toThrow(
+    /^Controller backend credentials refused$/,
+  );
 });

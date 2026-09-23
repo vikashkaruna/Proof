@@ -11,7 +11,7 @@ analyst work and pending implementation, start with
 [roadmap traceability](../docs/13_Roadmap_Traceability.md), and
 [the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
 The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
-Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 46](../docs/audits/46-private-mumbai-hosts-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 47](../docs/audits/47-controller-credential-delivery-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
 
 Route aliases in the prototype require reconciliation: `/remediation` maps to
 `/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
@@ -69,3 +69,5 @@ Revision 55 adds a protected local Workload API signing-bundle source with fail-
 Revision 56 composes the private VM controller with protected live SPIRE trust, persisted tenant policy, isolated assessment execution and independent confirmation. Production VM/node/scheduler deployment remains pending; see Doc 16 for protected configuration and operating prerequisites. Revision 56 is verified green at staging `df409cb`, CI 35821680808, with 17 applicable jobs and nine exact-revision artifacts.
 
 Revision 57 prepares separate private Mumbai issuer and runner host resources, disabled by default and verified with offline Terraform tests. Issuer/node bootstrap and operational activation are still pending; no cloud resources were provisioned.
+
+Revision 58 requires protected file delivery of the private controller backend key, with a minimal non-secret environment, before the future Docker image attestor is enabled. The public BFF remains unchanged.
