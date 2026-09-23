@@ -1,15 +1,27 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint: `0081948`, CI [35817381642](https://github.com/vikashkaruna/Proof/actions/runs/35817381642) green, with 17 applicable jobs and eight verified artifacts. Revision 54 adds reviewed registration lifecycle; Revision 55 adds protected Workload API signing-bundle delivery. The selected dedicated Mumbai VM runner still needs deployment and production trust composition; W3/W4 remain open.
+Verified staging checkpoint before this revision’s merge: `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765) green, with 17 applicable jobs and nine verified artifacts. Revision 59 adds node/image admission preparation and separate SPIRE persistence acceptance. Host activation and issuer-sync health remain open; W3/W4 are partial.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 55, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 59, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 59 — prepare and verify exact node/image admission
+
+**Completed code / in-progress deployment:** use the [SPIRE bundle contract](../infra/workload/README.md) and `scripts/prepare-workload-spire.py` to render a fresh, owner-only review directory from an operator-controlled policy file. Replace every example value with reviewed project, immutable runner instance ID, private issuer address, trust domain and both target-architecture Docker image configuration digests. The renderer prepares configuration and proposed argument arrays only. Do not automatically execute them or treat file generation as enrollment/readiness. No new environment variable is introduced.
+
+**Review authority:** only controller UID 20000 and Parikshan UID 20003 are proposed, each bound to its image configuration digest and the exact runner node parent. A digest comes from the approved image's local `docker image inspect` `.Id`, not a tag or registry manifest. Verify build provenance and runtime mount integrity separately. VM replacement, image changes and revocation require an explicit reviewed lifecycle; retain the independent application registration/task checks. The issuer project allowlist is broader than one node, while the workload entries are exact-parent bound. Preserve GCP IIT first-use state; investigate unexpected enrollment conflicts rather than deleting node records or enabling rebootstrap.
+
+**Pending host guards:** validate and mount the intended persistent disk before starting SPIRE. Preserve issuer keys/registry and node keys; never format/reinitialize on restart. Deliver and verify the initial CA independently at the protected configured path. Protect both admin sockets and keep them out of controller/worker mounts. The renderer does not implement disk initialization, installation, service supervision, backup/restore or these permission guards. The real test uses separate local containers/volumes, not deployed GCP VMs. Keep Terraform `workload_vms = null` until these gates are complete.
+
+**Health gate still open:** the new real outage check confirms cached identity can remain available while the issuer is down. A successful node healthcheck or fresh Workload API read must not be used as production issuer-sync readiness. Implement bounded authenticated synchronization evidence and outage/recovery refusal before activation; avoid granting node-admin access to a controller merely for health. Existing ten-second local trust snapshots do not bound upstream replication.
+
+**Acceptance:** `python3 -m unittest discover -s tests/deployment -p 'test_*.py'` covers 28 tests; `python3 scripts/test-spire-deployment.py` passes 14 outcomes with checksum-pinned SPIRE and real Docker selectors, distinct issuer/node state, positive and refusal cases, restart recovery and the outage limitation. Local attestation substitutes a join token and local parent for GCP IIT; no cloud identity claim follows. CI adds `spire-deployment-acceptance` with exact revision, dirty flag, version and sanitized outcomes, bringing expected acceptance JSON artifacts to ten. Continue supervised bootstrap/health, scoped IAM/KMS, TLS/production startup, opaque scheduler, then remaining workers, W4.4 grants and W3 wizard/graph work. Final merge evidence is saved in the session and handoff.
 
 ## Revision 58 — keep controller credentials out of container metadata
 

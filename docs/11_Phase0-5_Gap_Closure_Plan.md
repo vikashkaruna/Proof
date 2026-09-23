@@ -2,10 +2,22 @@
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 11 · **Revision 58 — CONTROLLER CREDENTIAL DELIVERY** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
-**Reviewed staging:** `24d5a40`, green CI [35822811715](https://github.com/vikashkaruna/Proof/actions/runs/35822811715); estate and owner/admin proposal milestones retained.
+**Document:** 11 · **Revision 59 — NODE / IMAGE ADMISSION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed staging:** `a4a2217`, green CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765); estate and owner/admin proposal milestones retained.
 **Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
 **Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 59 — exact node/image admission and separate SPIRE persistence
+
+Revision 58 is **complete and green** at staging `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits.
+
+**Delivered:** an offline, strict SPIRE policy renderer prepares the separate issuer/node configurations and two proposed registrations for the implemented controller and Parikshan worker. Each registration requires the exact GCP project/immutable instance parent, intended UID and Docker image configuration digest. Tags, extra fields, unsafe addresses and malformed identities are refused. Persistent issuer registry/signing-key and node-key paths, protected initial CA, disabled rebootstrap, authenticated verifier access and separate admin sockets are explicit. Rendering never starts services, enrolls nodes, applies registrations or overwrites a reviewed bundle. Release metadata pins SPIRE 1.15.3; host installation and mount guards remain open.
+
+**Validation:** 28 deployment unit tests, including 11 new policy/CLI tests, and **14 real separate-host SPIRE outcomes** in a new acceptance artifact. The fixture validates production GCP configurations with the pinned binaries, then uses local join-token attestation and a local parent alias to test actual Docker selectors. It verifies intended identities, same-UID wrong-image refusal, wrong-UID/parent refusal, controller separation, mutable-tag refusal, issuer/node recreation preserving trust/registration, recovery without a bootstrap token, lost-node-state refusal and restoration of the original state. The Alpine probes establish admission behavior; actual GCP attestation and the complete production controller/worker composition under Docker attestation remain deployment gates. Existing application/schema acceptance is preserved. Final exact-merge CI/artifact results are recorded in the saved session.
+
+**Review finding confirmed by a real outage:** an online node can serve a cached identity while the issuer is offline. That test records a demonstrated limitation, not healthy readiness. A protected Workload API read cannot by itself bound issuer synchronization or global revocation. The next trust milestone must implement an authenticated, bounded issuer-sync health gate without exposing node administration to the controller.
+
+**Remaining:** supervised pinned installation, persistent-disk validation/initialization guards, protected CA delivery, health and recovery, scoped cloud IAM/KMS, TLS/DNS, full production CLI acceptance and dedicated opaque scheduler deployment. Terraform stays default-off; no cloud resources or client changes were applied. Full W3/W4, W0/W1/W2 remainder and backup-aware key retirement remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**. See [review 48](audits/48-spire-admission-persistence-review-2026-09-23.md) and the [bundle contract](../infra/workload/README.md).
 
 ## Revision 58 — protected controller credential delivery
 

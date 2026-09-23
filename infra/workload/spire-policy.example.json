@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "trustDomain": "preprod.axiomproof.test",
+  "projectId": "replace-project",
+  "runnerInstanceId": "1",
+  "issuerPrivateIp": "10.0.0.10",
+  "controllerImageConfigDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "assessmentImageConfigDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}
