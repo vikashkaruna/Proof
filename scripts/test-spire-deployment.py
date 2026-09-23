@@ -98,6 +98,8 @@ def main() -> None:
             run(["docker", "pull", PYTHON_IMAGE], timeout=180)
         shutil.copyfile(ROOT / "infra/workload/spire_health.py", temp / "spire_health.py")
         (temp / "spire_health.py").chmod(0o644)
+        shutil.copyfile(ROOT / "infra/workload/spire_state.py", temp / "spire_state.py")
+        (temp / "spire_state.py").chmod(0o644)
         policy = {
             "schemaVersion": 1, "trustDomain": "deployment.axiomproof.test",
             "projectId": "axiom-local-test", "runnerInstanceId": "1234567890",
@@ -130,6 +132,10 @@ def main() -> None:
                 mounts += ["--mount", f"type=volume,src={volumes[3]},dst=/run/spire-health"]
             run(["docker", "run", "-d", "--name", name, "--network", network, "--network-alias", "node" if is_node else "issuer", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--log-driver", "none", "--memory", "256m", "--pids-limit", "128", "--tmpfs", "/run:rw,nosuid,nodev,noexec,size=8m", *mounts, "--entrypoint", "sleep", PYTHON_IMAGE if is_node else image, "1200"])
 
+            # Isolated test-volume initialization only; the deployed guard
+            # never changes permissions or initializes an existing disk.
+            run(["docker", "exec", name, "chmod", "700", f"/var/lib/spire/{'agent' if is_node else 'server'}"])
+
         def wait(name: str, binary: str, socket: str) -> None:
             for _ in range(30):
                 if run(["docker", "exec", name, binary, "healthcheck", "-socketPath", socket], required=False, timeout=5).returncode == 0:
@@ -138,12 +144,12 @@ def main() -> None:
             raise RuntimeError("SPIRE host startup failed")
 
         def launch_server() -> None:
-            run(["docker", "exec", "-d", issuer, "spire-server", "run", "-config", "/etc/axiom/spire/server-test.conf"])
+            run(["docker", "exec", "-d", issuer, "sh", "-c", 'umask 077; exec "$@"', "spire-start", "spire-server", "run", "-config", "/etc/axiom/spire/server-test.conf"])
             wait(issuer, "spire-server", SERVER_SOCKET)
 
         def launch_node(first: bool = False) -> None:
             run(["docker", "exec", node, "sh", "-c", "mkdir -p /run/spire-admin /run/workload; chmod 700 /run/spire-admin; chmod 755 /run/workload"])
-            command = ["docker", "exec", "-d", node, "spire-agent", "run", "-config", "/etc/axiom/spire/agent-test.conf"]
+            command = ["docker", "exec", "-d", node, "sh", "-c", 'umask 077; exec "$@"', "spire-start", "spire-agent", "run", "-config", "/etc/axiom/spire/agent-test.conf"]
             if first:
                 command += ["-joinTokenFile", "/run/join-token"]
             run(command)
@@ -195,6 +201,36 @@ def main() -> None:
                     raise RuntimeError("unexpected workload identity")
             elif result.returncode == 0:
                 raise RuntimeError("unregistered image admitted")
+
+
+        def state_probe(role: str, *, accepted: bool) -> None:
+            # Actual SPIRE files are mounted read-only. Only the probe's tmpfs
+            # marker/root differs from production. This does not claim a GCP
+            # block-device or mount/supervisor acceptance result.
+            probe = prefix + f"-probe-{len(probes)}"
+            probes.append(probe)
+            state_dir = "server" if role == "issuer" else "agent"
+            state_policy = {"schemaVersion": 1, "role": role, "filesystemUuid": "de6a77f6-27ae-4c42-b302-8a98d243ed9b", "trustDomain": policy["trustDomain"], "nodeId": json.loads(bundle["release.json"])["expectedNodeId"] if role == "runner" else None}
+            code = """import json,os,sys
+from pathlib import Path
+sys.path.insert(0, '/etc/axiom/spire')
+import spire_state as guard
+guard.STATE=Path('/run/state')
+os.umask(0o077)
+p=guard.policy(json.load(sys.stdin))
+marker=guard.STATE/'.axiom-state.json'
+marker.write_text(json.dumps(p));marker.chmod(0o600)
+try:
+ guard.ready(p)
+except FileNotFoundError:
+ if sys.argv[1] != 'refused': raise
+else:
+ if sys.argv[1] != 'accepted': raise ValueError('empty state admitted')
+print('SPIRE persistent file check passed.')
+"""
+            result = run(["docker", "run", "--rm", "-i", "--name", probe, "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--log-driver", "none", "--tmpfs", "/run:rw,nosuid,nodev,noexec,size=8m", "--mount", f"type=bind,src={temp},dst=/etc/axiom/spire,readonly", "--mount", f"type=volume,src={volumes[0 if role == 'issuer' else 1]},dst=/run/state/{state_dir},readonly", "--entrypoint", "python", PYTHON_IMAGE, "-c", code, "accepted" if accepted else "refused"], data=json.dumps(state_policy))
+            if result.stdout != "SPIRE persistent file check passed.\n":
+                raise RuntimeError("persistent file probe refused")
 
         print("SPIRE deployment acceptance: node, UID and immutable-image boundaries.", flush=True)
         fetch(accepted=True)
@@ -306,6 +342,10 @@ def main() -> None:
             if inspected["HostConfig"]["NetworkMode"] != network or inspected["HostConfig"]["PortBindings"]:
                 raise RuntimeError("host network boundary failed")
         outcomes["separate-host-state-and-admin-boundaries"] = True
+        state_probe("issuer", accepted=True)
+        state_probe("runner", accepted=True)
+        outcomes["read-only-issuer-key-and-registry-guard"] = True
+        outcomes["read-only-node-key-and-recovery-guard"] = True
         print("SPIRE deployment acceptance: missing node state refuses recovery.", flush=True)
         run(["docker", "rm", "-f", node])
         original_volume = volumes[1]
@@ -313,9 +353,11 @@ def main() -> None:
         run(["docker", "volume", "create", volumes[1]])
         created_volumes.append(volumes[1])
         start_host(node, True)
+        state_probe("runner", accepted=False)
+        outcomes["empty-node-state-refused-before-agent-start"] = True
         # The agent can retry attestation, but must not regain workload
         # authority. Probe while it is running, not after stopping its process.
-        run(["docker", "exec", "-d", node, "spire-agent", "run", "-config", "/etc/axiom/spire/agent-test.conf"])
+        run(["docker", "exec", "-d", node, "sh", "-c", 'umask 077; exec "$@"', "spire-start", "spire-agent", "run", "-config", "/etc/axiom/spire/agent-test.conf"])
         for _ in range(5):
             time.sleep(1)
             if run(["docker", "exec", node, "spire-agent", "healthcheck", "-socketPath", WORKLOAD_SOCKET], required=False, timeout=5).returncode == 0:

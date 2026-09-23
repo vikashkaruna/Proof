@@ -1,15 +1,25 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-Verified staging checkpoint before this revision’s merge: `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827) green, with 17 applicable jobs and ten verified artifacts. Revision 60 adds bounded issuer synchronization health; supervised host activation and broader W3/W4 remain open.
+Verified staging checkpoint before this revision’s merge: `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373) green, with 17 applicable jobs and ten verified artifacts. Revision 61 adds read-only persistent SPIRE state admission; supervised host activation and broader W3/W4 remain open.
 
 ### Axiom Minds Private Limited · https://axiomminds.ai
 
-**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 60, 23 Sep 2026
+**Document:** 16 · Companion to the [workstream status register](11_Phase0-5_Gap_Closure_Plan.md#workstream-status-register--as-at-revision-22-21-sep-2026) · **As at** Revision 61, 23 Sep 2026
 
 The register says what is delivered. This says **who does what next**, for W0
 through W4, and — the part that is usually missing — **exactly what
 evidence flips a status**, so that "done" is something you can hand over rather
 than something either of us asserts.
+
+## Revision 61 — persistent state guard before supervised startup
+
+1. Prepare a reviewed state binding outside the repository with `python3 scripts/prepare-workload-state.py /protected/spire-policy.json issuer <actual-filesystem-uuid> /protected/issuer-state.json` (use `runner` and its own UUID for the runner). The existing policy supplies the domain and exact runner node. Output is owner-only and never overwritten. Do not use an example UUID as operational configuration.
+2. On the intended host, install the reviewed guard and host binding as root-owned protected files; the fixed binding path is `/etc/axiom/spire/state.json`. The host must provide Python 3.11+ and `/usr/sbin/blkid`. The root-controlled device alias is `/dev/disk/by-id/google-axiom-issuer-state` or `google-axiom-runner-state`. Only a reviewed whole ext4 filesystem mounted at `/var/lib/spire` with `rw,nosuid,nodev,noexec` passes. The mounted root and role directory must be owner-only; every ancestor must be canonical, root-owned and non-writable by group/others.
+3. **First enrollment remains separate:** `python3 /protected/spire_state.py --empty issuer` (or `runner`) only checks a blank disk. It changes nothing and must never be substituted for a ready check in service startup. Do not automatically format, repair or reenroll on refusal. Approved formatting/mounting, pinned binary installation, initial issuer/node enrollment, CA delivery and stopped-state verification still need the supervised installation workflow.
+4. After that approved initialization, the operator must install an identical reviewed binding at `/var/lib/spire/.axiom-state.json`, root-owned `0600`. It must describe the disk actually initialized. Preserve issuer `server/keys.json` plus `server/db.sqlite3`, or runner `agent/keys.json` plus `agent/agent-data.json`, as private regular files. The guard checks structural recovery state; SPIRE and the issuer-sync gate still validate usable credentials and expected node identity. A marker cannot establish cloud identity or freshness of a restored backup.
+5. `python3 /protected/spire_state.py --ready issuer` (or `runner`) must pass before ordinary SPIRE startup. The future supervisor must require the approved mount and stop the service when it disappears. This revision supplies the read-only gate, **not that installed supervisor or live mount-loss proof**. Never remediate missing state by deleting keys, changing UUID/marker to match an unexpected disk, enabling rebootstrap or resetting uncertain dispatch claims. Use the approved recovery process and verify fresh sync before execution resumes.
+
+58 deployment tests and 24 local SPIRE outcomes cover controlled mount/superblock refusal and actual issuer/node recovery-file compatibility. Real GCP disk attachment, mount loss, systemd ordering and first enrollment remain external acceptance gates. Terraform remains default-off and no cloud apply occurred. See [review 50](audits/50-spire-state-admission-review-2026-09-23.md).
 
 ## Revision 60 — require bounded issuer synchronization health
 
