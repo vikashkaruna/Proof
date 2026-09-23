@@ -18,6 +18,14 @@ Evaluated Terraform mock-provider tests cover default-off behavior, exact resour
 
 Local/source/exact-merge evidence is recorded after verification. No cloud state was read or changed and no cloud provisioning/apply occurred. Schema remains 0049 / 50 migrations / 55 public tables plus the private credential registry; W2 remains 19/40 named targets.
 
+## Security gate correction during source acceptance
+
+The first source run (35884952271) passed the functional/deployment jobs but gitleaks flagged two public SHA-256 fingerprints of synthetic test resource names. Two exact historical finding IDs and inline annotations on those same test vectors resolve that false positive; no credential, file-wide or rule-wide exception was added. The failed run is not closure evidence.
+
+Reviewing that job also exposed a Trivy scan with a non-failing default and a pip-audit invocation that treated `pyproject.toml` as requirements and ignored its error. Trivy now fails on high/critical findings; pip-audit examines the locked runtime exports of all three Python services under Python 3.11, with dependency-collection failures and findings enforced.
+
+The old locks included cryptography 48.0.1 through `presidio-anonymizer`, which constrained it below the patched version. Neither service imports that package, so the unused dependency was removed while preserving `presidio-analyzer` and existing PII redaction code. Agent runtime now locks cryptography 50.0.1; the gateway no longer depends on cryptography. The newly enforced audit also flags legacy `PyPDF2` 3.0.1 (PYSEC-2026-1835); it has no imports anywhere in the runtime and is removed rather than replaced with another unused dependency. The existing report implementation and its ReportLab dependency are unchanged. All 187 agent-runtime and 14 gateway tests pass locally. Fresh locked dependency audits and renewed full source/staging acceptance are required before closure. See the [upstream cryptography changelog](https://cryptography.io/en/latest/changelog/) and [Presidio's dependency constraint report](https://github.com/data-privacy-stack/presidio/issues/2229).
+
 ## Required deployment evidence — still pending
 
 On an explicitly authorized deployment, retain the complete reviewed Terraform plan and applied resource IDs. Verify the tenant's service account on the actual VM and the same identity used by the controller. Compare the emitted key-policy fingerprint and secret inventory with the persisted backend policy and protected host generation. Verify the exact secret replication/labels and key purposes/locations; dispatch keys must be distinct from credential-vault keys.

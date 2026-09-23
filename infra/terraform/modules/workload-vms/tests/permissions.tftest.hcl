@@ -151,7 +151,7 @@ run "only_explicit_tenant_resources_receive_permissions" {
   # Cross-checked with DispatchKeyPolicy.fingerprint in the BFF, not a repeat of
   # the Terraform expression: also catches changes to purpose/order/newlines.
   assert {
-    condition     = output.controller_permissions["11111111-1111-4111-8111-111111111111"].keyPolicyFingerprint == "84408be6bba7fda972957bc32d8ac053a39ed709d6ff11517f55af7edff400dc"
+    condition     = output.controller_permissions["11111111-1111-4111-8111-111111111111"].keyPolicyFingerprint == "84408be6bba7fda972957bc32d8ac053a39ed709d6ff11517f55af7edff400dc" # gitleaks:allow -- public SHA-256 of synthetic resource names, not a credential
     error_message = "IAM review fingerprint must equal the backend's persisted key-policy contract."
   }
 }
@@ -183,7 +183,7 @@ run "primary_promotion_preserves_all_readable_grants" {
         "projects/axiom-vm-fixture/locations/asia-south1/keyRings/dispatch/cryptoKeys/tenant-a-current",
         "projects/axiom-vm-fixture/locations/asia-south1/keyRings/dispatch/cryptoKeys/tenant-a-retiring",
         "projects/axiom-vm-fixture/locations/asia-south1/keyRings/dispatch/cryptoKeys/tenant-b-current",
-      ]) && output.controller_permissions["11111111-1111-4111-8111-111111111111"].keyPolicyFingerprint == "e5190bde28f89f87900b799573e2f5159869d9e4061c1abd9817b09053042de9"
+      ]) && output.controller_permissions["11111111-1111-4111-8111-111111111111"].keyPolicyFingerprint == "e5190bde28f89f87900b799573e2f5159869d9e4061c1abd9817b09053042de9" # gitleaks:allow -- public SHA-256 of synthetic resource names, not a credential
     )
     error_message = "Primary promotion must change the policy fence while retaining old-key read authority."
   }
