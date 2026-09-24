@@ -127,3 +127,15 @@ export const IssueConnectorGrantRequestSchema = z
   })
   .strict();
 export type IssueConnectorGrantRequest = z.infer<typeof IssueConnectorGrantRequestSchema>;
+
+/** W4.5: register a classified, hash-pinned tool on a connector. */
+export const RegisterConnectorToolRequestSchema = z
+  .object({
+    toolName: z.string().regex(/^[a-z][a-z0-9_.-]{0,99}$/),
+    toolVersion: z.string().regex(/^[A-Za-z0-9._-]{1,80}$/),
+    operationClass: z.enum(['read', 'write']),
+    description: z.string().trim().min(1).max(4000),
+    inputSchema: z.object({ type: z.literal('object') }).passthrough(),
+  })
+  .strict();
+export type RegisterConnectorToolRequest = z.infer<typeof RegisterConnectorToolRequestSchema>;

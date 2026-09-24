@@ -1,4 +1,6 @@
-# Continuing implementation — Revision 82
+# Continuing implementation — Revision 83
+
+**Revision 83 — W4.5 internal tool registry (Claude cloud session):** migration 0057 adds `register_connector_tool`, which is audited and append-only, makes read/write classification mandatory, and allows no write tools on sandbox bindings. It also adds `verify_connector_tool`, which rejects a tool unless its description matches the SHA-256 pinned at registration. `ToolRegistry` in the BFF refuses unregistered, reclassified or changed tools, and any tool whose class does not match the lease scope. `GET` and `POST /v1/connectors/:id/tools` expose it. See [audit 72](audits/72-internal-tool-registry-review-2026-09-24.md). Schema is **0057 / 58 migrations / 60 public tables**; the next migration is **0058**. Next in plan order: W4.6, the first real SQL binding.
 
 **Revision 82 — W4.4 grant issuance and enforcement (Claude cloud session):**
 

@@ -32,6 +32,7 @@ beforeEach(() => {
   record('connector_grant_review_queue', () => [{ id: GRANT, overdue: true }]);
   record('attest_connector_grant', (a) => attest(a));
   record('issue_connector_grant', (a) => issue(a));
+  record('register_connector_tool', (a) => ({ tool: { id: 't', tool_name: a.p_tool_name } }));
 });
 function app(role: UserRole = UserRole.ADMIN) {
   const hono = new Hono<{ Variables: Variables }>();
@@ -140,5 +141,30 @@ describe('sustenance routes (C-W3-6)', () => {
     expect((await issueAs(grantBody)).status).toBe(403);
     issue = () => ({ error: 'write_requires_production' });
     expect((await issueAs(grantBody)).status).toBe(409);
+  });
+
+  it('registers a classified tool and refuses an unclassified one', async () => {
+    const post = (payload: unknown, role?: UserRole) =>
+      app(role).request(`/v1/connectors/${ESTATE}/tools`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    const tool = {
+      toolName: 'list_tables',
+      toolVersion: '1',
+      operationClass: 'read',
+      description: 'Lists tables',
+      inputSchema: { type: 'object' },
+    };
+    expect((await post(tool)).status).toBe(201);
+    expect(calls.register_connector_tool?.[0]).toMatchObject({
+      p_operation_class: 'read',
+      p_tool_name: 'list_tables',
+    });
+    const { operationClass: _omitted, ...unclassified } = tool;
+    expect((await post(unclassified)).status).toBe(400);
+    expect((await post(tool, UserRole.VIEWER)).status).toBe(403);
+    expect(calls.register_connector_tool).toHaveLength(1);
   });
 });

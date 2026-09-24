@@ -6,6 +6,7 @@ import {
   AttestConnectorGrantRequestSchema,
   Capability,
   IssueConnectorGrantRequestSchema,
+  RegisterConnectorToolRequestSchema,
 } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
@@ -21,6 +22,9 @@ const failures: Record<string, [400 | 403 | 404 | 409, string]> = {
   agent_scope_refused: [403, 'Only Drishti may read and only Karya may write.'],
   write_requires_production: [409, 'Write access needs a production connector binding.'],
   grant_exists: [409, 'That agent already holds an active grant on this connector.'],
+  classification_required: [400, 'Classify the tool as read or write.'],
+  connector_archived: [409, 'Archived connectors cannot register tools.'],
+  version_exists: [409, 'That tool version is already registered; register a new version.'],
 };
 const unavailable = {
   error: { code: 'sustenance_unavailable', message: 'Retry this same request.' },
@@ -114,6 +118,52 @@ export function sustenanceRoutes(deps: { client?: typeof createSupabaseAdmin } =
       return c.json({ error: { code: data.error, message: failure[1] } }, failure[0]);
     }
     return c.json({ data: data.grant }, 201);
+  });
+  // W4.5: internal tool registry. Registration is audited and append-only;
+  // using a tool still needs a live grant whose scope matches its class.
+  app.get('/connectors/:id/tools', async (c) => {
+    const denied = requireCapability(c, Capability.POSTURE_READ);
+    if (denied) return denied;
+    if (!id.safeParse(c.req.param('id')).success)
+      return c.json({ error: { code: 'invalid_id' } }, 400);
+    const { data, error } = await db()
+      .from('mcp_tool_registry')
+      .select('id,tool_name,tool_version,operation_class,description,description_sha256,created_at')
+      .eq('tenant_id', c.get('tenantId'))
+      .eq('connector_id', c.req.param('id'))
+      .order('created_at');
+    if (error) return c.json(unavailable, 503);
+    return c.json({ data });
+  });
+
+  app.post('/connectors/:id/tools', async (c) => {
+    const denied = requireCapability(c, Capability.CONNECTOR_MANAGE);
+    if (denied) return denied;
+    if (!id.safeParse(c.req.param('id')).success)
+      return c.json({ error: { code: 'invalid_id' } }, 400);
+    const parsed = RegisterConnectorToolRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success)
+      return c.json({ error: { code: 'invalid_request', message: 'Check the tool fields.' } }, 400);
+    const { data, error } = await db().rpc('register_connector_tool', {
+      p_tenant_id: c.get('tenantId'),
+      p_actor_id: c.get('user').id,
+      p_connector_id: c.req.param('id'),
+      p_tool_name: parsed.data.toolName,
+      p_tool_version: parsed.data.toolVersion,
+      p_operation_class: parsed.data.operationClass,
+      p_description: parsed.data.description,
+      p_input_schema: parsed.data.inputSchema,
+      p_correlation_id: randomUUID(),
+    });
+    if (error || !data) return c.json(unavailable, 503);
+    if (data.error) {
+      const failure = failures[String(data.error)];
+      if (!failure) return c.json(unavailable, 503);
+      return c.json({ error: { code: data.error, message: failure[1] } }, failure[0]);
+    }
+    return c.json({ data: data.tool }, 201);
   });
   return app;
 }
