@@ -21,10 +21,14 @@ anthropic_api_key = "sk-ant-api03-..."
 openai_api_key    = "sk-proj-..."
 gemini_api_key    = "AIzaSy..."
 
-# Security Tokens
-approval_signing_key         = "your-preprod-hmac-sha256-signing-secret-32-chars-long"
-agent_runtime_internal_token = "your-preprod-agent-runtime-token-xyz"
-model_gateway_api_key        = "your-preprod-model-gateway-api-key-abc"
+# Security Tokens — leave blank for stable generated keys, or supply secret-manager values.
+approval_signing_key         = ""
+agent_runtime_internal_token = ""
+model_gateway_api_key        = ""
+
+mfa_encryption_key           = ""
+# Empty unless an MFA key rotation is in flight. Comma-separated, newest first.
+mfa_encryption_keys_previous = ""
 
 # Transactional Email (Resend)
 resend_api_key          = "re_your_resend_api_key_here"
@@ -32,3 +36,28 @@ axiom_from_email        = "Axiom Proof <platform@axiomproof.ai>"
 axiom_sales_email       = "sales@axiomproof.ai"
 axiom_founder_email     = "founder@axiomminds.ai"
 contact_recipient_email = "hello@axiomminds.ai"
+
+report_email_mode = "disabled"
+contact_email_mode = "disabled"
+invitation_email_mode = "disabled"
+
+# Separate private Mumbai SPIRE issuer + runner foundation. Keep disabled until
+# bootstrap, state mounting, issuer enrollment, IAM and supervision are ready.
+workload_vms = null
+# workload_vms = {
+#   zone                     = "asia-south1-a"
+#   boot_image               = "projects/YOUR-PROJECT/global/images/REVIEWED-NAMED-IMAGE"
+#   tenants = {
+#     "11111111-1111-4111-8111-111111111111" = {
+#       controller_source_ranges = ["10.10.16.0/28"]
+#       # Optional: creates empty Mumbai secret containers and resource-only grants.
+#       # No credential values or signing keys belong in Terraform/tfvars.
+#       controller_permissions = {
+#         dispatch_keys = {
+#           primary  = "projects/YOUR-PROJECT/locations/asia-south1/keyRings/dispatch/cryptoKeys/TENANT-PRIMARY"
+#           retiring = [] # Retain every key still referenced by jobs/backups.
+#         }
+#       }
+#     }
+#   }
+# }

@@ -1,0 +1,6 @@
+# Shared Bandit configuration: used by .github/workflows/bandit.yml and by
+# scripts/security-scan.sh (pre-push), so local and CI results match.
+# Test code is excluded: pytest's `assert` (B101) and fixture credentials
+# (B105/B106) are expected there and are not shipped.
+[bandit]
+exclude = ./node_modules,./.git,./services/agent-runtime/tests,./services/model-gateway/tests,./services/temporal-workers/tests,./services/agent-runtime/.venv,./services/model-gateway/.venv,./services/temporal-workers/.venv

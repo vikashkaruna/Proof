@@ -8,6 +8,7 @@ processes) drive the orchestration.
 
 from __future__ import annotations
 
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -16,7 +17,8 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from .agents import (
     DrishtiAgent,
@@ -145,14 +147,25 @@ async def list_agents():
                 "one_liner": a.one_liner,
                 "tool_scopes": list(a.tool_scopes),
                 "can_mutate": a.can_mutate,
+                "mutates_client_estate": a.mutates_client_estate,
+                "writes_axiom_state": a.writes_axiom_state,
             }
             for a in app.state.agents.values()
         ]
     }
 
 
+def require_internal_caller(request: Request) -> None:
+    """Legacy BFF transport authentication; never workload or grant authority."""
+    expected = app.state.settings.internal_token
+    supplied = request.headers.get("x-internal-token", "")
+    if not expected or not secrets.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="invalid internal token")
+
+
 @app.post("/agents/{agent_name}/invoke", response_model=InvokeResponse)
 async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
+    require_internal_caller(req)
     try:
         agent_enum = AgentName(agent_name)
     except ValueError:
@@ -161,13 +174,6 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
     agent = app.state.agents.get(agent_enum)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not initialised: {agent_name}")
-
-    # Internal-token check (BFF only)
-    expected = app.state.settings.internal_token
-    if expected:
-        auth = req.headers.get("x-internal-token", "")
-        if auth != expected:
-            raise HTTPException(status_code=401, detail="invalid internal token")
 
     t0 = time.monotonic()
     result: AgentRunResult = await agent.invoke(
@@ -191,34 +197,58 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 
 # ─── Internal-only: BFF calls this after a successful approval+execute
 #     to trigger the agent runtime to actually do the work.
+# W5 · R-05. The BFF sent camelCase to a model that requires snake_case and
+# defines no aliases, so every dispatch was a 422 — and the BFF never checked
+# the response, so it reported the batch as accepted. Aliases are deliberately
+# NOT added: accepting both shapes would preserve the ambiguity that caused it.
+# The contract is versioned instead, so a mismatch refuses with a reason.
+EXECUTION_CONTRACT_VERSION = 2
+
+
 class InternalExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int
     tenant_id: str
     plan_id: str
     correlation_id: str
     action_ids: list[str]
+    # The BFF's Idempotency-Key for this batch. Carried so the runtime can be
+    # made idempotent against a redelivery when W5 adds the durable outbox.
+    request_key: str
     mode: str
     concurrency: int
     stop_on_failure: bool
     approval_token: dict[str, Any]
+    # v2: the content snapshot this batch was authorised for. The claim read it
+    # from the approval token's signed payload, so it is what the approver
+    # agreed to. A real executor must recompute the digest and refuse to mutate
+    # anything that no longer matches — this runtime records it and refuses to
+    # execute at all, which is the honest state until there is an executor.
+    content_digest: str
 
 
 @app.post("/internal/execute")
 async def internal_execute(body: InternalExecuteRequest, req: Request):
-    expected = app.state.settings.internal_token
-    if not expected or req.headers.get("x-internal-token", "") != expected:
-        raise HTTPException(status_code=401, detail="invalid internal token")
+    require_internal_caller(req)
 
-    # Phase 0/1: we just record the intent in the ledger. Phase 3+
-    # dispatches to the connector framework and the action catalogue.
-    log = structlog.get_logger()
-    log.info(
-        "internal.execute.received",
-        plan_id=body.plan_id,
-        action_ids=body.action_ids,
-        correlation_id=body.correlation_id,
-    )
-    return {
-        "accepted": True,
+    if body.contract_version != EXECUTION_CONTRACT_VERSION:
+        # A deployment error, and it says so. The BFF records this against the
+        # batch and returns the actions to `approved` rather than reporting
+        # work as running.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported execution contract version {body.contract_version}; "
+                f"this runtime speaks version {EXECUTION_CONTRACT_VERSION}"
+            ),
+        )
+
+    # No durable consumer exists yet. Logging an intent does not transfer
+    # responsibility for execution; report a refusal until enqueueing exists.
+    return JSONResponse(status_code=501, content={
+        "accepted": False,
+        "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
-        "phase": "0/1 stub — execution deferred to Phase 3",
-    }
+        "reason": "execution_not_implemented",
+    })

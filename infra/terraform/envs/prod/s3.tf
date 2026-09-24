@@ -5,7 +5,7 @@
 # period expires.
 
 resource "aws_s3_bucket" "evidence" {
-  bucket = "axiom-proof-evidence-ap-south-1"
+  bucket              = "axiom-proof-evidence-ap-south-1"
   object_lock_enabled = true
   # Force destroy is FALSE — we cannot delete a bucket with
   # Object Lock Compliance mode retention unexpired.
@@ -59,6 +59,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "evidence" {
     id     = "transition-to-ia"
     status = "Enabled"
 
+    # Applies to every object. Stating it empty rather than omitting it:
+    # a rule with neither `filter` nor `prefix` is already a provider
+    # warning and becomes an error in a later major.
+    filter {}
+
     transition {
       days          = 90
       storage_class = "STANDARD_IA"
@@ -105,6 +110,9 @@ data "aws_iam_policy_document" "evidence_access" {
       "s3:PutObjectRetention",
       "s3:GetObject",
       "s3:GetObjectVersion",
+      "s3:GetObjectRetention",
+      "s3:GetObjectLegalHold",
+      "s3:GetBucketObjectLockConfiguration",
       "s3:ListBucket",
     ]
     resources = [

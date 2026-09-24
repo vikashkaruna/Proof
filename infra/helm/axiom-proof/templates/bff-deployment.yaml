@@ -16,7 +16,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "axiom-proof.selectorLabels" . | nindent 8 }}
+        {{- include "axiom-proof.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: bff
     spec:
       imagePullSecrets:
@@ -70,6 +70,47 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-internal
                   key: approval-key
+            - name: AXIOM_MFA_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-internal
+                  key: mfa-encryption-key
+            # The retiring half of the ring, present only while a rotation is
+            # in flight. `optional` is what keeps the ordinary case working:
+            # with no `mfa-encryption-keys-previous` key in the Secret the
+            # variable is simply unset, which is how the BFF's key ring reads
+            # "no retiring keys". Without it every pod would refuse to start
+            # until someone added a key they do not have.
+            - name: AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-internal
+                  key: mfa-encryption-keys-previous
+                  optional: true
+            - name: AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS
+              value: {{ .Values.config.assessmentDispatchRetentionDays | quote }}
+            - name: AXIOM_MFA_SESSION_TTL_HOURS
+              value: {{ .Values.config.mfaSessionTtlHours | default 12 | quote }}
+            # 0 disables address-scoped MFA budgets. Set it to the number of
+            # proxies in front of the BFF; see packages/config.
+            - name: AXIOM_TRUSTED_PROXY_HOPS
+              value: {{ .Values.config.trustedProxyHops | default 0 | quote }}
+            - name: AXIOM_REPORT_EMAIL_MODE
+              value: {{ .Values.bff.reportEmailMode | default "disabled" | quote }}
+            - name: AXIOM_CONTACT_EMAIL_MODE
+              value: {{ .Values.bff.contactEmailMode | default "disabled" | quote }}
+            - name: AXIOM_INVITATION_EMAIL_MODE
+              value: {{ .Values.bff.invitationEmailMode | default "disabled" | quote }}
+            - name: AXIOM_WEB_APP_URL
+              value: {{ .Values.marketing.env.NEXT_PUBLIC_APP_URL | quote }}
+            - name: CONTACT_RECIPIENT_EMAIL
+              value: {{ .Values.bff.contactRecipientEmail | default "" | quote }}
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bff.reportEmailSecretName | default "axiom-report-email" | quote }}
+                  key: resend-api-key
+                  optional: true
           livenessProbe:
             httpGet:
               path: /health

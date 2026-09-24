@@ -89,6 +89,9 @@ export const ReadinessIndexSchema = z.object({
     }),
   ),
   generatedAt: z.string(),
+  // C-W0-7: sector benchmarks are Axiom editorial estimates, not measured peer
+  // data. Absent on snapshots stored before this field; those were heuristic too.
+  benchmarkBasis: z.literal('editorial_estimate').optional(),
 });
 export type ReadinessIndex = z.infer<typeof ReadinessIndexSchema>;
 
@@ -114,9 +117,30 @@ export const GapScanReportSchema = z.object({
     }),
   ),
   libraryVersion: z.string(),
+  // Wording/mapping version of the questions answered; absent on older snapshots.
+  questionSetVersion: z.string().optional(),
   readinessIndex: ReadinessIndexSchema.optional(),
 });
 export type GapScanReport = z.infer<typeof GapScanReportSchema>;
+
+export const GapScanStoredReportSchema = z.object({
+  id: z.string(),
+  report_snapshot: GapScanReportSchema,
+  library_version: z.string(),
+  posture_score: z.number().min(0).max(100),
+  estimated_exposure_inr: z.number().nonnegative(),
+  contact_name: z.string().nullish(),
+  contact_email: z.string().nullish(),
+  contact_phone: z.string().nullish(),
+  contact_company: z.string().nullish(),
+  follow_up_requested: z.boolean().optional(),
+  created_at: z.string(),
+});
+export type GapScanStoredReport = z.infer<typeof GapScanStoredReportSchema>;
+export const GapScanEmailRequestSchema = z.object({
+  id: z.uuid(),
+  email: z.email().max(320),
+});
 
 // ─── Contact inquiry (public) ────────────────────────────────────────
 
@@ -220,6 +244,20 @@ export const IssueApprovalRequestSchema = z
       .default(60),
     reason: z.string().max(2000).nullish(),
     conditions: z.record(z.string(), z.unknown()).default({}),
+
+    /**
+     * The satisfied MFA challenge authorising this approval (W1 · SEC-8).
+     *
+     * Optional in the schema and mandatory at the route, deliberately: a
+     * missing challenge has to produce `mfa_challenge_required` with the
+     * binding the client should request, not a generic `validation_failed`
+     * that tells an approver nothing about what to do next.
+     *
+     * The challenge is bound to this exact plan and action set, so one
+     * satisfied step-up cannot be redirected at a different approval, and
+     * it is spent once, so it cannot authorise two.
+     */
+    mfaChallengeId: z.string().uuid().nullish(),
   })
   .superRefine((value, ctx) => {
     if (new Set(value.actionIds).size !== value.actionIds.length) {
@@ -236,6 +274,86 @@ export const RevokeApprovalRequestSchema = z.object({
   reason: z.string().max(2000).nullish(),
 });
 export type RevokeApprovalRequest = z.infer<typeof RevokeApprovalRequestSchema>;
+
+// ─── Multi-factor authentication (W1 · SEC-8) ─────────────────────────────
+
+export const BeginMfaEnrolmentRequestSchema = z.object({
+  /** Friendly device name, e.g. "iPhone Authenticator". Never the secret. */
+  label: z.string().max(120).nullish(),
+  /**
+   * A satisfied `enrolment` challenge, required only when the caller already
+   * holds an active factor — replacing one means proving you hold it.
+   *
+   * Declared here rather than read off the raw body, which is what the route
+   * did while no client sent it. An undeclared field is a contract nobody can
+   * see: the web app's Replace button omitted it for exactly as long, and the
+   * BFF refused every press with `mfa_challenge_required`.
+   */
+  mfaChallengeId: z.string().uuid().nullish(),
+});
+export type BeginMfaEnrolmentRequest = z.infer<typeof BeginMfaEnrolmentRequestSchema>;
+
+export const ActivateMfaEnrolmentRequestSchema = z.object({
+  code: z.string().min(6).max(12),
+});
+export type ActivateMfaEnrolmentRequest = z.infer<typeof ActivateMfaEnrolmentRequestSchema>;
+
+export const MfaChallengePurposeSchema = z.enum([
+  'login',
+  'approval_issuance',
+  'enrolment',
+  'factor_revocation',
+]);
+export type MfaChallengePurpose = z.infer<typeof MfaChallengePurposeSchema>;
+
+/**
+ * Issuing a challenge for `approval_issuance` requires the thing being
+ * approved, because the challenge is bound to it. Requiring the binding
+ * inputs here rather than accepting a bare purpose is what stops a client
+ * obtaining a general-purpose step-up and spending it on anything.
+ */
+export const IssueMfaChallengeRequestSchema = z
+  .object({
+    purpose: MfaChallengePurposeSchema,
+    planId: z.string().uuid().nullish(),
+    actionIds: z.array(z.string().uuid()).min(1).max(100).nullish(),
+    mode: z.enum(['batch', 'individual']).default('batch'),
+  })
+  .superRefine((value, ctx) => {
+    if (value.purpose !== 'approval_issuance') return;
+    if (!value.planId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['planId'],
+        message: 'planId is required for an approval_issuance challenge',
+      });
+    }
+    if (!value.actionIds || value.actionIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['actionIds'],
+        message: 'actionIds is required for an approval_issuance challenge',
+      });
+    } else if (new Set(value.actionIds).size !== value.actionIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['actionIds'],
+        message: 'actionIds must not contain duplicates',
+      });
+    }
+  });
+export type IssueMfaChallengeRequest = z.infer<typeof IssueMfaChallengeRequestSchema>;
+
+export const VerifyMfaChallengeRequestSchema = z.object({
+  /**
+   * A six-digit TOTP code, or a recovery code. The server decides which by
+   * shape; the client does not get to declare it, because letting a caller
+   * choose the verification path is how you end up with one that skips a
+   * check the other performs.
+   */
+  code: z.string().min(6).max(32),
+});
+export type VerifyMfaChallengeRequest = z.infer<typeof VerifyMfaChallengeRequestSchema>;
 
 // THE EXECUTION GATE — the single most security-critical contract in the system.
 // Per ADR-2 / BR-1, the ApprovalToken in the body is the gate that makes
@@ -270,7 +388,7 @@ export const ExecutePlanResponseSchema = z.object({
       reason: z.string(),
     }),
   ),
-  status: z.enum(['accepted', 'partial', 'rejected']),
+  status: z.enum(['accepted', 'partial', 'rejected', 'dispatch_failed', 'dispatch_unknown']),
   startedAt: z.string().datetime(),
 });
 export type ExecutePlanResponse = z.infer<typeof ExecutePlanResponseSchema>;

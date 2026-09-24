@@ -14,6 +14,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY services/bff/package.json ./services/bff/
 COPY packages/approval-engine/package.json ./packages/approval-engine/
 COPY packages/config/package.json ./packages/config/
+COPY packages/mfa/package.json ./packages/mfa/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY packages/control-library/package.json ./packages/control-library/
 COPY packages/evidence/package.json ./packages/evidence/
 COPY packages/ledger/package.json ./packages/ledger/
@@ -21,7 +23,7 @@ COPY packages/supabase/package.json ./packages/supabase/
 COPY packages/types/package.json ./packages/types/
 COPY packages/ui/package.json ./packages/ui/
 COPY packages/design-tokens/package.json ./packages/design-tokens/
-RUN pnpm install --frozen-lockfile --filter @axiom/bff...
+RUN --mount=type=cache,id=axiom-pnpm,target=/pnpm/store pnpm install --store-dir=/pnpm/store --frozen-lockfile --filter @axiom/bff...
 
 # ─── build ─────────────────────────────────────────────────────────
 FROM base AS build
@@ -31,8 +33,30 @@ COPY services/bff ./services/bff
 COPY packages ./packages
 RUN pnpm --filter @axiom/bff build
 
+# Explicit dedicated runner image. Deployment supplies only this trusted
+# controller with the daemon group/socket; workers never inherit either.
+FROM build AS assessment-controller
+RUN apk add --no-cache docker-cli tini
+ENV NODE_ENV=production TSX_DISABLE_CACHE=1
+USER 20000:20000
+WORKDIR /app/services/bff
+ENTRYPOINT ["/sbin/tini", "--", "node", "--import", "/app/node_modules/tsx/dist/loader.mjs", "src/assessment-controller-service.ts"]
+CMD []
+
+FROM assessment-controller AS vm-controller-acceptance
+COPY scripts/verify-vm-controller.ts /app/scripts/verify-vm-controller.ts
+COPY scripts/verify-issuer-sync.ts /app/scripts/verify-issuer-sync.ts
+
+# Test-only controller: no source/token mounts or backend credentials at runtime.
+# The normal final runtime target does not contain this acceptance script.
+FROM build AS workload-trust-acceptance
+COPY scripts/verify-workload-trust.ts /app/scripts/verify-workload-trust.ts
+
 # ─── runtime ───────────────────────────────────────────────────────
 FROM base AS runtime
+ARG AXIOM_RELEASE_SHA
+ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
+LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
 WORKDIR /app
 RUN apk add --no-cache tini
 ENV NODE_ENV=production

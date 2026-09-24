@@ -11,6 +11,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/',
   '/api/health',
   '/login',
+  // C-W1-3: client-only; moves the fragment token to session storage before
+  // any sign-in redirect could drop it. The BFF authenticates the acceptance.
+  '/invite',
   '/about',
   '/favicon.ico',
   '/robots.txt',
@@ -25,36 +28,32 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isLoggedOut = request.cookies.get('axiom_e2e_logged_out')?.value === 'true';
-
+  // SEC-2: the block that stood here skipped the session check entirely when
+  // ENVIRONMENT was 'preprod', when the Supabase URL merely *contained*
+  // 'preprod-supabase' or 'placeholder', or — with no environment guard at
+  // all — when the request carried `axiom_e2e_bypass=true`.
+  //
+  // That cookie clause was step 2 of a complete unauthenticated takeover
+  // chain: cookie set in any browser → page session check skipped → the BFF
+  // proxy injects `test-access-token` → the BFF resolves that to the founder
+  // identity → the tenant resolver accepts any X-Tenant-Id with role `owner`.
+  // It was reachable in production, and the app handed the cookie out itself
+  // whenever login hit a transient network failure.
+  //
+  // There is now one path, and it runs in every environment.
   const supabaseUrl =
     process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:55321';
   const supabaseAnonKey =
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+    process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  const isPreprodOrMock =
-    process.env.ENVIRONMENT === 'preprod' ||
-    supabaseUrl.includes('preprod-supabase') ||
-    supabaseUrl.includes('placeholder') ||
-    request.cookies.get('axiom_e2e_bypass')?.value === 'true' ||
-    (process.env.NODE_ENV === 'test' &&
-      (process.env.AXIOM_E2E_BYPASS_AUTH === 'true' ||
-        request.headers.get('x-e2e-bypass-auth') === 'true'));
-
-  if (isPreprodOrMock) {
-    if (isLoggedOut) {
-      if (!pathname.startsWith('/login')) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/login';
-        url.searchParams.set('redirect', pathname);
-        return NextResponse.redirect(url);
-      }
-      return NextResponse.next();
-    }
-    // In preprod/mock sovereign mode with active session, permit access immediately
-    return NextResponse.next();
+  // A missing anon key used to fall back to a hardcoded live JWT (SEC-2). Fail
+  // closed instead: without a key we cannot validate a session, so we must not
+  // pretend we did.
+  if (!supabaseAnonKey) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
+    url.searchParams.set('error', 'Authentication is not configured.');
+    return NextResponse.redirect(url);
   }
 
   let response = NextResponse.next({ request });

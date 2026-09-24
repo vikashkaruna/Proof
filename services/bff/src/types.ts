@@ -6,5 +6,21 @@ export type Variables = {
   token: string;
   tenantId: string;
   role: UserRole;
+  /**
+   * From `tenant_users.approval_scopes` — a column defined in migration 0001
+   * and never read by any code until W1. An approver may be scoped to specific
+   * action classes, so that authority to approve a data-deletion does not
+   * imply authority to approve a cross-border transfer change.
+   *
+   * Empty means unrestricted, matching the column default.
+   */
+  approvalScopes: readonly string[];
   idempotencyKey: string;
+  /**
+   * GoTrue's `session_id` claim (W1 · SEC-8). What a login MFA attestation is
+   * bound to — stable across access-token refresh, gone when the session ends.
+   * Empty when it could not be read, which every consumer treats as
+   * "not attested".
+   */
+  sessionId: string;
 };

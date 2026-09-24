@@ -23,6 +23,16 @@ interface Props {
   blocked: Action[];
   initialApprovalToken?: string | null;
   initialApprovedActionIds?: string[];
+  /**
+   * Resolved on the server from the central capability matrix (W1 · SEC-9).
+   *
+   * Render gating, not the security boundary — the BFF refuses regardless.
+   * Its job is that a reviewer or viewer is not handed an Approve button whose
+   * only possible outcome is a 403.
+   */
+  canApprove?: boolean;
+  canReject?: boolean;
+  canExecute?: boolean;
 }
 
 export function ApprovalActions({
@@ -34,6 +44,9 @@ export function ApprovalActions({
   blocked,
   initialApprovalToken = null,
   initialApprovedActionIds = [],
+  canApprove = false,
+  canReject = false,
+  canExecute = false,
 }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set(eligible.map((a) => a.id)));
@@ -49,6 +62,15 @@ export function ApprovalActions({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // W1 · SEC-8 — the step-up. The BFF will not issue an approval token without
+  // a freshly satisfied challenge bound to this exact plan and action set, so
+  // approving is a two-step act here as well: open a challenge, prove the
+  // factor, then approve. The binding is why the code has to be entered after
+  // the selection is final rather than once per session.
+  const [stepUp, setStepUp] = useState<{ challengeId: string; expiresAt: string } | null>(null);
+  const [stepUpCode, setStepUpCode] = useState('');
+  const [needsEnrolment, setNeedsEnrolment] = useState(false);
+
   function toggle(id: string) {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
@@ -56,51 +78,124 @@ export function ApprovalActions({
     setSelected(next);
   }
 
-  async function submit() {
+  /** Read `{ error: { code, message, details } }` out of a failed response. */
+  async function readError(res: Response, fallback: string) {
+    const body = await res.json().catch(() => ({}));
+    let message = body?.error?.message ?? `${fallback} (HTTP ${res.status})`;
+    if (body?.error?.details) {
+      const detail =
+        typeof body.error.details === 'object'
+          ? JSON.stringify(body.error.details)
+          : String(body.error.details);
+      message += `: ${detail}`;
+    }
+    return { code: body?.error?.code as string | undefined, message };
+  }
+
+  /** Step one: open a challenge bound to exactly what is selected. */
+  async function beginApproval() {
     setError(null);
     setSuccess(null);
+    setNeedsEnrolment(false);
     if (selected.size === 0) {
       setError('Select at least one action to approve.');
       return;
     }
     setSubmitting(true);
     try {
-      const res = await fetch('/api/bff/v1/plans/approve', {
+      const res = await fetch('/api/bff/v1/mfa/challenge', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+        // A step-up challenge is single-use, so creating one must not replay.
+        // The bridge's derived key is stable per (path, body), which for a
+        // re-approval of the same plan and actions would hand back a
+        // challenge that had already been spent. See `verify-form.tsx`.
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': tenantId,
+          'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
+        },
         body: JSON.stringify({
+          purpose: 'approval_issuance',
           planId,
           actionIds: Array.from(selected),
           mode: 'batch',
-          concurrency,
-          stopOnFailure,
-          expiresInMinutes,
-          reason: reason.trim() ? reason.trim() : undefined,
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        let errorMsg = body?.error?.message ?? `Approval failed (HTTP ${res.status})`;
-        if (body?.error?.details) {
-          const detailStr =
-            typeof body.error.details === 'object'
-              ? JSON.stringify(body.error.details)
-              : String(body.error.details);
-          errorMsg += `: ${detailStr}`;
-        }
-        setError(errorMsg);
+        const { code, message } = await readError(res, 'Could not start verification');
+        // An approver with no factor needs to enrol, not to keep trying codes.
+        if (code === 'mfa_enrolment_required') setNeedsEnrolment(true);
+        setError(message);
         return;
       }
       const body = await res.json();
-      setApprovalToken(JSON.stringify(body.token));
-      setApprovedActionIds(Array.from(selected));
-      setSuccess(`Approved ${selected.size} action(s). Signed approval token issued.`);
-      router.refresh();
+      setStepUp({ challengeId: body.challengeId, expiresAt: body.expiresAt });
+      setStepUpCode('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Approval failed');
+      setError(e instanceof Error ? e.message : 'Could not start verification');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /** Step two: satisfy the challenge, then spend it on the approval. */
+  async function confirmApproval() {
+    if (!stepUp) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const verify = await fetch(
+        `/api/bff/v1/mfa/challenge/${encodeURIComponent(stepUp.challengeId)}/verify`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+          body: JSON.stringify({ code: stepUpCode.trim() }),
+        },
+      );
+      if (!verify.ok) {
+        const { code, message } = await readError(verify, 'Verification failed');
+        setError(message);
+        // These are terminal for this challenge — a new one is needed.
+        if (code === 'attempts_exhausted' || code === 'challenge_expired') setStepUp(null);
+        return;
+      }
+      await issueApproval(stepUp.challengeId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Verification failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function issueApproval(mfaChallengeId: string) {
+    const res = await fetch('/api/bff/v1/plans/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+      body: JSON.stringify({
+        planId,
+        actionIds: Array.from(selected),
+        mode: 'batch',
+        concurrency,
+        stopOnFailure,
+        expiresInMinutes,
+        reason: reason.trim() ? reason.trim() : undefined,
+        mfaChallengeId,
+      }),
+    });
+    if (!res.ok) {
+      const { message } = await readError(res, 'Approval failed');
+      setError(message);
+      // The challenge is spent either way — a retry needs a fresh one.
+      setStepUp(null);
+      return;
+    }
+    const body = await res.json();
+    setApprovalToken(JSON.stringify(body.token));
+    setApprovedActionIds(Array.from(selected));
+    setStepUp(null);
+    setStepUpCode('');
+    setSuccess(`Approved ${selected.size} action(s). Signed approval token issued.`);
+    router.refresh();
   }
 
   async function execute() {
@@ -200,6 +295,18 @@ export function ApprovalActions({
         </div>
       )}
 
+      {needsEnrolment && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          <strong>You have no second factor enrolled.</strong> Approval tokens bind a fresh
+          authentication to the exact actions being approved, so one is required before you can
+          approve anything.{' '}
+          <a href="/settings/security" className="font-medium underline">
+            Enrol an authenticator
+          </a>
+          .
+        </div>
+      )}
+
       {success && (
         <div className="rounded-md border border-teal-500 bg-teal-50 p-3 text-sm text-teal-800">
           {success}
@@ -271,17 +378,70 @@ export function ApprovalActions({
         />
       </div>
 
+      {canApprove && stepUp && (
+        <div className="rounded-md border border-slate-300 bg-slate-50 p-4">
+          <p className="text-sm font-medium text-slate-800">Confirm with your authenticator</p>
+          <p className="mt-1 text-xs text-slate-600">
+            This code authorises <strong>these {selected.size} action(s) on this plan</strong> and
+            nothing else. It can be used once. Changing the selection needs a new code.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="stepUpCode">6-digit code, or a recovery code</Label>
+              <Input
+                id="stepUpCode"
+                value={stepUpCode}
+                onChange={(e) => setStepUpCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && stepUpCode.trim()) void confirmApproval();
+                }}
+                placeholder="123456"
+                autoComplete="one-time-code"
+                inputMode="text"
+                autoFocus
+              />
+            </div>
+            <Button
+              variant="accent"
+              onClick={confirmApproval}
+              loading={submitting}
+              disabled={!stepUpCode.trim()}
+            >
+              Verify and approve
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setStepUp(null);
+                setStepUpCode('');
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!canApprove && !canReject && (
+        <div className="rounded-md border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+          You have read access to this plan. Approving and rejecting are reserved for an approver or
+          owner in this tenant.
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="accent"
-          size="lg"
-          onClick={submit}
-          loading={submitting}
-          disabled={selected.size === 0}
-        >
-          Approve {selected.size} action{selected.size === 1 ? '' : 's'}
-        </Button>
-        {approvalToken && (
+        {canApprove && (
+          <Button
+            variant="accent"
+            size="lg"
+            onClick={beginApproval}
+            loading={submitting && !stepUp}
+            disabled={selected.size === 0 || Boolean(stepUp)}
+          >
+            Approve {selected.size} action{selected.size === 1 ? '' : 's'}
+          </Button>
+        )}
+        {canExecute && approvalToken && (
           <Button variant="primary" size="lg" onClick={execute} loading={submitting}>
             Execute approved actions
           </Button>
@@ -289,21 +449,24 @@ export function ApprovalActions({
         <Button variant="ghost" size="lg" onClick={() => router.refresh()}>
           Refresh
         </Button>
-        <Button
-          variant="danger"
-          size="lg"
-          onClick={reject}
-          loading={submitting}
-          disabled={submitting}
-        >
-          Reject plan
-        </Button>
+        {canReject && (
+          <Button
+            variant="danger"
+            size="lg"
+            onClick={reject}
+            loading={submitting}
+            disabled={submitting}
+          >
+            Reject plan
+          </Button>
+        )}
       </div>
 
       <p className="text-xs text-slate-500">
-        On approval, the BFF issues a signed, scope-bound token via the Approval Engine. The token
-        is the gate (per ADR-2). A separate execute call is required to actually run — the token
-        itself doesn&apos;t execute.
+        Approving requires a fresh second factor bound to this plan and these actions, and the BFF
+        issues a signed, scope-bound token via the Approval Engine only once that challenge is
+        satisfied. The token is the gate (per ADR-2). A separate execute call is required to
+        actually run — the token itself doesn&apos;t execute.
       </p>
     </div>
   );

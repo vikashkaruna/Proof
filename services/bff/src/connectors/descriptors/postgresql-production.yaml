@@ -1,0 +1,15 @@
+schemaVersion: 1
+id: 41410000-0000-4000-8000-000000000001
+target: postgresql
+version: 1.0.0
+transport: sql
+targetBinding: production
+auth: cloud_iam
+assurance: high
+capabilities:
+  enumerate: { operation: sql.enumerate, mutating: false }
+  sample: { operation: sql.sample, mutating: false }
+  read: { operation: sql.read, mutating: false }
+  write: { operation: sql.execute-approved-action, mutating: true, requiresApprovalToken: true }
+dataCategoryHints: [contact, identity]
+rateLimit: { requestsPerSecond: 5, burst: 10 }

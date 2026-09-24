@@ -110,6 +110,59 @@ kubectl -n axiom-proof rollout restart deployment/axiom-proof-bff
 # execution that has a stale token will be rejected by the BFF.
 ```
 
+### Rotate the MFA encryption key
+
+Unlike the approval signing key, this one cannot simply be replaced: a TOTP
+secret has to be recoverable to check a code, so every enrolled factor is
+sealed under it. Replacing it on its own does not invalidate tokens, it locks
+out every enrolled user at once.
+
+The BFF reads a **ring**. `AXIOM_MFA_ENCRYPTION_KEY` seals new and rewrapped
+secrets; `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` is a comma-separated list,
+newest first, of keys that may still be read. Each stored secret names the key
+that sealed it, so both can be live at once.
+
+```bash
+# 1. Mint a new primary and carry the outgoing key onto the retiring list.
+#    MINT_FORCE is required: rotating a live secret is a deliberate act.
+MINT_FORCE=true ./scripts/sync-env.sh <env> mint
+
+# 2. Confirm the ring before deploying anything.
+#    `verify` prints how many retiring keys are still in play.
+./scripts/sync-env.sh <env> verify
+```
+
+Then roll the BFF. Enrolled factors keep working throughout: each one is
+rewritten under the new key the next time its owner verifies, so the rotation
+drains at the pace people log in rather than in a single pass that would
+decrypt every TOTP secret into one process.
+
+**How the retiring list reaches a deployed BFF.** Until Revision 18 it did
+not: Compose carried it, Cloud Run and Helm carried only the primary key, so
+step 2 could pass and the rolled service would still have half a ring. Both
+surfaces express "no rotation in flight" as _absent_ rather than empty,
+because an empty value is not storable as a Secret Manager version and is not
+a key.
+
+| Surface                                 | Retiring list                                                                                                                    | Clearing it                                 |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Compose (local, staging, preprod, prod) | `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`, empty by default                                                                           | Unset the variable                          |
+| Cloud Run (preprod)                     | `mfa_encryption_keys_previous` in `.env` → tfvars → a Secret Manager secret that exists **only** while the variable is non-empty | Clear it and apply; the secret is destroyed |
+| Helm (prod/EKS)                         | Key `mfa-encryption-keys-previous` in the `<release>-internal` Secret, read with `optional: true`                                | Remove the key; pods start without it       |
+
+`scripts/check-mfa-ring-coverage.sh` fails the build if a surface that runs the
+BFF cannot carry both halves. A surface added later belongs in that list.
+
+**Do not remove a key from the retiring list until nothing is sealed under
+it.** Removing it early is the lockout this design exists to prevent. If it
+happens, affected users get `secret_unreadable` and HTTP 503 — a deliberate,
+distinct signal rather than a rejected code — and the fix is to put the key
+back on the list. Users who cannot wait can authenticate with a recovery code.
+
+There is no query that reports the remaining count directly: the key id in
+each envelope is a hash, so compare it against the primary key's id if you
+need to measure how far a rotation has drained.
+
 ### Verify the audit ledger
 
 ```sql

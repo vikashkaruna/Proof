@@ -1,5 +1,6 @@
 'use client';
 
+import { CONTROL_LIBRARY_COUNT, CONTROL_LIBRARY_DOMAIN_COUNT } from '@axiom/control-library';
 import React, { useState } from 'react';
 import { AgentIcon } from '@axiom/ui';
 
@@ -43,7 +44,8 @@ const INITIAL_REPORTS: ReportItem[] = [
       {
         title: '1. Executive Posture Scorecard',
         content:
-          'Audit evaluated 48 controls across 14 DPDPA domains. 36 controls are in full statutory compliance, 8 are actively managed under remediation plans, and 4 require board review.',
+          // axiom-count-ok: 36 is a compliant-subset figure in sample narrative, not the library total
+          `Audit evaluated ${CONTROL_LIBRARY_COUNT} controls across ${CONTROL_LIBRARY_DOMAIN_COUNT} DPDPA domains. 36 controls are in full statutory compliance, 8 are actively managed under remediation plans, and 4 require board review.`,
       },
       {
         title: '2. High Exposure Findings & Risk Allocation',

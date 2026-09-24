@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { selectTenantMembership, type TenantMembership } from '@/lib/tenant-selection';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
@@ -10,36 +11,19 @@ async function forward(request: NextRequest, context: RouteContext) {
     data: { session },
   } = await supabase.auth.getSession();
 
-  let accessToken = session?.access_token;
-  if (!accessToken) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const accessToken = session?.access_token;
 
-    if (
-      user ||
-      (process.env.NODE_ENV === 'test' &&
-        (process.env.AXIOM_E2E_BYPASS_AUTH === 'true' ||
-          request.headers.get('x-e2e-bypass-auth') === 'true'))
-    ) {
-      accessToken = 'test-access-token';
-    }
-  }
-
-  if (!accessToken) {
-    const isPreprodOrDev =
-      process.env.ENVIRONMENT === 'preprod' ||
-      process.env.ENVIRONMENT === 'development' ||
-      process.env.ENVIRONMENT === 'local' ||
-      process.env.NODE_ENV !== 'production' ||
-      request.cookies.get('axiom_e2e_bypass')?.value === 'true' ||
-      request.headers.get('x-e2e-bypass-auth') === 'true';
-
-    if (isPreprodOrDev) {
-      accessToken = 'test-access-token';
-    }
-  }
-
+  // SEC-2 step 3: two blocks stood here. The first minted `test-access-token`
+  // for any request where `getUser()` returned a user but no session; the
+  // second minted it for any request at all in preprod, development, local,
+  // any container without NODE_ENV, or — with no environment guard — any
+  // request carrying `axiom_e2e_bypass=true` or an `x-e2e-bypass-auth` header.
+  // Either header is attacker-controlled, so this was a free founder token.
+  //
+  // Under `e2e-bypass` the Supabase client is itself the fixture client, which
+  // returns a session with `test-access-token` through the normal path above.
+  // So no special case is needed here at all: either there is a session or
+  // there is a 401.
   if (!accessToken) {
     return NextResponse.json(
       { error: { code: 'unauthorized', message: 'Missing session' } },
@@ -51,38 +35,95 @@ async function forward(request: NextRequest, context: RouteContext) {
   const base = process.env.BFF_PUBLIC_URL || 'http://localhost:4000';
   const target = new URL(`${base.replace(/\/$/, '')}/${path.join('/')}`);
   target.search = request.nextUrl.search;
+  const bodyBytes =
+    request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${accessToken}`);
-  if (!headers.has('x-tenant-id')) {
-    const activeTenantSlug = request.cookies.get('axiom_active_tenant')?.value;
-    const tenantMap: Record<string, string> = {
-      meridian: '00000000-0000-0000-0000-000000000001',
-      aarogya: '00000000-0000-0000-0000-000000000002',
-      streamline: '00000000-0000-0000-0000-000000000003',
-    };
-    const tenantId =
-      (activeTenantSlug && tenantMap[activeTenantSlug]) ||
-      (activeTenantSlug &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeTenantSlug)
-        ? activeTenantSlug
-        : '00000000-0000-0000-0000-000000000001');
-    headers.set('x-tenant-id', tenantId);
+  // These exact endpoints run before a caller has a tenant. The BFF still
+  // authenticates and authorizes them; the bridge supplies no tenant scope.
+  const tenantless =
+    (request.method === 'POST' && target.pathname === '/v1/organizations/onboard') ||
+    (request.method === 'GET' && target.pathname === '/v1/user/tenants') ||
+    (request.method === 'POST' && target.pathname === '/v1/invitations/accept');
+  if (tenantless) {
+    headers.delete('x-tenant-id');
+  } else if (!headers.has('x-tenant-id')) {
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return NextResponse.json(
+          { error: { code: 'unauthorized', message: 'Invalid session' } },
+          { status: 401 },
+        );
+      }
+      const { data, error } = await supabase
+        .from('tenant_users')
+        .select('tenant_id, tenants:tenant_id(slug)')
+        .eq('user_id', user.id);
+      if (error) throw new Error('membership_lookup_failed');
+      const selected = selectTenantMembership(
+        (data ?? []) as unknown as TenantMembership[],
+        request.cookies.get('axiom_active_tenant')?.value,
+      );
+      if (!selected) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'tenant_selection_required',
+              message: 'Select a tenant you belong to before continuing.',
+            },
+          },
+          { status: 403 },
+        );
+      }
+      headers.set('x-tenant-id', selected.tenant_id);
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'tenant_lookup_unavailable',
+            message: 'Unable to verify the selected tenant. Try again.',
+          },
+        },
+        { status: 503 },
+      );
+    }
   }
+  // Explicit headers are intentional selections. The BFF independently checks
+  // current membership and MFA for them, as it does for resolved cookies.
+  // The browser is the client here, and a client is entitled to generate its
+  // own idempotency key — but it must be stable across a retry or it buys
+  // nothing. `Date.now()` + `Math.random()` is unique per attempt, so a
+  // double-submit produced two executions. Derive the key from the request
+  // instead, so an identical retry replays rather than re-executes.
   if (
     !headers.has('idempotency-key') &&
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
   ) {
-    headers.set('idempotency-key', `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const prefix = new TextEncoder().encode(
+      `${request.method}:${target.pathname}${target.search}:`,
+    );
+    const body = new Uint8Array(bodyBytes ?? new ArrayBuffer(0));
+    const payload = new Uint8Array(prefix.length + body.length);
+    payload.set(prefix, 0);
+    payload.set(body, prefix.length);
+
+    const fingerprint = await crypto.subtle.digest('SHA-256', payload);
+    const hex = Array.from(new Uint8Array(fingerprint))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    headers.set('idempotency-key', `web-${hex.slice(0, 32)}`);
   }
   headers.delete('host');
   headers.delete('content-length');
   headers.delete('cookie');
-  const body =
-    request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const response = await fetch(target, {
     method: request.method,
     headers,
-    body,
+    body: bodyBytes,
     redirect: 'manual',
   });
   return new NextResponse(response.body, { status: response.status, headers: response.headers });

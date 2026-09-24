@@ -84,6 +84,37 @@ To maximize horizontal scalability, failure isolation, and independent rollouts,
 
 ---
 
+### Self-hosted Supabase, and why the order matters
+
+Preprod does not use Supabase Cloud. GoTrue and PostgREST run as Cloud Run services against this environment's own Cloud SQL, so preprod is a real replica of production and no third-party processor sits in the data path. An nginx gateway presents both on one origin, because `supabase-js` is given a single base URL and appends `/auth/v1` and `/rest/v1` itself.
+
+```
+   SUPABASE_URL ──▶ axiom-supabase-preprod (nginx)
+                        ├── /auth/v1/ ──▶ axiom-supabase-auth-preprod (GoTrue)
+                        └── /rest/v1/ ──▶ axiom-supabase-rest-preprod (PostgREST)
+                                                    │
+                                              Cloud SQL
+```
+
+The deployment sequence is load-bearing, and every way of getting it wrong fails in a message that points somewhere else:
+
+| Order | Step                                                                                                                                          | What happens if it moves                                                                                                                                        |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `infra/supabase/bootstrap-selfhosted.sql` — roles, an **empty** `auth` schema, and the `storage` table contract migration 0007 writes against | GoTrue exits with `schema "auth" does not exist`. It never creates the schema, only the tables in it.                                                           |
+| 2     | GoTrue starts and applies its own 54 migrations, owning `auth`                                                                                | If the migration series ran first, migration 0000's hand-rolled `auth.users` is already there, and GoTrue's chain breaks partway having created sixteen tables. |
+| 3     | The migration series, over GoTrue's schema. 0000's auth tables become no-ops                                                                  | —                                                                                                                                                               |
+| 4     | PostgREST starts                                                                                                                              | —                                                                                                                                                               |
+
+Two settings are not optional and neither announces itself:
+
+- **`search_path=auth` on GoTrue's connection.** Its MFA migration creates the `factor_type` and `factor_status` enums _unqualified_. Without it they are created in `public`, and a later migration dies on `type "auth.factor_type" does not exist` — after sixteen tables already exist, so it reads like a schema conflict rather than a `search_path` one. Terraform carries this in a dedicated `gotrue_db_url` secret.
+- **`GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated`.** Unset, GoTrue emits an empty `role` claim, PostgREST runs `set local role ""`, and every authenticated request fails with `role "" does not exist` — a 400 that looks like a malformed query.
+
+All of this is pinned by `tests/deployment/selfhosted-supabase.sh`, which builds the deployed shape against real GoTrue and PostgREST on every CI run and asserts that a sign-up produces a token PostgREST accepts and that RLS answers it as itself.
+
+> [!IMPORTANT]
+> Supabase **Storage** is not deployed. The bootstrap creates `storage.buckets` and `storage.objects` so migration 0007 can apply, but nothing serves those buckets until `supabase/storage-api` is added. The evidence vault is unaffected: it writes to GCS through the S3 API and never touches Supabase Storage.
+
 ## 2. Prerequisites & Pre-flight Setup
 
 Ensure your administrative workstation or deployment bastion has the following tools installed:
@@ -131,41 +162,41 @@ gcloud services enable \
 
 The Terraform configuration at `infra/terraform/envs/preprod` establishes the entire regional infrastructure in `asia-south1`.
 
-### Step 3.1: Configure Variables
+### Step 3.1: Configure the environment
+
+Terraform variables are **generated**, not hand-written. `infra/docker/environments/.env.preprod` is the single source of truth for every environment value, and `scripts/sync-env.sh` propagates it to `terraform.tfvars`, Secret Manager and Cloud Run.
+
+Editing `terraform.tfvars` directly no longer has any effect — the next `sync-env.sh preprod terraform` overwrites it, and the deploy pipeline runs that on every invocation.
 
 ```bash
-cd "infra/terraform/envs/preprod"
+# 1. Create .env.preprod, or bring an existing one up to the template.
+#    Only missing keys are appended; values you have already set are kept.
+./scripts/sync-env.sh preprod scaffold
 
-# Copy the variable definitions template
-cp terraform.tfvars.example terraform.tfvars
+# 2. Generate the secrets that must be generated. This fills the Supabase
+#    JWT secret and its anon/service keys FROM ONE MINTING — those two keys
+#    are JWTs signed with that secret, and mixing values from separate runs
+#    leaves GoTrue issuing tokens PostgREST rejects.
+./scripts/sync-env.sh preprod mint
+
+# 3. Fill in everything a machine cannot generate: the GCP project, the
+#    provider API keys, the Temporal namespace, the Upstash URL.
+$EDITOR infra/docker/environments/.env.preprod
+
+# 4. Confirm it is complete. This is a gate, not a report: missing or
+#    placeholder values exit non-zero and the deploy refuses to start.
+./scripts/sync-env.sh preprod verify
 ```
 
-Edit `terraform.tfvars` with your project credentials:
+Two values deserve a conscious decision rather than a default:
 
-```hcl
-project_id             = "axiom-proof"
-region                 = "asia-south1"
-environment            = "preprod"
-cloud_sql_tier         = "db-custom-2-7680" # Or db-f1-micro for cost optimization
+| Key                             | Why it matters                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AXIOM_EVIDENCE_RETENTION_DAYS` | Applied as a COMPLIANCE-mode Object Lock, which **nobody — including the project owner — can shorten or delete** before it expires. The DPDPA statutory term Axiom Proof reports against is 2555 days; preprod deliberately uses a short value so a test bucket does not become undeletable for seven years. |
+| `AXIOM_TRUSTED_PROXY_HOPS`      | How many proxies sit in front of the BFF. `0` disables address-scoped MFA budgets rather than trusting a caller-supplied `x-forwarded-for`, which would let an attacker exhaust a victim's quota.                                                                                                            |
 
-# Upstash Redis
-upstash_redis_url = "rediss://default:YOUR_TOKEN@your-endpoint.upstash.io:6379"
-
-# Temporal Cloud GCP Subscription
-temporal_address   = "axiom-proof.tmprl.cloud:7233"
-temporal_namespace = "axiom-proof"
-temporal_api_key   = "your-temporal-api-key"
-
-# Agent Models Fallback Priority (Anthropic -> OpenAI -> Gemini)
-anthropic_api_key = "sk-ant-api03-..."
-openai_api_key    = "sk-proj-..."
-gemini_api_key    = "AIzaSy..."
-
-# Sovereign Security Tokens
-approval_signing_key         = "your-32-character-minimum-hmac-signing-key"
-agent_runtime_internal_token = "your-preprod-agent-runtime-token"
-model_gateway_api_key        = "your-preprod-model-gateway-token"
-```
+> [!NOTE]
+> A Terraform variable that nothing fills from `.env` is a build failure, enforced by `scripts/check-tfvars-coverage.sh` in CI. This exists because the variable mapping used to be hand-written in the deploy script and covered 15 of 23: `mfa_encryption_key` among them, so an operator's configured MFA key was silently ignored while Terraform minted a different one into Secret Manager.
 
 ### Step 3.2: Initialize & Apply Infrastructure
 

@@ -4,7 +4,7 @@
 
 # Enable required Google APIs
 resource "google_project_service" "apis" {
-  for_each = toset([
+  for_each = toset(concat([
     "run.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com",
@@ -13,7 +13,7 @@ resource "google_project_service" "apis" {
     "vpcaccess.googleapis.com",
     "compute.googleapis.com",
     "servicenetworking.googleapis.com",
-  ])
+  ], local.workload_kms_required ? ["cloudkms.googleapis.com"] : []))
   project            = var.project_id
   service            = each.key
   disable_on_destroy = false

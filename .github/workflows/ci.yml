@@ -2,17 +2,469 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
+
+# Least privilege by default; jobs that publish images or report status
+# declare their own, broader permissions.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  deployed-http-acceptance:
+    name: Container API/browser acceptance (W0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx --test scripts/lib/*.test.ts
+      - run: pnpm exec tsc -p scripts/tsconfig.acceptance.json
+      - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - run: ./scripts/test-deployed-http.sh --browser
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-http-acceptance
+          path: |
+            .axiom-runtime/acceptance/http-*/api-results.json
+            .axiom-runtime/acceptance/http-*/browser-results.json
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Stop isolated Auth stack
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
+  workload-identity:
+    name: Isolated SPIRE workload identity (W4.3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: python3 scripts/test-workload-identity.py
+      - run: python3 scripts/test-spire-deployment.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spire-deployment-acceptance
+          path: .axiom-runtime/spire-deployment/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-identity-acceptance
+          path: .axiom-runtime/workload-identity/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  workload-host:
+    name: Protected SPIRE host and native restart (W4.3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: /usr/bin/python3 scripts/test-workload-host.py
+      - name: Disposable native systemd and loop-device fixture
+        run: sudo -E /usr/bin/python3 scripts/test-workload-host-systemd.py --isolated-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-host-acceptance
+          path: |
+            .axiom-runtime/workload-host/results.json
+            .axiom-runtime/workload-host-systemd/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  workload-runner-host:
+    name: Native SPIRE runner and observer lifecycle (W4.3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: /usr/bin/python3 scripts/test-workload-host.py
+      - name: Disposable runner systemd and loop-device fixture
+        run: sudo -E /usr/bin/python3 scripts/test-workload-runner-systemd.py --isolated-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-runner-host-acceptance
+          path: .axiom-runtime/workload-runner-systemd/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  database-security:
+    name: Fresh migrations and direct-client RLS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/test-database.sh
+
+  strict-auth-parity:
+    name: Real Auth/PostgREST strict topology parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/test-strict-parity.sh
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: uv sync --locked
+        working-directory: services/agent-runtime
+      - run: uv run --locked python ../../scripts/verify-runtime-audit.py
+        working-directory: services/agent-runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-audit-acceptance
+          path: .axiom-runtime/runtime-audit/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - run: uv sync --locked
+        working-directory: services/temporal-workers
+      - run: python3 scripts/test-workload-identity.py --assessment
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-assessment-acceptance
+          path: .axiom-runtime/workload-assessment/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workload-trust-acceptance
+          path: .axiom-runtime/workload-trust/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop the isolated parity project
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
+  # ─── W1 browser persona journeys ─────────────────────────────────
+  # Real GoTrue accounts, one per persona, signing in through the real login
+  # form against AXIOM_AUTH_MODE=strict.
+  #
+  # This job is new because the suite it runs was never runnable: `tests/e2e`
+  # was missing from pnpm-workspace.yaml, so `@playwright/test` was never
+  # installed and `pnpm test:e2e` resolved to no package and exited 0 having
+  # run nothing. The harness it did carry configured `AXIOM_E2E_BYPASS_AUTH`
+  # and the `axiom_e2e_bypass` cookie, both deleted from the app in W0.0 —
+  # and under that bypass every caller resolves to one founder identity, so a
+  # persona journey could not have failed for the right reason.
+  persona-journeys:
+    name: Browser persona journeys (W1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/start-parity-supabase.sh
+        # setup-cli exports a single GHCR override, disabling the pinned CLI's
+        # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
+        # keep the pinned image tags and every health/acceptance check intact.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+      - run: pnpm exec tsx scripts/seed-personas.ts
+      - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - run: pnpm --filter @axiom/e2e exec playwright test
+      - name: Persona journey report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persona-journeys-report
+          path: tests/e2e/playwright-report
+          retention-days: 7
+      - name: Stop the isolated parity project
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
+  # ─── W0.0 security gate ──────────────────────────────────────────
+  # Runs first and gates everything else. The findings it guards against
+  # (SEC-1, SEC-2, SEC-3, SEC-13) were all instances of one mistake:
+  # environment identity used as a proxy for security posture. This job
+  # exists so that mistake cannot be made again silently.
+  env-security-gate:
+    name: Environment/security separation (W0.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-env-security-gate.sh
+
+  # ─── W0.1 deployment configuration coverage ──────────────────────
+  # Terraform variables were mapped to .env keys by hand, one `if` per
+  # line, in a deploy script. It covered 15 of preprod's 23, so the rest
+  # silently took Terraform defaults — including the MFA encryption key,
+  # which meant an operator's configured key was ignored while Terraform
+  # minted a different one, and the evidence retention period, which could
+  # put a test-length COMPLIANCE lock on a bucket documented as seven
+  # years. Nothing failed; the values were simply not the ones configured.
+  tfvars-coverage-gate:
+    name: Deployment configuration coverage (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-tfvars-coverage.sh
+      - run: python3 scripts/check-cloudrun-auth-wiring.py
+      - run: python3 scripts/check-cloudrun-iam.py
+      - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
+      # Every surface that runs the BFF must be able to carry BOTH halves of
+      # the MFA key ring. Rotation landed with the retiring list wired into
+      # the Compose files only, so Cloud Run and Helm could start the BFF with
+      # no path for it — a deploy that succeeds and then fails one user at a
+      # time as their old-key factors come up for verification.
+      - run: ./scripts/check-mfa-ring-coverage.sh
+
+      # Terraform formatting had drifted on four files across both
+      # environments and nothing noticed, because no job had ever run
+      # `terraform fmt`. One of the four drifted without anyone writing a
+      # misaligned line: fmt aligns contiguous runs of assignments, so the
+      # comment 66885c5 added inside preprod's `locals` block split it into
+      # two alignment groups and stale-padded the six keys above it. That is
+      # exactly the shape a reviewer skims past, which is the argument for
+      # deciding it mechanically rather than by eye.
+      #
+      # Pinned rather than floating: fmt's own rules can change between
+      # Terraform releases, and an unpinned gate would turn an upstream
+      # release into a red build on untouched files.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra/terraform
+
+      # fmt only parses; it never resolves a module or a reference, so it
+      # cannot see a module block whose arguments the pinned version rejects.
+      # `validate` does, which is how envs/prod was found unloadable: three
+      # variables declared twice, seven arguments spelled for module majors it
+      # does not pin, a helm_release using the provider v3 `set` form under a
+      # v2 pin, and a lifecycle rule with no filter. prod had never been
+      # initialised at all, so none of it had ever been reported.
+      #
+      # The loop discovers environments instead of naming them, so a third one
+      # cannot be added ungated — the failure mode that produced prod.
+      # -backend=false because prod's main.tf carries a live `backend "s3"`
+      # block; this gate reads configuration and must not touch state.
+      #
+      # Error level only. `validate` exits 0 on warnings, so the lifecycle
+      # rule's empty `filter {}` is defensive rather than held here — removing
+      # it warns and still passes. Promoting warnings to failures was declined
+      # on purpose: a provider minor can introduce one on untouched files,
+      # which is the brittleness the pinned terraform_version above avoids.
+      - name: terraform validate (all environments)
+        run: |
+          set -euo pipefail
+          for env in infra/terraform/envs/*/; do
+            echo "::group::${env}"
+            terraform -chdir="${env}" init -backend=false -input=false
+            terraform -chdir="${env}" validate
+            echo "::endgroup::"
+          done
+
+      - name: Offline Terraform runtime IAM and MFA rotation tests
+        run: terraform -chdir=infra/terraform/envs/preprod test -no-color
+
+      - name: Offline private issuer and runner boundary tests
+        run: |
+          python3 scripts/check-workload-iam.py
+          terraform -chdir=infra/terraform/modules/workload-vms init -backend=false -input=false
+          terraform -chdir=infra/terraform/modules/workload-vms validate
+          terraform -chdir=infra/terraform/modules/workload-vms test -no-color
+
+  # ─── W0.1 deployment manifests render ────────────────────────────
+  # The Helm chart had never been rendered anywhere. No job invoked helm and
+  # helm is not installed on the dev machines, so `check-mfa-ring-coverage.sh`
+  # above could confirm the retiring-key variable was PRESENT in the chart
+  # while the chart it was present in could not produce a manifest at all.
+  # It had four defects: `range` over a boolean in ingress.yaml, two values
+  # keys the templates dereference that values.yaml never defined, and an
+  # annotations block emitted outside metadata. Every one is caught in about
+  # a second by actually rendering.
+  helm-render:
+    name: Deployment manifests render (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      # Pinned rather than floating: a validator that silently changes its
+      # schema set turns this gate into a source of unrelated red builds.
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.6.7
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: helm lint
+        run: helm lint infra/helm/axiom-proof
+
+      # Own interpreter rather than the runner's system Python: a system-wide
+      # `pip install` trips PEP 668 (externally-managed-environment) on the
+      # newer Ubuntu images.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install PyYAML for the rendered-manifest checks
+        run: pip install --quiet pyyaml
+
+      # Rendering the defaults alone is not coverage: a `{{- with }}` guarding
+      # an empty map never executes, which is exactly how the ServiceAccount
+      # annotations defect survived — clean on defaults, invalid YAML the
+      # moment an operator attaches an IRSA role. Each fixture in ci/ forces
+      # one such branch; values-prod.yaml.example is rendered because it is
+      # the shape that actually ships. -strict rejects unknown and duplicate
+      # fields, so a typo'd key fails here instead of being silently dropped
+      # by the API server on apply.
+      - name: helm template + schema validation
+        run: |
+          set -euo pipefail
+          CHART=infra/helm/axiom-proof
+          VALUE_SETS=("" "-f ${CHART}/values-prod.yaml.example")
+          for fixture in "${CHART}"/ci/*-values.yaml; do
+            VALUE_SETS+=("-f ${fixture}")
+          done
+
+          # -cache matters: without it kubeconform refetches every schema for
+          # each value set, turning a one-second gate into minutes of network.
+          mkdir -p /tmp/kubeconform-cache
+
+          for value_set in "${VALUE_SETS[@]}"; do
+            echo "::group::helm template ${value_set:-(chart defaults)}"
+            # Rendered to a file rather than piped because two checks consume
+            # it, and they answer different questions: kubeconform asks whether
+            # each manifest is well-formed, check-rendered-manifests.py asks
+            # whether the set of them means what the chart claims.
+            # Unquoted on purpose: each entry is a flag pair, not one argument.
+            helm template axiom-proof "${CHART}" ${value_set} > /tmp/rendered.yaml
+            kubeconform -strict -summary \
+              -cache /tmp/kubeconform-cache \
+              -kubernetes-version 1.30.0 /tmp/rendered.yaml
+            python3 scripts/check-rendered-manifests.py \
+              --expect-components web,marketing,bff,agent-runtime,model-gateway,temporal-worker \
+              < /tmp/rendered.yaml
+            echo "::endgroup::"
+          done
+
+  # ─── W0.1 self-hosted Supabase topology ──────────────────────────
+  # Higher environments self-host GoTrue and PostgREST against their own
+  # Postgres rather than using Supabase Cloud, so preprod is a real
+  # replica and no third-party processor sits in the data path. That
+  # shape had never been run: GoTrue's MFA migration creates its enums
+  # unqualified, so without search_path=auth they land in `public` and a
+  # later migration dies having already created sixteen tables; and with
+  # no default group GoTrue emits an empty `role` claim, which PostgREST
+  # turns into `set local role ""`. Both failures look like something
+  # else entirely, so they are pinned here.
+  selfhosted-supabase:
+    name: Self-hosted Supabase topology (W0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: ./tests/deployment/selfhosted-supabase.sh
+
+  # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
+  # The library's total is derived from the controls array. Six other
+  # places carried their own literal and had drifted to 43 and 48, so a
+  # client could see three different totals for the same library.
+  control-count-gate:
+    name: Control count consistency (W7.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-control-count.sh
+
+  # R-06: the agent runtime scores assessments against a GENERATED copy of the
+  # control library. W7.1's citation correction landed in TypeScript and never
+  # reached that copy, so for a year the runtime cited rules the Gazette puts
+  # elsewhere. The count gate could not see it — both sides had 46 controls the
+  # whole time; only the citations differed. This one compares the bytes.
+  control-library-drift-gate:
+    name: Control library TS → runtime parity (W7 · R-06)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/check-controls-drift.sh
+
   # ─── Static analysis ─────────────────────────────────────────────
   lint-and-typecheck:
+    needs:
+      [
+        env-security-gate,
+        control-count-gate,
+        control-library-drift-gate,
+        database-security,
+        strict-auth-parity,
+        deployed-http-acceptance,
+        workload-host,
+      ]
     name: Lint + typecheck
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +513,31 @@ jobs:
           name: coverage-agent-runtime
           path: services/agent-runtime/coverage.xml
 
+  test-python-temporal:
+    name: Python (temporal workers) tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: uv sync --extra dev
+        working-directory: services/temporal-workers
+      - run: uv run pytest
+        working-directory: services/temporal-workers
+        env:
+          AXIOM_TEMPORAL_ACCEPTANCE_REPORT: ../../.axiom-runtime/temporal/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: temporal-orchestration-acceptance
+          path: .axiom-runtime/temporal/results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   test-python-gateway:
     name: Python (model gateway) tests
     runs-on: ubuntu-latest
@@ -99,12 +576,19 @@ jobs:
           scan-ref: '.'
           format: 'table'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
       - name: pnpm audit
         run: pnpm audit --prod --audit-level=high
-      - name: pip-audit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: Audit locked Python runtime dependencies
         run: |
-          pip install pip-audit
-          pip-audit -r services/agent-runtime/pyproject.toml || true
+          for service in agent-runtime temporal-workers model-gateway; do
+            uv export --locked --no-dev --no-emit-project --project "services/$service" --output-file "$RUNNER_TEMP/$service-requirements.txt"
+            uvx --python 3.11 pip-audit==2.10.1 --strict --disable-pip --no-deps -r "$RUNNER_TEMP/$service-requirements.txt"
+          done
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v3
         env:
@@ -114,7 +598,7 @@ jobs:
   build-images:
     name: Build container images
     runs-on: ubuntu-latest
-    needs: [test-ts, test-python-runtime, test-python-gateway]
+    needs: [test-ts, test-python-runtime, test-python-temporal, test-python-gateway]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read

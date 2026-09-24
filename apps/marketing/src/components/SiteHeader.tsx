@@ -1,16 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Button, AxiomLogo } from '@axiom/ui';
-import { resolveAppUrl } from '@/lib/url-resolver';
+import { useResolvedAppUrl } from '@/lib/use-resolved-app-url';
 
 export function SiteHeader() {
-  const [appUrl, setAppUrl] = useState<string>(() => resolveAppUrl());
-
-  useEffect(() => {
-    setAppUrl(resolveAppUrl());
-  }, []);
+  const appUrl = useResolvedAppUrl();
 
   return (
     <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">

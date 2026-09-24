@@ -1,0 +1,47 @@
+# Explicitly opt-in: no workload VM is provisioned by an existing deployment.
+# Keep null until node/issuer bootstrap, protected state and service supervision
+# are reviewed. This foundation does not claim either application is ready.
+variable "workload_vms" {
+  type = object({
+    zone       = string
+    boot_image = string
+    tenants = map(object({
+      controller_source_ranges = optional(set(string), [])
+      controller_permissions = optional(object({
+        dispatch_keys = object({
+          primary  = string
+          retiring = optional(list(string), [])
+        })
+      }))
+    }))
+  })
+  default = null
+}
+
+module "workload_vms" {
+  count       = var.workload_vms == null ? 0 : 1
+  source      = "../../modules/workload-vms"
+  project_id  = var.project_id
+  name_prefix = "axiom-${var.environment}"
+  zone        = var.workload_vms.zone
+  boot_image  = var.workload_vms.boot_image
+  tenants     = var.workload_vms.tenants
+  network     = google_compute_network.vpc.self_link
+  subnetwork  = google_compute_subnetwork.subnet.self_link
+  depends_on  = [google_project_service.apis]
+}
+
+output "workload_vm_hosts" {
+  value = var.workload_vms == null ? null : module.workload_vms[0].hosts
+}
+
+output "workload_controller_permissions" {
+  description = "Reviewed permission inventory, not effective-IAM evidence or application readiness."
+  value       = var.workload_vms == null ? null : module.workload_vms[0].controller_permissions
+}
+
+locals {
+  workload_kms_required = var.workload_vms == null ? false : anytrue([
+    for settings in values(var.workload_vms.tenants) : settings.controller_permissions != null
+  ])
+}

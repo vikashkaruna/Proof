@@ -32,3 +32,13 @@ htmlcov
 *.tfstate*
 .DS_Store
 **/.DS_Store
+
+# Never send fixture credentials, local env files or agent worktrees to builders.
+.axiom-runtime
+**/.axiom-runtime
+.env
+.env.*
+**/.env
+**/.env.*
+.claude
+.codex

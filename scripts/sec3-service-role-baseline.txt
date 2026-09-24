@@ -1,0 +1,17 @@
+# SEC-3 · service-role usage baseline in apps/web
+#
+# EMPTY — closed in W1. All 22 files are migrated to the user-scoped client
+# via `requireTenantContext()`, so RLS enforces tenancy for every query the
+# web app makes. NFR-2 ("tenant isolation — absolute") now holds in the
+# running product as well as in the database policies.
+#
+# This file stays as a ratchet. The W0.0 gate fails on any apps/web file that
+# calls `createSupabaseAdmin()` and is not listed here, and nothing should
+# ever be listed here again: the service-role key bypasses RLS by design, and
+# `packages/supabase/src/admin.ts` states the invariant plainly — "The Next.js
+# apps NEVER use this."
+#
+# If a web-app feature genuinely needs elevated privilege, it belongs behind
+# the BFF, which authenticates the caller and checks their capability first.
+#
+# Do not add to this file.

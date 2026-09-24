@@ -7,13 +7,13 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
 
-  name               = var.cluster_name
-  kubernetes_version = var.kubernetes_version
+  cluster_name    = var.cluster_name
+  cluster_version = var.kubernetes_version
 
   # API endpoint access
-  endpoint_public_access  = true
-  endpoint_private_access = true
-  public_access_cidrs     = ["0.0.0.0/0"]  # restrict via WAF / OIDC in production
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"] # restrict via WAF / OIDC in production
 
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets
@@ -42,7 +42,7 @@ module "eks" {
     # L4-class GPUs are confirmed available in ap-south-1.
     gpu = {
       name           = "gpu"
-      instance_types = ["g6f.xlarge"]  # L4 GPU
+      instance_types = ["g6f.xlarge"] # L4 GPU
       min_size       = 0
       max_size       = 4
       desired_size   = 1
@@ -73,7 +73,7 @@ module "eks" {
   }
 
   # AWS auth
-  enable_irsa = true  # IAM Roles for Service Accounts
+  enable_irsa = true # IAM Roles for Service Accounts
 
   tags = {
     "k8s.io/cluster-autoscaler/enabled"             = "true"
@@ -101,14 +101,15 @@ resource "helm_release" "cluster_autoscaler" {
   version    = "9.29.0"
   namespace  = "kube-system"
 
-  set = [
-    {
-      name  = "autoDiscovery.clusterName"
-      value = module.eks.cluster_name
-    },
-    {
-      name  = "awsRegion"
-      value = "ap-south-1"
-    },
-  ]
+  # Repeated blocks, not a list attribute: `set = [{...}]` is the helm
+  # provider v3 form, and this configuration pins `~> 2.11`.
+  set {
+    name  = "autoDiscovery.clusterName"
+    value = module.eks.cluster_name
+  }
+
+  set {
+    name  = "awsRegion"
+    value = "ap-south-1"
+  }
 }

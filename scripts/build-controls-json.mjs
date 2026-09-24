@@ -9,7 +9,9 @@
  * Run from the repo root:
  *   pnpm tsx scripts/build-controls-json.mjs
  *
- * Output: services/agent-runtime/src/axiom/data/controls.json
+ * Output: services/agent-runtime/src/axiom/data/controls.json, or the path
+ * given as the first argument — which is how `check-controls-drift.sh`
+ * regenerates to a scratch file and compares without touching the tree.
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -47,7 +49,8 @@ const out = {
   })),
 };
 
-const outPath = join(repoRoot, 'services/agent-runtime/src/axiom/data/controls.json');
+const outPath =
+  process.argv[2] ?? join(repoRoot, 'services/agent-runtime/src/axiom/data/controls.json');
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, JSON.stringify(out, null, 2), 'utf-8');
 

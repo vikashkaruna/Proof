@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePersistentState } from '@/lib/use-persistent-state';
 import { AgentIcon } from '@axiom/ui';
 
 export interface ActionItem {
@@ -34,12 +35,25 @@ interface OutcomeBanner {
   timestamp: string;
 }
 
+/**
+ * Stable empty defaults. `usePersistentState` uses the fallback as its server
+ * snapshot and inside its snapshot memo, so an inline `{}` literal would be a
+ * new object on every render and defeat the cache.
+ */
+const NO_STATUSES: Record<string, ActionStatus> = {};
+const NO_DEFER_NOTES: Record<string, string> = {};
+
 export function ApprovalConsoleClient({ initialActions }: { initialActions: ActionItem[] }) {
   const actionsData = initialActions.length > 0 ? initialActions : [];
   const firstId = actionsData[0]?.id || 'ACT-01';
 
   const [selected, setSelected] = useState<Record<string, boolean>>({ [firstId]: true });
-  const [statuses, setStatuses] = useState<Record<string, ActionStatus>>({});
+  // Persisted across reloads; rendered from the server snapshot during
+  // hydration, then swapped without an effect.
+  const [statuses, setStatuses] = usePersistentState<Record<string, ActionStatus>>(
+    'axiom_approval_statuses',
+    NO_STATUSES,
+  );
   const [selId, setSelId] = useState<string>(firstId);
   const [filterTab, setFilterTab] = useState<FilterTab>('pending');
   const [outcome, setOutcome] = useState<OutcomeBanner | null>(null);
@@ -51,23 +65,10 @@ export function ApprovalConsoleClient({ initialActions }: { initialActions: Acti
     'Scheduled for off-peak maintenance window (Saturday 02:00 IST)',
   );
   const [deferDuration, setDeferDuration] = useState('24 Hours');
-  const [deferNotes, setDeferNotes] = useState<Record<string, string>>({});
-
-  // Load persisted statuses from localStorage
-  useEffect(() => {
-    try {
-      const savedStatuses = localStorage.getItem('axiom_approval_statuses');
-      if (savedStatuses) {
-        setStatuses(JSON.parse(savedStatuses));
-      }
-      const savedNotes = localStorage.getItem('axiom_defer_notes');
-      if (savedNotes) {
-        setDeferNotes(JSON.parse(savedNotes));
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  const [deferNotes, setDeferNotes] = usePersistentState<Record<string, string>>(
+    'axiom_defer_notes',
+    NO_DEFER_NOTES,
+  );
 
   // Auto-dismiss outcome banner after 8 seconds
   useEffect(() => {
@@ -128,9 +129,6 @@ export function ApprovalConsoleClient({ initialActions }: { initialActions: Acti
     setStatuses((prev) => {
       const next = { ...prev };
       for (const id of ids) next[id] = st;
-      try {
-        localStorage.setItem('axiom_approval_statuses', JSON.stringify(next));
-      } catch {}
       return next;
     });
   };
@@ -209,9 +207,6 @@ export function ApprovalConsoleClient({ initialActions }: { initialActions: Acti
       for (const id of deferringIds) {
         next[id] = `${deferReason} · Snoozed for ${deferDuration}`;
       }
-      try {
-        localStorage.setItem('axiom_defer_notes', JSON.stringify(next));
-      } catch {}
       return next;
     });
     setSelected({});

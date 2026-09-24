@@ -14,6 +14,10 @@ variable "environment" {
   description = "Deployment environment name"
   type        = string
   default     = "preprod"
+  validation {
+    condition     = contains(["staging", "preprod", "production", "onprem"], var.environment)
+    error_message = "Use a supported strict deployment environment: staging, preprod, production or onprem."
+  }
 }
 
 variable "cloud_sql_tier" {
@@ -142,4 +146,101 @@ variable "contact_recipient_email" {
   description = "Recipient email address for founder contact inquiries"
   type        = string
   default     = "hello@axiomminds.ai"
+}
+
+variable "mfa_encryption_key" {
+  description = "Persistent BFF-only MFA encryption key, distinct from signing keys. Empty generates a stable random key."
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition     = var.mfa_encryption_key == "" || length(var.mfa_encryption_key) >= 32
+    error_message = "MFA encryption key must have at least 32 characters."
+  }
+}
+
+# The retiring half of the key ring. Comma-separated, newest first, and empty
+# except while a rotation is in flight — which is why it is not a member of
+# `local.managed_secrets`: Secret Manager will not store an empty payload, so a
+# permanently-empty member would fail every apply that is not a rotation.
+# See secrets.tf for how absence is expressed.
+variable "mfa_encryption_keys_previous" {
+  description = "Retiring MFA encryption keys, comma-separated, newest first. Empty unless a rotation is in flight."
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition = var.mfa_encryption_keys_previous == "" || alltrue([
+      for key in split(",", var.mfa_encryption_keys_previous) : length(trimspace(key)) >= 32
+    ])
+    error_message = "Every retiring MFA encryption key must have at least 32 characters."
+  }
+}
+
+# ─── Self-hosted Supabase (W0.1) ──────────────────────────────────────────────
+# These cannot be generated here the way the other secrets are. The anon and
+# service_role keys are JWTs SIGNED WITH the JWT secret, so a random value per
+# resource would produce three unrelated strings and no token would validate.
+# They are minted together by scripts/mint-supabase-keys.mjs and carried in
+# .env like every other value; sync-env.sh refuses to deploy without them.
+variable "supabase_jwt_secret" {
+  description = "HS256 secret GoTrue signs with and PostgREST validates against. Must be the one the anon/service keys were signed with."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_anon_key" {
+  description = "Supabase anon JWT, signed with supabase_jwt_secret. Public by design; RLS is the boundary, not this value."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_service_key" {
+  description = "Supabase service_role JWT, signed with supabase_jwt_secret. Bypasses RLS by design; server-side only."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+
+variable "report_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF report delivery, enabled only after provider/domain verification."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.report_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}
+
+variable "contact_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF founder-contact notification mail; inquiries are always persisted first (C-W0-6)."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.contact_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}
+
+variable "invitation_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF tenant-invitation mail (C-W1-3); invitations work with a shared one-time link when disabled."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.invitation_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}
+
+variable "assessment_dispatch_retention_days" {
+  description = "Days to retain private dispatch ciphertext after independent completion; separate from sealed evidence."
+  type        = number
+  default     = 90
+  validation {
+    condition     = var.assessment_dispatch_retention_days >= 1 && var.assessment_dispatch_retention_days <= 36500 && floor(var.assessment_dispatch_retention_days) == var.assessment_dispatch_retention_days
+    error_message = "Assessment dispatch retention must be an integer from 1 to 36500 days."
+  }
 }

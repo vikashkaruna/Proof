@@ -1,9 +1,19 @@
+import { assessmentRoutes } from './assessment.js';
+import { connectorRoutes } from './connectors.js';
+import { onboardingProposalRoutes } from './onboarding-proposals.js';
+import { estateRoutes } from './estates.js';
+import { invitationRoutes } from './invitations.js';
+import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
   IssueApprovalRequestSchema,
   ExecutePlanRequestSchema,
   type ExecutePlanRequest,
+  ActivateMfaEnrolmentRequestSchema,
+  BeginMfaEnrolmentRequestSchema,
+  IssueMfaChallengeRequestSchema,
+  VerifyMfaChallengeRequestSchema,
   ActorType,
   LedgerActionType,
   LedgerResult,
@@ -11,30 +21,743 @@ import {
 import type { ApprovalEngine } from '../services/approval.js';
 import type { KillSwitchService } from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
+import type { MfaService } from '../services/mfa.js';
+import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
+import { ACTION_CONTENT_COLUMNS, actionSetDigestSha256 } from '../services/action-digest.js';
+import { clientAddressKey, trustedClientAddress } from '../services/client-address.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireCapability } from '../middleware/authorize.js';
+import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
+import { canonicalJson, sha256 } from '@axiom/ledger';
 import { loadEnv } from '@axiom/config';
+import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
+
+/**
+ * Version of the BFF → agent-runtime execution payload (W5 · R-05).
+ *
+ * The two sides disagreed on casing for as long as the endpoint existed —
+ * camelCase out, snake_case required — so every dispatch was a 422 nobody saw.
+ * A version the runtime does not recognise is now a refusal with a reason,
+ * which is the failure mode a silent schema mismatch should have had from the
+ * start.
+ *
+ * Bump on any breaking payload change and update `InternalExecuteRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/execution-contract.test.ts` asserts they agree.
+ */
+export const EXECUTION_CONTRACT_VERSION = 2;
+
+export interface ExecutionDispatchInput {
+  tenantId: string;
+  planId: string;
+  correlationId: string;
+  actionIds: string[];
+  requestKey: string;
+  mode: string;
+  concurrency: number;
+  stopOnFailure: boolean;
+  approvalToken: unknown; /** From the claim, which read it from the token's signed payload. */
+  contentDigest: string;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/execute`.
+ *
+ * Extracted so both sides of the contract can be tested against one fixture:
+ * `tests/contracts/execution-dispatch.v1.json` is asserted here to be what
+ * this function produces, and validated in
+ * `services/agent-runtime/tests/test_execution_contract.py` against the
+ * runtime's own Pydantic model. A change to either side fails the other.
+ */
+export function buildExecutionDispatchPayload(input: ExecutionDispatchInput) {
+  return {
+    contract_version: EXECUTION_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    plan_id: input.planId,
+    correlation_id: input.correlationId,
+    action_ids: input.actionIds,
+    request_key: input.requestKey,
+    mode: input.mode,
+    concurrency: input.concurrency,
+    stop_on_failure: input.stopOnFailure,
+    approval_token: input.approvalToken,
+    // v2: the snapshot this batch was authorised for, reported by
+    // `claim_plan_execution` from the token's signed payload. The executor
+    // must refuse to mutate anything whose content no longer matches it.
+    content_digest: input.contentDigest,
+  };
+}
+
+/** Missing, malformed and boundary-time expiry are all stale. */
+function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
+  return (
+    typeof expiresAt === 'string' &&
+    Number.isFinite(Date.parse(expiresAt)) &&
+    Date.parse(expiresAt) > now
+  );
+}
 
 interface Deps {
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
+  mfa: MfaService;
   realtime: RealtimeService;
 }
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
+  app.route('/', estateRoutes());
+  app.route('/', assessmentRoutes());
+  app.route('/', connectorRoutes());
+  app.route('/', onboardingProposalRoutes());
+  app.route('/', invitationRoutes());
+
+  // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
+  //
+  // Self-managed TOTP rather than Supabase Auth factors: W10 requires onprem
+  // to run air-gapped, and binding MFA to a hosted GoTrue would mean either a
+  // second implementation for onprem or an environment that authenticates
+  // differently from the others — which is what W0.0 exists to prevent.
+  //
+  // Every route here is scoped to the calling user. None of them takes a user
+  // id from the request: a route that let one caller name another is a
+  // one-request downgrade of the whole control for a targeted approver.
+
+  // GET /v1/mfa/status — does this user hold a factor, and how many recovery
+  // codes remain. Used by the web app to decide what to show before approving.
+  app.get('/mfa/status', async (c) => {
+    return c.json(await deps.mfa.status(c.get('user').id));
+  });
+
+  // POST /v1/mfa/enrol — begin TOTP enrolment; returns the secret once.
+  app.post('/mfa/enrol', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = BeginMfaEnrolmentRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+
+    // Replacing a live factor requires proving you hold the live factor.
+    //
+    // Without this, an attacker with a stolen session has a clean bypass:
+    // enrol their own authenticator alongside the victim's, then satisfy every
+    // future step-up themselves. The recovery-code path keeps a genuinely lost
+    // device recoverable, so this costs the honest user nothing.
+    //
+    // A first enrolment needs no step-up — there is nothing yet to protect.
+    // That does mean a stolen session on a never-enrolled approver can enrol
+    // its own device, which is why enrolment is ledgered loudly rather than
+    // logged quietly.
+    const existingFactorId = await deps.mfa.activeFactorId(user.id);
+    let replacement: { factorId: string; challengeId: string } | undefined;
+    if (existingFactorId) {
+      const stepUp = await deps.mfa.consumeChallenge({
+        challengeId: parsed.data.mfaChallengeId ?? undefined,
+        userId: user.id,
+        purpose: 'enrolment',
+        boundResourceRef: existingFactorId,
+        boundPayloadSha256: factorBindingSha256('enrolment', existingFactorId),
+      });
+      if (!stepUp.ok) {
+        return c.json(
+          {
+            error: {
+              code:
+                stepUp.reason === 'challenge_required' ? 'mfa_challenge_required' : stepUp.reason,
+              message:
+                'You already have an active authenticator. Satisfy an `enrolment` challenge with your current factor or a recovery code before enrolling a new one.',
+              details: { challengeEndpoint: '/v1/mfa/challenge', purpose: 'enrolment' },
+            },
+          },
+          401,
+        );
+      }
+      replacement = { factorId: existingFactorId, challengeId: stepUp.challengeId };
+    }
+
+    const result = await deps.mfa.beginTotpEnrolment({
+      userId: user.id,
+      accountName: user.email ?? user.id,
+      label: parsed.data.label ?? null,
+      replacement,
+    });
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_ENROLLED,
+      targetRef: result.factorId,
+      result: 'success',
+      detail: {
+        factorType: 'totp',
+        label: parsed.data.label ?? null,
+        replacing: existingFactorId,
+        replacementChallengeId: replacement?.challengeId ?? null,
+      },
+    });
+
+    // The secret and the URI are returned exactly once. They are not readable
+    // afterwards by any endpoint, because a TOTP secret is a standing
+    // credential: anyone who can re-read it can mint codes indefinitely.
+    return c.json(
+      {
+        factorId: result.factorId,
+        secret: result.secret,
+        provisioningUri: result.provisioningUri,
+        nextStep:
+          'Add the secret to an authenticator app, then POST the six-digit code to /v1/mfa/enrol/activate.',
+      },
+      201,
+    );
+  });
+
+  // POST /v1/mfa/enrol/activate — prove possession, activate, issue recovery codes.
+  app.post('/mfa/enrol/activate', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = ActivateMfaEnrolmentRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const result = await deps.mfa.activateTotpEnrolment({
+      userId: user.id,
+      code: parsed.data.code,
+    });
+
+    if (!result.ok) {
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: user.id,
+        result: 'failure',
+        detail: { purpose: 'enrolment', reason: result.reason, detail: result.detail },
+      });
+      if (result.reason === 'replacement_authorization_changed') {
+        return c.json(
+          {
+            error: {
+              code: result.reason,
+              message:
+                'Your authenticator changed or the replacement authorization is no longer valid. Restart enrollment and verify your current factor.',
+            },
+          },
+          409,
+        );
+      }
+      if (result.reason === 'activation_failed') {
+        return c.json(
+          {
+            error: {
+              code: 'activation_failed',
+              message:
+                'Enrolment could not be saved. Your existing authenticator and recovery codes have not changed. Please try again.',
+            },
+          },
+          503,
+        );
+      }
+      if (result.reason === 'secret_unreadable') {
+        return c.json(
+          {
+            error: {
+              code: 'secret_unreadable',
+              message:
+                'Enrolment cannot be completed right now. This is a fault on our side, not a ' +
+                'problem with your code. Start a fresh enrolment once it is resolved.',
+            },
+          },
+          503,
+        );
+      }
+      return c.json(
+        {
+          error: {
+            code: result.reason,
+            message:
+              result.reason === 'no_pending_factor'
+                ? 'No enrolment is in progress. Start one at /v1/mfa/enrol.'
+                : 'That code was not accepted. Check your authenticator’s clock and try the next code.',
+          },
+        },
+        result.reason === 'no_pending_factor' ? 409 : 401,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_ACTIVATED,
+      targetRef: result.factorId,
+      result: 'success',
+      detail: { factorType: 'totp', recoveryCodesIssued: result.recoveryCodes.length },
+    });
+
+    return c.json({
+      factorId: result.factorId,
+      // Shown once. They are hashed at rest, so this response is the only time
+      // they exist in readable form anywhere.
+      recoveryCodes: result.recoveryCodes,
+      warning:
+        'Store these now. Each works once, they are not recoverable, and they are the only way back in if you lose the authenticator.',
+    });
+  });
+
+  // POST /v1/mfa/factors/:id/revoke — retire a factor, proving you hold it.
+  app.post('/mfa/factors/:id/revoke', async (c) => {
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const factorId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const challengeId = (body as { mfaChallengeId?: string } | null)?.mfaChallengeId;
+
+    // Revocation is step-up gated for the same reason enrolment is. On its own
+    // it is only self-denial — an approver with no factor cannot approve at
+    // all — but revoke-then-re-enrol is a complete bypass, and this is the
+    // cheaper of the two places to break that chain.
+    const stepUp = await deps.mfa.consumeChallenge({
+      challengeId,
+      userId: user.id,
+      purpose: 'factor_revocation',
+      boundResourceRef: factorId,
+      boundPayloadSha256: factorBindingSha256('factor_revocation', factorId),
+    });
+    if (!stepUp.ok) {
+      return c.json(
+        {
+          error: {
+            code: stepUp.reason === 'challenge_required' ? 'mfa_challenge_required' : stepUp.reason,
+            message:
+              'Revoking a factor requires proving you hold it. Satisfy a `factor_revocation` challenge with your authenticator or a recovery code.',
+            details: { challengeEndpoint: '/v1/mfa/challenge', purpose: 'factor_revocation' },
+          },
+        },
+        401,
+      );
+    }
+
+    const result = await deps.mfa.revokeFactor({ userId: user.id, factorId });
+    if (!result.ok) {
+      return c.json(
+        { error: { code: 'factor_not_found', message: 'No such active factor for this user' } },
+        404,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_FACTOR_REVOKED,
+      targetRef: factorId,
+      result: 'success',
+      detail: { challengeId: stepUp.challengeId },
+    });
+
+    return c.json({ factorId, status: 'revoked' });
+  });
+
+  /**
+   * The pseudonymised client address, or null when the deployment has not
+   * declared how many proxy hops to trust. Null disables the address budget
+   * rather than falling back to a value the caller could have chosen.
+   */
+  const addressKeyFor = (c: { req: { header: (name: string) => string | undefined } }) => {
+    const address = trustedClientAddress(
+      c.req.header('x-forwarded-for'),
+      env.AXIOM_TRUSTED_PROXY_HOPS,
+    );
+    return address ? clientAddressKey(address) : null;
+  };
+
+  // POST /v1/mfa/challenge — open a challenge, bound to what it may authorise.
+  app.post('/mfa/challenge', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = IssueMfaChallengeRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const input = parsed.data;
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+
+    // The binding is computed server-side from the request's own inputs, never
+    // accepted as a client-supplied digest. A client that could name its own
+    // binding could name the one it intends to spend the challenge against.
+    let boundResourceRef: string | undefined;
+    let boundPayloadSha256: string | undefined;
+
+    if (input.purpose === 'approval_issuance') {
+      // The plan must exist in this tenant before a challenge is opened
+      // against it, so the endpoint cannot be used to probe for plan ids.
+      const admin = createSupabaseAdmin();
+      const { data: plan } = await admin
+        .from('remediation_plans')
+        .select('id, version')
+        .eq('id', input.planId!)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (!plan) {
+        return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
+      }
+      // R-08: the challenge binds the CONTENT of each action, not just its id.
+      // Read from the database, never from the request — a caller that could
+      // name its own digest could name the one for content it already
+      // replaced. See `action-digest.ts`.
+      const { data: boundActions, error: boundActionsErr } = await admin
+        .from('remediation_actions')
+        .select(ACTION_CONTENT_COLUMNS)
+        .eq('plan_id', input.planId!)
+        .eq('tenant_id', tenantId)
+        .in('id', input.actionIds!);
+      if (boundActionsErr) {
+        return c.json({ error: { code: 'lookup_failed', message: boundActionsErr.message } }, 500);
+      }
+      // Binding to an action that does not exist would compute the digest over
+      // a smaller set than the one being approved.
+      const boundFound = new Set((boundActions ?? []).map((a) => a.id));
+      const boundMissing = input.actionIds!.filter((id) => !boundFound.has(id));
+      if (boundMissing.length > 0) {
+        return c.json(
+          {
+            error: {
+              code: 'actions_not_found',
+              message: 'Every action in a challenge must belong to this tenant and plan',
+              details: { missing: boundMissing },
+            },
+          },
+          404,
+        );
+      }
+
+      boundResourceRef = input.planId!;
+      boundPayloadSha256 = approvalBindingSha256({
+        planId: input.planId!,
+        actionIds: input.actionIds!,
+        mode: input.mode,
+        // R-08: bind the revision the approver was shown, so a plan edited
+        // between satisfying the challenge and issuing the approval no longer
+        // matches.
+        planVersion: (plan as { version?: number }).version ?? null,
+        actionsDigest: actionSetDigestSha256(boundActions ?? []),
+      });
+    } else if (input.purpose === 'login') {
+      // Bound to the session it will vouch for. Without this a challenge
+      // satisfied in one session could be presented from another — which is
+      // precisely the position someone holding a stolen password is in.
+      const sessionId = c.get('sessionId');
+      if (!sessionId) {
+        return c.json(
+          {
+            error: {
+              code: 'session_unidentified',
+              message:
+                'This session carries no identifier, so a login challenge cannot be bound to it. Sign in again.',
+            },
+          },
+          401,
+        );
+      }
+      boundResourceRef = sessionId;
+      boundPayloadSha256 = factorBindingSha256('login', sessionId);
+    } else if (input.purpose === 'enrolment' || input.purpose === 'factor_revocation') {
+      const factorId = await deps.mfa.activeFactorId(user.id);
+      if (!factorId) {
+        return c.json(
+          {
+            error: {
+              code: 'mfa_enrolment_required',
+              message: 'You have no active factor to act on.',
+            },
+          },
+          409,
+        );
+      }
+      boundResourceRef = factorId;
+      boundPayloadSha256 = factorBindingSha256(input.purpose, factorId);
+    }
+
+    const issued = await deps.mfa.issueChallenge({
+      userId: user.id,
+      tenantId,
+      purpose: input.purpose,
+      boundResourceRef,
+      boundPayloadSha256,
+      // From the verified access token, not the request.
+      sessionId: c.get('sessionId') ?? null,
+      addressKey: addressKeyFor(c),
+    });
+
+    if (!issued.ok) {
+      if (issued.reason === 'rate_limited') {
+        c.header('Retry-After', String(issued.retryAfterSeconds ?? 3600));
+        return c.json(
+          {
+            error: {
+              code: 'rate_limited',
+              message: 'Too many MFA challenge requests. Try again later.',
+            },
+          },
+          429,
+        );
+      }
+      return c.json(
+        {
+          error: {
+            code: 'mfa_enrolment_required',
+            message: 'You have no active second factor. Enrol an authenticator first.',
+            details: { enrolEndpoint: '/v1/mfa/enrol' },
+          },
+        },
+        403,
+      );
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_CHALLENGE_ISSUED,
+      targetRef: boundResourceRef ?? user.id,
+      result: 'success',
+      detail: { purpose: input.purpose, challengeId: issued.challengeId, boundPayloadSha256 },
+    });
+
+    return c.json(
+      {
+        challengeId: issued.challengeId,
+        expiresAt: issued.expiresAt,
+        maxAttempts: issued.maxAttempts,
+        // Echoed so the client can confirm it is about to authenticate for the
+        // thing it thinks it is. It is a digest of inputs the client already
+        // supplied, so it discloses nothing.
+        boundPayloadSha256,
+      },
+      201,
+    );
+  });
+
+  // POST /v1/mfa/challenge/:id/verify — satisfy it with a TOTP or recovery code.
+  app.post('/mfa/challenge/:id/verify', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = VerifyMfaChallengeRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const user = c.get('user');
+    const tenantId = c.get('tenantId');
+    const challengeId = c.req.param('id');
+
+    const result = await deps.mfa.verifyChallenge({
+      challengeId,
+      userId: user.id,
+      code: parsed.data.code,
+      sessionId: c.get('sessionId') ?? null,
+      addressKey: addressKeyFor(c),
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'rate_limited') {
+        c.header('Retry-After', String(result.retryAfterSeconds ?? 3600));
+        return c.json(
+          {
+            error: {
+              code: 'rate_limited',
+              message: 'Too many MFA verification attempts. Try again later.',
+            },
+          },
+          429,
+        );
+      }
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: challengeId,
+        result: 'failure',
+        detail: { reason: result.reason, detail: result.detail },
+      });
+      if (result.reason === 'secret_unreadable') {
+        // Their code may well have been right; we cannot read the secret to
+        // find out. Saying 401 here would blame the user for an operator
+        // error and hide a broken key rotation behind ordinary login noise.
+        return c.json(
+          {
+            error: {
+              code: 'secret_unreadable',
+              message:
+                'Your second factor cannot be verified right now. This is a fault on our side, ' +
+                'not a problem with your code. Use a recovery code if you need access now.',
+            },
+          },
+          503,
+        );
+      }
+      // `challenge_not_found` covers both "no such id" and "not yours". The
+      // two are not distinguished on the wire: telling a caller that a
+      // challenge exists but belongs to someone else is a user-enumeration
+      // oracle for no operational benefit.
+      const status = result.reason === 'challenge_not_found' ? 404 : 401;
+      return c.json(
+        {
+          error: {
+            code: result.reason,
+            message:
+              result.reason === 'attempts_exhausted'
+                ? 'Too many attempts on this challenge. Request a new one.'
+                : result.reason === 'challenge_expired'
+                  ? 'This challenge has expired. Request a new one.'
+                  : result.reason === 'challenge_already_satisfied'
+                    ? 'This challenge has already been satisfied.'
+                    : result.reason === 'not_enrolled'
+                      ? 'You have no active second factor.'
+                      : 'That code was not accepted.',
+          },
+        },
+        status,
+      );
+    }
+
+    if (result.satisfiedWith === 'recovery_code') {
+      // Recorded distinctly. A recovery code satisfying an approval step-up is
+      // legitimate but notable: it is single-use, it means the approver did not
+      // have their authenticator, and a reviewer should be able to see that.
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_RECOVERY_CODE_CONSUMED,
+        targetRef: challengeId,
+        result: 'success',
+        detail: {},
+      });
+    }
+
+    // A satisfied `login` challenge becomes a session attestation immediately,
+    // here, rather than through a further call the client could simply not
+    // make. Consuming it first keeps the single-use property: one challenge,
+    // one attestation.
+    let attestedUntil: string | undefined;
+    if (result.purpose === 'login') {
+      const sessionId = c.get('sessionId');
+      const spend = await deps.mfa.consumeChallenge({
+        challengeId,
+        userId: user.id,
+        purpose: 'login',
+        boundResourceRef: sessionId,
+        boundPayloadSha256: factorBindingSha256('login', sessionId),
+        consumedFor: sessionId,
+      });
+      if (!spend.ok) {
+        return c.json(
+          {
+            error: {
+              code: spend.reason,
+              message: 'That challenge does not belong to this session.',
+            },
+          },
+          401,
+        );
+      }
+
+      const attestation = await deps.mfa.attestSession({
+        userId: user.id,
+        sessionId,
+        challengeId,
+        factorId: result.factorId,
+      });
+      attestedUntil = attestation.expiresAt;
+    }
+
+    await deps.ledger.append({
+      tenantId,
+      correlationId: randomUUID(),
+      actorType: 'human',
+      actorId: user.id,
+      actionType: LedgerActionType.MFA_CHALLENGE_SATISFIED,
+      targetRef: challengeId,
+      result: 'success',
+      detail: {
+        satisfiedWith: result.satisfiedWith,
+        purpose: result.purpose,
+        ...(attestedUntil ? { sessionAttestedUntil: attestedUntil } : {}),
+      },
+    });
+
+    return c.json({
+      challengeId,
+      satisfied: true,
+      satisfiedWith: result.satisfiedWith,
+      ...(attestedUntil ? { attestedUntil } : {}),
+    });
+  });
 
   // ─── Plans / Approval / Execution ───────────────────────────────
 
   // POST /v1/plans/approve — issue a signed approval token
   app.post('/plans/approve', async (c) => {
-    if (deps.killSwitch.isActive(c.get('tenantId'))) {
+    if (await deps.killSwitch.isActive(c.get('tenantId'))) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -60,24 +783,17 @@ export function v1Routes(deps: Deps) {
     const user = c.get('user');
     const role = c.get('role');
 
-    if (!['owner', 'admin', 'approver'].includes(role)) {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only owners, admins, and approvers can issue approval tokens',
-          },
-        },
-        403,
-      );
-    }
+    // Role first. The per-action scope check needs the actions themselves and
+    // runs once they are loaded, below.
+    const approvalRefusal = requireCapability(c, Capability.PLAN_APPROVE);
+    if (approvalRefusal) return approvalRefusal;
 
     const admin = createSupabaseAdmin();
 
     // Verify plan + actions exist and belong to the tenant
     const { data: plan, error: planErr } = await admin
       .from('remediation_plans')
-      .select('id, status, library_version, tenant_id')
+      .select('id, status, library_version, tenant_id, version')
       .eq('id', input.planId)
       .eq('tenant_id', tenantId)
       .single();
@@ -93,7 +809,9 @@ export function v1Routes(deps: Deps) {
 
     const { data: actions, error: actErr } = await admin
       .from('remediation_actions')
-      .select('id, tenant_id, plan_id, dry_run_status, rollback_validated, dry_run_expires_at')
+      .select(
+        'id, tenant_id, plan_id, action_type, dry_run_status, rollback_validated, dry_run_expires_at, parameters, rollback_definition, closes_finding_ids, dry_run_result',
+      )
       .eq('plan_id', input.planId)
       .eq('tenant_id', tenantId)
       .in('id', input.actionIds);
@@ -114,6 +832,41 @@ export function v1Routes(deps: Deps) {
         },
         404,
       );
+    }
+
+    // W1 · SEC-9: `tenant_users.approval_scopes` has existed since migration
+    // 0001 and was read by nothing. An approver scoped to `data-deletion`
+    // must not be able to approve a cross-border transfer change simply
+    // because both are "approving a plan". The scope is checked per action,
+    // because a batch can mix classes and a partial authority must not
+    // silently approve the whole batch.
+    const approvalScopes = c.get('approvalScopes');
+    if (approvalScopes.length > 0) {
+      const outOfScope = (actions ?? []).filter((a) => {
+        const decision = authorize(Capability.PLAN_APPROVE, {
+          role,
+          approvalScopes,
+          actionClass: a.action_type as string,
+        });
+        return !decision.allowed;
+      });
+      if (outOfScope.length > 0) {
+        return c.json(
+          {
+            error: {
+              code: 'scope_forbidden',
+              message:
+                'Your approval scope does not cover every action in this request. ' +
+                'Approve the covered actions separately, or ask an approver with wider scope.',
+              details: {
+                approvalScopes,
+                outOfScope: outOfScope.map((a) => ({ id: a.id, actionClass: a.action_type })),
+              },
+            },
+          },
+          403,
+        );
+      }
     }
 
     // Hard gate: every action must have a successful dry-run and a
@@ -137,9 +890,7 @@ export function v1Routes(deps: Deps) {
 
     // Stale dry-run check
     const now = Date.now();
-    const stale = (actions ?? []).filter(
-      (a) => a.dry_run_expires_at && new Date(a.dry_run_expires_at).getTime() < now,
-    );
+    const stale = (actions ?? []).filter((a) => !hasFreshDryRun(a.dry_run_expires_at, now));
     if (stale.length > 0) {
       return c.json(
         {
@@ -153,6 +904,127 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    // ── W1 · SEC-8 · the step-up ───────────────────────────────────────
+    //
+    // Everything above this point decides whether the approval is *allowed*.
+    // This decides whether the person asking is really the approver. It runs
+    // last on purpose: a challenge is a scarce, single-use credential, and
+    // spending one on a request that was going to fail for an unrelated reason
+    // would force a needless re-authentication.
+    //
+    // Unconditional, and deliberately NOT gated on `tenants.mfa_required_roles`
+    // — that column governs sign-in. Making the approval step-up per-tenant
+    // configurable would turn FR-7.3 from a platform guarantee into something
+    // an auditor has to re-check for every client, and would let a tenant
+    // owner remove it for their own approvals.
+    const stepUpBinding = approvalBindingSha256({
+      planId: input.planId,
+      actionIds: input.actionIds,
+      mode: input.mode,
+      planVersion: (plan as { version?: number }).version ?? null,
+      // Recomputed from the rows as they stand NOW. If an action's definition
+      // or its dry-run diff changed after the challenge was raised, this no
+      // longer matches what the challenge was bound to and the step-up is
+      // refused — which is the whole point of binding it.
+      actionsDigest: actionSetDigestSha256(actions ?? []),
+    });
+
+    if (!input.mfaChallengeId) {
+      const enrolled = await deps.mfa.isEnrolled(user.id);
+      // Two genuinely different situations, and telling them apart is the
+      // difference between "tap your authenticator" and "you have no second
+      // factor and must enrol one before you can approve anything".
+      return enrolled
+        ? c.json(
+            {
+              error: {
+                code: 'mfa_challenge_required',
+                message:
+                  'Approving requires a fresh second factor. Request a challenge for this exact plan and action set, satisfy it, then retry.',
+                details: {
+                  challengeEndpoint: '/v1/mfa/challenge',
+                  purpose: 'approval_issuance',
+                  planId: input.planId,
+                  actionIds: input.actionIds,
+                  mode: input.mode,
+                },
+              },
+            },
+            401,
+          )
+        : c.json(
+            {
+              error: {
+                code: 'mfa_enrolment_required',
+                message:
+                  'You have no active second factor. Approval tokens cannot be issued without one. Enrol an authenticator, then retry.',
+                details: { enrolEndpoint: '/v1/mfa/enrol' },
+              },
+            },
+            403,
+          );
+    }
+
+    const stepUp = await deps.mfa.consumeChallenge({
+      challengeId: input.mfaChallengeId,
+      userId: user.id,
+      purpose: 'approval_issuance',
+      boundResourceRef: input.planId,
+      boundPayloadSha256: stepUpBinding,
+      consumedFor: input.planId,
+    });
+
+    if (!stepUp.ok) {
+      // A refused step-up is ledgered. A run of these against one approver is
+      // the signal that someone holds their session and is working on the
+      // factor, and that signal is worth more in the tamper-evident chain than
+      // in an application log the same operator can edit.
+      await deps.ledger.append({
+        tenantId,
+        correlationId: randomUUID(),
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: input.planId,
+        result: 'failure',
+        detail: {
+          purpose: 'approval_issuance',
+          reason: stepUp.reason,
+          challengeId: input.mfaChallengeId,
+          actionIds: input.actionIds,
+        },
+      });
+
+      const message =
+        stepUp.reason === 'binding_mismatch'
+          ? 'That challenge was satisfied for a different plan, action set, or action content. ' +
+            'If an action was edited after you reviewed it, re-read it and request a fresh challenge.'
+          : stepUp.reason === 'challenge_already_consumed'
+            ? 'That challenge has already authorised an approval. Each step-up authorises exactly one.'
+            : stepUp.reason === 'challenge_expired'
+              ? 'That challenge has expired. Request a fresh one.'
+              : stepUp.reason === 'challenge_not_satisfied'
+                ? 'That challenge has not been satisfied yet.'
+                : 'No usable step-up challenge for this approval.';
+      return c.json({ error: { code: stepUp.reason, message } }, 401);
+    }
+
+    // Hash the SAME rows used by the MFA binding, never a newer database
+    // read. Migration 0028 compares this snapshot and the plan revision under
+    // the issuance locks; an intervening edit must require a fresh review.
+    const correlationId = randomUUID();
+    const { data: expectedDigest, error: digestErr } = await admin.rpc(
+      'reviewed_action_content_digest',
+      { p_actions: actions ?? [] },
+    );
+    if (digestErr || typeof expectedDigest !== 'string') {
+      logger.error({ err: digestErr?.message, planId: input.planId }, 'content digest unreadable');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not read the action content' } },
+        500,
+      );
+    }
+
     // Issue the signed token
     const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString();
     const signed = await deps.approvalEngine.issue(tenantId, {
@@ -163,85 +1035,83 @@ export function v1Routes(deps: Deps) {
       concurrency: input.concurrency,
       stopOnFailure: input.stopOnFailure,
       expiresAt,
+      contentDigest: expectedDigest,
     });
 
-    // Persist the token
-    const { data: tokenRow, error: tokenErr } = await admin
-      .from('approval_tokens')
-      .insert({
-        tenant_id: tenantId,
-        plan_id: input.planId,
-        action_ids: input.actionIds,
-        approver_id: user.id,
-        mode: input.mode,
-        concurrency: input.concurrency,
-        stop_on_failure: input.stopOnFailure,
-        signature: signed.signature,
-        signed_payload: signed.spec,
-        nonce: signed.spec.nonce,
-        expires_at: expiresAt,
-        reason: input.reason ?? null,
-        conditions: input.conditions,
-      })
-      .select('id, expires_at')
-      .single();
-    if (tokenErr || !tokenRow) {
-      logger.error({ err: tokenErr?.message }, 'failed to persist approval token');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not persist approval token' } },
-        500,
-      );
-    }
-
-    // Mark actions as approved
-    const { error: actionApprovalErr } = await admin
-      .from('remediation_actions')
-      .update({
-        approval_status: 'approved',
-        approval_token_id: tokenRow.id,
-        approved_by: user.id,
-        approved_at: new Date().toISOString(),
-        final_outcome: null,
-      })
-      .eq('tenant_id', tenantId)
-      .eq('plan_id', input.planId)
-      .in('id', input.actionIds);
-    if (actionApprovalErr) {
-      logger.error({ err: actionApprovalErr.message }, 'failed to mark actions approved');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not mark actions approved' } },
-        500,
-      );
-    }
-
-    // Update plan status to approved
-    await admin
-      .from('remediation_plans')
-      .update({ status: 'approved' })
-      .eq('id', input.planId)
-      .eq('tenant_id', tenantId);
-
-    // Ledger
-    const correlationId = randomUUID();
-    await deps.ledger.append({
-      tenantId,
-      correlationId,
-      actorType: 'human',
-      actorId: user.id,
-      actionType: 'approval.token.issued',
-      targetRef: input.planId,
-      approvalTokenId: tokenRow.id,
-      approverId: user.id,
-      result: 'success',
-      detail: {
-        actionIds: input.actionIds,
-        mode: input.mode,
-        concurrency: input.concurrency,
-        stopOnFailure: input.stopOnFailure,
-        expiresAt,
-        reason: input.reason,
+    // ── One transaction, or nothing (migration 0026) ──────────────────
+    //
+    // This used to be six more round trips: insert the token, link the
+    // challenge to it, mark the actions approved, move the plan, append the
+    // ledger. Each committed on its own, so a fault between any two left a
+    // state nobody designed — most seriously actions approved and a signed
+    // token live with NO ledger entry, which is authority over a client's
+    // estate with no tamper-evident record of who granted it.
+    //
+    const { data: issuance, error: issueErr } = await admin.rpc('issue_reviewed_plan_approval', {
+      p_expected_plan_version: plan.version,
+      p_tenant_id: tenantId,
+      p_plan_id: input.planId,
+      p_action_ids: input.actionIds,
+      p_approver_id: user.id,
+      p_mode: input.mode,
+      p_concurrency: input.concurrency,
+      p_stop_on_failure: input.stopOnFailure,
+      p_signature: signed.signature,
+      p_signed_payload: signed.spec,
+      p_nonce: signed.spec.nonce,
+      p_expires_at: expiresAt,
+      p_reason: input.reason ?? null,
+      p_conditions: input.conditions,
+      p_challenge_id: stepUp.challengeId,
+      p_expected_digest: expectedDigest,
+      // FR-7.3: a user id records whose session it was. These record that the
+      // human re-authenticated, when, and against what.
+      p_mfa_detail: {
+        mfa: {
+          challengeId: stepUp.challengeId,
+          satisfiedAt: stepUp.satisfiedAt,
+          binding: stepUpBinding,
+        },
       },
+      p_correlation_id: correlationId,
     });
+    if (issueErr) {
+      logger.error({ err: issueErr.message, planId: input.planId }, 'approval issuance failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not issue the approval' } },
+        500,
+      );
+    }
+
+    const issued = issuance as {
+      decision?: string;
+      token_id?: string;
+      expires_at?: string;
+    } | null;
+
+    if (issued?.decision !== 'issued') {
+      // The step-up has already been spent by this point, deliberately:
+      // burning a challenge and refusing costs a re-authentication, which is
+      // the safe direction. Each of these is a refusal the route's own earlier
+      // reads could not see, because they were taken before the row locks.
+      const message = ['content_changed', 'plan_changed'].includes(issued?.decision ?? '')
+        ? 'The plan or an action changed while this approval was being issued. Re-read the plan and approve again.'
+        : issued?.decision === 'actions_not_ready'
+          ? 'A dry-run expired or a rollback became invalid while this approval was being issued.'
+          : issued?.decision === 'actions_in_flight'
+            ? 'Some of these actions are already executing or finished.'
+            : issued?.decision === 'actions_not_found'
+              ? 'Every requested action must belong to this tenant and plan.'
+              : 'This approval could not be issued.';
+      logger.warn(
+        { decision: issued?.decision, planId: input.planId },
+        'approval refused under row locks',
+      );
+      return c.json(
+        { error: { code: issued?.decision ?? 'approval_refused', message } },
+        ['content_changed', 'plan_changed'].includes(issued?.decision ?? '') ? 409 : 422,
+      );
+    }
 
     deps.realtime.broadcast({
       type: 'approval.pending',
@@ -253,8 +1123,8 @@ export function v1Routes(deps: Deps) {
 
     return c.json(
       {
-        approvalTokenId: tokenRow.id,
-        expiresAt: tokenRow.expires_at,
+        approvalTokenId: issued.token_id,
+        expiresAt: issued.expires_at,
         // The actual token — sent to the client. The client must
         // present it in the execute call.
         token: signed,
@@ -265,7 +1135,7 @@ export function v1Routes(deps: Deps) {
 
   // POST /v1/plans/:id/reject — reject the plan
   app.post('/plans/:id/reject', async (c) => {
-    if (deps.killSwitch.isActive(c.get('tenantId'))) {
+    if (await deps.killSwitch.isActive(c.get('tenantId'))) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -276,12 +1146,8 @@ export function v1Routes(deps: Deps) {
     const user = c.get('user');
     const role = c.get('role');
 
-    if (!['owner', 'admin', 'approver'].includes(role)) {
-      return c.json(
-        { error: { code: 'role_forbidden', message: 'Only owners/admins/approvers can reject' } },
-        403,
-      );
-    }
+    const rejectRefusal = requireCapability(c, Capability.PLAN_REJECT);
+    if (rejectRefusal) return rejectRefusal;
 
     const admin = createSupabaseAdmin();
     const { error } = await admin
@@ -317,8 +1183,10 @@ export function v1Routes(deps: Deps) {
   // Per ADR-2 / BR-1: no mutating action executes without a valid
   // approval token. The token is validated per-action.
   app.post('/plans/:id/execute', async (c) => {
+    const executeRefusal = requireCapability(c, Capability.PLAN_EXECUTE);
+    if (executeRefusal) return executeRefusal;
     const tenantId = c.get('tenantId');
-    if (deps.killSwitch.isActive(tenantId)) {
+    if (await deps.killSwitch.isActive(tenantId)) {
       return c.json(
         { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
         423,
@@ -382,6 +1250,63 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    // W1 · R-08 — the approver's execution settings are authority, not a hint.
+    //
+    // `concurrency` and `stopOnFailure` are inside the signed spec, and the
+    // execute path took them from the REQUEST instead. So an approver could
+    // sign "one at a time, stop on the first failure" and the caller could
+    // execute twenty at once, ignoring failures, against the same token. The
+    // signature covered settings nobody then enforced, which is worse than not
+    // signing them: it makes the token look like it constrains blast radius.
+    //
+    // The signed values now govern. A request that contradicts them is
+    // refused rather than quietly overridden, because silently narrowing
+    // someone's stated intent is its own kind of wrong answer.
+    const signedConcurrency = signedToken.spec.concurrency;
+    const signedStopOnFailure = signedToken.spec.stopOnFailure;
+    const signedMode = signedToken.spec.mode;
+
+    // A setting the spec does not carry is not a setting the approver bound,
+    // so there is nothing to enforce and nothing to contradict. The spec is
+    // HMAC-signed, so a caller cannot drop a field to escape the check — only
+    // a token we issued without one reaches here, and refusing those would
+    // invalidate every token issued before this change for no security gain.
+    const settingConflicts: string[] = [];
+    if (signedConcurrency !== undefined && input.concurrency !== signedConcurrency) {
+      settingConflicts.push('concurrency');
+    }
+    if (signedStopOnFailure !== undefined && input.stopOnFailure !== signedStopOnFailure) {
+      settingConflicts.push('stopOnFailure');
+    }
+    if (signedMode !== undefined && input.mode !== signedMode) settingConflicts.push('mode');
+
+    if (settingConflicts.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'execution_settings_mismatch',
+            message:
+              'These execution settings differ from the ones that were approved. ' +
+              'Re-approve the plan with the settings you intend to run.',
+            details: {
+              conflicting: settingConflicts,
+              approved: {
+                mode: signedMode,
+                concurrency: signedConcurrency ?? input.concurrency,
+                stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+              },
+              requested: {
+                mode: input.mode,
+                concurrency: input.concurrency,
+                stopOnFailure: input.stopOnFailure,
+              },
+            },
+          },
+        },
+        409,
+      );
+    }
+
     // The in-memory nonce check is only a fast path. The persisted token is
     // the source of truth so replay protection also works across replicas.
     const { data: persistedToken, error: persistedTokenErr } = await admin
@@ -422,21 +1347,43 @@ export function v1Routes(deps: Deps) {
       );
     }
 
-    // Per-action validation
+    // Per-action validation.
+    //
+    // PERF-1: this issued one `.single()` per action inside the loop, so a
+    // 200-action batch was 200 sequential round-trips before execution could
+    // start. One `.in()` fetch replaces them.
+    //
+    // SEC-6: `dry_run_expires_at` was checked at approve time but not here,
+    // and was not even selected. Time passes between approval and execution —
+    // that is the entire point of an approval queue — so a dry-run that was
+    // fresh when a human approved it can be hours stale by the time it runs.
+    // FR-6.3 says a stale dry-run cannot back an approval; the execute path
+    // has to re-assert it or the guarantee lasts only until the approver
+    // clicks.
     const accepted: string[] = [];
     const rejected: Array<{ actionId: string; reason: string }> = [];
+
+    const { data: actionRows, error: actionsErr } = await admin
+      .from('remediation_actions')
+      .select(
+        'id, plan_id, approval_status, dry_run_status, dry_run_expires_at, rollback_validated, idempotency_key',
+      )
+      .in('id', input.actionIds)
+      .eq('tenant_id', tenantId);
+
+    if (actionsErr) {
+      return c.json({ error: { code: 'action_lookup_failed', message: actionsErr.message } }, 500);
+    }
+
+    const actionsById = new Map((actionRows ?? []).map((a) => [String(a.id), a]));
+    const executeAt = Date.now();
+
     for (const actionId of input.actionIds) {
       if (!deps.approvalEngine.isActionCovered(signedToken, actionId)) {
         rejected.push({ actionId, reason: 'action_not_in_token_scope' });
         continue;
       }
-      // Fetch the action row
-      const { data: action } = await admin
-        .from('remediation_actions')
-        .select('id, plan_id, approval_status, dry_run_status, rollback_validated, idempotency_key')
-        .eq('id', actionId)
-        .eq('tenant_id', tenantId)
-        .single();
+      const action = actionsById.get(actionId);
       if (!action || action.plan_id !== planId) {
         rejected.push({ actionId, reason: 'action_not_found' });
         continue;
@@ -449,61 +1396,163 @@ export function v1Routes(deps: Deps) {
         rejected.push({ actionId, reason: 'action_not_ready' });
         continue;
       }
-      // Idempotency: if this action already has an idempotency_key and
-      // it's the same as the request, treat it as already-executed.
-      if (action.idempotency_key === c.get('idempotencyKey')) {
-        accepted.push(actionId);
+      if (!hasFreshDryRun(action.dry_run_expires_at, executeAt)) {
+        rejected.push({ actionId, reason: 'dry_run_expired' });
         continue;
       }
+      // Idempotency: if this action already carries this request's key, it has
+      // already been executed under it.
       accepted.push(actionId);
     }
 
-    // Mark accepted actions as executing + record idempotency key
+    // W5 · R-04 — claim the batch and consume the token in ONE transaction.
+    //
+    // These were two statements with a gap between them, and the gap was
+    // fatal: the token was consumed first, then every accepted action was
+    // stamped with the SAME request key, against a column carrying a global
+    // unique constraint. A two-action batch therefore raised a duplicate-key
+    // error after the single-use token had already been spent, leaving the
+    // plan approved, un-executable and needing a fresh approval. The one flow
+    // the product exists to make trustworthy could not run a batch at all.
+    //
+    // `claim_plan_execution` (migration 0019) does both halves atomically and
+    // writes a per-action scoped key, so the constraint is satisfied by
+    // construction and still catches a regression.
+    // Declared before the claim: the outbox row carries it, so the
+    // correlation id has to exist before the transaction that writes it.
+    const correlationId = randomUUID();
+    const requestKey = c.get('idempotencyKey');
+    let claimedActions: string[] = [];
+    // Reported by the claim, straight from the token's signed payload.
+    let claimedDigest: string | null = null;
+
     if (accepted.length > 0) {
-      const { data: consumedToken, error: consumeErr } = await admin
-        .from('approval_tokens')
-        .update({ status: 'consumed', consumed_at: new Date().toISOString() })
-        .eq('id', persistedToken.id)
-        .eq('tenant_id', tenantId)
-        .eq('status', 'issued')
-        .select('id')
-        .maybeSingle();
-      if (consumeErr) {
+      // W5: the outbox row is written inside this same transaction, so "we
+      // spent the token" and "we owe a dispatch" cannot disagree. If the
+      // process dies before the runtime hears anything, the intent survives
+      // and `pending_execution_dispatches` shows it.
+      const { data: claim, error: claimErr } = await admin.rpc('claim_plan_execution', {
+        p_tenant_id: tenantId,
+        p_plan_id: planId,
+        p_token_id: persistedToken.id,
+        p_action_ids: accepted,
+        p_request_key: requestKey,
+        p_correlation_id: correlationId,
+        p_payload: buildExecutionDispatchPayload({
+          tenantId,
+          planId,
+          correlationId,
+          actionIds: accepted,
+          requestKey,
+          mode: signedMode ?? input.mode,
+          concurrency: signedConcurrency ?? input.concurrency,
+          stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+          approvalToken: signedToken,
+          // From the verified token. `claim_plan_execution` overwrites this in
+          // the stored intent with the value it read from the token row, so
+          // the outbox is authoritative even if this were ever wrong.
+          contentDigest: signedToken.spec.contentDigest ?? '',
+        }),
+      });
+
+      if (claimErr) {
+        logger.error({ err: claimErr.message, planId }, 'execution claim failed');
         return c.json(
-          { error: { code: 'token_consume_failed', message: consumeErr.message } },
+          { error: { code: 'execution_claim_failed', message: 'Could not claim the execution' } },
           500,
-        );
-      }
-      if (!consumedToken) {
-        return c.json(
-          {
-            error: {
-              code: 'token_already_used',
-              message: 'Approval token was consumed concurrently',
-            },
-          },
-          409,
         );
       }
 
-      const { error: executionUpdateErr } = await admin
-        .from('remediation_actions')
-        .update({
-          execution_status: 'executing',
-          idempotency_key: c.get('idempotencyKey'),
-        })
-        .eq('tenant_id', tenantId)
-        .eq('plan_id', planId)
-        .in('id', accepted);
-      if (executionUpdateErr) {
-        return c.json(
-          { error: { code: 'persistence_failed', message: 'Could not mark actions as executing' } },
-          500,
-        );
+      const parsed = claim as {
+        decision?: string;
+        action_ids?: string[];
+        content_digest?: string;
+      } | null;
+      switch (parsed?.decision) {
+        case 'claimed':
+          claimedActions = parsed.action_ids ?? [];
+          claimedDigest = parsed.content_digest ?? null;
+          break;
+        // ── The snapshot the approver authorised (0027) ──────────────
+        case 'content_changed':
+          // The action content no longer matches what the token was issued
+          // for. `trg_actions_approved_immutable` freezes an approved
+          // action's parameters and rollback definition but not its
+          // dry-run diff, so this is reachable without anyone breaking a
+          // constraint — and the diff is what the approver read.
+          return c.json(
+            {
+              error: {
+                code: 'content_changed',
+                message:
+                  'These actions no longer match what was approved. Re-read the plan and approve again.',
+              },
+            },
+            409,
+          );
+        case 'token_without_snapshot':
+          return c.json(
+            {
+              error: {
+                code: 'token_without_snapshot',
+                message:
+                  'This approval predates content binding and cannot authorise execution. Approve again.',
+              },
+            },
+            409,
+          );
+        case 'already_claimed':
+          return c.json(
+            {
+              error: {
+                code: 'execution_already_claimed',
+                message: 'This dispatch intent already exists; reconcile it before retrying.',
+              },
+            },
+            409,
+          );
+        case 'token_already_used':
+          return c.json(
+            {
+              error: {
+                code: 'token_already_used',
+                message: 'Approval token was consumed concurrently',
+              },
+            },
+            409,
+          );
+        case 'already_executing':
+          return c.json(
+            {
+              error: {
+                code: 'action_already_executing',
+                message: 'Another request is already executing one of these actions',
+              },
+            },
+            409,
+          );
+        case 'actions_not_found':
+          return c.json(
+            {
+              error: {
+                code: 'actions_not_found',
+                message: 'Every action must belong to this tenant and plan',
+              },
+            },
+            404,
+          );
+        default:
+          return c.json(
+            {
+              error: {
+                code: 'execution_claim_refused',
+                message: `Execution was not claimed (${parsed?.decision ?? 'unknown'})`,
+              },
+            },
+            409,
+          );
       }
     }
-
-    const correlationId = randomUUID();
     await deps.ledger.append({
       tenantId,
       correlationId,
@@ -515,43 +1564,127 @@ export function v1Routes(deps: Deps) {
       detail: {
         accepted: accepted.length,
         rejected: rejected.length,
-        mode: input.mode,
-        concurrency: input.concurrency,
+        mode: signedMode ?? input.mode,
+        concurrency: signedConcurrency ?? input.concurrency,
+        stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
       },
     });
 
-    // Enqueue to the agent runtime (Phase 3+). For Phase 0/1, we
-    // immediately mark the actions as succeeded (advisory only) and
-    // surface the plan via the realtime channel so the workbench
-    // shows the lifecycle.
-    if (accepted.length > 0 && env.AGENT_RUNTIME_URL) {
-      try {
-        await fetch(`${env.AGENT_RUNTIME_URL}/internal/execute`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Internal-Token': env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+    // W5 · R-05 — dispatch over a contract that exists.
+    //
+    // The old call sent camelCase keys to `/internal/execute`, whose Pydantic
+    // model requires snake_case and defines no aliases, so every dispatch was
+    // a 422. Nothing noticed: the response was never checked and the catch
+    // only logged, so the route returned `status: 'accepted'` for work the
+    // runtime had refused outright. An execution console showing "accepted"
+    // for a batch that never reached the executor is worse than one showing an
+    // error, because only one of those prompts anybody to look.
+    //
+    // The payload is versioned so a future mismatch is a refusal with a reason
+    // rather than a silent 422.
+    let dispatch: DispatchOutcome = {
+      status: 'failed',
+      reference: null,
+      error: 'dispatch not attempted',
+    };
+    if (claimedActions.length > 0 && claimedDigest === null) {
+      // Unreachable through `claim_plan_execution`, which refuses a token
+      // carrying no snapshot — so reaching it means the claim is not the
+      // function this route thinks it is. Dispatching anyway would send the
+      // executor a batch with nothing to verify against, which is the whole
+      // property 0027 adds.
+      logger.error({ planId, requestKey }, 'claim returned actions without a content snapshot');
+      return c.json(
+        {
+          error: {
+            code: 'token_without_snapshot',
+            message: 'The claim reported no approved content snapshot; nothing was dispatched.',
           },
-          body: JSON.stringify({
-            tenantId,
-            planId,
-            correlationId,
-            actionIds: accepted,
-            mode: input.mode,
-            concurrency: input.concurrency,
-            stopOnFailure: input.stopOnFailure,
-            approvalToken: signedToken,
-          }),
-        });
-      } catch (err) {
-        logger.error({ err }, 'failed to enqueue execution to agent runtime');
-      }
+        },
+        500,
+      );
     }
 
-    deps.approvalEngine.markNonceUsed(signedToken.spec.nonce);
+    if (claimedActions.length > 0) {
+      dispatch = await dispatchExecution(
+        env.AGENT_RUNTIME_URL,
+        env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+        buildExecutionDispatchPayload({
+          tenantId,
+          planId,
+          correlationId,
+          actionIds: claimedActions,
+          requestKey,
+          mode: signedMode ?? input.mode,
+          concurrency: signedConcurrency ?? input.concurrency,
+          stopOnFailure: signedStopOnFailure ?? input.stopOnFailure,
+          approvalToken: signedToken,
+          // Reported by the claim, which read it from the token's signed
+          // payload under the action row locks. Guarded above: a claim that
+          // reports actions always reports this.
+          contentDigest: claimedDigest ?? '',
+        }),
+      );
 
+      // An ambiguous acknowledgement retains the claim. Only an explicit
+      // refusal permits a fresh approval to retry the actions.
+      const { data: settled, error: settleErr } = await admin.rpc('finish_execution_dispatch', {
+        p_tenant_id: tenantId,
+        p_plan_id: planId,
+        p_request_key: requestKey,
+        p_status: dispatch.status,
+        p_reference: dispatch.reference,
+        p_error: dispatch.error,
+      });
+      if (settleErr || settled !== true) {
+        logger.error({ planId }, 'could not persist dispatch outcome; reconciliation required');
+        return c.json(
+          {
+            error: {
+              code: 'dispatch_reconciliation_required',
+              message:
+                'Dispatch outcome could not be persisted. Do not retry without reconciliation.',
+            },
+            correlationId,
+          },
+          503,
+        );
+      }
+
+      if (dispatch.status === 'failed') {
+        logger.error(
+          { planId, correlationId, error: dispatch.error },
+          'execution dispatch refused by the agent runtime',
+        );
+        await deps.ledger.append({
+          tenantId,
+          correlationId,
+          actorType: 'human',
+          actorId: user.id,
+          actionType: 'execution.action.failed',
+          targetRef: planId,
+          result: 'failure',
+          detail: { stage: 'dispatch', error: dispatch.error, actionIds: claimedActions },
+        });
+      }
+    }
+    // Pass the token's expiry so the replay cache can drop the entry once the
+    // token would fail the expiry check anyway (SEC-12).
+    deps.approvalEngine.markNonceUsed(signedToken.spec.nonce, signedToken.spec.expiresAt);
+
+    // `accepted` now means the RUNTIME accepted it. Previously this said
+    // `accepted` whenever the BFF's own checks passed, whether or not anything
+    // had been dispatched.
     const status =
-      rejected.length === 0 ? 'accepted' : accepted.length === 0 ? 'rejected' : 'partial';
+      claimedActions.length === 0
+        ? 'rejected'
+        : dispatch.status === 'unknown'
+          ? 'dispatch_unknown'
+          : dispatch.status === 'failed'
+            ? 'dispatch_failed'
+            : rejected.length === 0
+              ? 'accepted'
+              : 'partial';
 
     return c.json(
       {
@@ -566,19 +1699,126 @@ export function v1Routes(deps: Deps) {
     );
   });
 
-  // ─── Kill switch ─────────────────────────────────────────────────
-  const handleKillSwitchEngage = async (c: any) => {
-    if (c.get('role') !== 'founder' && c.get('role') !== 'admin' && c.get('role') !== 'owner') {
+  // ─── Dispatch reconciliation (W5) ────────────────────────────────
+  //
+  // An `unknown` dispatch retains its claim, because from here an unreachable
+  // runtime is indistinguishable from work running on a client's estate. That
+  // is correct and it is also a dead end, so a human has to be able to record
+  // a judgement. Redelivery always needs a FRESH approval — founder decision —
+  // so nothing here re-dispatches anything.
+
+  // GET /v1/execution/dispatches/pending — the operator's queue.
+  app.get('/execution/dispatches/pending', async (c) => {
+    const refusal = requireCapability(c, Capability.EXECUTION_RECONCILE);
+    if (refusal) return refusal;
+
+    const tenantId = c.get('tenantId');
+    const { data, error } = await createSupabaseAdmin()
+      .from('pending_execution_dispatches')
+      .select('*')
+      .eq('tenant_id', tenantId);
+    if (error) {
+      return c.json({ error: { code: 'lookup_failed', message: error.message } }, 500);
+    }
+    return c.json({ dispatches: data ?? [] });
+  });
+
+  // POST /v1/execution/dispatches/reconcile — record the judgement.
+  app.post('/execution/dispatches/reconcile', async (c) => {
+    const refusal = requireCapability(c, Capability.EXECUTION_RECONCILE);
+    if (refusal) return refusal;
+
+    const parsed = z
+      .object({
+        planId: z.string().uuid(),
+        requestKey: z.string().min(1).max(255),
+        decision: z.enum(['released', 'abandoned']),
+        // A reconciliation with no stated reason records no judgement, which
+        // is the only thing this endpoint produces. Trimmed first: `min(1)`
+        // alone accepts a single space, and the database would then be the
+        // only thing refusing it.
+        reason: z.string().trim().min(1).max(500),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
       return c.json(
         {
           error: {
-            code: 'role_forbidden',
-            message: 'Only founders/owners can engage the kill switch',
+            code: 'validation_failed',
+            message: 'Invalid reconciliation',
+            details: parsed.error.flatten(),
           },
         },
-        403,
+        400,
       );
     }
+
+    const input = parsed.data;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+
+    const { data, error } = await createSupabaseAdmin().rpc('reconcile_execution_dispatch', {
+      p_tenant_id: tenantId,
+      p_plan_id: input.planId,
+      p_request_key: input.requestKey,
+      p_decision: input.decision,
+      p_reason: input.reason,
+      p_actor_id: user.id,
+    });
+    if (error) {
+      logger.error({ err: error.message, planId: input.planId }, 'reconciliation failed');
+      return c.json({ error: { code: 'reconcile_failed', message: error.message } }, 500);
+    }
+
+    const result = data as {
+      decision?: string;
+      released_action_count?: number;
+      correlation_id?: string;
+    } | null;
+    switch (result?.decision) {
+      case 'released':
+      case 'abandoned':
+        break;
+      case 'intent_not_found':
+      case 'plan_not_found':
+        return c.json(
+          { error: { code: 'intent_not_found', message: 'No such dispatch intent' } },
+          404,
+        );
+      case 'not_reconcilable':
+        // Delivered, or already judged. Releasing delivered work would invite
+        // a second execution of a batch already in flight.
+        return c.json(
+          {
+            error: {
+              code: 'not_reconcilable',
+              message:
+                'This intent was delivered or has already been reconciled, so it cannot be reopened.',
+            },
+          },
+          409,
+        );
+      default:
+        return c.json(
+          { error: { code: result?.decision ?? 'reconcile_failed', message: 'Refused' } },
+          422,
+        );
+    }
+
+    // Migration 0025 appends the ledger inside the reconciliation transaction.
+    return c.json({
+      decision: input.decision,
+      releasedActionCount: result.released_action_count ?? 0,
+      correlationId: result?.correlation_id,
+      redeliveryRequiresFreshApproval: true,
+    });
+  });
+
+  // ─── Kill switch ─────────────────────────────────────────────────
+  const handleKillSwitchEngage = async (c: any) => {
+    const engageRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_TENANT);
+    if (engageRefusal) return engageRefusal;
+
     const body = await c.req.json().catch(() => ({}));
     const parsedKillSwitch = z
       .object({
@@ -593,18 +1833,14 @@ export function v1Routes(deps: Deps) {
       );
     }
     const { reason, scope } = parsedKillSwitch.data;
-    if (scope === 'global' && c.get('role') !== 'founder' && c.get('role') !== 'owner') {
-      return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only founders/owners can engage a global kill switch',
-          },
-        },
-        403,
-      );
+    // SEC-4: a GLOBAL halt stops execution for every tenant on the platform.
+    // `owner` is a per-tenant role, so it is not authority over other
+    // tenants' execution. Global scope is founder-only in both directions.
+    if (scope === 'global') {
+      const globalRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_GLOBAL);
+      if (globalRefusal) return globalRefusal;
     }
-    deps.killSwitch.engage({
+    await deps.killSwitch.engage({
       tenantId: c.get('tenantId'),
       userId: c.get('user').id,
       reason,
@@ -626,32 +1862,67 @@ export function v1Routes(deps: Deps) {
   app.post('/kill-switch', handleKillSwitchEngage);
 
   app.post('/kill-switch/release', async (c) => {
-    if (c.get('role') !== 'founder' && c.get('role') !== 'owner') {
+    const releaseRefusal = requireCapability(c, Capability.KILL_SWITCH_RELEASE_TENANT);
+    if (releaseRefusal) return releaseRefusal;
+
+    const body = await c.req.json().catch(() => ({}));
+    const parsedRelease = z
+      .object({ scope: z.enum(['global', 'tenant']).default('tenant') })
+      .safeParse(body);
+    if (!parsedRelease.success) {
       return c.json(
-        {
-          error: {
-            code: 'role_forbidden',
-            message: 'Only founders/owners can release the kill switch',
-          },
-        },
-        403,
+        { error: { code: 'validation_failed', message: 'Invalid kill-switch release request' } },
+        400,
       );
     }
-    deps.killSwitch.release();
+    const { scope } = parsedRelease.data;
+
+    // SEC-4: `release()` used to take no arguments and clear everything, so a
+    // tenant owner could lift a founder-engaged GLOBAL halt — the platform-wide
+    // emergency stop, released by someone with authority over one tenant.
+    // Releasing the global scope is founder-only, and the service refuses a
+    // tenant release while a global halt stands.
+    if (scope === 'global') {
+      const globalReleaseRefusal = requireCapability(c, Capability.KILL_SWITCH_RELEASE_GLOBAL);
+      if (globalReleaseRefusal) return globalReleaseRefusal;
+    }
+
+    const result = await deps.killSwitch.release({
+      scope,
+      tenantId: c.get('tenantId'),
+      userId: c.get('user').id,
+    });
+
+    if (!result.released) {
+      const status = result.reason === 'global_halt_active' ? 409 : 200;
+      return c.json(
+        {
+          engaged: result.reason === 'global_halt_active',
+          released: false,
+          reason: result.reason,
+          message:
+            result.reason === 'global_halt_active'
+              ? 'A global kill switch is engaged; a tenant release cannot lift it'
+              : 'No kill switch was engaged for this scope',
+        },
+        status,
+      );
+    }
+
     await deps.ledger.append({
       tenantId: c.get('tenantId'),
       correlationId: randomUUID(),
       actorType: 'human',
       actorId: c.get('user').id,
-      actionType: 'execution.kill_switch.engaged',
+      actionType: 'execution.kill_switch.released',
       result: 'success',
-      detail: { action: 'released' },
+      detail: { action: 'released', scope },
     });
-    return c.json({ engaged: false });
+    return c.json({ engaged: false, released: true, scope });
   });
 
-  app.get('/kill-switch/status', (c) => {
-    return c.json({ engaged: deps.killSwitch.isActive(c.get('tenantId')) });
+  app.get('/kill-switch/status', async (c) => {
+    return c.json(await deps.killSwitch.state(c.get('tenantId')));
   });
 
   // ─── Ledger ──────────────────────────────────────────────────────
@@ -711,15 +1982,12 @@ export function v1Routes(deps: Deps) {
   });
 
   app.post('/engagements', async (c) => {
-    if (!['owner', 'admin', 'reviewer'].includes(c.get('role'))) {
-      return c.json(
-        { error: { code: 'role_forbidden', message: 'Only owners/admins/reviewers' } },
-        403,
-      );
-    }
+    const engagementRefusal = requireCapability(c, Capability.ENGAGEMENT_CREATE);
+    if (engagementRefusal) return engagementRefusal;
     const body = await c.req.json();
     const Schema = z.object({
       libraryVersion: z.string(),
+      estateId: z.uuid().optional(),
       title: z.string().min(3).max(200),
     });
     const parsed = Schema.safeParse(body);
@@ -732,12 +2000,34 @@ export function v1Routes(deps: Deps) {
       .insert({
         tenant_id: c.get('tenantId'),
         library_version: parsed.data.libraryVersion,
+        estate_id: parsed.data.estateId ?? null,
         title: parsed.data.title,
         lead_reviewer_id: c.get('user').id,
         status: 'intake',
       })
       .select()
       .single();
+    if (error?.code === '23514' && parsed.data.estateId)
+      return c.json(
+        {
+          error: {
+            code: 'estate_archived',
+            message: 'Restore the estate before starting an assessment.',
+          },
+        },
+        409,
+      );
+    if (error?.code === '23503' && parsed.data.estateId) {
+      return c.json(
+        {
+          error: {
+            code: 'invalid_reference',
+            message: 'The estate and library must belong to the requested assessment scope.',
+          },
+        },
+        422,
+      );
+    }
     if (error)
       return c.json({ error: { code: 'persistence_failed', message: error.message } }, 500);
     return c.json(data, 201);
@@ -782,25 +2072,29 @@ export function v1Routes(deps: Deps) {
     const body = await c.req.json().catch(() => ({}));
 
     const OnboardSchema = z.object({
-      name: z.string().min(2).max(100),
+      name: z.string().trim().min(2).max(100),
       slug: z.string().min(2).max(60).optional(),
       tier: z.enum(['essential', 'growth', 'enterprise']).default('growth'),
       is_sdf: z.boolean().default(false),
       processes_health_data: z.boolean().default(false),
       processes_children_data: z.boolean().default(false),
-      dpo_name: z.string().optional(),
+      dpo_name: z.string().trim().min(1).max(200).optional(),
       dpo_email: z.string().email().optional(),
       systems: z
         .array(
           z.object({
-            name: z.string(),
-            type: z.string(),
-            description: z.string().optional(),
+            name: z.string().trim().min(1).max(200),
+            type: z.string().min(1).max(100),
+            description: z.string().max(2000).optional(),
             hosts_personal_data: z.boolean().default(true),
-            region: z.string().default('ap-south-1'),
-            data_categories: z.array(z.string()).default(['contact', 'identity']),
+            region: z.string().min(1).max(100).default('ap-south-1'),
+            data_categories: z
+              .array(z.string().min(1).max(100))
+              .max(50)
+              .default(['contact', 'identity']),
           }),
         )
+        .max(100)
         .optional(),
     });
 
@@ -809,125 +2103,121 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', details: parsed.error.flatten() } }, 400);
     }
 
-    const {
-      name,
-      tier,
-      is_sdf,
-      processes_health_data,
-      processes_children_data,
-      dpo_name,
-      dpo_email,
-      systems,
-    } = parsed.data;
-
-    // Generate unique slug if not supplied
-    const baseSlug = (
-      parsed.data.slug ||
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-    ).slice(0, 45);
-    const uniqueSlug = `${baseSlug}-${Math.random().toString(36).substring(2, 7)}`;
-
     const admin = createSupabaseAdmin();
-
-    // 1. Insert into public.tenants
-    const { data: tenant, error: tenantErr } = await admin
-      .from('tenants')
-      .insert({
-        slug: uniqueSlug,
-        name,
-        tier,
-        data_residency_region: 'ap-south-1',
-        is_sdf,
-        processes_health_data,
-        processes_children_data,
-      })
-      .select()
-      .single();
-
-    if (tenantErr || !tenant) {
-      logger.error({ error: tenantErr }, 'failed to create tenant');
+    // A durable counter shared by every BFF replica. Counting outside the
+    // creation transaction means failed attempts are throttled too.
+    const { data: rateData, error: rateError } = await admin.rpc('take_rate_limit', {
+      p_bucket: 'organization-onboarding',
+      p_subject: user.id,
+      p_limit: 5,
+      p_window_seconds: 3600,
+    });
+    const rate = z
+      .object({ allowed: z.boolean(), retry_after: z.number().int().positive() })
+      .safeParse(rateData);
+    if (rateError || !rate.success) {
+      return c.json(
+        {
+          error: { code: 'rate_limit_unavailable', message: 'Could not verify the request limit.' },
+        },
+        503,
+      );
+    }
+    if (!rate.data.allowed) {
+      c.header('Retry-After', String(rate.data.retry_after));
       return c.json(
         {
           error: {
-            code: 'tenant_creation_failed',
-            message: tenantErr?.message || 'Failed to create organization',
+            code: 'rate_limited',
+            message: 'Too many onboarding attempts. Try again later.',
           },
         },
-        500,
+        429,
       );
     }
-
-    // 2. Add user as 'owner' in tenant_users
-    const { error: memberErr } = await admin.from('tenant_users').insert({
-      tenant_id: tenant.id,
-      user_id: user.id,
-      role: 'owner',
-      accepted_at: new Date().toISOString(),
+    const input = parsed.data;
+    const baseSlug =
+      (input.slug ?? input.name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '')
+        .slice(0, 45) || 'organization';
+    const { data, error } = await admin.rpc('onboard_organization', {
+      p_user_id: user.id,
+      p_slug: `${baseSlug}-${randomUUID()}`,
+      p_name: input.name,
+      p_tier: input.tier,
+      p_is_sdf: input.is_sdf,
+      p_processes_health_data: input.processes_health_data,
+      p_processes_children_data: input.processes_children_data,
+      p_dpo_name: input.dpo_name ?? null,
+      p_dpo_email: input.dpo_email ?? null,
+      p_systems: input.systems ?? [],
+      p_library_version: LIBRARY_VERSION,
+      p_correlation_id: randomUUID(),
     });
-
-    if (memberErr) {
-      logger.error({ error: memberErr }, 'failed to link tenant owner');
-    }
-
-    // 3. Create initial engagement in engagements table
-    const { data: engagement, error: engErr } = await admin
-      .from('engagements')
-      .insert({
-        tenant_id: tenant.id,
-        library_version: '0.1.0',
-        title: `${name} — DPDPA Statutory Assessment`,
-        lead_reviewer_id: user.id,
-        status: 'intake',
-        started_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (engErr) {
-      logger.warn({ error: engErr }, 'failed to create initial engagement for new tenant');
-    }
-
-    // 4. Record to immutable audit ledger
-    const correlationId = randomUUID();
-    deps.ledger.appendAndForget({
-      tenantId: tenant.id,
-      correlationId,
-      actorType: ActorType.HUMAN,
-      actorId: user.id,
-      actionType: LedgerActionType.TENANT_CREATED,
-      targetRef: `tenant:${tenant.id}`,
-      result: LedgerResult.SUCCESS,
-      detail: {
-        name,
-        slug: uniqueSlug,
-        tier,
-        is_sdf,
-        dpo_name: dpo_name || user.user_metadata?.full_name || 'Compliance Officer',
-        dpo_email: dpo_email || user.email,
-        systems_count: systems?.length || 0,
-      },
-    });
-
-    return c.json(
-      {
-        tenant,
-        engagement,
-        systems: systems || [
-          {
-            name: `${uniqueSlug}-core-db`,
-            type: 'postgres',
-            description: `Primary customer datastore in ap-south-1 for ${name}`,
-            hosts_personal_data: true,
-            region: 'ap-south-1',
-            data_categories: ['identity', 'contact', 'financial'],
+    if (error) {
+      logger.error({ code: error.code, userId: user.id }, 'atomic onboarding failed');
+      return c.json(
+        {
+          error: {
+            code: 'onboarding_failed',
+            message:
+              'Organization creation could not be confirmed. Keep the request key and check its outcome.',
           },
-        ],
-      },
-      201,
-    );
+        },
+        503,
+      );
+    }
+    const outcome = z
+      .union([
+        z.object({
+          error: z.enum([
+            'onboarding_not_entitled',
+            'tier_not_entitled',
+            'tenant_quota_exceeded',
+            'library_not_published',
+          ]),
+        }),
+        z.object({
+          tenant: z.object({ id: z.uuid() }).passthrough(),
+          engagement: z.object({ id: z.uuid() }).passthrough(),
+          intake: z.object({
+            proposed_system_count: z.number().int().nonnegative(),
+            status: z.literal('pending_estate_setup'),
+          }),
+        }),
+      ])
+      .safeParse(data);
+    if (!outcome.success) {
+      return c.json(
+        {
+          error: {
+            code: 'onboarding_failed',
+            message:
+              'Organization creation could not be confirmed. Keep the request key and check its outcome.',
+          },
+        },
+        503,
+      );
+    }
+    if ('error' in outcome.data) {
+      const code = outcome.data.error;
+      const status =
+        code === 'library_not_published' ? 503 : code === 'tenant_quota_exceeded' ? 409 : 403;
+      return c.json(
+        {
+          error: {
+            code,
+            message: 'The onboarding prerequisites are not satisfied. Contact your administrator.',
+          },
+        },
+        status,
+      );
+    }
+    // The submitted inventory is preserved as intake. W3 will create verified
+    // estate records; do not echo invented systems as if they were connected.
+    return c.json({ ...outcome.data, systems: [] }, 201);
   });
 
   // ─── Agent Invocation & Audit Pipeline ───────────────────────────
@@ -951,6 +2241,24 @@ export function v1Routes(deps: Deps) {
 
   app.post('/agents/:name/run', async (c) => {
     const name = c.req.param('name').toLowerCase();
+    const invokeRefusal = requireCapability(c, Capability.AGENT_INVOKE);
+    if (invokeRefusal) return invokeRefusal;
+    // Karya is dispatched only by the persisted approval/execution gate.
+    if (name === 'karya') {
+      return c.json(
+        {
+          error: {
+            code: 'execution_gate_required',
+            message: 'Use the approved plan execution endpoint.',
+          },
+        },
+        403,
+      );
+    }
+    if (['sanket', 'nazar', 'lekha'].includes(name)) {
+      const internalRefusal = requireCapability(c, Capability.WORKBENCH_ACCESS);
+      if (internalRefusal) return internalRefusal;
+    }
     const validAgents = [
       'drishti',
       'vibhaag',
@@ -968,41 +2276,101 @@ export function v1Routes(deps: Deps) {
     }
 
     const tenantId = c.get('tenantId');
-    const body = ((await c.req.json().catch(() => ({}))) || {}) as Record<string, any>;
-    const runtimeUrl = process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:8000';
-    const runtimeToken =
-      process.env.AGENT_RUNTIME_INTERNAL_TOKEN || 'dev-agent-runtime-token-axiom';
-
-    const correlationId = c.req.header('x-correlation-id') || body.correlation_id || randomUUID();
-
-    const input = {
-      tenant_id: tenantId,
-      engagement_id: body.engagement_id || '00000000-0000-0000-0000-000000000001',
-      ...body,
-    };
-
+    const parsed = z
+      .object({
+        tenant_id: z.uuid().optional(),
+        tenantId: z.uuid().optional(),
+        engagement_id: z.uuid().optional(),
+        correlation_id: z.uuid().optional(),
+      })
+      .catchall(z.unknown())
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid agent input.' } }, 400);
+    }
+    const body = parsed.data;
+    if (
+      (body.tenant_id && body.tenant_id !== tenantId) ||
+      (body.tenantId && body.tenantId !== tenantId)
+    ) {
+      return c.json(
+        {
+          error: {
+            code: 'tenant_forbidden',
+            message: 'Agent input must belong to the active tenant.',
+          },
+        },
+        403,
+      );
+    }
+    const runtimeUrl = env.AGENT_RUNTIME_URL;
+    const runtimeToken = env.AGENT_RUNTIME_INTERNAL_TOKEN;
+    if (!runtimeUrl || !runtimeToken) {
+      return c.json(
+        { error: { code: 'runtime_unavailable', message: 'Agent runtime is not configured.' } },
+        503,
+      );
+    }
+    const requestedCorrelation = c.req.header('x-correlation-id') ?? body.correlation_id;
+    if (requestedCorrelation && !z.uuid().safeParse(requestedCorrelation).success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid correlation ID.' } },
+        400,
+      );
+    }
+    const correlationId = requestedCorrelation ?? randomUUID();
     const admin = createSupabaseAdmin();
+    if (body.engagement_id) {
+      const { data: engagement, error } = await admin
+        .from('engagements')
+        .select('id')
+        .eq('id', body.engagement_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (error)
+        return c.json(
+          { error: { code: 'lookup_failed', message: 'Could not validate engagement.' } },
+          503,
+        );
+      if (!engagement)
+        return c.json(
+          { error: { code: 'engagement_not_found', message: 'Engagement is not in this tenant.' } },
+          404,
+        );
+    }
+    // Assign the authority last; untrusted input never overrides it.
+    const input = { ...body, tenant_id: tenantId };
     let runId: string | null = null;
 
     try {
-      const { data: runRow } = await admin
+      const { data: runRow, error: runError } = await admin
         .from('agent_runs')
         .insert({
           tenant_id: tenantId,
           agent: name,
+          engagement_id: body.engagement_id ?? null,
           correlation_id: correlationId,
+          input_redacted_hash: await sha256(canonicalJson(input)),
           status: 'running',
           started_at: new Date().toISOString(),
-          metadata: { input: body },
+          metadata: { requested_by: c.get('user').id },
         })
         .select('id')
         .maybeSingle();
 
-      if (runRow?.id) {
-        runId = runRow.id;
+      if (runError || !runRow?.id) {
+        return c.json(
+          { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
+          503,
+        );
       }
-    } catch (e: any) {
-      logger.warn({ error: e.message }, 'could not record initial agent_run row');
+      runId = runRow.id;
+    } catch {
+      logger.error({ agent: name, correlationId }, 'could not record initial agent_run row');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
+        503,
+      );
     }
 
     deps.realtime.broadcast({
@@ -1016,71 +2384,127 @@ export function v1Routes(deps: Deps) {
       occurredAt: new Date().toISOString(),
     });
 
+    // The runtime is an authenticated transport peer, not a source of arbitrary
+    // public fields or lifecycle authority. Bind its response to this dispatch.
+    const resultSchema = z.object({
+      agent: z.literal(name),
+      correlation_id: z.literal(correlationId),
+      status: z.enum(['succeeded', 'failed']),
+      latency_ms: z.number().int().nonnegative().max(2147483647),
+      input_tokens: z.number().int().nonnegative().max(2147483647),
+      output_tokens: z.number().int().nonnegative().max(2147483647),
+      cost_usd: z.number().nonnegative().max(9999.999999),
+      error: z.string().max(256).nullable(),
+      output: z.record(z.string(), z.unknown()).nullable(),
+      ledger_entry_ids: z.array(z.string().min(1).max(128)).max(1000),
+    });
+    type RuntimeResult = z.infer<typeof resultSchema>;
+    let result: RuntimeResult | null = null;
+    let failureCode = 'agent_invocation_failed';
     try {
       const res = await fetch(`${runtimeUrl}/agents/${name}/invoke`, {
         method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(120_000),
         headers: {
           'Content-Type': 'application/json',
           'X-Internal-Token': runtimeToken,
         },
-        body: JSON.stringify({
-          correlation_id: correlationId,
-          input,
-        }),
+        body: JSON.stringify({ correlation_id: correlationId, input }),
       });
-
-      const data = (await res.json()) as Record<string, any>;
-
-      if (runId) {
-        await admin
-          .from('agent_runs')
-          .update({
-            status: data.status === 'succeeded' ? 'succeeded' : 'failed',
-            completed_at: new Date().toISOString(),
-            latency_ms: data.latency_ms,
-            input_tokens: data.input_tokens,
-            output_tokens: data.output_tokens,
-            total_tokens: (data.input_tokens || 0) + (data.output_tokens || 0),
-            cost_usd: data.cost_usd,
-            error: data.error,
-          })
-          .eq('id', runId);
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error('runtime_http_refused');
       }
+      const parsedResult = resultSchema.parse(await res.json());
+      if (
+        parsedResult.status === 'succeeded' &&
+        (parsedResult.error !== null ||
+          parsedResult.output === null ||
+          parsedResult.ledger_entry_ids.length < 2 ||
+          new Set(parsedResult.ledger_entry_ids).size !== parsedResult.ledger_entry_ids.length)
+      )
+        throw new Error('runtime_result_refused');
+      if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
+        throw new Error('runtime_accounting_refused');
+      result = parsedResult;
+      if (result.status === 'failed') failureCode = 'agent_reported_failure';
+    } catch {
+      // Fetch, validation and provider errors may include private payloads or
+      // bearer credentials. Only fixed failure codes cross this boundary.
+      logger.error({ agent: name, correlationId }, 'agent runtime invocation refused');
+    }
 
-      deps.realtime.broadcast({
-        type: 'agent.progress',
-        agent: name,
-        correlationId,
-        runId,
-        step: `${name}.completed`,
-        progress: 1.0,
-        message: `Agent ${name} ${data.status || 'finished'}`,
-        occurredAt: new Date().toISOString(),
-      });
-
-      return c.json(data, res.status as any);
-    } catch (err: any) {
-      if (runId) {
-        await admin
-          .from('agent_runs')
-          .update({
-            status: 'failed',
-            completed_at: new Date().toISOString(),
-            error: err.message,
-          })
-          .eq('id', runId);
-      }
-      logger.error({ agent: name, error: err.message }, 'failed to call agent runtime');
+    const succeeded = result?.status === 'succeeded';
+    const terminalStatus = succeeded ? 'succeeded' : 'failed';
+    try {
+      const { data: recorded, error } = await admin
+        .from('agent_runs')
+        .update({
+          status: terminalStatus,
+          completed_at: new Date().toISOString(),
+          latency_ms: result?.latency_ms ?? null,
+          input_tokens: result?.input_tokens ?? null,
+          output_tokens: result?.output_tokens ?? null,
+          total_tokens: result ? result.input_tokens + result.output_tokens : null,
+          cost_usd: result?.cost_usd ?? null,
+          error: succeeded ? null : failureCode,
+          output_redacted_hash:
+            succeeded && result ? await sha256(canonicalJson(result.output)) : null,
+        })
+        .eq('id', runId)
+        .eq('tenant_id', tenantId)
+        .eq('agent', name)
+        .eq('correlation_id', correlationId)
+        .eq('status', 'running')
+        .select('id,status')
+        .maybeSingle();
+      if (error || recorded?.id !== runId || recorded?.status !== terminalStatus)
+        throw new Error('completion_not_confirmed');
+    } catch {
+      // An ambiguous commit is not proof of failure or rollback. Do not write
+      // over a concurrently cancelled/terminal row, retry dispatch or publish
+      // an unconfirmed completion event. Reconcile the recorded run instead.
+      logger.error(
+        { agent: name, correlationId, runId },
+        'agent completion persistence unconfirmed',
+      );
       return c.json(
         {
           error: {
-            code: 'agent_invocation_failed',
-            message: `Could not invoke agent ${name}: ${err.message}`,
+            code: 'agent_completion_unconfirmed',
+            message: 'Could not confirm the recorded outcome. Inspect this run before retrying.',
+            runId,
+            correlationId,
+          },
+        },
+        503,
+      );
+    }
+
+    deps.realtime.broadcast({
+      type: 'agent.progress',
+      agent: name,
+      correlationId,
+      runId,
+      step: `${name}.${terminalStatus}`,
+      progress: 1,
+      message: `Agent ${name} ${terminalStatus}`,
+      occurredAt: new Date().toISOString(),
+    });
+    if (!succeeded)
+      return c.json(
+        {
+          error: {
+            code: failureCode,
+            message: `Could not complete agent ${name}.`,
+            runId,
+            correlationId,
           },
         },
         502,
       );
-    }
+    return c.json(result, 200);
   });
 
   return app;

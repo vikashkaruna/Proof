@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
     log_level: Literal["debug", "info", "warn", "error"] = "info"
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8000")))
-    http_host: str = "0.0.0.0"
+    # Containers must listen on all interfaces; exposure is controlled by the
+    # platform ingress/network policy, never by this bind address.
+    http_host: str = "0.0.0.0"  # nosec B104
 
     # ─── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(
@@ -129,7 +131,13 @@ class Settings(BaseSettings):
     approval_signing_key: str | None = None
 
     # ─── Internal token for BFF → agent-runtime calls ────────────
-    internal_token: str | None = None
+    internal_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AGENT_RUNTIME_INTERNAL_TOKEN", "INTERNAL_TOKEN", "internal_token"
+        ),
+        description="BFF-to-runtime authentication; canonical deployment variable first",
+    )
 
     # ─── Feature flags ─────────────────────────────────────────────
     feature_dry_run_engine: bool = True
@@ -151,7 +159,7 @@ class Settings(BaseSettings):
             if self.axiom_region not in ("ap-south-1", "asia-south1"):
                 raise ValueError("Production data-plane services must run in Mumbai (ap-south-1 or asia-south1)")
             if not self.internal_token:
-                raise ValueError("INTERNAL_TOKEN is required in production")
+                raise ValueError("AGENT_RUNTIME_INTERNAL_TOKEN is required in production")
             if not self.approval_signing_key:
                 raise ValueError("APPROVAL_SIGNING_KEY is required in production")
             if not self.model_gateway_api_key:

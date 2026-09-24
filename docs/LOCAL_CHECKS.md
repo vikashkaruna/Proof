@@ -65,6 +65,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+
+# 4. Browser persona journeys (W1). Real GoTrue accounts, real login form,
+#    AXIOM_AUTH_MODE=strict. Needs Docker for the isolated parity stack.
+./scripts/start-parity-supabase.sh
+pnpm exec tsx scripts/seed-personas.ts
+pnpm --filter @axiom/e2e exec playwright install chromium   # first run only
+pnpm --filter @axiom/e2e exec playwright test
 ```
 
 **Expected**: each step exits 0. The build step takes ~15s; the rest are <2s.
@@ -177,7 +184,7 @@ ls services/agent-runtime/src/axiom/agents/ 2>/dev/null
 #           sudhaar.py, karya.py, lekha.py, nazar.py,
 #           prativedan.py, sanket.py
 
-# Confirm 43 controls in the library
+# Confirm the control count matches CONTROL_LIBRARY_COUNT (derived, currently 46)
 grep -c "^    id: '" packages/control-library/src/controls.ts
 # Expected: 43
 ```
@@ -201,7 +208,7 @@ grep -l "10 named agents\|10 agents" \
   README.md
 
 # Control count cross-check
-echo "Doc claim: 43 controls"
+echo "Doc claim: 46 controls"
 echo "Code: $(grep -c "^    id: '" packages/control-library/src/controls.ts)"
 
 # Stray `any` (should be near zero after Phase 3 fixes)

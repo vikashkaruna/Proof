@@ -73,3 +73,20 @@ output "marketing_url" {
   description = "Cloud Run Marketing Container URL"
   value       = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
 }
+
+# ─── Self-hosted Supabase (W0.1) ──────────────────────────────────────────────
+output "supabase_url" {
+  description = "The single origin SUPABASE_URL must be set to. Serves /auth/v1 and /rest/v1."
+  value       = google_cloud_run_v2_service.supabase_gateway.uri
+}
+
+output "supabase_auth_url" {
+  description = "GoTrue's own Cloud Run URL. Behind the gateway; not what clients use."
+  value       = google_cloud_run_v2_service.supabase_auth.uri
+}
+
+output "supabase_rest_url" {
+  description = "PostgREST's own Cloud Run URL. Behind the gateway; not what clients use."
+  value       = google_cloud_run_v2_service.supabase_rest.uri
+}
+

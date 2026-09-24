@@ -1,0 +1,96 @@
+name: Deployed acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact deployed Git commit (40-character SHA)
+        required: true
+        type: string
+      comparison_environment:
+        description: Compare preprod-acceptance with this isolated acceptance environment
+        required: true
+        type: choice
+        options: [production-configured-acceptance, onprem-acceptance]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: API and browser acceptance against deployed services
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [preprod-acceptance, '${{ inputs.comparison_environment }}']
+    environment: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.revision }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - name: Materialize private target and verify its exact revision
+        env:
+          TARGET_JSON: ${{ secrets.AXIOM_ACCEPTANCE_TARGET_JSON }}
+          EXPECTED_REVISION: ${{ inputs.revision }}
+        run: |
+          umask 077
+          mkdir -p .axiom-runtime
+          python3 - <<'PY'
+          import json,os,re,subprocess
+          from pathlib import Path
+          expected=os.environ['EXPECTED_REVISION']
+          assert re.fullmatch('[a-f0-9]{40}',expected),'Use an exact commit SHA'
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==expected
+          target=json.loads(os.environ['TARGET_JSON'])
+          assert target['expectedRevision']==expected and target['topology']=='remote'
+          Path('.axiom-runtime/deployed-target.json').write_text(json.dumps(target))
+          PY
+      - run: ./scripts/run-deployed-acceptance.sh .axiom-runtime/deployed-target.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployed-acceptance-${{ matrix.target }}
+          path: |
+            .axiom-runtime/acceptance/*/api-results.json
+            .axiom-runtime/acceptance/*/browser-results.json
+          retention-days: 14
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Remove private test credentials and raw reports
+        if: always()
+        run: rm -rf .axiom-runtime
+
+  parity:
+    name: Refuse behavioral divergence between deployments
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.revision }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deployed-acceptance-*
+          path: .axiom-runtime/compared-results
+      - name: Compare successful API and browser suites at the exact same revision
+        run: |
+          mapfile -t api < <(find .axiom-runtime/compared-results -name api-results.json)
+          mapfile -t browser < <(find .axiom-runtime/compared-results -name browser-results.json)
+          pnpm exec tsx scripts/compare-deployed-parity.ts "${api[@]}"
+          pnpm exec tsx scripts/compare-deployed-parity.ts "${browser[@]}"

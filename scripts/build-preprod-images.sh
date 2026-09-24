@@ -67,6 +67,18 @@ SERVICES=(
   "model-gateway:infra/docker/Dockerfile.model-gateway"
   "temporal-worker:infra/docker/Dockerfile.temporal-worker"
   "marketing:infra/docker/Dockerfile.marketing"
+  # The Supabase API gateway. Self-hosting means something has to present
+  # /auth/v1 and /rest/v1 on one origin, because supabase-js is given a single
+  # base URL and appends those paths itself.
+  "supabase-gateway:infra/docker/Dockerfile.supabase-gateway"
+)
+
+# Upstream images Cloud Run cannot pull directly — it serves from Artifact
+# Registry or Container Registry only, not Docker Hub. Versions match
+# docker-compose.supabase.yml so local and preprod run the same builds.
+MIRRORED_IMAGES=(
+  "gotrue:v2.169.0:supabase/gotrue:v2.169.0"
+  "postgrest:v12.2.8:postgrest/postgrest:v12.2.8"
 )
 
 TARGET_SERVICE="${4:-${TARGET_SERVICE:-all}}"
@@ -91,6 +103,9 @@ for entry in "${SERVICES[@]}"; do
   fi
 
   BUILD_ARGS=()
+  if [[ "$SVC_NAME" =~ ^(bff|web|marketing)$ ]] && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
+    BUILD_ARGS+=(--build-arg "AXIOM_RELEASE_SHA=$(git rev-parse HEAD)")
+  fi
   if [ "$SVC_NAME" = "marketing" ] || [ "$SVC_NAME" = "web" ]; then
     local_proj_num="${GCP_PROJECT_NUMBER:-}"
     if [ -z "$local_proj_num" ] && command -v gcloud >/dev/null 2>&1; then
@@ -116,6 +131,32 @@ for entry in "${SERVICES[@]}"; do
   echo "  ✓ Successfully built and pushed ${LOCAL_TAG}"
 done
 
+# ─── Mirror the upstream Supabase images ──────────────────────────────────────
+if [ "$TARGET_SERVICE" = "all" ] || [ "$TARGET_SERVICE" = "supabase" ]; then
+  for entry in "${MIRRORED_IMAGES[@]}"; do
+    MIRROR_NAME="${entry%%:*}"
+    rest="${entry#*:}"
+    MIRROR_TAG="${rest%%:*}"
+    UPSTREAM="${rest#*:}"
+    MIRROR_URI="${REGISTRY}/${MIRROR_NAME}:${MIRROR_TAG}"
+
+    if [ "$FORCE_BUILD" != "true" ] && command -v gcloud >/dev/null 2>&1; then
+      if gcloud artifacts docker images describe "${MIRROR_URI}" >/dev/null 2>&1; then
+        echo "  ✓ ${MIRROR_URI} already mirrored (set FORCE_BUILD=true to refresh)"
+        continue
+      fi
+    fi
+
+    echo -e "\n▶ Mirroring ${UPSTREAM} -> ${MIRROR_URI}..."
+    docker pull --platform linux/amd64 "${UPSTREAM}"
+    docker tag "${UPSTREAM}" "${MIRROR_URI}"
+    if [ "${PUSH_IMAGES:-false}" = "true" ] || [ "${1:-}" != "" ]; then
+      docker push "${MIRROR_URI}"
+    fi
+    echo "  ✓ Mirrored ${MIRROR_NAME}:${MIRROR_TAG}"
+  done
+fi
+
 echo -e "\n================================================================="
-echo "  ✓ All 6 Axiom Proof Preprod Container Images Built!            "
+echo "  ✓ Axiom Proof preprod images built and Supabase images mirrored"
 echo "================================================================="

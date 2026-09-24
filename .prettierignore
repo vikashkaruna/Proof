@@ -17,3 +17,13 @@ services/agent-runtime/src/axiom/data/controls.json
 # Firebase CLI cache & build outputs
 .firebase/
 
+
+# Hand-authored reference documents.
+#
+# Prettier's markdown rules (emphasis style, table-column padding) rewrite
+# these wholesale without changing a word of content, which buries real edits
+# in reformatting noise and makes the plan documents hard to review. They are
+# prose, not code, so they are excluded rather than reformatted.
+docs/11_Phase0-5_Gap_Closure_Plan.md
+Axiom-Proof_Readiness_Matrix.md
+VK_QUICK_REF_PROOF_MODULES_SETUP.md

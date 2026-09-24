@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { PageHeader, Card, CardContent, Badge, AgentIcon } from '@axiom/ui';
 import { VerifyButton } from './verify-button';
 import { ExportLedgerButton } from './export-ledger-button';
@@ -42,11 +42,11 @@ export default async function LedgerPage({
   }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  // W1 · SEC-9/SEC-8: this page read the session directly, so it was gated on
+  // being signed in and nothing else — no role check, and, once login MFA
+  // landed, no MFA check either.
+  const { supabase, userId } = await requireCapabilityContext(Capability.LEDGER_READ);
+  const user = { id: userId };
 
   const { data: profile, error: profileError } = await supabase
     .from('users')
@@ -55,21 +55,24 @@ export default async function LedgerPage({
     .maybeSingle();
   if (profileError || !profile?.is_axiom_internal) redirect('/portal');
 
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. This page is already gated on
+  // `is_axiom_internal` above, and `tenants_select_member` grants exactly
+  // that audience cross-tenant visibility — so RLS enforces the same rule the
+  // page intends, rather than the page asserting it and the client ignoring it.
 
   // Resolve active tenant from cookie or query param
   const cookieStore = await cookies();
   const activeTenantCookie = cookieStore.get('axiom_active_tenant')?.value;
   const targetTenantSlug = resolvedSearchParams.tenant || activeTenantCookie || 'meridian';
 
-  let { data: activeTenant } = await admin
+  let { data: activeTenant } = await supabase
     .from('tenants')
     .select('id, name, slug')
     .eq('slug', targetTenantSlug)
     .maybeSingle();
 
   if (!activeTenant) {
-    const { data: fallbackTenant } = await admin
+    const { data: fallbackTenant } = await supabase
       .from('tenants')
       .select('id, name, slug')
       .limit(1)
@@ -90,7 +93,7 @@ export default async function LedgerPage({
   // Verify chain integrity
   let verification: LedgerVerification = { intact: true };
   if (tenantId) {
-    const { data } = await admin.rpc('verify_ledger', {
+    const { data } = await supabase.rpc('verify_ledger', {
       p_tenant_id: tenantId,
       p_from_sequence: 1,
     });
@@ -103,7 +106,7 @@ export default async function LedgerPage({
   }
 
   // Build filtered query with exact count
-  let ledgerQuery = admin
+  let ledgerQuery = supabase
     .from('audit_ledger')
     .select('*', { count: 'exact' })
     .eq('tenant_id', tenantId)
@@ -147,14 +150,14 @@ export default async function LedgerPage({
 
   // Fetch active agent runs, paginated audit ledger entries, and total count in parallel
   const [activeRunsRes, ledgerRes, totalCountRes] = await Promise.all([
-    admin
+    supabase
       .from('agent_runs')
       .select('*')
       .eq('tenant_id', tenantId)
       .in('status', ['running', 'queued'])
       .order('started_at', { ascending: false }),
     ledgerQuery,
-    admin
+    supabase
       .from('audit_ledger')
       .select('*', { count: 'exact', head: true })
       .eq('tenant_id', tenantId),

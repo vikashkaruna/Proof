@@ -3,13 +3,15 @@
 # ==============================================================================
 
 locals {
-  image_prefix         = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.name}"
-  bff_service_url      = "https://axiom-bff-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  web_service_url      = "https://axiom-web-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  agent_runtime_url    = "https://axiom-agent-runtime-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  model_gateway_url    = "https://axiom-model-gateway-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  marketing_url        = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
-  supabase_preprod_url = "https://preprod-supabase.axiomproof.ai"
+  image_prefix      = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.name}"
+  bff_service_url   = "https://axiom-bff-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  web_service_url   = "https://axiom-web-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  agent_runtime_url = "https://axiom-agent-runtime-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  model_gateway_url = "https://axiom-model-gateway-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  marketing_url     = "https://axiom-marketing-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
+  # Was a hard-coded hostname that nothing in this Terraform provisioned. It
+  # now points at the gateway in supabase.tf, which is a resource that exists.
+  supabase_preprod_url = local.supabase_gateway_url
 }
 
 # ─── 1. BFF (API Gateway & Execution Gate) ───────────────────────────────────
@@ -19,7 +21,7 @@ resource "google_cloud_run_v2_service" "bff" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["bff"].email
 
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -74,6 +76,10 @@ resource "google_cloud_run_v2_service" "bff" {
         value = local.model_gateway_url
       }
       env {
+        name  = "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS"
+        value = tostring(var.assessment_dispatch_retention_days)
+      }
+      env {
         name  = "BFF_CORS_ORIGINS"
         value = "${local.marketing_url},${local.web_service_url},https://axiomproof.ai,https://app.axiomproof.ai,https://preprod.axiomproof.ai,https://preprod-app.axiomproof.ai,http://localhost:3000,http://localhost:3001"
       }
@@ -98,14 +104,52 @@ resource "google_cloud_run_v2_service" "bff" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_SERVICE_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_service_key"].secret_id
+            version = "latest"
+          }
+        }
       }
 
+      env {
+        name = "AXIOM_MFA_ENCRYPTION_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["mfa_encryption_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      # The retiring half of the ring, present only while a rotation is in
+      # flight. A `dynamic` block is what makes absence expressible: a plain
+      # `env` pointing at a secret with no versions would fail the deploy in
+      # the ordinary case, which is no rotation at all. Iterating the resource
+      # itself means the condition lives in one place — secrets.tf — instead of
+      # being restated here and drifting.
+      dynamic "env" {
+        for_each = google_secret_manager_secret.mfa_previous_keys
+        content {
+          name = "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS"
+          value_source {
+            secret_key_ref {
+              secret  = env.value.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
       # Secrets
       env {
         name = "APPROVAL_SIGNING_KEY"
@@ -134,24 +178,8 @@ resource "google_cloud_run_v2_service" "bff" {
           }
         }
       }
-      env {
-        name = "UPSTASH_REDIS_URL"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secret["upstash_redis_url"].secret_id
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name = "SUPABASE_DB_URL"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secret["db_url"].secret_id
-            version = "latest"
-          }
-        }
-      }
+
+
       env {
         name = "AXIOM_STORAGE_ACCESS_KEY_ID"
         value_source {
@@ -189,6 +217,38 @@ resource "google_cloud_run_v2_service" "bff" {
         }
       }
       env {
+        name  = "AXIOM_REPORT_EMAIL_MODE"
+        value = var.report_email_mode
+      }
+      env {
+        name  = "AXIOM_CONTACT_EMAIL_MODE"
+        value = var.contact_email_mode
+      }
+      env {
+        name  = "AXIOM_INVITATION_EMAIL_MODE"
+        value = var.invitation_email_mode
+      }
+      env {
+        name  = "AXIOM_WEB_APP_URL"
+        value = local.web_service_url
+      }
+      env {
+        name  = "CONTACT_RECIPIENT_EMAIL"
+        value = var.contact_recipient_email
+      }
+      env {
+        name  = "AXIOM_FROM_EMAIL"
+        value = var.axiom_from_email
+      }
+      env {
+        name  = "AXIOM_SALES_EMAIL"
+        value = var.axiom_sales_email
+      }
+      env {
+        name  = "AXIOM_FOUNDER_EMAIL"
+        value = var.axiom_founder_email
+      }
+      env {
         name = "RESEND_API_KEY"
         value_source {
           secret_key_ref {
@@ -210,7 +270,12 @@ resource "google_cloud_run_v2_service" "bff" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_version.version]
+  depends_on = [
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+  ]
 }
 
 # ─── 2. Web App (Compliance Workbench & Approval Console) ───────────────────
@@ -220,7 +285,7 @@ resource "google_cloud_run_v2_service" "web" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["web"].email
 
     scaling {
       min_instance_count = 1
@@ -266,16 +331,26 @@ resource "google_cloud_run_v2_service" "web" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "SUPABASE_URL"
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
 
       startup_probe {
@@ -290,7 +365,13 @@ resource "google_cloud_run_v2_service" "web" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.bff]
+  depends_on = [
+    google_cloud_run_v2_service.bff,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── 3. Agent Runtime (10 Compliance Agents Fleet) ──────────────────────────
@@ -300,7 +381,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
   ingress  = "INGRESS_TRAFFIC_ALL" # Invoked by BFF
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["agent_runtime"].email
 
     scaling {
       min_instance_count = 1
@@ -358,9 +439,23 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         value = "https://storage.googleapis.com"
       }
 
+      env {
+        name  = "SUPABASE_URL"
+        value = local.supabase_preprod_url
+      }
+      env {
+        name = "SUPABASE_SERVICE_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_service_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+
       # Secrets
       env {
-        name = "INTERNAL_TOKEN"
+        name = "AGENT_RUNTIME_INTERNAL_TOKEN"
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.secret["agent_runtime_internal_token"].secret_id
@@ -435,7 +530,13 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.model_gateway]
+  depends_on = [
+    google_cloud_run_v2_service.model_gateway,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── 4. Model Gateway (PII Redactor & Multi-Model Fallback Chain) ───────────
@@ -445,7 +546,7 @@ resource "google_cloud_run_v2_service" "model_gateway" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["model_gateway"].email
 
     scaling {
       min_instance_count = 0 # 1
@@ -546,7 +647,12 @@ resource "google_cloud_run_v2_service" "model_gateway" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_version.version]
+  depends_on = [
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── 5. Temporal Worker (Durable Orchestration on GCP) ──────────────────────
@@ -556,7 +662,7 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
   ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["temporal_worker"].email
 
     scaling {
       min_instance_count = 0 # 1
@@ -575,6 +681,20 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
 
       ports {
         container_port = 8080
+      }
+
+      env {
+        name  = "ENVIRONMENT"
+        value = var.environment
+      }
+      env {
+        name = "AGENT_RUNTIME_INTERNAL_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["agent_runtime_internal_token"].secret_id
+            version = "latest"
+          }
+        }
       }
 
       env {
@@ -616,7 +736,13 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.agent_runtime]
+  depends_on = [
+    google_cloud_run_v2_service.agent_runtime,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }
 
 # ─── 6. Marketing Container (Cloud Run deployment option) ───────────────────
@@ -626,7 +752,7 @@ resource "google_cloud_run_v2_service" "marketing" {
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
+    service_account = google_service_account.runtime["marketing"].email
 
     scaling {
       min_instance_count = 0 # 1
@@ -680,47 +806,27 @@ resource "google_cloud_run_v2_service" "marketing" {
         value = local.supabase_preprod_url
       }
       env {
-        name  = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        value = "preprod-anon-key-placeholder-length-over-forty-chars"
+        name = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "SUPABASE_URL"
         value = local.supabase_preprod_url
       }
       env {
-        name  = "SUPABASE_SERVICE_KEY"
-        value = "preprod-service-key-placeholder-length-over-forty-chars"
-      }
-      env {
-        name = "RESEND_API_KEY"
+        name = "SUPABASE_ANON_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["resend_api_key"].secret_id
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
             version = "latest"
           }
         }
       }
-      env {
-        name  = "CONTACT_RECIPIENT_EMAIL"
-        value = var.contact_recipient_email
-      }
-      env {
-        name  = "AXIOM_FROM_EMAIL"
-        value = var.axiom_from_email
-      }
-      env {
-        name  = "RESEND_FROM_EMAIL"
-        value = var.axiom_from_email
-      }
-      env {
-        name  = "AXIOM_SALES_EMAIL"
-        value = var.axiom_sales_email
-      }
-      env {
-        name  = "AXIOM_FOUNDER_EMAIL"
-        value = var.axiom_founder_email
-      }
-
       startup_probe {
         http_get {
           path = "/api/health"
@@ -733,5 +839,12 @@ resource "google_cloud_run_v2_service" "marketing" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.bff, google_cloud_run_v2_service.web]
+  depends_on = [
+    google_cloud_run_v2_service.bff,
+    google_cloud_run_v2_service.web,
+    google_secret_manager_secret_iam_member.runtime_access,
+    google_secret_manager_secret_iam_member.mfa_previous_access,
+    google_secret_manager_secret_version.version,
+    google_secret_manager_secret_version.mfa_previous_keys,
+  ]
 }

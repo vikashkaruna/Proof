@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import Link from 'next/link';
 import { createSupabaseServerClient } from '@axiom/supabase';
 import { BRAND } from '@axiom/config';
@@ -39,7 +40,7 @@ export default async function LoginPage({
     resolvedSearchParams.redirect &&
     resolvedSearchParams.redirect !== '/login'
   ) {
-    redirect(resolvedSearchParams.redirect);
+    redirect(safeRedirectPath(resolvedSearchParams.redirect));
   }
 
   const isSignup = resolvedSearchParams.mode === 'signup';

@@ -21,6 +21,10 @@ services:
     image: axiom-bff:prod
     environment:
       - NODE_ENV=production
+      - AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS=${AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS:-90}
+      - ENVIRONMENT=production
+      - AXIOM_MFA_ENCRYPTION_KEY=${AXIOM_MFA_ENCRYPTION_KEY:?Set the distinct persistent MFA encryption key}
+      - AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}
       - LOG_LEVEL=warn
     restart: always
 
@@ -36,16 +40,20 @@ services:
 
   temporal-worker:
     image: axiom-temporal-worker:prod
+    depends_on:
+      temporal: !reset null
     restart: always
 
   web:
     image: axiom-web:prod
     environment:
       - NODE_ENV=production
+      - ENVIRONMENT=production
     restart: always
 
   marketing:
     image: axiom-marketing:prod
     environment:
       - NODE_ENV=production
+      - ENVIRONMENT=production
     restart: always

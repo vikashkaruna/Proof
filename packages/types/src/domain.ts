@@ -130,6 +130,8 @@ export type Control = z.infer<typeof ControlSchema>;
 // ─── Engagement / Finding ────────────────────────────────────────────
 
 export const EngagementSchema = z.object({
+  // Legacy assessments remain unassigned; never invent an estate from a tenant.
+  estateId: z.string().uuid().nullable().default(null),
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   libraryVersion: z.string(),

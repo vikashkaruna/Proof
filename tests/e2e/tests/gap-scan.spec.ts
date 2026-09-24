@@ -11,7 +11,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const marketingUrl = 'http://localhost:3000';
+import { marketingUrl } from '../target';
 
 test.describe('Public gap-scan funnel', () => {
   test('the marketing site loads with the gap-scan CTA', async ({ page }) => {
@@ -44,7 +44,9 @@ test.describe('Public gap-scan funnel', () => {
     }
   });
 
-  test('the contact page loads and sends inquiry successfully', async ({ page }) => {
+  test('the contact page persists an inquiry through the BFF and reports delivery honestly', async ({
+    page,
+  }) => {
     await page.goto(`${marketingUrl}/contact`);
     await expect(page.getByRole('heading', { name: /Talk to the founder/i })).toBeVisible();
 
@@ -55,9 +57,70 @@ test.describe('Public gap-scan funnel', () => {
       .locator('#contact-message')
       .fill('We require a comprehensive readiness assessment for DPDPA 2023 compliance.');
 
+    const submission = page.waitForResponse(`${marketingUrl}/api/contact`);
     await page.getByRole('button', { name: /Send message/i }).click();
+    const response = await submission;
+    // Acceptance runs with contact mail disabled (C-W0-6): stored, never claimed as sent.
+    expect(response.status()).toBe(201);
+    const body = (await response.json()) as { id: string; delivery: string };
+    expect(body.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.delivery).toBe('not_configured');
 
-    await expect(page.getByText(/Message sent successfully/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Message received' })).toBeVisible();
+    await expect(page.getByTestId('contact-delivery-outcome')).toContainText(
+      /saved for .* founder to review/i,
+    );
+    await expect(page.getByText(/Message sent successfully/i)).toHaveCount(0);
     await expect(page.getByText(/aarav@fintechbharat.in/i)).toBeVisible();
   });
+});
+
+test('a complete gap-scan submission persists and refuses another browser', async ({
+  page,
+  browser,
+}) => {
+  await page.goto(`${marketingUrl}/gap-scan`);
+  await page.getByLabel('Sector', { exact: true }).selectOption('BFSI');
+  await page.getByLabel('Employee count', { exact: true }).selectOption('51-200');
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  for (const button of await page.getByRole('button', { name: 'No', exact: true }).all())
+    await button.click();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Synthetic Report Owner');
+  await page.getByLabel('Email', { exact: true }).fill('owner@example.invalid');
+  await page.getByLabel('Company', { exact: true }).fill('Synthetic Company');
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  const submission = page.waitForResponse(`${marketingUrl}/api/gap-scan`);
+  await page.getByRole('button', { name: 'Generate my report', exact: true }).click();
+  const res = await submission;
+  expect(res.status()).toBe(201);
+  const body = await res.json();
+  expect(body.accessToken).toBeUndefined();
+  expect(body.emailSent).toBe(false);
+  await expect(
+    page.getByRole('heading', { name: 'Your DPDPA Readiness Report', exact: true }),
+  ).toBeVisible();
+  const reportUrl = page.url();
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Your DPDPA Readiness Report', exact: true }),
+  ).toBeVisible();
+  const cookie = (await page.context().cookies()).find((c) => c.name === 'gap_scan_access');
+  expect(cookie?.httpOnly).toBe(true);
+  const outsider = await browser.newContext();
+  try {
+    const other = await outsider.newPage();
+    expect((await other.goto(reportUrl))?.status()).toBe(404);
+    const refused = await outsider.request.post(`${marketingUrl}/api/gap-scan/send-email`, {
+      data: { id: body.id, email: 'outsider@example.invalid' },
+    });
+    expect(refused.status()).toBe(404);
+  } finally {
+    await outsider.close();
+  }
+  const owner = await page.request.post(`${marketingUrl}/api/gap-scan/send-email`, {
+    data: { id: body.id, email: 'owner@example.invalid' },
+  });
+  expect(owner.status()).toBe(503);
+  expect((await owner.json()).error.code).toBe('delivery_unavailable');
 });

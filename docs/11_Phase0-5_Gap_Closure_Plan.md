@@ -1,0 +1,2604 @@
+# Axiom Proof — Phase 0–5 Gap Closure Plan
+
+**Code-scanning remediation (operator request, #47):** the open CodeQL/Bandit alerts on main are fixed at source rather than dismissed:
+- `generateUUID` no longer falls back to `Math.random`.
+- Evidence GCS detection (TS and Python) and the Temporal Cloud check compare parsed hostnames, not substrings.
+- The TOTP base32 padding trim is linear.
+- The S3 `Content-MD5` digest is marked `usedforsecurity=False`.
+- The acceptance-target file is checked and read through one descriptor.
+- `ci.yml` defaults to `contents: read`.
+- Lekha raises instead of asserting.
+- The swallowed exceptions now log an event name.
+- Container `0.0.0.0` binds and the SafeLoader-derived YAML load carry justified `nosec` markers.
+
+Test code is excluded through a shared `.bandit` configuration, which removes about 150 test-only assert and fixture-credential notes. **Early detection:** `scripts/security-scan.sh` (`pnpm security:scan`, run by the husky pre-push hook) applies the same Bandit config as CI. It fails on medium+ in shipped services and on high anywhere, then runs ESLint. `@axiom/eslint-config` now rejects `Math.random` and host-substring checks while editing. With `AXIOM_CODEQL` set, the script also runs CodeQL security-extended locally.
+
+**Follow-ups, not yet fixed:**
+- Five web screens still fabricate IDs, hashes and scores with `Math.random`. They are listed as tracked lint debt.
+- CodeQL flags world-readable SPIRE health files (deliberate cross-UID reads) and a URL built in `verify-controller-issuance.py`.
+- Bandit reports medium findings in test-harness SQL strings.
+
+## Revision 78 — C-W1-3 tenant invitations
+
+**Baseline:** Revisions 76–77 were merged to staging as `b68fa2c` (squash of [vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Staging [CI 36037580711](https://github.com/vikashkaruna/Proof/actions/runs/36037580711) passed.
+
+**Branch and main audit (operator request):** the audit ran on an unshallowed clone. Every remote branch is contained in staging, with no missing commits, and so is `main`. The closed-unmerged PRs are not implementation work: vikashkaruna/Proof#44 was an earlier staging→main attempt, and vikashkaruna/Proof#32–#36 are Dependabot bumps against the old main (follow-up: re-raise them against staging). Staging is promoted to main through [vikashkaruna/Proof#45](https://github.com/vikashkaruna/Proof/pull/45) (merge commit, not squash) only once its checks are green. Its first run failed only on `trivy / Build`, which also fails on main: the workflow was the unmodified GitHub template and built a root `Dockerfile` that does not exist. This revision switches it to a Trivy filesystem scan (the change reaches main through #45 itself). The types compatibility test also caught that 0053's three `tenant.invitation.*` ledger actions were missing from the client `LedgerActionType`; they are now declared. An earlier shallow-clone reading of "unrelated histories" was wrong and is recorded here so it is not repeated.
+
+**Implemented:**
+
+- Migration **0053** `tenant_invitations`, with three atomic, audited RPCs (create, revoke, accept):
+  - hashed single-use tokens;
+  - restricted invitable roles, where admins cannot mint owners or admins;
+  - acceptance bound to the confirmed invited email;
+  - one open invitation per address;
+  - immutable content, and no deletes.
+- BFF routes: the manage routes are `USER_MANAGE`-gated; the accept route is tenantless and rate-limited.
+- An invitation mail adapter behind `AXIOM_INVITATION_EMAIL_MODE`, default disabled. When mail is off, the inviter shares a one-time link.
+- A `/settings/members` UI and a public, client-only `/invite` accept page that preserves the token across sign-in.
+- **Hardening:** the login open redirect is fixed with `safeRedirectPath`.
+
+**Local evidence:**
+
+| Check | Result |
+| --- | --- |
+| Full DB suite | pass, including the new invitation SQL and two-session race suites |
+| BFF tests | **1,038** |
+| Web tests | 85 |
+| Workspace gates and deployment gates | pass |
+| Playwright on the real stack | **70/70** |
+
+See [audit 67](audits/67-tenant-invitations-review-2026-09-24.md). The operator had not answered clarifying questions, so the role, lifetime and link-sharing decisions follow the recommended options and are recorded in audit 67.
+
+**Next and limits:** real mail delivery and deployed acceptance remain operator-gated (W1-2/W1-3). W1 engineering items C-W1-1…4 are now all delivered. Next in plan order: W3, starting with the C-W3-5 resumable wizard, then C-W3-6 sustenance and the W3.5 graph, then W4.4 grants. W2 is **19/40**. Schema is **0053 / 54 migrations / 57 public tables**, plus three private credential tables. No cloud apply was performed.
+
+## Revision 77 — C-W0-7 scoring semantics and display provenance
+
+**Baseline:** Revision 76 (C-W0-6) is on the same branch and PR ([vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Operator input was not received; the assumptions in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md) still apply.
+
+**Implemented:**
+
+- **Question set:** a single versioned `GAP_SCAN_QUESTIONS` set (`2026-09-24`) in `@axiom/control-library` drives both the gap-scan form and BFF scoring.
+  - q7 now asks about least privilege (it previously asked about MFA while scoring SEC-002).
+  - q11 is phrased so that "yes" means compliant (previously admitting a transfer scored as compliant).
+  - q12 asks about a DPIA *before* new high-risk processing.
+  - Reports record `questionSetVersion`; stored snapshots are never rescored.
+- **Benchmarks:** readiness figures carry `benchmarkBasis: 'editorial_estimate'` and are labelled "Indicative, not measured peer data" in the report page and email.
+- **Client portal:** the demo tenant, slug aliases, per-slug invented scores/exposure/control counts, "+6 vs baseline", "WORM lock active", "0 Active Breaches" and "1 nearing SLA" are all removed.
+  - It uses the verified tenant and the BFF saved-results projection through a shared `loadAssessmentSnapshot`.
+  - It scopes actions to the tenant's plans and shows explicit empty/unavailable/error states.
+- **Workbench:** the loader queried non-existent ledger columns and an invalid plan status, so it always showed invented counts (214/8). It now uses real columns with exact counts or "Unavailable", and the static "10/10 Online", "Env: Production" and prompt-registry figures are replaced with truthful labels.
+
+**Local evidence:**
+
+| Check | Result |
+| --- | --- |
+| Control library tests | 83 |
+| BFF tests | **1,022** |
+| Workspace typecheck/lint/test | pass |
+| Playwright on the real isolated stack | **68/68**, including a new portal provenance journey |
+
+A pre-existing MFA recovery journey timed out 1 in 3 times under `next dev` cold compiles. Its URL wait now matches the spec's existing 20-second waits; it passed 4/4 repeats and the full suite. See [audit 66](audits/66-scoring-and-display-provenance-review-2026-09-24.md).
+
+**Next and limits:** C-W0 code findings are now all delivered. W0 still needs remote parity acceptance, C-W0-5 deployed IAM and the EKS CIDR decision, which are operator/cloud-gated. Next in plan order is **C-W1-3 invitations**, then W3 wizard/sustenance/graph and W4.4 grants. W2 remains **19/40**. Schema is unchanged at **0052 / 53 migrations / 56 public tables**.
+
+## Revision 76 — C-W0-6 durable contact inquiries behind the BFF
+
+**Verified baseline:** Revision 75 is complete at staging `6617e3283092462f40a13168d1f016da69048f14`. [PR 42](https://github.com/vikashkaruna/Proof/pull/42) was integrated by a no-fast-forward merge. Source [CI 35906474455](https://github.com/vikashkaruna/Proof/actions/runs/35906474455) (source `4dedecf`) and exact staging [CI 35908407498](https://github.com/vikashkaruna/Proof/actions/runs/35908407498) both concluded success.
+
+**Session change and operator input:** a Claude cloud session took over from the Codex worktree. The operator was not available to answer clarifying questions, so work continued on the recommended option. Assumptions are recorded in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md):
+
+1. Cloud-gated W4 items stay parked while cloud apply is unauthorized. The next open code items come first, in plan order: C-W0-6, C-W0-7, C-W1-3 invitations, then W3 (C-W3-5/6, W3.5 graph) and W4.4 grants.
+2. Contact mail has its own opt-in (`AXIOM_CONTACT_EMAIL_MODE`), separate from report mail. It defaults to `disabled`.
+3. Inquiries have no delete path. Retention/erasure is left to W8.1.
+
+**Implemented:** migration **0052** adds `contact_inquiries`. Only the BFF can write it; checks bind each delivery status to its evidence; a trigger makes submitted content immutable and settles an outcome exactly once (`pending → sent|failed`); and Axiom-internal users can read through their own session. BFF `POST /public/contact` works as follows:
+
+- It rate-limits and fails closed when the rate budget is unavailable.
+- It persists before any mail and refuses success when persistence fails.
+- It makes at most one provider attempt.
+- It replies with exactly the stored status. An unrecorded settlement is reported as `pending`, never `sent`.
+
+Marketing SSR only validates and forwards the request. The in-memory store, the SSR mail path and the public inquiry-count endpoint are removed, and the form states only what the server recorded. Marketing no longer receives `RESEND_API_KEY` or mail variables in Cloud Run, Helm or Compose. Its secret allowlist is `supabase_anon_key` only, enforced by the IAM checker and Terraform test. The BFF gains the `contact_email_mode` variable and the mail settings it actually reads.
+
+**Local evidence (isolated Docker in this session):**
+
+| Check | Result |
+| --- | --- |
+| Database suite (fresh/re-apply, all SQL, concurrency and upgrade scripts) | pass, including the new contact security test |
+| BFF tests | **1,016** (12 new) |
+| Marketing tests | 6 (4 new) |
+| Workspace typecheck/lint/test, Prettier, `terraform fmt` | pass |
+| Deployment unittests | **214** |
+| tfvars, env-security, MFA-ring, IAM and auth-wiring gates | pass |
+| Playwright journeys on the real isolated Supabase/BFF/web/marketing stack | **67/67** |
+
+The inquiry row was observed directly in Postgres. The DB suite caught a silent 0-row service-role `DELETE` before commit; it is fixed by an explicit revoke. Terraform validate/test and Helm render could not run locally (registry blocked by the session proxy), so source CI and exact staging CI remain the closure gates.
+
+**Next and limits:** C-W0-7 scoring semantics/benchmark provenance is next, then C-W1-3 invitations. Real provider delivery was not exercised. W0/W1/W2/W3/W4 remain partial. W2 named targets remain **19/40**. Schema is **0052 / 53 migrations / 56 public tables**, plus three private credential tables. No cloud provisioning/apply was authorized or performed.
+
+## Revision 75 — reviewed controller generation transition
+
+**Verified baseline:** Revision 74 is complete at staging `fb4bcdf8aa5d24d813772ae5da1fbb3fc242572f`; [CI 35900630429](https://github.com/vikashkaruna/Proof/actions/runs/35900630429) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 40](https://github.com/vikashkaruna/Proof/pull/40) and [registry recovery PR 41](https://github.com/vikashkaruna/Proof/pull/41) are merged. The initial staging run's two image-acquisition failures are diagnostic evidence, not closure evidence. The later exact staging run retains assessment86, native runner45, deployment197 and matching API89/browser67 results across both configurations.
+
+**Implemented; source acceptance passed:** a protected external review binds the tenant, previous/new immutable profiles and file generations, and predecessor transition. After the operator separately stops the old lifetime, the helper locks the tenant, verifies the exact disabled/inactive unit and reinspects every journal-owned container ID before atomic publication. It preserves an immutable transition chain, explicitly resumes interrupted complete preparation, and requires a separate loaded-unit confirmation before runtime admission. Old profiles and incomplete/branched histories are refused. A return to an earlier generation requires its own linked review and still-valid credentials. Publication never starts, stops, enables or reloads a service and never renews or revokes backend authority. External change-record UUIDs and hashes are not human signatures or application action approval.
+
+**Local evidence:** all **214 deployment tests** and **16 Docker host-delivery outcomes** pass. The 17 new state-machine tests cover private files, conflicting/uncertain history, live exact-ID inspection, publication/confirmation interruptions, input changes, locks and reverse transitions. **Source gate passed:** [CI 35906474455](https://github.com/vikashkaruna/Proof/actions/runs/35906474455) verifies all **19 applicable jobs and 13 exact-revision reports** for source `4dedecf` (tested PR integration `04aec79`). Native runner passes **53 outcomes**, preserving all previous 45; assessment retains all 86. Hosted deployment passes 214 tests, 26 module and nine root Terraform cases and the IAM inventory gate; enforced Trivy, pnpm, three locked Python audits and secret scanning pass. Both topology configurations preserve identical 89 API/67 browser outcomes. The exact staging-merge gate remains required; its final result is recorded only after verification in `.axiom-runtime/revision75/completion.json`. See [audit 64](audits/64-controller-generation-transition-review-2026-09-24.md) and the [operator procedure](../infra/workload/CONTROLLER_TRANSITIONS.md).
+
+**Next and limits:** actual cloud secret publication/replication and effective inherited IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery remain open. This engineering workflow does not establish live application readiness or production credential cutover. Existing helper-bundle replacement also remains an explicit deployment gate; installation refuses different bytes. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial; W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Continue in plan order after every green milestone. Verification lives in `.axiom-runtime/revision75`.
+
+## Revision 74 — reviewed controller credential issuance
+
+**Verified baseline:** Revision 73 is complete on staging `5efb40d8d6b6e0a0788b961d028d0203fa608e97`; [CI 35890118690](https://github.com/vikashkaruna/Proof/actions/runs/35890118690) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 39](https://github.com/vikashkaruna/Proof/pull/39) is merged. The full roadmap remains active and incomplete; continue in plan order after each green milestone.
+
+**Implemented, source acceptance passed:** an isolated manual operator CLI now creates protected tenant-scoped controller credentials, records immutable reviewed issuance/retirement, permits one successor per predecessor, recovers an uncertain result only through explicit identical-request resume, and permanently revokes retired authority. Signing and operator database credentials stay outside runners. The private issuer role has no application/table write grants or provisioned login/membership. Its change-record UUID is not proof of human signature and never replaces application approval/dry-run/rollback rules. No public issuance route or automatic renewal was added.
+
+Actual CLI and BFF-consumer acceptance against the existing isolated Docker backend passes **eight new checks**, bringing assessment to **86 outcomes** with all prior 78 retained; identity remains 61 and protected trust five. A clean-database extension-schema failure is corrected by append-only migration 0051, preserving already-applied 0050. All 197 deployment tests, the full database concurrency/upgrade suite, workspace checks and control/security gates pass. Source [CI 35896023384](https://github.com/vikashkaruna/Proof/actions/runs/35896023384) passes all **19 applicable jobs and 13 exact-revision reports** for source `5577b78` (tested PR integration `8a4ef5e`). All 86 assessment outcomes retain the previous 78; native runner remains 45, and both topology labels retain identical 89 API/67 browser outcomes. Hosted deployment passes 197 tests, 26 module Terraform cases, nine root cases and the IAM inventory gate; enforced dependency and secret scans pass. The final exact staging-merge gate is recorded after verification in `.axiom-runtime/revision74/completion.json`. See [audit 63](audits/63-controller-credential-issuance-review-2026-09-23.md) and the [issuer operator contract](../infra/credential-issuer/README.md).
+
+**Next and limits:** renewal creates a reviewed fresh credential; it does not switch a running host. Protected generation transition and actual secret publication remain next, followed by effective inherited/cloud IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial, W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Source/staging results are recorded only after verification in this task's `.axiom-runtime/revision74` checkpoint.
+
+**Registry recovery source gate passed:** initial staging `88b2f31` (PR 40) failed before tests in CI 35897974592 attempts 1 and 2 on image registry/auth/rate-limit startup errors. PR 41 clears the setup action's GHCR-only override at three CI steps, restoring the pinned CLI registry fallback without changing image versions or checks. Renewed [source CI 35898949282](https://github.com/vikashkaruna/Proof/actions/runs/35898949282) passes **19 applicable jobs and all 13 exact-revision reports** for source `0b37017` (PR integration `b8e1168`). It retains all 86 assessment and 45 native runner outcomes, 197 deployment tests and identical API89/browser67 across both configurations; enforced security scans pass. Only renewed exact staging acceptance can close the milestone; its result is saved in `.axiom-runtime/revision74/completion.json`. See audit 63 for the failed-attempt evidence and limits.
+
+## Revision 73 — tenant controller secret/KMS permission configuration
+
+**Verified baseline:** Revision 72 is complete on staging `3c2ff1e53452ac3d2762da9652322050624ee486`, [CI 35879582618, attempt 2](https://github.com/vikashkaruna/Proof/actions/runs/35879582618/attempts/2): all 19 applicable jobs and 13 exact-revision reports passed. The 78 assessment outcomes retain every earlier 71; all 45 native runner outcomes and both configurations' 89 API/67 browser outcomes are preserved. [PR 38](https://github.com/vikashkaruna/Proof/pull/38) is merged. The first staging attempt and redundant documentation PR run were cancelled before closure; only successful attempt 2 is evidence.
+
+**Implemented, source acceptance passed:** the default-off workload module now accepts a reviewed per-tenant primary/retiring dispatch-key inventory. Opted-in runners receive two empty, tenant-labelled, Mumbai-only secret containers and fixed resource-level secret-access/decryption grants. The issuer and unconfigured tenants receive none. Shared/duplicate keys, foreign projects/regions, key-version references and zero tenant IDs are refused. No secret versions, signing keys, producer encryption grants or key retirement are managed. The root conditionally enables the KMS API only for this explicit configuration and never disables that shared API on removal.
+
+A non-secret output binds the tenant, host identity, secret resources and exact key-policy fingerprint to the backend's existing contract. Promotion retains old readable-key grants. The independent source inventory gate rejects broader roles, additional authority resources and indirect secret reads. Local module tests pass **26 evaluated cases**, the root passes **nine composition cases**, and the deployment suite passes **178 tests**. Formatting, control/drift and security gates pass. Source [CI 35888025773](https://github.com/vikashkaruna/Proof/actions/runs/35888025773) passes all **19 applicable jobs and 13 exact-revision reports** for code `ac981df` (tested PR integration `fc74c41`). Hosted deployment verification confirms 26 module cases, nine root cases, 178 deployment tests and the IAM source inventory gate. All 78 assessment and 45 native runner outcomes remain; both topology labels retain identical 89 API/67 browser outcomes. Exact staging-merge CI remains the final closure gate, recorded in this task’s `.axiom-runtime/revision73/completion.json` after verification. See [audit 62](audits/62-controller-resource-iam-review-2026-09-23.md) for the configuration contract and concrete effective-policy acceptance requirements.
+
+**Source gate correction:** the first CI run failed on two public synthetic fingerprint false positives. Narrow exceptions preserve secret scanning. The same review exposed ineffective dependency auditing: high/critical Trivy findings and all three locked Python runtime audits now fail the gate. Removing unused `presidio-anonymizer` unblocks cryptography 50.0.1 in agent runtime and removes that dependency from the gateway; the Presidio analyzer and redaction implementation remain. Agent-runtime 187 and gateway 14 tests pass. All three locked dependency audits pass locally; renewed source CI is green, with exact staging acceptance still required.
+
+**Next and limits:** resource configuration is not proof of effective inherited/cloud IAM. Actual per-principal allow/deny checks, secret replication/payload validation, real KMS and global key-purpose review remain external gates. Continue credential issuance/renewal and protected generation rollout, private TLS/DNS, opaque scheduler and authorized cloud identity/recovery acceptance. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 remain partial; W2 is **19/40**, schema **0049 / 50 migrations / 55 public tables**, plus the private credential registry. Continue in plan order after each green milestone and report it.
+
+## Revision 72 — tenant-scoped controller backend
+
+**Current checkpoint:** Revision 71 is complete on staging `fd747ad3125895fc49534db5229b72e7ea7e0f60`; [CI 35872098864](https://github.com/vikashkaruna/Proof/actions/runs/35872098864) passed all 19 applicable jobs and all 13 exact-revision acceptance reports, including 45 native runner outcomes. The user's 23 September continuation instruction supersedes the earlier one-milestone stop: proceed in plan order after each green milestone, updating implementation, tests, documentation and staging integration, and report each milestone.
+
+**Implemented, source gate passed:** migration 0049 supplies a non-login, non-inheriting controller role, a private credential registry and tenant checks around the seven existing controller RPCs. RLS and column grants permit only registration, key-policy and opaque dispatch reads. Existing assessment logic, task/approval checks and ledger writes remain authoritative. No delegation, enqueue, policy publication, retention, direct table-write or general administration authority is granted. The existing public `has_tenant_role` read helper remains callable; it adds no write authority.
+
+The production entrypoint requires an owner-only JSON credential file containing an anonymous gateway key and a signed controller token, rejects broad/foreign/expired credentials, and obtains the effective registered tenant through a bounded read-only PostgREST check before listening. The backend verifies the signature; SQL rechecks registration, expiry and revocation per statement. Tokens last at most one hour and registry leases at most 24 hours. A running statement can still settle after revocation; preserve existing uncertain-result recovery and never reset a claim. Signing keys remain outside the runner.
+
+**Local acceptance:** clean source `b547b03` passes 78 real Docker assessment outcomes, preserving every earlier 71 outcome, plus 61 SPIRE identity and five protected-trust checks. Both the actual controller composition and production entrypoint use the scoped credential. All 1,004 BFF tests, 168 deployment tests, the full database migration/security/concurrency/upgrade suite, workspace checks and control/security gates pass. A failed release download was resolved using the prior session's checksum-verified archive; the first full run also required installing this checkout's missing locked Temporal dependencies. Neither failed attempt is closure evidence. Exact source/staging CI remains the final gate.
+
+**Source gate passed:** [CI 35877565279](https://github.com/vikashkaruna/Proof/actions/runs/35877565279) passes all **19 applicable jobs and 13 exact-revision reports** for source `b547b03` (PR integration `6654a47`). This includes 78 assessment outcomes with all earlier 71 retained, 45 native runner outcomes, 61 identity checks, five protected-trust checks and 146 Temporal outcomes. Both container configurations preserve the baseline 89 API and 67 browser outcomes exactly. The documentation-only integration checkpoint records these results; exact staging merge evidence is saved in `.axiom-runtime/revision72/merge-final` and `.axiom-runtime/session-checkpoint.json` after that independent gate.
+
+**Next:** finish exact staging acceptance for this backend boundary, then resource-level secret/KMS/IAM configuration and effective-policy acceptance, private TLS/DNS and opaque scheduler deployment. Credential issuance, renewal and reviewed host-generation replacement are deployment work, not automatic startup behavior. Real GCP IIT/caller/KMS and Mumbai recovery remain external gates. No cloud apply is authorized. W0/W1/W2/W3/W4 remain partial; W2 remains **19/40** named targets. Schema is **0049 / 50 migrations / 55 public tables**, plus the private credential registry. See [audit 61](audits/61-controller-backend-scope-review-2026-09-23.md).
+
+### Axiom Minds Private Limited · https://axiomminds.ai
+
+**Document:** 11 · **Revision 71 — REVIEWED CONTROLLER SUPERVISION** (23 Sep 2026) · **Status:** W0/W1/W2/W3/W4 partial; later intentional W5/W7/W8/W9 work preserved.
+**Reviewed source:** `b25729d`, green CI [35868902682](https://github.com/vikashkaruna/Proof/actions/runs/35868902682); exact staging integration evidence is recorded in the task checkpoint. Estate and owner/admin proposal milestones remain retained.
+**Scope:** marketing site, workbench, client portal — frontend, backend, data, infra, tests.
+**Per-workstream status:** the [workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026) below carries W0–W10, re-derived from the repository rather than from the previous revision.
+
+## Revision 71 — reviewed controller supervision
+
+**Implemented and reviewed:** protected hash-bound runtime profiles and disabled per-tenant systemd units now deliver a fixed controller lifetime. Start repeats tenant/VM/file/volume admission, checks the immutable image's production entrypoint and environment, records intent before creation, verifies exact private-IP/8443 confinement, and persists the exact container ID before start. Only the trusted UID 20000 controller receives the daemon socket; workers retain their separate boundary. Restart is disabled in Docker and systemd. Docker running is not application readiness.
+
+**Failure handling:** a per-tenant lock prevents competing lifetimes. Uncertain creation or failed ID persistence leaves an unstarted unresolved intent for review, without name adoption or deletion. A durable start intent also blocks a premature stopped receipt when a timed-out activation still appears created. Shutdown verifies ID/name/image/labels against the protected journal and needs no metadata, issuer, DNS, KMS or backend availability. SIGTERM, unexpected exit and wrapper-death recovery preserve records. Docker gets 90 seconds for the application's 85-second grace, namespace probes are bounded to three seconds, and systemd has a 180-second stop budget. A hung/unavailable daemon still requires explicit recovery; no job reset or automatic restart is introduced.
+
+**Review corrections and evidence:** the saved local Docker Desktop probe reproducibly reports loopback/random-port configuration for a requested private-IP/fixed-port create. The production guard continues to refuse that observation. Added direct confinement mutation tests, stricter host-option checks, stop-timeout configuration, profile/name receipt consistency and interrupted-create/persistence/stop regressions. All **168 deployment tests** and **16 Docker host-delivery outcomes**, workspace tests/lint/typecheck, formatting and security/control gates pass locally. Source [CI 35868902682](https://github.com/vikashkaruna/Proof/actions/runs/35868902682) verifies **all 19 applicable jobs and 13 exact-revision result artifacts** for source `b25729d` (PR integration `748bdea`). Native runner acceptance passes **45 outcomes**, retaining all earlier 33; issuer 17, host delivery 16, assessment 71, identity 61 and protected trust five also pass. Browser/API results agree across both local topology labels. The final staging merge remains a separate exact-revision gate; its run, commit and artifact verification are saved in this task's `.axiom-runtime/session-checkpoint.json` and reported at the milestone stop. See [review 60](audits/60-controller-supervision-review-2026-09-23.md).
+
+**Acceptance limits and next:** the native lifecycle fixture uses a deliberately synthetic process at the expected command path and a fixture-only local-node placement substitution. Production GCP placement must reject that node. Actual production-entrypoint, SPIRE identity and real assessment acceptance remain separate required gates. Effective tenant-scoped backend/secret/IAM/KMS permissions, private TLS/DNS, opaque scheduler deployment, real GCP/caller/KMS and Mumbai recovery are pending. No cloud provisioning or activation occurred. W0/W1/W2/W3/W4 remain partial; W2 stays **19/40** named targets, schema **0048 / 49 migrations / 55 public tables**. The later Revision 72 continuation instruction supersedes this historical milestone stop.
+
+## Revision 70 — reviewed tenant-to-VM placement check
+
+Revision 69 is **complete and green** at `55282ea`, CI [35859815075](https://github.com/vikashkaruna/Proof/actions/runs/35859815075): all 19 applicable jobs and 13 exact-revision artifacts verified. This includes 33 native runner, 17 native issuer, 16 host-delivery, 71 assessment and five protected-trust outcomes. This revision continues the accepted dedicated runner VM per tenant decision.
+
+**Implemented:** a protected, hash-reviewed placement profile binds a tenant and controller file generation to a Mumbai zone and private IPv4 address. A read-only root helper compares fixed GCP instance metadata with the installed SPIRE GCP node identity, checks the address belongs to exactly one active non-loopback host interface, verifies protected controller files and live runtime-volume mappings, then reobserves placement and file bindings before returning. The helper and file installer are now included in the checksum-reviewed runner bundle. Metadata reads use only five fixed nonsensitive paths, no proxy/redirect/alternate endpoint, bounded responses and an enforced total child-process deadline. No access or identity token is requested.
+
+**Validation:** 14 new tests include actual local HTTP responses, proxy bypass, redirects, response bounds, a real trickling-child timeout, tenant/node/address mismatch and composition refusal. All 141 deployment tests and 16 disposable Ubuntu file-delivery outcomes pass locally. Native/system-wide evidence still requires exact-merge CI. See [review 59](audits/59-controller-placement-review-2026-09-23.md).
+
+**Boundary and next:** this supplies the preflight for supervised activation; it does not start a controller or yet integrate a host supervisor. Metadata is an observation of the trusted host placement, not cryptographic GCP attestation, continuous authorization, effective IAM or backend credential scoping. Next integrate this check into the supervised container lifetime, preserving exact container ownership, private binding and graceful shutdown. Then complete private TLS/DNS/secret delivery, scoped IAM/KMS and opaque scheduler deployment. Actual GCP identity and Mumbai recovery remain external; other W3/W4 and W0/W1/W2 obligations remain open. No cloud provisioning or schema/application-approval changes.
+
+## Revision 69 — dedicated runner VM per tenant
+
+Revisions 67–68 are **complete and green** together at `a7df79f`, CI [35857993698](https://github.com/vikashkaruna/Proof/actions/runs/35857993698): all 19 applicable jobs and 13 exact-revision artifacts verified. Evidence includes 33 native runner outcomes (all prior 24 retained), 71 assessment outcomes and five protected-trust outcomes. The initial native fixture hash-format mismatch was corrected without weakening production checks.
+
+**Accepted user decision:** use a dedicated runner VM for each tenant, rather than multiple tenant controllers sharing one runner VM. The separate private Mumbai issuer remains the existing shared trust service; public APIs remain on Cloud Run. This intentionally refines the earlier generic dedicated-runner placement and preserves one configured tenant per controller.
+
+**Implemented deployment foundation:** the opt-in workload module now takes a map keyed by canonical tenant UUID. Each entry has its own runner instance, service account, private address, protected state disk and independent controller source ranges. The issuer is separate. Host firewall rules target individual identities; a tenant's controller allowlist cannot open another tenant's runner. Tenant identifiers are carried in runner metadata, labels and output references. Resource keys are tenant-stable, generated names fit provider limits and potential derived-name collisions are refused. `workload_vms = null` still creates no workload hosts; the module supports bounded batches of 1–100 tenants, not a product entitlement limit.
+
+**Validation:** 13 module boundary tests and eight preprod-root tests pass using provider mocks, including multi-tenant resource separation, per-tenant ingress/default deny, metadata/output bindings, invalid ranges/tenant IDs, name limits and default-off composition. Both configurations validate. No cloud apply, IAM grant, controller activation or schema change occurred. See [review 58](audits/58-dedicated-tenant-runner-review-2026-09-23.md).
+
+**Next:** supervised controller lifecycle must match the configured tenant to its reviewed assigned VM/node and private address before activation. Dedicated VMs do not by themselves establish tenant-scoped backend credentials, effective IAM/KMS permissions or scheduler authorization; those gates remain explicit. Continue private TLS/DNS/secret delivery, scoped cloud permissions and opaque scheduler deployment, then remaining W4/W3 and W0/W1/W2 obligations. Existing populated Terraform state needs a reviewed migration/retirement plan; no automatic move or reassignment of an old unbound runner is supplied.
+
+## Revision 68 — protected controller file delivery
+
+**Implemented:** a fresh-output review-bundle preparer and a root-only file installer/checker for the controller's fixed `service.json`, `backend.key`, `tls.key` and `tls.crt` inventory. The manifest binds tenant, reviewed SPIRE installation, intended immutable controller image and exact file hashes. Installation checks the actual installed runner binding and fixes the container paths, Docker endpoint, runtime volume and private listener contract. A root-owned generation manifest precedes file writes; a completion receipt follows them. Existing complete identical generations retain their inodes; incomplete or altered generations are preserved and refused, without repair or overwrite.
+
+**Protection and evidence boundary:** root-only host ancestry encloses a mountable root-owned `0755` directory whose files are owned by UID/GID 20000 with mode `0400`. The checker verifies ownership, permissions, hashes, hard-link count, canonical ancestry and receipt. It can run without the original source bundle. This delivers files; it neither starts/enables a service nor proves TLS/KMS/backend readiness, image admission or effective cloud permissions. The actual controller `--check` remains authoritative for full runtime validation. No secrets are placed in environment variables, command arguments or logs.
+
+**Validation:** ten new delivery tests bring the deployment suite to 127; the protected local preparer and overwrite refusal pass. The native runner gate adds nine checks using actual root filesystem ownership and a read-only container consumer, including worker-UID denial, foreign-node refusal, tamper preservation and incomplete-generation refusal. Native results require the exact-merge artifact before being called green. See [review 57](audits/57-controller-protected-files-review-2026-09-23.md).
+
+**Next:** supervised controller container lifecycle with reviewed immutable-image admission, private listener binding, host-namespace volume preflight, explicit ownership before stop/remove and bounded graceful shutdown. Then private DNS/TLS/secret and scoped IAM/KMS deployment, opaque scheduler delivery, and external GCP/Mumbai backup acceptance. Other W3/W4 and W0/W1/W2 obligations remain open. No cloud provisioning or schema changes; W2 remains 19/40 named targets.
+
+## Revision 67 — exact controller workload admission
+
+Revision 66 is **complete and green** at `1d7aa92`, CI [35854335396](https://github.com/vikashkaruna/Proof/actions/runs/35854335396): all 19 applicable jobs and 13 exact-revision artifacts verified, including 71 assessment outcomes. The initial persona job failed during Supabase startup; its isolated retry passed without code changes.
+
+**Review finding and fix:** a successful Workload API bundle read establishes access to trust material, but does not establish the controller role. Startup now requests the exact `spiffe://<domain>/controller/assessment` JWT-SVID for the fixed `axiom-controller-startup` audience. It requires one matching response, then verifies signature, subject, audience, lifetime and independently current trust under the existing exact-node health gate **before reading backend dispatch policy**. Transport is the configured protected Unix socket with bounded messages/deadline and no retries or alternate transport. The bearer is never returned, persisted or logged. This startup proof adds no tenant/task/action authority and does not replace job approvals or per-tool identity checks.
+
+**Validation:** real Unix gRPC tests cover the exact wire request/metadata, wrong role/audience/signature, expired/future/overlong tokens, malformed/ambiguous responses, denial, timeout, unavailable socket and changed trust. Composition checks prove denied admission cannot query the backend. Real SPIRE acceptance additionally requires controller admission and demonstrates that a registered worker can read bundles yet cannot pass controller admission. The existing actual entrypoint and assessment checks remain required. See [review 56](audits/56-controller-role-admission-review-2026-09-23.md). Exact-merge CI remains the closure gate; do not infer whole-roadmap completion from these checks.
+
+**Next:** protected controller host delivery and supervised container lifecycle; then private TLS/DNS/secret and scoped IAM/KMS deployment plus opaque scheduler delivery. Actual GCP attestation, valid Google caller identity, real cloud KMS and Mumbai backup/restore remain external gates. No cloud provisioning, schema changes or altered application approvals. Other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open; W2 remains 19/40 named targets.
+
+## Revision 66 — actual controller entrypoint acceptance
+
+Revision 65 is **complete and green** at `66e6147`, CI [35852588998](https://github.com/vikashkaruna/Proof/actions/runs/35852588998): all 19 applicable jobs and 13 exact-revision artifacts verified. Native runner/container acceptance passes 24 outcomes, including exact returned SPIFFE identity; native issuer remains 17 and Docker delivery remains 16.
+
+**Review and implementation:** the existing controller integration exercised composition with explicit fixture database/KMS/OIDC ports. It did not execute the deployed `--check`/`--serve` entrypoint. A new disposable Docker fixture now invokes that inherited entrypoint unchanged with owner-only files, a real HTTPS backend connection to isolated Supabase and real protected SPIRE/health volumes. The private TLS proxy permits only the existing key-policy read and counts refused operations; it does not add a production plaintext or development-credential fallback. Synthetic keys enter private stdin and protected volume files, never Docker environment or command arguments.
+
+**Acceptance:** eight new checks cover actual startup, TLS-host mismatch, foreign node, unsafe backend-file permissions, the private TLS listener rejecting invalid identity, absence of backend/TLS secrets in container environment, graceful SIGTERM, and no job claims. The fixture leaves an explicit pending job available, checks database claims before/after and requires no forbidden backend operation attempts. It cleans up its own named containers, volume and network. The local assessment suite now has 71 outcomes, preserving all prior 63; strengthened final checks and exact-merge CI evidence are saved separately. See [review 55](audits/55-controller-entrypoint-acceptance-review-2026-09-23.md).
+
+**Next in order:** protected controller host delivery and supervised container lifecycle, then private TLS/DNS/secret and scoped IAM/KMS deployment plus opaque scheduler delivery. Valid Google caller identity, real cloud KMS, GCP node attestation and Mumbai backup/restore remain external gates. This local entrypoint test uses the acceptance image inheriting the production entrypoint, not an attestation of a deployed production image. Other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open. No cloud provisioning or schema/application-authorization changes; schema 0048 / 49 migrations / 55 tables, W2 targets 19/40.
+
+## Revision 65 — protected host socket and health volumes
+
+Revision 64 is **complete and green** at `24e6a87`, CI [35850300471](https://github.com/vikashkaruna/Proof/actions/runs/35850300471): all 19 applicable jobs and 13 exact-revision artifacts verified, including 16 native runner, 17 native issuer and 16 Docker delivery outcomes. No intervening staging implementation was found. The initial fixture run correctly hit the production observer start limit; only the independent test sequence was corrected.
+
+**Implemented:** a root-only, installed-manifest-bound helper prepares or checks two fixed Docker local-driver mappings: `/run/workload` and `/run/spire-health`. Names derive from the reviewed filesystem UUID; labels bind the manifest, UUID and purpose. The helper requires initialized bound state, the reviewed live runner/observer, exact current node health and protected stable source directories. All existing conflicts are checked before writes. A protected review record precedes volume creation; identical explicit retries preserve matching mappings. Options require read-only, nosuid, nodev and noexec binds. Existing active mounts must still reference the original source device/inode and carry those flags. No arbitrary source, driver, Docker endpoint, deletion, repair or container launch is accepted.
+
+**Validation:** 117 deployment tests and local Docker bundle delivery; the expanded native runner gate adds a real container consumer, wrong mapping/UID/image refusal, exact image/UID admission, socket replacement and atomic health refresh, retaining all earlier lifecycle outcomes. Native results remain pending until the exact-merge artifact verifies them. The consumer receives read-only workload/health directories and no admin or daemon socket. The fixture uses local join-token identity, not GCP attestation. See [review 54](audits/54-runtime-volume-delivery-review-2026-09-23.md).
+
+**Next in order:** complete controller container admission/startup and supervision with protected configuration, backend credentials, private TLS and scoped IAM/KMS; then opaque scheduler delivery and external GCP/backup acceptance. Other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open. No cloud deployment, schema or application-approval changes. Schema 0048 / 49 migrations / 55 public tables; W2 targets 19/40.
+
+## Revision 64 — reviewed runner enrollment and native lifecycle gate
+
+Revision 63 is **complete and green** at `ddf3954`, CI [35848499207](https://github.com/vikashkaruna/Proof/actions/runs/35848499207): all 18 applicable jobs and 12 exact-revision artifacts verified, including 16 Docker and 17 native issuer outcomes. No intervening staging changes were found.
+
+**Implemented:** the protected initializer now supports runners using the reviewed GCP-bound manifest, exact filesystem and separately reviewed bootstrap CA. It requires disabled/stopped normal services and a stopped observer. The bounded static initialization unit keeps the normal runner hardening and Docker/mount dependencies, but does not launch the observer. Before stopping, the helper queries the protected node admin socket twice, requiring the exact expected node, an unexpired certificate and recent non-regressing issuer synchronization. Its receipt binds those observations, the bootstrap CA and stopped key/recovery-state bytes. Separate receipt review refuses changed state or bootstrap trust and an expired node certificate. It publishes the marker without starting normal services. Normal boot remains ready-only with `rebootstrap_mode=never`; interrupted initialization requires explicit recovery.
+
+**Validation:** 105 deployment tests and 16 local Docker delivery outcomes pass. A separate native Ubuntu runner CI gate exercises actual installed commands and service lifetimes, including observer restart/expiry, issuer outage/recovery, mount loss, missing keys and Docker loss. The new native gate remains unverified until its exact-merge artifact passes. Its disposable fixture substitutes local join-token attestation and one exact generated node identity into a separately hashed test bundle; production GCP configuration has no fallback. It cannot prove GCP IIT, cloud IAM or client execution. See [review 53](audits/53-runner-enrollment-lifecycle-review-2026-09-23.md).
+
+**Next in order:** host workload socket/metadata delivery to containers, controller admission and lifecycle, then scoped IAM/KMS, private TLS/DNS and opaque scheduler delivery. Actual GCP attestation, Mumbai backup/restore, other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open. No cloud provisioning or schema changes; schema remains 0048 / 49 migrations / 55 public tables, W2 targets 19/40.
+
+## Revision 63 — explicit issuer initialization and reviewed marker publication
+
+Revision 62 is **complete and green** at `00dc35d`, CI [35842199663](https://github.com/vikashkaruna/Proof/actions/runs/35842199663): 18 applicable jobs and 12 exact-revision artifacts verified. No intervening staging work was found.
+
+**Implemented:** a separate, non-enabled issuer initialization unit and root administration CLI. Initialization requires the reviewed installed-manifest SHA, exact host/disk binding, an empty mounted state disk and inactive, disabled normal services. Loaded unit paths must match the reviewed files, with no drop-ins or pending reload. A durable request precedes startup; a short-lived permit binds the request, manifest, live CLI process and held exclusive lock. The initialization unit keeps normal service hardening, requires the empty-state guard and permit, has no restart policy and is bounded to 60 seconds. Normal restart units still require `--ready` and cannot initialize state.
+
+**Separate review:** the issuer is stopped before a protected receipt is produced. It records the bound installation/disk, the public X.509/JWT bundle and bootstrap CA fingerprints and private stopped-state fingerprints. Protected public bundle/CA exports remain available for concrete review while the issuer is stopped; sealing verifies their receipt-bound bytes. A second explicit command requires the receipt SHA, unchanged installation and state, stopped units and absent marker/approval. It durably records that review before publishing the owner-only marker. Neither command enables or starts the normal service. Existing requests, markers, permits or approval records are never overwritten; failed/interrupted attempts remain unmarked for explicit recovery. These are root administrative review records, not application approval tokens or cryptographic proof of a human identity.
+
+**Validation:** 96 deployment unit tests (19 added), plus 16 real Docker delivery outcomes. Native issuer acceptance now uses the actual initializer and reviewed publication commands, adding direct-unit refusal without a permit, unmarked stopped initialization, wrong-receipt refusal, changed-state refusal, reviewed marker publication and replay refusal while retaining all prior lifecycle outcomes. The expanded native and combined exact-merge CI results are saved in the session; source preparation alone is not a green native gate. See [review 52](audits/52-issuer-initial-enrollment-review-2026-09-23.md).
+
+**Next in order:** equivalent reviewed runner enrollment and complete node/observer lifecycle acceptance; host socket-volume mapping and full controller admission; scoped IAM/KMS, TLS/DNS and opaque scheduler delivery. Actual GCP attestation, cloud activation and Mumbai backup/restore remain external gates. Continue with remaining workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder. No cloud provisioning occurred. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 targets remain **19/40**.
+
+## Revision 62 — protected SPIRE host delivery and normal restart
+
+**CI fixture correction:** initial native runs found GitHub's `/usr/local/bin` and `/opt` are root-owned but world-writable (0777). The production installer correctly refused it. Only the disposable CI fixture now prepares those two known directories as 0755 and restores their original modes on exit; installed-file and parent protection remain unchanged. Failed initial runs are not closure evidence.
+
+Revision 61 is **complete and green** at `13ce160`, CI [35833267173](https://github.com/vikashkaruna/Proof/actions/runs/35833267173): 17 applicable jobs and ten exact-revision artifacts verified. Fresh upstream review found no intervening implementation.
+
+**Implemented:** an offline bundle preparer verifies the pinned SPIRE 1.15.3 archive before reading a fixed, bounded inventory; it rejects links, traversal, unexpected members and wrong ELF architecture. A reviewed manifest binds the selected binary, configuration, state guard, runtime helper, service units and (for runners) separately fingerprinted bootstrap CA. The root-only installer supports Ubuntu 24.04 / Python 3.12 / systemd 255 on amd64 or arm64, protects fixed destinations, refuses conflicting files and preserves identical files on retry. Installation never formats, mounts, initializes, enrolls, reloads, enables or starts services. It is first installation, not an in-place upgrade mechanism.
+
+**Normal startup:** generated units require installed-file integrity and the ready-state guard before launching SPIRE. They bind the service to the UUID-bound state mount; runner services also depend on Docker, and the health observer follows the node/mount lifetime. Startup/readiness/shutdown are bounded. Protected runtime directories preserve the workload socket-directory inode across restarts. The normal units cannot use the empty-state check or automatically recover lost keys. Initial enrollment and marker installation remain separate reviewed procedures.
+
+**Validation:** 77 deployment tests, including 19 new host tests. Local Docker acceptance passes all 16 outcomes, checking both real pinned binaries, root-protected delivery, unit syntax, idempotence, disabled services, manifest refusal and tamper refusal. A separate native Ubuntu CI fixture uses only a newly allocated, backing-file-verified loop device to exercise actual systemd startup, missing marker/key refusal, mount loss and original trust/registry recovery. Exact merge results and outcome counts are saved in the session; a new gate is not considered green until that run succeeds. See [review 51](audits/51-spire-host-delivery-review-2026-09-23.md).
+
+**Native acceptance verified:** staging `c493fc7`, CI [35841077123](https://github.com/vikashkaruna/Proof/actions/runs/35841077123), passed the protected-host job. Its two clean-revision artifacts contain **16 Docker delivery outcomes and 11 native systemd outcomes**. Native evidence covers actual startup under the service namespace, explicit and external mount loss with completed shutdown, missing keys without regeneration, and original registry/X.509/JWT trust after recovery. This proves the isolated issuer lifecycle; full runner/GCP deployment remains open. Combined final-merge regression evidence is saved in the session.
+
+**Remaining, in order:** explicit first enrollment/marker workflow and full runner/observer supervision acceptance; host-to-container socket delivery and production controller admission; scoped IAM/KMS, private TLS/DNS, opaque scheduler deployment and Mumbai backup/restore. Actual GCP attestation, effective cloud permissions and deployment remain external acceptance gates. Other workers/actor chains, live grants, full W3 wizard/readiness/graph and W0/W1/W2 remainder remain open. No cloud apply occurred; Terraform stays default-off. Schema remains **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 named targets remain **19/40**.
+
+## Revision 61 — read-only persistent SPIRE state admission
+
+Revision 60 is **complete and green** at `3e505c5`, CI [35831554373](https://github.com/vikashkaruna/Proof/actions/runs/35831554373): 17 applicable jobs and ten exact-revision artifacts verified. No intervening staging implementation was found at this checkpoint.
+
+**Review finding:** SPIRE's disk key managers accept an absent key file as an empty store. A healthy process or an attached disk alone cannot distinguish approved first enrollment from accidental state loss. Automatic host startup therefore needs an explicit state gate before launching SPIRE.
+
+**Delivered:** a read-only Linux/root state check and offline owner-only binding preparer. The binding names issuer or runner, the reviewed filesystem UUID and trust domain, plus the exact expected GCP node for runners. The guard binds the fixed Terraform disk-device alias to the actual superblock UUID and mounted device, requires a separate whole ext4 filesystem at `/var/lib/spire` with `rw,nosuid,nodev,noexec`, refuses root-device/subtree/stacked/nested mounts, checks protected ancestors and owner-only state, and rechecks mount identity after reading. The ready path requires an identical protected disk marker, nonempty key records and issuer SQLite or node recovery state. Missing, malformed, aliased, oversized, foreign or unsafe files fail closed with fixed output. It never formats, mounts, repairs, initializes or changes permissions.
+
+`--empty` is only a read-only first-initialization precondition: the bound disk must be empty apart from an empty protected `lost+found`. It cannot authorize service startup. `--ready` is the future supervised-start prerequisite; it refuses fresh/missing state. Initial enrollment, approved state-marker installation and recovery remain explicit operator procedures pending the supervised installer. The marker is a configuration binding, not a cryptographic attestation, backup freshness proof or permission to reenroll. Existing issuer-sync health and application authorization remain required.
+
+**Validation:** 58 deployment unit tests (20 new); real separate SPIRE acceptance adds read-only issuer key/registry and node key/recovery checks plus refusal of empty node state before starting the agent, for 24 outcomes. The disposable fixture now explicitly initializes private volume directories and starts SPIRE with owner-only umask. This proves actual SPIRE file compatibility, not GCP block-device activation: mount/superblock failures use controlled unit fixtures, and real host mount-loss/systemd acceptance remains open. Final exact-merge CI/artifact results are saved in the session. See [review 50](audits/50-spire-state-admission-review-2026-09-23.md).
+
+**Remaining:** supervised checksum-pinned installation, reviewed first enrollment/marker delivery, mount-loss stop behavior, protected CA delivery, scoped IAM/KMS, TLS/DNS, complete deployed controller/worker admission, Mumbai backup/restore and opaque scheduler deployment. No cloud resources or live state were changed; Terraform remains default-off. Full W3/W4 and W0/W1/W2 remain partial. Schema remains **0048 / 49 migrations / 55 tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**.
+
+## Revision 60 — bounded issuer synchronization health
+
+Revision 59 is **complete and green** at staging `1c72489`, CI [35827394827](https://github.com/vikashkaruna/Proof/actions/runs/35827394827): 17 applicable jobs and ten exact-revision artifacts verified. Fresh review found no intervening staging changes.
+
+**Delivered:** a root-only node observer reads the fixed SPIRE admin `Debug.GetInfo` operation with a two-second deadline and bounded output. It publishes only node identity, observation/sync times and certificate expiry through an atomic root-owned metadata file. The controller receives that directory read-only, without the admin socket. Failed observations replace healthy state with an explicit denial; stopped publication expires automatically. Backend credentials and TLS/config files retain their separate owner-only protections.
+
+The dedicated controller now requires the exact `issuerNodeId`, matching its trust domain. Its health gate permits at most **ten seconds since observation**, **thirty seconds since successful issuer synchronization**, and the node certificate's remaining lifetime. Future/malformed timestamps, wrong nodes, unsafe file permissions, unavailable observations and detected backward clock movement fail closed. Every trust load is checked before and after Workload API I/O, with validity capped by both health checks and the signing-bundle deadline. Healthy local API caching can no longer bypass stale issuer health in this composition.
+
+**Execution/recovery:** startup, one-time claim, post-claim launch and every scoped identity/tool verification require current health. Known stale health does not consume a claim. Expiry after a committed claim prevents launch and remains unconfirmed; there is no reset or automatic relaunch. Independent reconciliation can still confirm previously persisted results while issuer health is unavailable. The existing conservative unconfirmed/review policy remains; this milestone does not add a new safely-retryable transport response or automatic outage resubmission.
+
+**Validation:** **976 BFF tests**, including 24 new health/controller checks; **38 deployment tests**, including ten new observer tests; workspace tests/lint/types and acceptance TypeScript. Separate real SPIRE admission/persistence acceptance increases from 14 to **21 outcomes**, adding protected healthy access, wrong-node and unsafe-file refusal, stopped publisher/node expiry, issuer outage refusal despite cached Workload API access, and fresh-sync recovery. Existing real controller/worker acceptance also reads the live root-owned observer snapshot. Final exact-merge CI and artifact counts are recorded in the saved session. See [review 49](audits/49-issuer-sync-health-review-2026-09-23.md).
+
+**Remaining:** supervised pinned host installation, persistent state-disk validation/initialization guards, protected CA delivery, scoped IAM/KMS, TLS/DNS, full deployed controller/worker admission, Mumbai backup/restore and opaque scheduler deployment. This gate bounds observed synchronization age; it is not instantaneous global revocation or proof of effective cloud IAM/firewalls. No cloud apply or public execution was enabled. Full W3/W4 and W0/W1/W2 remainder remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**; W2 named targets remain **19/40**.
+
+## Revision 59 — exact node/image admission and separate SPIRE persistence
+
+**CI follow-up:** initial merge `bf20863`, CI 35827110239, passed the existing identity checks but failed the new fixture before enrollment on Linux. Its capability-less root could not read host-runner-owned owner-only bind-mounted configuration. Only non-secret test configuration/CA files and their directory now have explicit read access through read-only mounts; private node/issuer volumes and production owner-only bundles are unchanged. Fixture failures report source function/line locations without raw diagnostics. Corrective exact-merge evidence is recorded in the session.
+
+Revision 58 is **complete and green** at staging `a4a2217`, CI [35824132765](https://github.com/vikashkaruna/Proof/actions/runs/35824132765): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits.
+
+**Delivered:** an offline, strict SPIRE policy renderer prepares the separate issuer/node configurations and two proposed registrations for the implemented controller and Parikshan worker. Each registration requires the exact GCP project/immutable instance parent, intended UID and Docker image configuration digest. Tags, extra fields, unsafe addresses and malformed identities are refused. Persistent issuer registry/signing-key and node-key paths, protected initial CA, disabled rebootstrap, authenticated verifier access and separate admin sockets are explicit. Rendering never starts services, enrolls nodes, applies registrations or overwrites a reviewed bundle. Release metadata pins SPIRE 1.15.3; host installation and mount guards remain open.
+
+**Validation:** 28 deployment unit tests, including 11 new policy/CLI tests, and **14 real separate-host SPIRE outcomes** in a new acceptance artifact. The fixture validates production GCP configurations with the pinned binaries, then uses local join-token attestation and a local parent alias to test actual Docker selectors. It verifies intended identities, same-UID wrong-image refusal, wrong-UID/parent refusal, controller separation, mutable-tag refusal, issuer/node recreation preserving trust/registration, recovery without a bootstrap token, lost-node-state refusal and restoration of the original state. The Alpine probes establish admission behavior; actual GCP attestation and the complete production controller/worker composition under Docker attestation remain deployment gates. Existing application/schema acceptance is preserved. Final exact-merge CI/artifact results are recorded in the saved session.
+
+**Review finding confirmed by a real outage:** an online node can serve a cached identity while the issuer is offline. That test records a demonstrated limitation, not healthy readiness. A protected Workload API read cannot by itself bound issuer synchronization or global revocation. The next trust milestone must implement an authenticated, bounded issuer-sync health gate without exposing node administration to the controller.
+
+**Remaining:** supervised pinned installation, persistent-disk validation/initialization guards, protected CA delivery, health and recovery, scoped cloud IAM/KMS, TLS/DNS, full production CLI acceptance and dedicated opaque scheduler deployment. Terraform stays default-off; no cloud resources or client changes were applied. Full W3/W4, W0/W1/W2 remainder and backup-aware key retirement remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**. See [review 48](audits/48-spire-admission-persistence-review-2026-09-23.md) and the [bundle contract](../infra/workload/README.md).
+
+## Revision 58 — protected controller credential delivery
+
+Revision 57 is **complete and green** at staging `24d5a40`, CI [35822811715](https://github.com/vikashkaruna/Proof/actions/runs/35822811715): 17 applicable jobs and nine exact-revision artifacts verified.
+
+**Review finding:** before enabling Docker workload/image attestation, remove raw backend credentials from the controller container environment. The SPIRE Docker attestor can include container environment values in workload selectors. No Docker attestor has been enabled by the preceding milestones; this closes a deployment prerequisite before activation.
+
+**Delivered:** the dedicated controller now requires `backendServiceKeyFile` in its protected service configuration. It reads the backend key from that owner-only, bounded, canonical regular file directly into the database client, without putting it into `process.env`. Raw `SUPABASE_SERVICE_KEY`, static AWS secret variables, legacy runtime/Temporal credentials, `NODE_OPTIONS` and other unreviewed environment settings are refused. The explicit non-secret environment allowlist retains regional/backend location and reviewed provider file-path settings; provider files remain the operator's protection responsibility. There is no environment or inline-secret fallback. The ordinary public BFF credential contract is unchanged.
+
+A single terminal newline in a secret-manager file is supported. Empty, short, oversized, non-ASCII, embedded-whitespace and extra-line inputs fail with fixed error text. The read buffer is cleared after use; strings/SDK copies remain in the trusted controller's memory. Protected configuration, backend key and TLS files stay outside the image and repository. `--env-file` is not a substitute, because Docker records those values in container configuration.
+
+**Validation:** all **952 BFF tests** (22 new), workspace tests/lint/typecheck, acceptance TypeScript and security/control gates pass. Real local integration passes **61 identity / 62 worker / three protected-trust outcomes**, retaining all earlier 60 worker outcomes. The built image refuses default startup with fixed output. Final exact-merge CI is recorded in the saved session. New tests cover protected reads, refusal of broad environments and unsafe backend transport/region, file permissions, malformed content and provider file paths. The real composed-controller fixture adds protected-file loading and checks Docker's recorded environment for absence of its backend, wrapping and TLS private-key values. Fixture secrets still arrive through private stdin; the short-lived test key file is on a private tmpfs and removed before execution. This is preparation for image attestation, not a claim that the attestor or production bootstrap is deployed.
+
+**Remaining:** persistent issuer/node bootstrap, exact node and immutable-image admission, protected trust/configuration mounts, scoped cloud IAM/KMS, TLS/DNS, supervision/health/backups and dedicated opaque scheduler deployment. VM foundation remains default-off; no cloud apply or external client mutation occurred. Full W3/W4, W0/W1/W2 remainder and backup-aware key retirement remain open. Schema stays **0048 / 49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, with W2 named targets **19/40**. See [review 47](audits/47-controller-credential-delivery-review-2026-09-23.md).
+
+## Revision 57 — separate private Mumbai issuer and runner foundation
+
+Revision 56 is **complete and green** at staging `df409cb`, CI [35821680808](https://github.com/vikashkaruna/Proof/actions/runs/35821680808): 17 applicable jobs and nine exact-revision artifacts verified.
+
+**Accepted deployment decision:** the user selected a separate private Mumbai SPIRE issuer VM alongside the already-approved worker-runner VM. Public APIs stay on Cloud Run. This preserves the roadmap's single intra-perimeter trust domain; application registration remains distinct from node enrollment.
+
+**Delivered:** an opt-in Terraform module prepares separate issuer/runner service accounts, reserved private IPv4 addresses, shielded VMs and persistent state disks. Mumbai zone/subnet validation and explicit named-image selection reject other regions and image families. The default preprod configuration is `workload_vms = null`, so existing deployment flows create no new VMs. There are no resource IAM grants, secrets in metadata, bootstrap script, public IP or administrative ingress. OS Login/2FA, blocked project SSH keys, disabled serial access, VM deletion protection and configured state-disk destruction guards are explicit.
+
+Ingress permits only runner-to-issuer TCP 8081 and optional reviewed private scheduler ranges to runner TCP 8443, with lower-priority deny rules for other traffic. Generic host egress is HTTPS; runner-to-issuer has an exact-address exception. This is not a destination-filtered egress policy or proof of effective cloud rules. The existing networkless worker-container boundary remains essential. No NAT, proxy or implicit SSH path is created.
+
+**Validation:** module validation and **nine offline boundary tests**, plus root validation and **eight offline integration/IAM tests** (six existing and two new), pass with mocked providers and no cloud state or resources. CI now runs both suites. Application/schema acceptance is unchanged: **930 BFF / 61 identity / 60 worker / three protected-trust outcomes**, migration **0048**, **49 migrations / 55 public tables / 18 concurrency suites / 14 upgrades**, W2 named targets **19/40**. Exact staging merge results are saved in the session. See [review 46](audits/46-private-mumbai-hosts-review-2026-09-23.md).
+
+**Still pending:** issuer/node bootstrap and persistent key-state mounting, reviewed node/image admission, trust-bundle delivery, scoped KMS/secret grants, protected controller configuration, TLS/DNS, supervision/health, backup/restore, opaque scheduler deployment and real cloud-provider acceptance. The pair is a foundation, not HA or a running issuer/controller. Do not enable it operationally until those gates are implemented and reviewed. No cloud apply, client mutation or WORM change occurred. Continue remaining workers/verified actor chains, W4.4 grants, full W3 wizard/readiness/live graph, W4.5/6/7, W0/W1/W2 remainder and backup-aware key retirement. The overall goal remains incomplete.
+
+## Revision 56 — dedicated VM assessment controller composition
+
+Revision 55 is **complete and green** at staging `4b67a74`, CI [35818471736](https://github.com/vikashkaruna/Proof/actions/runs/35818471736): 17 applicable jobs and nine exact-revision artifacts verified. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+**Delivered:** a separate, explicit VM controller entrypoint and Docker image target compose protected live SPIRE trust, registration/task checks, scoped assessment tools, persisted tenant key-policy recovery, regional AWS/GCP wrappers, per-job container isolation, independent confirmation and opaque scheduling. Each controller is configured for one tenant and namespace. Foreign runs/reconciliation are refused before metadata lookup, and foreign acknowledgements before RPC. Read-only startup checks require the reviewed immutable worker image, existing Workload API volume, exact durable policy and available protected trust. Startup never publishes policy, enrolls a node, activates registration or claims work.
+
+The protected deployment file is strict, bounded, regular, owner-only and not a symlink. The service requires explicit `--check` or `--serve`, regional backend configuration, direct TLS and a current certificate matching the scheduler audience hostname. Google scheduler subject, email and audience are pinned. The default public BFF is unchanged. Errors expose fixed status text; shutdown stops accepting work and drains with a bounded deadline. Uncertain work requires independent reconciliation, never automatic claim reset or relaunch.
+
+**Validation:** real local integration passes **61 identity / 60 worker / three protected-trust outcomes**, retaining all prior 54 worker outcomes. All **930 BFF tests**, workspace tests/lint/typecheck, acceptance TypeScript and security/control gates pass. Exact-merge CI remains the final gate and is recorded in the saved session. The new real integration starts a trusted UID-attested controller container, retrieves fresh signing bundles through its protected SPIRE socket, launches an isolated worker and persists/independently confirms its result through real Auth/PostgREST. It tests stale-policy refusal before claim, HTTPS identity and tenant refusal, reconstruction without relaunch and tenant-bound scheduling. Cloud KMS and scheduler signing use synthetic provider fixtures; production cloud IAM/KMS is not thereby verified. Existing captured-trust edge-case tests remain alongside the new composed path. Schema remains **0048 / 55 public tables / 49 migrations / 18 concurrency suites / 14 upgrades**; W2 named targets **19/40**. See [review 45](audits/45-vm-controller-composition-review-2026-09-23.md).
+
+**Next:** provisionable Mumbai VM/SPIRE node bootstrap, protected mounts and image admission, issuer health, controller/opaque-scheduler deployment and actual cloud-provider acceptance. No VM was provisioned or cloud apply performed. Then remaining workers/verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph and W4.5/6/7. Preserve W0/W1/W2 remainder, backup-aware key retirement and intentional later-workstream changes. This component is not whole-goal or live-connector completion.
+
+## Revision 55 — protected Workload API trust source
+
+Revision 54 is **complete and green** at staging `0081948`, CI [35817381642](https://github.com/vikashkaruna/Proof/actions/runs/35817381642): 17 applicable jobs and eight exact-revision artifacts verified. The shared-fixture regression is fixed and all four local topology and both container/browser environments pass. The overall goal remains incomplete.
+
+**Delivered:** `WorkloadApiJwtTrust` obtains public JWT signing bundles from an explicitly configured, protected local Unix socket using the standard `FetchJWTBundles` RPC. It accepts only configured trust domains, applies bounded transport/message/key limits and validates the same public-key schema used by the verifier. Every load uses a new bounded stream; a second independent read must match the domain-bound bundle fingerprint after signature verification. Missing, changed, malformed, private-key-bearing, unavailable or timed-out bundles fail closed, with no cached fallback or private transport error output. Local snapshots expire after ten seconds. Identity/domain parsing now rejects trailing line terminators.
+
+**Validation:** 908 BFF tests (26 new), workspace tests/lint/typecheck and acceptance TypeScript. A dedicated test controller container, UID-attested by real SPIRE, validates a real worker SVID using freshly retrieved bundles; an unregistered controller and a paused node are refused. It uses a read-only root/socket mount, no network, no capabilities and no backend credentials. The loader's cache is explicitly disabled. Existing **61 identity / 54 worker** outcomes remain; **three protected-trust outcomes** have a separate CI artifact. Expect nine exact-revision JSON artifacts on the next merge. Schema is unchanged: **0048 / 55 public tables / 49 migrations / 18 concurrency suites / 14 upgrades**; W2 named targets **19/40**. See [review 44](audits/44-protected-workload-trust-review-2026-09-23.md).
+
+**Next:** compose the dedicated Mumbai VM controller, protected SPIRE node/bootstrap and opaque scheduler using this adapter. Public APIs stay on Cloud Run. Socket ownership/mount protection and issuer replication health remain operator/deployment responsibilities; a fresh local read does not prove instantaneous global key revocation. This component does not deploy a VM, activate public broker execution, enroll production nodes or replace the existing host assessment harness's captured test trust. Complete those integration gates, then remaining workers/verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph and W4.5/6/7. W0/W1/W2 remainder and backup-aware key retirement remain open.
+
+## Revision 54 — audited workload registration lifecycle
+
+**CI follow-up:** initial Revision 54 merge `1e1207d` failed CI [35816732842](https://github.com/vikashkaruna/Proof/actions/runs/35816732842) because the shared strict-parity/container fixture still attempted a direct service-role registration insert. Both failing lanes hit the same correctly enforced permission boundary. The fixture now uses disabled registration followed by audited activation, verifies bound receipts and explicitly proves direct service writes return 403. A separate tenant-A owner preserves the viewer isolation persona. All four local topology parity runs, both local container/browser environments and acceptance TypeScript pass. Corrective merge `0081948` is green in CI 35817381642 with 17 applicable jobs and eight verified exact-revision artifacts.
+
+
+Revision 53 is **complete and green** at staging `c17f428`, CI [35814929318](https://github.com/vikashkaruna/Proof/actions/runs/35814929318): all 17 applicable jobs and eight exact-revision artifacts verified. Upstream review found no intervening other-model work. The overall goal remains incomplete.
+
+**Delivered:** migration **0048** replaces direct service-role identity writes with a service-only, version-checked administration transaction. Trusted authenticated owner/admin or internal-founder review is required; membership is checked again in SQL. New registrations start disabled, and activation is explicit. Tenant, workload ID, agent and SPIFFE binding cannot be edited. Status changes and `workload.registration_changed` receipts commit together. Immediate matching retries recover the existing receipt; stale conflicting requests cannot undo later changes. On disablement, existing task delegations and connector grants are permanently revoked. Re-enabling the registration cannot revive either. The registration lock serializes this transition against scoped tools and new task issuance.
+
+`WorkloadRegistrationLifecycle` validates commands and bound receipts, sanitizes errors and uses a ten-second caller budget. No public route, SPIRE enrollment, live connector grant or client execution is enabled. Existing bindings/statuses and authority are preserved by migration, without fabricated historical receipts. Noncanonical legacy bindings can be disabled without rewriting them; they require a new reviewed canonical registration before future activation. Existing administrative test fixtures were moved outside the service role; runtime acceptance now uses the actual lifecycle adapter.
+
+**Validation:** **882 BFF tests**, workspace tests/lint/typecheck and acceptance TypeScript; **49 migrations, 18 concurrency suites and 14 populated upgrades**. Local real Auth/PostgREST/SPIRE passes **61 identity and 54 worker outcomes**, retaining all previous 51 worker outcomes and proving audited registration, permanent old-proof revocation after reactivation, and direct service rebind refusal. SQL covers audit-failure rollback for status/tasks/grants, role and tenant checks, immutable bindings, stale revisions, populated upgrade, and both orderings of disable versus tool completion/issuance. Schema tip **0048**, **55 public tables**, W2 named targets **19/40**. Final exact-merge CI/artifacts are saved in the session. See [review 43](audits/43-workload-registration-lifecycle-review-2026-09-23.md).
+
+**Accepted deployment decision:** the user selected a **dedicated Mumbai VM runner** for higher environments, keeping public APIs on Cloud Run. This is the next runner/SPIRE-node deployment target, not evidence that a VM was provisioned. Complete protected node attestation, trust-bundle delivery and runner/controller/opaque-scheduler composition, then remaining scoped workers and verified actor chains, W4.4 grants, full W3 wizard/readiness/live graph and W4.5/6/7. Application registration is separate from SPIRE node enrollment and signing-key retirement. Preserve W0/W1/W2 remainder and backup-aware dispatch-key retirement. No cloud deployment, client mutation or WORM change occurred.
+
+## Revision 53 — separate containers for private assessment jobs
+
+Revision 52 is **complete and green** at staging `a01604b`, CI [35813509615](https://github.com/vikashkaruna/Proof/actions/runs/35813509615): all 17 applicable jobs and eight exact-revision artifacts verified. Fresh upstream review found no intervening other-model changes. The overall goal remains incomplete.
+
+**Delivered:** `assessmentContainerFactory` starts a new container for every private assessment. Trusted configuration pins a preloaded immutable image ID and a local Docker endpoint; request-provided commands, environment, mounts and network overrides are rejected. The fixed supervisor retains only the capabilities needed to drop identity and stop descendants; the worker runs as UID 20003 without effective capabilities. Containers have separate process/network/cgroup namespaces, no network route, read-only root and Workload API mount, bounded CPU/memory/processes, no swap allocation and disabled Docker log collection. Private task inputs and SVIDs stay in attached pipes. The worker image now includes a checksum-pinned SPIRE client, without issuer state or backend settings.
+
+**Validation:** 862 BFF tests, workspace tests/lint/typecheck and acceptance TypeScript. Real local Auth/PostgREST/SPIRE acceptance now runs each actual assessment in its own container: **61 identity and 51 worker outcomes**, preserving all prior 43 worker outcomes. Two simultaneous jobs cannot see or signal each other's host process; write attempts, metadata/controller/public-network connections and foreign/unregistered identities are refused. Tests inspect actual resource/mount/log settings and verify normal, aborted-input and abruptly killed-transport removal. The independent supervisor deadline remains authoritative after transport loss; CLI exit alone is not cleanup evidence. Final exact-merge CI/artifacts are recorded in the saved session. No migration changed: **0047**, **55 public tables**, **48 migrations / 17 concurrency suites / 13 upgrades**, W2 named targets **19/40**. See [review 42](audits/42-per-job-container-isolation-review-2026-09-23.md).
+
+**Trust boundary and remaining work:** the Docker daemon, launcher, reviewed image and node SPIRE agent are trusted. Only the node fixture sees host PIDs to attest cross-container callers; jobs never receive host PID access, the daemon socket, issuer files or backend/cloud credentials. UID selectors plus controlled socket access are local attestation evidence, not an image-admission policy or production registration lifecycle. Containers share a kernel. Higher-environment controller/scheduler/runner composition, trust bundle delivery and registration/revocation remain engineering work; Cloud Run services do not acquire a Docker socket. Continue remaining scoped workers and verified actor chains, W4.4 live grants, full W3 resumable wizard/readiness/live graph, then W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations, the remaining 21 W2 targets and backup-aware key retirement. No cloud deployment, client mutation, key destruction or WORM change occurred.
+
+## Revision 52 — persisted dispatch policy and transactional fences
+
+Revision 51 is **complete and green** at staging `9e4fdaa`, CI [35810398922](https://github.com/vikashkaruna/Proof/actions/runs/35810398922): 17 applicable jobs and eight verified acceptance artifacts. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+Migration **0047** persists each tenant's dispatch provider, primary/readable key references, monotonic revision, canonical configuration fingerprint and mandatory publication receipt. The service-only publisher checks a trusted authenticated owner/admin or internal founder identity and compare-and-set revision. Bootstrap accounts for all historical outbox references, including purged rows; cross-tenant key reuse is refused. Updates retain every readable reference and can promote only a previously staged key. Publication and audit commit atomically; immediate lost-response retries recover the original receipt.
+
+Both enqueue and claim now share a per-tenant transaction lock with policy publication. A stale writer cannot create new work; a stale reader cannot consume a single-use claim. Original actor/context checks still govern historical receipt recovery, which never creates authority. The former implementations are private and no longer executable by service/client roles. Production AWS/GCP adapters expose a fingerprint derived from their actual immutable local policy; `AssessmentDispatch` captures configured revisions rather than accepting policy assertions from a request. Startup can recover the stored revision only when that local fingerprint matches. Existing provider patterns were also tightened to reject trailing line terminators.
+
+**Validation:** **846 BFF tests**, workspace tests/lint/typecheck/security and separate acceptance TypeScript; **48 migrations, 17 concurrency suites and 13 populated upgrades**. Local real Auth/PostgREST/SPIRE acceptance passes **61 identity and 43 worker outcomes**, proving staged publication, stale reader/writer refusal, durable revision recovery and retained-key decryption after promotion. Concurrent publication tests cover both ordering directions and competing cross-tenant reservation. Schema tip **0047**, **55 public tables**; W2 named targets remain **19/40**. Final exact-merge CI/artifacts are saved in the session. See [review 41](audits/41-dispatch-policy-fencing-review-2026-09-23.md).
+
+**Next:** per-job process/network/cloud-metadata isolation, workload trust/registration and dedicated controller/scheduler deployment composition; remaining scoped workers and verified actor chains; W4.4 grants; full W3 resumable wizard/readiness/live graph; W4.5/6/7. Backup inventory and reviewed key retirement remain open. A matching configuration does not prove live KMS IAM/decrypt readiness, deploy controllers or revoke already-issued tasks. No key removal/destruction, public activation or cloud deployment was performed. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and the remaining 21 W2 targets.
+
+## Revision 51 — configurable completed-dispatch retention
+
+Revision 50 is **complete and green** at staging `7485880`, CI [35715172231](https://github.com/vikashkaruna/Proof/actions/runs/35715172231): 17 applicable jobs and eight exact-revision artifacts passed. Fresh upstream review found no intervening other-model commits. The overall goal remains incomplete.
+
+The accepted policy is now implemented as backend `AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS`, default **90 days**, configurable from **1 to 36500 whole days**. Migration **0046** removes only the nonce, encrypted input/proof and wrapped data key for a delivered, independently confirmed successful assessment whose confirmation age has reached the configured period. It revalidates assignment bindings, result/library digests and immutable execution receipts before cleanup. Unconfirmed, cancelled, undelivered and conflicting jobs retain their payloads. A conflict returns a review state and stops maintenance.
+
+Cleanup and its append-only audit receipt commit atomically. Job/run/scheduling identity, single-use delivery, original enqueue receipts, findings and confirmed results survive. One candidate per transaction and task-first locking avoid duplicate purge receipts and lock-order reversal. A new explicit backend maintenance entrypoint supports `--once` and `--watch`; default BFF startup is unchanged. It needs database credentials, not approval/MFA/model/KMS secrets. Watch polls one candidate per minute and stops on errors or review. A timed-out call is uncertain and requires receipt inspection before restart. Docker, Cloud Run variables/env sync and Helm carry the setting; no recurring cloud job was deployed.
+
+**Validation:** **820 BFF tests**, **68 config tests**, workspace tests/typecheck/lint/security gates, separate acceptance TypeScript, real local Auth/PostgREST with **61 SPIRE and 39 worker outcomes**. Database tests cover role isolation, configurable age, audit rollback, idempotent recovery, conflicting state, concurrent cleanup/confirmation and upgrade of populated old outboxes. Schema tip **0046**, **54 public tables**, **47 migrations / 16 concurrency suites / 12 populated upgrades**; W2 named targets remain **19/40**. Final exact-merge CI/artifacts are recorded in the saved session. See [review 40](audits/40-dispatch-retention-review-2026-09-23.md).
+
+**Remaining:** persisted key-policy revisions and both enqueue/claim rollout fences, retained-backup inventory and reviewed key retirement; per-job process/network/metadata isolation, trust registration and dedicated scheduler/controller deployment; remaining scoped workers/verified actor chains; W4.4 grants; full W3 resumable wizard/readiness/live graph; W4.5/6/7. W0 contact/provenance/deployed acceptance, W1 invitation/email lifecycle and the 21 remaining W2 targets stay open. Live-row cleanup is not physical WAL/backup erasure or permission to destroy keys. Sealed evidence, audit and consent retention are unchanged.
+
+## Revision 50 — tenant-bound dispatch KMS adapters
+
+Revision 49 is **complete and green** at staging `b40685f`, CI [35711878303](https://github.com/vikashkaruna/Proof/actions/runs/35711878303): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening changes. The overall goal remains active.
+
+The private dispatch controller now has AWS and GCP KMS wrapping adapters. Trusted policy pins distinct per-tenant Mumbai key resources; an envelope cannot choose a new key, region or endpoint. Each call first validates the exact canonical, purpose-separated dispatch context. KMS receives only the random data key and a digest of the assignment context, keeping full job metadata and private answers/proofs out of provider audit context. Response key identity, algorithm, sizes and GCP CRC32C checks fail closed. Errors are sanitized and temporary key buffers are cleared where possible.
+
+Both adapters have a bounded call budget and retain one occupied provider slot until the actual call settles, even after timeout. Late plaintext is discarded and cleared. `DispatchKeyPolicy.withReadable()` prepares a reader policy with the new key while retaining the old primary; `withPrimary()` promotes only an already-readable key and retains all prior references. It does not deploy policy, fence old controllers, retire keys or change cloud IAM. Existing default startup remains unchanged; these adapters are supplied only to a trusted controller.
+
+**Validation:** **803 BFF tests**, including 53 new provider/policy regressions, workspace/lint/type checks and separate acceptance TypeScript. The real local outbox/controller/worker probe now uses the production AWS adapter against a local cryptographic KMS fixture; it proves old ciphertext survives primary rotation/controller reconstruction, new jobs use the new primary, and stable-ID retry preserves the original stored envelope. Existing Unix/HTTPS scheduling and lost-response checks are retained. Combined local acceptance passed **61 SPIRE and 35 isolated-worker outcomes**; final exact-merge results are saved in the session. No live KMS/IAM acceptance or cloud changes occurred. Schema remains **0045**, **54 public tables**, W2 named targets **19/40**. See [review 39](audits/39-dispatch-kms-review-2026-09-22.md).
+
+**Next:** persisted/fenced key-policy rollout and retained-job/backup inventory before any key retirement; per-job process/network/metadata isolation, trust registration and dedicated scheduler/controller deployment composition; remaining scoped workers and verified actor chains; W4.4 live grants/approval; full W3 resumable wizard/readiness/live graph; W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Provider adapters and additive policy preparation are delivered; full key lifecycle and production orchestration remain partial.
+
+## Revision 49 — authenticated remote assessment transport
+
+Revision 48 is **complete and green** at staging `0edceda`, CI [35707610075](https://github.com/vikashkaruna/Proof/actions/runs/35707610075): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening changes. The overall goal remains active.
+
+The assessment scheduler now has an explicit HTTPS mode using its assigned Google service identity, with no downloaded key, proxy, redirect or credential-file fallback. The controller independently verifies the signed token's issuer, audience, immutable service-account subject, verified email and lifetime against a fixed, bounded Google signing-key source. Forwarded identity headers cannot substitute for that verification. Identity expiry, request cancellation and disconnect retain the single-operation guard until actual controller work settles. Local Unix transport reuses the same bounded protocol; both clients reject private or unknown fields before transmission.
+
+`--assessment-controller-origin` selects only the opaque assessment queue and is mutually exclusive with socket mode. Optional `--assessment-outbox-pump` retains durable lease/ack recovery. The remote server is an explicitly constructed backend listener, absent from default public BFF startup. Its platform-TLS mode requires a trusted TLS terminator; direct TLS uses verified certificates. This is transport authentication, not connector grant authority, account revocation or a verified agent actor chain.
+
+**Validation:** **750 BFF tests**, **146 Temporal tests**, workspace/lint/type checks, acceptance TypeScript, **61 SPIRE outcomes** and **33 isolated-worker outcomes**. Actual TLS and Unix connections both run Temporal → controller → isolated worker → Postgres, including lost submission/ack/activity replies and one launch per job. The TLS probe refuses a signed foreign-principal token and an untrusted certificate before polling. Its signing keys, Google key response and service identity are synthetic; live Google metadata/IAM is not proved by local acceptance. Metadata transport and refusal are exercised separately with HTTP fixtures. The ledger test cache now includes all migration inputs, verified against the actual Turbo input inventory and direct ledger tests. No migration change: **0045**, **54 public tables**, W2 named targets **19/40**. Final exact-merge CI/artifacts are saved separately. See [review 38](audits/38-remote-assessment-transport-review-2026-09-22.md).
+
+**Next:** production wrapping-key lifecycle, per-job process/network/metadata isolation and workload trust/registration, plus deployment composition for a dedicated opaque scheduler and controller with least-privilege IAM. The legacy Temporal service still has runtime-token access for its legacy queue; do not reuse that grant in the opaque scheduler. Remaining scoped workers and verified actor chains, W4.4 live grants/approval, full W3 resumable wizard/readiness and graph, and W4.5/6/7 stay open. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. No public activation, cloud deployment or client mutation occurred.
+
+## Revision 48 — durable outbox scheduling pickup
+
+Revision 47 is **complete and green** at staging `694305e`, CI [35702650435](https://github.com/vikashkaruna/Proof/actions/runs/35702650435): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes. The overall goal remains active.
+
+Migration **0045** closes the persisted-outbox-to-Temporal submission crash window with namespace-bound leases, a stable workflow ID and a mandatory, fenced submission receipt. Polling skips locked jobs. A crashed or uncertain producer leaves its lease to expire; a fresh producer recovers the same execution. Expired, claimed, revoked or terminal task assignments permit existing-workflow lookup only. Scheduling never resets a claim, extends task authority, decrypts payloads or proves assessment completion. Exhausted attempts become an audited `needs_review` handoff. Shared ledger action types include both scheduling events.
+
+The private BFF socket adds bounded poll/ack operations through a trusted configured adapter. The scheduler holds no database or task credentials. Automatic pickup requires explicit `--assessment-outbox-pump` together with the private socket/owner options; ordinary startup is unchanged. Each acknowledgement binds tenant, job, current lease, configured namespace, canonical workflow ID and observed Temporal execution ID. Namespace changes cannot silently resubmit a previously reserved job elsewhere.
+
+**Validation:** **705 BFF tests**, **112 Temporal tests**, workspace tests/lint/typecheck, acceptance TypeScript, real Auth/PostgREST parity, **61 SPIRE outcomes** and **30 isolated-worker outcomes**. The actual Temporal → private socket → isolated Linux worker → Postgres path now proves pickup, lost submission response with a newly acquired lease and unchanged execution, lost acknowledgement after a committed receipt, and one worker launch per job. The acceptance fixture alone advances a lease deadline to avoid waiting; it does not alter task expiry or claim state. Database acceptance passes **46 migrations, 15 concurrency suites and 11 populated upgrades**, including stale-producer fencing, one audit receipt, mandatory audit rollback and preservation of existing live/claimed/expired jobs. Exact final merge CI/artifacts are saved separately. Schema **0045**, **54 public tables**, W2 named targets **19/40**. See [review 37](audits/37-durable-assessment-pickup-review-2026-09-22.md).
+
+**Next:** authenticated remote controller transport preserving distinct cloud service IAM; production wrapping-key lifecycle, per-job isolation and trust/registration; remaining scoped workers and verified actor chains; W4.4 live grants/approval; full W3 resumable wizard/readiness and graph; W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Local engineering is delivered; deployed namespace ACLs, distinct-UID denial and production controller/database timeouts still need acceptance. No public activation or cloud deployment occurred. This closes the durable pickup component, not full W3/W4 or the overall goal.
+
+## Revision 47 — opaque Temporal scheduling and private controller transport
+
+Revision 46 is **complete and green** at staging `eb262fd`, CI [35697773545](https://github.com/vikashkaruna/Proof/actions/runs/35697773545): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
+
+A separate `axiom.assessment.job.v1` workflow on `axiom-assessment-v1` now carries only validated tenant/job references and confirmed receipt metadata. Stable workflow IDs refuse duplicate execution, including after completion or cancellation. One launch attempt is followed by bounded confirmation-only reconciliation; timeout, loss or restart cannot retry the launch. The controller refuses a claim response arriving after cancellation and stops the private channel on disconnect. Persistence and cleanup remain independent observations.
+
+The local/on-prem controller transport is a protected Unix socket with checked owner UID, directory/socket permissions, strict request/result limits and one active operation. Only provisioned controller/scheduler principals may use its OS group. The dedicated worker mode is explicit and does not poll legacy workflows. This transport does not replace distinct Cloud Run service identities or authorize sharing backend credentials with Temporal; authenticated remote transport for separate cloud services remains work to deliver.
+
+**Validation:** **689 BFF tests**, **94 Temporal tests**, workspace tests/lint/typecheck and acceptance TypeScript; **61 real SPIRE outcomes** and **27 isolated-worker outcomes**, now including real Temporal → socket → controller → isolated worker → Postgres confirmation, lost-reply recovery with exactly one launch per job, stable scheduling and history/replay privacy checks. Final exact-merge CI/artifacts are recorded separately. No migration: **0044**, **54 public tables**, W2 named targets **19/40**. See [review 36](audits/36-opaque-assessment-scheduling-review-2026-09-22.md).
+
+**Remaining:** durable outbox-to-producer pickup and restart recovery; authenticated transport for separate deployed services, production wrapping-key lifecycle, per-job isolation and workload trust/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. Namespace producer ACLs and distinct-UID deployed denial/lifecycle checks are not proved by local tests. No public activation or cloud deployment occurred. The overall goal remains active.
+
+## Revision 46 — bounded assessment launch and reconciliation
+
+Revision 45 is **complete and green** at staging `61ee348`, CI [35693874727](https://github.com/vikashkaruna/Proof/actions/runs/35693874727): all 17 applicable jobs and eight exact-merge artifacts passed. Fresh upstream review found no intervening other-model changes.
+
+The trusted Linux supervisor runs the fixed worker under UID/GID 20003 with an allowlisted environment, resource limits, an independent deadline and descendant cleanup. It reaps detached descendants and binds the fixed worker/identity-CLI chain to parent death. The image refuses implicit startup and unprivileged supervisor launch. A bounded private channel validates task context, tool order and the final cleanup report; raw input, proofs and SVIDs never enter logs or workflow history. The private controller resolves an opaque owned job, claims at most once, and independently confirms SQL persistence after normal completion or a lost channel response. An already claimed job is reconciled without relaunch. Persistence confirmation and cleanup confirmation are separate results.
+
+**Validation:** **673 BFF tests**, **187 Python runtime tests**, workspace tests/lint/typecheck and acceptance TypeScript; **61 real SPIRE outcomes** and **24 isolated-worker outcomes**, including actual controller launch/recovery, detached descendant cleanup, idle timeout, parent-death termination and launch refusal. Exact follow-up merge CI/artifacts are recorded separately in the saved session. No migration: **0044**, **54 public tables**, W2 named targets **19/40**. See [review 35](audits/35-bounded-assessment-controller-review-2026-09-22.md).
+
+**Remaining:** opaque queue/reconciliation scheduling and private deployment transport; production wrapping-key provider/rotation/retention, per-job process isolation and workload attestation/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0 contact/provenance/deployed acceptance, W1 invitations and W2 remainder. This is local Linux process evidence, not deployed Cloud Run isolation. No public activation occurred. The overall goal remains active.
+
+## Revision 45 — durable encrypted assessment dispatch
+
+Revision 44 is **complete and green** at staging `d1becf0`, CI [35691631278](https://github.com/vikashkaruna/Proof/actions/runs/35691631278), with 17 applicable jobs and eight exact-merge artifacts, including 67 Temporal tests. No intervening upstream implementation was present.
+
+Migration **0044** adds a private outbox atomically with task/run/audit delegation. A stable request UUID returns the same run after a lost response; changed context/input conflicts. The exact input and task proof are encrypted with a fresh data key and authenticated job/tenant/actor/workload/estate/engagement/correlation/input context, separated from connector credentials and approval keys. Only ciphertext and the existing proof hash reach storage. The controller can claim a live dispatch once. Lost claims, decryption failures and uncertain launches require reconciliation; they never silently renew or relaunch task authority. Actual tools still require fresh worker SVIDs.
+
+**Validation:** **645 BFF tests**, including 21 new encryption/adapter cases; real Auth/PostgREST parity across all four environment labels; **61 real SPIRE outcomes** and **17 isolated-worker outcomes**, now including controller reconstruction, idempotent issuance and single delivery through the encrypted outbox. Database acceptance passes **45 migrations, 14 concurrency suites and 10 populated upgrades**, covering atomic rollback, tenant/client isolation, expiry/demotion/revocation/archival/halt and competing enqueue/claim. Exact follow-up CI/artifacts are saved separately. Schema **0044**, **54 public tables**, W2 named targets **19/40**. See [review 34](audits/34-private-dispatch-review-2026-09-22.md).
+
+**Remaining:** bounded isolated launch/termination, scheduler/reconciliation and private job transport integration; production wrapping-key provider/rotation/retention and workload trust/registration; other scoped workers/actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. Preserve W0/W1/W2 remainder. This controller remains private and the UI is not switched. A local synthetic wrapping provider proves encryption and restart behavior, not production KMS or Cloud Run attestation. The overall goal remains active.
+
+## Revision 44 — truthful Temporal computation and replay
+
+Revision 43 is **complete and green** at staging `e0781c6`, CI [35688921423](https://github.com/vikashkaruna/Proof/actions/runs/35688921423): all 17 applicable jobs and seven exact-merge artifacts (67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 14 worker/recovery outcomes). No intervening upstream implementation was present.
+
+Review found invalid activity argument dispatch, nondeterministic workflow UUID generation and a false `completed` result after agent failures. A new versioned workflow/queue validates stage context and results, uses deterministic correlation and positional arguments, stops on failure/uncertainty/escalation, and ends successful computation at `plan_persistence_required`. It cannot invent Sudhaar's absent persisted plan ID or claim approval/execution/verification. HTTP activity failures are bounded, sanitized and nonretryable pending reconciliation. See [review 33](audits/33-temporal-orchestration-review-2026-09-22.md).
+
+**Validation:** **67 Temporal tests**, including real test-server execution, sandboxed history replay and restart with a pending activity, using synthetic agents; separate HTTP transport/contract regressions. Final exact-merge CI and its sanitized revision-bound evidence are saved in the session. Existing real SPIRE/worker and database gates remain distinct. No schema change: **0043**, **53 public tables**, W2 named targets **19/40**.
+
+**Next:** trusted idempotent issuance/dispatch, bounded isolated launch/private payload delivery and scheduled recovery; production trust/registration, remaining scoped workers and actor chains; W4.4 live grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. W0/W1/W2 remainder stays open. Legacy history migration and payload privacy require engineering before rollout; this new queue is not activated from the UI. Full production orchestration and the overall goal remain partial.
+
+## Revision 43 — confirmed assessment runs and recovery
+
+Revision 42 is **complete and green** at staging `66a9ec4`, CI [35687544717](https://github.com/vikashkaruna/Proof/actions/runs/35687544717), with all 17 applicable jobs and seven exact-merge artifacts: 67 browser/89 API outcomes per configuration, 61 SPIRE, five audit and 11 real worker outcomes. No intervening upstream implementation was present.
+
+The next W4.3 component independently confirms a committed assessment after a lost worker response. Migration **0043** validates the task/run/packet binding, recomputes SQL digests and checks actual immutable start/completion receipts before atomically recording terminal run success and one `workload.task_completed` receipt. Retries do not duplicate it; audit failure leaves the earlier persisted assessment intact and the run unconfirmed. Existing cancellations or contradictory terminal records are preserved. Historical confirmation can occur after authority ends; it cannot revive task access or write findings. The BFF adapter accepts only trusted expected controller context, not worker success claims, and exposes no new worker/browser route.
+
+Validation: **624 BFF tests**, **187 Python tests**, workspace tests/lint/typecheck, acceptance TypeScript and format/security gates; **44 migrations, 13 concurrency suites, 9 populated upgrades**. Real worker acceptance now has **14 outcomes**, including deliberately lost response recovery and terminal task refusal. Exact follow-up CI and its seven artifacts are recorded separately in the saved session. Schema **0043**, **53 public tables**, W2 named targets **19/40**. See [review 32](audits/32-assessment-confirmation-review-2026-09-22.md).
+
+**Next:** trusted idempotent issuance/dispatch, bounded worker launch/private payload delivery and automated recovery scheduling; production trust/registration, remaining scoped workers and actor chains; W4.4 grants/approval; full W3 wizard/readiness and graph; W4.5/6/7. The UI still uses the legacy runtime and default BFF startup keeps the new tools unavailable. Confirmation engineering is delivered; full production orchestration, W3/W4 and the overall goal remain partial. Preserve the W0/W1/W2 remainder.
+
+## Revision 42 — isolated assessment worker and transactional tools
+
+Revision 41 is **complete and green** at staging `39f973f`, CI [35684322559](https://github.com/vikashkaruna/Proof/actions/runs/35684322559). All 17 applicable jobs passed; six exact-merge artifacts verify 67 browser/89 API outcomes per configuration, 61 SPIRE and five runtime-audit outcomes. No intervening other-model staging commits were found.
+
+Delivered the representative W4.3 Parikshan path: a separate credential-less worker image, exact assigned-input binding, worker-acquired SVIDs, BFF tools that reauthenticate every operation, and migration **0042** for a pinned library snapshot and atomic findings/score/audit persistence. Library mismatch now also fails closed in the legacy agent; scoring formulas are preserved. Expiry, task revocation, demotion, estate archival and halt state are checked under transaction locks; mandatory audit failure rolls back the result. Identical retries return one receipt. Ordinary BFF startup keeps the internal tool routes unavailable until a trusted controller is supplied.
+
+Validation: **610 BFF tests**, **187 Python tests**, workspace tests/lint/typecheck and acceptance TypeScript checks. Real local SPIRE/isolated worker/BFF/PostgREST acceptance passes **11 outcomes**, including actual UID attestation, no worker backend credentials/network, persisted scores, idempotency and mid-task authority refusals. Database acceptance covers **43 migrations, 12 concurrency suites and 8 populated upgrades**. The first race fixture and a load-related existing MFA timeout were resolved and retested; see [review 31](audits/31-isolated-assessment-worker-review-2026-09-22.md). Exact-merge CI, including the new seventh worker artifact, is recorded separately in the saved session. Tip **0042**, **53 public tables**; W2 named targets remain **19/40**.
+
+**Still in progress:** production controller/private task transport, terminal run confirmation and restart reconciliation, production trust/registration lifecycle, the other nine isolated worker/tool paths and verified actor chains. The UI still invokes the legacy runtime. The new persistence tool leaves its delegated run `running` for controller finalization; a lost response requires checking the stored packet. Local UID attestation is not production Cloud Run proof. W4.3 remains partial and connector execution stays gated.
+
+**Next order:** finish W4.3 orchestration/scoped workers, W4.4 live grants/approval, full W3 resumable onboarding/readiness and graph, then W4.5/6/7. Retain W0 contact/provenance/deployed acceptance, W1 invitations and remaining W2 targets. The overall goal stays active.
+
+## Revision 41 — saved assessment provenance
+
+**CI correction:** the first assessment merge `fadf0d0` / CI 35683997539 failed on a count-gate false positive for the documented 1,000-row query bound and an E2E reference to a nonexistent fixture field. The bound now has the gate's explicit explanatory marker. The browser test uses the real tenant-A assessment ID, asserts 404 `engagement_not_found` through the BFF, and verifies the unavailable page. This replaces the earlier invalid-ID-only check. Run the separate acceptance TypeScript project and control-count gate before the successor merge. The failed merge is not closure evidence.
+
+Revision 40 is complete and green at staging `f49c0c7`, CI [35682852802](https://github.com/vikashkaruna/Proof/actions/runs/35682852802). The exact-merge gate and six sanitized artifacts passed: 66 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging implementation was present.
+
+The new BFF `GET /v1/assessment` read projection requires posture-read capability and existing membership/MFA gates. It selects one owned assessment (latest by default, or an explicit ID), reads only that assessment's tenant/library-bound findings and evidence, verifies the published/deprecated library's declared count, and returns a validated shared contract. Empty history returns no invented controls or exposure. Missing findings are unassessed; measured zero scores/exposure remain zero. Failed queries, malformed/ambiguous rows, incomplete libraries and truncated result sets return a sanitized unavailable response. Evidence links contain full, real IDs cited by a finding and owned by the same tenant/assessment. Responses are private/no-store.
+
+Assessment SSR now consumes that BFF projection; it holds no privileged database credential or scoring rules. The page removes default score 85, made-up evidence IDs/control rows/exposure, static domain outcomes and the sixteen-row limit. Domain counts reflect the selected saved library. SDF is labelled as a recorded profile value, not an inferred legal designation. Existing 80/40 display bands are preserved and disclosed; the scoring model and immutable historical records are unchanged. An invocation requires a readable saved assessment and sends its engagement/library IDs. Completion refreshes saved data; it does not claim that the runtime persisted findings.
+
+Validation: **598 BFF tests**, including 26 new projection tests; **76 web tests**; five focused browser journeys, including one new real Auth/BFF/PostgREST provenance journey with an isolated 20-control synthetic library. The journey covers empty history, measured zeros, all controls, missing findings, stale evidence, historical selection and foreign-assessment refusal. Invocation tests still use explicitly injected runtime responses. Workspace tests/lint/typecheck and format/security gates passed. Expected full acceptance is now **67 browser journeys per configuration**, with 89 API outcomes unchanged; final exact-merge CI is recorded in the session checkpoint. No migration: 0041 / 42 migration files / 52 public tables; W2 targets 19/40.
+
+**Scope of closure:** the Assessment saved-results display defect is fixed. C-W0-7 remains partial: public q7/q11/q12 scoring semantics, heuristic benchmark provenance, portal demo fallbacks and static Workbench health labels remain. The projection is a live read of persisted rows, not a transactionally sealed report or WORM verification. Sets reaching 1,000 controls/findings/evidence records fail closed pending pagination. Evidence links use `findings.evidence_ids`; broader evidence linkage/provenance belongs to W8. Parikshan's write persistence and actual requested-library execution must be completed/tested with W4.3 tools; this change does not activate them.
+
+**Next order:** continue W4.3 credential-less workers/private task handoff/scoped tools/trust lifecycle/actor chains, then W4.4 live grants and approval, full W3 wizard/readiness and graph, then W4.5/6/7. Retain the W0 provenance/funnel and W1/W2 remainder in the register. The overall goal remains active. See [review 30](audits/30-assessment-provenance-review-2026-09-22.md).
+
+## Revision 40 — dynamic tenant routing
+
+Revision 39 is complete and green at staging `180ae52`, CI [35681594813](https://github.com/vikashkaruna/Proof/actions/runs/35681594813): 17 applicable jobs passed, with six exact-merge artifacts verifying 65 browser/89 API outcomes per configuration, 61 identity and five durable-audit outcomes. No intervening other-model staging changes were present.
+
+Review found the browser BFF bridge translated only three demo slugs and otherwise targeted Meridian. Arbitrary customer slugs could therefore fail, or act in the wrong tenant when the caller belonged to both. The bridge now verifies the signed-in user and resolves its cookie through that user's RLS-scoped memberships. Unknown, stale and revoked selections return 403 without forwarding; lookup failure returns a sanitized 503. With no cookie it selects the first actual membership by stable tenant ID, matching the shared page context and app shell. Slug and UUID preferences both work. Explicit headers remain independently membership/MFA checked by the BFF. Only exact onboarding and tenant-discovery method/path pairs remain tenantless, with any incoming tenant header removed.
+
+Validation: **76 web unit tests**, including 17 route regressions, and one new **real Auth/PostgREST/BFF browser journey** covering custom-tenant reads and writes, slug/UUID SSR agreement, invalid-cookie mutation refusal, foreign-header denial and membership revocation. Workspace tests, lint, typecheck, format and security gates passed. This is real tenant-routing acceptance, not an injected BFF response. Expected full browser acceptance is now **66 journeys per configuration**; exact merge CI is recorded separately in the saved session checkpoint. No schema change: 0041 / 42 migrations / 52 public tables; W2 targets 19/40.
+
+**Remaining:** assessment source-data provenance, W4.3 isolated workers/private task tools/trust lifecycle/actor chains, W4.4 live grants/approval, full W3 wizard/readiness and graph, then W4.5/6/7. The overall goal remains active. SSR may still display a permitted fallback page for an invalid cookie, but implicit bridge operations refuse until the user selects a valid tenant. Portal's separate legacy selection/fallback logic should be consolidated during provenance review. See [review 29](audits/29-tenant-routing-review-2026-09-22.md).
+
+## Revision 39 — confirmed agent results in the UI
+
+The backend/ledger-schema follow-up is green at staging `e0db93d`, CI [35680568394](https://github.com/vikashkaruna/Proof/actions/runs/35680568394). All 17 applicable jobs passed; six exact-merge artifacts verify 61 identity, five audit and 63 browser/89 API outcomes per configuration. UI review then found independent false-success behavior that backend checks alone could not fix.
+
+A shared browser invocation helper now sends JSON and a fresh correlation ID, requires a matching successful BFF response, rejects non-success HTTP and contradictory/missing fields, and surfaces the bounded public error. Workbench no longer treats missing status as success or displays a green completion card for failure. Sidebar/module actions use the same contract. Assessment no longer advances five stages on a timer, adds 15 points, adjusts pass/fail counts or invents a lower exposure. It waits for Parikshan's confirmed result, marks **only Parikshan** complete and refreshes server props. Other stages remain not run. In-progress indicators use teal; an ordinary ledger receipt is not labelled sealed proof.
+
+Validation: **59 web unit tests** (19 new invocation tests), **four local browser journeys** including two new failure/confirmation regressions, workspace tests/lint/typecheck and format/security gates. The new browser cases sign in through real Auth/MFA, then inject explicitly labelled BFF responses to test UI behavior; they are not live worker/connector execution evidence. A delayed response is held beyond the removed animation duration and leaves scores/stages unchanged; failure shows an error, and confirmed success advances only the invoked agent. The next exact-merge browser acceptance should include **65 journeys per configuration**; API outcomes remain 89. No schema change: 0041, 42 migrations, 52 public tables, W2 named targets 19/40. See [review 28](audits/28-agent-ui-outcomes-review-2026-09-22.md).
+
+**Newly confirmed C-W0-7 provenance work remains open:** Assessment's server loader still invents a score of 85 for missing findings, fallback control/evidence rows and exposure, and its static target-area cards contain made-up pass counts. It mixes findings across engagements/library versions, and the tenant metadata query lacks an explicit active-tenant filter. Fix these with explicit unassessed/unavailable states and owned, version-bound persisted results before claiming end-to-end assessment readiness. Workbench's static fleet/prompt/environment labels also are not live health evidence. These are separate from the confirmed invocation UI correction; no full assessment or W3/W4 closure is claimed.
+
+**Next:** remove those assessment provenance fallbacks, then continue W4.3 isolated workers/private task handoff/scoped tools/trust lifecycle and verified actor chains, W4.4 live grants/approval, full W3 onboarding/readiness and graph, W4.5/6/7. Keep the overall goal active and broker/executor activation gated.
+
+## Revision 38 — W4.3 confirmed dispatch outcomes
+
+Task delegation merge `c88e3c1` passed CI [35679665494](https://github.com/vikashkaruna/Proof/actions/runs/35679665494), including all 17 applicable jobs. Six exact-merge artifacts confirm 61 SPIRE, five durable-audit and 63 browser/89 API outcomes per configuration. The follow-up below adds the missing shared ledger-event types and hardens the actual dispatch path.
+
+Follow-up review found the legacy BFF agent route ignored completion-update errors, accepted missing/foreign runtime response fields, returned HTTP 200 for a reported agent failure, and persisted raw transport/provider errors. The UI could consequently present a failed or unrecorded invocation as successful. These defects are fixed before task/worker integration proceeds.
+
+The BFF now records the owned engagement and exact input digest, validates the returned agent/correlation/status/accounting/output/receipt shape, and confirms a terminal database write matched the exact run, tenant, agent, correlation and prior `running` state. It preserves concurrent cancellations and completed rows. Successful output is returned only after a confirmed `succeeded` row; persistence uncertainty returns **503 `agent_completion_unconfirmed`**, includes the run/correlation IDs and emits no completion event. Runtime failures return **502**, with fixed safe errors; raw exception/error payloads are neither persisted nor logged. Unknown top-level runtime fields are stripped. Internal-token fetches reject redirects and have a 120-second deadline. Success requires output and at least two distinct reported audit receipts; this validates the protocol shape, not independent receipt provenance.
+
+Validation: **572 BFF tests**, including 26 new dispatch cases, and two shared-schema tests pinning all 74 SQL ledger actions to the TypeScript decoder. The missing 0041 task-event entries are now included. Also passed: workspace tests/lint/typecheck and format/security gates. Tests inject completion-write failures, concurrent terminal/context changes, runtime error bodies, malformed/mismatched responses, accounting overflow and unknown fields. No schema change beyond 0041: **42 migrations, 52 public tables**, W2 named targets **19/40**. Exact merge CI remains a separate gate recorded in the session checkpoint. See [review 27](audits/27-agent-completion-review-2026-09-22.md).
+
+**Next:** continue W4.3 physical worker isolation and scoped tools/task handoff, production trust/registration lifecycle and verified actor chains; then W4.4 live grants/approval, full W3 wizard/readiness and graph, W4.5/6/7. This correction still uses the legacy shared runtime transport and does not activate task authority or connector execution. A timeout or unconfirmed database receipt is not proof of rollback; inspect/reconcile the identified run before retrying. Automatic agent-run reconciliation and private task orchestration remain work to implement.
+
+## Revision 37 — W4.3 task delegation core
+
+**Previous milestone complete and green:** C-W0-5 service IAM engineering, staging `e46c1b7`, CI [35678105419](https://github.com/vikashkaruna/Proof/actions/runs/35678105419). All 17 applicable jobs passed. Six sanitized artifacts match that exact merge: 61 SPIRE outcomes, five real Postgres runtime-audit outcomes, and 63 browser/89 API checks per local preprod/production configuration. Effective deployed IAM acceptance remains open. A fresh upstream review found no intervening other-model commits.
+
+Migration **0041** introduces private, short-lived task delegations tied to an agent run, current initiator membership, tenant, workload registration, optional estate/engagement, input digest, scopes and deadline. Issuance and revocation append ledger events in the same transaction. The BFF generates an independent random 256-bit task proof, persists only its SHA-256 digest and redacts ordinary serialization. A visible run UUID alone is insufficient. Each authorization repeats SVID/registration validation and a live task lookup; current membership/internal status, run/context, registration, halt state, expiry and revocation all constrain access. The deadline is bounded by both task and SVID expiry. Tenant admins may issue/revoke tenant tasks; internal-only agents still require a verified internal founder/analyst. Generic issuance refuses Karya.
+
+**Delivered component, not runtime activation:** no browser or worker receives direct SQL access; no HTTP route consumes this component yet. Legacy runs receive no implicit delegation. The issuer is a trusted BFF interface, not a public API; the controller must derive actor identity and input digest, apply idempotency and deliver proof privately. The SQL lookup does not verify JWTs or replace contract checks. Task authority is a fresh snapshot, not a lock spanning an external action. Connector grants, dry-run/rollback and approval remain separate W4.4 gates; broker defaults and the execution stub remain disabled.
+
+Validation: **546 BFF tests**, workspace tests/lint/typecheck, and the real Docker PostgreSQL suite with all **42 migrations**, eleven concurrency suites and seven populated upgrade suites passed locally. New tests cover task/tenant/workload/proof/scope refusal, mid-lookup expiry, safe proof handling, live revocation, failed-audit rollback, both issuance/demotion lock orderings and concurrent revocation producing one ledger event. The 0040→0041 upgrade preserves historical runs byte-for-byte and grants them no authority. Exact merge/container CI is a separate release gate, recorded in the session checkpoint after execution. Tip **0041**, **52 public tables**; W2 named targets remain **19/40**. See [review 26](audits/26-workload-task-review-2026-09-22.md).
+
+**Next in order:** W4.3 credential-less worker execution, production trust/registration lifecycle, private task handoff and every-tool tenant/estate enforcement, then verified token exchange/actor chains and W4.4 live grants/approval. Complete the full W3 onboarding/readiness wizard and graph next, then W4.5/6/7. W0/W1/W2/W3/W4 and the overall goal remain partial. Do not treat these tested internal components as proof of live connector execution.
+
+## Revision 36 — C-W0-5 service IAM isolation
+
+Cross-script follow-up: `sync-env.sh secrets` no longer creates IAM bindings, so it cannot restore access for the retired shared account. Secret creation/version failures now stop the command; Cloud Run sync merges environment changes instead of replacing managed bindings, preserves the Terraform-selected identity and stops on update failure. Seven executable tests use an isolated fake `gcloud` with synthetic inputs; they make no cloud requests and assert no secret output or IAM mutation. The deployment suite now has **17 tests**. Secret sync does not remove retiring-key resources/grants: finish rotation with the reviewed full Terraform plan/apply.
+
+Reviewed staging `a5ba641` and green CI [35666946505](https://github.com/vikashkaruna/Proof/actions/runs/35666946505): 17 applicable jobs passed; six exact-merge artifacts verify 61 SPIRE outcomes, five real Postgres audit outcomes and 63 browser/89 API checks per configuration. The runtime audit milestone is complete. No intervening upstream implementation was present.
+
+C-W0-5 engineering now assigns nine distinct Cloud Run identities with 29 explicit secret-level grants and a BFF-only conditional retiring MFA grant. Project-wide secret, artifact and Cloud SQL runtime roles are removed. Unused BFF database-password/Redis bindings are removed. The runtime now receives its actual Supabase URL/service key, and Temporal receives its strict environment and internal transport token. Every service rollout waits for required IAM grants/secret versions; deployment and teardown target the new resources. The sensitive MFA resource-count expression is corrected without exposing key material.
+
+Validation: ten permission-drift/target-coverage tests and four offline evaluated Terraform cases, plus configuration checks, formatting and shell validation. No provider apply or cloud resource change occurred. **C-W0-5 code is delivered; effective deployed IAM acceptance remains pending.** See [review 25](audits/25-service-iam-review-2026-09-22.md) for the access matrix, upgrade/rollback rules and proof limits.
+
+This is a prerequisite for W4.3, not completion of agent isolation: all ten agents still share the runtime service's backend, approval and storage credentials. Next implement credential-less workers, tenant/task delegation and every-tool scopes, then W4.4 live grants, full W3 wizard/readiness and graph, and W4.5/6/7. C-W0-6 contact persistence/mail, C-W0-7 scoring provenance, W1 invitations, W2 remaining targets and remote acceptance remain open. Migration tip 0040 and 51 public tables are unchanged.
+
+## Revision 35 — W4.3 runtime audit hardening
+
+The W4.3 identity foundation is **complete and green** at staging `41f9171`, CI [35665778056](https://github.com/vikashkaruna/Proof/actions/runs/35665778056). Verified exact-merge artifacts contain 61 SPIRE outcomes and 63 browser journeys plus 89 API/restart outcomes in each configuration. The earlier `2c3f8f6` run failed on an undeclared root Zod dependency and is superseded by this successful corrected run. W4.3 as a whole remains partial; the runtime audit follow-up below still requires its own exact-merge CI.
+
+Closed the runtime audit defects found in Revision 34. `LedgerClient.from_settings` never selects memory in staging/preprod/production, including a local strict-mode stack, and client-construction failure always raises instead of falling back. Only explicit development/test loopback configuration retains the memory fixture; lookalike hostnames do not qualify. The remote append requires a positive SQL bigint receipt, refusing missing, zero, malformed or out-of-range results. All writes still use `append_ledger`.
+
+`BaseAgent.invoke` revalidates inputs even when passed a different Pydantic model, validates outputs and computes canonical input/output digests. Ledger detail contains phase/receipt/failure-code metadata, not raw payloads, approval material or exception traces. Validation, adapter and execution exceptions are sanitized in logs and returned errors. Mandatory completion-audit failure now returns a failed invocation with no output; it cannot claim success. This cannot undo a side effect already performed by future tools, so execution reconciliation/rollback remains a W5 requirement.
+
+Validation: **174 Python tests**; **five real Postgres outcomes** against the isolated local Supabase stack prove strict durable writes, confirmed receipts, redaction, digests and chain verification. The probe exposed an incorrect draft UUID-receipt assumption; it was corrected to the actual bigint RPC contract before commit. The strict Auth/PostgREST CI lane now runs and publishes only the sanitized runtime-audit result. Memory-ledger tests are explicitly not PostgreSQL durability or canonicalization evidence. No migration or application route is added; tip 0040 and 51 public tables remain unchanged. See [review 24](audits/24-runtime-audit-review-2026-09-22.md).
+
+**Still pending:** complete W4.3 isolated credential-less workers, trust/registration lifecycle, authenticated tenant/task delegation, every-tool permission and tenant/estate data checks, token exchange and actor-chain verification. Then W4.4 grants/approval enforcement, full W3 wizard/readiness and graph, and W4.5/6/7. Broker acquisition and the runtime executor remain disabled. The overall goal is not complete.
+
+## Revision 34 — W4.3 identity verification and attestation foundation
+
+W4.2 broker core is complete and green at staging merge **`46847d8`**, CI [35663034387](https://github.com/vikashkaruna/Proof/actions/runs/35663034387). The broker remains disabled pending mandatory workload/grant activation. No newer other-model staging implementation was present. The broader W3/W4 goal remains open.
+
+Delivered: strict JWT-SVID verification using pinned `jose` 6.2.12, a trusted current-bundle interface, canonical allowlisted trust domains, signature/header/audience/time validation, bounded trust freshness and refusal of removed or changed keys. The verifier returns only immutable identity metadata, never claimed scopes/tenant roles. A tenant-scoped registration adapter checks the exact verified subject, current active registration, expected agent and declared permission on every call. These are internal library components; no application route uses them yet, and neither identity nor registration grants task/estate/connector authority.
+
+The reproducible Docker harness uses checksum-pinned SPIRE 1.15.3 and a digest-pinned Alpine image. A fresh network-disabled container hosts a server, securely bootstrapped agent and ten distinct UID-attested workloads. It proves **61 outcomes**: ten identities, cross-agent/unknown-UID refusals and BFF signature/audience/bundle checks. Private material stays in subprocess memory/stdin and container-local state; only boolean outcomes and revision metadata are artifacts. Containers/state are cleaned up. A required CI lane runs the same harness. An early exploratory diagnostic printed synthetic five-minute tokens; that isolated issuer was removed, its bundle was never trusted by the application, and the reusable runner was changed to allowlist all output. Do not reuse exploratory private fixtures.
+
+Runtime review additionally found and fixed a deployment/authentication mismatch: Python now reads canonical `AGENT_RUNTIME_INTERNAL_TOKEN` (legacy `INTERNAL_TOKEN` remains compatible), and both invocation paths require a configured matching token using constant-time comparison. The generic route previously skipped authentication when configuration was empty. HTTP tests cover the actual deployment variable, absent/empty/wrong credentials and refusal before agent lookup. This legacy BFF transport token still supplies no workload or connector authority.
+
+TS/Python metadata now distinguishes client mutation from internal domain-record changes while retaining `canMutate`/`can_mutate` compatibility and Sudhaar's false setting. Prativedan now declares findings/evidence/Control Library reads; cross-language tests pin both scopes and metadata. These declarations do not enforce tenant/estate data access on their own. Nazar's earlier declaration fix is preserved.
+
+Validation: **513 BFF tests**, **144 Python runtime tests**, workspace tests/lint/typecheck, acceptance harness types and production dependency audit passed locally; 61 real SPIRE/BFF outcomes passed. Existing unrelated runtime Ruff findings are not represented as clean. No new database migration or table: tip **0040**, 41 files, 51 public tables; W2 named targets still 19/40. See [review 23](audits/23-workload-identity-review-2026-09-22.md). Committed container and exact merge CI evidence is recorded after execution.
+
+**Still W4.3:** isolated credential-less agent processes and production SPIRE deployment/bundle delivery, live registration provisioning/revocation, authenticated runtime orchestration with tenant/task delegation, every-tool scope checks and tenant/estate-aware reads, plus RFC 8693 token exchange and verified actor-chain evidence. Do not replace the broker's deny-all default with this identity-only adapter. Then implement W4.4 live grants/approval enforcement, finish W3 wizard/readiness and graph, and proceed W4.5/6/7. Additional review findings to close before runtime activation: `LedgerClient.from_settings` can fall back to in-memory audit on client-construction failure; `BaseAgent.invoke` writes raw input/output and exception detail (including possible approval material), and reports success after completion-audit failure. Add durable fail-closed audit and redaction regression coverage with the runtime isolation slice. These existing paths are not exercised by the BFF/browser acceptance suite.
+
+## Revision 33 — W4.2 OAuth broker core
+
+Reviewed staging `9a75743` and successful CI [35659326878](https://github.com/vikashkaruna/Proof/actions/runs/35659326878): all 16 applicable jobs passed; sanitized artifacts prove 63 browser journeys and 89 API/restart outcomes in each local preprod/production configuration. No newer other-model staging commits were present. The vault milestone is complete and green; the broader implementation goal remains open.
+
+Delivered: typed encrypted OAuth profiles; `client_credentials` and `jwt_bearer` grants; separate Basic/private-key client authentication; short-lived RS256/ES256 assertions; an exact-endpoint, IPv4-pinned HTTPS transport with certificate/hostname checks, bounded responses/deadlines and no redirects. Tenant/connector/configuration-specific trusted configuration selects the endpoint and Mumbai KMS ring. No caller-supplied URL or key resource is accepted. Tokens stay in an explicit redacted in-memory handle, with no token cache or browser response.
+
+The internal broker copies authorization inputs, permits only Drishti read or Karya approved production write leases, and repeats current authority plus credential checks before/after exchange and after audit. Acquisition fails closed on audit errors or excessive scopes/lifetimes. Review fixed a network-latency edge case: the external lifetime upper bound uses response receipt time, while local use expires conservatively from request start. Typed profile provisioning refuses malformed/wrong-family payloads before wrapping. Migration **0040** adds three ledger event types and a service-only credential snapshot reader checking exact tenant/estate/configuration/version, live parents, expiry and revocation; it does not authenticate workloads or grant access.
+
+**Activation gate:** `createCredentialBroker` defaults to deny-all. No acquisition route is enabled. Real SVID authentication, registration, kill-switch, grant mapping and approval/dry-run/rollback checks belong to the mandatory W4.3/4 authority adapter. Synthetic test authority proves broker sequencing only. Repeated issuance checks cannot invalidate an already-issued external bearer token; controlled transports must recheck authority per invocation, and target-side revocation remains provider-specific. JavaScript/SDK buffer clearing is best effort. Deployment configuration/provisioning and real KMS acceptance remain open.
+
+Validation: **471 BFF tests** (107 broker tests), local SQL/security suite including all **41 migration files**, ten concurrency suites and upgrade regressions. Reference HTTP authorization-server tests verify Basic/JWT credentials and claims; a separate real TLS fixture exercises encrypted-profile acquisition. Database SQL tests and HTTP repository adapter tests are distinct evidence, not a claim of end-to-end real SPIRE/cloud KMS. Container and exact merge CI results are recorded after they complete. Tip **0040**, **51 public tables**, W2 named targets **19/40** unchanged. See [review 22](audits/22-oauth-broker-review-2026-09-22.md).
+
+**Next:** W4.3 workload identity, then W4.4 live grants/approval adapter and controlled invocation; finish full W3 wizard/readiness and graph, then W4.5/6/7. W4.2 core implementation is delivered, but deployment activation/acceptance is still gated; W3/W4 are not complete.
+
+## Revision 32 — W4.2 credential vault and rotation foundation
+
+Reviewed staging `be69c3f` and green CI [35654053318](https://github.com/vikashkaruna/Proof/actions/runs/35654053318). No newer upstream implementation appeared. W4.1 is complete at that checkpoint; W4.2 remains **partial**.
+
+Delivered: tenant/connector/credential/configuration-bound AES-256-GCM envelopes, independent random data keys, Mumbai-only AWS/GCP KMS adapters with tenant-specific key rings, authenticated context and provider response checks (including GCP CRC32C). Rotation retains the old stored envelope until the new envelope and audit event commit. Secret buffers are cleared after use; this is best-effort buffer hygiene, not a claim that JavaScript/SDK heaps can be erased.
+
+Migration **0039** adds explicit format/revision/context metadata and a service-only owner/admin/founder administration RPC. Connector version and credential revision checks serialize stale rotation/revocation. Parent/lifecycle locks and live membership are repeated in SQL. Every credential change revokes prior grants and appends an atomic, redacted ledger event. Historical envelopes remain byte-for-byte intact as format 0 and cannot be opened by the v1 broker. No browser credential reads, token cache, acquisition endpoint or execution authority is added. Existing service-role access remains a trusted backend boundary; this milestone is not workload credential isolation.
+
+Validation: **394 BFF tests**, workspace tests/lint/typecheck; **40 migration files**, 51 public tables; ten concurrency suites, including both credential rotation/revocation orders; populated 0038→0039 upgrade; production dependency audit clean. Exact committed container/merge CI remains a separate gate, recorded in the session checkpoint after execution. Provider tests inject KMS responses; no real cloud KMS request was made. See [review 21](audits/21-credential-vault-review-2026-09-22.md).
+
+**Next:** finish W4.2 OAuth grant handlers, pinned token-endpoint transport, broker authorization seam and isolated reference-authorization-server tests. Then W4.3 workload identity, W4.4 per-invocation grants, full W3 wizard/readiness and graph, W4.5/6/7. No connectivity or readiness claim is implied by encrypted storage.
+
+## Revision 31 — connector registry, contracts and lifecycle
+
+Reviewed staging `c79c303` and successful CI [35647963475](https://github.com/vikashkaruna/Proof/actions/runs/35647963475); no newer other-model commits appeared. The latest user instruction prioritizes **W4.1 → W4.2/3/4 → remaining W3 wizard and graph**, followed by W4.5/6/7. Earlier open W0/W1 findings remain recorded, not silently closed.
+
+W4.1 implements strict versioned YAML capability descriptors, separate TypeScript/Python read and write interfaces, a reviewed BFF catalogue, and tenant-scoped registration APIs/UI. Unknown keys, credential fields and connection URLs as endpoint references, duplicate descriptor identities, unsafe YAML, ambiguous numeric spellings and non-production write capabilities are refused. Catalogue publication occurs only during a human registration transaction; published metadata and content hashes remain immutable. The initial PostgreSQL production/reference descriptors declare future transport operations, **not working adapters**.
+
+Migration **0038** adds optimistic versions and the service-only audited lifecycle RPC. Owner/admin/founder membership is repeated and locked inside the transaction. Estate → system → connector locks serialize activation against parent archival. Draft/disabled registrations may be edited; active registrations must first be disabled; archival is terminal. Disable revokes grants, archive additionally revokes stored credential envelopes, and re-enable cannot restore revoked authority. A legacy descriptor outside the reviewed catalogue may be disabled/archived but cannot be enabled through this API.
+
+The connector page now reads actual tenant records under RLS. It no longer claims hardcoded connections, health, residency or active access. “Enabled registration” is explicitly distinct from connectivity; health is the latest recorded check or “Not checked”; non-production bindings carry an amber marker. No probe, credential exchange or client write is triggered.
+
+Validation includes descriptor/role/tenant/API refusals, SQL audit rollback, both archive/enable race orderings, populated upgrade, real-Auth lifecycle/replay checks and browser lifecycle/retry/isolation coverage. Workspace TS tests/lint/typecheck, Python runtime tests and all **39 migrations** pass locally; exact committed container and merge CI outcomes are recorded in Docs 14/15 and the private session checkpoint once those lanes complete. Tip **0038**, **51 public tables**, W2 named targets unchanged at **19/40**. See [review 20](audits/20-connector-lifecycle-review-2026-09-22.md).
+
+**Next:** W4.2 broker vault/rotation and client-credentials/JWT-bearer handlers; then W4.3 workload identity and W4.4 live, per-invocation grants. Complete the W3 resumable wizard/readiness and graph using those enforced permissions. W4.5 internal MCP registry and W4.6 first real SQL execution remain separate acceptance gates; registration alone closes neither W4 nor W3.
+
+## Revision 30 — prior implementation checkpoint
+
+C-W0-4 moves public gap-scan calculation, persisted snapshots and email dispatch into the BFF. SSR validates input, forwards requests and holds only an HttpOnly ownership cookie. Database or rate-limit failure refuses the request; the process-memory fallback is removed. Migration **0037** adds a hashed opaque ownership capability, preserving legacy cookie access without rewriting report snapshots. Both report retrieval and resend require that capability. Review fixed a resend IDOR: the previous route could read any report by ID and dispatch it to a caller-selected address without ownership.
+
+Email delivery requires explicit BFF `AXIOM_REPORT_EMAIL_MODE=delivery` plus a provider key. Disabled or failed delivery never claims success, and optional email failure cannot hide a successfully saved report. Durable request/recipient budgets limit public traffic. Existing client-write denial from 0016 is retained and tested; 0037 does not represent a newly discovered direct SQL write vulnerability.
+
+Validation: 323 BFF tests, 61 browser journeys, all 38 migrations and populated legacy-report upgrade, four real-Auth API parity configurations, workspace and harness checks. The container acceptance runner now submits a report, restarts BFF and marketing, then verifies owned retrieval and foreign denial. Exact committed container/CI results are recorded in the private session checkpoint after execution. See [review 19](audits/19-durable-gap-scan-review-2026-09-22.md) and Docs 14–17. Tip **0037**, 51 public tables, W2 named targets unchanged at 19/40.
+
+**Still open:** C-W0-5 service IAM; new C-W0-6 durable contact inquiries/BFF-owned contact mail; new C-W0-7 questionnaire/control mapping and benchmark provenance. Existing scoring was relocated, not substantively validated by this storage/security milestone. W0 remote acceptance, W1 invitations, full W3 wizard/graph and W4 connector execution remain pending. No cloud resource, real email or client connector action was executed.
+
+## Revision 29 — prior implementation checkpoint
+
+C-W1-4 implements the accepted E.2.3 decision. Migration **0036** records the verified challenge method and binds each pending replacement to the active factor and consumed enrollment proof. Activation refuses missing, unknown or stale provenance with a restart message. Recovery-authorized activation atomically swaps the factor, rotates recovery codes and revokes all existing MFA attestations for that user, including assurance retained from an earlier current-factor replacement. Current-factor authorization preserves attestations. Password sessions remain signed in but MFA-protected APIs and pages require verification again.
+
+The UI explains this before confirmation. Regression coverage includes both paths, two real browser sessions, unrelated-user isolation, SQL fault injection at recovery storage and attestation update, both orderings of concurrent login/replacement, and populated upgrade refusal for legacy pending replacements. The migration changes no existing active credentials or attestations on deployment; an in-flight legacy replacement must restart. Apply migration and deploy BFF/web together. Migration tip **0036** (37 files, 51 public tables; W2 named targets remain 19/40).
+
+Acceptance review also fixed shared analyst TOTP fixtures: each verifying journey owns an enrolled internal-staff account. This preserves replay protection and the independent internal-staff/capability gates. The suite now has **60 journeys**. Exact committed container/CI results are saved in the private checkpoint; a failed or superseded run is never closure evidence. See [review 18](audits/18-recovery-replacement-review-2026-09-22.md), Docs 14–16.
+
+W0 remote acceptance, durable marketing storage and service IAM remain open. W1 invitations remain open. W3 full wizard/graph depends on the pending W4 registry/broker/grant execution work. No new cloud resources or client actions were executed.
+
+## Revision 28 — prior implementation checkpoint
+
+W0 deployed-target engineering is delivered: the existing strict suite can call a running HTTP BFF; browser fixtures, URLs and cookies bind to an explicit private deployment target; MFA enrollment goes through the real BFF without sharing its encryption key. Preflight checks BFF/web/marketing environment, strict mode and exact source revision. Only sanitized scenario results are published; comparison accepts completed successful runs only. Comparison refuses different revisions, repeated endpoints, incomplete/failed results and local/remote substitution. The manual CI lane compares both API and browser suites across two remote acceptance deployments. Automatic CI rehearses BFF/web/marketing containers and the full browser suite locally.
+
+Review found an additional configuration defect: SSR required an unused database service key, while ambient Next/package hints could waive backend secret validation. `loadWebEnv` now exposes only scoped SSR fields; backend validation never trusts those hints. Production Dockerfiles include missing workspace manifests and exclude private runtime/env files. The existing 0035 tenant-admin approval policy remains intact.
+
+Cloud Run wiring review also found placeholder Auth values despite existing managed secrets. BFF now references the managed anon/service keys; web/marketing reference only the managed anon key, including the server-side field previously absent. A deployment gate checks each resource independently; removing a binding, selecting the wrong secret or injecting a backend key into SSR fails. Terraform validates without applying changes.
+
+**Additional open findings:** the marketing gap-scan store still writes through an admin client and falls back to process memory; the existing 59 browser journeys exercise marketing navigation/contact, not submission persistence across processes. Move that store behind BFF authority and test durable submission/report ownership before claiming complete Phase 1 funnel acceptance. Cloud Run also uses a shared service account: runtime environment separation is delivered, but per-service IAM isolation still needs implementation/review. These remain engineering work, not operator provisioning tasks.
+
+This closes engineering items C-W0-1/2, **not W0 remote acceptance**. No higher environment was provisioned. Local production-container evidence shares the local Docker Auth/Postgres stack and is labeled accordingly. Read [Doc 17](17_Deployed_Acceptance.md) for isolated-target setup, CI promotion requirements, fixture side effects and safe evidence handling. Migration tip remains 0035 (36 files, 51 public tables; W2 named targets 19/40).
+
+Next engineering follows the remaining dependencies: W1 invitation lifecycle, then W4.1 registry/contracts/lifecycle for the remaining W3 wizard; W2 execution-detail groups follow stable W4 permissions. E.2.3 is now resolved by the user: recovery-code replacement must invalidate sessions attested by the retired factor. Implementation and regression evidence remain pending as a separate W1 milestone.
+
+---
+
+## Revision 27 — prior implementation checkpoint
+
+W3 onboarding proposal normalization/review is delivered by **0035**, `/estate/onboarding` and the BFF. Assigned Axiom analysts/founders prepare a complete mapping of the retained intake to an explicitly chosen estate. Preparation creates no live systems. A **different client owner or tenant admin** approves or rejects the immutable snapshot with a reason. The user-approved admin policy is now implemented, not merely recorded. Founder/analyst roles cannot substitute for client review.
+
+Approval binds the source intake, normalized systems and estate snapshot through a content hash. An estate-version change invalidates approval. A successful review atomically creates systems/categories, source-index links and all ledger entries; rejected proposals preserve history and permit a revised proposal. Concurrent or repeated approvals cannot import an intake twice. Browser/API roles cannot rewrite proposal content or forge source links. The BFF reads only inventory from the private intake, excluding DPO contact fields.
+
+Validation: 309 BFF tests, 59 browser journeys, all 36 migrations, seven concurrency suites, three populated upgrades, real Auth parity under four local topology labels, workspace lint/typecheck/format. The final approval-ledger failure test rolls back the already-created system and earlier ledger writes. Owner approval/replay passes through real Auth; the browser proves staff preparation followed by tenant-admin approval. See [review 16](audits/16-onboarding-proposal-review-2026-09-21.md).
+
+W3 remains partial for the complete resumable company→estate→inventory→connector/grant→readiness wizard and sustenance; W3.5 and W4 remain pending. Do not present reviewed declarations as discovered systems or active connections. The initial intake is imported as one batch; per-item omission, subsequent onboarding batches and draft form autosave are not implemented. Source region/personal-data declarations remain preserved in the snapshot rather than being silently claimed as verified live attributes. New tables: `onboarding_proposals`, `onboarding_proposal_systems` (51 public tables overall; named W2 targets still 19/40). Next: W4.1 registry/contracts/lifecycle, then broker/identity/grants to support the remaining wizard and graph.
+
+---
+
+## Revision 26 — prior implementation checkpoint
+
+W3 estate management is **partial, with the inventory milestone delivered**. Migration **0034** and `/estate` provide owner/admin/founder create, edit, archive and restore of estates and systems. `estate.manage` is a central capability; the transaction repeats live tenant membership/role checks. Every accepted inventory mutation and explicit legacy-intake assignment appends its audit event in the same database transaction. Browser writes go through the BFF's session/MFA and durable idempotency gates; user-scoped SSR reads remain subject to RLS.
+
+Edits carry an expected version, and concurrent stale changes are refused. Declared and observed data categories now coexist under a provenance-aware key; removing a declaration cannot erase an observation. Active connectors prevent archival. Archived estates refuse system changes and new assessment bindings. Legacy assignment requires explicit confirmation and refuses already assigned assessments or any intake with findings, plans, agent runs, evidence or reports. No old scope is inferred or rewritten.
+
+**Accepted user decision:** tenant **owners and admins** may approve onboarding proposals prepared by Axiom staff. Analysts prepare proposals; they do not gain live estate mutation authority. This decision is recorded now; the proposal review/normalization workflow remains the next W3 implementation chunk. The complete resumable wizard, W3.5 graph and W4 connector runtime are not delivered by inventory CRUD.
+
+Review of upstream `b380578` found no newer staging changes. Its seven connector tables remain metadata only. The populated connector upgrade test now compares pre-existing fields explicitly because 0034 adds a version column; the new default is asserted separately. Migration allocation is **0000–0034**, 35 files. W2 named targets remain 19/40 delivered, 21 absent; no new tables in this milestone. See [review 15](audits/15-estate-management-review-2026-09-21.md), progress, session handoff and Doc 16.
+
+---
+
+## Revision 25 — prior implementation checkpoint
+
+W2 connector schema batch, migration **0033**: `connector_descriptors`, `connectors`, `connector_credentials`, `connector_grants`, `connector_health_checks`, `workload_identities`, `mcp_tool_registry`. Every tenant-owned relationship uses composite foreign keys; membership RLS works without a JWT tenant claim. Browser roles cannot read credential envelopes or mutate any of these tables. Descriptors and tool registrations are append-only for the service role and carry database-computed content hashes. Target provenance is required and descriptor/instance-consistent. Only Drishti read and Karya write grants can be represented; the workload/agent binding is enforced by a composite FK.
+
+This is **W2 data foundation**, not W4 acceptance. No registry API, broker encryption/decryption, SVID authentication, grant enforcement per invocation, connector transport, credential issuance or external mutation is implemented by these rows. Health records in tests are explicitly fixtures. A connector defaults to draft; a workload registration defaults to disabled. Descriptor manifests are non-secret catalogue metadata; credential envelopes have no browser response schema.
+
+The populated 0032→0033 upgrade leaves the existing system unchanged and all seven new tables empty. SQL security/constraint tests, real GoTrue/PostgREST isolation across four local topology labels, and shared contract tests pass. A temporary browser SELECT grant makes the credential regression fail. Migration allocation is **0000–0033** (34 files). The named W2 set is now **19 of 40 delivered, 21 absent**; direct `pg_tables` inspection finds **49 public tables** overall, correcting the earlier 43 count at the pre-connector checkpoint.
+
+W1 invitation/deployed acceptance and E.2.3 remain open. Next: W3 estate management API/UI using the existing model, then W4 registry/broker/grants; W5 execution details require the stable W4 grant model. See [review 14](audits/14-connector-foundation-review-2026-09-21.md), progress, handoff and Doc 16. No cloud apply, scan or connector execution.
+
+---
+
+## Revision 24 — prior implementation checkpoint
+
+Migration **0032** closes the activation failure boundary found in review 12. `finalize_totp_enrolment` swaps the authenticator and replaces its recovery set in one transaction. Recovery codes cross the database boundary only as hashes; the old rows are retained but revoked. A failed recovery insert rolls back the factor swap, old-code retirement and replay counter. BFF errors distinguish storage failure (503) from a rejected code or missing pending enrollment. The old three-argument activation primitive is no longer callable by `service_role`; deploy 0032 together with the updated BFF.
+
+SQL fault injection proves a recovery-write failure leaves old credentials usable, followed by a successful retry. The populated 0031→0032 upgrade preserves every credential row. Local real-Auth parity and enrollment/replacement browser journeys pass. The Revision 23 CI failure was the concurrency script assuming `rg` existed on the runner; it now uses portable `grep`. No security condition was relaxed.
+
+W1 remains partial for invitations, deployed verification, and the unanswered E.2.3 replacement-session decision. Next independent implementation is W2's seven-table connector schema batch, followed by W3 estate management. See [review 13](audits/13-atomic-mfa-recovery-review-2026-09-21.md), Doc 14, Doc 15 and updated Doc 16. Migration tip **0032**.
+
+---
+
+## Revision 23 — prior implementation checkpoint
+
+Completed C-W1-1 (factor revocation UI) and C-W1-2 (enrollment during login quarantine). The UI collects a purpose-bound proof before revocation and shows the effects before confirmation. A first-time quarantined user can enroll, save recovery codes and explicitly continue to login verification; activation alone grants no session assurance.
+
+Reviewing staging exposed a failure boundary behind the existing revoke endpoint: factor removal succeeded even if ending its sessions failed. Forward migration **0031** replaces that best-effort pair with a transaction that revokes the user's active/pending credentials, recovery set and all MFA session attestations together. New attestations must hold an active factor for that user; real two-session races in both orderings prove a concurrent login cannot leave assurance behind. Recovery verification and counter claims now require active credentials as well as unused codes/counters.
+
+**Remaining W1:** invitation delivery and deployed acceptance, plus the pending founder decision on session invalidation after recovery-based replacement (E.2.3). Explicit revocation is separate from replacement and ends assurance unconditionally. Review also found that activation swaps the TOTP rows atomically but still refreshes recovery codes in separate writes; that failure boundary is the next security chunk. W1 is not closed.
+
+The W2 target list contains **40** names, **12 delivered and 28 absent** (including the two existing auth tables). The previous register's 34 total was inconsistent with its own named groups. W0 code delivered so far is tested, but deployed harness work remains engineering work, not solely an operator obligation.
+
+Evidence and limitations: [review 12](audits/12-w1-revocation-quarantine-review-2026-09-21.md), [progress](14_Implementation_Progress.md), [operator runbook](16_Operator_Completion_Runbook.md). Migration tip **0031**; no cloud apply or client-system execution.
+
+---
+
+## Revision 22 — prior implementation checkpoint
+
+Migration **0030**. W1's replacement path, which Revision 21 carried forward as
+a UI gap and which turned out to be broken at three layers — each one hiding
+the next.
+
+**A refusal that looked like a control working.** The Replace button called
+`POST /v1/mfa/enrol` with no `mfaChallengeId`, and the BFF refused it with
+`mfa_challenge_required`. That refusal is correct, and it is why the defect
+survived review: a gate that refuses every caller is indistinguishable from a
+gate that works. Because no request had ever cleared it, nothing had ever
+reached the code behind it.
+
+**What was behind it.** `user_mfa_factors_one_active_totp` (migration 0012) is
+UNIQUE on `user_id` WHERE `totp AND active`. Activation promoted the pending
+factor with a bare UPDATE and never retired the one being replaced, so it
+raised `23505` for any user who already held a factor — and the service
+reported that unique violation as `no_pending_factor`, rendered as "No
+enrolment is in progress". A reason that names the wrong layer is worse than no
+reason: fixing only the UI would have swapped a clean refusal for a confusing
+one, arriving after the user had been shown a new secret.
+
+**The fix, in three parts.** `activate_totp_factor` (0030) retires the replaced
+factor and activates the new one under one set of row locks. Neither order is
+safe from outside a transaction, and revoke-then-activate is the worse of the
+two for a reason beyond lockout: a first enrolment is deliberately not step-up
+gated, so an account momentarily holding no active factor is one a stolen
+session can enrol its own device on — the revoke-then-re-enrol chain the
+enrolment gate exists to break. The security page now opens the `enrolment`
+challenge, satisfies it with the current authenticator or a recovery code, and
+spends it, carrying a per-attempt `Idempotency-Key` because it is the third
+caller of `/v1/mfa/challenge` and the bridge's derived key is fixed for its
+body. `BeginMfaEnrolmentRequestSchema` declares `mfaChallengeId`, which the
+route had been reading off the raw body — an undeclared field is a contract
+nobody can see, and no client sent it for exactly as long.
+
+**Coverage, where there was none.** `/v1/mfa/enrol` had no route test at all;
+seven now. A SQL suite covers 0030 and separately asserts the unique index
+still bites, so dropping it cannot make the function's own tests pass while two
+live authenticators quietly become possible. Five browser journeys cover first
+enrolment, replacement by TOTP, replacement by recovery code, single-use
+consumption and both refusals. The in-memory PostgREST double now models the
+unique index rather than being more permissive than the database — it was that
+permissiveness that let the bare UPDATE pass every unit test in the repository.
+
+The journeys provision their own accounts instead of borrowing seeded personas.
+Enrolment and recovery-code consumption are state transitions on the account,
+so persona-based journeys pass once on a freshly seeded database and fail on
+every rerun — under `retries: 2` that appears as a product flake rather than a
+fixture defect. Confirmed re-runnable by running them twice against an already
+mutated database.
+
+**Delivered:** replacement by current factor and by recovery code, atomic
+retirement of the replaced factor, and the coverage above. **Pending:** factor
+revocation through the UI, enrolment under login quarantine, and estate
+management APIs/UI. W1 remains partial. Migration allocation is through
+**0030**.
+
+**Open decision, not an oversight.** Replacing an authenticator does not
+invalidate live session attestations made with the retired factor. Where the
+replacement was satisfied by a *recovery code*, the user by definition did not
+have their device, and whether that should end sessions the lost device
+attested is a posture question with a real cost either way. It is recorded in
+E.2 rather than answered here.
+
+Per-workstream status for every workstream, not just this one, is in the
+[workstream status register](#workstream-status-register--as-at-revision-22-21-sep-2026)
+immediately below. See also
+[review 11](audits/11-w1-authenticator-replacement-review-2026-09-21.md),
+[progress](14_Implementation_Progress.md), and
+[session handoff](15_Session_Handoff.md).
+
+---
+
+<a id="workstream-status-register--as-at-revision-22-21-sep-2026"></a>
+
+# Workstream status register — as at Revision 28 (21 Sep 2026)
+
+One maintained table rather than a per-revision delta, because a reader asking
+"where is W4?" should not have to reconstruct it from six revision sections.
+Baseline review: `3c1275f`; W1 and migration/count evidence updated in Revision 23. Historical measurements elsewhere in the table are labelled by their checkpoint.
+
+**Status vocabulary** (shared with [Doc 13](13_Roadmap_Traceability.md)):
+**Closed** — exit criteria met and held by a test or CI gate. **Partial** —
+foundation delivered and proven, named acceptance outstanding. **Pending** —
+not delivered; a stub or a page shell does not qualify. **Gated** — blocked on
+a founder decision or on a deployment this workspace is not authorized to make.
+
+| # | Workstream | Status | Proven, and by what | Not proven |
+| --- | --- | --- | --- | --- |
+| **W0** | Security remediation & environment parity · P0 blocking | **Partial** — harness delivered, remote acceptance pending | W0.0 and W0.2 are closed and held by the CI gate. Zero environment-conditional security branches; the only two matches are a marketing URL resolver the plan explicitly names as topology and a comment recording the removed defect. `axiom_e2e_bypass` has no reader anywhere. SEC-3 is closed: **zero** service-role calls across the 22 `apps/web` files, with the baseline file now empty and acting as a ratchet. SEC-4/5/6/10/11/12/13 each carry a regression test. Four strict-parity topology labels produce identical security outcomes. | W0.1 remote acceptance: new HTTP/browser target harness and manual CI comparison are delivered; no remote acceptance run exists. Automatic container and local full-browser evidence do not substitute for two remote deployments. Provisioning and EKS CIDR policy remain operator-owned. |
+| **W1** | Tenancy, RBAC, MFA, personas · P0 | **Partial** | All 22 web files go through `requireTenantContext()`, so RLS enforces tenancy for every query the web app makes. Capability matrix and central `authorize()` in `@axiom/types`; `approval_scopes` is genuinely read, proven by a scoped approver who differs from an unscoped one *only* by that column. MFA: TOTP, recovery codes, login quarantine, approval-time step-up, key-ring rotation, and — Revision 22 — authenticator replacement with atomic retirement of the factor it replaces. 59 browser journeys under `AXIOM_AUTH_MODE=strict` with real GoTrue accounts, including revocation and quarantined enrollment (Revision 23). | Revocation UI and quarantined enrollment delivered in Revision 23. Atomic recovery rotation delivered in Revision 24. Remaining: invitation/email flow and deployed acceptance. The accepted recovery-replacement policy (E.2 item 3) is implemented in Revision 29 / 0036 with atomic revocation, UI notice and regression coverage. |
+| **W2** | Data model completion · P0 | **Partial** | Migrations **0000–0048**, 55 public tables, applied and re-applied cleanly with immutable history and a checksum ledger; the suite runs with `service_role nobypassrls`. Delivered of the named target set: the estate group (4), W7.0 regulatory group (6), auth group (2), and connector group (7, via 0033): 19 of 40 named targets. Plus MFA, execution claims, dispatch outbox, atomic onboarding, approval issuance and reconciliation. | **21 of the 40 named target tables do not exist** — verified against the migrated database, not by grep. All 5 W5 execution-detail tables, all 4 W6 monitoring/policy tables, all 4 W7.3/7.4 multi-regulator tables, all 4 Phase 1/2 parity tables and all 4 W8 rights/consent tables. |
+| **W3** | Client estate & onboarding · P1 | **Partial** | Inventory API/UI and confirmed legacy-intake assignment (0034); immutable staff proposals and owner/admin review with atomic import (0035). | Complete resumable wizard, sustenance, W3.5 graph and W4 runtime remain pending. |
+| **W4** | Universal Connection Framework · P1 XL | **Partial: W4.1 and W4.2 core implemented** | Registry/contracts/lifecycle (0038), vault/rotation (0039), OAuth broker core and credential snapshot reader (0040); W2 foundation retained. | Identity verification, runtime audit, task delegation and a real isolated Parikshan/scoped-persistence path are delivered. Receipt-based finalization/recovery is delivered. Durable private dispatch, opaque scheduling, authenticated remote transport, KMS provider components, completed-input retention and persisted enqueue/claim policy fences are delivered locally. Production composition/isolation, backup-aware key retirement, remaining workers, trust lifecycle, broker activation, grants, health probes and client transports remain open. Registration does not grant executable authority. |
+| **W5** | Phase 3 execution loop · P1 XL | **Partial** | The *authority* machinery is real and tested: signed scope-bound approval tokens, bounded nonce replay defence, execution claims with serialization proven by a held-open two-session race, the dispatch outbox, atomic reconciliation and the kill switch. | The executor. Karya refuses mutating execution without a signed token **by design at this phase** — a deliberate refusal stub, not a defect, and not a PRD B.10 completion claim. Zero of 5 execution-detail tables. |
+| **W6** | Continuous compliance · P1 | **Pending** | Nothing. | Zero of 4 tables. A monitoring page shell and a controls-drift script exist; neither is this workstream. |
+| **W7** | Control library & multi-regulator · P0-adjacent | **Partial** | 46 controls, with a CI gate proving every count in the repository agrees with the library, a TS→runtime parity gate against drift, and citation tests. The full W7.0 regulatory baseline group is in the database. | Multi-regulator and sector packs: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs` — all 4 missing. Sectoral pack #1 is an open founder decision ([E.2 item 1](#e2-still-open--not-blocking-needed-before-the-workstream-that-uses-it)). |
+| **W8** | Reporting, evidence, branding · P1 | **Partial**, retention **Gated** | The evidence package and the gap-scan report exist and are tested. | Real immutable retention, which **cannot** be proven from here: an evidence-bucket Object Lock is a COMPLIANCE-mode lock nobody, including the project owner, can shorten or delete. Deliberately out of scope rather than skipped. The 4 rights/consent tables are missing. |
+| **W9** | Test, audit and performance · P0, alongside | **Partial** | 624 BFF tests, 187 Python runtime tests, 76 web tests; 67 browser journeys per configuration at the prior green checkpoint. 44 migrations, 13 concurrency suites and 9 populated upgrades; 61 identity and 14 real worker/tool/recovery outcomes. New automatic container HTTP acceptance complements the local strict suite and manual remote API/browser comparison. | Performance/load acceptance remains open; NFR-7 depends on W4 execution. Remote workflow success is not claimed from local tests. |
+| **W10** | On-prem deployment environment · P2 | **Partial** | The Helm chart renders, passes `kubeconform` and a semantic gate, and the self-hosted Supabase topology rehearsal is green in CI. | No deployed on-prem instance. Air-gapped operation is unexercised. A chart that renders is an artifact, not a running deployment. |
+
+**What it takes to move W0–W3.** The ordered operator steps — configure,
+deploy, migrate, seed, verify — together with the evidence each one returns and
+what I do with that evidence to flip a status, are in
+[Doc 16, the operator completion runbook](16_Operator_Completion_Runbook.md).
+Every item there names one owner, because the four workstreams split unevenly:
+W0's remote acceptance awaits provisioned targets, while its harness is delivered; W2 and W3 still need engineering, and W1 is genuinely shared.
+
+**Reading the register honestly.** Six of eleven workstreams are Partial, two are
+Pending outright, and W0's remaining half plus W8's retention are Gated on things
+this workspace is not permitted to do. The P0 band (W0 code, W1, W2, W7, W9) is
+where the delivered work is concentrated; the XL workstreams that make up the
+actual product loop — W4's connectors and W5's executor — are the ones with
+almost nothing in them, and W5's own tables are empty because W4 has to land
+first. Nothing here states or implies that a scan, a connector or a mutating
+execution has ever run.
+
+---
+
+## Revision 21 — prior implementation checkpoint
+
+W2 estate foundation, migration **0029**: `estates`, `estate_systems`, `system_data_categories`, `estate_scans`, and an optional estate reference on engagements. Every relationship uses a tenant-consistent composite foreign key. Authenticated clients have membership-bound reads only; the BFF has explicit policies that work without BYPASSRLS. Referenced records cannot be deleted out from under their history; estates/systems can be archived. A queued scan is metadata, not evidence that discovery ran.
+
+Existing engagements remain unassigned rather than being silently mapped to an invented estate. The engagement-creation API accepts an optional `estateId`, retains its capability gate, and the database rejects another tenant's estate. Shared Zod models and branded IDs describe the new entities. The upgrade test applies 0029 to a populated 0028 database and verifies the assessment survives unchanged with a null estate reference.
+
+Reviewed and retained the other model's browser/MFA/deployment work. Two follow-ups: the browser harness no longer explicitly gives administrative Supabase credentials to Next.js, and approval-page invalid HTML nesting is fixed. The original browser suite passed despite React hydration errors; approval journeys now fail on browser runtime errors, and the old markup fails that new assertion.
+
+**Delivered:** model, constraints, RLS, engagement API linkage, SQL/upgrade/API/real-Auth coverage. **Pending:** estate management APIs and UI, normalization of onboarding proposals, user-confirmed assignment of legacy engagements, scan/connector implementation and graph. W2 is still partial; this does not complete W3 or imply that a scan has executed. Migration allocation is through **0029**. W0 deployment/retention acceptance and executor-side checks remain open. MFA replacement UI still needs its required step-up flow; the existing server correctly refuses replacement without it.
+
+See [review 10](audits/10-estate-foundation-and-browser-review-2026-09-21.md), [progress](14_Implementation_Progress.md), and [session handoff](15_Session_Handoff.md). Earlier revision sections are historical where they conflict with this checkpoint.
+
+---
+
+## Revision 20 — prior implementation checkpoint
+
+No migration. Not a workstream item — a gate that was missing, and what turned up once it existed.
+
+**A comment that invalidated six lines it never touched.** `terraform fmt` had
+never been run by anything, and four files had drifted. Three are ordinary. The
+fourth was not written wrong by anyone: fmt aligns *contiguous* runs of
+assignments, and a comment ends the run. Revision 17's change to preprod's
+`supabase_preprod_url` added a two-line comment directly above it, splitting the
+`locals` block into two alignment groups. The six keys above had been padded to
+that key's 20-character width — correct while they shared its group, stale the
+instant they did not. The edit that invalidated them is three lines away and
+modifies none of them.
+
+**prod had never been initialised.** `fmt` only parses; it never resolves a
+module or a reference, so it cannot see a module block whose arguments the
+pinned version rejects. `terraform validate` can, and against `envs/prod` it
+found a configuration that could not load at all: three variables declared twice
+(bare in `main.tf`, documented in `variables.tf`), then seven arguments spelled
+for module majors the configuration does not pin, then a `helm_release` using
+the provider v3 `set` attribute under a `~> 2.11` pin, then a lifecycle rule
+with neither `filter` nor `prefix`.
+
+The obvious reading — an abandoned module upgrade — is wrong, and the
+distinction matters for how it was fixed. The same `module "eks"` block mixes
+v21 spellings (`name`, `kubernetes_version`, `endpoint_*`) with v20 ones
+(`cluster_encryption_config`, `enable_irsa`). No single version has ever
+accepted that combination. It was assembled from whichever version's
+documentation was open at the time, and because nothing ever ran `init`, nothing
+ever said so.
+
+**Pins kept, names changed.** Moving eks to v21 or helm to v3 would change what
+gets provisioned; renaming changes only which name expresses a setting already
+written. So `~> 20.0` and `~> 5.5` both stand and nine things were corrected
+against them.
+
+**The gate discovers environments rather than naming them.** `for env in
+infra/terraform/envs/*/` — the failure that produced prod was an environment
+nobody checked, and a hand-written list of two reproduces it the moment a third
+appears. `-backend=false` is deliberate: prod's `main.tf` carries a live
+`backend "s3"` block, and a configuration gate must not reach for state.
+
+| Workstream | Delivered since Revision 19 | Remaining acceptance |
+| --- | --- | --- |
+| W0.1 | `terraform fmt -check -recursive` and `terraform validate` across every environment in the W0.1 job, on a pinned Terraform; four files reformatted; `envs/prod` made loadable for the first time | prod is loadable, not reviewed as correct; its public API CIDR is unchanged and remains a founder decision |
+
+**Confirmed on the runner, not only locally.** Staging CI [35584341666](https://github.com/vikashkaruna/Proof/actions/runs/35584341666) is
+green across all fifteen jobs on the merge commit, and the validate step's log
+shows both environment groups and two valid verdicts with no warnings — so the
+loop iterated both rather than matching nothing, which would also have exited 0.
+
+**What this does not do.** Nothing was applied and no cloud resource was
+created — `init -backend=false` and `validate` only. `validate` proves a
+configuration resolves, never that it describes infrastructure anyone wants, and
+prod has not been reviewed on that second question. One item is carried forward
+unchanged and is a **decision, not an oversight**:
+`cluster_endpoint_public_access_cidrs` still carries `["0.0.0.0/0"]`, exactly as
+the v21-named argument did, with its "restrict via WAF / OIDC in production"
+comment still standing and still unactioned. What changed is that this exposure
+is now reachable rather than blocked behind a configuration that could not load.
+The gate is error-level: `validate` exits 0 on warnings, so the lifecycle
+`filter {}` is defensive rather than enforced. Migration allocation is unchanged
+at **0028**.
+
+---
+
+## Revision 19 — prior implementation checkpoint
+
+No migration. The deployment gap Revision 18 named in its own closing lines.
+
+**Reviewed, never compiled.** Revision 18 shipped `optional: true` on a Helm
+`secretKeyRef` and recorded plainly that `helm` is not installed on the dev
+machines and CI does not render the chart, so the change was reviewed rather
+than templated. Rendering it for the first time showed the chart could not
+render **at all**, and had not been able to for its whole life: a `range` over
+a boolean in `ingress.yaml`, two values keys the templates dereference that
+`values.yaml` never declared, and an `annotations` block emitted outside
+`metadata`. An absent key is a nil pointer in Helm, not an empty string.
+
+The consequence for Revision 18 is worth stating plainly.
+`check-mfa-ring-coverage.sh` was confirming that
+`AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS` was *present in the chart*, and it was —
+in a chart that could not produce a manifest. A presence check over template
+source cannot tell a wired variable from an unrenderable file.
+
+**Then the defects that render perfectly.** With the chart rendering, four more
+appeared that are valid YAML and valid Kubernetes, and wrong:
+
+- Both NetworkPolicies that *grant* access selected on
+  `app.kubernetes.io/part-of`, a label the pod templates never carried — it was
+  emitted on object metadata only. They matched zero pods while the
+  default-deny matched all of them, leaving every workload with DNS and nothing
+  else.
+- `allow-internal` then carried only the **egress** half. A NetworkPolicy
+  decision needs the sender's egress and the receiver's ingress, so once the
+  policies bound to real pods, `bff:4000`, `agent-runtime:8000` and
+  `model-gateway:8001` still admitted nothing; only port 3000 from
+  ingress-nginx was ever allowed in, which is the public edge, not the data
+  plane.
+- A `marketing` Service and the Ingress rule for `axiomproof.ai` pointed at a
+  Deployment that did not exist. The public site answered 503.
+- `bff` and `agentRuntime` omitted `replicas` to hand the count to an
+  autoscaler the chart never shipped, so each ran one pod under a
+  PodDisruptionBudget with `minAvailable: 1` — a floor equal to the count,
+  which permits zero voluntary evictions and stalls a node drain indefinitely.
+  `temporalWorker` had values, a Dockerfile and a published image, and no
+  Deployment: durable work would be accepted and never run.
+
+**Two gates, because they answer different questions.** `helm template` piped
+through `kubeconform -strict` asks whether each manifest is well-formed and
+schema-valid. `scripts/check-rendered-manifests.py` asks whether the set of
+them means what the chart claims: every bundled component has a workload, every
+Service selects a pod, every NetworkPolicy binds, every Service port is
+admitted under the default-deny, and no disruption budget sits at or above its
+own replica floor. Against the pre-change tree it reports seven findings. The
+render gate could not have caught any of them.
+
+Rendering the chart defaults alone is not coverage either — a `{{- with }}`
+guarding an empty map never executes, which is how the annotations defect
+stayed invisible to both the defaults and `values-prod.yaml.example`.
+`infra/helm/axiom-proof/ci/` holds one values file per branch the defaults
+leave cold, following the convention `ct` already uses, and the gate renders
+every one.
+
+**Not deployed.** Nothing was applied to a cluster. kubeconform validates
+against the upstream schema set only — no CRDs, no admission controllers, no
+cluster policy — so a manifest can pass here and still be rejected on apply.
+The topology corrections are reasoned from the Compose files and the existing
+Services, not observed against a running cluster, and they are the first thing
+a real deploy should be checked against.
+
+## Revision 18 — prior implementation checkpoint
+
+No migration. The last piece of W1 that was not deployment acceptance.
+
+**Half a key ring.** Revision 15 gave the BFF a rotatable MFA key: a primary
+that seals new and rewrapped secrets, and `AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS`,
+a comma-separated list of keys that may still be read. It was wired into the
+four Compose files and nothing else. Cloud Run and Helm carried only the
+primary, so a rotation in a deployed environment had **no path for the
+retiring list** — `sync-env.sh verify` would pass, the service would roll, and
+every factor still sealed under the outgoing key would become unreadable.
+
+That failure does not show up at deploy time. It shows up later and one user at
+a time, as each person's next verification hits `secret_unreadable` and a 503,
+which reads like an authenticator problem rather than a deployment one.
+
+**Absent, not empty.** Both surfaces now express "no rotation in flight" as the
+variable being *absent*, which is what the key ring already reads an unset
+value as. That is not a stylistic choice: an empty payload is not storable as a
+Secret Manager version, so a permanently-empty member of `managed_secrets`
+would fail every apply that is not a rotation.
+
+- **Cloud Run** — the secret and its version are `count`-conditional on
+  `var.mfa_encryption_keys_previous`, and the BFF's env entry is a `dynamic`
+  block iterating that resource, so the condition is stated once in
+  `secrets.tf` rather than restated and left to drift. Clearing the variable
+  destroys the secret, so the retiring key stops existing at the moment it
+  stops being needed.
+- **Helm** — `optional: true` on the `secretKeyRef`. With no
+  `mfa-encryption-keys-previous` key in the `<release>-internal` Secret the
+  variable is simply unset; without `optional` every pod would refuse to start
+  until someone supplied a key they do not have.
+
+**The check that would have caught it.** No gate asked whether a variable
+reaches every surface that runs the service needing it, which is why the
+omission survived. `scripts/check-mfa-ring-coverage.sh` asks it across all six
+BFF surfaces and fails the build otherwise; it runs in the existing deployment
+coverage job. Against the pre-change tree it names Cloud Run and Helm and
+nothing else. The word-boundary match is deliberate —
+`AXIOM_MFA_ENCRYPTION_KEY` is a prefix of the retiring list's name, so a
+substring test would stay green with the primary key missing.
+
+| Workstream | Delivered since Revision 17 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Retiring key ring wired into Cloud Run and Helm; a conditional Secret Manager secret; the cross-surface coverage gate; the deployed rotation path documented per surface in Doc 09 | Deployed acceptance — no rotation has been exercised against a running environment |
+
+**What this does not do.** Nothing is deployed and no rotation has been run
+against a live service; this makes the path exist, not proven. `terraform
+validate` passes and the conditional resources are unapplied. Helm could not be
+rendered locally — `helm` is not installed on this machine — so the chart change
+is reviewed, not templated. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 17 — prior implementation checkpoint
+
+No migration. The positive case the persona journeys could not reach, and the defect it uncovered.
+
+**The approval completes.** The harness now starts the BFF alongside the web app, so a step-up challenge has something to be satisfied against. `scripts/seed-personas.ts` enrols real TOTP factors — written encrypted under the same ring key the harness starts the BFF with, so the two agree by construction — and an approver signs in, selects an action, opens the step-up panel, enters a code generated from their own seeded secret, and receives a **signed approval token**. Every gate the product has, in the order a person meets them. A wrong code approves nothing and leaves the panel open; the same code cannot be spent twice; a viewer is never offered the path and a scoped approver is refused it.
+
+The two workbench journeys that Revision 16 marked `fixme` are live for the same reason: `axiom_analyst` now clears the login-MFA gate with a real code and reaches `/workbench`. They needed one more thing the seed had not modelled — `requireInternalContext` asks two separate questions, `users.is_axiom_internal` (who employs you) and `WORKBENCH_ACCESS` (what you may do), and the capability alone lands on the client portal. The seed marks Axiom staff as staff.
+
+**What the browser found.** The web-to-BFF bridge derives an `Idempotency-Key` from method, path and body when the caller supplies none. For `POST /v1/mfa/challenge` with `{"purpose":"login"}` that is the **same key for a given user forever**, and `claim_request` returns `conflict` whenever the stored claim's authority hash differs — a hash that includes the GoTrue session id. So the first login-MFA verification of a user's life claimed the key, and every later sign-in presented the same key from a different session and was refused `idempotency_conflict` **permanently**. Inside one session it failed more quietly: the claim replayed and handed back a challenge id that had already been consumed.
+
+A derived key is right for approving and executing, where a double submit must not run twice. It is wrong for minting a single-use credential. Both challenge callers now supply a per-attempt key. The API suites cannot find this class of defect at all — they pass a fresh `randomUUID()` on every request and never exercise the bridge's derivation.
+
+| Workstream | Delivered since Revision 16 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Approval carried to a signed token in a browser; wrong-code, replay and refusal journeys; the BFF in the harness; seeded TOTP factors; the two workbench journeys un-`fixme`d; the single-use challenge idempotency fix with a unit regression | Deployed acceptance |
+
+**What this does not do.** A signed token is not an execution: the token is the gate, and a separate execute call runs the work against a client estate, which no connector-backed executor exists to perform. Nothing is deployed. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 16 — prior implementation checkpoint
+
+No migration. The W1 exit criterion, and the harness that could never have proved it.
+
+**What was actually there.** `tests/e2e` was missing from `pnpm-workspace.yaml`, so `@playwright/test` was never installed, `pnpm test:e2e` resolved to no package, and the whole suite exited 0 having run nothing — the same failure mode as `--passWithNoTests`, which this repository has been bitten by before. There was no e2e job in CI. And the harness it did carry configured `AXIOM_E2E_BYPASS_AUTH` and an `axiom_e2e_bypass` cookie, both deleted from the application in W0.0; under that bypass every caller resolves to a single founder identity, so a persona journey written on it would have been a founder wearing a viewer's name and would have passed whatever the render gating did, including nothing.
+
+**What replaces it.** `scripts/seed-personas.ts` creates nine real GoTrue accounts — one per persona, plus a second approver and a second owner — across two tenants with deliberately different MFA policies, and the journeys sign in through the real login form under `AXIOM_AUTH_MODE=strict`. Tenant A sets `mfa_required_roles = '{}'` so the authorisation journeys vary one thing at a time; tenant B keeps the default so the quarantine is exercised as its own journey. Both are supported configurations, stated rather than inherited.
+
+Twenty-seven journeys cover the first two clauses of the exit criterion — a viewer cannot see tenant B and cannot reach an approve control — plus nav gating, the login-MFA quarantine, and a wrong password staying refused. The third clause is a statement about the server, not the page, so `viewer_cannot_approve` and `viewer_cannot_reject` were added to `verify-strict-parity.ts`, which holds a real GoTrue token; a caller who never loads the page is exactly the one worth refusing.
+
+**What the journeys found.** A scoped approver gets no approve control but keeps **Reject plan**. `SCOPE_NARROWED` covers `PLAN_APPROVE` and `PLAN_EXECUTE` and not `PLAN_REJECT`, so narrowing someone's `approval_scopes` removes their ability to grant and leaves their ability to refuse. That is the right asymmetry — saying no is not authority over a client estate — and it is now asserted rather than assumed. My first draft of the test asserted the opposite and was wrong.
+
+The `approver` / `approverScoped` pair differ **only** by a non-empty `approval_scopes`, which is what makes Doc 11's old note that the column is "defined and never read" falsifiable.
+
+**The gate.** `check-env-security-gate.sh` scanned `apps packages services` and not `tests`, which is why a harness configuring the deleted bypass survived W0.0. It scans `tests` now, and reintroducing `AXIOM_E2E_BYPASS_AUTH` there fails the build.
+
+| Workstream | Delivered since Revision 15 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Real-auth persona harness and 27 browser journeys; persona approve/reject refusals at the API; `tests/*` in the workspace; a CI job that runs them; the security gate extended to the harness | The positive approve **action** through a browser, which needs the full MFA flow and a running BFF; deployed acceptance |
+
+**The specs this woke up.** Making the suite runnable for the first time also started four spec files that had been dormant since they were written, and the first CI run failed on them. `approval-console.spec.ts` wrote a fake Supabase session into `localStorage` carrying `test-access-token` — one of the BFF's `SYNTHETIC_TOKENS`, accepted only under the deleted bypass — so its setup was inert and it was really asserting what an unauthenticated visitor sees, against a plan id that has never existed. It now signs in as a seeded persona against a real plan, and gained the complement it could not previously express: the same page as a viewer, with no kill switch. The public-surface specs needed the marketing server this config had stopped starting, which is restored. `agent-ui-communication.spec.ts` is marked `fixme` rather than deleted: `/workbench` needs `WORKBENCH_ACCESS`, held only by `founder` and `axiom_analyst`, both of which `ALWAYS_MFA_REQUIRED` holds at enrolment — so it is blocked on the same TOTP-through-the-BFF gap named below.
+
+**What this does not do.** The journeys prove what each persona is *offered*, not that an approver can complete an approval end to end in a browser — that needs the TOTP challenge satisfied against a running BFF, and is the next piece. Nothing is deployed, so none of this is deployed acceptance. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 15 — prior implementation checkpoint
+
+No migration. Two pieces of work: verifying Revision 14 rather than inheriting it, and closing the MFA key rotation gap it named as next.
+
+**Verification of 0028.** All of it holds. Reverting the route's digest source to a live post-MFA read fails exactly the three regression tests that cover it. The claim that matters most is byte compatibility — `action_set_content_digest` now round-trips through `jsonb_to_recordset`, and 0027 compares a token's stored digest against a fresh recompute, so any disagreement would make **every approval token issued before 0028 permanently unclaimable**, surfacing as `content_changed` on content nobody touched. Rebuilding the 0026 function under another name and comparing on deep nesting, non-BMP characters, combining marks, numeric trailing zeros and exponents, a 23-digit integer, `-0.0`, and `'null'::jsonb` in every jsonb column produced identical digests on every row and every subset, while still detecting a real edit. The other three step-up call sites bind to stable identifiers and have no read-after-consume window, so the gap was confined to the approve route.
+
+**MFA key rotation.** `AXIOM_MFA_ENCRYPTION_KEY` could not be rotated at all. The stored envelope recorded no key identity, so replacing the key did not degrade service — it locked out every enrolled user simultaneously, and each lockout was indistinguishable from a wrong code. There was no procedure, only a flag day, which is why the operator policy told readers not to rotate.
+
+The envelope is now `v2$<keyId>$…`, where the id is a hash of the key material: stable, safe to log, and not a step towards the key. The BFF reads a ring — one primary that seals new secrets, plus retiring keys that may still be read — so both can be live at once. A factor sealed under a retiring key keeps verifying and is rewritten under the primary key the next time its owner **successfully** authenticates, never on a failed attempt, so rotation drains at the pace people log in and nothing decrypts the whole table into one process. Pre-ring `v1` envelopes are opened by trying each key, which is safe because the ciphertext is authenticated.
+
+A secret nobody on the ring can open returns `secret_unreadable` and HTTP 503, not a rejected code. That distinction is the point: collapsing the two is what would hide a broken rotation inside ordinary failed-login noise. `sync-env.sh mint --force` now carries the outgoing key onto the retiring list instead of orphaning every factor, and `verify` reports how many retiring keys remain.
+
+| Workstream | Delivered since Revision 14 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Key ring with identified envelopes; lazy rewrap on successful verification; `secret_unreadable` as a distinct 503; rotation carried through `sync-env.sh`, the env templates and all four Compose topologies; runbook and operator policy | Browser persona journeys; rotating a **deployed** environment, which nothing has done because nothing is deployed |
+
+**What this does not do.** Rotation is proved by unit and service tests, including the lockout case it exists to prevent, and by running the mint carry-over end to end against a real env file. It has never been exercised against a deployed environment, and the Cloud Run and Helm paths pass the primary key through Secret Manager without yet carrying the retiring list — an environment rotated there today would still need the list wired into its secret flow. Migration allocation is unchanged at **0028**.
+
+---
+
+## Revision 14 — prior implementation checkpoint
+
+Integrated staging `369bcf7` without discarding the other model's work. The follow-up review found a remaining gap: MFA verified the route's first action read, but the signed digest came from a **second live read after challenge consumption**. An edit between the reads became new signed authority; the two regression tests returned 201 before this correction.
+
+Migration **0028** adds a pure database digest helper for the exact action rows already verified by MFA. The route sends those server-read rows, not a client-provided snapshot. The issuance entrypoint locks and checks the reviewed plan revision and status, then delegates to the existing atomic action/token/ledger transaction. The underlying action digest representation is unchanged, including existing signed tokens; the old issuance entrypoint is no longer callable by `service_role`. Challenge consumption remains outside issuance, preserving the deliberate safe-side tradeoff.
+
+Delivered: action-edit and revision regression tests, digest compatibility against the 0026 implementation, positive issuance, direct-client/legacy-entrypoint restrictions, and actual writer-versus-issuer PostgreSQL races. Local acceptance: 258 BFF tests, typecheck/lint, 0000–0028 SQL and DSN suites, four concurrency suites, and all four real Auth/MFA parity labels. See [review 09](audits/09-reviewed-approval-snapshot-2026-09-21.md) and [saved session](15_Session_Handoff.md).
+
+W0/W1/W2 remain **partial**. Next W1 work is strict browser persona journeys and MFA key rotation; real executor snapshot verification belongs with the W4/W5 connector/executor implementation. W0 deployment acceptance remains constrained by the accepted no-billable/irreversible rule. W2 estate/system/engagement modeling is still pending. Migration allocation is through **0028**; previous revision sections are historical where they conflict with this one.
+
+---
+
+## Revision 13 — prior implementation checkpoint
+
+Migration 0027. Revision 12 verified the content digest when an approval was issued; nothing downstream checked it, so the token named which rows to execute and not what they contained.
+
+`trg_actions_approved_immutable` (0004) freezes an approved action's type, parameters, rollback definition and findings. It does **not** freeze `dry_run_result`, and the simulated outcome is exactly what the approver read before agreeing — so between approval and execution the diff could be replaced without anyone breaking a constraint, and nothing noticed. `tests/database/claim-snapshot.test.sql` establishes that gap against the live schema rather than asserting it from the trigger's source, so a future widening of the trigger shows up as a failing test.
+
+`claim_plan_execution` now recomputes `action_set_content_digest` under the action row locks and compares it with the digest on the token, read from the persisted signed payload and never from the caller — the function still takes no digest parameter. A token carrying no snapshot is refused outright: failing closed costs a re-approval, failing open executes content nobody agreed to.
+
+The digest is signed into `ApprovalTokenSpec`, carried into the dispatch intent, and put on the wire as dispatch contract **v2** (`content_digest`, required on both sides and pinned by the shared fixture that exists because neither side's own tests could catch R-05).
+
+| Workstream | Delivered since Revision 12 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Claim-time snapshot enforcement (0027); digest signed into the approval token; dispatch contract v2 carries it; a token without a snapshot cannot claim | Browser personas; MFA key rotation/deployment |
+| W5 | The dispatch intent and the wire payload both carry the snapshot the batch was authorised for | A real executor that recomputes the digest before mutating; live connectors, chunk interruption, rollback, PRD B.10 |
+
+**What this does not do.** The executor is still a refusal stub, so it records the snapshot rather than re-verifying against it. Recomputing there needs database access the stub does not have, and a check around a no-op would read as coverage while guarding nothing. The enforcement point today is the claim, which is transactional and holds the row locks — that is a stronger place for it than the executor, but it is not the same as the executor refusing.
+
+Migration allocation is through **0027**. Everything Revision 12 records as remaining stays remaining unless listed above.
+
+---
+
+## Revision 12 — prior implementation checkpoint
+
+Continues from staging `8476d8c`. The 21 September review named atomic approval issuance as the next W1 safety slice; migration 0026 delivers it and the approve route is wired onto it.
+
+Issuing an approval was seven round trips, each committing on its own. A fault between any two left a state nobody designed — most seriously actions approved and a signed token live with **no ledger entry**, which is authority over a client's estate with no tamper-evident record of who granted it. Token, challenge link, action approval, plan status and the ledger append are now one transaction, under the same lock order as `claim_plan_execution` and `reconcile_execution_dispatch`.
+
+`action_set_content_digest` is recomputed under those row locks and compared with the digest the route read, which closes the read-to-write race the review identified: the content that is approved is now the content that was verified. Eligibility is rechecked there too, because the route's reads can go stale before the write lands. The function lives in SQL so both ends of the comparison agree by construction rather than by two languages canonicalising JSON identically — the assumption R-05 disproved.
+
+**Deliberate deviation from the review's sequence:** challenge consumption stays *outside* the transaction. Burning a step-up and then failing costs the approver a re-authentication, which is the safe direction; folding it in would mean a rolled-back issuance silently restores a spent challenge. Everything after consumption is atomic. If that trade is not wanted, it is a one-parameter change and a founder decision, not a defect.
+
+| Workstream | Delivered since Revision 11 | Remaining acceptance |
+| --- | --- | --- |
+| W1 | Atomic approval issuance (0026): token, challenge link, action approval, plan status and ledger in one transaction; content digest and eligibility rechecked under row locks; ledger-failure and concurrent-edit tests | Browser personas; MFA key rotation/deployment. *(Snapshot enforcement delivered in Revision 13.)* |
+
+Migration allocation is through **0026**. Everything Revision 11 records as remaining stays remaining unless listed above. No deployed parity, irreversible lock or live estate execution is claimed.
+
+---
+
+## Revision 11 — prior implementation checkpoint
+
+Reviewed and incorporated staging `ea27df9` and its ten commits after `84c3b16`; no accepted work was discarded. See [the saved session handoff](15_Session_Handoff.md), [progress](14_Implementation_Progress.md), and [21 September review](audits/07-staging-integration-review-2026-09-21.md). The previous revision below is historical where it conflicts with this checkpoint.
+
+Accepted decisions remain: higher environments self-host Supabase; no billable/irreversible deployment in this session; fresh approval for every redelivery; proxy trust configured per environment and disabled by default; TOTP/recovery only, email OTP deferred. No automatic outbox worker is authorized by these documents.
+
+| Workstream | Delivered since Revision 10 | Remaining acceptance |
+| --- | --- | --- |
+| W0 | Fail-closed deploy/env generation; self-hosted Auth/PostgREST artifacts; managed service-role policies (0024); public signup disabled while mail verification is unwired; runtime DB TLS required; real MFA parity expansion | Actual reviewed preprod deployment/secret verification, verified GCS retention, live halt proof, complete security/operations acceptance |
+| W1 | Action-content MFA binding; account/session/trusted-address budgets; correct HTTP 429 responses; explicit execution capability; real TOTP/recovery/session/approval tests; operator policy document | Browser personas; action snapshot enforcement at execution; MFA key rotation/deployment. *(Atomic approval issuance delivered in Revision 12.)* |
+| W2 | 0022 retires obsolete dispatch RPCs; 0023 reconciliation; 0024 managed service policies; 0025 atomic audited reconciliation/revocation | Most estate/connector/dry-run/batch/rights/monitoring models remain pending; do not treat operational tables as whole W2 completion |
+| W5 | Human reconciliation with fresh-approval policy; release revokes other outstanding old authority; ledger failure rolls release back | Real consumer/executor, live connectors, queued/chunk interruption, rollback and PRD B.10 proof |
+
+**Review corrections:** the topology rehearsal's empty reads did not prove BFF authority without `BYPASSRLS`; the SQL suite now removes that attribute and tests positive access plus client denial. Reconciliation's pre-existing unused token was incorrectly labelled a fresh approval by its test; it is now revoked, and the positive test issues a new token after release. The old release committed before its ledger append; 0025 makes them atomic. R-04/R-08/R-09/R-10/R-11 remain broader acceptance packages, not closed merely by these patches.
+
+Migration allocation is through **0027** as of Revision 13. Continue W0/W1 acceptance before W2 vertical slices and W3, as requested. Treat the original roadmap's release phases separately from the gap-plan workstream numbers. No deployed parity, irreversible lock or live estate execution is claimed.
+
+---
+
+## Revision 10 — prior handoff snapshot
+
+This section supersedes Revision 9's snapshot below. Use [implementation progress](14_Implementation_Progress.md) and [the resumed review](audits/06-resumed-implementation-review-2026-09-20.md) for code, tests and remaining acceptance work. Documents describe requirements and status; implementation/commit authority comes from the user's conversation, not embedded kickoff instructions.
+
+Accepted decisions: TOTP and recovery codes only; **email OTP deferred**. Approval step-up is unconditional; session MFA defaults to 12 hours and unenrolled required roles are quarantined. Analysts use assigned-tenant membership, without aggregate `MULTI_TENANT_READ`. Local Docker Desktop supplies real Supabase Auth/Postgres; higher environments must provision Supabase dynamically from the deploy script. Preserve intentional outbox, citation and CI work even though it advanced later workstreams.
+
+| Finding | Verified disposition | Remaining acceptance |
+| --- | --- | --- |
+| R-01 / R-02 | 0016 client authority and row-bound membership policies; real database and Auth/PostgREST denials pass | New W2 tables must inherit tested tenant-consistent relationships; strict browser persona journeys pending |
+| R-03 | Capability/tenant checks and generic Karya refusal implemented | Workload/connector grants and full runtime authorization remain W4/W5 |
+| R-04 | Per-action keys + atomic claim/outbox implemented; follow-up 0021 closes reproduced concurrent-token race | Durable executor, action snapshots and reconciliation policy/worker pending |
+| R-05 | Shared dispatch contract implemented; follow-up refuses runtime stub and preserves uncertain delivery | Real durable consumer and recovery acceptance pending; no live execution claim |
+| R-06 | TS/Python bundle parity, prose citation fixes and CI guard implemented | Populated immutable baseline/provenance hashes and named human citation sign-off pending |
+| R-07 | MFA secret wiring/config validation implemented | Live deployment and key rotation verification pending |
+| R-08 | TOTP/recovery, session MFA, account budgets, plan revision binding and signed execution settings implemented | Action/diff/rollback hashes, session/IP abuse controls, policy operations and full persona E2E pending |
+| R-09 | Shared runtime checks implemented; follow-up closes constructor/localhost fail-open paths | Temporal chunk checks, queued cancellation, connector interruption and live halt evidence pending |
+| R-10 | TS and Python sealing now require bucket lock and uploaded-version COMPLIANCE retention readback; failed uploads cannot produce mock proof | GCS verified adapter and deployed WORM proof remain pending; GCS sealing fails closed |
+| R-11 | Real migration/RLS/Auth parity, lint and control drift lanes green | Browser journeys, eight PRD B.10 scenarios, release/restore/performance gates pending |
+
+**R01–R11 are not blanket closed.** Green CI verifies its configured assertions; review reproduced a double claim outside the old assertions and found false stub acceptance, ambiguous-delivery retry and a kill-reader fallback. Regression tests accompany the follow-up fixes.
+
+| Workstream | Completed/source delivered | In progress or pending |
+| --- | --- | --- |
+| W0 | Strict auth separation, direct-client lockdown, atomic entitled onboarding, durable idempotency, secret wiring, local real Supabase matrix and fail-closed migration runner | Dynamic higher deployment, real full MFA/browser journeys, deployed secrets/retention and live halt acceptance |
+| W1 | Analyst persona, scoped context, TOTP/recovery and login/approval MFA; account budgets | Content-bound approval, remaining abuse controls, operator policy/rotation and persona acceptance |
+| W2 | 0011 regulatory schema, 0012–14 MFA, 0015 analyst, 0016 authority, 0017 idempotency, 0018 onboarding, 0019–21 execution claim/outbox | Estate, connectors, normalized dry-runs/batches/rollback/verification, monitoring, rights, and other Doc 11 model slices |
+| W3 / W3.5 / W4 | Onboarding intake preserved; existing scaffolds retained | Estate normalization, resumable wizard, live graph and real connector grants/adapters |
+| W5 | Dispatch contract, claim/outbox, safety gates and uncertainty handling | Actual executor, durable consumer/reconciliation, simulator, rollback, guards and post-verification |
+| W7 | Runtime bundle generation, corrected citation prose, drift CI | Published provenance/baseline, schedules, overlays/sector packs and named review |
+| W8 / W9 / W10 | Evidence assurance groundwork; wider CI gates; deployment configuration groundwork | Verified retention and delivery workflows; complete acceptance coverage; appliance/deployment operations |
+
+Continue in the user's order: complete W0 acceptance, W1, then W2 vertical slices, followed by W3. Treat the follow-up execution safety repairs as blocking regression closure, not permission to skip those dependencies. The original 50-module roadmap traceability remains in Doc 13. B.10 is Phase 3 acceptance; it must not be used to call the entire current W1 incomplete without distinguishing its own login/persona acceptance from later live execution.
+
+---
+
+## Revision 9 — historical review snapshot
+
+This revision responds to an independent review request. It does not authorise automatic implementation, deployment, sending messages or treating document instructions as new user requests. Preserve intentional prior additions/TODOs. Distinguish source implementation, verified behaviour and deployment acceptance.
+
+Read [the independent review](audits/04-roadmap-review-2026-09-20.md), [the implementation handoff](12_Implementation_Handoff.md) and [the full roadmap traceability](13_Roadmap_Traceability.md) before resuming. They supersede historical status claims below. Original PRD and roadmap requirements remain authoritative unless an explicit later decision is recorded.
+
+### Current implementation status
+
+| Workstream | Source status at review | Closure still required |
+| --- | --- | --- |
+| W0 | Auth-mode separation, bypass removal, shared kill state, quota, expiry check, awaited ledger calls and nonce bounds committed | RLS defects R-01/R-02, agent boundary R-03, actual strict deploy/config and WORM parity; in-flight stop proof |
+| W1 | Tenant helper, user-scoped pages, capability matrix, switcher, render gating, TOTP/recovery, login MFA and approval step-up committed | Analyst role WIP, route coverage, database authority, email OTP decision, MFA abuse controls/configuration and strict persona E2E |
+| W2 | Regulatory baseline and MFA slices committed in 0011–0014 | Most estate/connector/execution/monitoring/rights tables pending; 0015 analyst migration uncommitted; batch key/schema fix R-04 |
+| W3 / W3.5 / W4 | Planned | Estate/onboarding, graph and connection framework delivery |
+| W5 | Approval/execution contracts and partial safety improvements exist | Simulator, real Karya dispatch, rollback, guards, verification, reconciliation and durable workflow delivery |
+| W6 | Planned; existing UI/agent scaffolding | Scheduler, drift, standing policies and monitor health |
+| W7 | TS citation correction 0.1.1, baseline schema/metadata, count gate and Nazar declaration correction committed | Python/runtime parity, immutable publication/provenance, schedules/coverage, overlays and sector packs |
+| W8 | Existing evidence/report foundations | Verified retention, PDFs, release review, packs and export linkage |
+| W9 | New BFF/web/MFA and other unit tests; static gates | Two analyst tests currently fail; real RLS/migrations/contracts/strict E2E, coverage and release gates pending |
+| W10 | Configuration groundwork | Appliance, offline operation, deployment tests and operational handoff pending |
+
+**Completed source changes are not a completed workstream.** The review reran targeted suites: config 41, approval engine 13, controls 66, MFA 144, BFF 114, web 31 and Python runtime 61 tests passed. Types had 28 pass / 2 fail due to unfinished analyst expectations. Targeted typechecks and static gates passed. SQL policies, cloud state, fresh migrations and strict E2E were not executed successfully in this review. See the review for limits and commands.
+
+### Current priority findings
+
+| ID | Priority | Finding and required closure | Workstream |
+| --- | --- | --- | --- |
+| R-01 | P0 | Self-writable `is_axiom_internal` enables privilege escalation; protect security columns and prove direct-client denial | W0/W1 |
+| R-02 | P0 | RLS role checks use selected JWT tenant, not target row; constrain writes and analyst reach per row | W1/W2 |
+| R-03 | P0 | Generic agent invocation lacks capability enforcement and permits body tenant override; protect all invocation paths | W1/W4 |
+| R-04 | P1 | Unique per-action idempotency column receives a shared batch key; token consumed before failing update | W2/W5 |
+| R-05 | P1 | BFF camelCase execute payload mismatches FastAPI snake_case; failed dispatch is not handled durably | W5 |
+| R-06 | P1 | Python bundle still 0.1.0; regulatory schema/metadata not a published hashed baseline | W7 |
+| R-07 | P1 | Mandatory MFA key missing from deployment definitions/examples | W0/W1 |
+| R-08 | P1 | Incomplete MFA delivery and abuse budgets; approval content/conditions not fully bound and enforced | W1/W5 |
+| R-09 | P1 | Shared kill state does not yet stop in-flight workers | W5 |
+| R-10 | P1 | Unlocked preprod retention and skipped GCS validation cannot prove WORM parity | W0/W8 |
+| R-11 | P1 | Real RLS, migrations, strict persona E2E and release-path gates remain absent | W9 |
+
+R-01–R-03 block multi-client security acceptance. These are evidence-backed review findings, not a claim that deployed infrastructure was exploited. See linked review for exact code and acceptance tests. Do not mark SEC-3/SEC-9 closed merely because page imports and role helper tests pass.
+
+### Recommended next delivery sequence
+
+1. Preserve Claude's worktree; finish the analyst enum/matrix/migration/tests as one coherent change. Enforce assigned-tenant access pending clarification; do not rely on blanket `is_axiom_internal` access.
+2. Close R-01–R-03 and add real-Postgres security tests. Wire R-07; exercise login, enrolment, approval step-up and tenant switching under strict auth.
+3. In parallel with that security closure, complete W7 runtime generation/publication parity (R-06). Never overwrite old library rows or silently repin engagements.
+4. Continue W2 by vertical slice, with fresh-install and upgrade checks. Resolve R-04 before building execution on the schema. Then W3 → W3.5 and W4.1–W4.4.
+5. W5 implementation can start after **W4.4** contracts/grants are stable; live acceptance additionally requires W4.6's real binding, rollback and all PRD B.10 criteria. Close R-05/R-08/R-09 inside W5.
+6. Deliver W8.1–W8.3 and W6.1 monitoring for the Phase 3 release; only advance W6.2 standing policies to L3 after demonstrated L2 safety. Later W6.3–W6.6 and W7 overlays remain phase/cash gated. W9 runs throughout; W10 remains the intentional pulled-forward scope.
+
+### Added closure packages — requirements previously named without delivery ownership
+
+These make existing roadmap obligations actionable; they are recommendations for the implementing model, not claims of completed work or new product scope.
+
+| Package | Required implementation | Acceptance evidence |
+| --- | --- | --- |
+| W3.1 — Phase 1/2 delivery persistence | Interview/import discovery; classification review/corrections; persisted RoPA, policy/notice drafts and delivery playbook time records; prompt/version review | Resume across sessions; corrections retain provenance; measured delivery-time baseline and ranked automation backlog; FR-2.3/2.4 and M1.8 |
+| W8.1 — Rights and consent | DSAR verified identity, fulfilment, deadlines and responses; purpose/notice-version consent capture, withdrawal and downstream completion; EN/HI; retention/legal-hold policy | Full DSAR and consent-withdrawal journeys; server-owned clocks; consent history and actor evidence; FR-12.1–12.3, FR-4.5; honour existing seven-year product requirement while separately recording statutory applicability |
+| W8.2 — Breach operations | Incident state machine, triage, notification drafts, review/send authority, deadline jobs and warm forensic evidence | Timed controlled drill with DPB/affected-principal outputs, delivery/retry evidence and escalation; FR-13.1–13.4; no unapproved live notifications |
+| W8.3 — Review and release | General output review queue, reasons/diffs, explicit founder release in Phases 0–2; sealed approval artifacts; report/claim/evidence linkage | Unreviewed client output cannot be released; rejection reason and approver preserved; BR-4, UJ-1, FR-7.5/7.6. Resolve free gap-scan auto-release versus BR-4 explicitly |
+| W6.1 — Monitoring | Scheduled discovery/assessment, drift and scheduler/connector health | Restart-safe schedules, alert delivery, last-success and missed-run detection; M3.10 |
+| W6.2 — Standing policies | Human-authored/versioned/expiring scope with revocation and escalation; still requires dry-run/rollback/token checks | Boundary and revocation tests, named policy approver and policy version per execution; M4.1; no bypass of BR-1/BR-2 |
+| W6.3 — Self-service SMB | Onboarding, tier/entitlement, guided assessment/remediation and support/billing boundaries | A new client completes the supported journey without founder intervention; M4.4 |
+| W6.4 — TPRM and DPIA | Vendor inventory, DPAs, questionnaires, sub-processors; guided DPIA with risk rationale and review | Persistent tenant-scoped vendor and DPIA lifecycle with export/review; M4.5/M4.6; control text alone does not qualify |
+| W6.5 — Partner service | Explicit assigned-client access, delegated role boundaries, brand configuration and exports | Multi-client partner acceptance with cross-client denial tests; M4.7 |
+| W6.6 — Market signals | Real permitted public-source ingestion, scoring, provenance and internal-only delivery | Non-empty sourced signals and repeatable scoring; M4.9; current Sanket is a stub |
+| W10.1 — Enterprise roadmap register | Track SSO/SAML login separately from connector grants; split-plane, custom SLA/support, certification, sector #2, Consent Manager registration and L4 | Named demand/funding/certification/proven-L3 gate per module; do not implement gated items merely because they appear in the plan |
+| W9.1 — Operational acceptance | India residency of data/backups/logs/models, tenant keys/rotation, encryption, restore drills, uptime, latency/throughput, per-client cost and explanation lineage | Measured NFR-1–12 results; RPO ≤1h/RTO ≤4h restore exercise; standard report <5min; cost <15% ACV; Phase 3/5 availability targets |
+
+W2 must add storage for these packages as each slice is designed (including vendor/DPA/questionnaire, DPIA, notifications, output reviews, entitlements and partner branding). A table by itself never completes the associated journey.
+
+### Clarifications and architecture reconciliations
+
+- Self-managed TOTP is intentional. Revision 10 records the accepted email OTP deferral; SMS remains deferred.
+- Recommended analyst boundary is explicitly assigned tenants. `founder`, tenant `owner`/`admin`, `axiom_analyst`, partner and machine identity are distinct; a matrix entry must agree with SQL, seeds, API and UI.
+- Retain REST/OpenAPI primary; outbound MCP optional; inbound MCP dropped. One connector identity must still be scoped to tenant + estate + target and separated read/write grants. Native database/object-store bindings need real protocol adapters and permission checks; an OAuth descriptor alone does not implement SQL or prove three live connector families.
+- Phase 2 still requires three live connector types before its exit is claimed; one live binding is an intentional intermediate milestone.
+- Provider-specific AWS `ap-south-1`/S3 and GCP `asia-south1`/GCS wording needs one recorded equivalence/ownership decision. Preserve Mumbai residency and immutable evidence requirements. Preprod's unlocked retention is an explicit verification gap, not production equivalence.
+- The architecture skill puts business logic and writes in APIs; marketing still owns scoring/storage/email workflows. Track their movement to the BFF or an explicitly approved boundary decision in W0/W8. Do not confuse deliberate user-scoped SSR reads with client-side direct writes.
+- Sectoral pack #1 remains undecided. Mock data is implemented as an explicit tenant demo flag; keep provenance visible and ensure sample data never becomes live evidence.
+
+---
+
+## Revision history and original baseline assessment
+
+**Historical record:** Parts A/B and the old kickoff below describe `9575205`. Their present-tense assertions, line numbers, counts, test totals and staging status do not describe `2c54fcd`. Revision 9's current tables and linked handoff take precedence for implementation status. Historical references to "DB policies are correct", a complete execution gate and functional Sanket are specifically superseded by this review.
+
+> **Revision 8 (final) changes:** **Inbound MCP dropped** from scope entirely. **Outbound MCP kept flexible** — an optional transport behind the existing interface, enabled per-descriptor, never the primary path. **Per-agent OAuth client registration dropped**: one connector identity per tenant, with `connector.write` requestable only by Karya's SVID plus a valid approval token. Rationale — only one of ten agents writes to external systems, that is a static architectural fact, and ten registrations per connector is authentication surface the ICP should not have to onboard. Per-agent registration remains documented as optional hardening. REST/OpenAPI is the primary transport.
+>
+> **Revision 7 changes:** **MCP posture settled.** Revision 3 conflated two opposite directions; separated now. **Outbound** MCP (Axiom → client MCP servers) is **deferred** — it was justified on general MCP adoption, but the ICP does not run MCP servers today, so it was building for a customer we do not have. **Inbound** MCP (external → Axiom) is **read-only permanently** and scheduled only after W0 + W1, because write-via-MCP contradicts the approval-console design rather than merely risking it. MCP otherwise stays inside the Axiom Proof perimeter. Also corrects a Revision 3 over-claim: **SPIFFE does not reach across to a client's IdP** without federation; the honest split is SPIFFE intra-perimeter, OAuth grants inter-perimeter, with the JWT-SVID as the `private_key_jwt` bridge. **REST/OpenAPI becomes the primary transport.** No delivered feature is lost; item 15 moves to W4.7 descriptors.
+>
+> **Revision 6 changes:** **Full ten-agent identity and estate-access matrix** added to W4.3, reconciled across all three declaration sites. Result: **only 2 of 10 agents touch a client estate** (Drishti reads, Karya writes); five handle estate-derived personal data with no connector access; three never see client data. Five declaration discrepancies found and scheduled. Two new findings: **SEC-14** (tool scopes are declarative only — read in exactly one place, enforced nowhere) and **SEC-15** (Nazar holds `control_library.write`, contradicting the architecture and dangerous under W7.0). Scopes gain tenant/estate structure.
+>
+> **Revision 5 changes:** **W7.0 added — regulatory baseline and library versioning.** The control library gets a recorded relationship to the law it implements: content-hashed `regulatory_instruments` with an amendment chain, a frozen named baseline (**`IN-DPDP@2026-09-20`** = Act 22 of 2023 + G.S.R. 846(E) + corrigendum **G.S.R. 892(E)**, 11 Dec 2025), per-control provenance with `verified_on`/`verified_by`, a typed change log, and semver whose bumps are defined by **assessment comparability**. Consequence: the CTL-1 citation fix is a **PATCH**, so existing client assessments stay valid. Nazar (M2.9) closes the loop from gazette signal to reviewed baseline delta.
+>
+> **Revision 4 changes:** **preprod becomes an exact replica of production** — same codebase, same ruleset, differing only in topology. New finding **SEC-13**: preprod currently bypasses auth, tenancy and idempotency in nine places and **runs on an in-memory mock database**, so nothing verified there says anything about production. **SEC-2 upgraded** to a full unauthenticated founder-owner takeover chain after tracing the `axiom_e2e_bypass` cookie end to end. W0 re-scoped M → L and restructured around one governing principle: environment identity must never determine security posture.
+>
+> **Revision 3 changes:** **W4 re-architected** from "build adapters" to a **Universal Connection Framework** — SPIFFE workload identity, a four-grant credential broker (OAuth 2.0/2.1 Client Credentials, RFC 8693 Token Exchange, RFC 7522 SAML Assertion, RFC 7523 JWT Assertion), pluggable transports with **MCP as the primary path**, and declarative per-system capability descriptors. Adding a target system becomes a config file, not an integration. Seven chunks; W5 now unblocks at W4.4.
+>
+> **Revision 2 changes:** all seven decisions in Part E resolved and folded into the workstreams. Added **W3.5** (Entity Relationship Graph page) and **W10** (on-prem deploy environment). **W7 re-scoped upward** following new finding **CTL-1** — verification against the notified Gazette showed the control library cites the *draft* Rules numbering, so nearly every statutory citation in client-facing reports is wrong.
+
+---
+
+## Historical kickoff — Revision 8, before implementation
+
+**Baseline:** `9575205` · main == staging == origin/main == origin/staging · working tree clean
+**Test baseline (verified):** TypeScript 11/11 task passes · Python 38/38 pass · `services/bff` and `apps/web` have **zero tests** behind `--passWithNoTests`
+**Environment:** work in the Axiom Proof repo. Staging and preprod **cannot validate auth, tenancy or RBAC today** — see SEC-1 and SEC-13. W0 fixes that first.
+
+### Order of work
+
+| Order | Workstream | Why first |
+| ----- | ---------- | --------- |
+| **1 — parallel** | **W0** Security & environment parity | Blocks everything. Until it lands, nothing is verifiable in any non-local environment |
+| **1 — parallel** | **W7.0 + W7.1** Regulatory baseline, then citation re-map | Independent of W0. The product cites the wrong law in client reports today; the fix is a PATCH so no assessment is invalidated |
+| 2 | **W2** Data model | Unblocks W1, W3, W4 |
+| 3 | **W1** Tenancy, RBAC, MFA, personas | Makes staging a real test bed |
+| 4 | **W3 → W3.5** Estate, then ER graph | |
+| 5 | **W4.1 → W4.7** Universal Connection Framework | W5 unblocks at W4.4 |
+| 6 | **W5** Phase 3 execution loop | The core product |
+| 7 | W6 · W8 · W10 | |
+| — | **W9** Tests & audits | Continuous. Gates every merge from day one |
+
+### First three things to do
+
+1. **W0.0** — build `resolveAuthMode()` in `@axiom/config` (`AXIOM_AUTH_MODE`, default `strict`, `e2e-bypass` refused at boot outside `local`/`test`), then delete all nine preprod/staging security branches listed in SEC-13 plus the `isDevOrTest` chains in SEC-1 and the cookie clauses in SEC-2. Acceptance: `grep -rn "ENVIRONMENT === 'preprod'\|ENVIRONMENT === 'staging'" apps packages services` returns zero security-relevant hits.
+2. **W9 seed** — stand up the `services/bff` test suite *before* touching its middleware, so W0's changes are verified as they land rather than after.
+3. **W7.1** — declare baseline `IN-DPDP@2026-09-20` and re-map all 24 `DPDPR-2025` citations against G.S.R. 846(E) + corrigendum G.S.R. 892(E). Publish as `0.1.1`.
+
+### Two open decisions (neither blocks the above)
+
+- **Sectoral pack #1** — Healthcare (ABDM/NHA retention vs DPDPA erasure) or BFSI (RBI / Account Aggregator)? Needed only when W7 reaches pack work.
+- **Mock-data line** — proposed: permitted only behind a `demo` tenant flag, never hardcoded in a page component, carrying the same provenance labelling as non-production connector bindings. Proceeding on this basis unless changed.
+
+### Findings index
+
+**P0:** SEC-1 (staging/preprod auth bypass) · SEC-2 (cookie takeover chain) · SEC-3 (cross-tenant leak, 17 pages) · SEC-13 (preprod runs on a mock DB) · CTL-1 (draft Rules citations)
+**P1:** SEC-4 (kill switch process-local) · SEC-5 (unbounded tenant creation) · SEC-6 (stale dry-run) · SEC-7 (blast radius unenforced at execution) · SEC-8 (no MFA) · SEC-9 (RBAC) · SEC-14 (tool scopes unenforced) · SEC-15 (Nazar can write the control library)
+**P2:** SEC-10 · SEC-11 · SEC-12 · QUA-1 (no BFF tests) · QUA-2 (ten shell modules) · QUA-3 (control count) · PERF-1 · PERF-2 · PERF-3
+
+---
+
+## 0. How to read this document
+
+Part A is what is **broken or unsafe today** and must be fixed before anything else.
+Part B is what is **missing** against the PRD and the phase plan.
+Part C is the **sequenced plan** to close both.
+Part D is the **test and verification strategy**.
+Part E records the **decisions taken** (E.1, resolved) and the two still open (E.2, non-blocking).
+
+Every claim in Parts A and B is anchored to a file and line in the repo at `9575205`. Where I say something is absent, I ran the search and report the count.
+
+---
+
+## 1. Historical staging status at the original baseline
+
+| Ref              | SHA       |
+| ---------------- | --------- |
+| `main`           | `9575205` |
+| `staging`        | `9575205` |
+| `origin/main`    | `9575205` |
+| `origin/staging` | `9575205` |
+
+`git rev-list --count staging..main` = 0, and `main..staging` = 0. Staging is already identical to main. Working tree clean. Nothing to sync.
+
+**However** — see **SEC-1** and **SEC-13**. In staging *and* preprod as currently configured, authentication, tenancy, role resolution and idempotency are all bypassed, and preprod additionally runs on an in-memory mock database rather than a real one. Neither environment can validate multi-tenancy, RBAC or MFA today. That reorders the plan: **W0 must land before any other workstream can be verified anywhere.**
+
+---
+
+## 2. Verdict
+
+The **spine is real and well built**. The parts that carry the trust proposition — the hash-chained ledger, the HMAC approval-token engine, the per-action execution gate, the DB-level RLS design, the agent separation-of-duties contract — are genuinely good and match the architecture document. `services/bff/src/routes/v1.ts:319-470` is a careful, correct execution gate: signature → plan binding → DB-persisted token lookup → status → scope cross-check → per-action approval/dry-run/rollback preconditions → atomic single-use consumption via conditional update. That is the hard part and it is done properly.
+
+The **body is not attached to the spine**. Three structural problems:
+
+1. **The web application bypasses the tenancy model entirely.** 17 of 22 authenticated pages query with the Supabase service-role key and no tenant filter. RLS is correct in the database and irrelevant in practice.
+2. **Phase 3 — "the core product" — is a stub.** Karya returns `status="skipped"`. There is no connector framework, no dry-run simulator, no rollback engine, no verification agent, no execution-time blast-radius enforcement.
+3. **Phase 4 is absent, not partial.** Standing approval policies, multi-regulator reuse, TPRM, DPIA automation, sectoral packs, partner portal: zero implementation references each.
+4. **The non-production environments do not run the production code path.** Preprod diverges in nine places and is backed by an in-memory mock (SEC-13); staging bypasses auth wholesale (SEC-1). The environments meant to de-risk a release are currently incapable of doing so.
+
+And one defect that is not architectural but is arguably the most commercially dangerous: **CTL-1** — the control library cites the *draft* DPDP Rules numbering, not the Rules as notified on 13 Nov 2025. Reports the product generates today cite the wrong rule for breach notification, cross-border transfer, notice, retention and data-principal rights.
+
+Prior grade in `Axiom-Proof_Readiness_Matrix.md` was **B+ / "Advanced Pilot"**. That assessment is infrastructure-focused and did not surface the tenancy defect, the auth bypasses, or CTL-1. On a security basis I would not put the current build in front of two clients at once; on a CTL-1 basis I would not send a generated report to a regulator.
+
+---
+
+# PART A — Findings to fix first
+
+Severity: **P0** = exploitable or data-exposing now · **P1** = violates a stated absolute requirement · **P2** = correctness/quality.
+
+## SEC-1 · P0 · Authentication is bypassable in staging, preprod, and any container without `NODE_ENV`
+
+`services/bff/src/middleware/auth.ts:18-28`
+
+```ts
+const isDevOrTest =
+  env.ENVIRONMENT === 'development' ||
+  env.ENVIRONMENT === 'local' ||
+  env.ENVIRONMENT === 'preprod' ||
+  env.ENVIRONMENT === 'staging' ||
+  process.env.NODE_ENV !== 'production' ||        // ← unset NODE_ENV ⇒ true
+  process.env.AXIOM_E2E_BYPASS_AUTH === 'true';
+
+let token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+if (!token && isDevOrTest) token = 'dev-token';   // ← no credential ⇒ synthesised one
+```
+
+When `isDevOrTest` is true, a request with **no `Authorization` header at all** is assigned `dev-token`, which resolves (`auth.ts:36-46`) to the founder identity `00000000-…-0001`. `tenantResolver` (`services/bff/src/middleware/tenant.ts:47-51`) then accepts **any** `X-Tenant-Id` the caller supplies and assigns `role: 'owner'` with no membership check.
+
+Net effect in staging: an unauthenticated caller is founder-owner of any tenant they name.
+
+Compounding: `auth.ts:60-75` and `auth.ts:83-96` **fail open** — if Supabase returns an error or is unreachable, the request is granted the founder identity rather than rejected.
+
+`.env.staging.example` sets `ENVIRONMENT=staging` **and** `NODE_ENV=staging`, so both clauses fire. Production sets both correctly, but the `NODE_ENV !== 'production'` clause means any deploy that forgets to set `NODE_ENV` silently opens the door.
+
+## SEC-2 · P0 · Cookie-controlled authentication bypass in the web app
+
+`apps/web/src/middleware.ts:37-56`
+
+```ts
+const isPreprodOrMock =
+  process.env.ENVIRONMENT === 'preprod' ||
+  supabaseUrl.includes('preprod-supabase') ||
+  supabaseUrl.includes('placeholder') ||
+  request.cookies.get('axiom_e2e_bypass')?.value === 'true' ||   // ← no env guard
+  (process.env.NODE_ENV === 'test' && …);
+
+if (isPreprodOrMock) {
+  …
+  return NextResponse.next();   // ← auth skipped
+}
+```
+
+The `axiom_e2e_bypass` cookie clause has **no environment guard**, unlike the `AXIOM_E2E_BYPASS_AUTH` clause beside it. Any visitor who sets `axiom_e2e_bypass=true` in their browser skips the session check on every non-public route — in production.
+
+**It is worse than a page-auth skip. It is a complete takeover chain**, and every link is in the production code path:
+
+| # | Where | What happens |
+| - | ----- | ------------ |
+| 1 | attacker's browser | sets `axiom_e2e_bypass=true` — no credentials needed |
+| 2 | `apps/web/src/middleware.ts:41` | cookie clause, **no env guard** ⇒ page session check skipped |
+| 3 | `apps/web/src/app/api/bff/[...path]/route.ts:35` | same cookie, **no env guard** ⇒ injects `accessToken = 'test-access-token'` |
+| 4 | `services/bff/src/middleware/auth.ts:36-46` | `test-access-token` ⇒ founder identity `00000000-…-0001` |
+| 5 | `services/bff/src/middleware/tenant.ts:47-51` | any `X-Tenant-Id` accepted, `role: 'owner'` assigned |
+
+Result: **unauthenticated founder-owner access to any tenant, from a cookie alone.**
+
+And the cookie is not obscure — the app sets it itself. `apps/web/src/app/(auth)/login/actions.ts:55-63` writes `axiom_e2e_bypass=true` (plus a `test-access-token` session cookie) as a "sovereign session" fallback whenever login hits a network or 5xx failure and `NODE_ENV !== 'production'`. A transient Supabase outage hands a real user the bypass cookie; the cookie then works everywhere, forever, including against production.
+
+Also here: a live anon JWT is hardcoded as a fallback at `apps/web/src/middleware.ts:33`.
+
+## SEC-3 · P0 · Cross-tenant data exposure — service-role client used on 17 pages with no tenant filter
+
+`packages/supabase/src/admin.ts:7-13` states the invariant plainly:
+
+> "The Next.js apps NEVER use this — they go through the user-scoped client and rely on RLS to enforce tenancy."
+
+22 files in `apps/web/src` call `createSupabaseAdmin()`. The service-role key bypasses RLS by design. Of those, these query tenant-scoped tables with **zero** occurrences of `tenant_id`/`tenantId` anywhere in the file:
+
+`approval/page.tsx` · `assessment/page.tsx` · `breaches/page.tsx` · `classification/page.tsx` · `connectors/page.tsx` · `controls/page.tsx` · `dashboard/page.tsx` · `datamap/page.tsx` · `discovery/page.tsx` · `dsars/page.tsx` · `evidence/page.tsx` · `execution/page.tsx` · `monitoring/page.tsx` · `partner/page.tsx` · `policies/page.tsx` · `reports/page.tsx` · `workbench/page.tsx`
+
+Any authenticated user of any tenant sees every tenant's findings, evidence, DSARs, breaches, reports, plans, approvals and ledger entries. This makes **NFR-2 "Tenant isolation — Absolute"** false in the running product despite the database policies being correct.
+
+Only `ledger/page.tsx`, `portal/page.tsx`, `plans/page.tsx` and `api/ledger/route.ts` filter by tenant.
+
+## SEC-13 · P0 · Preprod is not a pre-production environment — it is a mock
+
+*Raised from your instruction that preprod must authenticate exactly as production does.*
+
+Preprod does not run the production code path. It runs a different one, in **nine** places, and the most consequential is that **it does not use a real database**.
+
+| # | Location | What preprod does instead of production behaviour |
+| - | -------- | -------------------------------------------------- |
+| 1 | `services/bff/src/middleware/auth.ts:20` | Authentication bypassed; missing token ⇒ founder identity |
+| 2 | `services/bff/src/middleware/tenant.ts:20` | Tenant membership check skipped; `role` forced to `owner` |
+| 3 | `services/bff/src/middleware/idempotency.ts:29-36` | `Idempotency-Key` auto-generated when absent — FR-8.3 never exercised |
+| 4 | `apps/web/src/middleware.ts:38` | Page session check skipped entirely |
+| 5 | `apps/web/src/app/api/bff/[...path]/route.ts:31` | Injects `test-access-token` with no session |
+| 6 | `apps/web/src/app/(auth)/login/actions.ts:48-63` | "Sovereign session" issued without credentials; sets the SEC-2 bypass cookie |
+| 7 | **`packages/supabase/src/admin.ts:20-27`** | **Returns the in-memory E2E mock client instead of connecting to Supabase** |
+| 8 | **`packages/supabase/src/server.ts:21-28`** | **Same substitution on the user-scoped client** |
+| 9 | `packages/config/src/index.ts:117-122` | All production credential validation skipped |
+
+Rows 7 and 8 are the ones that matter most. `createE2ESupabaseClient()` (`packages/supabase/src/e2e.ts`) serves **hardcoded fixtures** — `E2E_USER`, `E2E_PLAN` and an in-memory table store. In preprod, every page, every query and every agent read is answered from constants compiled into the bundle.
+
+The consequence is blunt: **nothing verified in preprod today tells you anything about production.** Not auth, not tenancy, not RLS, not idempotency, not query correctness, not performance, not migrations. A green preprod run is evidence about a fixture file.
+
+Note also that `isE2EBypassEnabled()` (`e2e.ts:245-251`) is itself correctly scoped — `NODE_ENV === 'test'`, or local plus an explicit flag. It is defeated by `admin.ts:20-27` ORing it together with `ENVIRONMENT === 'preprod'` and two `SUPABASE_URL` substring checks. The guard was written correctly and then bypassed around.
+
+**There is already a correct precedent in this repo.** `services/model-gateway/src/model_gateway/config.py:93-99` treats preprod at production strictness — it *enforces* Mumbai region and refuses to let PII redaction be disabled in `("production", "preprod")`. The Python services got this right. The TypeScript layer did not. Making preprod a true replica means bringing the TS layer up to the standard the model gateway already sets.
+
+---
+
+## SEC-14 · P1 · Agent tool scopes are declarative only — nothing enforces them
+
+*Raised from your question about the full agent roster.*
+
+`04_Solution_Architecture.md §5.2` describes the agent permission model and calls separation of duties "a genuine security property, not a talking point". Today it is a talking point.
+
+`tool_scopes` is declared on all ten agents in `packages/types/src/agents.ts` and again in `services/agent-runtime/src/axiom/agents/*.py`. Repo-wide, it is **read in exactly one place**:
+
+```
+services/agent-runtime/src/axiom/app.py:146    "tool_scopes": list(a.tool_scopes),
+```
+
+That serialises it into an API response for display. There is no scope-checking middleware, no enforcement at tool invocation, no gate between a declared scope and an actual capability. The permission model is a set of strings rendered as JSON.
+
+The one property that *is* genuinely enforced is Karya's approval-token gate (`services/bff/src/routes/v1.ts:319-470`) — and it is enforced by the BFF and the token, not by `tool_scopes`. So the headline claim ("Sudhaar can never execute") holds today only because Sudhaar has no code path that calls an executor, not because a permission system prevents it.
+
+## SEC-15 · P1 · Nazar holds `control_library.write` — an L1 agent can rewrite the definition of compliance
+
+`packages/types/src/agents.ts` and `services/agent-runtime/src/axiom/agents/nazar.py` both declare:
+
+```
+nazar → ('http.read.government_sources', 'control_library.write')
+```
+
+`04_Solution_Architecture.md §5.2` says Nazar's permission is **"External sources read"**. The implementation grants it write access to the control library; the architecture does not.
+
+This matters far more after W7.0. The control library is the definition of what compliance *means* — the baseline every assessment, finding, penalty estimate and client report is computed against. Granting an **L1 agent that ingests untrusted external web content** write access to that baseline is the wrong shape: a poisoned or misread gazette page becomes a silent change to every client's posture, with no human in the loop and no `regulatory_signals` review step.
+
+Per W7.0, Nazar's correct scope is `regulatory_signal.write` — it **proposes** a baseline delta, a human accepts it, and only then is a new library version cut. That is the same maker-checker pattern as Sudhaar/Karya, applied to the rulebook. Fixed in W4.3 and W7.0 together.
+
+---
+
+## SEC-4 · P1 · Global kill switch is process-local — FR-8.6 not met
+
+`services/bff/src/services/kill-switch.ts:32-67`. In-memory object, acknowledged in its own docstring as single-replica-only. The deployment target is Cloud Run / EKS with multiple replicas. Engaging the kill switch on one instance leaves every other instance executing. FR-8.6 requires "immediately effective".
+
+Second defect: `release()` (`:57-64`) ignores scope. A **tenant owner** can release a founder-engaged **global** kill switch — `v1.ts:629` permits `role === 'owner'`.
+
+## SEC-5 · P1 · Any authenticated user can create unlimited tenants and self-assign `owner`
+
+`services/bff/src/routes/v1.ts:780-790`. `/organizations/onboard` is exempted from tenant resolution (`tenant.ts:28-32`, which hands it `role: 'owner'`), then uses `createSupabaseAdmin()` to insert a tenant and a `tenant_users` row with `role: 'owner'` for the caller. No entitlement check, no quota, no rate limit. Combined with SEC-1 this is reachable unauthenticated in staging.
+
+Minor, same route: `Math.random()` used for slug uniqueness (`v1.ts:827`).
+
+## SEC-6 · P1 · Stale dry-runs can back an execution — FR-6.3 half-enforced
+
+`dry_run_expires_at` is checked at **approve** time (`v1.ts:141`) but not at **execute** time (`v1.ts:440-446` checks only `dry_run_status` and `rollback_validated`). Time passes between approval and execution. FR-6.3 says a stale dry-run cannot back an approval; the execute path should re-assert it.
+
+## SEC-7 · P1 · Blast-radius caps are not enforced at execution — FR-8.5 not met
+
+The only enforcement is inside the **planner**, `services/agent-runtime/src/axiom/agents/sudhaar.py:209-217`, as a plan-generation escalation. Nothing in the BFF execute path or in Karya re-checks the cap against actual affected records at execution time, and there is no halt-and-escalate path. FR-8.5 requires enforcement at execution with a breach halt.
+
+## SEC-8 · P1 · No MFA anywhere
+
+Repo-wide search for `mfa|2fa|totp|otp|authenticator|second factor|verifyOtp|signInWithOtp` across `apps`, `packages`, `services`, `infra` returns **only** UI copy strings and one control-library description. `04_Solution_Architecture.md §4.1` specifies "email+MFA in Phase 1". Not implemented. This is item 3 of your brief.
+
+## SEC-9 · P1 · RBAC is four inline string comparisons; the web app has none
+
+BFF role checks exist at exactly four places: `v1.ts:571`, `:596`, `:629`, `:714`. Everything else is role-agnostic. `apps/web/src` contains **zero** role checks — every page renders for every authenticated user. The `tenant_users.approval_scopes` column (`0001_init_tenants_users.sql:96`) is defined and never read. There are no persona views.
+
+## SEC-10 · P2 · Ledger writes are fire-and-forget on a path that must not be
+
+`v1.ts:900` uses `deps.ledger.appendAndForget(...)` for tenant creation. `packages/ledger/src/append.ts:50-56` documents the opposite rule: "per BR-3, no action bypasses the ledger, so a ledger write failure must fail the parent operation."
+
+## SEC-11 · P2 · Hardcoded placeholder secret in the Temporal activity
+
+`services/temporal-workers/src/temporal_workers/workflows.py:47` sends the literal string `"{{AGENT_RUNTIME_INTERNAL_TOKEN}}"` as the internal auth header — the template is never substituted. Cluster URL is hardcoded at `:39`.
+
+## SEC-12 · P2 · Approval-engine nonce set grows without bound
+
+`packages/approval-engine/src/index.ts:57` — `usedNonces: Set<string>` is never pruned. Unbounded memory growth in a long-lived process. Functionally harmless (DB is the source of truth) but it is a slow leak.
+
+## QUA-1 · P2 · The security-critical service has no tests
+
+`services/bff` — `vitest run --passWithNoTests`, **zero test files**. Turbo reports `@axiom/bff:test: No test files found, exiting with code 0`. `apps/web` likewise. The BFF holds auth, tenancy, RBAC, idempotency and the entire execution gate. CI is green on an untested attack surface.
+
+Current baseline: TS **11/11 task-level passes** (all cached, mostly trivial package tests), Python **38/38 pass**, Playwright **4 spec files**.
+
+## QUA-2 · P2 · Ten modules are display-only shells
+
+`apps/web/src/app/(app)/generic-module-view.tsx` is a presentational template. These pages pass it hardcoded figures and render a ledger tail — they have no functionality:
+
+`connectors` · `discovery` · `classification` · `datamap` · `execution` · `monitoring` · `policies` · `partner` · `controls` · `plans`
+
+Example, `discovery/page.tsx:47-96`: `"12.4M rows"`, `"47 tables"`, `"8,210 files"`, `"6 vendors"` are string literals. The `"Run Discovery Scan"` button label has no backing endpoint.
+
+This is fine as demo furniture — you said mock data may stay — but these are currently counted as delivered modules and they are not.
+
+## QUA-3 · P2 · Control-library count is inconsistent in six places
+
+Canonical is **46**, asserted at runtime: `packages/control-library/src/controls.ts:1640` `CONTROL_LIBRARY_COUNT = 46`, validated at `:1661`. 46 unique IDs across 13 domains (GOV 5, CNS 5, DAT 6, RCD 3, RTN 3, SEC 7, BRCH 3, XBR 3, CHD 2, SDF 3, DPF 2, DPIA 2, AUD 2).
+
+Contradictions:
+
+| Location                                  | Says            |
+| ----------------------------------------- | --------------- |
+| `apps/web/.../dashboard/page.tsx:336`     | 43              |
+| `apps/web/.../reports/reports-client.tsx:46` | 48           |
+| `docs/03_BRD_PRD.md:15` (§A.1)            | "forty-three"   |
+| `docs/LOCAL_CHECKS.md:180,204`            | 43              |
+| `VK_QUICK_REF_PROOF_MODULES_SETUP.md:1115`| 43              |
+| Everywhere else (24 refs)                 | 46              |
+
+The stray "47" you may have seen is `discovery/page.tsx:73` — "47 tables", not controls.
+
+## CTL-1 · **P0 for a compliance product** · Control library cites the *draft* Rules numbering — nearly every Rules citation points at the wrong rule
+
+Upgraded from P2 after verification. This is the most client-damaging defect in the repo.
+
+The DPDP Rules 2025 were notified **13 November 2025** via Gazette **G.S.R. 846(E)** — **23 rules and 7 schedules**. The control library's `DPDPR-2025` citations were authored against an earlier draft numbering and were never re-mapped. Reports generated today cite the wrong law.
+
+Extracted every `DPDPR-2025` citation and compared to the notified text:
+
+| Control(s)                | Library cites   | What that rule **actually is** when notified | Correct rule              |
+| ------------------------- | --------------- | -------------------------------------------- | ------------------------- |
+| `GOV-002`, `CNS-002`      | Rule 5          | Processing by the State for subsidies        | **Rule 3** (Notice)       |
+| `CNS-001`                 | Rule 5, 6       | State processing / security safeguards       | **Rule 3**                |
+| `CNS-003` (7-yr consent)  | Rule 5(3)       | State processing                             | **Rule 4 + First Schedule** |
+| `DAT-001/002/003/005`     | Rule 16, 17, 18 | Research exemption / Board appointment / Board salary | **Rule 14** (Rights of Data Principals) |
+| `RCD-001/002/003`         | Rule 21         | Terms of service of Board *officers*         | **Rule 8** / **Rule 13**  |
+| `BRCH-001/002`            | Rule 19, 20     | Board meetings / Board as digital office     | **Rule 7** (Intimation of breach) |
+| `XBR-001`                 | Rule 13         | Additional obligations of SDFs               | **Rule 15** (Transfer outside India) |
+| `SDF-001`                 | Rule 11         | Verifiable consent — persons with disabilities | **Rule 13**             |
+| `SDF-002/003`, `DPIA-001/002` | Rule 12     | Exemptions for certain child-data processing | **Rule 13(2)**            |
+| `SEC-001`                 | Rule 14, 15     | Rights of Data Principals / Transfer outside India | **Rule 6** (Reasonable security safeguards) |
+| `CHD-001/002`             | Rule 10         | Verifiable consent for a child's data        | **Rule 10** ✅ *(the only correct one)* |
+
+**Coverage gaps on top of the mis-citations.** Rules never cited at all: **1, 2, 3, 4, 7, 8, 9, 15, 22, 23** — 10 of 23. Named-Schedule references anywhere in the library: **zero** (verified: `grep -ioE "(first|second|third|fourth|fifth|sixth|seventh) schedule"` → no matches).
+
+Operationally significant omissions:
+
+- **Rule 3** — mandatory notice content and itemised-purpose presentation
+- **Rule 7** — breach intimation particulars and the 72-hour Board report
+- **Rule 8 + Third Schedule** — class-based retention (e-commerce ≥2cr users, online gaming ≥50L, social media ≥2cr → 3-year erasure) and the pre-erasure notice
+- **Rule 9** — published contact information for processing questions
+- **Rule 11** — verifiable consent for persons with disabilities (**no control exists in any domain**)
+- **Rule 12 + Fourth Schedule** — child-data exemption classes (healthcare, education, childcare, transport safety)
+- **Rule 15** — conditions on transfer outside India, including foreign-state requirements
+- **Rule 16** — research/archiving/statistics exemption
+- **Rules 22–23 + Seventh Schedule** — appeal to the Appellate Tribunal; calling for information
+- **Rule 1** — the phased commencement itself (13 Nov 2025 / 13 Nov 2026 / **13 May 2027**), which is the readiness clock the whole product sells against
+
+Fixing this is W7 and it is no longer a recount — it is a full re-map plus roughly 46 → ~65 controls.
+
+Sources: [dpdp.ind.in/rules.php](https://dpdp.ind.in/rules.php) · [Shardul Amarchand Mangaldas — enforcement & notification](https://www.amsshardul.com/insight/enforcement-of-the-dpdp-act-and-notification-of-the-dpdp-rules/)
+
+## PERF-1 · P2 · Per-action sequential DB round-trips in the execute path
+
+`v1.ts:425-448` issues one `select().single()` per action inside a `for` loop. A 200-action batch is 200 sequential round-trips before execution starts. Should be a single `.in('id', actionIds)` fetch. Same pattern in the approve path.
+
+## PERF-2 · P2 · Module pages are `force-dynamic` with uncached service-role queries
+
+Every shell page sets `export const dynamic = 'force-dynamic'` and issues a fresh unindexed `audit_ledger` query with `count: 'exact'` on render. `count: 'exact'` on an append-only ledger is a full scan that grows forever. No caching, no `count: 'estimated'`.
+
+## PERF-3 · P2 · No rate limiting
+
+One reference repo-wide. `04_Solution_Architecture.md §4.1` lists rate limiting as an API Gateway responsibility. The public gap-scan endpoint and `/organizations/onboard` are both unthrottled.
+
+---
+
+# PART B — Capability gap register
+
+Status key: **✅ built** · **🟡 partial** · **🔴 absent**
+
+## B.1 Phase 0 — Foundation
+
+| Module                          | Status | Evidence                                                                           |
+| ------------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| M0.2 Control Library v0         | 🟡     | 46 controls real and well-formed; Rules-2025 conformance pass outstanding (QUA-4)  |
+| M0.3 Parikshan Assessment v0    | ✅     | `agents/parikshan.py` (167 ln), 3 tests pass                                        |
+| M0.4 Prativedan Report v0       | 🟡     | `agents/prativedan.py` (185 ln) emits JSON/HTML; `pdf.render` scope declared, no PDF engine |
+| M0.5 Free Gap-Scan              | ✅     | `apps/marketing/src/app/gap-scan/**`, scoring lib, report route, email dispatch     |
+| M0.6 Agent Workbench            | 🟡     | `workbench-client.tsx` (438 ln) real; prompt/version registry tables exist, no UI   |
+
+## B.2 Phase 1 — First cash
+
+| Module                       | Status | Evidence                                                                 |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| M1.1 Drishti Discovery v0    | 🟡     | Interview-driven only; `/discovery` page is a shell (QUA-2)              |
+| M1.2 Vibhaag Classification  | 🟡     | Agent real (172 ln); **no `classification_reviews` table, no review UI** — FR-2.3/2.4 unmet |
+| M1.3 RoPA Generator          | 🟡     | `ropa_generator.py` (96 ln) exists; **no `ropa_records` table**, nothing persists |
+| M1.4 Sudhaar Planner v0      | ✅     | 227 ln, typed actions, rollback definitions, blast-radius escalation      |
+| M1.5 Saakshi Evidence v0     | ✅     | 152 ln + `packages/evidence` content-addressed store                      |
+| M1.6 Policy & Notice Gen     | 🟡     | `policy_generator.py` (51 ln); **no `policy_drafts` table**               |
+| M1.7 Human Review Console    | 🟡     | Approval console exists; no generalised review queue with reason capture  |
+| M1.8 Delivery Playbook       | 🟡     | `playbook.py` (27 ln); **no `playbook_entries` table**                    |
+
+## B.3 Phase 2 — Repeatability
+
+| Module                      | Status | Evidence                                                                            |
+| --------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| **M2.1 Connector Framework**| 🔴     | **Zero implementation.** 46 repo references = 2 enum strings, 1 feature flag, tool-scope labels, UI copy. No adapter interface, no registry table, no credential vault, no health checks |
+| M2.2 Drishti Live Discovery | 🔴     | Depends on M2.1                                                                      |
+| M2.3 Vibhaag Automated      | 🟡     | LLM path exists; review queue absent                                                 |
+| M2.4 Evidence Vault v1      | 🟡     | `packages/evidence` + storage buckets real; **WORM/Object-Lock unverified; no evidence-pack assembly or export** (FR-4.4) |
+| M2.5 Lekha Ledger v1        | ✅     | Hash-chained, `append_ledger()` SECURITY DEFINER RPC, counters, verify endpoint. Strong. |
+| M2.6 Approval Workflow v1   | ✅     | Approval engine + execution gate. Strong.                                            |
+| M2.7 Prativedan Multi-Format| 🟡     | HTML only; no auditor pack, no DPB submission format, no signed PDF                  |
+| M2.8 DSAR Tracker           | 🟡     | `dsars` table + `dsar-client.tsx` (517 ln); identity verification is UI copy, statutory clock not enforced server-side |
+| M2.9 Nazar Regulatory Watch | 🟡     | Agent (83 ln) + `regwatch-client.tsx` (481 ln); no scheduler, no control-impact mapping |
+
+## B.4 Phase 3 — Agentic execution ⭐ the core product
+
+| Module                          | Status | Evidence                                                              |
+| ------------------------------- | ------ | --------------------------------------------------------------------- |
+| M3.1 Sudhaar v1 Structured      | ✅     | Typed, parameterised, risk-scored, rollback definitions               |
+| **M3.2 Dry-Run / Simulation**   | 🔴     | `feature_dry_run_engine: bool = True` flag only. **No engine, no diff renderer.** The approval gate checks a status column nothing ever sets from a real simulation |
+| M3.3 Approval Console v1        | ✅     | `approval-client.tsx` (857 ln) + `plans/[id]/` — the strongest surface in the app |
+| **M3.4 Karya Execution v1**     | 🔴     | `agents/karya.py:120-130` returns `status="skipped"`, "execution deferred until Phase 3 connector framework is online". **Stub.** |
+| **M3.5 Rollback Engine**        | 🔴     | Rollback *definitions* generated by Sudhaar; **no engine executes them** |
+| M3.6 Blast-Radius Guardrails    | 🟡     | Planner-side only (SEC-7); kill switch process-local (SEC-4)           |
+| **M3.7 Post-Exec Verification** | 🔴     | No agent, no module, no endpoint                                       |
+| M3.8 Consent Management v1      | 🟡     | `consent/page.tsx` (334 ln) UI; **no consent tables, no ledger, no withdrawal workflow**. FR-12.2 and the 7-year retention rule unmet |
+| M3.9 Breach & Incident v1       | 🟡     | `breaches` table + `breach-client.tsx` (331 ln); 72-hour clock is display-only, no notification generation |
+| M3.10 Continuous Monitoring     | 🔴     | **No scheduler at all** — `grep -E "schedule\|cron"` = 0 hits. Page is a shell |
+| M3.11 Client Portal             | 🟡     | `portal-client.tsx` (938 ln), tenant-filtered. Best-scoped page. No persona views |
+
+## B.5 Phase 4 — Scale & continuous compliance
+
+| Module                             | Status | Reference count |
+| ---------------------------------- | ------ | --------------- |
+| M4.1 Standing Approval Policies    | 🔴     | 0               |
+| M4.2 Multi-Regulator Control Reuse | 🔴     | 0 (`RBI\|SEBI\|IRDAI\|CERT-In`) |
+| M4.3 Connector Framework v2        | 🔴     | 0 (v1 absent)   |
+| M4.4 Self-Serve SMB Tier           | 🔴     | 0               |
+| M4.5 Vendor / Processor Risk       | 🔴     | 0 (`vendor\|TPRM`) |
+| M4.6 DPIA Automation               | 🔴     | Control text only — no generator |
+| M4.7 Partner / White-Label Portal  | 🔴     | Shell page; `tenants.partner_tenant_id` column exists, unused |
+| M4.8 Sectoral Pack #1              | 🔴     | 0               |
+| M4.9 Sanket Market Signal          | ✅     | 72 ln, functional |
+
+## B.6 Phase 5 — Maturity
+
+All 🔴 except the Terraform skeletons. M5.3 Enterprise Tier (SSO/SAML, granular RBAC) is the one item inside your stated scope and depends on W1 + W2 below.
+
+## B.7 Your fifteen observations — where each lands
+
+| #   | Your observation                                          | Verdict  | Addressed in |
+| --- | --------------------------------------------------------- | -------- | ------------ |
+| 1   | Client onboarding & sustenance, continuous monitoring      | Confirmed: onboarding is one endpoint that discards its input; no scheduler | W3, W6 |
+| 2   | Multi-tenancy, RBAC, persona views                         | Confirmed: DB correct, app bypasses it (SEC-3); RBAC 4 checks (SEC-9) | **W0, W1** |
+| 3   | Client estate/targets, multiple systems                    | Confirmed: `/organizations/onboard` accepts `systems[]` at `v1.ts:794-805` and **never persists it** — echoed back in the response at `:915`. No table, no model, no UI | **W3** |
+| 4   | Connector definition, read/write grants to agents          | Confirmed absent (M2.1). Now solved by standards, not adapters — grants map to the target's own OAuth scopes, enforced at the client's IdP | **W4.1–W4.4** |
+| 5   | Control count 46/47/48 + Rules conformance                 | Confirmed — and **worse than you flagged**: the count is inconsistent (QUA-3) *and* the citations point at draft rule numbers (CTL-1) | **W7** |
+| 6/7 | Agents on different estates; multiple estates per client   | Confirmed: no estate dimension anywhere in the domain model | **W3** + **W3.5** (ER graph) |
+| 8   | Progress monitoring before/during/after agent tasks        | Partial: `agent_runs` table + realtime channel exist; no per-task progress, no pre/post task record | W5 |
+| 9   | **Reconcile Karya's work vs Sudhaar's approved plan (maker-checker)** | **Confirmed absent — `grep -iE "reconcil\|maker.check"` = 0 hits.** The separation of duties is designed; the *checker* half is not built | **W5** |
+| 10  | Approval records and post-approval trail                   | Partial: tokens + usages + ledger are solid; no approval-record export, no post-execution closure pack | W5, W8 |
+| 11  | Reports branded to Axiom Proof / Axiom Minds               | Partial: present in `reports-client.tsx:214,271,345-353` only. **Absent from Prativedan's own output, evidence packs and the gap-scan report** | **W8** |
+| 12  | Evidence storage, retrieval, review                        | Partial: content-addressed store real; no pack assembly, no export, no verification UI | W8 |
+| 13  | Monitor the continuous-monitoring setup; re-assess; auto-remediate | Confirmed absent (M3.10, M4.1) | **W6** |
+| 14  | Multi-regulator reuse with indicative mappings             | Confirmed absent | **W7** |
+| 15  | Connectors to CRM/HRMS/DWH/ticketing/code repo             | Confirmed absent. Delivered as **REST/OpenAPI descriptors** — declarative config per system, one descriptor each (Rev 7: MCP auto-discovery deferred) | **W4.7** |
+| 16  | Sectoral packs                                             | Confirmed absent | W7 |
+| —   | Multi-tenant + MFA (your item 3)                           | Tenancy partially real, MFA absent (SEC-8) | **W0, W1** |
+
+---
+
+# PART C — The plan
+
+Ten workstreams. **W0 is a hard prerequisite for everything** — not because of ceremony, but because staging currently authenticates nobody and isolates nothing, so no other workstream can be verified there.
+
+Sizing is relative (S/M/L/XL), not calendar. I have deliberately not invented day counts.
+
+---
+
+## W0 · Security remediation & environment parity — **P0, blocking** · size L
+
+Nothing else ships until this lands. Size raised from M to L in Revision 4: preprod parity is not a config change, it is the removal of an entire class of code.
+
+### W0.0 · The governing principle — one codebase, one ruleset
+
+*Your instruction: preprod must authenticate exactly as production does, as an exact replica of the prod codebase and ruleset.*
+
+The root cause of SEC-1, SEC-2 and SEC-13 is a single conflation: **environment identity has been used as a proxy for security posture.** `ENVIRONMENT === 'preprod'` is read in nine places to mean "relax the rules", and each site invented its own OR-chain to decide what relaxing means.
+
+The fix is to separate the two concepts permanently:
+
+| Concept | May vary by environment? | Examples |
+| ------- | ------------------------ | -------- |
+| **Topology** | **Yes** — this is what environments are for | Cluster, URLs, GCP project, bucket names, Supabase instance, replica count, log level |
+| **Security ruleset** | **No — never** | Authentication, tenant resolution, RBAC, idempotency, RLS enforcement, credential validation, which database client is used |
+
+Concretely:
+
+1. **Delete every environment-conditional security branch in the codebase.** All nine sites in SEC-13, plus the `isDevOrTest` chains in SEC-1 and the cookie clauses in SEC-2. Not re-scoped — *deleted*. `grep -rn "ENVIRONMENT === 'preprod'" apps packages services` returning zero security-relevant hits is the acceptance test.
+
+2. **One switch, defaulting to secure.** A single `resolveAuthMode()` in `@axiom/config`:
+   - `AXIOM_AUTH_MODE` ∈ `{ strict, e2e-bypass }`, **default `strict`**.
+   - `e2e-bypass` is **refused at boot** unless `ENVIRONMENT ∈ {local, test}`. The process exits with a clear error rather than degrading.
+   - No other code anywhere reads `ENVIRONMENT` to make a security decision. Enforced by an ESLint rule plus a CI grep gate, so the pattern cannot grow back.
+
+3. **`preprod`, `staging`, `production` and `onprem` all run `strict`.** Identical code path, identical rules. The only thing preprod does differently is point at different infrastructure.
+
+4. **Fail closed, everywhere.** Supabase error or unreachable ⇒ `401`/`503`. Never a founder identity (SEC-1), never a "sovereign session" (SEC-13 row 6), never a cached bypass cookie.
+
+5. **Legitimate preprod references stay.** `apps/marketing/src/lib/url-resolver.ts` and the GCP project/bucket naming are *topology* — they route to the right host. Those are correct and untouched. The distinction is exactly the table above.
+
+### W0.1 · Making preprod a real replica
+
+Code parity alone is not enough — preprod currently has no database to be strict against.
+
+- **Provision a real Supabase/Postgres for preprod** and run the full migration series against it. Remove the `admin.ts` / `server.ts` mock substitution so preprod connects to it like production does.
+- **Seed representative data, not fixtures** — multiple tenants, users across every persona, so RLS and RBAC are genuinely exercised. Never client production data.
+- **Real auth**: real Supabase Auth users, real JWTs, real MFA enrolment once W1 lands.
+- **Idempotency enforced** — remove the auto-key generation at `idempotency.ts:34` so FR-8.3 is actually tested.
+- **Parity CI lane**: the same E2E suite runs against preprod and against a production-configured stack, and **any behavioural divergence fails the build**. That is what keeps parity true after this workstream ends.
+- Same treatment for **staging** and **onprem** (W10) — all four strict, differing only in topology.
+
+### W0.2 · The remaining findings
+
+6. **Ban the service-role client from the web app** (SEC-3) — ESLint `no-restricted-imports` blocking `createSupabaseAdmin` inside `apps/web/**` plus a CI grep gate; migrate all 17 pages to the user-scoped client in W1.
+7. **Distributed kill switch** (SEC-4) — Redis-backed with short-TTL local cache; `release()` becomes scope-aware; global release restricted to `founder`.
+8. **Gate `/organizations/onboard`** (SEC-5) — entitlement check, per-user tenant quota, rate limit, `randomUUID()` slug suffix.
+9. **Re-assert `dry_run_expires_at` in the execute path** (SEC-6).
+10. **Fix** the Temporal placeholder token (SEC-11), bound the nonce set with a TTL map (SEC-12), make the onboarding ledger write blocking (SEC-10).
+
+### Exit criteria
+
+- `grep -rn "ENVIRONMENT === 'preprod'\|ENVIRONMENT === 'staging'" apps packages services` returns **zero** security-relevant hits.
+- An unauthenticated request returns **401 in every environment**, verified by test in each.
+- Setting `axiom_e2e_bypass=true` has **no effect anywhere**.
+- Preprod runs on a real database, real auth, enforced idempotency, with the parity CI lane green.
+- SEC-1 … SEC-13 closed, each with a regression test (W9).
+
+---
+
+## W1 · Tenancy, RBAC, MFA, personas — **P0** · size L
+
+*Your brief items 2 and 3.*
+
+**Tenancy.** Single `requireTenantContext()` server helper returning `{ tenantId, userId, role, scopes }` from the session + active-tenant cookie. Every page and route handler goes through it. All 17 pages migrated to the user-scoped client. Add a tenant-switcher for founder/partner multi-tenant users (the `user/tenants` endpoint already exists).
+
+**Personas.** Define them once in `packages/types` as a capability matrix, not scattered strings. Proposed set, extending the existing `user_role` enum:
+
+| Persona | Surface | Core capability |
+| --- | --- | --- |
+| `founder` | Workbench, all tenants | Everything; only role that can globally kill-switch |
+| `axiom_analyst` | Workbench, assigned tenants | Run agents, review outputs; cannot approve client-side |
+| `owner` | Portal | Tenant admin, billing, user management, approve |
+| `approver` | Portal | Approve/reject/defer within `approval_scopes` |
+| `reviewer` | Portal | Review agent output, comment, cannot approve |
+| `viewer` | Portal | Read-only posture, reports, evidence |
+| `partner` | Partner portal | Multi-client read + branded export |
+| `agent` | Service | Machine identity, token-gated |
+
+**RBAC.** Central policy module — `can(role, action, resource, scopes)` — replacing the four inline comparisons. Enforced in three places: BFF middleware, web server components (render gating), and RLS (already partly there). `tenant_users.approval_scopes` finally read: an approver may be scoped to specific action classes, which is also what makes W6 standing policies safe later.
+
+**MFA — TOTP + recovery delivered; email OTP and SMS deferred by accepted scope.** The implementation intentionally uses self-managed TOTP (see migration 0012's decision note), encrypted secrets, recovery codes and session attestations. Preserve that choice. Email OTP is deferred; do not implement it without a later scope decision. Tables `user_mfa_factors`, `mfa_challenges` and `mfa_session_attestations` exist in 0012–0014. SMS stays defined-but-disabled with no provider or code.
+
+Enforcement is **step-up, not blanket**: required at login for `founder` / `owner` / `approver`, and **re-challenged at the moment of approval-token issuance**. That second challenge is the one that matters — it binds a fresh, strong authentication to the exact act of approving, which is what FR-7.3 ("approver identity, timestamp, scope recorded") actually needs to mean in front of an auditor. Recovery codes issued at enrolment, single-use, hashed at rest.
+
+**Authenticator replacement (Revision 22).** Replacing a live factor requires an `enrolment` challenge satisfied with the current authenticator or a recovery code, and the swap is atomic: migration 0030's `activate_totp_factor` retires the replaced factor and activates the new one under one set of row locks. The one-active-TOTP unique index makes any two-statement version either impossible or unsafe — revoke-then-activate leaves a window in which an account holds no factor, and a first enrolment is not step-up gated. Recovery codes are reissued on replacement so a code spent against the old factor does not outlive it.
+
+**Exit:** a `viewer` in tenant A cannot see tenant B, cannot reach an approve button, and cannot call the approve endpoint. Proven by test, not inspection.
+
+---
+
+## W2 · Data model completion — **P0** · size M
+
+Append-only migrations, allocated from the next unused number. **0000–0033 exist** at Revision 25; **0015 analyst is committed**. Inspect the actual branch before allocating more. Regulatory baseline and MFA tables listed below already exist; do not recreate them. Remaining target tables:
+
+```
+-- Estate (W3)
+estates, estate_systems, system_data_categories, estate_scans -- DELIVERED by 0029; management/workflows pending
+
+-- Universal Connection Framework (W4) -- SCHEMA DELIVERED by 0033; runtime pending
+connectors,                    -- registered target instances + targetBinding
+connector_descriptors,         -- capability descriptors (versioned, hash-pinned)
+connector_credentials,         -- envelope-encrypted grant config, never raw tokens
+connector_grants,              -- internal scope ↔ target OAuth scope, expires_at, revoked_at
+connector_health_checks,
+workload_identities,           -- SPIFFE IDs per agent workload
+mcp_tool_registry              -- discovered tools, read/write class, description hash
+
+-- Execution (W5)
+dry_runs, rollback_executions, execution_batches, verification_results,
+plan_reconciliations
+
+-- Monitoring & policy (W6)
+monitoring_schedules, drift_events, standing_approval_policies, policy_evaluations
+
+-- Regulatory baseline & versioning (W7.0) -- DELIVERED; all six exist. Do not recreate.
+regulatory_instruments,        -- content-hashed, with amends/supersedes chain
+regulatory_provisions,         -- addressable: 'Rule 7(1)', 'Third Schedule'
+regulatory_baselines,          -- frozen named set: 'IN-DPDP@2026-09-20'
+control_provenance,            -- control <- provision, with verified_on/by
+control_change_log,            -- typed diffs driving the semver bump
+regulatory_signals,            -- Nazar watch output, triaged to baseline deltas
+
+-- Multi-regulator & sector (W7.3/7.4)
+frameworks, framework_controls, control_mappings, sector_packs
+
+-- Phase 1/2 parity (Readiness Matrix §5.2)
+ropa_records, policy_drafts, playbook_entries, classification_reviews
+
+-- Rights & consent (W8)
+consent_purposes, consent_records, consent_withdrawals, evidence_packs
+
+-- Auth (W1)
+user_mfa_factors, mfa_challenges
+```
+
+Tenant-owned tables require `tenant_id`, row-bound RLS and tenant-consistent foreign keys. **Do not copy the existing 0003/0004 write-policy pattern unchanged** (R-02). Global regulatory/catalogue reference tables require controlled publication and explicit read policy; personal MFA records are user-scoped. Index real access paths and test missing/stale JWT tenant claims. Normalise existing inline dry-run/execution fields deliberately rather than creating a second source of truth. Separate batch/request keys from action keys (R-04). Retention: `consent_records` 7-year minimum per FR-4.5, with legal-hold and withdrawal semantics defined.
+
+---
+
+## W3 · Client estate & onboarding — **P1** · size M
+
+*Your brief items 1, 3, 6, 7.*
+
+The original endpoint discarded `systems[]`; migration 0018 preserves it as an onboarding intake proposal. Live estate/system inventory management and explicit scope assignment are implemented. Migration 0035 and the proposal review UI add owner/admin approval and normalization into the live estate. The complete resumable wizard, readiness confirmation, drift handling and live relationship graph remain pending. Owners and tenant admins may approve staff-prepared proposals (accepted user decision).
+
+- **Model:** tenant → **estates** (1:N) → **systems** (1:N) → connectors (1:N). An estate is the unit an assessment binds to, so one client can run separate Axiom-Proof-bound assessments on, say, "India production" and "Singapore subsidiary" independently.
+- **Engagements bind to an estate**, not just a tenant — `engagements.estate_id`, with the control-library version already pinned.
+- **Onboarding wizard** (real, replacing the single endpoint): company profile → estate definition → system inventory → connector registration → scope & access grants → readiness confirmation. Resumable; each step a ledger event.
+- **Sustenance:** estate drift detection, re-onboarding for new systems, periodic access-grant re-attestation.
+
+### W3.5 · Entity Relationship Graph page — *new, your item 5*
+
+A first-class page (`/estate/graph`) rendering the live domain as an interactive node-edge graph, not a static diagram.
+
+**Nodes:** tenant → estates → systems → connectors → data categories, plus the control/finding/evidence/plan objects bound to them, and the **ten agents** as first-class nodes.
+
+**Edges carry meaning, and access is the point:**
+
+| Edge style       | Meaning                                              |
+| ---------------- | ---------------------------------------------------- |
+| Solid teal       | Agent holds a **read** grant on that connector/system; hover shows grant type (`client_credentials`, `token_exchange`, …) and assurance level |
+| Solid indigo + lock and WRITE label | Agent holds a **write** grant — scoped, time-bound; hover shows `expires_at`; gold remains reserved for sealed evidence/attestations |
+| Dashed grey      | Structural containment (estate → system)             |
+| *no edge*        | The default — eight of ten agents have no client-system access at all |
+| Thin indigo      | Derivation (finding → control, evidence → finding)    |
+
+Only Karya can carry client-system write edges; it may hold more than one scoped connector grant. The graph must derive those edges from enforced permissions and show Sudhaar has none. Colour and labels must distinguish write authority from sealed evidence.
+
+**Icons — reuse what exists, build nothing new.** `packages/ui/src/components/AgentIcon.tsx` (877 ln) already ships bespoke icons for all ten agents plus `policy`, `policy_engine`, `incident`, `dsar`, `consent` — 15 keys, with `idle | thinking | working` states and `xs|sm|md|lg` sizing already wired. The graph uses `AgentIcon` directly as the node glyph, and drives the `working` state from the live agent-run channel so the canvas animates while agents are actually running. New icons needed only for infrastructure node types (system/connector/datastore), which follow the same SVG conventions.
+
+**Interactions:** click a node → side panel with its records, grants and recent ledger entries; filter by agent, by estate, by access type; "show me everything Karya can write to" as a one-click view; export to PNG/SVG for board packs (branded per W8).
+
+---
+
+## W4 · Universal Connection Framework — **P1** · size XL
+
+*Your brief items 4 and 15, re-architected. This is the single largest gap and it gates Phase 3.*
+
+> **Revision 3 — direction change.** Do **not** build connectors one system at a time. Implement a small number of **standards** and describe each target system declaratively. `04_Solution_Architecture.md §5.2` already calls for a "Tool/MCP Server registry" — this is that design finally built, not a new one.
+>
+> The unit of work stops being "an adapter" and becomes "a grant handler, a transport, and a descriptor". Adding Salesforce should be a config file and a capability test, not a sprint.
+
+### W4.0 · The layering
+
+Four layers, each independently testable. The bottom two are the reusable framework; the top one is per-system configuration.
+
+```
+┌─ L4 · CAPABILITY DESCRIPTORS ──────────────────────────────┐
+│  Declarative per target system (YAML, not code)            │
+│  salesforce · workday · snowflake · jira · github · …      │
+└───────────────────────────┬────────────────────────────────┘
+┌─ L3 · TRANSPORTS ─────────▼────────────────────────────────┐
+│  REST/OpenAPI (primary) · SQL catalogue · GraphQL          │
+│  MCP — internal registry; outbound optional per-descriptor  │
+│  all implement: enumerate → sample → read → (write)        │
+└───────────────────────────┬────────────────────────────────┘
+┌─ L2 · CREDENTIAL BROKER ──▼────────────────────────────────┐
+│  oauth2.client_credentials   (RFC 6749 §4.4 / 2.1)         │
+│  oauth2.token_exchange       (RFC 8693)                    │
+│  oauth2.saml2_bearer         (RFC 7522)                    │
+│  oauth2.jwt_bearer           (RFC 7523)                    │
+│  + legacy lane (static key / DB auth) — lower assurance    │
+│  issues SHORT-LIVED, SCOPE-NARROWED tokens. Never raw creds│
+└───────────────────────────┬────────────────────────────────┘
+┌─ L1 · WORKLOAD IDENTITY ──▼────────────────────────────────┐
+│  SPIFFE / SPIRE — X.509-SVID & JWT-SVID per agent workload │
+│  INTRA-PERIMETER only. All 10 agents; Karya's ID ≠ Sudhaar's│
+│  Broker uses separate registered-client assertions       │
+└────────────────────────────────────────────────────────────┘
+```
+
+### L1 · Workload identity (SPIFFE)
+
+Each agent runtime workload receives its own SVID. Karya, Sudhaar and Drishti are **distinct cryptographic identities**, not one service account with different code paths.
+
+The benefit is real but its boundary matters, and Revision 3 drew it too generously — see **the workload-identity correction** under the MCP posture below. Precisely:
+
+- **Inside Axiom's perimeter**, SVIDs give per-agent identity with a single trust domain and no federation. Sudhaar's workload is structurally incapable of presenting Karya's identity to the broker, so `connector.write` cannot be acquired on its behalf. This is enforceable and it ships in W4.3.
+- **Across to the client**, the broker authenticates as the registered connector identity using a separate OAuth assertion; the internal SVID stays inside Axiom. Per-agent client registration remains optional hardening. See the Revision 32 protocol correction under *External-system authentication*.
+
+It is also the enabling primitive for **M5.1 split-plane** and **W10 on-prem** — an in-perimeter data plane proves its identity without a shared secret crossing the boundary.
+
+### The full agent roster — identity and estate access for all ten
+
+*Your question: the plan named Karya, Sudhaar and Drishti. What about the rest?*
+
+Every agent gets its own SVID, not just the three I used as examples. Here is the complete roster, reconciled across all three places permissions are declared (`packages/types/src/agents.ts`, `services/agent-runtime/src/axiom/agents/*.py`, and `04_Solution_Architecture.md §5.2`).
+
+**Estate access classes:**
+**D** = direct — reaches client systems through a connector ·
+**I** = indirect — never touches client systems, but processes estate-derived data including personal data ·
+**N** = none — Axiom-internal or external-web only, never sees client data
+
+| Agent | Autonomy | `canMutate` | Declared scopes | Estate | Needs a connector grant? |
+| ----- | -------- | ----------- | --------------- | ------ | ------------------------ |
+| **Drishti** | L1 | false | `connector.read`, `inventory.write`, `evidence.write` | **D** | **Yes — read**, per estate |
+| **Karya** | L2 | **true** | `connector.write`, `evidence.write`, `rollback.execute` | **D** | **Yes — write**, per estate, approval-token gated |
+| **Vibhaag** | L1 | false | *(none)* | I | No |
+| **Parikshan** | L1 | false | `control_library.read`, `findings.write` | I | No |
+| **Sudhaar** | L1 | false | `findings.read`, `control_library.read`, `plan.propose` | I | **No — never** |
+| **Saakshi** | L1 | false | `evidence.write`, `s3.write_worm` | I | No |
+| **Prativedan** | L1 | false | `findings.read`, `evidence.read`, `control_library.read`, `report.write`, `pdf.render` | I | No |
+| **Lekha** | L1 | false | `ledger.append`, `ledger.read` | N | No |
+| **Nazar** | L1 | false | `http.read.government_sources`, ~~`control_library.write`~~ → `regulatory_signal.write` (SEC-15) | N | No |
+| **Sanket** | L1 | false | `http.read.public_sources` | N | No |
+
+**So: only two of ten agents ever touch a client estate.** Drishti reads it; Karya writes to it. Five more handle estate-*derived* data — including personal data — without any connector access at all. Three never see client data in any form.
+
+Connector grants (W4.4) are issued only to those two internal workload identities. In the accepted shared connector-client model, Axiom's broker refuses the other eight; the client's IdP enforces target scopes against the connector identity. Separate per-agent registrations can add external enforcement when explicitly configured.
+
+#### Discrepancies — delivered declarations versus pending W4.3 enforcement
+
+1. **Nazar — declaration fix already delivered** in `cc3fcee`: both TS and Python declare `regulatory_signal.write` instead of `control_library.write`. Preserve that work. W4.3 must prove runtime/workload enforcement; do not report the declaration change as newly implemented.
+2. **Prativedan read declarations are corrected in Revision 34**: findings, evidence and Control Library reads are explicit in TS/Python. Tenant/estate-scoped enforcement at each runtime data access is still required; declaration tests and the internal registration adapter do not close this.
+3. **Mutation metadata is clarified in Revision 34**: `mutatesClientEstate`/`mutates_client_estate` distinguishes client changes from `writesAxiomState`/`writes_axiom_state` domain-record changes. `canMutate`/`can_mutate` remains compatible; Sudhaar stays false. No credentials or permission are granted by these labels. Runtime/workload isolation remains pending.
+4. **Saakshi's "write-once"** (architecture) is expressed as ordinary `evidence.write` + `s3.write_worm` strings with nothing enforcing append-only. WORM must be enforced at the object store (Object Lock / MinIO compliance mode), not asserted by a scope name.
+5. **Drishti and Parikshan are understated** in §5.2 — "Connectors: read-only" and "Control Library read" omit `inventory.write`/`evidence.write` and `findings.write` respectively. Architecture scope-table alignment is corrected in Revision 34; runtime enforcement conformance remains part of W4.3.
+
+#### The missing dimension: scopes have no estate
+
+This is the gap your question exposes most sharply. A declared scope string alone is **global to the agent**: `connector.read` does not identify connector X in estate Y for tenant Z. The private delegation model now binds tasks to tenant, actor, workload, estate/engagement and input; the isolated Parikshan path checks that context on every tool call. Remaining worker/tool integrations and live connector grants are still pending.
+
+Under W3's multi-estate model — one client running separate assessments on "India production" and "Singapore subsidiary" — an agent authorised for one estate must not be able to read the other. Apply the same structured context to all enforced permissions, rather than treating a declared string as authorization:
+
+```
+connector.read:<tenant>:<estate>:<connector>
+connector.write:<tenant>:<estate>:<connector>    # Karya only, approval-token bound
+findings.write:<tenant>:<engagement>
+```
+
+Resolved at token-acquisition time by the credential broker (W4.2) and mapped onto the target's own OAuth scopes by the grant model (W4.4), so narrowing is enforced by the client's authorization server rather than by our string comparison.
+
+#### Enforcement — making SEC-14 false
+
+Declared scopes become checked scopes, at three layers:
+
+1. **Workload identity (L1)** — authenticate the agent's SVID, then resolve its permitted scopes from trusted, current workload registration and policy. Only Karya may obtain write authority; Sudhaar receives no connector authority. Enforcement lives inside Axiom under the accepted single external connector identity. SVIDs prove workload identity; custom scope claims are not assumed to exist. [JWT-SVID specification](https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#3-jwt-claims).
+2. **Broker (L2)** — refuses to acquire a token for a scope the authenticated workload is not currently permitted to use. Over-broad requests are rejected and logged as a security event, not silently narrowed.
+3. **Runtime (agent-runtime)** — every tool invocation checks the scope before dispatch. An undeclared scope raises and is written to the ledger. This is the piece that makes `tool_scopes` load-bearing instead of decorative.
+
+A conformance test per agent asserts its declared set matches its enforced set, so the three declaration sites cannot drift apart again — which is how discrepancies 1–5 arose.
+
+#### The ER graph makes this legible
+
+W3.5 renders this matrix from enforced grants: **eight agents with no client-system access, teal read edges from Drishti, indigo write edges with lock/WRITE labels from Karya.** Gold is reserved for sealed evidence and attestations.
+
+### L2 · Credential broker — the four grants
+
+Every handler implements one interface: `acquire(grantConfig, requestedScopes) → { token, scopes, expiresAt, binding }`. Agents never see a credential; they receive a short-lived, scope-narrowed token.
+
+| Grant | Spec | When it is the right choice |
+| ----- | ---- | --------------------------- |
+| **Client Credentials** | RFC 6749 §4.4, OAuth 2.1 | Axiom Proof is a registered app in the client's tenant. The common SaaS case. Prefer **`private_key_jwt`** (RFC 7523) or **mTLS** (RFC 8705) client auth over `client_secret` |
+| **Token Exchange** | RFC 8693 | Agent acts *on behalf of* the tenant with constrained scope. `subject_token` = tenant delegation, `actor_token` = agent JWT-SVID |
+| **SAML 2.0 Assertion** | RFC 7522, `urn:ietf:params:oauth:grant-type:saml2-bearer` | Enterprise has a SAML IdP and no OIDC M2M path. Common in Indian BFSI and large enterprises |
+| **JWT Assertion** | RFC 7523, `…:grant-type:jwt-bearer` | The OIDC-native sibling of the SAML grant. Included because it is frequently the only thing a modern IdP exposes |
+
+**Token Exchange deserves special attention — it upgrades the audit ledger.** RFC 8693's `act` claim carries a verifiable **delegation chain**. Today a ledger entry *asserts* "Karya did this under Priya's approval". With token exchange, the access token itself carries that chain, and **the client's own IdP logs corroborate it independently of us**. That is a materially stronger answer to FR-10.5 ("ledger integrity verifiable independently") and to a DPB inquiry — the evidence no longer rests solely on Axiom Proof's own record. Ledger entries will therefore also record the token `jti` and `act` chain.
+
+Where the target supports it, tokens are **sender-constrained** — DPoP (RFC 9449) or mTLS binding — so a leaked token is not replayable.
+
+**Honest limits.** Not everything speaks OAuth, and pretending otherwise would be a design lie:
+
+- **Databases** (PostgreSQL/MySQL — our W4.4 target) generally use native auth. The path there is workload identity → **cloud IAM** (RDS IAM auth, Cloud SQL IAM) → short-lived DB token. Where the client runs self-hosted Postgres with password auth, it falls to the legacy lane.
+- **Legacy Indian enterprise estate** — on-prem HRMS, custom ERP, file drops — frequently has none of these. There is an explicit **legacy lane** with static credentials, marked `assurance: 'low'` in the registry, surfaced as such in the UI and the estate graph, and barred from write scopes without additional per-action human confirmation.
+
+### L3 · Transports
+
+Each implements the same `enumerate → sample → read → (write)` contract, so descriptors are portable across transports.
+
+- **REST / OpenAPI** — **the primary path.** Descriptor-driven from the target's OpenAPI document. This is what most SaaS in an Indian mid-market estate actually exposes.
+- **SQL catalogue** — `information_schema` and equivalents, for data stores.
+- **GraphQL** — introspection-driven.
+- **MCP** — **scoped to the Axiom Proof perimeter only.** See the MCP posture below.
+
+---
+
+### MCP posture — internal only, outbound optional, inbound dropped
+
+*Final. Revision 8.*
+
+Revision 3 conflated two opposite directions. Separated and settled:
+
+| | Direction | Decision |
+| --- | --------- | -------- |
+| **A** | **Outbound** — Axiom's agents → a client's MCP server | **Optional transport, not the primary path.** Implemented behind the same transport interface as REST/OpenAPI, enabled per-descriptor when a client actually runs an MCP server. Not built as part of the W4 critical path |
+| **B** | **Inbound** — external systems → Axiom Proof | **Dropped.** Not in scope |
+| — | **Internal MCP tool registry** — Axiom's own agents and tools, inside the perimeter | **Built in W4.5.** Delivers `04_Solution_Architecture.md §5.2`'s "Tool/MCP Server registry" as specified |
+
+**Why outbound stays flexible rather than deleted.** Your read is right — most 50–200 employee companies have nothing in front of their systems, let alone an MCP server. So MCP cannot be the primary transport. But the transport layer is an interface, and the descriptor already names its transport, so an MCP-capable client is a one-line descriptor change rather than a re-architecture. Keeping the seam costs nothing; assuming the adoption would have cost a lot.
+
+**Why inbound is dropped rather than deferred.** Two independent reasons, either sufficient:
+
+1. It is another read surface, and **SEC-3 means we currently leak across tenants on the read surfaces we already have.** Adding one before isolation is enforced is indefensible.
+2. Writes could never be offered over it anyway. An external MCP client performing a write would have to bypass the approval console — breaking AP-1 and BR-1 — or re-implement it over MCP, which cannot work: `§3.2` requires the approver see the action, statutory citation, **dry-run diff**, blast radius, risk reasoning and rollback plan, under the rule that *"an approver must never have to trust the agent to approve safely."* **An MCP tool call cannot show a human a diff.** The approval surface is a human review surface by design, not an API.
+
+So inbound MCP would have been read-only forever, delivering a convenience feature onto an unresolved isolation problem. Dropped.
+
+### External-system authentication — one connector identity, not ten
+
+*Your call, and it is the right simplification.*
+
+Revisions 3 and 7 proposed registering a **separate OAuth client per agent** at the client's IdP, so their authorization server could refuse a write-scoped token to anything but Karya. That bought defence-in-depth at a real cost: ten client registrations per connector, ten credential rotations, ten sets of scopes for a client's IT team to validate — a large authentication surface for a mid-market client to onboard, and one more thing to get wrong.
+
+It is also largely redundant, because the fact it was protecting is **known statically**:
+
+> Of ten agents, **Karya** alone writes to external systems, **Drishti** alone reads client systems, and the other eight receive no client-system access.
+
+That is not a runtime property needing an external authority to adjudicate. It is a fixed property of the architecture, enforced at three points inside our own perimeter.
+
+**Final model:**
+
+| Layer | What it holds | Enforcement |
+| ----- | ------------- | ----------- |
+| **Per tenant-connector** | **One** registered OAuth client identity, with read and write scopes available | Client's IdP |
+| **Read scope** | Requested only by Drishti holding the matching tenant/estate/connector read grant | Broker (W4.2), SPIFFE-authenticated |
+| **Write scope** | Requested **only** when the caller's SVID is Karya's **and** a valid approval token exists | Broker + approval gate (`v1.ts:319-470`) |
+
+One registration, one rotation, one scope set to validate. Onboarding friction drops sharply, which matters for the ICP.
+
+**The honest trade.** Enforcement of "only Karya writes" now lives entirely **inside Axiom's perimeter** — SPIFFE workload identity plus the broker plus the approval-token gate. A total compromise of Axiom Proof could, in principle, request a write token. Previously the client's IdP would also have refused it.
+
+Three things make that acceptable:
+
+1. The approval-token gate is independent of identity — a write still requires a signed, scope-bound, single-use token issued against a specific plan version and action set. Compromising the workload does not produce one.
+2. Write scope is time-bound and revocable per grant (W4.4), and the client can revoke from their side at any moment.
+3. Every token acquisition is a ledger event with the SVID and `act` chain recorded, so an anomalous write-scope request is visible rather than silent.
+
+**Per-agent OAuth registration remains documented as optional hardening** for security-mature clients who ask for it. The framework supports it; we do not require it. That is the right default: available for the client who wants belt-and-braces, not imposed on the client who just wants to connect a database.
+
+### Workload identity — the corrected boundary
+
+Revision 3 claimed a client's IdP could refuse a write-scoped token to any identity but Karya's, on the strength of SPIFFE. **That was over-claimed**, and the decision above supersedes it anyway. The accurate position:
+
+| Boundary | Mechanism | Status |
+| -------- | --------- | ------ |
+| **Inside Axiom's perimeter** — agent-runtime, BFF, model-gateway, temporal-workers, agent-to-agent, internal MCP registry | **SPIFFE/SPIRE SVIDs** for all ten agents. Single trust domain, one root of trust, no federation | **Real, enforceable, ships in W4.3** |
+| **Across to client systems** | **OAuth grants** (W4.2) against one connector identity. The broker issues a separate OAuth client assertion using the registered connector identity | Planned W4.2/3. A workload SVID authenticates the caller inside Axiom; it is not forwarded as an OAuth client assertion |
+
+**Revision 32 protocol correction:** `private_key_jwt` client authentication and the `jwt_bearer` authorization grant are different uses of JWTs. The client-authentication assertion must identify the registered OAuth client as subject and use an audience accepted by the target authorization server. An agent SVID is therefore not interchangeable with that assertion. Keep internal workload authentication separate from external connector authentication. This preserves the accepted one-client-per-connector decision. [RFC 7523 §§2–3](https://www.rfc-editor.org/rfc/rfc7523.html#section-3).
+
+SPIFFE never reaches into a client's infrastructure without federation the client would have to run SPIRE for — which no mid-market client will. Scoping it intra-perimeter is what makes W4.3 something that actually ships rather than an aspiration.
+
+### Safety rules — retained for the internal registry
+
+Unchanged from Revision 3, now applying to the internal tool registry and to outbound MCP if a client ever enables it:
+
+1. **Tool classification is mandatory and deny-by-default.** Every registered tool is classified read or write. An unclassified tool is refused, not guessed.
+2. **Tool output is data, never instruction.** Descriptions are hash-pinned at registration and re-verified each session.
+3. **Karya's parameters come only from the approved plan** — bound by the approval token, so no connector or tool response can redirect execution.
+
+### Scope impact — what changed, what did not
+
+**Unaffected:** W0 · W1 · W2 · W3 · W3.5 · W4.1 · W4.2 · W4.4 · W4.6 · **W5 entire execution loop** · W6 · W7 · W8 · W9 · W10.
+
+| Item | Final position |
+| ---- | -------------- |
+| W4.3 | **Simpler** — SPIFFE intra-perimeter only; no per-agent client registration to design or document |
+| W4.5 | Internal MCP tool registry only |
+| W4.7 | REST/OpenAPI primary; **absorbs item 15** via OpenAPI descriptors |
+| Inbound MCP server | **Dropped from scope** |
+| Outbound MCP client | Optional transport behind the existing interface; enabled per-descriptor |
+
+**Nothing is lost from the delivered feature set.** Item 15's connectors use hand-written OpenAPI descriptors instead of MCP tool discovery — work always required for any target without an MCP server, which is nearly all of them.
+
+### L4 · Capability descriptors — config, not code
+
+Adding a system becomes a file:
+
+```yaml
+target: salesforce
+transport: mcp
+auth: oauth2.client_credentials      # private_key_jwt
+assurance: high
+capabilities:
+  enumerate: { tool: list_objects }
+  sample:    { tool: query_records, mutating: false }
+  read:      { tool: query_records, mutating: false }
+  write:     { tool: update_record, mutating: true, requiresApprovalToken: true }
+dataCategoryHints: [contact, identity, financial]
+rateLimit: { rps: 5, burst: 20 }
+```
+
+`connector_grants` maps Axiom's internal scope (`connector.read`) onto the **target's own OAuth scopes**, so scope is enforced at the client's IdP rather than only by our code — and a write scope is requested *only* when a valid approval token already exists.
+
+### W4 chunking — seven sequential chunks
+
+Each independently mergeable, tested and staging-deployable. **W5 unblocks at W4.4**, once a grant-enforced transport contract is stable.
+
+| Chunk | Deliverable | Gate for |
+| ----- | ----------- | -------- |
+| **W4.1** | Registry + contract: `ReadConnector`/`WriteConnector` (TS + Python), capability-descriptor schema and loader, `connectors` / `connector_health_checks` tables, lifecycle | — |
+| **W4.2** | **Credential broker core** + `client_credentials` and `jwt_bearer` handlers; per-tenant envelope-encrypted vault; rotation; zero plaintext in Postgres | — |
+| **W4.3** | **SPIFFE workload identity, intra-perimeter** — SPIRE deployment, **SVIDs for all ten agents**, scope enforcement at identity/broker/runtime (closes SEC-14), enforce Nazar's already-corrected `regulatory_signal.write` declaration (SEC-15), `token_exchange` handler with `act`-chain capture | Enforced SoD + W10 |
+| **W4.4** | **Grant model** — `connector_grants` with scope/`expires_at`/`revoked_at`, mapped to target OAuth scopes; enforced per invocation; portal grant/revoke UI; ledger event per change | **W5 unblocks here** |
+| **W4.5** | **Internal MCP tool registry** — perimeter-scoped, hash-pinned descriptions, deny-by-default read/write classification. Delivers §5.2's "Tool/MCP Server registry" | Governed agent tooling |
+| **W4.6** | **First live binding — PostgreSQL/MySQL** via SQL transport + cloud-IAM credential path, end to end against a live staging database | Real Drishti discovery |
+| **W4.7** | `saml2_bearer` handler + **REST/OpenAPI (primary)** and GraphQL transports; OpenAPI descriptor pack for CRM / HRMS / DWH / ticketing / code repo | Phase 4 surface, **absorbs item 15** |
+
+### What "simulated" now means — and why this is a better position
+
+The previous plan said one real adapter plus simulated bespoke adapters. That distinction largely dissolves under this architecture, and in your favour.
+
+Because transports and grants are shared, a descriptor for an unconnected system still runs the **real transport, real grant handler and real scope enforcement**. Only the endpoint is synthetic. So instead of simulated *code*, we have real code pointed at a **sandbox or reference target**.
+
+`targetBinding: 'production' | 'sandbox' | 'reference-mock'` replaces `implementation: 'live' | 'simulated'`. The labelling rules from Revision 2 carry over unchanged and still apply to anything not `production`:
+
+1. **Type-level** — `targetBinding` is required on every descriptor; no default; omission fails the build.
+2. **Runtime** — a non-`production` binding cannot be granted a write scope. Structurally incapable of reaching W5 execution.
+3. **UI** — persistent amber chip on the connector card, the estate-graph node, discovery headers, and any derived finding or evidence.
+4. **Evidence & reports** — `provenance` recorded, visible watermark, **excluded from auditor packs and DPB submissions by default**.
+5. **Ledger** — `connector.targetBinding` on every entry, so the trail stays honest retrospectively.
+6. **Code & docs** — `TODO(W4.x)` header on every non-production descriptor; CI regenerates `docs/CONNECTOR_STATUS.md` so the live/sandbox split can never drift from the code.
+
+Promoting a system to production becomes **changing an endpoint and a binding flag**, not rewriting an adapter — which is the whole point of the change you asked for.
+
+---
+
+## W5 · Phase 3 execution loop — **P1** · size XL
+
+*Your brief items 8, 9, 10. This is "the core product" per the phase plan.*
+
+1. **Dry-Run / Simulation Engine (M3.2).** Per action type, a simulator that produces a **structured diff** (before/after), not prose. Writes `dry_runs` with a TTL. The design rule from `04 §3.2` is load-bearing: *if the diff cannot be rendered legibly, the action is not eligible for agent execution and routes to manual handling* — so the engine must be able to refuse.
+2. **Karya v1 (M3.4).** Replace the stub. Typed action catalogue → connector dispatch. Idempotent, pre/post state captured to evidence, configurable concurrency, stop-on-failure, per-action token re-validation (the gate already exists — wire the executor behind it).
+3. **Rollback Engine (M3.5).** Executes the Sudhaar-generated rollback definitions. Itself dry-run-able. Auto-trigger on failure threshold within a batch.
+4. **Execution-time blast-radius governor (SEC-7).** Re-check actual affected counts against the cap mid-batch; breach ⇒ halt + escalate.
+5. **Post-Execution Verification Agent (M3.7).** Re-runs the specific Parikshan checks the remediation targeted; emits closure evidence.
+6. **Reconciliation / maker-checker (your item 9 — currently zero implementation).** A `plan_reconciliations` record produced after every batch, comparing **approved scope** vs **executed reality**:
+   - actions approved but not executed, and why
+   - actions executed — parameter-level diff against the approved parameters
+   - anything executed outside approved scope (must be structurally impossible; the reconciler asserts it and screams if not)
+   - verification outcome per action
+   - a signed reconciliation statement sealed into evidence
+
+   This is the *checker* half of the maker-checker design. The architecture separates Sudhaar (maker) from Karya (doer); the reconciler is the independent third role that proves they agreed. It is also the artifact an auditor will actually ask for.
+7. **Progress telemetry (your item 8).** Per-task lifecycle events — queued → started → progress% → completed — over the existing WebSocket channel, with pre-task and post-task records in `agent_runs`.
+
+---
+
+## W6 · Continuous compliance — **P1** · size L
+
+*Your brief items 1, 13.*
+
+- **Scheduler.** Nothing exists today. Temporal is already deployed and is the right home — durable, survives restarts, handles human-approval waits. Cron-style `monitoring_schedules` per estate driving re-discovery and re-assessment.
+- **Drift detection** against the last sealed baseline; `drift_events` with severity; alerting on newly-introduced gaps.
+- **Standing approval policies (M4.1).** Human-authored, scope-bounded — *"auto-remediate expired-retention deletions under 1,000 records in non-production"*. Evaluated by a policy engine that issues a **scoped approval token automatically** when an action falls inside policy, and escalates otherwise. Critically: this reuses the existing token gate rather than bypassing it, so L3 autonomy inherits the same architectural guarantee as L2.
+- **Monitoring-of-the-monitoring (your specific ask).** A meta-health surface: are schedules firing, are connectors healthy, when did each estate last get assessed, which policies fired and what did they do. This is what makes "continuous" defensible rather than assumed.
+
+---
+
+## W7 · Control library & multi-regulator — **P0-adjacent, starts day one** · size L
+
+*Your brief items 5, 14, 16.*
+
+Re-scoped upward after CTL-1. This is now **P0-adjacent** — the product currently cites the wrong law in client-facing reports — and it runs from day one in parallel with W0.
+
+### W7.0 · Regulatory baseline & library versioning — *the foundation for everything else in W7*
+
+*Your instruction: version the library properly, with today's gazette position as the baseline, and track inclusions, changes and sources over time.*
+
+The current model is a good skeleton that stops one level short. `control_libraries` already treats a version as an immutable **publication event**, `controls` is keyed `(id, library_version)`, each control carries `introducedInVersion` / `revisedInVersion`, and assessments pin `library_version` (FR-3.5). What is missing is the thing underneath: **the library has no recorded relationship to the law it claims to implement.** There is one free-text `change_log` string and no way to answer "which gazette text was this control verified against, by whom, when?"
+
+That is also why CTL-1 went unnoticed for a year.
+
+#### The baseline chain, as of today
+
+Verified for this document:
+
+| Instrument | Gazette | Date | Status | Effect |
+| ---------- | ------- | ---- | ------ | ------ |
+| DPDP Act, 2023 | Act 22 of 2023 | 11 Aug 2023 | In force (phased) | Primary |
+| **DPDP Rules, 2025** | **G.S.R. 846(E)** | **13 Nov 2025** | Notified | 23 rules, 7 schedules |
+| **Corrigendum** | **G.S.R. 892(E)** | **11 Dec 2025** | Notified | Amends Rule 1(3) & 1(4) — wording only, **non-substantive**; commencement dates unchanged |
+| MeitY proposal — 18 months → 12 months | — | — | **Proposed, not notified** | Would move 13 May 2027 → 13 Nov 2026 |
+
+Commencement under Rule 1 as corrected:
+
+- **13 Nov 2025** — Rules 1, 2, 17–21 *(in force now)*
+- **13 Nov 2026** — Rule 4, Consent Managers *(~2 months away)*
+- **13 May 2027** — Rules 3, 5–16, 22, 23 — the core compliance set *(~8 months away)*
+
+Baseline declared as **`IN-DPDP@2026-09-20`** = { Act 22 of 2023, G.S.R. 846(E), G.S.R. 892(E) }, with the MeitY proposal tracked as `proposed` and excluded from compliance scoring.
+
+The corrigendum is a neat proof of why this matters: it *did* amend the Rules, and it *should not* invalidate a single assessment, because it changed grammar and not obligation. Only a model that records change **type** can tell those apart. A free-text changelog cannot.
+
+#### Semver, with defined meaning
+
+"Major / minor / revision" has to mean something specific or the numbers are decoration. The rule is **assessment comparability**:
+
+| Bump | Trigger | Effect on existing assessments |
+| ---- | ------- | ------------------------------- |
+| **MAJOR** | Scoring model, domain taxonomy, or control-identity changes | **Not comparable.** Posture scores cannot be compared across a major. Re-assessment required |
+| **MINOR** | Controls added, removed or **materially** reworded; a new instrument enters the baseline | Still comparable, with deltas shown. Re-assessment recommended, not forced |
+| **PATCH** | Citation corrections, typos, clarified guidance, non-substantive corrigenda — **what is tested does not change** | Fully valid. No re-assessment |
+
+This immediately resolves a commercial question in W7: **the CTL-1 citation fix is a PATCH.** The controls test exactly what they tested before; they now cite the right rule. Existing client assessments stay valid and do not need re-running — which would have been an awkward conversation. Adding the ~19 controls for uncited rules is a separate MINOR.
+
+So W7 ships as a sequence, each step independently releasable:
+
+| Version | Content | Bump rationale |
+| ------- | ------- | -------------- |
+| `0.1.0` → **`0.1.1`** | W7.1 citation re-map against G.S.R. 846(E) + 892(E); fix the header's factual errors | PATCH — same tests, correct law |
+| `0.1.1` → **`0.2.0`** | W7.2 new controls for the 10 uncited rules and all 7 schedules; new domains `NTC`/`PWD`/`CMG`/`APL` | MINOR — ~46 → ~65 controls |
+| `0.2.0` → **`1.0.0`** | Scoring recalibration, `effectiveFrom` per control, baseline formally declared, multi-framework mappings | MAJOR — scoring model changes |
+
+#### Schema (extends `0002_control_library.sql` rather than replacing it)
+
+```sql
+regulatory_instruments     -- the law itself, as retrieved
+  id, jurisdiction, short_code,          -- 'GSR-846E'
+  title, gazette_ref, published_on, effective_from,
+  status,                                -- notified | corrigendum | proposed | draft | repealed
+  source_url, retrieved_at, content_sha256,
+  amends_id, supersedes_id               -- the chain
+
+regulatory_provisions      -- addressable units
+  id, instrument_id, provision_ref,      -- 'Rule 7(1)', 'Third Schedule'
+  heading, text_sha256
+
+regulatory_baselines       -- a frozen, named instrument set
+  id, code,                              -- 'IN-DPDP@2026-09-20'
+  declared_on, declared_by, instrument_ids[], baseline_sha256
+
+control_libraries          -- EXTEND existing table
+  + baseline_id, semver_major, semver_minor, semver_patch,
+    content_sha256, supersedes_version,
+    status                               -- draft | published | deprecated
+
+control_provenance         -- the missing link: control ← provision
+  control_id, library_version, provision_id,
+  mapping_type,                          -- derives_from | supports | informational
+  verified_on, verified_by, verification_method, note
+
+control_change_log         -- typed, per-control diffs between versions
+  from_version, to_version, control_id,
+  change_type,                           -- added | removed | reworded_material
+                                         -- | citation_corrected | scoring_changed
+                                         -- | severity_changed | evidence_changed
+                                         -- | deprecated | superseded_by
+  rationale, source_instrument_id, diff jsonb
+
+regulatory_signals         -- Nazar's output, triaged
+  id, source_url, detected_at, retrieved_sha256,
+  signal_type, summary,
+  status,                                -- new | triaged | accepted | rejected
+  proposed_instrument_id, affected_control_ids[]
+```
+
+Two properties fall out of this:
+
+- **Content-hashed and tamper-evident.** `content_sha256` on instruments, baselines and library versions means a published version is verifiable the same way sealed evidence is. A report can state *"assessed against control library 1.0.0, baseline `IN-DPDP@2026-09-20`, hash `abc…`"* and a third party can check it. That is the same trust model as the audit ledger, applied to the rulebook.
+- **`verified_on` / `verified_by` is the CTL-1 vaccine.** A citation now carries provenance of the *source*, not just the version it appeared in. A citation never verified against a notified instrument is visible as such, and CI can fail on any control whose provenance is missing or older than its baseline.
+
+#### Closing the loop with Nazar (M2.9)
+
+This is what turns regulatory watch from a feed into a workflow. Nazar monitors MeitY / DPB / gazette sources; on detecting a new or amended instrument it writes a `regulatory_signals` row with the source URL and retrieved hash, maps it to affected controls through `control_provenance`, and opens a **proposed baseline delta** for human review. On approval, a new baseline and library version are cut, with the change type determining the semver bump. Nothing enters the compliance baseline without a human accepting it — consistent with BR-1.
+
+`proposed` instruments are the other half. The MeitY 12-month proposal is live right now and clients need to plan for it, but it is not law. Proposed instruments drive a **"what-if" posture view** — *"here is your position if the deadline moves to 13 Nov 2026"* — without contaminating the compliance baseline. For a product whose whole pitch is readiness against a deadline, that view is close to a feature in its own right.
+
+#### Also fix, while in here
+
+The current library header (`controls.ts:6-28`) contains factual errors: it dates notification to **14 November 2025** (it was the 13th), refers to **"rules 5–24"** (there are 23), and maps children's-data controls to "Rules 9–10" and SDF to "Rules 11–12" (correctly Rule 10 and Rule 13). All corrected in `0.1.1`.
+
+Sources: [dpdprules.org — Rule 1 commencement](https://dpdprules.org/rules/1) · [dpdp.ind.in — all 23 rules and 7 schedules](https://dpdp.ind.in/rules.php) · [Shardul Amarchand Mangaldas — notification & enforcement](https://www.amsshardul.com/insight/enforcement-of-the-dpdp-act-and-notification-of-the-dpdp-rules/)
+
+---
+
+**W7.1 · Citation re-map (do this first, it is a correctness fix, not a feature).** Re-map all 24 `DPDPR-2025` citations against G.S.R. 846(E). Verify the 12 `DPDPA-2023` Act-section citations in the same pass. Add a `citations.verifiedAgainst` field recording the gazette reference and verification date, so this class of drift is detectable next time rather than invisible.
+
+**W7.2 · Close the coverage gaps (your item 4 — "all missing controls in any form, including schedules").** New controls for the 10 uncited rules and all 7 schedules:
+
+| New control area                    | Instrument                          |
+| ----------------------------------- | ----------------------------------- |
+| Notice content & itemised purposes  | Rule 3                              |
+| Consent Manager engagement duties   | Rule 4 + **First Schedule**         |
+| State-processing standards          | Rule 5 + **Second Schedule** *(conditional — applies only to State-instrumentality tenants; gated by a tenant flag so it never fires spuriously)* |
+| Reasonable security safeguards      | Rule 6 *(re-anchors `SEC-001`)*     |
+| Breach intimation particulars + 72h | Rule 7                              |
+| Retention, erasure & pre-erasure notice; class-based periods | Rule 8 + **Third Schedule** (e-commerce ≥2cr users, online gaming ≥50L, social media ≥2cr → 3-year erasure) |
+| Published contact for processing Qs | Rule 9                              |
+| **Verifiable consent — persons with disabilities** *(no control exists today, in any domain)* | Rule 11 |
+| Child-data exemption classes        | Rule 12 + **Fourth Schedule**       |
+| Transfer outside India, incl. foreign-state requirements | Rule 15 *(re-anchors `XBR-001`)* |
+| Research / archiving / statistics exemption | Rule 16                     |
+| Appeal to Appellate Tribunal        | Rule 22                             |
+| Responding to a call for information | Rule 23 + **Seventh Schedule**     |
+| Board-procedure awareness           | Rules 17–21 + **Fifth/Sixth Schedules** *(informational domain — these bind the Board, not the fiduciary; included as `informational: true` so they inform readiness without polluting the posture score)* |
+| **Phased commencement clock**       | Rule 1 — 13 Nov 2025 / 13 Nov 2026 / **13 May 2027** |
+
+Expected: **46 → ~65 controls**. New domains: `NTC` (notice), `PWD` (persons with disabilities), `CMG` (consent manager), `APL` (appeal/regulatory response).
+
+**Rule 1 is more than a control.** The staggered commencement is the readiness clock the product sells against. It becomes a first-class field — every control carries `effectiveFrom`, and the posture score can answer *"compliant as of today"* versus *"compliant as of 13 May 2027"*. That distinction is the entire mid-market sales conversation.
+
+**W7.3 · Single-source the count (QUA-3).** `CONTROL_LIBRARY_COUNT` derived from the array, not asserted against a literal. Every UI and doc reference reads from it. CI test fails the build on any hardcoded control count anywhere in the repo.
+
+**W7.4 · Release the version sequence.** `0.1.0 → 0.1.1 → 0.2.0 → 1.0.0` per the W7.0 table, each published as an immutable, content-hashed version bound to baseline `IN-DPDP@2026-09-20`. Because the citation fix is a PATCH, engagements pinned to `0.1.0` need **no re-assessment** — they are offered a free re-issued report carrying corrected citations against the same results. Only the `1.0.0` scoring recalibration triggers a re-assessment prompt.
+3. **Multi-regulator reuse (M4.2).** `frameworks` + `control_mappings` with an explicit `mapping_strength` ∈ `{equivalent, partial, indicative}` — **indicative mappings labelled as such**, per your wording. RBI, SEBI, IRDAI, CERT-In overlays. One evidence artifact satisfies N controls across M frameworks; cross-framework coverage map in the portal.
+4. **Sectoral packs (M4.8).** Pack = control subset + overlay mappings + sector-specific evidence requirements + remediation patterns. Pack #1 per your choice (see Part E).
+
+---
+
+## W8 · Reporting, evidence, branding — **P1** · size L
+
+*Your brief items 10, 11, 12.*
+
+- **Branding by default (your item 11).** Today branding lives only in `reports-client.tsx`. Move it into a shared `@axiom/report-kit` — Axiom Proof lockup, "Axiom Minds Private Limited", `https://axiomminds.ai`, agent attribution and named human approver (FR-11.4) — applied to **every** generated artifact: Prativedan output, evidence packs, DSAR responses, breach notifications, the gap-scan report. Tenant/partner white-label becomes an *override* of this default, never a replacement of the Axiom Minds attribution.
+- **Server-side PDF** (Readiness Matrix §5.1.3): headless Chromium in the agent-runtime image; content-hash each PDF into the evidence vault.
+- **Evidence retrieval & review (your item 12).** Evidence explorer with full-text + control + agent + date filters; **evidence-pack assembly and export** (FR-4.4) for auditors/DPB; independent hash verification UI so a reviewer can check a seal without trusting the platform; evidence-to-control linkage shown both directions.
+- **Report formats** (FR-11.1): board report, auditor pack, DPB-ready submission, technical remediation register. Every claim traceable to an artifact (FR-11.3).
+- **Approval records** (your item 10): exportable approval history — who approved what, when, under which scope, backed by which dry-run, with the reconciliation statement attached.
+
+---
+
+## W9 · Test, audit and performance — **P0, runs alongside everything** · size L
+
+Current state: BFF and web have **zero tests** behind `--passWithNoTests`.
+
+1. **Remove `--passWithNoTests`** from `services/bff` and `apps/web` once suites exist. Add a coverage floor to CI.
+2. **BFF suite — highest priority.** The execution gate, auth, tenancy, RBAC, idempotency. Including explicit adversarial cases:
+   - unauthenticated request ⇒ 401 in every environment
+   - tenant A token + tenant B `X-Tenant-Id` ⇒ 403
+   - `axiom_e2e_bypass` cookie ⇒ no effect, on page routes **and** the BFF proxy
+   - login-time service failure ⇒ 503, never a "sovereign session"
+   - mutating request with no `Idempotency-Key` ⇒ 400 in every environment
+   - forged / expired / replayed / scope-mismatched approval token ⇒ rejected
+   - stale dry-run ⇒ execution refused
+   - partial batch approval executes **exactly** the approved subset (PRD §B.10.4)
+   - kill switch halts in-flight execution across replicas
+3. **RLS integration tests** against a real Postgres — the policies are good and completely untested.
+4. **E2E (Playwright)** for each persona: founder, owner, approver, reviewer, viewer, partner — asserting both visibility and action-level authorisation.
+5. **PRD §B.10 acceptance suite** — all eight Phase 3 acceptance criteria as executable tests. That is the definition of "Phase 3 done".
+6. **Performance:** fix PERF-1 (batch the per-action fetch), PERF-2 (`count: 'estimated'` + caching + ledger indexes), PERF-3 (rate limiting). Load-test discovery against NFR-7 (1M records/hour/connector) once W4 lands.
+7. **Standing audits:** `pnpm audit` + secret scanning + the `no-restricted-imports` tenancy gate in CI.
+
+**Connection-framework coverage (W4).** Each grant handler gets a conformance suite against a reference authorization server — token acquisition, scope narrowing, expiry, refusal on over-broad scope request, `act`-chain capture for RFC 8693. MCP transport gets adversarial tests: unclassified tool ⇒ refused; tool description hash changed after registration ⇒ session refused; connector output attempting to alter Karya's action parameters ⇒ no effect, because parameters are bound by the approval token.
+
+**Scope confirmed (your item 7): comprehensive, not selective.** Every package, app and service gets a suite — including the ones that have none today (`services/bff`, `apps/web`) and every new module added by W1–W8 and W10. No new module merges without tests. `--passWithNoTests` is removed everywhere once suites exist, and a coverage floor gates CI thereafter.
+
+---
+
+## W10 · On-prem deployment environment — **P2** · size M
+
+*Your brief item 3. This is the slice of Phase 5 (M5.2) you asked to pull in.*
+
+Rather than deferring on-prem to a future packaging project, `onprem` becomes a **first-class deploy environment alongside local / staging / preprod / production**, so it is exercised continuously instead of discovered late.
+
+- **Config.** Extend the `ENVIRONMENT` enum at `packages/config/src/index.ts:12` — currently `['development','staging','preprod','production','local']` — to include `onprem`. Per the W0.0 principle this is purely a **topology** value: like `preprod` and `staging` after W0, `onprem` runs `AXIOM_AUTH_MODE=strict` and inherits every production credential check. No environment is ever a relaxed mode.
+
+  This also closes a latent W0 issue: the `superRefine` at `packages/config/src/index.ts:117-122` currently **skips all production credential validation** whenever `ENVIRONMENT` is `staging` or `preprod`. Same fail-open family as SEC-1 and fixed in the same pass.
+
+- **Artifacts.** `infra/docker/docker-compose.onprem.yml` + Helm values for a self-contained stack: Postgres, MinIO (S3-compatible, Object Lock for WORM), Temporal, Redis, all four services. No dependency on Supabase Cloud, GCP or AWS.
+- **Sovereignty.** No outbound egress required by default. Model Gateway configured for a self-hosted model endpoint (NFR-10, "self-hosted model support by Phase 5"); any outbound LLM call is explicit opt-in and allowlisted.
+- **Licence & identity.** Offline licence token; local admin bootstrap; MFA via TOTP works fully air-gapped, which is precisely why TOTP-first (W1) is the right call — email OTP degrades gracefully where there is no mail relay.
+- **Evidence.** MinIO Object Lock in compliance mode to satisfy FR-4.1 WORM semantics without AWS.
+- **Verification.** An `onprem` CI lane that boots the full stack from scratch and runs the E2E suite against it — the only way this stays real.
+
+---
+
+## C.1 Sequencing
+
+```
+W0  Security ───────────────────────────────────────────┐ blocks everything
+     │                                                  │
+W2  Data model ──┬── W1 Tenancy / RBAC / MFA ───────────┤ makes staging testable
+                 │                                      │
+                 ├── W3 Estate ──── W3.5 ER graph ──────┤
+                 │        │                             │
+                 │   W4 Universal Connection Framework  │
+                 │    4.1 registry+descriptors                 │
+                 │    4.2 credential broker (CC, JWT-bearer)   │
+                 │    4.3 SPIFFE identity + token exchange     │
+                 │    4.4 grant model ─────────────────────────┐
+                 │    4.5 internal MCP tool registry           │
+                 │    4.6 live binding: PostgreSQL/MySQL       │
+                 │    4.7 SAML grant + REST/GraphQL + packs    │
+                 │                                      │      │
+                 │   W5 Execution loop ◀────────────────┼──────┘ starts at W4.4
+                 │    dry-run ─ Karya ─ rollback ─ verify ─ reconcile
+                 │                                      │
+                 ├── W6 Continuous / standing policies ─┤ Phase 4 L3
+                 └── W8 Reporting / evidence / branding ┘
+
+W7  Control library ──── starts day one, parallel to W0   (CTL-1 is a correctness fix)
+W10 On-prem environment ── parallel from W0; shares the config hardening
+W9  Tests & audits ────── continuous, gates every merge
+```
+
+**Current dependency:** W7 publication/runtime parity and W10 configuration hardening can proceed alongside W0. W5 implementation starts after **W4.4**, once the grant model is stable; live execution acceptance also requires the real W4.6 target and W5 rollback/verification. This corrects the earlier W4.3/W4.4 contradiction.
+
+---
+
+# PART D — Verification strategy
+
+**Definition of done for each workstream:** tests written first where the behaviour is security-relevant, suite green, no `--passWithNoTests`, deployed to staging with `AXIOM_AUTH_MODE=strict`, and exercised through the UI as each persona.
+
+**Per-merge gate:** typecheck · lint · unit · RLS integration · E2E · no-service-role-in-web grep · secret scan · control-count consistency check.
+
+**Phase 3 sign-off** is the eight PRD §B.10 criteria as passing tests, plus a live rollback exercised in a controlled staging estate.
+
+I will report failures with the actual output rather than summarising them, and will not call a workstream done until its suite is green.
+
+---
+
+# PART E — Decisions
+
+These change the shape of the work, so I would rather ask than assume.
+
+## E.1 Resolved — 20 Sep 2026
+
+| # | Decision | Resolution | Lands in |
+| - | -------- | ---------- | -------- |
+| 1 | MFA second factor | **TOTP + email OTP. SMS deferred** — enum slot reserved, no provider, no code | W1 |
+| 2 | Connector depth | **Latest decision, Rev 8:** Universal Connection Framework; SPIFFE identity, scoped credential broker, **REST/OpenAPI primary**, optional outbound MCP per descriptor, inbound MCP dropped. Real protocol bindings plus declarative capabilities; initial live PostgreSQL/MySQL target, other reference targets labelled by provenance. Phase 2's three-live-type exit remains separate | W4.1–W4.7 |
+| 3 | Phase 5 on-prem | **In scope** as a dedicated `onprem` deploy environment, validated at production strictness | **W10** |
+| 8 | Preprod authentication | **Exact replica of production — same codebase, same ruleset.** Environment determines topology only, never security posture. Real database, real auth, enforced idempotency, parity CI lane | **W0.0, W0.1** |
+| 9 | Control library versioning | **Versioned against a declared regulatory baseline** — `IN-DPDP@2026-09-20`, content-hashed, with per-control source provenance, a typed change log, and semver defined by assessment comparability. Future revisions enter via Nazar → human review → new baseline | **W7.0** |
+| 10 | Agent access rights | **All ten agents** get SVIDs and enforced, tenant/estate-scoped permissions. Only Drishti (read) and Karya (write) ever reach a client estate; Nazar loses `control_library.write` | **W4.3**, W7.0 |
+| 11 | MCP scope | **Inbound dropped.** Outbound kept **flexible** — optional transport, enabled per-descriptor when a client has an MCP server. Internal tool registry in W4.5. **REST/OpenAPI is the primary transport** | **W4.5, W4.7** |
+| 12 | External-system auth | **One connector identity per tenant**, not per agent. `connector.write` requestable only by Karya's SVID + valid approval token. Per-agent OAuth registration available as optional hardening | **W4.2, W4.3, W4.4** |
+| 4 | Control library | **Add every missing control in any form, including all 7 Schedules** — plus the citation re-map forced by CTL-1 | W7 |
+| 5 | Client estate | **Build all missing pieces**, plus a new **Entity Relationship Graph** page showing entities, relationships and agent read/write access, reusing the existing `AgentIcon` set | W3, **W3.5** |
+| 6 | Maker-checker | **Build it** — Sudhaar cannot execute, Karya cannot plan, reconciliation proves they agreed | W5.6 |
+| 7 | Tests | **Comprehensive across every package/app/service**, including `services/bff` and all new modules | W9 |
+
+## E.2 Still open — not blocking, needed before the workstream that uses it
+
+1. **Sectoral pack #1 (needed before W7's pack work).** Healthcare (ABDM/NHA retention vs DPDPA erasure conflict) or BFSI (RBI / Account Aggregator overlay)? Pick whichever is closest to your live pipeline — everything before it proceeds regardless.
+
+2. **Mock-data line (needed before W3/W4 UI work).** You said mock may stay for demo. My proposal: permitted **only** behind an explicit `demo` tenant flag, never hardcoded in a page component (QUA-2), and subject to the same `provenance: 'simulated'` labelling as simulated connectors. Everything else reads real tables, empty states included. I will proceed on this basis unless you say otherwise.
+
+3. **Resolved 21 Sep 2026 — sessions after recovery-code replacement.** The user requires sessions verified with the retired authenticator to complete MFA again when replacement is authorized by a recovery code. Replacement authorized with the current factor keeps its existing behavior. Implement revocation atomically with activation and the recovery-set swap; show the effect before confirmation. Tests must prove old-factor attestations end on the recovery path and remain on the current-factor path. **Delivered in Revision 29 / 0036.** Recovery invalidates all existing MFA assurance for the account, including sessions retained from an earlier current-factor replacement. Current-factor replacement retains existing assurance; GoTrue sessions need not sign out.
+
+---
+
+## Appendix — evidence commands
+
+Reproduce any claim in Parts A/B:
+
+```bash
+# Control count discrepancies
+grep -rnoE "\b(4[0-9]|5[0-9])\s*controls" --include="*.ts" --include="*.tsx" --include="*.md" . | grep -v node_modules | grep -v "^./.kilo"
+
+# Service-role pages with no tenant filter
+for f in $(grep -rl createSupabaseAdmin apps/web/src); do echo "$(grep -c 'tenant_id\|tenantId' "$f")  $f"; done | sort -n
+
+# Absent capabilities
+grep -rniE "reconcil|maker.check|RBI|SEBI|IRDAI|standing.approval|TPRM|sectoral" --include="*.ts" --include="*.py" apps packages services | grep -v node_modules | wc -l
+
+# Test baseline
+pnpm test && (cd services/agent-runtime && uv run pytest -q)
+```

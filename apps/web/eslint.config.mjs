@@ -1,10 +1,23 @@
-import nextVitals from 'eslint-config-next/core-web-vitals';
+import shared from '@axiom/eslint-config';
 
 const config = [
-  ...nextVitals,
+  ...shared,
   {
+    files: ['src/**/*.{ts,tsx}'],
     rules: {
-      'react/no-unescaped-entities': 'off',
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@axiom/supabase',
+              importNames: ['createSupabaseAdmin'],
+              message: 'Privileged writes belong in the BFF. Use the user-scoped tenant context.',
+            },
+          ],
+          patterns: ['@axiom/supabase/**/admin*'],
+        },
+      ],
     },
   },
 ];

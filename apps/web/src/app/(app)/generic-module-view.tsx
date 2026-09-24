@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentIcon } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
+import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 
 export interface ModuleCardRow {
   t: string;
@@ -51,9 +52,22 @@ export interface GenericModuleMeta {
 
 export function GenericModuleView({
   meta,
+  isDemo = false,
   children,
 }: {
   meta: GenericModuleMeta;
+  /**
+   * Whether this tenant may be shown the illustrative figures in `meta.cards`.
+   *
+   * Those figures are hardcoded — "12.4M rows", "47 tables", "8,210 files" —
+   * and used to render for everyone. On a compliance product that is the most
+   * damaging possible default: a real client sees invented numbers presented
+   * as their own posture, indistinguishable from a genuine finding, in a
+   * product sold on the basis that its output can be shown to a regulator.
+   *
+   * Opt-in per tenant (`tenants.is_demo`), and visibly labelled when on.
+   */
+  isDemo?: boolean;
   children?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -72,44 +86,23 @@ export function GenericModuleView({
     setRunResult(null);
 
     try {
-      const res = await fetch(`/api/bff/v1/agents/${meta.agentKey}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: `${meta.agentKey}_module_screen` }),
+      const data = await invokeAgent(meta.agentKey, { scope: 'manual_trigger' });
+      setRunResult({
+        success: true,
+        status: 'succeeded',
+        message: `Agent ${meta.agentKey} completed.`,
+        latency_ms: data.latency_ms,
+        ledgerIds: data.ledger_entry_ids,
       });
-
-      const data = await res.json();
-
-      if (data?.output?.status === 'denied' || data?.status === 'denied') {
-        setRunResult({
-          success: false,
-          status: 'denied',
-          message:
-            data.output?.error ||
-            'Refused: Mutating actions require an issued Human Approval Token (ADR-1 / ADR-3).',
-          latency_ms: data.latency_ms,
-        });
-      } else if (res.ok && (data.status === 'succeeded' || data.agent)) {
-        setRunResult({
-          success: true,
-          status: 'succeeded',
-          message: `Agent ${meta.agentKey} executed successfully.`,
-          latency_ms: data.latency_ms,
-          ledgerIds: data.ledger_entry_ids,
-        });
-        router.refresh();
-      } else {
-        setRunResult({
-          success: false,
-          status: 'failed',
-          message: data?.error?.message || data?.error || 'Execution failed. Inspect system logs.',
-        });
-      }
-    } catch (err: any) {
+      router.refresh();
+    } catch (error) {
       setRunResult({
         success: false,
-        status: 'error',
-        message: err?.message || 'Network error invoking compliance agent',
+        status: 'failed',
+        message:
+          error instanceof AgentInvocationError
+            ? error.message
+            : 'Could not confirm the agent outcome.',
       });
     } finally {
       setIsExecuting(false);
@@ -270,8 +263,19 @@ export function GenericModuleView({
       {/* ============================================================ */}
       {/* 2. DYNAMIC CARDS GRID                                        */}
       {/* ============================================================ */}
+      {isDemo && meta.cards.length > 0 && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-[#C9A227]/30 bg-[#C9A227]/5 px-3.5 py-2.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-[#C9A227]" />
+          <p className="text-[11px] leading-tight text-[#6b5a14]">
+            <span className="font-semibold">Sample data.</span> The figures below are illustrative,
+            not measured from this estate. They appear because this tenant is flagged for
+            demonstration.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {meta.cards.map((c, idx) => (
+        {(isDemo ? meta.cards : []).map((c, idx) => (
           <div
             key={idx}
             className="rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-2xs hover:shadow-xs transition-shadow"
@@ -306,6 +310,18 @@ export function GenericModuleView({
           </div>
         ))}
       </div>
+
+      {!isDemo && meta.cards.length > 0 && (
+        <div className="rounded-2xl border border-dashed border-[#e4e8ee] bg-[#fafbfc] p-8 text-center">
+          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
+            Nothing measured yet
+          </h2>
+          <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[#8a909b]">
+            This module has no results for your estate. Once {meta.agent ?? 'the responsible agent'}{' '}
+            has run, its findings and the ledger entries behind them appear here.
+          </p>
+        </div>
+      )}
 
       {children}
 

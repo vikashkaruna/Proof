@@ -14,6 +14,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "gate:security": "./scripts/check-env-security-gate.sh",
     "test:e2e": "turbo run test:e2e",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",
@@ -47,16 +48,23 @@
     "env:verify:all": "./scripts/sync-env.sh preprod verify && ./scripts/sync-env.sh staging verify && ./scripts/sync-env.sh local verify && ./scripts/sync-env.sh production verify",
     "env:tf": "./scripts/sync-env.sh preprod terraform",
     "env:secrets": "./scripts/sync-env.sh preprod secrets",
-    "env:sync": "./scripts/sync-env.sh preprod all"
+    "env:sync": "./scripts/sync-env.sh preprod all",
+    "gate:controls": "./scripts/check-control-count.sh",
+    "gate:controls:drift": "./scripts/check-controls-drift.sh",
+    "build:controls-json": "tsx scripts/build-controls-json.mjs",
+    "security:scan": "bash scripts/security-scan.sh"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "@types/node": "^26.5.1",
     "husky": "^9.1.6",
+    "jose": "6.2.12",
     "prettier": "^3.3.3",
     "tsx": "^4.23.13",
     "turbo": "^2.10.12",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "zod": "4.5.4"
   },
   "workspaces": [
     "apps/*",

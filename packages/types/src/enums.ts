@@ -13,6 +13,13 @@ export const UserRole = {
   AGENT: 'agent',
   PARTNER: 'partner',
   FOUNDER: 'founder',
+  /**
+   * Axiom Minds operator working across assigned client tenants: runs the
+   * agents, reviews what they produce, and prepares plans. Deliberately
+   * cannot approve on the client's behalf — the whole proposition is that a
+   * human at the *client* authorises the change.
+   */
+  AXIOM_ANALYST: 'axiom_analyst',
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
@@ -166,14 +173,59 @@ export const LedgerActionType = {
   EXECUTION_ROLLBACK_STARTED: 'execution.rollback.started',
   EXECUTION_ROLLBACK_COMPLETED: 'execution.rollback.completed',
   EXECUTION_KILL_SWITCH_ENGAGED: 'execution.kill_switch.engaged',
+  // A release was previously recorded as an 'engaged' entry, so the audit
+  // trail said the opposite of what happened. On a product whose proposition
+  // is a tamper-evident ledger, that is not a cosmetic defect.
+  EXECUTION_KILL_SWITCH_RELEASED: 'execution.kill_switch.released',
+  EXECUTION_DISPATCH_RECONCILED: 'execution.dispatch.reconciled',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',
+  ONBOARDING_PROPOSAL_PREPARED: 'onboarding.proposal.prepared',
+  ONBOARDING_PROPOSAL_APPROVED: 'onboarding.proposal.approved',
+  ONBOARDING_PROPOSAL_REJECTED: 'onboarding.proposal.rejected',
+  CONNECTOR_REGISTERED: 'connector.registered',
+  CONNECTOR_UPDATED: 'connector.updated',
+  CONNECTOR_CREDENTIAL_CHANGED: 'connector.credential_changed',
+  CONNECTOR_TOKEN_REQUESTED: 'connector.token_requested',
+  CONNECTOR_TOKEN_ACQUIRED: 'connector.token_acquired',
+  CONNECTOR_TOKEN_DENIED: 'connector.token_denied',
+  WORKLOAD_REGISTRATION_CHANGED: 'workload.registration_changed',
+  WORKLOAD_TASK_DELEGATED: 'workload.task_delegated',
+  WORKLOAD_TASK_REVOKED: 'workload.task_revoked',
+  WORKLOAD_TASK_COMPLETED: 'workload.task_completed',
+  WORKLOAD_DISPATCH_SCHEDULED: 'workload.dispatch_scheduled',
+  WORKLOAD_DISPATCH_SCHEDULE_REVIEW: 'workload.dispatch_schedule_review',
+  WORKLOAD_DISPATCH_POLICY_PUBLISHED: 'workload.dispatch_policy_published',
+  WORKLOAD_DISPATCH_PAYLOAD_PURGED: 'workload.dispatch_payload_purged',
+  ESTATE_CREATED: 'estate.created',
+  ESTATE_UPDATED: 'estate.updated',
+  ESTATE_SYSTEM_CREATED: 'estate.system.created',
+  ESTATE_SYSTEM_UPDATED: 'estate.system.updated',
+  ENGAGEMENT_ESTATE_ASSIGNED: 'engagement.estate.assigned',
   USER_LOGIN: 'user.login',
   USER_LOGOUT: 'user.logout',
   USER_ROLE_CHANGED: 'user.role.changed',
+  // MFA (W1 · SEC-8). Enrolment and every challenge outcome are ledgered,
+  // not merely logged: FR-7.3 requires "approver identity, timestamp, scope
+  // recorded", and the step-up that binds a fresh authentication to a specific
+  // approval is part of that identity claim. A reviewer must be able to see
+  // that the approver re-authenticated, and see it in the same tamper-evident
+  // chain as the approval itself.
+  MFA_FACTOR_ENROLLED: 'mfa.factor.enrolled',
+  MFA_FACTOR_ACTIVATED: 'mfa.factor.activated',
+  MFA_FACTOR_REVOKED: 'mfa.factor.revoked',
+  MFA_CHALLENGE_ISSUED: 'mfa.challenge.issued',
+  MFA_CHALLENGE_SATISFIED: 'mfa.challenge.satisfied',
+  // Failures are recorded too. A burst of them against one approver is the
+  // signal that someone holds their password and is working on the factor.
+  MFA_CHALLENGE_FAILED: 'mfa.challenge.failed',
+  MFA_RECOVERY_CODE_CONSUMED: 'mfa.recovery_code.consumed',
   TENANT_CREATED: 'tenant.created',
   TENANT_UPDATED: 'tenant.updated',
+  TENANT_INVITATION_CREATED: 'tenant.invitation.created',
+  TENANT_INVITATION_REVOKED: 'tenant.invitation.revoked',
+  TENANT_INVITATION_ACCEPTED: 'tenant.invitation.accepted',
   PLAN_PUBLISHED: 'plan.published',
   CONTROL_PUBLISHED: 'control.published',
   DSAR_RECEIVED: 'dsar.received',

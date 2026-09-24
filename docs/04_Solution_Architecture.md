@@ -5,6 +5,10 @@
 **Axiom Minds Private Limited** · https://axiomminds.ai
 **Document:** 04 of 05 · **Version:** 1.0 · **Date:** August 2026
 
+## Accepted deployment clarification — 23 September 2026
+
+The user selected a **dedicated Mumbai runner VM per tenant** for isolated per-job workers and the SPIRE node agent in higher environments. Public APIs remain on Cloud Run. The runner belongs to the trusted backend layer; Docker control and node-attestation access are not exposed to public API processes or workers. Each job retains private namespaces, network denial, a read-only Workload API mount and scoped tool calls. Protected node bootstrap, trust-bundle delivery and controller/opaque-scheduler deployment composition remain implementation gates; this decision does not mean a VM was provisioned. The separate private SPIRE issuer remains shared; each tenant runner has its own instance, private address, service account and state disk. Preserve the controller’s one-tenant scope and verify its assigned VM/node before activation. Tenant-scoped backend credentials, effective cloud permissions and signed scheduler authorization remain separate requirements. See Doc 16, Revision 69, for the current placement and operator sequence. Local Docker/Supabase acceptance remains the development topology.
+
 ---
 
 ## 1. ARCHITECTURAL PRINCIPLES
@@ -170,23 +174,32 @@ This is how AP-1 (approval is architectural) is realised concretely: there is no
 
 Each agent is a versioned service with a declared contract: inputs, tool permissions, output schema, autonomy level, and escalation conditions.
 
-| Agent                    | Autonomy ceiling                  | Tool permissions                           |
-| ------------------------ | --------------------------------- | ------------------------------------------ |
-| Drishti (Discovery)      | L1 (current; L2 read-only target) | Connectors: **read-only**                  |
-| Vibhaag (Classification) | L1 (current; L2 target)           | None (operates on discovery output)        |
-| Parikshan (Assessment)   | L1 (current; L2 target)           | Control Library read                       |
-| Saakshi (Evidence)       | L1 (current; L2 target)           | Evidence store **write-once**              |
-| Sudhaar (Planning)       | L2 — proposes only                | Read-only; **can never execute**           |
-| **Karya (Execution)**    | **L2 — requires approval token**  | Connectors: **write, scoped, token-gated** |
-| Lekha (Audit)            | L1 (current; L2 target)           | Ledger **append-only**                     |
-| Nazar (Regulatory)       | L1 (current; L2 target)           | External sources read                      |
-| Prativedan (Reporting)   | L1 (current; L2 target)           | Read all; document generation              |
-| Sanket (Signal)          | L1 (current; L2 target)           | External sources read (internal use)       |
+| Agent                    | Autonomy ceiling                  | Tool permissions                                          |
+| ------------------------ | --------------------------------- | --------------------------------------------------------- |
+| Drishti (Discovery)      | L1 (current; L2 read-only target) | Connector read; inventory/evidence record writes          |
+| Vibhaag (Classification) | L1 (current; L2 target)           | None (operates on discovery output)                       |
+| Parikshan (Assessment)   | L1 (current; L2 target)           | Control Library read; findings record writes              |
+| Saakshi (Evidence)       | L1 (current; L2 target)           | Evidence store **write-once**                             |
+| Sudhaar (Planning)       | L2 — proposes only                | Read-only; **can never execute**                          |
+| **Karya (Execution)**    | **L2 — requires approval token**  | Connectors: **write, scoped, token-gated**                |
+| Lekha (Audit)            | L1 (current; L2 target)           | Ledger **append-only**                                    |
+| Nazar (Regulatory)       | L1 (current; L2 target)           | Government-source read; regulatory-signal proposals       |
+| Prativedan (Reporting)   | L1 (current; L2 target)           | Findings/evidence/Control Library read; report generation |
+| Sanket (Signal)          | L1 (current; L2 target)           | External sources read (internal use)                      |
 
 The current ceilings above match the implemented Phase 0–3 runtime contracts in
 `packages/types/src/agents.ts` and `services/agent-runtime`. L2/L3 values in
 earlier drafts were roadmap targets, not deployed permissions. Karya remains the
-only mutating agent and is always approval-token gated.
+only agent permitted to mutate client systems, subject to approval and execution gates.
+
+`canMutate`/`can_mutate` is retained as a compatibility alias for the explicit
+`mutatesClientEstate`/`mutates_client_estate` field. `writesAxiomState`/
+`writes_axiom_state` describes changes to domain records (including proposals),
+excluding ordinary run telemetry. Neither metadata field grants credentials.
+The W4.3 identity/registration verification core is implemented, but shared-runtime
+workload isolation and every-tool scope enforcement remain pending; the current
+broker factory denies all acquisition. Prativedan read declarations must become
+tenant/estate-scoped checks at each data access, not a replacement for them.
 
 **Separation-of-duties design:** the agent that _plans_ (Sudhaar) is architecturally distinct from the agent that _executes_ (Karya), and Sudhaar holds no write credentials whatsoever. A planning agent cannot execute its own plan even if compromised or misbehaving. This mirrors the maker-checker principle Indian compliance buyers already understand from banking, and it is a genuine security property, not a talking point.
 

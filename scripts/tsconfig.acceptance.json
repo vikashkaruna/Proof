@@ -1,0 +1,26 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@axiom/mfa": ["../packages/mfa/src/index.ts"]
+    }
+  },
+  "include": [
+    "lib/*.ts",
+    "seed-personas.ts",
+    "verify-workload-identity.ts",
+    "verify-workload-trust.ts",
+    "verify-vm-controller.ts",
+    "verify-issuer-sync.ts",
+    "verify-workload-assessment.ts",
+    "verify-strict-parity.ts",
+    "verify-gap-scan-durability.ts",
+    "compare-deployed-parity.ts",
+    "summarize-deployed-browser.ts",
+    "../tests/e2e/**/*.ts"
+  ]
+}

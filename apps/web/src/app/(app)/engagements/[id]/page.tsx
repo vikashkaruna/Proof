@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import {
   PageHeader,
   Card,
@@ -23,11 +23,8 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const { supabase, userId } = await requireTenantContext();
+  const user = { id: userId };
 
   const { data: engagement } = await supabase
     .from('engagements')

@@ -1,0 +1,45 @@
+# The single origin SUPABASE_URL points at (W0.1).
+#
+# supabase-js takes one base URL and appends /auth/v1 and /rest/v1 to it, so
+# self-hosting means something has to present both services on one host. This
+# mirrors the `supabase-gateway` service in docker-compose.supabase.yml, which
+# is what local and staging already run; preprod differs only in that the
+# upstreams are Cloud Run URLs rather than container names.
+#
+# The nginx image expands this with envsubst at startup, so the upstreams are
+# literal strings by the time nginx parses the file and no resolver is needed.
+server {
+    listen ${PORT};
+    server_name _;
+    client_max_body_size 50M;
+
+    # Cloud Run terminates TLS for us but the upstreams are themselves HTTPS,
+    # so SNI has to be sent or the handshake is refused.
+    proxy_ssl_server_name on;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $proxy_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location /auth/v1/ {
+        proxy_pass ${SUPABASE_AUTH_UPSTREAM}/;
+    }
+
+    location /rest/v1/ {
+        proxy_pass ${SUPABASE_REST_UPSTREAM}/;
+    }
+
+    # Cloud Run's own health probe. Deliberately answered here rather than
+    # proxied, so the gateway reports on itself.
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Anything else is not part of the Supabase surface this gateway exposes.
+    location / {
+        return 404;
+    }
+}

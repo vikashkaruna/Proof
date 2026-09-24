@@ -17,7 +17,9 @@ export function PageHeader({ title, description, actions, meta, className }: Pag
           <h1 className="font-heading text-2xl font-semibold tracking-tight text-indigo-500">
             {title}
           </h1>
-          {description && <p className="mt-1 max-w-3xl text-sm text-slate-600">{description}</p>}
+          {description && (
+            <div className="mt-1 max-w-3xl text-sm text-slate-600">{description}</div>
+          )}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>

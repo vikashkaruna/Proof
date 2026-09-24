@@ -1,10 +1,15 @@
+import { CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
 import Link from 'next/link';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
 
   // Parallel database queries with safe fallbacks
   let ledgerCount: number | null = null;
@@ -12,7 +17,8 @@ export default async function DashboardPage() {
   let dsarCount: number | null = null;
   let postureScore: number = 74;
   let passingControlsCount = 32;
-  let totalControlsCount = 43;
+  // QUA-3: was the literal 43, against a library of 46. Derived now.
+  let totalControlsCount = CONTROL_LIBRARY_COUNT;
   let liveRuns: Array<{ agent: string; status: string; started_at: string }> = [];
   let openGapsCount = 11;
   let pendingActionsCount = 4;
@@ -43,26 +49,39 @@ export default async function DashboardPage() {
       findingsRes,
       controlsRes,
     ] = await Promise.all([
-      admin.from('audit_ledger').select('*', { count: 'exact', head: true }),
-      admin.from('evidence').select('*', { count: 'exact', head: true }),
-      admin.from('dsars').select('*', { count: 'exact', head: true }),
-      admin.from('remediation_plans').select('id, title, status', { count: 'exact' }).limit(5),
-      admin
+      supabase
+        .from('audit_ledger')
+        .select('*', { count: 'estimated', head: true })
+        .eq('tenant_id', tenantId),
+      supabase
+        .from('evidence')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId),
+      supabase.from('dsars').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      supabase
+        .from('remediation_plans')
+        .select('id, title, status', { count: 'exact' })
+        .eq('tenant_id', tenantId)
+        .limit(5),
+      supabase
         .from('remediation_actions')
-        .select('id, plan_id, risk_class, description, blast_radius, approval_status'),
-      admin
+        .select('id, plan_id, risk_class, description, blast_radius, approval_status')
+        .eq('tenant_id', tenantId),
+      supabase
         .from('engagements')
         .select('posture_score')
+        .eq('tenant_id', tenantId)
         .order('started_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
-      admin
+      supabase
         .from('agent_runs')
         .select('agent, status, started_at')
+        .eq('tenant_id', tenantId)
         .order('started_at', { ascending: false })
         .limit(5),
-      admin.from('findings').select('id, control_id, status, score'),
-      admin.from('controls').select('id, domain'),
+      supabase.from('findings').select('id, control_id, status, score').eq('tenant_id', tenantId),
+      supabase.from('controls').select('id, domain'),
     ]);
 
     ledgerCount = ledgerRes.count ?? null;
@@ -333,7 +352,7 @@ export default async function DashboardPage() {
           },
           {
             agent: 'Parikshan',
-            text: 're-scored 43 controls after last remediation',
+            text: `re-scored ${CONTROL_LIBRARY_COUNT} controls after last remediation`,
             dot: '#1E2A4A',
             pulse: false,
             time: '12 min ago',

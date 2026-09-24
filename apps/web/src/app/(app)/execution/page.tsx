@@ -1,30 +1,38 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ExecutionPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so RLS is the backstop it was designed
+  // to be and a missing filter is an empty result, not a leak.
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let plans: any[] = [];
   let actions: any[] = [];
   let executionLedger: any[] = [];
 
   try {
     const [plansRes, actionsRes, ledgerRes] = await Promise.all([
-      admin
+      supabase
         .from('remediation_plans')
         .select('id, title, status, created_at')
+        .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(3),
-      admin
+      supabase
         .from('remediation_actions')
         .select('id, plan_id, risk_tier, dry_run_status, rollback_validated, rollback_ref')
+        .eq('tenant_id', tenantId)
         .limit(10),
-      admin
+      supabase
         .from('audit_ledger')
-        .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result')
-        .or('actor.eq.karya,action.ilike.%execute%,action.ilike.%mutation%')
-        .order('seq', { ascending: false })
+        .select(
+          'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+        )
+        .eq('tenant_id', tenantId)
+        .eq('actor_id', 'karya')
+        .order('sequence_no', { ascending: false })
         .limit(6),
     ]);
 
@@ -36,10 +44,10 @@ export default async function ExecutionPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = executionLedger.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Remediation Mutation Executed',
+    seq: r.sequence_no,
+    title: r.action_type || 'Remediation Mutation Executed',
     detail: `Target: ${r.target_ref || 'Production Infrastructure'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'prod_system',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ verified' : r.result,
@@ -49,6 +57,7 @@ export default async function ExecutionPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Execution & Rollback',
         hi: 'निष्पादन',

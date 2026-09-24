@@ -2,6 +2,8 @@
 
 This document is the authoritative, end-to-end deployment guide for Axiom Proof. It covers all lifecycle phases from local self-contained developer environments to multi-machine staging networks and AWS production Kubernetes clusters in `ap-south-1`.
 
+**Current workload-host decision (23 September 2026):** public APIs stay on Cloud Run; the user selected separate private Mumbai SPIRE issuer and runner VMs. The existing GCP preprod root now has a default-off `workload_vms` foundation. Bootstrap and activation are still pending. Use [Doc 16](16_Operator_Completion_Runbook.md) and the [module guide](../infra/terraform/modules/workload-vms/README.md) for current gates; the historical topology comparisons below do not override that decision.
+
 ---
 
 ## 1. Multi-Environment Architecture & Strategy
@@ -283,9 +285,25 @@ For running in a staging machine on a local network or a dedicated staging VM:
 1. **Prepare Staging Environment Configuration**:
 
    ```bash
-   cp infra/docker/environments/.env.staging.example infra/docker/environments/.env.staging
-   # Edit .env.staging with staging database credentials and hostnames
+   # Create .env.staging, or bring an existing one up to the template.
+   # Only missing keys are appended; values already set are kept.
+   ./scripts/sync-env.sh staging scaffold
+
+   # Generate the secrets that must be generated. The Supabase JWT secret and
+   # its anon/service keys come from ONE minting — those two are JWTs signed
+   # with that secret, and mixing runs leaves GoTrue issuing tokens PostgREST
+   # rejects.
+   ./scripts/sync-env.sh staging mint
+
+   # Fill in what a machine cannot generate (hostnames, provider keys), then
+   # confirm. `verify` is a gate: missing or placeholder values exit non-zero.
+   $EDITOR infra/docker/environments/.env.staging
+   ./scripts/sync-env.sh staging verify --allow-simulated
    ```
+
+   > `--allow-simulated` accepts the LLM, email and Temporal credentials that
+   > staging deliberately runs without. It is refused for preprod and
+   > production.
 
 2. **Deploy with Staging Overlay**:
 
@@ -326,12 +344,26 @@ _Provisions VPC (3 AZs), EKS cluster, S3 Evidence Vault with Compliance Object L
 #### Step 2: Supabase Schema Migration
 
 ```bash
-# Link to production Supabase project (ap-south-1)
-supabase link --project-ref <your-supabase-project-ref>
-
-# Push immutable migrations
-pnpm db:migrate
+# Apply the migration series to the deployed database.
+#
+# NOT `pnpm db:migrate`, which runs `supabase db push`. That cannot succeed
+# here: migration 0000 creates roles and writes to the Auth-owned schema,
+# which the CLI's restricted migration role may not do. It also has no
+# checksum history, so it cannot tell an unapplied migration from a changed
+# one.
+#
+# This runner records a checksum per migration, refuses changed history,
+# wraps each file in its own transaction, serialises concurrent runners on an
+# advisory lock, and exits non-zero when anything fails.
+./scripts/migrate-cloudsql.sh "postgresql://<user>:<password>@<host>:5432/<database>"
 ```
+
+> [!IMPORTANT]
+> Higher environments self-host Supabase Auth and PostgREST against their own
+> Postgres rather than linking a Supabase Cloud project, so there is no
+> `supabase link` step. The bootstrap, GoTrue and migration ordering is
+> load-bearing and documented in
+> [the GCP preprod guide](GCP_PREPROD_DEPLOYMENT_GUIDE.md#self-hosted-supabase-and-why-the-order-matters).
 
 #### Step 3: Container Image Build & Push
 
@@ -486,13 +518,13 @@ _Instantly invalidates all pre-existing unsigned or stale tokens._
 
 ## 8. Summary of Key Files
 
-| File Path                                                                                                               | Description                                           |
-| :---------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------- |
-| [`scripts/dev-docker.sh`](file:///Users/vikash/Axiom%20Proof/scripts/dev-docker.sh)                                     | Master Docker automation & multi-environment manager. |
-| [`scripts/test-local-stack.sh`](file:///Users/vikash/Axiom%20Proof/scripts/test-local-stack.sh)                         | Self-contained 5-stage pre-CI test pipeline.          |
-| [`docker-compose.yml`](file:///Users/vikash/Axiom%20Proof/docker-compose.yml)                                           | Base & local Docker Compose stack definition.         |
-| [`infra/docker/docker-compose.staging.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.staging.yml) | Staging compose overlay.                              |
-| [`infra/docker/docker-compose.preprod.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.preprod.yml) | Preprod compose overlay.                              |
-| [`infra/docker/docker-compose.prod.yml`](file:///Users/vikash/Axiom%20Proof/infra/docker/docker-compose.prod.yml)       | Production reference compose overlay.                 |
-| [`infra/docker/environments/`](file:///Users/vikash/Axiom%20Proof/infra/docker/environments/)                           | Environment `.env.*.example` configuration templates. |
-| [`docs/08_DEPLOYMENT_GUIDE.md`](file:///Users/vikash/Axiom%20Proof/docs/08_DEPLOYMENT_GUIDE.md)                         | This master deployment and operations guide.          |
+| File Path                                                                               | Description                                           |
+| :-------------------------------------------------------------------------------------- | :---------------------------------------------------- |
+| [`scripts/dev-docker.sh`](../scripts/dev-docker.sh)                                     | Master Docker automation & multi-environment manager. |
+| [`scripts/test-local-stack.sh`](../scripts/test-local-stack.sh)                         | Self-contained 5-stage pre-CI test pipeline.          |
+| [`docker-compose.yml`](../docker-compose.yml)                                           | Base & local Docker Compose stack definition.         |
+| [`infra/docker/docker-compose.staging.yml`](../infra/docker/docker-compose.staging.yml) | Staging compose overlay.                              |
+| [`infra/docker/docker-compose.preprod.yml`](../infra/docker/docker-compose.preprod.yml) | Preprod compose overlay.                              |
+| [`infra/docker/docker-compose.prod.yml`](../infra/docker/docker-compose.prod.yml)       | Production reference compose overlay.                 |
+| [`infra/docker/environments/`](../infra/docker/environments/)                           | Environment `.env.*.example` configuration templates. |
+| [`docs/08_DEPLOYMENT_GUIDE.md`](08_DEPLOYMENT_GUIDE.md)                                 | This master deployment and operations guide.          |

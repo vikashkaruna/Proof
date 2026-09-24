@@ -1,11 +1,15 @@
 import { redirect } from 'next/navigation';
-import { createSupabaseServerClient } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { BRAND } from '@axiom/config';
+import Link from 'next/link';
+import { Capability, can } from '@axiom/types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  const supabase = await createSupabaseServerClient();
+  const { supabase, role } = await requireTenantContext();
+  // The page renders profile details (display name, last sign-in) that live on
+  // the auth user rather than on the tenant context.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -13,6 +17,14 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-[1120px] space-y-5 animate-fade-in">
+      {can(Capability.USER_MANAGE, { role }) && (
+        <Link
+          href="/settings/members"
+          className="inline-block text-sm font-medium text-teal-700 underline"
+        >
+          Manage members and invitations
+        </Link>
+      )}
       {/* Design System Hero Banner */}
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] to-[#243356] p-6 sm:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2.5 mb-2.5">

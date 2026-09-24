@@ -1,0 +1,2 @@
+# Code-scanning parity before code leaves the machine (skip once with --no-verify).
+bash scripts/security-scan.sh

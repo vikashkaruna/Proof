@@ -14,7 +14,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint config'",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist .turbo coverage"
   },

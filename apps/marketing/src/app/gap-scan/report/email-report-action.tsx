@@ -77,7 +77,7 @@ export function EmailReportAction({
             </div>
             <p className="mt-1 text-sm text-slate-600">
               Receive a permanent copy of your statutory scorecard
-              {hasReadinessIndex ? ', industry benchmark percentile, and roadmap' : ''} directly in
+              {hasReadinessIndex ? ', indicative sector benchmark, and roadmap' : ''} directly in
               your inbox.
             </p>
           </div>

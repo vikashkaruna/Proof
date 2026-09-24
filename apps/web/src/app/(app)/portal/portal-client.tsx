@@ -17,10 +17,13 @@ export interface EngagementSummary {
   id: string;
   title: string;
   status: string;
-  postureScore: number;
-  estimatedExposureInr: number;
+  /** Persisted engagement posture; null until an assessment has scored it. */
+  postureScore: number | null;
+  /** Persisted exposure estimate; null when none was recorded. */
+  estimatedExposureInr: number | null;
   startedAt?: string;
-  passingControls: number;
+  /** Saved-results bands from the BFF projection (not a legal determination). */
+  summary: { pass: number; partial: number; fail: number; unassessed: number };
   totalControls: number;
 }
 
@@ -59,9 +62,10 @@ export interface DsarSummary {
   kind: string;
   status: string;
   principalName: string;
-  dueBy: string;
+  dueBy: string | null;
   receivedAt: string;
-  slaDays: number;
+  /** Days until the recorded due date; null when no due date is recorded. */
+  slaDays: number | null;
 }
 
 export interface BreachSummary {
@@ -93,6 +97,10 @@ export interface PortalClientProps {
   dsars: DsarSummary[];
   breaches: BreachSummary[];
   ledger: LedgerSummary[];
+  /** The saved-results projection could not be read. */
+  assessmentUnavailable: boolean;
+  /** At least one portal query failed; shown lists may be incomplete. */
+  loadError: boolean;
 }
 
 type TabType = 'overview' | 'approvals' | 'evidence' | 'dsars' | 'ledger';
@@ -106,6 +114,8 @@ export function PortalClient({
   dsars,
   breaches,
   ledger,
+  assessmentUnavailable,
+  loadError,
 }: PortalClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -125,18 +135,26 @@ export function PortalClient({
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  // Safe normalized score
-  const rawScore = engagement?.postureScore ?? 74;
-  const normalizedScore = rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
-  const exposureInr = engagement?.estimatedExposureInr ?? 184000000;
+  // C-W0-7: only persisted values are shown; missing values render as such.
+  const postureScore = engagement?.postureScore ?? null;
+  const exposureInr = engagement?.estimatedExposureInr ?? null;
   const exposureDisplay =
-    exposureInr >= 10000000
-      ? `₹${(exposureInr / 10000000).toFixed(1)} Cr`
-      : `₹${exposureInr.toLocaleString('en-IN')}`;
+    exposureInr === null
+      ? 'Not recorded'
+      : exposureInr >= 10000000
+        ? `₹${(exposureInr / 10000000).toFixed(1)} Cr`
+        : `₹${exposureInr.toLocaleString('en-IN')}`;
 
-  const passingControls = engagement?.passingControls ?? 32;
-  const totalControls = engagement?.totalControls ?? 43;
-  const passingPct = Math.round((passingControls / (totalControls || 1)) * 100);
+  const passingControls = engagement?.summary.pass ?? 0;
+  const assessedControls = engagement
+    ? engagement.summary.pass + engagement.summary.partial + engagement.summary.fail
+    : 0;
+  const totalControls = engagement?.totalControls ?? 0;
+  const passingPct = totalControls ? Math.round((passingControls / totalControls) * 100) : 0;
+  const nearingSla = dsars.filter(
+    (d) => d.slaDays !== null && d.slaDays <= 3 && !['completed', 'rejected'].includes(d.status),
+  ).length;
+  const openBreaches = breaches.filter((b) => b.status !== 'closed').length;
 
   const pendingPlanCount = plans.filter(
     (p) => p.status === 'review' || p.status === 'draft',
@@ -225,7 +243,7 @@ export function PortalClient({
           <div className="flex flex-wrap items-center gap-4 text-[#c7cfe0]">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
-              <span className="font-medium text-white">Live Operations Mode</span>
+              <span className="font-medium text-white">Recorded data</span>
             </span>
             <span>·</span>
             <span>
@@ -235,7 +253,7 @@ export function PortalClient({
             <span>
               Tenant Tier:{' '}
               <strong className="text-[#0FB5A5] capitalize">
-                {activeTenant.tier || 'Growth Enterprise'}
+                {activeTenant.tier || 'Not set'}
               </strong>
             </span>
             {activeTenant.is_sdf && (
@@ -257,6 +275,16 @@ export function PortalClient({
         </div>
       </div>
 
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-[#D9534F]/30 bg-[#D9534F]/5 px-4 py-3 text-xs text-[#9b2c2c]"
+        >
+          Some portal data could not be loaded. Lists below may be incomplete; nothing has been
+          substituted.
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/* 2. DYNAMIC KPI STAT CARDS                                    */}
       {/* ============================================================ */}
@@ -267,13 +295,16 @@ export function PortalClient({
             Compliance Posture
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="font-heading text-2xl font-bold text-[#1E2A4A]">
-              {normalizedScore}
+            <span
+              className="font-heading text-2xl font-bold text-[#1E2A4A]"
+              data-testid="portal-posture"
+            >
+              {postureScore === null ? '—' : Math.round(postureScore)}
             </span>
-            <span className="text-xs text-[#94a3b8]">/100</span>
+            {postureScore !== null && <span className="text-xs text-[#94a3b8]">/100</span>}
           </div>
-          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#0FB5A5] font-semibold">
-            <span>▲ +6 vs baseline</span>
+          <div className="mt-2 text-[11px] text-[#64748b]">
+            {postureScore === null ? 'Not yet assessed' : 'Latest saved assessment'}
           </div>
         </div>
 
@@ -285,7 +316,9 @@ export function PortalClient({
           <div className="mt-2 font-heading text-xl font-bold text-[#D9534F] tracking-tight">
             {exposureDisplay}
           </div>
-          <div className="mt-2 text-[11px] text-[#64748b]">DPDPA §33 ceiling</div>
+          <div className="mt-2 text-[11px] text-[#64748b]">
+            {exposureInr === null ? 'No saved estimate' : 'Saved estimate'}
+          </div>
         </div>
 
         {/* Controls Passing */}
@@ -294,12 +327,19 @@ export function PortalClient({
             Controls Passing
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="font-heading text-2xl font-bold text-[#0FB5A5]">
-              {passingControls}
+            <span
+              className="font-heading text-2xl font-bold text-[#0FB5A5]"
+              data-testid="portal-controls-passing"
+            >
+              {engagement ? passingControls : '—'}
             </span>
-            <span className="text-xs text-[#94a3b8]">/{totalControls}</span>
+            {engagement && <span className="text-xs text-[#94a3b8]">/{totalControls}</span>}
           </div>
-          <div className="mt-2 text-[11px] text-[#64748b]">{passingPct}% audit verified</div>
+          <div className="mt-2 text-[11px] text-[#64748b]">
+            {engagement
+              ? `${assessedControls} of ${totalControls} assessed`
+              : 'No saved assessment'}
+          </div>
         </div>
 
         {/* Pending Approvals */}
@@ -324,7 +364,7 @@ export function PortalClient({
           <div className="mt-2 font-heading text-2xl font-bold text-[#1E2A4A]">
             {evidence.length}
           </div>
-          <div className="mt-2 text-[11px] text-[#0FB5A5] font-medium">WORM lock active</div>
+          <div className="mt-2 text-[11px] text-[#64748b]">Recorded evidence items</div>
         </div>
 
         {/* Open DSARs */}
@@ -334,10 +374,10 @@ export function PortalClient({
           </div>
           <div className="mt-2 font-heading text-2xl font-bold text-[#1E2A4A]">{openDsarCount}</div>
           <div className="mt-2 text-[11px] text-[#64748b]">
-            {dsars.filter((d) => d.slaDays <= 3).length > 0 ? (
-              <span className="text-[#D9534F] font-semibold">1 nearing SLA</span>
+            {nearingSla > 0 ? (
+              <span className="text-[#D9534F] font-semibold">{nearingSla} due within 3 days</span>
             ) : (
-              <span className="text-[#0FB5A5]">All within SLA</span>
+              <span>None due within 3 days</span>
             )}
           </div>
         </div>
@@ -473,7 +513,9 @@ export function PortalClient({
                     <div className="text-[10px] uppercase font-bold text-[#64748b]">
                       Passing Ratio
                     </div>
-                    <div className="text-sm font-bold text-[#0FB5A5]">{passingPct}% Compliant</div>
+                    <div className="text-sm font-bold text-[#0FB5A5]">
+                      {passingPct}% in pass band
+                    </div>
                   </div>
                 </div>
               </div>
@@ -481,9 +523,10 @@ export function PortalClient({
               {/* Progress Bar */}
               <div className="mt-5 space-y-2">
                 <div className="flex justify-between text-xs font-medium text-[#1E2A4A]">
-                  <span>Statutory Controls Passing</span>
+                  <span>Controls in the pass band</span>
                   <span>
-                    {passingControls} of {totalControls} Verified
+                    {passingControls} of {totalControls} ({engagement.summary.unassessed}{' '}
+                    unassessed)
                   </span>
                 </div>
                 <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
@@ -513,7 +556,7 @@ export function PortalClient({
                 >
                   <div>
                     <div className="text-xs font-semibold text-[#1E2A4A]">Control Library</div>
-                    <div className="text-[11px] text-slate-500">43 codified controls</div>
+                    <div className="text-[11px] text-slate-500">Published control library</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
                 </Link>
@@ -533,8 +576,13 @@ export function PortalClient({
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500">
-              No active engagement recorded for this organization.
+            <div
+              className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500"
+              data-testid="portal-no-engagement"
+            >
+              {assessmentUnavailable
+                ? 'Saved assessment results are unavailable right now. Try again.'
+                : 'No assessment engagement recorded for this organization.'}
             </div>
           )}
 
@@ -547,13 +595,14 @@ export function PortalClient({
                   Active Security Incidents & CERT-In / DPB Radar
                 </h3>
               </div>
-              <span className="rounded bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-semibold border border-emerald-200">
-                0 Active Breaches
+              <span className="rounded bg-slate-50 text-slate-700 px-2 py-0.5 text-xs font-semibold border border-slate-200">
+                {openBreaches} open of {breaches.length} recorded
               </span>
             </div>
             <p className="mt-2 text-xs text-slate-600">
-              Zero open security incidents or personal data breaches on record. Tabletop readiness
-              protocol validated with 6-hour CERT-In and 72-hour DPB statutory notification SLAs.
+              {breaches.length === 0
+                ? 'No personal data breaches are recorded for this organization.'
+                : 'Recorded breaches for this organization; see the Breaches module for details.'}
             </p>
           </div>
         </div>
@@ -568,8 +617,8 @@ export function PortalClient({
                 Pending Remediation Plans ({plans.length})
               </h2>
               <p className="text-xs text-[#64748b]">
-                Drafted by Sudhaar and validated with zero schema lock contention. Require human
-                approval before execution.
+                Remediation plans recorded for this organization. Execution requires a human
+                approval backed by a completed dry-run and a validated rollback.
               </p>
             </div>
             <Link href="/approval" className="text-xs font-bold text-[#0FB5A5] hover:underline">
@@ -843,10 +892,14 @@ export function PortalClient({
                       <div className="text-[11px] font-semibold text-[#1E2A4A]">
                         {d.dueBy
                           ? `Due ${new Date(d.dueBy).toLocaleDateString('en-IN')}`
-                          : 'SLA: 30 days'}
+                          : 'No due date recorded'}
                       </div>
                       <div className="text-[10px] text-slate-500">
-                        {d.slaDays > 0 ? `${d.slaDays} days remaining` : 'Delivered'}
+                        {d.slaDays === null
+                          ? '—'
+                          : d.slaDays > 0
+                            ? `${d.slaDays} days remaining`
+                            : 'Due date reached'}
                       </div>
                     </div>
                   </div>

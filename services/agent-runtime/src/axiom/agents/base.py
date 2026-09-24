@@ -22,22 +22,23 @@ Per Doc 04 §5.2:
 from __future__ import annotations
 
 import time
-import traceback
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from typing import Any, ClassVar, Generic, TypeVar
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ..canonicalise import sha256_hex
+from ..canonicalise import canonical_json, sha256_hex
 from ..config import Settings, get_settings
 from ..evidence_client import EvidenceVault
 from ..ledger_client import AppendInput, LedgerClient, new_correlation_id
-from ..model_gateway import ModelGateway, ModelRequest, ModelResponse, TaskKind
+from ..model_gateway import ModelGateway, TaskKind
+
+
+class AuditCompletionFailed(RuntimeError):
+    """Mandatory completion evidence was not durably acknowledged."""
 
 
 class AutonomyLevel(str, Enum):
@@ -99,6 +100,10 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
     default_pii_redact: ClassVar[bool] = True
     # Whether this agent can mutate external state (architectural)
     can_mutate: ClassVar[bool] = False
+    # Explicit metadata, not credentials or an authorization decision.
+    mutates_client_estate: ClassVar[bool] = False
+    # Domain records only; excludes ordinary run/audit telemetry.
+    writes_axiom_state: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -121,9 +126,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
     def output_schema(self) -> type[OutputT]: ...
 
     @abstractmethod
-    async def _run(
-        self, *, correlation_id: str, input: InputT, **deps: Any
-    ) -> OutputT: ...
+    async def _run(self, *, correlation_id: str, input: InputT, **deps: Any) -> OutputT: ...
 
     async def invoke(
         self,
@@ -136,20 +139,24 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         t0 = time.monotonic()
         entry_ids: list[str] = []
 
-        # Validate input
-        if not isinstance(raw_input, BaseModel):
-            try:
-                input_obj = self.input_schema()(**(raw_input or {}))
-            except Exception as e:
-                self.log.error("agent.input_validation_failed", err=str(e))
-                return AgentRunResult(
-                    agent=self.name,
-                    correlation_id=correlation_id,
-                    status="failed",
-                    error=f"validation_failed: {e}",
-                )
-        else:
-            input_obj = raw_input
+        # Revalidate even BaseModel inputs; an unrelated model instance is not
+        # authority to bypass this agent's declared input contract.
+        try:
+            payload = (
+                raw_input.model_dump(mode="python")
+                if isinstance(raw_input, BaseModel)
+                else (raw_input or {})
+            )
+            input_obj = self.input_schema().model_validate(payload)
+            input_hash = sha256_hex(canonical_json(input_obj.model_dump(mode="json")))
+        except Exception:
+            self.log.error("agent.input_validation_failed")
+            return AgentRunResult(
+                agent=self.name,
+                correlation_id=correlation_id,
+                status="failed",
+                error="validation_failed",
+            )
 
         tenant_id = getattr(input_obj, "tenant_id", None) or "00000000-0000-0000-0000-000000000001"
         engagement_id = getattr(input_obj, "engagement_id", None)
@@ -166,22 +173,29 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                     action_type=self._started_action_type(),
                     target_ref=engagement_id,
                     result="pending",
-                    detail={"input": input_obj.model_dump(mode="json", exclude={"tenant_id", "engagement_id"})},
+                    input_hash=input_hash,
+                    detail={"phase": "started"},
                 )
             )
             entry_ids.append(r.id)
-        except Exception as e:  # noqa: BLE001
-            self.log.error("ledger.append.started_failed", err=str(e))
+        except Exception:  # noqa: BLE001
+            self.log.error("ledger.append.started_failed")
             # Per BR-3 we cannot proceed without a ledger record; bail.
             return AgentRunResult(
                 agent=self.name,
                 correlation_id=correlation_id,
                 status="failed",
-                error=f"ledger_append_failed: {e}",
+                error="ledger_append_failed",
             )
 
         try:
-            output = await self._run(correlation_id=correlation_id, input=input_obj)
+            raw_output = await self._run(correlation_id=correlation_id, input=input_obj)
+            output = self.output_schema().model_validate(
+                raw_output.model_dump(mode="python")
+                if isinstance(raw_output, BaseModel)
+                else raw_output
+            )
+            output_hash = sha256_hex(canonical_json(output.model_dump(mode="json")))
             latency_ms = int((time.monotonic() - t0) * 1000)
             total_tokens = sum(getattr(output, "_tokens", lambda: 0)() for _ in [0])  # type: ignore[func-returns-value]
             cost_usd = 0.0
@@ -200,15 +214,15 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                         action_type=self._completed_action_type(),
                         target_ref=engagement_id,
                         result="success",
-                        detail={
-                            "started_entry": entry_ids[0] if entry_ids else None,
-                            "output": output.model_dump(mode="json"),
-                        },
+                        input_hash=input_hash,
+                        output_hash=output_hash,
+                        detail={"phase": "completed", "started_entry": entry_ids[0]},
                     )
                 )
                 entry_ids.append(r2.id)
-            except Exception as e:  # noqa: BLE001
-                self.log.error("ledger.append.completed_failed", err=str(e))
+            except Exception:  # noqa: BLE001
+                self.log.error("ledger.append.completed_failed")
+                raise AuditCompletionFailed() from None
 
             return AgentRunResult(
                 agent=self.name,
@@ -224,8 +238,12 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
             )
         except Exception as e:  # noqa: BLE001
             latency_ms = int((time.monotonic() - t0) * 1000)
-            tb = traceback.format_exc()
-            self.log.error("agent.failed", err=str(e), traceback=tb)
+            failure_code = (
+                "audit_completion_failed"
+                if isinstance(e, AuditCompletionFailed)
+                else "agent_failed"
+            )
+            self.log.error("agent.failed", failure_code=failure_code)
             try:
                 r2 = await self.ledger.append(
                     AppendInput(
@@ -237,18 +255,24 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                         action_type=self._completed_action_type(),
                         target_ref=engagement_id,
                         result="failure",
-                        detail={"started_entry": entry_ids[0] if entry_ids else None, "error": str(e), "traceback": tb},
+                        input_hash=input_hash,
+                        detail={
+                            "phase": "failed",
+                            "started_entry": entry_ids[0],
+                            "failure_code": failure_code,
+                        },
                     )
                 )
                 entry_ids.append(r2.id)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                # The run already failed; record that its failure entry is missing.
+                self.log.error("agent.failure_ledger_append_failed")
             return AgentRunResult(
                 agent=self.name,
                 correlation_id=correlation_id,
                 status="failed",
                 latency_ms=latency_ms,
-                error=str(e),
+                error=failure_code,
                 ledger_entry_ids=entry_ids,
             )
 

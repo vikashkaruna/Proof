@@ -467,7 +467,9 @@ export function EvidenceClient({ initialEvidence, vaultStats }: EvidenceClientPr
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">WORM Lock:</span>
-                  <span className="text-emerald-700 font-semibold">Object Lock (Compliance Mode)</span>
+                  <span className="text-emerald-700 font-semibold">
+                    Object Lock (Compliance Mode)
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">SHA-256 Digest:</span>

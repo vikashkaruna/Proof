@@ -1,0 +1,73 @@
+begin;
+create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('d0000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m; end if; end$$;
+insert into auth.users(id,email) values(pg_temp.id(1),'preparer@test.invalid'),(pg_temp.id(2),'admin@test.invalid');
+insert into public.users(id,email) values(pg_temp.id(1),'preparer@test.invalid'),(pg_temp.id(2),'admin@test.invalid');
+insert into public.tenants(id,slug,name) values(pg_temp.id(11),'proposal-a','A'),(pg_temp.id(12),'proposal-b','B');
+insert into public.tenant_users(tenant_id,user_id,role) values(pg_temp.id(11),pg_temp.id(1),'axiom_analyst'),(pg_temp.id(11),pg_temp.id(2),'admin');
+insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(21),pg_temp.id(11),'india','India'),(pg_temp.id(22),pg_temp.id(12),'foreign','Foreign');
+insert into public.tenant_onboarding_intakes(tenant_id,submitted_by,proposed_systems) values(pg_temp.id(11),pg_temp.id(2),'[{"name":"Original CRM","type":"custom SaaS","region":"ap-south-1","data_categories":["Contact Details"]}]');
+create function pg_temp.prepare() returns jsonb language sql as $$select public.prepare_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),pg_temp.id(21),'[{"name":"CRM","systemKind":"saas","description":"Confirmed inventory","dataCategories":["contact-details"]}]',gen_random_uuid())$$;
+create function pg_temp.fail_proposal_audit() returns trigger language plpgsql as $$
+begin if new.action_type='onboarding.proposal.approved' and new.detail->>'reason'='Audit fault' then raise exception 'Injected final audit failure' using errcode='23514'; end if; return new; end $$;
+create trigger proposal_audit_fault before insert on public.audit_ledger for each row execute function pg_temp.fail_proposal_audit();
+set local role service_role;
+select pg_temp.ok(jsonb_array_length(public.read_onboarding_inventory(pg_temp.id(11)))=1,'non-bypass service reads inventory without private contact data');
+do $$ declare p jsonb; result jsonb; proposal_id uuid; digest text;
+begin
+ result:=public.prepare_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),pg_temp.id(22),'[]',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='not_found','cross-tenant estate refused');
+ p:=pg_temp.prepare();proposal_id:=(p#>>'{data,id}')::uuid;digest:=p#>>'{data,content_sha256}';
+ perform pg_temp.ok(proposal_id is not null,'analyst prepares');
+ perform pg_temp.ok((select count(*)=0 from public.estate_systems),'preparation creates no live systems');
+ perform pg_temp.ok(pg_temp.prepare()->>'error'='proposal_exists','only one pending proposal');
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),proposal_id,digest,'approved','I prepared it',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='forbidden','analyst cannot approve');
+ result:=public.review_onboarding_proposal(pg_temp.id(12),pg_temp.id(2),proposal_id,digest,'approved','Wrong tenant',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='forbidden','admin cannot review another tenant');
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,repeat('a',64),'approved','Changed content',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='content_changed','review digest binds exact content');
+ -- If the final audit fails, system creation and the review status roll back together.
+ begin
+  perform public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'approved','Audit fault',gen_random_uuid());
+  raise exception 'Expected audit failure';
+ exception when check_violation then null; end;
+ perform pg_temp.ok((select count(*)=0 from public.estate_systems),'audit fault leaves no systems');
+ perform pg_temp.ok((select status='pending' from public.onboarding_proposals where onboarding_proposals.id=proposal_id),'audit fault preserves pending review');
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'rejected','Correct the scope',gen_random_uuid());
+ perform pg_temp.ok(result#>>'{data,status}'='rejected','admin can reject');
+ perform pg_temp.ok((select count(*)=0 from public.estate_systems),'rejection creates no systems');
+ -- An estate edit invalidates pending approval even though proposal content is immutable.
+ p:=pg_temp.prepare();proposal_id:=(p#>>'{data,id}')::uuid;digest:=p#>>'{data,content_sha256}';
+ perform public.manage_estate(pg_temp.id(11),pg_temp.id(2),'estate.update',pg_temp.id(21),'{"name":"India revised","status":"active","expectedVersion":1}'::jsonb,gen_random_uuid());
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'approved','Stale estate',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='estate_changed','changed estate must be reviewed anew');
+ perform public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'rejected','Estate changed',gen_random_uuid());
+ p:=pg_temp.prepare();proposal_id:=(p#>>'{data,id}')::uuid;digest:=p#>>'{data,content_sha256}';
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'approved','Reviewed all original and normalized fields',gen_random_uuid());
+ perform pg_temp.ok(result#>>'{data,status}'='approved','tenant admin approves');
+ perform pg_temp.ok((select count(*)=1 from public.estate_systems where name='CRM'),'exactly one live system');
+ perform pg_temp.ok((select count(*)=1 from public.onboarding_proposal_systems),'source lineage retained');
+ perform pg_temp.ok((select count(*)=1 from public.audit_ledger where action_type='onboarding.proposal.approved'),'approval audited');
+ result:=public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(2),proposal_id,digest,'approved','Duplicate',gen_random_uuid());
+ perform pg_temp.ok(result->>'error'='already_reviewed','double approval cannot duplicate systems');
+ perform pg_temp.ok(pg_temp.prepare()->>'error'='proposal_exists','applied intake cannot be imported again');
+end $$;
+reset role;
+-- Changing the preparer's role cannot make self-review valid.
+update public.tenant_users set role='admin' where user_id=pg_temp.id(1);
+set local role service_role;
+select pg_temp.ok((select public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),id,content_sha256,'approved','Self review',gen_random_uuid())->>'error'='self_review' from public.onboarding_proposals where status='approved'),'preparer remains unable to self-review after promotion');
+reset role;
+select pg_temp.ok(not has_table_privilege('service_role','public.onboarding_proposals','UPDATE'),'broker cannot rewrite proposal snapshots');
+select pg_temp.ok(not has_table_privilege('authenticated','public.onboarding_proposal_systems','INSERT'),'browser cannot forge lineage');
+select pg_temp.ok(not has_function_privilege('authenticated','public.review_onboarding_proposal(uuid,uuid,uuid,text,text,text,uuid)','EXECUTE'),'review cannot bypass BFF');
+set local role authenticated;
+set local request.jwt.claims='{"sub":"d0000000-0000-4000-8000-000000000001","role":"authenticated","tenant_id":"d0000000-0000-4000-8000-000000000012"}';
+select pg_temp.ok((select count(*)=3 from public.onboarding_proposals),'assigned analyst sees proposal history despite forged tenant claim');
+reset role;
+delete from public.tenant_users where user_id=pg_temp.id(1);
+set local role authenticated;
+select pg_temp.ok((select count(*)=0 from public.onboarding_proposals),'membership revocation hides history');
+reset role;
+rollback;

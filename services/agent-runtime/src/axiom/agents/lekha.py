@@ -41,6 +41,7 @@ class LekhaOutput(BaseModel):
 
 class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
     name: ClassVar[AgentName] = AgentName.LEKHA
+    writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Audit ledger queries: verify, reconstruct, export."
     one_liner: ClassVar[str] = "I remember everything, forever."
     tool_scopes: ClassVar[tuple[str, ...]] = ("ledger.append", "ledger.read")
@@ -66,7 +67,8 @@ class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
                 first_break=result.get("firstBreak"),
             )
         elif input.operation == "reconstruct":
-            assert input.correlation_id, "reconstruct requires a correlation_id"
+            if not input.correlation_id:
+                raise ValueError("reconstruct requires a correlation_id")
             entries = await self.ledger.query(
                 tenant_id=input.tenant_id,
                 correlation_id=input.correlation_id,

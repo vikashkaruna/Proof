@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "deploymentId": "preprod-isolated-acceptance",
+  "environment": "preprod",
+  "topology": "remote",
+  "syntheticFixtures": true,
+  "expectedRevision": "0000000000000000000000000000000000000000",
+  "bffUrl": "https://bff.acceptance.example.invalid",
+  "webUrl": "https://web.acceptance.example.invalid",
+  "marketingUrl": "https://marketing.acceptance.example.invalid",
+  "supabaseUrl": "https://auth.acceptance.example.invalid",
+  "anonKey": "REPLACE_FROM_SECRET_STORAGE",
+  "publishableKey": "REPLACE_FROM_SECRET_STORAGE",
+  "serviceKey": "REPLACE_FROM_SECRET_STORAGE"
+}

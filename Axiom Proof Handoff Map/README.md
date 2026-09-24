@@ -4,6 +4,20 @@ The bridge document between the design prototypes and the real build. Read this
 when changing screens in `../apps/web/` or `../apps/marketing/` and cross-check
 the prototype references in this folder before wiring real data.
 
+**Implementation review — 20 September 2026:** This folder describes target
+designs, not verified completion. For completed source changes, unfinished W1
+analyst work and pending implementation, start with
+[the implementation handoff](../docs/12_Implementation_Handoff.md),
+[roadmap traceability](../docs/13_Roadmap_Traceability.md), and
+[the independent review](../docs/audits/04-roadmap-review-2026-09-20.md).
+The current plan is [Doc 11](../docs/11_Phase0-5_Gap_Closure_Plan.md).
+Current implementation progress is in [Doc 14](../docs/14_Implementation_Progress.md), with [review 59](../docs/audits/59-controller-placement-review-2026-09-23.md) and the [saved handoff](../docs/15_Session_Handoff.md) recording the latest checkpoint. W0/W1/W2/W3/W4 remain partial; this diagram is a target map, not release evidence.
+
+Route aliases in the prototype require reconciliation: `/remediation` maps to
+`/plans`, `/dsar` to `/dsars`, and `/breach` to `/breaches`. MFA now adds
+`/settings/security` and `/verify`; `/estate` manages inventory and `/estate/onboarding` reviews staff proposals; `/connectors` now manages real registrations (W4.1), without granting connectivity or execution; `/estate/graph` remains planned. See the
+traceability document before introducing new routes or data entities.
+
 ## What's here
 
 - `Axiom Proof Handoff Map.dc.html` — open in a browser (self-contained with `support.js`). Contains:
@@ -21,3 +35,63 @@ right" into "a screen wired to the right route, agent, and entities". The real
 web/marketing apps and backend now exist alongside these references, so update
 the route map when a production surface changes to prevent drift from
 [`../docs/04_Solution_Architecture.md`](../docs/04_Solution_Architecture.md).
+
+Revision 36 implements per-service Cloud Run IAM and tests its secret allowlists offline. Deployed IAM denial checks and per-agent runtime isolation remain pending; see Doc 16 and review 25.
+
+Revision 37 adds the private W4.3 task delegation component (0041); it is not wired into runtime/tool routes yet. Service IAM engineering passed exact staging CI 35678105419. Next: isolated workers, task handoff and every-tool scope/data enforcement, then W4.4, full W3 wizard/graph and W4.5/6/7.
+
+Revision 38 requires a validated runtime result and confirmed run persistence before reporting success. Unconfirmed completion returns a run ID for reconciliation; worker/task integration and connector execution remain pending.
+
+Revision 39 removes UI default-success and timer-driven assessment improvements. Assessment source-data fallbacks remain a separate C-W0-7 gap; current scores/cards are not end-to-end readiness evidence. See review 28 before continuing worker and W3/W4 integration.
+
+Revision 40 verifies Revision 39 CI and replaces the browser bridge demo mapping with user-scoped dynamic tenant routing. Real custom-tenant read/write and revocation acceptance is covered. Assessment provenance and full W3/W4 remain pending; see review 29 and the session handoff.
+
+Revision 41 replaces Assessment demonstration posture with a BFF projection of one owned assessment/library and real evidence references. Missing/error states are explicit and zero values preserved. Full worker persistence, requested-library execution, W3 wizard/graph and W4 grants remain open; see review 30.
+
+Revision 42 delivers a real local isolated Parikshan worker and task-authorized, transactional library/findings tools (0042). Normal UI dispatch, production orchestration/finalization/reconciliation, trust lifecycle and the other worker paths remain open; this is not full W4.3 or connector activation. See review 31 and Doc 16 for acceptance and recovery.
+
+Revision 43 confirms already committed assessment runs from actual ledger receipts and recovers lost worker responses without duplicate completion. Production dispatch/launch/automated recovery and the remaining W3/W4 scope stay open. Revision 42 passed exact CI 35687544717; see review 32 and Doc 16 for the successor acceptance gate.
+
+Revision 46 connects bounded private worker launch to independent controller reconciliation. Real Linux process tests cover detached descendants, timeout, parent death and launch refusal; existing claims are never relaunched. Production scheduling/private transport, per-job isolation and key/trust setup remain pending alongside other workers, W4.4 grants and the full W3 wizard/graph. See review 35 and Doc 16.
+
+Revision 47 adds a separate opaque Temporal workflow with stable scheduling and confirmation-only recovery, tested through the private local socket and real isolated worker/Postgres path. Durable outbox pickup, separate-service cloud transport, deployed identity/namespace/key lifecycle and remaining workers remain open before W4.4/full W3 integration. The local Unix transport does not change cloud IAM separation.
+
+Revision 50 verifies remote transport at staging `b40685f` / CI 35711878303 and adds tenant-bound AWS/GCP dispatch KMS adapters. Local provider fixtures and the real outbox/worker path test integrity, rotation, retained keys and bounded failures. Distributed key-policy rollout/retirement, per-job isolation, deployment/trust and remaining W3/W4 work stay open; see review 39 and Doc 16.
+
+Revision 53 verifies persisted policy fencing at staging `a01604b` / CI 35813509615 and runs each private assessment in a separate constrained container. Real SPIRE/Postgres acceptance covers concurrent job isolation, read-only files, metadata refusal and bounded cleanup. Production trust/runner composition, remaining workers, live grants and full W3/W4 remain open; see review 42 and Doc 16.
+
+Revision 54 verifies per-job isolation at staging `c17f428` / CI 35814929318 and adds audited, version-checked workload registration. Disable permanently revokes old tasks/grants; re-enable cannot restore them. The user selected a dedicated Mumbai VM runner for higher environments with public APIs on Cloud Run. Deployment/trust composition and the remaining W3/W4 scope are still open; see review 43 and Doc 16.
+
+Revision 54 CI follow-up: initial merge `1e1207d` failed shared fixture setup, now corrected to audited registration and explicit direct-write refusal. Corrective merge `0081948` / CI 35817381642 is verified green, with 17 applicable jobs and eight exact-revision artifacts.
+
+Revision 55 adds a protected local Workload API signing-bundle source with fail-closed rereads and real SPIRE controller checks. VM/controller deployment and production composition remain open. See review 44 and Doc 16; verify nine exact-merge JSON artifacts before closure.
+
+Revision 56 composes the private VM controller with protected live SPIRE trust, persisted tenant policy, isolated assessment execution and independent confirmation. Production VM/node/scheduler deployment remains pending; see Doc 16 for protected configuration and operating prerequisites. Revision 56 is verified green at staging `df409cb`, CI 35821680808, with 17 applicable jobs and nine exact-revision artifacts.
+
+Revision 57 prepares separate private Mumbai issuer and runner host resources, disabled by default and verified with offline Terraform tests. Issuer/node bootstrap and operational activation are still pending; no cloud resources were provisioned.
+
+Revision 58 requires protected file delivery of the private controller backend key, with a minimal non-secret environment, before the future Docker image attestor is enabled. The public BFF remains unchanged.
+
+Revision 59 prepares exact GCP-node, UID and immutable-image admission, with separate real SPIRE persistence/restart acceptance. Cached identity during issuer outage is demonstrated; production bootstrap and bounded issuer-sync health remain open. See the current handoff/runbook before activation.
+
+Revision 60 adds bounded issuer-sync health enforcement, preserving one-time claims and independent recovery. The node observer publishes root-owned metadata to the controller through a read-only mount; node admin access is not shared. Protected host bootstrap and deployment remain open.
+
+Revision 61 adds read-only persistent SPIRE disk/state admission and explicit blank-disk checks. Supervised installation and actual cloud mount-loss acceptance remain pending; no deployment was activated.
+
+Revision 62 adds protected pinned host bundles and initialized-state-only systemd units. Delivery and native issuer lifecycle have dedicated acceptance gates; first enrollment and complete runner/controller activation remain pending. Read Docs 11–16 and the saved session before resuming.
+
+Protected-host CI at `c493fc7` / run 35841077123 verifies 16 Docker delivery and 11 native issuer lifecycle outcomes. The broader combined CI result remains in the saved session.
+
+Revision 63 separates first issuer initialization from normal restart and requires a second receipt review before marker publication. Runner enrollment and full activation remain next; follow the latest Docs 11–16 and saved session.
+
+Revision 64 extends reviewed enrollment to the runner, with exact-node/sync/CA evidence and separate marker publication. A native runner/observer gate is added; final results are recorded after exact-merge CI verification. Host socket/container delivery and full controller activation are next.
+
+Revision 65 implements protected, reviewed local Docker mappings from the native node socket/health directories. The native gate adds a real unprivileged consumer and exact image/UID checks; final evidence is saved after exact-merge validation. Controller delivery/admission/supervision, private TLS and scoped IAM/KMS are next.
+
+Revision 66 adds actual inherited controller entrypoint acceptance: protected files, real HTTPS backend and SPIRE startup, TLS/node/permission refusal, invalid caller rejection, clean shutdown and no claims. Controller host delivery/supervision and cloud activation remain pending.
+
+Revision 67 adds exact controller workload admission before backend policy reads. Protected host delivery/supervision and cloud acceptance remain pending; see Docs 11–16 for evidence boundaries.
+
+Revision 68 adds reviewed protected controller file delivery. It does not activate the controller; supervised lifetime and cloud readiness remain pending.
+
+Revision 69 records the accepted dedicated runner VM per tenant and implements tenant-keyed deployment resources. The separate issuer remains shared; runtime placement enforcement and scoped permissions remain activation gates.

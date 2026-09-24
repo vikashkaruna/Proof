@@ -28,15 +28,12 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
   if (id === 'preview') {
     scan = SAMPLE_GAP_SCAN_RECORD;
   } else {
+    // The ownership check is unconditional. It used to be disabled in local,
+    // development, preprod, staging and any container without NODE_ENV, which
+    // meant three deployed environments served any prospect's report to any
+    // visitor who had an ID.
     const access = (await cookies()).get('gap_scan_access')?.value;
-    const isLocal =
-      process.env.ENVIRONMENT === 'local' ||
-      process.env.ENVIRONMENT === 'development' ||
-      process.env.ENVIRONMENT === 'preprod' ||
-      process.env.ENVIRONMENT === 'staging' ||
-      process.env.NODE_ENV !== 'production';
-
-    scan = await getGapScanReport(id, access, isLocal);
+    scan = await getGapScanReport(id, access);
   }
 
   if (!scan) {
@@ -64,8 +61,8 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
           Your DPDPA Readiness Report
         </h1>
         <p className="mt-2 text-slate-600">
-          Scored against {CONTROL_LIBRARY_COUNT} controls from {BRAND.name} Control Library v
-          {scan.library_version}.
+          Self-assessment across {report.findings.length} selected controls from the{' '}
+          {CONTROL_LIBRARY_COUNT}-control {BRAND.name} library v{scan.library_version}.
         </p>
       </div>
 
@@ -85,10 +82,10 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
       {/* Interactive Email Dispatch Card */}
       <EmailReportAction
         reportId={scan.id}
-        defaultEmail={scan.contact_email}
-        defaultName={scan.contact_name}
-        defaultPhone={scan.contact_phone}
-        defaultCompany={scan.contact_company}
+        defaultEmail={scan.contact_email ?? undefined}
+        defaultName={scan.contact_name ?? undefined}
+        defaultPhone={scan.contact_phone ?? undefined}
+        defaultCompany={scan.contact_company ?? undefined}
         hasReadinessIndex={Boolean(readinessIndex)}
       />
 
@@ -98,16 +95,19 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
           <CardHeader className="border-b border-slate-100 bg-mist-50/50 pb-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <Badge variant="info">Quarterly Research Benchmark</Badge>
+                <Badge variant="info">Indicative Benchmark</Badge>
                 <CardTitle className="mt-2 text-xl text-indigo-500">
                   The Axiom Proof DPDPA Readiness Index — {readinessIndex.sector}
                 </CardTitle>
                 <CardDescription>
-                  Sector peer standing and quarterly statutory compliance progression milestones.
+                  Indicative sector comparison and quarterly statutory compliance progression
+                  milestones.
                 </CardDescription>
               </div>
               <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-right">
-                <span className="text-xs uppercase font-medium text-teal-700">Peer Standing</span>
+                <span className="text-xs uppercase font-medium text-teal-700">
+                  Indicative Standing
+                </span>
                 <p className="text-lg font-bold text-teal-900">
                   Top {100 - readinessIndex.percentileRank}%
                 </p>
@@ -115,13 +115,17 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
             </div>
           </CardHeader>
           <CardContent className="p-6">
+            <p className="mb-4 text-xs text-slate-500" data-testid="benchmark-provenance">
+              Sector benchmarks and standing are Axiom editorial estimates, not measured data from
+              peer organisations. Treat them as indicative context, not as a ranking.
+            </p>
             <div className="grid grid-cols-2 gap-4 rounded-lg bg-slate-50 p-4 sm:grid-cols-4">
               <div>
                 <p className="text-xs text-slate-500">Your Score</p>
                 <p className="text-xl font-bold text-teal-600">{readinessIndex.companyScore}/100</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Sector Benchmark</p>
+                <p className="text-xs text-slate-500">Indicative Sector Benchmark</p>
                 <p className="text-xl font-bold text-slate-700">
                   {readinessIndex.sectorBenchmarkScore}/100
                 </p>

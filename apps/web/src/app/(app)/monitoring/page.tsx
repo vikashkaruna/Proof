@@ -1,21 +1,32 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
 export default async function MonitoringPage() {
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`, whose service-role key bypasses RLS.
+  // The client below is user-scoped, so a missing tenant filter is an empty
+  // result rather than a cross-tenant leak.
+  const { supabase, tenantId, isDemo } = await requireTenantContext();
   let monitoringLedger: any[] = [];
   let totalLedgerEntries = 0;
 
   try {
-    const { data, count } = await admin
+    const { data, count } = await supabase
       .from('audit_ledger')
-      .select('seq, correlation_id, action, target_ref, timestamp, entry_hash, result', {
-        count: 'exact',
-      })
-      .or('action.ilike.%monitor%,action.ilike.%scan%,action.ilike.%drift%')
-      .order('seq', { ascending: false })
+      .select(
+        'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+        {
+          count: 'estimated',
+        },
+      )
+      .eq('tenant_id', tenantId)
+      .in('action_type', [
+        'discovery.started',
+        'discovery.drift_detected',
+        'discovery.batch.completed',
+      ])
+      .order('sequence_no', { ascending: false })
       .limit(6);
 
     monitoringLedger = data || [];
@@ -25,10 +36,10 @@ export default async function MonitoringPage() {
   }
 
   const telemetryEvents: ModuleTelemetryEvent[] = monitoringLedger.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Continuous Posture Surveillance',
+    seq: r.sequence_no,
+    title: r.action_type || 'Continuous Posture Surveillance',
     detail: `Target: ${r.target_ref || 'Estate Telemetry'} · Corr: ${r.correlation_id?.slice(0, 8)}…`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
+    time: r.occurred_at ? new Date(r.occurred_at).toLocaleTimeString('en-IN') : 'Recently',
     target: r.target_ref || 'monitoring_daemon',
     hash: r.entry_hash,
     status: r.result === 'success' ? '✓ active' : r.result,
@@ -36,6 +47,7 @@ export default async function MonitoringPage() {
 
   return (
     <GenericModuleView
+      isDemo={isDemo}
       meta={{
         title: 'Continuous Monitoring',
         hi: 'सतत निगरानी और ड्रिफ्ट',

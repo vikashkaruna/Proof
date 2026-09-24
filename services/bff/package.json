@@ -6,32 +6,44 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-connector-descriptors.mjs",
     "start": "node dist/index.js",
-    "lint": "echo 'no lint config'",
+    "lint": "axiom-lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "echo 'BFF has no Playwright suite; see apps/web/tests/e2e'",
     "clean": "rm -rf dist .turbo coverage"
   },
   "dependencies": {
+    "@aws-crypto/crc32c": "^5.2.0",
+    "@aws-sdk/client-kms": "^3.1137.0",
     "@axiom/approval-engine": "workspace:*",
     "@axiom/config": "workspace:*",
     "@axiom/control-library": "workspace:*",
     "@axiom/evidence": "workspace:*",
     "@axiom/ledger": "workspace:*",
+    "@axiom/mfa": "workspace:*",
     "@axiom/supabase": "workspace:*",
     "@axiom/types": "workspace:*",
+    "@google-cloud/kms": "^6.2.0",
+    "@grpc/grpc-js": "1.14.5",
+    "@grpc/proto-loader": "0.8.1",
     "@hono/node-server": "^2.1.1",
     "@supabase/supabase-js": "^2.116.0",
     "hono": "^4.13.7",
+    "jose": "6.2.12",
+    "yaml": "2.8.3",
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@axiom/eslint-config": "workspace:*",
     "@types/node": "^26.5.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }

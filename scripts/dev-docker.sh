@@ -185,15 +185,20 @@ setup_environment() {
       cp "$ENV_EXAMPLE" "$ENV_FILE"
       log_succ "Generated ${ENV_FILE}"
     else
-      log_warn "${ENV_FILE} not found; using local fallback."
-      ENV_FILE="infra/docker/environments/.env.local"
-      if [[ ! -f "$ENV_FILE" ]]; then
-        cp "infra/docker/environments/.env.local.example" "$ENV_FILE"
-      fi
+      # Silently substituting local configuration for a named environment is
+      # how a "staging" stack comes up on developer defaults — local URLs,
+      # demo keys, local feature flags — while every log line says staging.
+      log_err "No configuration for '${TARGET_ENV}': neither ${ENV_FILE} nor ${ENV_EXAMPLE} exists."
+      log_err "Create a template at ${ENV_EXAMPLE}, or choose an environment that has one."
+      exit 1
     fi
   else
     log_succ "Loaded configuration from ${ENV_FILE}"
   fi
+
+  # Bring the file up to its template before anything reads it, so a stack
+  # started after a template gained keys does not run on stale configuration.
+  ./scripts/sync-env.sh "$TARGET_ENV" scaffold >/dev/null 2>&1 || true
 
   # Compose file selection
   COMPOSE_ARGS=("-f" "docker-compose.yml")
@@ -235,14 +240,64 @@ preflight_checks() {
     if command -v supabase >/dev/null 2>&1; then
       if ! curl -fsS http://127.0.0.1:55321/rest/v1/ >/dev/null 2>&1; then
         log_info "Starting local Supabase stack..."
-        (cd infra && supabase start || true)
+        (cd infra && supabase start)
       else
         log_succ "Local Supabase stack is running on port 55321 (DB port 55322)."
       fi
-      # Sync migrations & seed controls and users
-      pnpm db:migrate || true
-      pnpm seed:controls || true
-      pnpm seed:users || true
+
+      # Migrations used to run as `pnpm db:migrate || true`, i.e. `supabase db
+      # push` with its failure discarded. Two things were wrong with that.
+      #
+      # First, `db push` runs as the CLI's restricted migration role, and
+      # migration 0000 creates database roles and writes to the Auth-owned
+      # schema. It cannot succeed. Second, `|| true` meant it did not have to:
+      # the stack came up against whatever schema happened to be there and
+      # reported success. A deploy that cannot fail is not evidence of
+      # anything, and here it produced the worst outcome available — services
+      # running against a database missing every W0 security migration, which
+      # reads as "the new code is broken" rather than "the schema is absent".
+      #
+      # scripts/migrate-database.py is the supported runner: it applies each
+      # file once under the administration role, records SHA-256 checksums and
+      # refuses changed history.
+      # Read the project id rather than hardcoding it: the container name and
+      # the ports both follow from it, and a stale guess would silently target
+      # a different local project.
+      local project_id
+      project_id=$(sed -n 's/^[[:space:]]*project_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+        infra/supabase/config.toml | head -1)
+      if [[ -z "$project_id" ]]; then
+        log_err "Could not read project_id from infra/supabase/config.toml."
+        return 1
+      fi
+      local db_container="supabase_db_${project_id}"
+      if ! docker ps --format '{{.Names}}' | grep -qx "$db_container"; then
+        log_err "Local Supabase database container '$db_container' is not running."
+        return 1
+      fi
+
+      # The runner will not adopt a schema it has no record of. Reconciling an
+      # existing database is a deliberate act with data at stake, so stop and
+      # say so rather than half-applying or dropping anything.
+      local tracked
+      tracked=$(docker exec "$db_container" psql -X -U postgres -d postgres -t -A -c \
+        "select to_regclass('axiom_migrations.applied') is not null" 2>/dev/null || echo 'f')
+      local public_tables
+      public_tables=$(docker exec "$db_container" psql -X -U postgres -d postgres -t -A -c \
+        "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null || echo '0')
+      if [[ "$tracked" != "t" && "$public_tables" -gt 0 ]]; then
+        log_err "Project '$project_id' has $public_tables public tables but no migration history."
+        log_err "It predates the checksummed runner and is missing the 0015-0018 security migrations."
+        log_err "Reconcile it deliberately, or verify against the isolated stack instead:"
+        log_err "  ./scripts/test-strict-parity.sh     # real Auth/PostgREST, isolated project"
+        log_err "  ./scripts/test-database.sh          # disposable Postgres, full migration series"
+        return 1
+      fi
+
+      log_info "Applying migrations with the checksummed runner..."
+      python3 scripts/migrate-database.py --container "$db_container" --user postgres --database postgres
+      pnpm seed:controls
+      pnpm seed:users
     else
       log_warn "Supabase CLI not found. Assuming external/containerized Supabase."
     fi

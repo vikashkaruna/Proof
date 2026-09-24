@@ -3,7 +3,7 @@
  *
  * The evidence vault is the product's trust claim. Per Doc 04 §6.2 and
  * Doc 05 §5, this is plain S3 API (no AWS-proprietary conveniences) so
- * the bucket can move to MinIO or GCS-interop without a rewrite.
+ * the bucket can use compatible S3/MinIO providers. GCS sealing requires a separate verified lock adapter.
  *
  * Object Lock with Compliance mode retention means:
  *   - Object cannot be deleted by ANY user, including root, until retention
@@ -20,6 +20,9 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  GetObjectLockConfigurationCommand,
+  GetObjectRetentionCommand,
+  GetObjectLegalHoldCommand,
   type ObjectLockLegalHold,
   type ObjectLockMode,
   type ServerSideEncryption,
@@ -49,6 +52,15 @@ export interface SealEvidenceInput {
   metadata?: Record<string, string>;
 }
 
+/**
+ * How far a retention claim has been established. See `SealedEvidence`.
+ *
+ * Deliberately three values rather than a boolean: "we checked and it holds"
+ * and "we cannot check from here" are different facts, and collapsing them is
+ * what produced a COMPLIANCE label on storage nobody had probed.
+ */
+export type RetentionAssurance = 'verified' | 'asserted' | 'unverified';
+
 export interface SealedEvidence {
   /** SHA-256 of the content — the canonical identifier. */
   contentHash: string;
@@ -61,8 +73,32 @@ export interface SealedEvidence {
   byteSize: number;
   /** When the object becomes eligible for deletion (retention end). */
   retainUntil: string;
-  /** The applied object-lock mode. Always 'COMPLIANCE' for sealed evidence. */
-  lockMode: ObjectLockMode;
+  /**
+   * The object-lock mode actually applied.
+   *
+   * This used to be the literal 'COMPLIANCE' on every path, including the GCS
+   * path where no lock header is sent and nothing is probed (R-10). A sealed
+   * artifact asserting compliance-mode retention nobody verified is a false
+   * assurance printed on the evidence itself, which is the one place a
+   * compliance product cannot afford one.
+   */
+  lockMode: ObjectLockMode | 'NONE';
+  /**
+   * How far the retention claim has actually been established (R-10).
+   *
+   *   `verified`  provider readback confirms retention on the uploaded version
+   *   `asserted`  a configuration claim, retained for historical records
+   *   `unverified` no provider proof (including metadata written before readback)
+   *
+   * New seal() results are returned only after verification. Unsupported GCS
+   * verification fails closed; endpoint detection is never evidence of a lock.
+   *
+   * Anything short of `verified` must not be presented to an auditor as WORM
+   * evidence without naming which of these it is.
+   */
+  retentionAssurance: RetentionAssurance;
+  /** Why the assurance is what it is, in words an auditor can read. */
+  retentionAssuranceReason: string;
   /** Version ID (S3 returns this; for true immutability we use the content hash). */
   versionId: string | undefined;
   /** Server-side encryption applied. */
@@ -78,7 +114,8 @@ export class EvidenceVault {
     private readonly endpoint?: string,
     credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string },
   ) {
-    this.isGcs = Boolean(endpoint && endpoint.includes('storage.googleapis.com'));
+    const host = endpoint ? new URL(endpoint).hostname : '';
+    this.isGcs = host === 'storage.googleapis.com' || host.endsWith('.storage.googleapis.com');
     this.s3 = new S3Client({
       region,
       endpoint,
@@ -100,11 +137,15 @@ export class EvidenceVault {
 
     const contentHash = createHash('sha256').update(body).digest('hex');
 
-    // The bucket must be created with ObjectLockConfiguration / Bucket Lock enabled.
-    // We verify that here so a misconfigured bucket fails fast.
+    if (!Number.isSafeInteger(input.retentionDays) || input.retentionDays <= 0) {
+      throw new Error('retentionDays must be a positive integer');
+    }
+    // Fail before upload if the provider cannot establish the required lock.
     await this.assertObjectLockEnabled(input.bucket);
-
-    const retainUntilDate = new Date(Date.now() + input.retentionDays * 24 * 60 * 60 * 1000);
+    const retainUntilDate = new Date(
+      Math.ceil((Date.now() + input.retentionDays * 86_400_000) / 1000) * 1000,
+    );
+    if (!Number.isFinite(retainUntilDate.getTime())) throw new Error('Invalid retention date');
 
     const legalHold: ObjectLockLegalHold = {
       Status: input.legalHold ? 'ON' : 'OFF',
@@ -117,12 +158,19 @@ export class EvidenceVault {
       ContentType: input.contentType,
       ContentMD5: createHash('md5').update(body).digest('base64'),
       Metadata: {
+        ...Object.fromEntries(
+          Object.entries(input.metadata ?? {}).filter(
+            ([key]) => !key.toLowerCase().startsWith('axiom-'),
+          ),
+        ),
         'axiom-content-sha256': contentHash,
         'axiom-tenant-id': input.tenantId,
         'axiom-engagement-id': input.engagementId ?? '',
         'axiom-collected-by-agent': input.collectedByAgent,
         'axiom-sealed-at': new Date().toISOString(),
-        ...input.metadata,
+        // Upload metadata precedes readback and cannot claim its result.
+        'axiom-retention-assurance': 'unverified',
+        'axiom-retention-request': 'COMPLIANCE',
       },
       ServerSideEncryption: input.encryption ?? 'AES256',
     };
@@ -140,6 +188,24 @@ export class EvidenceVault {
     const cmd = new PutObjectCommand(putParams);
 
     const result = await this.s3.send(cmd);
+    if (!result.VersionId || result.VersionId === 'null') {
+      throw new Error('Uploaded evidence has no immutable version; seal not verified');
+    }
+    const objectRef = { Bucket: input.bucket, Key: input.key, VersionId: result.VersionId };
+    const readback = await this.s3.send(new GetObjectRetentionCommand(objectRef));
+    const retention = readback.Retention;
+    if (
+      retention?.Mode !== 'COMPLIANCE' ||
+      !retention.RetainUntilDate ||
+      !Number.isFinite(retention.RetainUntilDate.getTime()) ||
+      retention.RetainUntilDate.getTime() < retainUntilDate.getTime()
+    ) {
+      throw new Error('Provider did not confirm required COMPLIANCE retention; seal not verified');
+    }
+    if (input.legalHold) {
+      const hold = await this.s3.send(new GetObjectLegalHoldCommand(objectRef));
+      if (hold.LegalHold?.Status !== 'ON') throw new Error('Provider did not confirm legal hold');
+    }
 
     return {
       contentHash,
@@ -147,8 +213,11 @@ export class EvidenceVault {
       bucket: input.bucket,
       key: input.key,
       byteSize: body.byteLength,
-      retainUntil: retainUntilDate.toISOString(),
+      retainUntil: retention.RetainUntilDate.toISOString(),
       lockMode: 'COMPLIANCE',
+      retentionAssurance: 'verified',
+      retentionAssuranceReason:
+        'Provider readback confirmed COMPLIANCE retention for the uploaded object version.',
       versionId: result.VersionId,
       encryption: input.encryption ?? 'AES256',
     };
@@ -224,44 +293,15 @@ export class EvidenceVault {
 
   private async assertObjectLockEnabled(bucket: string): Promise<void> {
     if (this.isGcs) {
-      // In Google Cloud Storage, WORM is enforced at the bucket level via Bucket Lock
-      // (Retention Policy) or Object Retention Lock. The HMAC S3 XML API does not support
-      // probing x-amz-object-lock headers.
-      return;
-    }
-    try {
-      const head = await this.s3.send(
-        new HeadObjectCommand({ Bucket: bucket, Key: '__axiom_lock_probe' }),
+      throw new Error(
+        'GCS sealing requires verified Bucket/Object Retention Lock via a provider adapter; the S3 client cannot establish it',
       );
-      // We only need to know the bucket accepts the header; if it doesn't,
-      // S3 returns InvalidArgument and we throw.
-      void head;
-    } catch (err: unknown) {
-      const errorName = getErrorProperty(err, 'name');
-      const errorMessage = getErrorProperty(err, 'message');
-      const httpStatusCode = getErrorProperty(getErrorProperty(err, '$metadata'), 'httpStatusCode');
-      if (
-        errorName === 'InvalidArgument' ||
-        (typeof errorMessage === 'string' &&
-          (errorMessage.includes('Object Lock') || errorMessage.includes('object-lock')))
-      ) {
-        throw new Error(
-          `Bucket ${bucket} does not have Object Lock enabled. ` +
-            `Object Lock (Compliance mode) is mandatory for sealed evidence. ` +
-            `See infra/terraform/envs/prod/s3.tf.`,
-        );
-      }
-      // NoSuchKey is fine — bucket exists, just no probe key.
-      if (errorName !== 'NoSuchKey' && httpStatusCode !== 404) {
-        throw err;
-      }
+    }
+    const result = await this.s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucket }));
+    if (result.ObjectLockConfiguration?.ObjectLockEnabled !== 'Enabled') {
+      throw new Error(`Bucket ${bucket} does not have verified Object Lock enabled`);
     }
   }
-}
-
-function getErrorProperty(error: unknown, property: string): unknown {
-  if (typeof error !== 'object' || error === null || !(property in error)) return undefined;
-  return (error as Record<string, unknown>)[property];
 }
 
 /**

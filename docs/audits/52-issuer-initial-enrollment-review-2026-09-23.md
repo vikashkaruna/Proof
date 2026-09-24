@@ -1,0 +1,13 @@
+# Review 52 — explicit issuer initialization and separate marker review
+
+Base: Revision 62 staging `00dc35d`, CI 35842199663, all 18 applicable jobs and 12 exact-revision artifacts verified. Fresh review found no intervening staging changes.
+
+The next gap was that a protected installation and ready-state guard could not perform first initialization. Normal boot must remain unable to mint replacement trust after accidental state loss. This revision adds a separate bounded static unit and explicit root CLI, with a durable manifest/disk-bound request before mutation and a temporary permit bound to a live process and exclusive lock. Loaded systemd configuration must be the reviewed static file with no override or pending reload. Enabled or running normal services are refused.
+
+Initialization observes both X.509 and JWT authorities, stops the issuer and records a protected receipt containing trust and stopped-state fingerprints. Review identified that fingerprints alone did not provide a usable CA-delivery artifact. Protected public bundle and bootstrap CA exports now accompany the receipt; sealing refuses changed exports. Separate receipt-hash review is required before marker publication. Static installation, disk, state bytes and unit state are checked again; approval is recorded before creating the marker. Missing/changed/foreign state and repeat requests fail closed without overwriting prior records. Interrupted initialization is retained for explicit recovery. A read-only unsealed-state check shares the existing state contents validation; normal boot still exclusively uses the ready path.
+
+Validation: 96 deployment tests, including 19 additions, and 16 Docker delivery outcomes. Native issuer acceptance now uses actual installed initialization/sealing commands, adding six scenarios while preserving the previous eleven. Exact-merge CI/artifact results are saved in the session; source preparation alone is not proof of native acceptance.
+
+Boundaries: no cloud provisioning, application/schema/approval-token changes, automatic recovery, in-place upgrade or runner enrollment. The records document trusted-root administration and byte binding; they do not cryptographically prove human identity or replace SPIRE validation. GCP identity, effective IAM/TLS, full node/observer/controller deployment and Mumbai backup/restore remain external gates. Continue next with reviewed runner enrollment and lifecycle, then socket mapping and scoped runtime delivery.
+
+Primary format reference: [SPIFFE Trust Domain and Bundle](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md). The receipt fingerprint includes both authority uses; it is not itself a trust-verification API.

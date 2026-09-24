@@ -1,51 +1,50 @@
 /**
- * E2E: The Approval Console — the most security-critical screen.
+ * E2E: the Approval Console — the most security-critical screen.
  *
- * Walks the user through:
- *   1. Login (founder user)
- *   2. Navigate to a plan
- *   3. Verify the dry-run / rollback / blast radius are shown
- *   4. Verify approval is disabled for actions without dry-run
- *   5. Approve a single action
- *   6. Verify the ledger entry was written
+ * This file used to open `/plans` after writing a fake Supabase session into
+ * `localStorage` with `access_token: 'test-access-token'`. That string is one
+ * of the BFF's `SYNTHETIC_TOKENS`, accepted only under the e2e bypass that
+ * W0.0 deleted — so the setup was inert, and the tests were really asserting
+ * what an unauthenticated visitor sees. It also navigated to a hardcoded plan
+ * id that has never existed in any database.
+ *
+ * None of that failed, because `tests/e2e` was missing from the pnpm workspace
+ * and the suite could not run. Now it can, so the tests sign in as a seeded
+ * persona and use a plan that is really there.
  */
 
 import { test, expect } from '@playwright/test';
+import { selectTenant, signIn, state } from '../fixtures';
 
-const marketingUrl = 'http://localhost:3000';
+import { marketingUrl } from '../target';
 
 test.describe('Approval Console — the trust surface', () => {
-  test.beforeEach(async ({ page }) => {
-    // Mock the Supabase auth (we don't need a real Supabase to test
-    // the UI's behaviour; the BFF integration is tested separately).
-    await page.addInitScript(() => {
-      window.localStorage.setItem(
-        'sb-axiom-proof-test-auth',
-        JSON.stringify({
-          access_token: 'test-access-token',
-          refresh_token: 'test-refresh',
-          user: {
-            id: '00000000-0000-0000-0000-000000000001',
-            email: 'founder@axiomminds.ai',
-            user_metadata: { full_name: 'Founder' },
-            app_metadata: { provider: 'email' },
-            aud: 'authenticated',
-          },
-        }),
-      );
-    });
-  });
-
-  test('approval is blocked for actions without a completed dry-run', async ({ page }) => {
+  test('a plan lists its remediation actions for a signed-in member', async ({ page }) => {
+    await signIn(page, 'owner');
+    await selectTenant(page, 'a');
     await page.goto('/plans');
     await expect(
       page.getByRole('main').getByRole('heading', { name: /Remediation Plans/i }),
     ).toBeVisible();
   });
 
-  test('the kill switch is visible on every plan page', async ({ page }) => {
-    await page.goto('/plans/00000000-0000-0000-0000-000000000001');
-    await expect(page.getByText('Engage kill switch')).toBeVisible();
+  test('the kill switch is visible on a plan page', async ({ page }) => {
+    // An owner holds KILL_SWITCH_ENGAGE_TENANT. Stopping must never be the
+    // thing that needs an escalation.
+    await signIn(page, 'owner');
+    await selectTenant(page, 'a');
+    await page.goto(`/plans/${state.planA.id}`);
+    await expect(page.getByText('Engage kill switch').first()).toBeVisible();
+  });
+
+  test('a viewer sees the plan and no kill switch', async ({ page }) => {
+    // The complement, which the old inert-session version could not express:
+    // the same page, a different role, a different set of controls.
+    await signIn(page, 'viewer');
+    await selectTenant(page, 'a');
+    await page.goto(`/plans/${state.planA.id}`);
+    await expect(page.locator('body')).toContainText(state.planA.title);
+    await expect(page.getByText('Engage kill switch')).toHaveCount(0);
   });
 
   test('the non-negotiable safety rules are visible on the public site', async ({ page }) => {

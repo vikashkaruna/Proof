@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation';
-import { createSupabaseServerClient, createSupabaseAdmin } from '@axiom/supabase';
+import { requireTenantContext } from '@/lib/tenant-context';
 import { Card, CardContent, Badge, SeverityChip } from '@axiom/ui';
 import { controls as controlLib, CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
@@ -12,24 +11,23 @@ export default async function ControlLibraryPage({
   searchParams: Promise<{ domain?: string; severity?: string; q?: string }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const admin = createSupabaseAdmin();
+  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
+  // by design, and these queries carried no tenant filter, so any
+  // authenticated user saw every tenant's data. The client below is
+  // user-scoped: RLS applies, and the explicit filters state the intent.
+  const { supabase, tenantId } = await requireTenantContext();
   let dbControls: any[] = [];
   let recentRuns: any[] = [];
 
   try {
     const [ctrlRes, ledgerRes] = await Promise.all([
-      admin.from('controls').select('*'),
-      admin
+      supabase.from('controls').select('*'),
+      supabase
         .from('audit_ledger')
         .select('seq, actor, action, target_ref, timestamp, entry_hash, result')
-        .eq('actor', 'parikshan')
-        .order('seq', { ascending: false })
+        .eq('tenant_id', tenantId)
+        .eq('actor_id', 'parikshan')
+        .order('sequence_no', { ascending: false })
         .limit(4),
     ]);
     if (ctrlRes.data && ctrlRes.data.length > 0) {
