@@ -7,11 +7,13 @@ import {
   GapScanSubmitSchema,
   GapScanStoredReportSchema,
   GapScanEmailRequestSchema,
+  ContactSubmitSchema,
 } from '@axiom/types';
 import { LIBRARY_VERSION } from '@axiom/control-library';
 import { computeGapScanReport } from '../services/gap-scan-scoring.js';
 import { computeQuarterlyReadinessIndex } from '../services/readiness-index.js';
 import { sendGapScanReportEmail } from '../services/gap-scan-email.js';
+import { contactEmailEnabled, sendContactInquiryEmail } from '../services/contact-email.js';
 
 const proofPattern = /^[a-f0-9]{64}$/;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -25,11 +27,13 @@ export function publicRoutes(
   deps: {
     client?: typeof createSupabaseAdmin;
     sendEmail?: typeof sendGapScanReportEmail;
+    sendContactEmail?: typeof sendContactInquiryEmail;
   } = {},
 ) {
   const app = new Hono();
   const client = deps.client ?? createSupabaseAdmin;
   const sendEmail = deps.sendEmail ?? sendGapScanReportEmail;
+  const sendContactEmail = deps.sendContactEmail ?? sendContactInquiryEmail;
   app.use('*', bodyLimit({ maxSize: 32 * 1024 }));
   app.use('*', async (c, next) => {
     c.header('Cache-Control', 'private, no-store');
@@ -207,6 +211,94 @@ export function publicRoutes(
         502,
       );
     return c.json({ success: true });
+  });
+  // C-W0-6: persist first, then make at most one provider attempt. The reply
+  // reports exactly what is stored; it never claims an unconfirmed delivery.
+  app.get('/contact/config', (c) => c.json({ emailDeliveryEnabled: contactEmailEnabled() }));
+
+  app.post('/contact', async (c) => {
+    const parsed = ContactSubmitSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Please verify all fields before submitting',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    const { name, email, company, message } = parsed.data;
+    for (const [bucket, subject, limit] of [
+      ['contact-create', 'global', 200],
+      ['contact-sender', digest(email.toLowerCase()), 5],
+    ] as const) {
+      const rate = await budget(bucket, subject, limit, 3600);
+      if (!rate.allowed) {
+        c.header('Retry-After', String(rate.retry_after));
+        return c.json(errorBody('rate_limited', 'Please try again later.'), 429);
+      }
+    }
+    const deliver = contactEmailEnabled();
+    const id = randomUUID();
+    const receivedAt = new Date().toISOString();
+    const { error } = await client()
+      .from('contact_inquiries')
+      .insert({
+        id,
+        name,
+        email,
+        company: company || null,
+        message,
+        created_at: receivedAt,
+        delivery_status: deliver ? 'pending' : 'not_configured',
+        delivery_attempted_at: deliver ? receivedAt : null,
+      });
+    if (error)
+      return c.json(
+        errorBody('persistence_failed', 'Your message could not be saved. Please try again.'),
+        503,
+      );
+    if (!deliver) return c.json({ id, delivery: 'not_configured' }, 201);
+    let outcome: Awaited<ReturnType<typeof sendContactInquiryEmail>>;
+    try {
+      outcome = await sendContactEmail({
+        id,
+        name,
+        email,
+        company: company || undefined,
+        message,
+        receivedAt,
+      });
+    } catch {
+      outcome = { status: 'failed', errorCode: 'provider_unavailable' };
+    }
+    const settled = await client()
+      .from('contact_inquiries')
+      .update(
+        outcome.status === 'sent'
+          ? {
+              delivery_status: 'sent',
+              delivery_completed_at: new Date().toISOString(),
+              provider_message_id: outcome.providerMessageId,
+            }
+          : {
+              delivery_status: 'failed',
+              delivery_completed_at: new Date().toISOString(),
+              delivery_error_code: outcome.errorCode,
+            },
+      )
+      .eq('id', id)
+      .eq('delivery_status', 'pending')
+      .select('id')
+      .maybeSingle()
+      .then(
+        (r) => !r.error && Boolean(r.data),
+        () => false,
+      );
+    // An unrecorded outcome stays pending: stored, delivery unknown.
+    return c.json({ id, delivery: settled ? outcome.status : 'pending' }, 201);
   });
   app.onError((_error, c) =>
     c.json(errorBody('service_unavailable', 'Report service unavailable. Please try again.'), 503),

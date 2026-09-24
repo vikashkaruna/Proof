@@ -53,7 +53,7 @@ run "separate_runtime_identities" {
   }
   assert {
     condition = (toset([for key, grant in local.runtime_secret_access : grant.secret if grant.service == "web"]) == toset(["supabase_anon_key"]) &&
-      toset([for key, grant in local.runtime_secret_access : grant.secret if grant.service == "marketing"]) == toset(["supabase_anon_key", "resend_api_key"]) &&
+      toset([for key, grant in local.runtime_secret_access : grant.secret if grant.service == "marketing"]) == toset(["supabase_anon_key"]) &&
     length([for key, grant in local.runtime_secret_access : key if grant.service == "supabase_gateway"]) == 0)
     error_message = "SSR/gateway identities must not acquire backend credentials. Contact mail remains a separately tracked marketing exception."
   }

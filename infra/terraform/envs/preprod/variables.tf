@@ -215,6 +215,16 @@ variable "report_email_mode" {
   }
 }
 
+variable "contact_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF founder-contact notification mail; inquiries are always persisted first (C-W0-6)."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.contact_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}
+
 variable "assessment_dispatch_retention_days" {
   description = "Days to retain private dispatch ciphertext after independent completion; separate from sealed evidence."
   type        = number

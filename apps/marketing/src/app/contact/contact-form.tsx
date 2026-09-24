@@ -6,6 +6,20 @@ import { BRAND } from '@axiom/config';
 import { Button, Input, Label, Textarea } from '@axiom/ui';
 import { CheckCircle2, AlertCircle, Loader2, Send } from 'lucide-react';
 
+type ContactDelivery = 'not_configured' | 'pending' | 'sent' | 'failed';
+
+// Each message states only what the server recorded; storage is always durable here.
+const deliveryCopy: Record<ContactDelivery, string> = {
+  sent: `Your message has been saved and emailed to ${BRAND.company}'s founder.`,
+  not_configured: `Your message has been saved for ${BRAND.company}'s founder to review.`,
+  pending: `Your message has been saved for ${BRAND.company}'s founder to review.`,
+  failed: `Your message has been saved for ${BRAND.company}'s founder to review; the email notification could not be sent.`,
+};
+
+function parseDelivery(value: unknown): ContactDelivery {
+  return value === 'sent' || value === 'pending' || value === 'failed' ? value : 'not_configured';
+}
+
 export function ContactForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -14,6 +28,7 @@ export function ContactForm() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [delivery, setDelivery] = useState<ContactDelivery>('not_configured');
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
@@ -45,6 +60,7 @@ export function ContactForm() {
         return;
       }
 
+      setDelivery(parseDelivery(data?.delivery));
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error. Please try again.');
@@ -61,6 +77,7 @@ export function ContactForm() {
     setError(null);
     setFieldErrors({});
     setSubmitted(false);
+    setDelivery('not_configured');
   }
 
   if (submitted) {
@@ -70,12 +87,12 @@ export function ContactForm() {
           <CheckCircle2 className="h-8 w-8" />
         </div>
         <h2 className="mt-4 font-heading text-xl font-semibold text-slate-900">
-          Message sent successfully
+          {delivery === 'sent' ? 'Message sent successfully' : 'Message received'}
         </h2>
-        <p className="mt-2 max-w-md text-sm text-slate-600">
-          Thank you, <span className="font-medium text-slate-800">{name}</span>. Your message has
-          been sent directly to {BRAND.company}'s founder. We will review your inquiry and get back
-          to you at <span className="font-medium text-slate-800">{email}</span> within 24 hours.
+        <p className="mt-2 max-w-md text-sm text-slate-600" data-testid="contact-delivery-outcome">
+          Thank you, <span className="font-medium text-slate-800">{name}</span>.{' '}
+          {deliveryCopy[delivery]} We will get back to you at{' '}
+          <span className="font-medium text-slate-800">{email}</span> within 24 hours.
         </p>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">

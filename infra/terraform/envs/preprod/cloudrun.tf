@@ -221,6 +221,26 @@ resource "google_cloud_run_v2_service" "bff" {
         value = var.report_email_mode
       }
       env {
+        name  = "AXIOM_CONTACT_EMAIL_MODE"
+        value = var.contact_email_mode
+      }
+      env {
+        name  = "CONTACT_RECIPIENT_EMAIL"
+        value = var.contact_recipient_email
+      }
+      env {
+        name  = "AXIOM_FROM_EMAIL"
+        value = var.axiom_from_email
+      }
+      env {
+        name  = "AXIOM_SALES_EMAIL"
+        value = var.axiom_sales_email
+      }
+      env {
+        name  = "AXIOM_FOUNDER_EMAIL"
+        value = var.axiom_founder_email
+      }
+      env {
         name = "RESEND_API_KEY"
         value_source {
           secret_key_ref {
@@ -799,36 +819,6 @@ resource "google_cloud_run_v2_service" "marketing" {
           }
         }
       }
-      env {
-        name = "RESEND_API_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secret["resend_api_key"].secret_id
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name  = "CONTACT_RECIPIENT_EMAIL"
-        value = var.contact_recipient_email
-      }
-      env {
-        name  = "AXIOM_FROM_EMAIL"
-        value = var.axiom_from_email
-      }
-      env {
-        name  = "RESEND_FROM_EMAIL"
-        value = var.axiom_from_email
-      }
-      env {
-        name  = "AXIOM_SALES_EMAIL"
-        value = var.axiom_sales_email
-      }
-      env {
-        name  = "AXIOM_FOUNDER_EMAIL"
-        value = var.axiom_founder_email
-      }
-
       startup_probe {
         http_get {
           path = "/api/health"

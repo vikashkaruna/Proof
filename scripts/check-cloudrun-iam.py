@@ -16,7 +16,7 @@ EXPECTED = {
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
             'supabase_service_key'},
     'web': {'supabase_anon_key'},
-    'marketing': {'supabase_anon_key', 'resend_api_key'},  # C-W0-6 mail migration remains open.
+    'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
     'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',
                       'gcs_hmac_access_key', 'gcs_hmac_secret_key',
                       'model_gateway_api_key', 'supabase_service_key'},

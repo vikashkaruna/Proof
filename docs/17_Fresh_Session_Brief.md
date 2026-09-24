@@ -1,29 +1,48 @@
-# Continuing implementation — Revision 75
+# Continuing implementation — Revision 76
 
-The user's instruction is to continue in plan order after every green milestone, reporting it and maintaining implementation, testing, documentation and no-fast-forward staging integration. It supersedes the earlier one-milestone stop. Use the existing isolated Docker services where appropriate. The overall goal is active and incomplete. No cloud provisioning/apply is authorized.
+The user's instruction still stands: continue in plan order after every green milestone. At each milestone, report it and keep the implementation, testing, documentation and no-fast-forward staging integration up to date. Use isolated Docker services for testing. The overall goal is active and incomplete. No cloud provisioning/apply is authorized.
 
-## Revision 75 — reviewed controller generation transition
+When operator input is unavailable, continue with the recommended option and record in Docs 11–16 that no input was received, together with the assumptions made.
 
-**Verified baseline:** Revision 74 is complete at staging `fb4bcdf8aa5d24d813772ae5da1fbb3fc242572f`; [CI 35900630429](https://github.com/vikashkaruna/Proof/actions/runs/35900630429) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 40](https://github.com/vikashkaruna/Proof/pull/40) and [registry recovery PR 41](https://github.com/vikashkaruna/Proof/pull/41) are merged. The initial staging run's two image-acquisition failures are diagnostic evidence, not closure evidence. The later exact staging run retains assessment86, native runner45, deployment197 and matching API89/browser67 results across both configurations.
+## Revision 76 — C-W0-6 durable contact inquiries (Claude cloud session)
 
-**Implemented; hosted acceptance pending:** a protected external review binds the tenant, previous/new immutable profiles and file generations, and predecessor transition. After the operator separately stops the old lifetime, the helper locks the tenant, verifies the exact disabled/inactive unit and reinspects every journal-owned container ID before atomic publication. It preserves an immutable transition chain, explicitly resumes interrupted complete preparation, and requires a separate loaded-unit confirmation before runtime admission. Old profiles and incomplete/branched histories are refused. A return to an earlier generation requires its own linked review and still-valid credentials. Publication never starts, stops, enables or reloads a service and never renews or revokes backend authority. External change-record UUIDs and hashes are not human signatures or application action approval.
+**Baseline:** Revision 75 is complete at staging `6617e32` (PR 42; source CI 35906474455 and staging CI 35908407498 succeeded).
 
-**Local evidence:** all **214 deployment tests** and **16 Docker host-delivery outcomes** pass. The 17 new state-machine tests cover private files, conflicting/uncertain history, live exact-ID inspection, publication/confirmation interruptions, input changes, locks and reverse transitions. Eight added native checks are pending hosted Ubuntu execution; source CI and exact staging CI must each verify all required jobs and exact-revision reports before closure. See [audit 64](audits/64-controller-generation-transition-review-2026-09-24.md) and the [operator procedure](../infra/workload/CONTROLLER_TRANSITIONS.md).
+**Delivered:** migration 0052 `contact_inquiries` (BFF-only writes, immutable content, one-time delivery settlement). BFF `POST /public/contact` and `GET /public/contact/config`. The marketing route only forwards; the SSR mail path and in-memory store are removed. Marketing's mail credential/allowlist is removed from Cloud Run, Helm and Compose. `AXIOM_CONTACT_EMAIL_MODE` is a new BFF opt-in (default `disabled`). See [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md).
 
-**Next and limits:** actual cloud secret publication/replication and effective inherited IAM, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery remain open. This engineering workflow does not establish live application readiness or production credential cutover. Existing helper-bundle replacement also remains an explicit deployment gate; installation refuses different bytes. No cloud provisioning/apply is authorized or performed. W0/W1/W2/W3/W4 stay partial; W2 **19/40**, schema **0051 / 52 migrations / 55 public tables and three private credential tables**. Continue in plan order after every green milestone. Verification lives in `.axiom-runtime/revision75`.
+**Status:** W0/W1/W2/W3/W4 remain partial. W2 is **19/40**. Schema is **0052 / 53 migrations / 56 public tables**, plus three private credential tables.
 
 ## Current work and continuation
 
-- Worktree: `/Users/vikash/.codex/worktrees/750f/Axiom Proof`; branch `codex/revision75-controller-generation-transition`, based on verified Revision 74 staging `fb4bcdf`. Do not edit the original checkout or old `w0-w3-closure` checkout; their WIP is preserved. Do not reload or fork the old conversation.
-- Inspect `.axiom-runtime/session-checkpoint.json` and `.axiom-runtime/revision75` for current source/merge/run state. Revision 74 closure and exact artifact verification are saved in `.axiom-runtime/revision74/completion.json` and `merge-final/verification.json`.
-- Apply through 0051. Never edit an applied migration. The schema has 52 migrations, 55 public tables and three private credential tables. W2 remains 19/40 named targets.
-- Read `infra/workload/CONTROLLER_TRANSITIONS.md` and `infra/credential-issuer/README.md` before changing authority or recovery. Both helpers are manual infrastructure administration. Their review references never replace signed application approval, completed dry-run or validated rollback.
-- Do not overwrite immutable generations, adopt container names, reset journals/claims, grant signing authority to runners or enable automatic restart. Saved stop receipts are rechecked against live exact-ID ownership/state; deleted containers remain uncertain.
-- Native systemd fixtures run only on fresh GitHub-hosted Ubuntu, never the user machine. Local Docker Desktop rewrites private host bindings and must remain refused by production admission. Synthetic process/local-node placement fixtures and local TLS bridges are test evidence, not cloud activation proof.
-- `/Users/vikash/bin/gh` is available. Artifact downloads must suppress signed URLs and match exact CI attempts/revisions. A watch command timing out is not a CI failure: recheck the same run. Never print private runtime credentials or reuse fixture authority as deployment configuration.
+- Branch `codex/revision75-controller-generation-transition` (the operator-designated branch), on top of `4dedecf` (already contained in staging). Integrate into `staging` through a PR and a no-fast-forward merge after source CI is green; then verify the staging push CI.
+- This cloud container has no persistent `.axiom-runtime`, so checkpoints live in Docs 11–15. The Codex worktree's `.axiom-runtime` evidence remains on the operator's machine.
+- **Local test recipe in a fresh cloud container:**
+  1. Start `dockerd`.
+  2. `pnpm install --frozen-lockfile`.
+  3. `bash scripts/test-database.sh`.
+  4. Install Supabase CLI 2.116.0 from GitHub releases, then run `SUPABASE_INTERNAL_IMAGE_REGISTRY='' ./scripts/start-parity-supabase.sh` and `pnpm exec tsx scripts/seed-personas.ts`.
+  5. Symlink `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell` to Playwright's expected `chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`.
+  6. `pnpm --filter @axiom/e2e exec playwright test` (67 journeys).
+- `registry.terraform.io` is blocked by the session proxy, so Terraform validate/test and Helm render run only in CI.
+- Never edit an applied migration. The next migration is **0053**.
 
-## Remaining roadmap and constraints
+## Next in plan order
 
-After the reviewed generation workflow is green, continue actual secret publication/replication and effective external/inherited IAM with per-principal allow/deny evidence, private TLS/DNS, opaque scheduler and real GCP IIT/caller/KMS/Mumbai recovery acceptance. Cloud apply remains unauthorized. W0 remote parity, W1 invitations/email/deployed acceptance, W2's 21 remaining targets, full W3 wizard/sustenance/live graph, remaining W4 workers/actor chains/connector grants/execution lifecycle and W5–W10 gates remain open.
+1. **C-W0-7**: reconcile q7/q11/q12 question-to-control scoring semantics, and label the readiness benchmark/percentile as heuristic with provenance. Stored reports stay immutable snapshots.
+2. **C-W1-3**: invitation workflow and provider adapter contract. Real delivery stays gated on provider/domain evidence.
+3. **W3**: C-W3-5 resumable company → estate → inventory → connector/grant → readiness wizard; C-W3-6 sustenance/re-attestation; the W3.5 `/estate/graph` page.
+4. **W4.4**: grant model enforcement per invocation, portal grant/revoke UI and ledger events. Then W4.5–W4.7.
+5. **Cloud-gated, when authorized:** secret publication/replication, effective IAM allow/deny evidence, private TLS/DNS, opaque scheduler, and real GCP IIT/caller/KMS/Mumbai recovery. Also W0 remote parity, C-W0-5 deployed IAM, and the EKS CIDR decision.
+6. **Follow-up hardening:** Helm `web` and `marketing` deployments still inject `SUPABASE_SERVICE_KEY`, which neither app reads.
 
-Preserve tenant-bound approval with completed dry-run and validated rollback, Sudhaar's no-write role, append-only ledger, WORM and Mumbai personal-data locality. Public APIs remain Cloud Run; each tenant gets a dedicated private Mumbai runner and the issuer is separate. Completed private dispatch retention defaults to 90 days; unresolved work/evidence has separate rules. Local success and a completed engineering milestone do not imply whole-roadmap completion or deployed cloud acceptance.
+## Invariants
+
+Preserve all of the following:
+
+- Tenant-bound approval requires a completed dry-run and a validated rollback.
+- Sudhaar has no write credentials.
+- The ledger is append-only.
+- Evidence uses WORM (Object Lock Compliance mode).
+- Personal data stays in Mumbai.
+
+Public APIs remain on Cloud Run. Each tenant gets a dedicated private Mumbai runner, and the issuer is separate. Local success and a completed engineering milestone do not imply whole-roadmap completion or deployed cloud acceptance.

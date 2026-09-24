@@ -25,7 +25,7 @@ locals {
     }
     marketing = {
       suffix  = "marketing"
-      secrets = ["resend_api_key", "supabase_anon_key"]
+      secrets = ["supabase_anon_key"]
     }
     supabase_auth = {
       suffix  = "auth"

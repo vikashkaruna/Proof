@@ -1,5 +1,40 @@
 # Axiom Proof — implementation handoff
 
+## Revision 76 — C-W0-6 durable contact inquiries behind the BFF
+
+**Verified baseline:** Revision 75 is complete at staging `6617e3283092462f40a13168d1f016da69048f14`. [PR 42](https://github.com/vikashkaruna/Proof/pull/42) was integrated by a no-fast-forward merge. Source [CI 35906474455](https://github.com/vikashkaruna/Proof/actions/runs/35906474455) (source `4dedecf`) and exact staging [CI 35908407498](https://github.com/vikashkaruna/Proof/actions/runs/35908407498) both concluded success.
+
+**Session change and operator input:** a Claude cloud session took over from the Codex worktree. The operator was not available to answer clarifying questions, so work continued on the recommended option. Assumptions are recorded in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md):
+
+1. Cloud-gated W4 items stay parked while cloud apply is unauthorized. The next open code items come first, in plan order: C-W0-6, C-W0-7, C-W1-3 invitations, then W3 (C-W3-5/6, W3.5 graph) and W4.4 grants.
+2. Contact mail has its own opt-in (`AXIOM_CONTACT_EMAIL_MODE`), separate from report mail. It defaults to `disabled`.
+3. Inquiries have no delete path. Retention/erasure is left to W8.1.
+
+**Implemented:** migration **0052** adds `contact_inquiries`. Only the BFF can write it; checks bind each delivery status to its evidence; a trigger makes submitted content immutable and settles an outcome exactly once (`pending → sent|failed`); and Axiom-internal users can read through their own session. BFF `POST /public/contact` works as follows:
+
+- It rate-limits and fails closed when the rate budget is unavailable.
+- It persists before any mail and refuses success when persistence fails.
+- It makes at most one provider attempt.
+- It replies with exactly the stored status. An unrecorded settlement is reported as `pending`, never `sent`.
+
+Marketing SSR only validates and forwards the request. The in-memory store, the SSR mail path and the public inquiry-count endpoint are removed, and the form states only what the server recorded. Marketing no longer receives `RESEND_API_KEY` or mail variables in Cloud Run, Helm or Compose. Its secret allowlist is `supabase_anon_key` only, enforced by the IAM checker and Terraform test. The BFF gains the `contact_email_mode` variable and the mail settings it actually reads.
+
+**Local evidence (isolated Docker in this session):**
+
+| Check                                                                     | Result                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------- |
+| Database suite (fresh/re-apply, all SQL, concurrency and upgrade scripts) | pass, including the new contact security test |
+| BFF tests                                                                 | **1,016** (12 new)                            |
+| Marketing tests                                                           | 6 (4 new)                                     |
+| Workspace typecheck/lint/test, Prettier, `terraform fmt`                  | pass                                          |
+| Deployment unittests                                                      | **214**                                       |
+| tfvars, env-security, MFA-ring, IAM and auth-wiring gates                 | pass                                          |
+| Playwright journeys on the real isolated Supabase/BFF/web/marketing stack | **67/67**                                     |
+
+The inquiry row was observed directly in Postgres. The DB suite caught a silent 0-row service-role `DELETE` before commit; it is fixed by an explicit revoke. Terraform validate/test and Helm render could not run locally (registry blocked by the session proxy), so source CI and exact staging CI remain the closure gates.
+
+**Next and limits:** C-W0-7 scoring semantics/benchmark provenance is next, then C-W1-3 invitations. Real provider delivery was not exercised. W0/W1/W2/W3/W4 remain partial. W2 named targets remain **19/40**. Schema is **0052 / 53 migrations / 56 public tables**, plus three private credential tables. No cloud provisioning/apply was authorized or performed.
+
 ## Revision 73 — tenant controller secret/KMS permission configuration
 
 **Verified baseline:** Revision 72 is complete on staging `3c2ff1e53452ac3d2762da9652322050624ee486`, [CI 35879582618, attempt 2](https://github.com/vikashkaruna/Proof/actions/runs/35879582618/attempts/2): all 19 applicable jobs and 13 exact-revision reports passed. The 78 assessment outcomes retain every earlier 71; all 45 native runner outcomes and both configurations' 89 API/67 browser outcomes are preserved. [PR 38](https://github.com/vikashkaruna/Proof/pull/38) is merged. The first staging attempt and redundant documentation PR run were cancelled before closure; only successful attempt 2 is evidence.

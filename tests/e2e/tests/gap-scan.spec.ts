@@ -44,7 +44,9 @@ test.describe('Public gap-scan funnel', () => {
     }
   });
 
-  test('the contact page loads and sends inquiry successfully', async ({ page }) => {
+  test('the contact page persists an inquiry through the BFF and reports delivery honestly', async ({
+    page,
+  }) => {
     await page.goto(`${marketingUrl}/contact`);
     await expect(page.getByRole('heading', { name: /Talk to the founder/i })).toBeVisible();
 
@@ -55,9 +57,20 @@ test.describe('Public gap-scan funnel', () => {
       .locator('#contact-message')
       .fill('We require a comprehensive readiness assessment for DPDPA 2023 compliance.');
 
+    const submission = page.waitForResponse(`${marketingUrl}/api/contact`);
     await page.getByRole('button', { name: /Send message/i }).click();
+    const response = await submission;
+    // Acceptance runs with contact mail disabled (C-W0-6): stored, never claimed as sent.
+    expect(response.status()).toBe(201);
+    const body = (await response.json()) as { id: string; delivery: string };
+    expect(body.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.delivery).toBe('not_configured');
 
-    await expect(page.getByText(/Message sent successfully/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Message received' })).toBeVisible();
+    await expect(page.getByTestId('contact-delivery-outcome')).toContainText(
+      /saved for .* founder to review/i,
+    );
+    await expect(page.getByText(/Message sent successfully/i)).toHaveCount(0);
     await expect(page.getByText(/aarav@fintechbharat.in/i)).toBeVisible();
   });
 });

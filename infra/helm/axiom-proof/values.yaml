@@ -92,20 +92,20 @@ marketing:
       enabled: true
       secretName: axiom-marketing-tls
   # Public URLs are baked into the Next.js bundle at request time, so they are
-  # plain values; only the Resend key is a secret, and it is mounted optional
-  # so a missing key degrades the contact form instead of the whole site.
+  # plain values. Marketing holds no mail credential: contact and report mail
+  # are BFF-owned (C-W0-4, C-W0-6).
   env:
     NEXT_PUBLIC_MARKETING_URL: "https://axiomproof.ai"
     NEXT_PUBLIC_APP_URL: "https://app.axiomproof.ai"
     NEXT_PUBLIC_BFF_URL: "https://app.axiomproof.ai/api"
     BFF_PUBLIC_URL: "http://axiom-bff:4000"
-    RESEND_FROM_EMAIL: ""
-    CONTACT_RECIPIENT_EMAIL: ""
-    CONTACT_FALLBACK_RECIPIENT_EMAIL: ""
 
 # ─── BFF (Node/TypeScript) ──────────────────────────────────────────
 bff:
   reportEmailMode: disabled
+  # Founder-contact notification mail (C-W0-6). Inquiries persist regardless.
+  contactEmailMode: disabled
+  contactRecipientEmail: ""
   reportEmailSecretName: axiom-report-email
   enabled: true
   replicaCount: 2
