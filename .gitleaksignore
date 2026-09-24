@@ -5,3 +5,39 @@
 # Named disposable e2e harness fixtures (never deployed; loadEnv() refuses placeholders outside local/test).
 95c59182567c0d9ecce1d907f74553027de9c5bb:tests/e2e/personas.ts:generic-api-key:287
 95c59182567c0d9ecce1d907f74553027de9c5bb:tests/e2e/playwright.config.ts:generic-api-key:71
+# Historical findings verified 2026-09-24 as public Supabase local demo JWTs (iss=supabase-demo),
+# named unit-test keys, or placeholder bearer tokens in a quick-reference doc. Exact fingerprints only.
+bbcb30d8dd8335dd8da2748aae037d7277a283a4:packages/config/src/index.ts:jwt:72
+bbcb30d8dd8335dd8da2748aae037d7277a283a4:packages/config/src/index.ts:jwt:78
+a6bb4dfb8a54e8b4205c5e8d16f70c953c15bc2b:services/bff/src/routes/enrolment-step-up.test.ts:generic-api-key:44
+9be5ffd0e28a6fe4f6f2db9244bd8b7162daec57:services/bff/src/middleware/session-mfa.test.ts:generic-api-key:34
+c814f7b445e5961391610b5f7564cf5c2748f850:services/bff/src/routes/approve-step-up.test.ts:generic-api-key:44
+6f1d40c35a4709d1634a7fd0dd8d9f92169e0871:scripts/run-staging-flow.ps1:jwt:38
+6f1d40c35a4709d1634a7fd0dd8d9f92169e0871:scripts/run-staging-flow.ps1:jwt:39
+6f1d40c35a4709d1634a7fd0dd8d9f92169e0871:infra/docker/environments/.env.staging.example:jwt:38
+6f1d40c35a4709d1634a7fd0dd8d9f92169e0871:infra/docker/environments/.env.staging.example:jwt:39
+6f1d40c35a4709d1634a7fd0dd8d9f92169e0871:infra/docker/environments/.env.staging.example:jwt:44
+de79418132c6838d9986c7fa5872b8c63ede78cc:scripts/run-full-audit.sh:jwt:11
+de79418132c6838d9986c7fa5872b8c63ede78cc:scripts/run-full-audit.sh:jwt:12
+5f6866aa7ee83a725cf5337e842e655f0e975085:infra/docker/environments/.env.onprem.example:jwt:36
+5f6866aa7ee83a725cf5337e842e655f0e975085:infra/docker/environments/.env.onprem.example:jwt:37
+5f6866aa7ee83a725cf5337e842e655f0e975085:infra/docker/environments/.env.onprem.example:jwt:42
+8dd1fe56d3d9a72a85ea6e85277aa6eeef102e0f:VK_QUICK_REF_PROOF_MODULES_SETUP.md:curl-auth-header:839
+ed0635642b49e61db34f8a070962b3b9e956b4c2:VK_QUICK_REF_PROOF_MODULES_SETUP.md:curl-auth-header:728
+ade7f7d71f9fcac70c0a4d39492b904528cd3427:VK_QUICK_REF_PROOF_MODULES_SETUP.md:curl-auth-header:763
+ade7f7d71f9fcac70c0a4d39492b904528cd3427:VK_QUICK_REF_PROOF_MODULES_SETUP.md:curl-auth-header:787
+e65ecf5776d512af4b626492263a2f5724190479:apps/marketing/.env.example:jwt:5
+e65ecf5776d512af4b626492263a2f5724190479:apps/marketing/.env.example:jwt:7
+7631b1fbbef36cfb4254414d665ebf28b23b9909:infra/docker/environments/.env.local.example:jwt:17
+7631b1fbbef36cfb4254414d665ebf28b23b9909:infra/docker/environments/.env.local.example:jwt:18
+7631b1fbbef36cfb4254414d665ebf28b23b9909:infra/docker/environments/.env.local.example:jwt:23
+e65ecf5776d512af4b626492263a2f5724190479:packages/config/src/index.ts:jwt:20
+e65ecf5776d512af4b626492263a2f5724190479:packages/config/src/index.ts:jwt:26
+e65ecf5776d512af4b626492263a2f5724190479:packages/control-library/scripts/seed.ts:jwt:14
+e65ecf5776d512af4b626492263a2f5724190479:services/agent-runtime/.env.example:jwt:9
+e65ecf5776d512af4b626492263a2f5724190479:apps/web/.env.example:jwt:6
+e65ecf5776d512af4b626492263a2f5724190479:apps/web/.env.example:jwt:8
+e65ecf5776d512af4b626492263a2f5724190479:services/agent-runtime/src/axiom/config.py:jwt:41
+e65ecf5776d512af4b626492263a2f5724190479:services/bff/.env.example:jwt:9
+e65ecf5776d512af4b626492263a2f5724190479:services/bff/.env.example:jwt:10
+e65ecf5776d512af4b626492263a2f5724190479:apps/web/src/middleware.ts:jwt:38

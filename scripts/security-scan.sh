@@ -5,9 +5,10 @@
 #
 #   1. Bandit with the shared .bandit config (same as .github/workflows/bandit.yml):
 #      shipped Python services fail on MEDIUM+; the whole repository on HIGH.
-#   2. ESLint, which carries the CodeQL-parity rules (Math.random, URL host
+#   2. gitleaks (when installed) over the unpushed commits, with .gitleaksignore.
+#   3. ESLint, which carries the CodeQL-parity rules (Math.random, URL host
 #      substring checks) from @axiom/eslint-config.
-#   3. Optional: set AXIOM_CODEQL=/path/to/codeql to run the CodeQL
+#   4. Optional: set AXIOM_CODEQL=/path/to/codeql to run the CodeQL
 #      security-extended suites locally and fail on high-severity results.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,6 +28,15 @@ echo "security-scan: bandit (services, medium+)"
   services/temporal-workers/src --ini .bandit -x "$exclusions" -ll -ii
 echo "security-scan: bandit (repository, high)"
 "${bandit[@]}" -q -r . --ini .bandit -x "$exclusions" -lll -ii
+
+if command -v gitleaks >/dev/null 2>&1; then
+  # Same engine and .gitleaksignore as CI, over the commits about to be pushed.
+  range="HEAD"
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  [ -n "$upstream" ] && range="$upstream..HEAD"
+  echo "security-scan: gitleaks ($range)"
+  gitleaks git . --log-opts="--no-merges $range" --redact --no-banner
+fi
 
 echo "security-scan: eslint"
 pnpm turbo run lint --output-logs=errors-only
