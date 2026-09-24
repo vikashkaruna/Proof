@@ -86,8 +86,9 @@ def main():
         class BackendProxy(http.server.BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_GET(self):
-                if self.path!='/rest/v1/rpc/current_assessment_controller_tenant':self.send_error(404);return
-                req=urllib.request.Request('http://127.0.0.1:56321'+self.path,headers={'apikey':self.headers.get('apikey',''),'Authorization':self.headers.get('Authorization','')})
+                target='/rest/v1/rpc/current_assessment_controller_tenant'
+                if self.path!=target:self.send_error(404);return
+                req=urllib.request.Request('http://127.0.0.1:56321'+target,headers={'apikey':self.headers.get('apikey',''),'Authorization':self.headers.get('Authorization','')})
                 try:
                     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=5) as response:code=response.status;data=response.read(4096)
                 except urllib.error.HTTPError as error:code=error.code;data=b'null'
