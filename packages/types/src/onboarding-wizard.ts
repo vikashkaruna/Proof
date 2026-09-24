@@ -79,3 +79,35 @@ export const OnboardingWizardSchema = z.object({
   updated_at: z.string(),
 });
 export type OnboardingWizard = z.infer<typeof OnboardingWizardSchema>;
+
+/** C-W3-6: a human decision on an agent's connector grant. */
+export const AttestConnectorGrantRequestSchema = z
+  .object({ decision: z.enum(['keep', 'revoke']) })
+  .strict();
+export type AttestConnectorGrantRequest = z.infer<typeof AttestConnectorGrantRequestSchema>;
+
+const driftItem = z.object({ id: z.uuid(), name: z.string() });
+export const EstateDriftSchema = z.object({
+  status: z.enum(['not_onboarded', 'no_baseline', 'current', 'drifted']),
+  baselineWizardId: z.uuid().optional(),
+  completedAt: z.string().optional(),
+  added: z.array(driftItem).optional(),
+  removed: z.array(driftItem).optional(),
+  changed: z.array(driftItem).optional(),
+  connectionLost: z.array(driftItem).optional(),
+});
+export type EstateDrift = z.infer<typeof EstateDriftSchema>;
+
+export const GrantReviewItemSchema = z.object({
+  id: z.uuid(),
+  connectorId: z.uuid(),
+  connectorName: z.string(),
+  agentName: z.string(),
+  scope: z.enum(['connector.read', 'connector.write']),
+  targetScopes: z.array(z.string()),
+  expiresAt: z.string(),
+  lastAttestedAt: z.string().nullable(),
+  dueAt: z.string(),
+  overdue: z.boolean(),
+});
+export type GrantReviewItem = z.infer<typeof GrantReviewItemSchema>;

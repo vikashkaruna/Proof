@@ -1,6 +1,6 @@
 # Audit Reports
 
-Latest review: [68 — resumable onboarding wizard (C-W3-5)](68-onboarding-wizard-review-2026-09-24.md). Previous: [67 — tenant invitations (C-W1-3)](67-tenant-invitations-review-2026-09-24.md); [66 — scoring semantics and display provenance (C-W0-7)](66-scoring-and-display-provenance-review-2026-09-24.md); [65 — durable BFF-owned contact inquiries (C-W0-6)](65-contact-inquiry-persistence-review-2026-09-24.md); [64 — reviewed controller generation transition](64-controller-generation-transition-review-2026-09-24.md).
+Latest review: [69 — estate sustenance and access re-attestation (C-W3-6)](69-estate-sustenance-review-2026-09-24.md). Previous: [68 — resumable onboarding wizard (C-W3-5)](68-onboarding-wizard-review-2026-09-24.md); [67 — tenant invitations (C-W1-3)](67-tenant-invitations-review-2026-09-24.md); [66 — scoring semantics and display provenance (C-W0-7)](66-scoring-and-display-provenance-review-2026-09-24.md); [65 — durable BFF-owned contact inquiries (C-W0-6)](65-contact-inquiry-persistence-review-2026-09-24.md); [64 — reviewed controller generation transition](64-controller-generation-transition-review-2026-09-24.md).
 C-W1-1/C-W1-2 are delivered locally; W1 is still partial. The current checkpoint is
 [Doc 15](../15_Session_Handoff.md), with operator actions in [Doc 16](../16_Operator_Completion_Runbook.md).
 

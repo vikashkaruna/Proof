@@ -1,5 +1,14 @@
 # Implementation progress — W0 through W4
 
+**Revision 80 — C-W3-6 estate sustenance (Claude cloud session):**
+
+- Migration 0055 adds an immutable onboarding attestation snapshot, `onboarding_estate_drift` (systems added, removed or changed, and lost connection paths) and a 90-day agent-grant re-attestation queue. Owners and admins record keep or revoke decisions, audited in the ledger.
+- The BFF adds `/v1/estates/:id/drift`, `/v1/connector-grants/review` and `/v1/connector-grants/:id/attestations`.
+- `/estate/setup` gains a drift card and an access-review list.
+- Nothing issues grants. See [audit 69](audits/69-estate-sustenance-review-2026-09-24.md); operator input was not received, and the assumptions are recorded there.
+- Schema is now **0055 / 56 migrations / 60 public tables**; the next migration is **0056**.
+- Next in plan order: W3.5 `/estate/graph`, then W4.4 grants.
+
 **Secret-scan history audit (#50 promotion):** a full-history gitleaks run found 37 historical findings. 34 were verified as the public Supabase local demo JWTs (`iss=supabase-demo`), named unit-test keys, or placeholder bearer tokens in a quick-reference doc; they are ignored by exact fingerprint in `.gitleaksignore`. **3 are held for the operator and not ignored:** two 64-hex `GOTRUE_JWT_SECRET`/`PGRST_JWT_SECRET` values in `infra/docker/docker-compose.supabase.yml` (commit `7719f0c`, since removed from the file) and one `APPROVAL_SIGNING_KEY` in `.env.preprod.example` (commit `7631b1f`). If any of them was used by a deployed stack, rotate it; then fingerprint-ignore it. `scripts/security-scan.sh` now also runs gitleaks over unpushed commits when gitleaks is installed.
 
 **Revision 79 — C-W3-5 resumable onboarding wizard (Claude cloud session):** migration 0054 (`tenant_onboarding_wizards`, DPO contact on `tenants`, three ledger actions), `start_/advance_onboarding_wizard` and a live readiness checklist, BFF `/v1/onboarding/wizard` routes, and the `/estate/setup` page. The wizard records confirmations only: it issues no grants and does not treat a registered connector as a live connection. See [audit 68](audits/68-onboarding-wizard-review-2026-09-24.md). Operator input on design was not received; the assumptions are recorded in audit 68. Schema is now **0054 / 55 migrations / 58 public tables**. The next migration is **0055**. Next in plan order: C-W3-6 sustenance and re-attestation, then the W3.5 `/estate/graph` page, then W4.4 grants. **History note:** `main` received direct pushes before the staging flow began. All of them are contained in staging, and the only main-only commit was the #45 promotion merge commit, which this revision carries back into staging. The operator should protect `main` so that it accepts only staging promotions.

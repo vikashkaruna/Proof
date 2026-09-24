@@ -3,6 +3,7 @@ import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { SetupWizard, type WizardEstate, type WizardSystem } from './setup-wizard';
+import { GrantReview } from './sustenance';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +62,12 @@ export default async function EstateSetupPage() {
           profile={tenant.data ?? null}
           estates={estates.data ?? []}
           systems={inventory}
+        />
+      )}
+      {!failed && (
+        <GrantReview
+          tenantId={ctx.tenantId}
+          canManage={can(Capability.CONNECTOR_MANAGE, { role: ctx.role })}
         />
       )}
     </div>
