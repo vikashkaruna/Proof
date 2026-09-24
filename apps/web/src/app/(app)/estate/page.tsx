@@ -34,9 +34,14 @@ export default async function EstatePage() {
         title="Client estate"
         description="Declare the systems in each assessment boundary. Inventory declarations do not establish connectivity or authorize agent execution."
       />
-      <Link href="/estate/onboarding" className="text-teal-700 underline">
-        Review onboarding proposals
-      </Link>
+      <div className="flex flex-wrap gap-4">
+        <Link href="/estate/setup" className="text-teal-700 underline">
+          Onboarding setup
+        </Link>
+        <Link href="/estate/onboarding" className="text-teal-700 underline">
+          Review onboarding proposals
+        </Link>
+      </div>
       {estates.error || systems.error || intakes.error ? (
         <p role="alert">Estate inventory could not be loaded. Refresh to try again.</p>
       ) : (

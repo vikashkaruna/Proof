@@ -1,5 +1,7 @@
 # Axiom Proof — Phase 0–5 Gap Closure Plan
 
+**Revision 79 — C-W3-5 resumable onboarding wizard (Claude cloud session):** migration 0054 (`tenant_onboarding_wizards`, DPO contact on `tenants`, three ledger actions), `start_/advance_onboarding_wizard` and a live readiness checklist, BFF `/v1/onboarding/wizard` routes, and the `/estate/setup` page. The wizard records confirmations only: it issues no grants and does not treat a registered connector as a live connection. See [audit 68](audits/68-onboarding-wizard-review-2026-09-24.md). Operator input on design was not received; the assumptions are recorded in audit 68. Schema is now **0054 / 55 migrations / 58 public tables**. The next migration is **0055**. Next in plan order: C-W3-6 sustenance and re-attestation, then the W3.5 `/estate/graph` page, then W4.4 grants. **History note:** `main` received direct pushes before the staging flow began. All of them are contained in staging, and the only main-only commit was the #45 promotion merge commit, which this revision carries back into staging. The operator should protect `main` so that it accepts only staging promotions.
+
 **Code-scanning remediation (operator request, #47):** the open CodeQL/Bandit alerts on main are fixed at source rather than dismissed:
 - `generateUUID` no longer falls back to `Math.random`.
 - Evidence GCS detection (TS and Python) and the Temporal Cloud check compare parsed hostnames, not substrings.

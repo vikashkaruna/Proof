@@ -3,6 +3,7 @@ import { connectorRoutes } from './connectors.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
+import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -118,6 +119,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());
   app.route('/', invitationRoutes());
+  app.route('/', onboardingWizardRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //
