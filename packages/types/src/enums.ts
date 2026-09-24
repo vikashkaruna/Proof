@@ -231,6 +231,7 @@ export const LedgerActionType = {
   ONBOARDING_WIZARD_COMPLETED: 'onboarding.wizard.completed',
   CONNECTOR_GRANT_ATTESTED: 'connector.grant.attested',
   CONNECTOR_GRANT_REVOKED: 'connector.grant.revoked',
+  CONNECTOR_GRANT_ISSUED: 'connector.grant.issued',
   PLAN_PUBLISHED: 'plan.published',
   CONTROL_PUBLISHED: 'control.published',
   DSAR_RECEIVED: 'dsar.received',

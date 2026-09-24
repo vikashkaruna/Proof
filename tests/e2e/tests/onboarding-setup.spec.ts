@@ -160,25 +160,60 @@ test('an owner re-attests agent access: keep schedules the next review, revoke r
   });
   expect(connector.status()).toBe(201);
   const connectorId = ((await connector.json()) as { data: { id: string } }).data.id;
-  // Grant issuance is W4.4; the review path is exercised on a directly seeded grant.
+  const enabled = await page.request.patch(`/api/bff/v1/connectors/${connectorId}`, {
+    data: { operation: 'transition', expectedVersion: 1, status: 'active' },
+  });
+  expect(enabled.status()).toBe(200);
+  // Workload registration is W4.3 infrastructure; the identity row is seeded.
   const identity = await service('workload_identities', {
     tenant_id: state.tenantA.id,
     agent_name: 'drishti',
     spiffe_id: `spiffe://axiom.test/tenant-a/drishti-${suffix}`,
     status: 'active',
   });
-  const grants: string[] = [];
-  for (let i = 0; i < 2; i++)
-    grants.push(
-      await service('connector_grants', {
-        tenant_id: state.tenantA.id,
-        connector_id: connectorId,
-        workload_identity_id: identity,
-        agent_name: 'drishti',
-        internal_scope: 'connector.read',
-        expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
-      }),
-    );
+
+  // W4.4: one grant through the page, one through the API; both are audited issues.
+  await page.goto('/estate/setup');
+  const issue = page.getByTestId('issue-grant');
+  await issue.locator('summary').click();
+  await issue.getByLabel('Connector').selectOption({ label: `Access reader ${suffix}` });
+  await issue.getByLabel('Agent workload').selectOption(identity);
+  await issue.getByLabel('Target scopes (comma separated)').fill('crm.read');
+  const issued = page.waitForResponse(
+    (r) => r.url().endsWith('/api/bff/v1/connector-grants') && r.request().method() === 'POST',
+  );
+  await issue.getByRole('button', { name: 'Issue access' }).click();
+  const first = (await (await issued).json()) as { data: { id: string } };
+  const duplicate = await page.request.post('/api/bff/v1/connector-grants', {
+    data: {
+      connectorId,
+      workloadIdentityId: identity,
+      scope: 'connector.read',
+      targetScopes: ['crm.read'],
+      ttlDays: 30,
+    },
+  });
+  expect(duplicate.status()).toBe(409);
+  const writeRefused = await page.request.post('/api/bff/v1/connector-grants', {
+    data: {
+      connectorId,
+      workloadIdentityId: identity,
+      scope: 'connector.write',
+      targetScopes: ['crm.write'],
+      ttlDays: 30,
+    },
+  });
+  expect(writeRefused.status()).toBe(403);
+  const second = await service('connector_grants', {
+    tenant_id: state.tenantA.id,
+    connector_id: connectorId,
+    workload_identity_id: identity,
+    agent_name: 'drishti',
+    internal_scope: 'connector.read',
+    target_scopes: ['crm.read'],
+    expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  });
+  const grants = [first.data.id, second];
 
   await page.goto('/estate/setup');
   const [kept, revoked] = grants.map((id) => page.getByTestId(`grant-${id}`));

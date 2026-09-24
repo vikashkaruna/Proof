@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 /** C-W3-5: resumable company → estate → inventory → connection → grant review → readiness. */
 export default async function EstateSetupPage() {
   const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
-  const [tenant, estates, systems, connectors] = await Promise.all([
+  const [tenant, estates, systems, connectors, workloads] = await Promise.all([
     ctx.supabase
       .from('tenants')
       .select('is_sdf,processes_children_data,processes_health_data,dpo_name,dpo_email')
@@ -27,9 +27,19 @@ export default async function EstateSetupPage() {
       .select('id,estate_id,name,status,system_data_categories(category_key,source)')
       .eq('tenant_id', ctx.tenantId)
       .order('created_at'),
-    ctx.supabase.from('connectors').select('system_id,status').eq('tenant_id', ctx.tenantId),
+    ctx.supabase
+      .from('connectors')
+      .select('id,name,system_id,status')
+      .eq('tenant_id', ctx.tenantId),
+    ctx.supabase
+      .from('workload_identities')
+      .select('id,agent_name,spiffe_id,status')
+      .eq('tenant_id', ctx.tenantId)
+      .eq('status', 'active')
+      .in('agent_name', ['drishti', 'karya']),
   ]);
-  const failed = tenant.error || estates.error || systems.error || connectors.error;
+  const failed =
+    tenant.error || estates.error || systems.error || connectors.error || workloads.error;
   const registered = new Set(
     (connectors.data ?? []).filter((c) => c.status !== 'archived').map((c) => c.system_id),
   );
@@ -68,6 +78,16 @@ export default async function EstateSetupPage() {
         <GrantReview
           tenantId={ctx.tenantId}
           canManage={can(Capability.CONNECTOR_MANAGE, { role: ctx.role })}
+          targets={{
+            connectors: (connectors.data ?? [])
+              .filter((c) => c.status === 'active')
+              .map((c) => ({ id: c.id, name: c.name })),
+            workloads: (workloads.data ?? []).map((w) => ({
+              id: w.id,
+              agentName: w.agent_name,
+              spiffeId: w.spiffe_id,
+            })),
+          }}
         />
       )}
     </div>

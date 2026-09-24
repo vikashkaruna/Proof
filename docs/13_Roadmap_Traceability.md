@@ -1,5 +1,14 @@
 # Axiom Proof — roadmap traceability and delivery status
 
+**Revision 82 — W4.4 grant issuance and enforcement (Claude cloud session):**
+
+- Migration 0056 adds `issue_connector_grant` for owners and admins. It enforces Drishti read, Karya write, write only on production bindings, and a 90-day cap; duplicates are refused and every issue is audited. It also adds `resolve_broker_grant`, which re-reads the grant, workload, lifecycle, credential, descriptor and kill switch in one snapshot.
+- `GrantBrokerAuthority` composes JWT-SVID verification with that resolution. It re-resolves in `stillCurrent`, and writes fail closed until a W5 approval verifier exists.
+- `POST /v1/connector-grants` and an "Issue agent access" form on `/estate/setup` are added.
+- The broker is still not exposed on a route. See [audit 71](audits/71-connector-grant-issuance-review-2026-09-24.md).
+- Schema is **0056 / 57 migrations / 60 public tables**; the next migration is **0057**.
+- Next in plan order: W4.5 internal tool registry, W4.6 first SQL binding, then W4.7 REST/GraphQL.
+
 **Revision 81 — W3.5 estate graph (Claude cloud session):** `/estate/graph` draws agents, connector registrations, systems, estates and data categories, with access edges derived only from active grants. Read edges are teal and write edges are indigo with a 🔒 WRITE label; there is no gold. It has filters, an "Everything Karya can write to" view, a node detail panel and SVG export. Derivation edges (finding/evidence), live agent animation and PNG/branded export remain open W3.5 scope. See [audit 70](audits/70-estate-graph-review-2026-09-24.md). No schema change. Next in plan order: W4.4 grant issuance and enforcement.
 
 **Revision 80 — C-W3-6 estate sustenance (Claude cloud session):**

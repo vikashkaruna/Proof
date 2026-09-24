@@ -85,7 +85,21 @@ export function DriftCard({ tenantId, estateId }: { tenantId: string; estateId: 
 }
 
 /** Periodic human review of agent connector grants (C-W3-6). */
-export function GrantReview({ tenantId, canManage }: { tenantId: string; canManage: boolean }) {
+export interface GrantTargets {
+  connectors: { id: string; name: string }[];
+  workloads: { id: string; agentName: string; spiffeId: string }[];
+}
+const fieldClass = 'w-full rounded-md border border-input bg-background p-2 text-sm';
+
+export function GrantReview({
+  tenantId,
+  canManage,
+  targets,
+}: {
+  tenantId: string;
+  canManage: boolean;
+  targets: GrantTargets;
+}) {
   const [revision, setRevision] = useState(0);
   const queue = useBff<GrantReviewItem[]>(tenantId, '/connector-grants/review', revision);
   return (
@@ -94,6 +108,80 @@ export function GrantReview({ tenantId, canManage }: { tenantId: string; canMana
         <CardTitle>Agent access review</CardTitle>
       </CardHeader>
       <CardContent className="text-sm">
+        {canManage && (
+          <details className="mb-4" data-testid="issue-grant">
+            <summary className="cursor-pointer font-semibold">Issue agent access</summary>
+            {targets.connectors.length === 0 || targets.workloads.length === 0 ? (
+              <p>
+                Issuing access needs an enabled connector and an active Drishti or Karya workload
+                identity.
+              </p>
+            ) : (
+              <MutationForm
+                tenantId={tenantId}
+                path="/connector-grants"
+                method="POST"
+                label="Issue access"
+                onSuccess={() => setRevision((n) => n + 1)}
+                body={(f) => {
+                  const workload = targets.workloads.find((w) => w.id === f.get('workload'));
+                  return {
+                    connectorId: String(f.get('connector') ?? ''),
+                    workloadIdentityId: String(f.get('workload') ?? ''),
+                    scope: workload?.agentName === 'karya' ? 'connector.write' : 'connector.read',
+                    targetScopes: String(f.get('targetScopes') ?? '')
+                      .split(',')
+                      .map((v) => v.trim())
+                      .filter(Boolean),
+                    ttlDays: Number(f.get('ttlDays') ?? 30),
+                  };
+                }}
+              >
+                <label className="flex flex-col gap-1">
+                  Connector
+                  <select name="connector" required className={fieldClass}>
+                    {targets.connectors.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  Agent workload
+                  <select name="workload" required className={fieldClass}>
+                    {targets.workloads.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.agentName === 'karya' ? 'Karya (write)' : 'Drishti (read)'} ·{' '}
+                        {w.spiffeId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  Target scopes (comma separated)
+                  <input name="targetScopes" required className={fieldClass} />
+                </label>
+                <label className="flex flex-col gap-1">
+                  Valid for (days, at most 90)
+                  <input
+                    name="ttlDays"
+                    type="number"
+                    min={1}
+                    max={90}
+                    defaultValue={30}
+                    required
+                    className={fieldClass}
+                  />
+                </label>
+                <p>
+                  Issuing records authority only. It obtains no credential and contacts no system;
+                  the broker re-checks the grant on every use.
+                </p>
+              </MutationForm>
+            )}
+          </details>
+        )}
         {queue.state === 'loading' ? (
           <p role="status">Loading agent grants…</p>
         ) : queue.state === 'error' ? (

@@ -111,3 +111,19 @@ export const GrantReviewItemSchema = z.object({
   overdue: z.boolean(),
 });
 export type GrantReviewItem = z.infer<typeof GrantReviewItemSchema>;
+
+/** W4.4: human issuance of an agent connector grant (Drishti read, Karya write). */
+export const IssueConnectorGrantRequestSchema = z
+  .object({
+    connectorId: z.uuid(),
+    workloadIdentityId: z.uuid(),
+    scope: z.enum(['connector.read', 'connector.write']),
+    targetScopes: z
+      .array(z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]{1,200}$/))
+      .min(1)
+      .max(100)
+      .refine((v) => new Set(v).size === v.length, 'Target scopes must be distinct'),
+    ttlDays: z.number().int().min(1).max(90),
+  })
+  .strict();
+export type IssueConnectorGrantRequest = z.infer<typeof IssueConnectorGrantRequestSchema>;

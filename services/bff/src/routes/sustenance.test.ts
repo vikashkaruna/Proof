@@ -16,11 +16,13 @@ let fake: FakeDb;
 let calls: Record<string, Record<string, unknown>[]>;
 let attest: (a: Record<string, unknown>) => unknown;
 let drift: unknown;
+let issue: (a: Record<string, unknown>) => unknown;
 beforeEach(() => {
   fake = createFakeDb();
   calls = {};
   drift = { status: 'current', added: [], removed: [], changed: [], connectionLost: [] };
   attest = (a) => ({ attestation: { id: 'x', decision: a.p_decision } });
+  issue = (a) => ({ grant: { id: GRANT, internal_scope: a.p_scope } });
   const record = (fn: string, result: (a: Record<string, unknown>) => unknown) =>
     fake.onRpc(fn, (args) => {
       (calls[fn] ??= []).push(args);
@@ -29,6 +31,7 @@ beforeEach(() => {
   record('onboarding_estate_drift', () => drift);
   record('connector_grant_review_queue', () => [{ id: GRANT, overdue: true }]);
   record('attest_connector_grant', (a) => attest(a));
+  record('issue_connector_grant', (a) => issue(a));
 });
 function app(role: UserRole = UserRole.ADMIN) {
   const hono = new Hono<{ Variables: Variables }>();
@@ -94,5 +97,48 @@ describe('sustenance routes (C-W3-6)', () => {
     expect((await body(res)).error?.code).toBe('not_active');
     attest = () => ({ error: 'surprise' });
     expect((await attestAs('keep')).status).toBe(503);
+  });
+
+  const grantBody = {
+    connectorId: ESTATE,
+    workloadIdentityId: GRANT,
+    scope: 'connector.read',
+    targetScopes: ['crm.read'],
+    ttlDays: 30,
+  };
+  const issueAs = (payload: unknown, role?: UserRole) =>
+    app(role).request('/v1/connector-grants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+  it('issues a grant through the audited RPC for connector managers', async () => {
+    const res = await issueAs(grantBody);
+    expect(res.status).toBe(201);
+    expect(calls.issue_connector_grant?.[0]).toMatchObject({
+      p_tenant_id: TENANT,
+      p_actor_id: USER,
+      p_scope: 'connector.read',
+      p_target_scopes: ['crm.read'],
+      p_ttl_days: 30,
+    });
+    expect((await issueAs(grantBody, UserRole.APPROVER)).status).toBe(403);
+    expect(calls.issue_connector_grant).toHaveLength(1);
+  });
+
+  it('validates grant bodies and maps refusals', async () => {
+    for (const bad of [
+      { ...grantBody, ttlDays: 91 },
+      { ...grantBody, targetScopes: [] },
+      { ...grantBody, targetScopes: ['a', 'a'] },
+      { ...grantBody, agentName: 'karya' },
+    ])
+      expect((await issueAs(bad)).status).toBe(400);
+    expect(calls.issue_connector_grant).toBeUndefined();
+    issue = () => ({ error: 'agent_scope_refused' });
+    expect((await issueAs(grantBody)).status).toBe(403);
+    issue = () => ({ error: 'write_requires_production' });
+    expect((await issueAs(grantBody)).status).toBe(409);
   });
 });
