@@ -2,86 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LIBRARY_VERSION } from '@axiom/control-library';
+import { GAP_SCAN_QUESTIONS, LIBRARY_VERSION } from '@axiom/control-library';
 import { Button, Input, Label, Textarea, generateUUID } from '@axiom/ui';
 
-const QUESTIONS = [
-  {
-    id: 'q1',
-    prompt: 'Do you have a publicly accessible privacy policy on your website?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-GOV-002',
-  },
-  {
-    id: 'q2',
-    prompt:
-      'Is the consent capture on your site/app a clear affirmative action (not pre-ticked, not implied)?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-CNS-001',
-  },
-  {
-    id: 'q3',
-    prompt: 'Can a user withdraw consent as easily as they gave it?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-CNS-004',
-  },
-  {
-    id: 'q4',
-    prompt: 'Do you have a named grievance officer / privacy contact published?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-DAT-003',
-  },
-  {
-    id: 'q5',
-    prompt:
-      'Do you maintain a written Record of Processing Activities (RoPA) — purpose, data items, lawful basis, retention, processors?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-RCD-001',
-  },
-  {
-    id: 'q6',
-    prompt: 'Is personal data encrypted at rest (AES-256 or equivalent) and in transit (TLS 1.2+)?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-SEC-001',
-  },
-  {
-    id: 'q7',
-    prompt: 'Is multi-factor authentication enforced for admin access to personal data stores?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-SEC-001',
-  },
-  {
-    id: 'q8',
-    prompt: 'Do you have a documented breach response procedure with the 72-hour DPB clock?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-BRCH-001',
-  },
-  {
-    id: 'q9',
-    prompt: 'Have you inventoried all systems that hold personal data?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-RCD-002',
-  },
-  {
-    id: 'q10',
-    prompt:
-      'Do you have signed Data Processing Agreements (DPAs) with every third party that processes personal data on your behalf?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-GOV-003',
-  },
-  {
-    id: 'q11',
-    prompt: 'Do you transfer any personal data outside India?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-XBR-001',
-  },
-  {
-    id: 'q12',
-    prompt: 'Have you conducted a Data Protection Impact Assessment (DPIA) in the past 12 months?',
-    type: 'boolean' as const,
-    mapsTo: 'DPDPA-DPIA-001',
-  },
-];
+// C-W0-7: the same versioned question set the BFF scores against.
+const QUESTIONS = GAP_SCAN_QUESTIONS.map((q) => ({
+  id: q.id,
+  prompt: q.prompt,
+  type: 'boolean' as const,
+  mapsTo: q.controlId,
+}));
 
 const SECTORS = [
   'BFSI',

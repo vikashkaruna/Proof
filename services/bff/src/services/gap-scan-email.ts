@@ -97,8 +97,9 @@ export async function sendGapScanReportEmail(
       `QUARTERLY DPDPA READINESS INDEX (${readinessIndex.sector})`,
       `----------------------------------------------------`,
       `Company Score:       ${readinessIndex.companyScore}/100`,
-      `Sector Benchmark:    ${readinessIndex.sectorBenchmarkScore}/100`,
-      `Peer Percentile:     Top ${100 - readinessIndex.percentileRank}%`,
+      `Indicative Sector Benchmark: ${readinessIndex.sectorBenchmarkScore}/100`,
+      `Indicative Standing: Top ${100 - readinessIndex.percentileRank}% (estimate)`,
+      `Benchmarks are Axiom editorial estimates, not measured peer data.`,
       `Readiness Status:    ${readinessIndex.status.toUpperCase()}`,
       ``,
       `Quarterly Progression Roadmap:`,
@@ -159,16 +160,17 @@ export async function sendGapScanReportEmail(
           <tr>
             <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Your Score:</td>
             <td style="padding: 6px 0; font-size: 14px; font-weight: 700; color: #0FB5A5;">${readinessIndex.companyScore} / 100</td>
-            <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Sector Benchmark:</td>
+            <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Indicative Sector Benchmark:</td>
             <td style="padding: 6px 0; font-size: 14px; font-weight: 600; color: #1E2A4A;">${readinessIndex.sectorBenchmarkScore} / 100</td>
           </tr>
           <tr>
-            <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Peer Standing:</td>
+            <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Indicative Standing:</td>
             <td style="padding: 6px 0; font-size: 14px; font-weight: 700; color: #1E2A4A;">Top ${100 - readinessIndex.percentileRank}%</td>
             <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Readiness Status:</td>
             <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #0FB5A5; text-transform: uppercase;">${readinessIndex.status.replace('_', ' ')}</td>
           </tr>
         </table>
+        <p style="margin: 0 0 12px 0; font-size: 12px; color: #64748b;">Sector benchmarks and standing are Axiom editorial estimates, not measured data from peer organisations.</p>
         <h4 style="margin: 12px 0 8px 0; font-size: 13px; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Quarterly Compliance Roadmap</h4>
         <ol style="margin: 0; padding-left: 20px;">
           ${readinessIndex.quarterlyRoadmap

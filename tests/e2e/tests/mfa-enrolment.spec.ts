@@ -288,7 +288,8 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
     await target.goto('/verify');
     await target.fill('#code', code);
     await target.getByRole('button', { name: /^Verify$/ }).click();
-    await expect(target).toHaveURL(/\/dashboard/);
+    // The dev-mode server action can exceed the default 5s on a cold compile.
+    await expect(target).toHaveURL(/\/dashboard/, { timeout: 20_000 });
   };
   const protectedApi = (target: Page) =>
     target.request.get('/api/bff/v1/engagements', { headers: { 'X-Tenant-Id': state.tenantA.id } });

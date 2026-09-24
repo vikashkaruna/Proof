@@ -89,6 +89,9 @@ export const ReadinessIndexSchema = z.object({
     }),
   ),
   generatedAt: z.string(),
+  // C-W0-7: sector benchmarks are Axiom editorial estimates, not measured peer
+  // data. Absent on snapshots stored before this field; those were heuristic too.
+  benchmarkBasis: z.literal('editorial_estimate').optional(),
 });
 export type ReadinessIndex = z.infer<typeof ReadinessIndexSchema>;
 
@@ -114,6 +117,8 @@ export const GapScanReportSchema = z.object({
     }),
   ),
   libraryVersion: z.string(),
+  // Wording/mapping version of the questions answered; absent on older snapshots.
+  questionSetVersion: z.string().optional(),
   readinessIndex: ReadinessIndexSchema.optional(),
 });
 export type GapScanReport = z.infer<typeof GapScanReportSchema>;

@@ -93,8 +93,11 @@ const DEFAULT_PROFILE: SectorProfile = {
 
 /**
  * Computes the Quarterly Axiom Proof DPDPA Readiness Index.
- * Benchmarks company performance against sector peers, calculates percentile
- * standing, and establishes a 4-quarter compliance progression roadmap.
+ *
+ * C-W0-7 provenance: the sector benchmarks, multipliers and top risks above are
+ * Axiom editorial estimates, not measured peer data, and `percentileRank` is a
+ * position derived from that estimate — not a percentile of real respondents.
+ * Every surface must present them as indicative (`benchmarkBasis`).
  */
 export function computeQuarterlyReadinessIndex(
   sector: string = 'Other',
@@ -104,7 +107,7 @@ export function computeQuarterlyReadinessIndex(
   const benchmark = profile.benchmark;
   const score = Math.max(0, Math.min(100, Math.round(companyScore)));
 
-  // Calculate peer percentile standing (1-99)
+  // Indicative standing (1-99) relative to the editorial benchmark, not real respondents
   let percentileRank: number;
   if (score >= benchmark) {
     const headroom = Math.max(1, 100 - benchmark);
@@ -170,5 +173,6 @@ export function computeQuarterlyReadinessIndex(
     sectorTopRisks: profile.topRisks,
     quarterlyRoadmap,
     generatedAt: new Date().toISOString(),
+    benchmarkBasis: 'editorial_estimate',
   };
 }

@@ -69,22 +69,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: service-key
-            - name: RESEND_FROM_EMAIL
-              value: {{ .Values.marketing.env.RESEND_FROM_EMAIL | quote }}
-            - name: CONTACT_RECIPIENT_EMAIL
-              value: {{ .Values.marketing.env.CONTACT_RECIPIENT_EMAIL | quote }}
-            - name: CONTACT_FALLBACK_RECIPIENT_EMAIL
-              value: {{ .Values.marketing.env.CONTACT_FALLBACK_RECIPIENT_EMAIL | quote }}
-            # `optional` on purpose: the contact form degrades without a
-            # Resend key, but the public site must still serve. A required
-            # ref would hold every marketing pod in CreateContainerConfigError
-            # until someone supplied a key the site does not need to render.
-            - name: RESEND_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "axiom-proof.fullname" . }}-marketing
-                  key: resend-api-key
-                  optional: true
           livenessProbe:
             httpGet:
               path: /

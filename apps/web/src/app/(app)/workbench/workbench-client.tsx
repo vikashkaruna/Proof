@@ -6,13 +6,28 @@ import { AgentIcon } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 
+interface RecentRun {
+  seq: number;
+  actor: string;
+  action: string;
+  target_ref: string | null;
+  correlation_id: string;
+  timestamp: string;
+  result: string;
+}
+
 interface WorkbenchClientProps {
   userEmail: string;
-  ledgerTodayCount: number;
-  awaitingReviewCount: number;
-  recentRuns: any[];
+  /** Ledger entries recorded today; null when the count could not be read. */
+  ledgerTodayCount: number | null;
+  /** Plans in draft or review; null when unreadable. */
+  awaitingReviewCount: number | null;
+  recentRuns: RecentRun[];
   pendingPlans: any[];
   dataResidencyRegion: string;
+  /** Deployment label from configuration, not a claim about health. */
+  environment: string;
+  loadError: boolean;
 }
 
 const AGENTS: Array<{
@@ -40,7 +55,7 @@ const AGENTS: Array<{
     name: 'parikshan',
     label: 'Parikshan',
     role: 'Assessment',
-    desc: 'Scores compliance posture against control library v25.11.2.',
+    desc: 'Scores compliance posture against the published control library.',
     autonomy: 'L1',
   },
   {
@@ -100,6 +115,8 @@ export function AgentWorkbenchClient({
   awaitingReviewCount,
   recentRuns,
   pendingPlans,
+  environment,
+  loadError,
   dataResidencyRegion,
 }: WorkbenchClientProps) {
   const [selectedAgent, setSelectedAgent] = useState<AgentName>('drishti');
@@ -158,7 +175,7 @@ export function AgentWorkbenchClient({
           </div>
           <span className="text-[11px] text-[#8a97b8]">Autonomy —</span>
           <span className="ml-auto rounded border border-teal-500/30 bg-teal-500/10 px-2.5 py-0.5 text-[11px] font-medium text-teal-300">
-            Env: Production · {dataResidencyRegion}
+            Env: {environment} · {dataResidencyRegion}
           </span>
         </div>
         <div className="flex flex-wrap items-baseline gap-3">
@@ -179,31 +196,36 @@ export function AgentWorkbenchClient({
         </div>
       </div>
 
+      {loadError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-[#D9534F]/30 bg-[#D9534F]/5 px-4 py-3 text-xs text-[#9b2c2c]"
+        >
+          Some workbench data could not be loaded. Counts marked unavailable were not substituted.
+        </div>
+      )}
+
       {/* 2 Top Cards as per Design System */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Card 1: Agent fleet */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3 flex items-center justify-between">
             <span>Agent fleet</span>
-            <span className="rounded bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-700">
-              10 / 10 Online
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+              Health not monitored here
             </span>
           </div>
           <div className="divide-y divide-[#eef1f5]">
             <div className="flex items-center justify-between py-2.5">
               <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 rounded-xs bg-[#0FB5A5]" />
-                <span className="text-[12.5px] text-[#2F3542]">Agents online</span>
-              </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#0FB5A5]">10 / 10</span>
-            </div>
-            <div className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
                 <span className="h-2 w-2 rounded-xs bg-[#1E2A4A]" />
-                <span className="text-[12.5px] text-[#2F3542]">Runs today</span>
+                <span className="text-[12.5px] text-[#2F3542]">Ledger entries today</span>
               </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#1E2A4A]">
-                {ledgerTodayCount}
+              <span
+                className="font-mono text-[11.5px] font-semibold text-[#1E2A4A]"
+                data-testid="workbench-ledger-today"
+              >
+                {ledgerTodayCount ?? 'Unavailable'}
               </span>
             </div>
             <div className="flex items-center justify-between py-2.5">
@@ -213,48 +235,28 @@ export function AgentWorkbenchClient({
                   Awaiting founder / admin review
                 </span>
               </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#8a6d10]">
-                {awaitingReviewCount}
+              <span
+                className="font-mono text-[11.5px] font-semibold text-[#8a6d10]"
+                data-testid="workbench-awaiting-review"
+              >
+                {awaitingReviewCount ?? 'Unavailable'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Card 2: Prompt registry */}
+        {/* Card 2: Prompt registry — C-W0-7: no registry exists yet, so no figures are shown. */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3 flex items-center justify-between">
             <span>Prompt registry</span>
-            <span className="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
-              v25.11.2
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+              Not yet available
             </span>
           </div>
-          <div className="divide-y divide-[#eef1f5]">
-            <div className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 rounded-xs bg-[#1E2A4A]" />
-                <span className="text-[12.5px] text-[#2F3542]">Versioned prompts</span>
-              </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#1E2A4A]">64</span>
-            </div>
-            <div className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 rounded-xs bg-[#0FB5A5]" />
-                <span className="text-[12.5px] text-[#2F3542]">Model gateway</span>
-              </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#0FB5A5]">
-                abstracted
-              </span>
-            </div>
-            <div className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 rounded-xs bg-[#0FB5A5]" />
-                <span className="text-[12.5px] text-[#2F3542]">Prompt drift</span>
-              </div>
-              <span className="font-mono text-[11.5px] font-semibold text-[#0FB5A5]">
-                0 untracked
-              </span>
-            </div>
-          </div>
+          <p className="text-[12.5px] text-[#5b6270]" data-testid="workbench-prompt-registry">
+            The versioned prompt and model registry is not implemented yet. Prompt versions, drift
+            and model-gateway health will be shown here once they are recorded.
+          </p>
         </div>
       </div>
 
@@ -359,18 +361,18 @@ export function AgentWorkbenchClient({
                           {r.action}
                         </div>
                         <div className="text-[10.5px] text-slate-400 font-mono truncate">
-                          {r.target_ref || 'ap-south-1'} · Corr: {r.correlation_id?.slice(0, 8)}…
+                          {r.target_ref || '—'} · Corr: {r.correlation_id.slice(0, 8)}…
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-3">
                       <span className="font-mono text-[10px] text-slate-400">
-                        {r.timestamp
-                          ? new Date(r.timestamp).toLocaleTimeString('en-IN')
-                          : 'Recently'}
+                        {new Date(r.timestamp).toLocaleTimeString('en-IN')}
                       </span>
-                      <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">
-                        ✓ {r.result || 'success'}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${r.result === 'success' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {r.result}
                       </span>
                     </div>
                   </div>

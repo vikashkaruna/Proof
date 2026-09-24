@@ -31,3 +31,5 @@ export type {
   RegulatoryProvision,
 } from './regulatory-baseline';
 export { buildLibrarySeed } from './seed';
+export { GAP_SCAN_QUESTIONS, GAP_SCAN_QUESTION_SET_VERSION } from './gap-scan-questions';
+export type { GapScanQuestion } from './gap-scan-questions';
