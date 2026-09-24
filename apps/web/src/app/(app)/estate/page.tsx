@@ -38,6 +38,9 @@ export default async function EstatePage() {
         <Link href="/estate/setup" className="text-teal-700 underline">
           Onboarding setup
         </Link>
+        <Link href="/estate/graph" className="text-teal-700 underline">
+          Estate graph
+        </Link>
         <Link href="/estate/onboarding" className="text-teal-700 underline">
           Review onboarding proposals
         </Link>

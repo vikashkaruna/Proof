@@ -4,6 +4,7 @@ import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
+import { sustenanceRoutes } from './sustenance.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -120,6 +121,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', onboardingProposalRoutes());
   app.route('/', invitationRoutes());
   app.route('/', onboardingWizardRoutes());
+  app.route('/', sustenanceRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //

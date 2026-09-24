@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createMfaAccount, selectTenant, signIn, signInAs } from '../fixtures';
+import {
+  createMfaAccount,
+  registerWorkload,
+  selectTenant,
+  signIn,
+  signInAs,
+  state,
+} from '../fixtures';
 
 // C-W3-5: the resumable onboarding checklist. Each step is saved server-side,
 // readiness is recomputed from live inventory, and the wizard never issues
@@ -94,6 +101,19 @@ test('an admin completes onboarding step by step and can resume between steps', 
   const body = (await stored.json()) as { data: { status: string }; readiness: { ready: boolean } };
   expect(body.data.status).toBe('completed');
   expect(body.readiness.ready).toBe(true);
+
+  // C-W3-6: a system added after onboarding shows as drift against the baseline.
+  await expect(page.getByTestId('drift-status')).toContainText('No changes since');
+  const estates = (await (await page.request.get('/api/bff/v1/estates')).json()) as {
+    data: { id: string; name: string }[];
+  };
+  const estateId = estates.data.find((e) => e.name === estateName)!.id;
+  const added = await page.request.post(`/api/bff/v1/estates/${estateId}/systems`, {
+    data: { name: `Setup Late ${suffix}`, systemKind: 'other', dataCategories: ['contact'] },
+  });
+  expect(added.status()).toBe(201);
+  await page.reload();
+  await expect(page.getByTestId('drift-added')).toContainText(`Setup Late ${suffix}`);
 });
 
 test('a viewer sees progress but cannot start or change onboarding', async ({ page }) => {
@@ -104,4 +124,115 @@ test('a viewer sees progress but cannot start or change onboarding', async ({ pa
   await expect(page.getByRole('button', { name: /Start (re-)?onboarding/ })).toHaveCount(0);
   const refused = await page.request.post('/api/bff/v1/onboarding/wizard', { data: {} });
   expect(refused.status()).toBe(403);
+});
+
+async function service(path: string, row: Record<string, unknown>) {
+  const res = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: state.publishableKey,
+      Authorization: `Bearer ${state.serviceKey}`,
+      'content-type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(row),
+  });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { id: string }[])[0]!.id;
+}
+
+test('an owner re-attests agent access: keep schedules the next review, revoke removes it', async ({
+  page,
+}) => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  await signIn(page, 'owner');
+  await selectTenant(page, 'a');
+  const estate = (await (
+    await page.request.post('/api/bff/v1/estates', {
+      data: { name: `Access estate ${suffix}`, slug: `access-${suffix}` },
+    })
+  ).json()) as { data: { id: string } };
+  const system = (await (
+    await page.request.post(`/api/bff/v1/estates/${estate.data.id}/systems`, {
+      data: { name: `Access CRM ${suffix}`, systemKind: 'saas', dataCategories: ['contact'] },
+    })
+  ).json()) as { data: { id: string } };
+  const connector = await page.request.post('/api/bff/v1/connectors', {
+    data: {
+      systemId: system.data.id,
+      descriptorId: '41410000-0000-4000-8000-000000000002',
+      name: `Access reader ${suffix}`,
+      endpointRef: `access_${suffix}`,
+    },
+  });
+  expect(connector.status()).toBe(201);
+  const connectorId = ((await connector.json()) as { data: { id: string } }).data.id;
+  const enabled = await page.request.patch(`/api/bff/v1/connectors/${connectorId}`, {
+    data: { operation: 'transition', expectedVersion: 1, status: 'active' },
+  });
+  expect(enabled.status()).toBe(200);
+  // Workload registration uses the reviewed W4.3 lifecycle RPC.
+  const identity = await registerWorkload('drishti', `access-${suffix}`);
+
+  // W4.4: one grant through the page, one through the API; both are audited issues.
+  await page.goto('/estate/setup');
+  const issue = page.getByTestId('issue-grant');
+  await issue.locator('summary').click();
+  await issue.getByLabel('Connector').selectOption({ label: `Access reader ${suffix}` });
+  await issue.getByLabel('Agent workload').selectOption(identity);
+  await issue.getByLabel('Target scopes (comma separated)').fill('crm.read');
+  const issued = page.waitForResponse(
+    (r) => r.url().endsWith('/api/bff/v1/connector-grants') && r.request().method() === 'POST',
+  );
+  await issue.getByRole('button', { name: 'Issue access' }).click();
+  const first = (await (await issued).json()) as { data: { id: string } };
+  const duplicate = await page.request.post('/api/bff/v1/connector-grants', {
+    data: {
+      connectorId,
+      workloadIdentityId: identity,
+      scope: 'connector.read',
+      targetScopes: ['crm.read'],
+      ttlDays: 30,
+    },
+  });
+  expect(duplicate.status()).toBe(409);
+  const writeRefused = await page.request.post('/api/bff/v1/connector-grants', {
+    data: {
+      connectorId,
+      workloadIdentityId: identity,
+      scope: 'connector.write',
+      targetScopes: ['crm.write'],
+      ttlDays: 30,
+    },
+  });
+  expect(writeRefused.status()).toBe(403);
+  const second = await service('connector_grants', {
+    tenant_id: state.tenantA.id,
+    connector_id: connectorId,
+    workload_identity_id: identity,
+    agent_name: 'drishti',
+    internal_scope: 'connector.read',
+    target_scopes: ['crm.read'],
+    expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  });
+  const grants = [first.data.id, second];
+
+  await page.goto('/estate/setup');
+  const [kept, revoked] = grants.map((id) => page.getByTestId(`grant-${id}`));
+  await expect(kept!).toContainText(`drishti · read · Access reader ${suffix}`);
+  const keep = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/connector-grants/${grants[0]}/attestations`) &&
+      r.request().method() === 'POST',
+  );
+  await kept!.getByRole('button', { name: 'Keep access' }).click();
+  expect((await keep).status()).toBe(201);
+  await expect(kept!).toBeVisible();
+  await revoked!.getByRole('button', { name: 'Revoke access' }).click();
+  await expect(revoked!).toHaveCount(0);
+  const queue = (await (await page.request.get('/api/bff/v1/connector-grants/review')).json()) as {
+    data: { id: string; lastAttestedAt: string | null }[];
+  };
+  expect(queue.data.find((g) => g.id === grants[0])?.lastAttestedAt).toBeTruthy();
+  expect(queue.data.some((g) => g.id === grants[1])).toBe(false);
 });
