@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label } from '@axiom/ui';
 import type { OnboardingReadiness, OnboardingWizard, OnboardingWizardStep } from '@axiom/types';
 import { MutationForm } from '../estate-client';
+import { DriftCard } from './sustenance';
 
 export interface WizardEstate {
   id: string;
@@ -114,6 +115,9 @@ export function SetupWizard({
           Onboarding completed on {new Date(wizard.completed_at ?? '').toLocaleDateString()}. The
           readiness snapshot below is what was confirmed at that time.
         </p>
+      )}
+      {wizard?.status === 'completed' && wizard.estate_id && (
+        <DriftCard tenantId={tenantId} estateId={wizard.estate_id} />
       )}
       {!open && canManage && (
         <MutationForm
