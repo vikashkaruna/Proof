@@ -44,6 +44,7 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         <label className="flex flex-col text-sm">
           Estate
           <select
+            aria-label="Estate filter"
             className={fieldClass}
             value={filter.estateId ?? ''}
             onChange={(e) => setFilter({ ...filter, estateId: e.target.value || undefined })}
@@ -61,6 +62,7 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         <label className="flex flex-col text-sm">
           Agent
           <select
+            aria-label="Agent filter"
             className={fieldClass}
             value={filter.agentName ?? ''}
             onChange={(e) => setFilter({ ...filter, agentName: e.target.value || undefined })}
@@ -76,6 +78,7 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         <label className="flex flex-col text-sm">
           Access
           <select
+            aria-label="Access filter"
             className={fieldClass}
             value={filter.access ?? 'all'}
             onChange={(e) =>

@@ -66,7 +66,7 @@ test('the estate graph derives agent access from grants and isolates Karya write
 
   await page.goto('/estate/graph');
   const graph = page.getByTestId('estate-graph');
-  await graph.getByLabel('Estate').selectOption({ label: estateName });
+  await graph.getByLabel('Estate filter', { exact: true }).selectOption({ label: estateName });
   await expect(graph.locator('[data-edge="read"]')).toHaveCount(1);
   await expect(graph.locator('[data-edge="write"]')).toHaveCount(1);
   await expect(graph.locator('[data-node="agent"]')).toHaveCount(10);
