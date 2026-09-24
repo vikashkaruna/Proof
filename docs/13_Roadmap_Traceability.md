@@ -1,5 +1,38 @@
 # Axiom Proof — roadmap traceability and delivery status
 
+## Revision 78 — C-W1-3 tenant invitations
+
+**Baseline:** Revisions 76–77 were merged to staging as `b68fa2c` (squash of [vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Staging [CI 36037580711](https://github.com/vikashkaruna/Proof/actions/runs/36037580711) passed.
+
+**Branch and main audit (operator request):** the audit ran on an unshallowed clone. Every remote branch is contained in staging, with no missing commits, and so is `main`. The closed-unmerged PRs are not implementation work: vikashkaruna/Proof#44 was an earlier staging→main attempt, and vikashkaruna/Proof#32–#36 are Dependabot bumps against the old main (follow-up: re-raise them against staging). Staging was promoted to main through [vikashkaruna/Proof#45](https://github.com/vikashkaruna/Proof/pull/45) after its checks passed. An earlier shallow-clone reading of "unrelated histories" was wrong and is recorded here so it is not repeated.
+
+**Implemented:**
+
+- Migration **0053** `tenant_invitations`, with three atomic, audited RPCs (create, revoke, accept):
+  - hashed single-use tokens;
+  - restricted invitable roles, where admins cannot mint owners or admins;
+  - acceptance bound to the confirmed invited email;
+  - one open invitation per address;
+  - immutable content, and no deletes.
+- BFF routes: the manage routes are `USER_MANAGE`-gated; the accept route is tenantless and rate-limited.
+- An invitation mail adapter behind `AXIOM_INVITATION_EMAIL_MODE`, default disabled. When mail is off, the inviter shares a one-time link.
+- A `/settings/members` UI and a public, client-only `/invite` accept page that preserves the token across sign-in.
+- **Hardening:** the login open redirect is fixed with `safeRedirectPath`.
+
+**Local evidence:**
+
+| Check                                | Result                                                             |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| Full DB suite                        | pass, including the new invitation SQL and two-session race suites |
+| BFF tests                            | **1,038**                                                          |
+| Web tests                            | 85                                                                 |
+| Workspace gates and deployment gates | pass                                                               |
+| Playwright on the real stack         | **70/70**                                                          |
+
+See [audit 67](audits/67-tenant-invitations-review-2026-09-24.md). The operator had not answered clarifying questions, so the role, lifetime and link-sharing decisions follow the recommended options and are recorded in audit 67.
+
+**Next and limits:** real mail delivery and deployed acceptance remain operator-gated (W1-2/W1-3). W1 engineering items C-W1-1…4 are now all delivered. Next in plan order: W3, starting with the C-W3-5 resumable wizard, then C-W3-6 sustenance and the W3.5 graph, then W4.4 grants. W2 is **19/40**. Schema is **0053 / 54 migrations / 57 public tables**, plus three private credential tables. No cloud apply was performed.
+
 ## Revision 77 — C-W0-7 scoring semantics and display provenance
 
 **Baseline:** Revision 76 (C-W0-6) is on the same branch and PR ([vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Operator input was not received; the assumptions in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md) still apply.

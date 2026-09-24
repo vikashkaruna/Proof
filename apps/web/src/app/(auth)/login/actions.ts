@@ -4,11 +4,12 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 
 export async function loginAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim();
   const password = String(formData.get('password') ?? '');
-  const redirectTo = String(formData.get('redirect') || '/dashboard');
+  const redirectTo = safeRedirectPath(formData.get('redirect'));
 
   if (!email || !password) {
     redirect(`/login?error=${encodeURIComponent('Email and password are required.')}`);

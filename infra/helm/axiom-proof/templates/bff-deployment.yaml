@@ -99,6 +99,10 @@ spec:
               value: {{ .Values.bff.reportEmailMode | default "disabled" | quote }}
             - name: AXIOM_CONTACT_EMAIL_MODE
               value: {{ .Values.bff.contactEmailMode | default "disabled" | quote }}
+            - name: AXIOM_INVITATION_EMAIL_MODE
+              value: {{ .Values.bff.invitationEmailMode | default "disabled" | quote }}
+            - name: AXIOM_WEB_APP_URL
+              value: {{ .Values.marketing.env.NEXT_PUBLIC_APP_URL | quote }}
             - name: CONTACT_RECIPIENT_EMAIL
               value: {{ .Values.bff.contactRecipientEmail | default "" | quote }}
             - name: RESEND_API_KEY

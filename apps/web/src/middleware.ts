@@ -11,6 +11,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/',
   '/api/health',
   '/login',
+  // C-W1-3: client-only; moves the fragment token to session storage before
+  // any sign-in redirect could drop it. The BFF authenticates the acceptance.
+  '/invite',
   '/about',
   '/favicon.ico',
   '/robots.txt',

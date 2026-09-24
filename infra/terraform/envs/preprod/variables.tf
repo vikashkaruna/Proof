@@ -225,6 +225,16 @@ variable "contact_email_mode" {
   }
 }
 
+variable "invitation_email_mode" {
+  type        = string
+  default     = "disabled"
+  description = "BFF tenant-invitation mail (C-W1-3); invitations work with a shared one-time link when disabled."
+  validation {
+    condition     = contains(["disabled", "delivery"], var.invitation_email_mode)
+    error_message = "Use disabled or delivery."
+  }
+}
+
 variable "assessment_dispatch_retention_days" {
   description = "Days to retain private dispatch ciphertext after independent completion; separate from sealed evidence."
   type        = number

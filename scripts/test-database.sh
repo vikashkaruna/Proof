@@ -64,6 +64,7 @@ bash tests/database/concurrent-assessment-retention.sh "$container"
 bash tests/database/concurrent-dispatch-key-policy.sh "$container"
 bash tests/database/concurrent-workload-registration.sh "$container"
 bash tests/database/concurrent-controller-issuance.sh "$container"
+bash tests/database/concurrent-invitation.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.
