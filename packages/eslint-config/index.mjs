@@ -40,6 +40,45 @@ const config = [
       'react-hooks/set-state-in-effect': 'error',
     },
   },
+  {
+    // Code-scanning parity (CodeQL js/insecure-randomness, js/incomplete-url-
+    // substring-sanitization) caught while editing instead of at CI time.
+    files: ['**/*.{ts,tsx,js,jsx,mjs}'],
+    ignores: ['**/*.test.*', '**/*.spec.*', '**/tests/**'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'Math.random is predictable. Use crypto.randomUUID()/crypto.getRandomValues(); never invent ids, hashes or scores.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.property.name='includes'][arguments.0.value=/^([a-z0-9-]+\\.)+[a-z]{2,}$/i]",
+          message:
+            'Do not match a host by substring. Parse with new URL() and compare hostname exactly or by "." + domain suffix.',
+        },
+      ],
+    },
+  },
+  {
+    // Tracked debt: these screens still fabricate ids/hashes/scores with
+    // Math.random (display-provenance defect, Docs 11-16 follow-up). Remove a
+    // file from this list when it is fixed; new files are never added here.
+    files: [
+      'src/app/(app)/approval/approval-client.tsx',
+      'src/app/(app)/dsars/dsar-client.tsx',
+      'src/app/(app)/evidence/evidence-client.tsx',
+      'src/app/(app)/regwatch/regwatch-client.tsx',
+      'src/app/(app)/reports/reports-client.tsx',
+    ],
+    rules: { 'no-restricted-properties': 'off' },
+  },
 ];
 
 export default config;

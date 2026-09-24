@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
     log_level: Literal["debug", "info", "warn", "error"] = "info"
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8000")))
-    http_host: str = "0.0.0.0"
+    # Containers must listen on all interfaces; exposure is controlled by the
+    # platform ingress/network policy, never by this bind address.
+    http_host: str = "0.0.0.0"  # nosec B104
 
     # ─── Supabase ──────────────────────────────────────────────────
     supabase_url: str = Field(

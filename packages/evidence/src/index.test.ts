@@ -122,6 +122,21 @@ describe('seal verifies the uploaded version', () => {
     ).rejects.toThrow('GCS sealing requires');
     expect(send).not.toHaveBeenCalled();
   });
+  it('matches GCS by hostname, not by substring anywhere in the endpoint', async () => {
+    // A lookalike host must take the S3 verification path (and fail there),
+    // not be mistaken for GCS.
+    vi.spyOn(sendClient, 'send').mockRejectedValueOnce(new Error('upload failed'));
+    await expect(
+      new EvidenceVault('ap-south-1', 'https://storage.googleapis.com.example.net').seal(input),
+    ).rejects.toThrow('upload failed');
+  });
+  it('treats a storage.googleapis.com subdomain as GCS', async () => {
+    const send = vi.spyOn(sendClient, 'send');
+    await expect(
+      new EvidenceVault('asia-south1', 'https://eu.storage.googleapis.com').seal(input),
+    ).rejects.toThrow('GCS sealing requires');
+    expect(send).not.toHaveBeenCalled();
+  });
   it('refuses unconfirmed legal hold', async () => {
     provider().mockResolvedValueOnce({ LegalHold: { Status: 'OFF' } });
     await expect(

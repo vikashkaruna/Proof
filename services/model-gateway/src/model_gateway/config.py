@@ -14,7 +14,9 @@ class Settings(BaseSettings):
 
     service_name: str = "axiom-model-gateway"
     environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
-    http_host: str = "0.0.0.0"
+    # Containers must listen on all interfaces; exposure is controlled by the
+    # platform ingress/network policy, never by this bind address.
+    http_host: str = "0.0.0.0"  # nosec B104
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8001")))
     log_level: Literal["debug", "info", "warn", "error"] = "info"
 

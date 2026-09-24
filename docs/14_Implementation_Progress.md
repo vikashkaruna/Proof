@@ -1,5 +1,25 @@
 # Implementation progress — W0 through W4
 
+**Code-scanning remediation (operator request, #47):** the open CodeQL/Bandit alerts on main are fixed at source rather than dismissed:
+
+- `generateUUID` no longer falls back to `Math.random`.
+- Evidence GCS detection (TS and Python) and the Temporal Cloud check compare parsed hostnames, not substrings.
+- The TOTP base32 padding trim is linear.
+- The S3 `Content-MD5` digest is marked `usedforsecurity=False`.
+- The acceptance-target file is checked and read through one descriptor.
+- `ci.yml` defaults to `contents: read`.
+- Lekha raises instead of asserting.
+- The swallowed exceptions now log an event name.
+- Container `0.0.0.0` binds and the SafeLoader-derived YAML load carry justified `nosec` markers.
+
+Test code is excluded through a shared `.bandit` configuration, which removes about 150 test-only assert and fixture-credential notes. **Early detection:** `scripts/security-scan.sh` (`pnpm security:scan`, run by the husky pre-push hook) applies the same Bandit config as CI. It fails on medium+ in shipped services and on high anywhere, then runs ESLint. `@axiom/eslint-config` now rejects `Math.random` and host-substring checks while editing. With `AXIOM_CODEQL` set, the script also runs CodeQL security-extended locally.
+
+**Follow-ups, not yet fixed:**
+
+- Five web screens still fabricate IDs, hashes and scores with `Math.random`. They are listed as tracked lint debt.
+- CodeQL flags world-readable SPIRE health files (deliberate cross-UID reads) and a URL built in `verify-controller-issuance.py`.
+- Bandit reports medium findings in test-harness SQL strings.
+
 ## Revision 78 — C-W1-3 tenant invitations
 
 **Baseline:** Revisions 76–77 were merged to staging as `b68fa2c` (squash of [vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Staging [CI 36037580711](https://github.com/vikashkaruna/Proof/actions/runs/36037580711) passed.

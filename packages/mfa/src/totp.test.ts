@@ -83,6 +83,14 @@ describe('base32 round-trip', () => {
     expect(base32Decode(messy).toString('ascii')).toBe('12345678901234567890');
   });
 
+  it('trims padding in linear time and rejects interior padding', () => {
+    const encoded = base32Encode(Buffer.from('12345678901234567890', 'ascii'));
+    expect(base32Decode(encoded + '='.repeat(100_000)).toString('ascii')).toBe(
+      '12345678901234567890',
+    );
+    expect(() => base32Decode('='.repeat(50_000) + 'A')).toThrow('Invalid base32 character');
+  });
+
   it('rejects a character outside the alphabet rather than decoding nonsense', () => {
     expect(() => base32Decode('ABC!DEF')).toThrow(/Invalid base32/);
   });

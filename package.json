@@ -51,7 +51,8 @@
     "env:sync": "./scripts/sync-env.sh preprod all",
     "gate:controls": "./scripts/check-control-count.sh",
     "gate:controls:drift": "./scripts/check-controls-drift.sh",
-    "build:controls-json": "tsx scripts/build-controls-json.mjs"
+    "build:controls-json": "tsx scripts/build-controls-json.mjs",
+    "security:scan": "bash scripts/security-scan.sh"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.116.0",

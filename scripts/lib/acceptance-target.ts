@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /** Privileged test configuration. Never import this module into an application bundle. */
@@ -97,16 +97,22 @@ export function loadAcceptanceTarget(
 ): AcceptanceTarget | null {
   if (!file) return null;
   const location = resolve(file);
-  const mode = statSync(location).mode;
-  requireValue(
-    process.platform === 'win32' || (mode & 0o077) === 0,
-    'Acceptance target credentials require a private file (chmod 600)',
-  );
+  // Check and read through one descriptor so the file cannot be swapped between them.
+  const fd = openSync(location, 'r');
   let value: unknown;
   try {
-    value = JSON.parse(readFileSync(location, 'utf8'));
-  } catch {
-    throw new Error('Cannot parse acceptance target file');
+    const mode = fstatSync(fd).mode;
+    requireValue(
+      process.platform === 'win32' || (mode & 0o077) === 0,
+      'Acceptance target credentials require a private file (chmod 600)',
+    );
+    try {
+      value = JSON.parse(readFileSync(fd, 'utf8'));
+    } catch {
+      throw new Error('Cannot parse acceptance target file');
+    }
+  } finally {
+    closeSync(fd);
   }
   return validateAcceptanceTarget(value);
 }

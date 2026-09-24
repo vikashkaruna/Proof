@@ -15,6 +15,7 @@ itself never leaves the runtime.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -125,7 +126,8 @@ def redact(text: str) -> RedactionSummary:
                 out = out[: result.start] + f"[REDACTED:{label}]" + out[result.end :]
                 redactions[label] = redactions.get(label, 0) + 1
         except Exception:  # noqa: BLE001 - fail back to deterministic regexes
-            pass
+            # The regex pass above already ran; never log the text itself.
+            logging.getLogger(__name__).warning("redaction.ner_unavailable")
 
     return RedactionSummary(
         redacted_text=out,

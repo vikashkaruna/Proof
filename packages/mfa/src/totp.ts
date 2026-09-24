@@ -53,7 +53,11 @@ export function base32Encode(buffer: Buffer): string {
 export function base32Decode(input: string): Buffer {
   // Authenticator apps and QR readers commonly present the secret in
   // lowercase, spaced into groups, and sometimes padded.
-  const normalised = input.toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
+  const compact = input.toUpperCase().replace(/[\s-]/g, '');
+  // Trim padding linearly; an anchored `=+$` regex backtracks quadratically.
+  let end = compact.length;
+  while (end > 0 && compact[end - 1] === '=') end--;
+  const normalised = compact.slice(0, end);
 
   let bits = 0;
   let value = 0;

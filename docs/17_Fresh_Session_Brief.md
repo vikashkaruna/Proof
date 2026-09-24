@@ -1,5 +1,25 @@
 # Continuing implementation — Revision 78
 
+**Code-scanning remediation (operator request, #47):** the open CodeQL/Bandit alerts on main are fixed at source rather than dismissed:
+
+- `generateUUID` no longer falls back to `Math.random`.
+- Evidence GCS detection (TS and Python) and the Temporal Cloud check compare parsed hostnames, not substrings.
+- The TOTP base32 padding trim is linear.
+- The S3 `Content-MD5` digest is marked `usedforsecurity=False`.
+- The acceptance-target file is checked and read through one descriptor.
+- `ci.yml` defaults to `contents: read`.
+- Lekha raises instead of asserting.
+- The swallowed exceptions now log an event name.
+- Container `0.0.0.0` binds and the SafeLoader-derived YAML load carry justified `nosec` markers.
+
+Test code is excluded through a shared `.bandit` configuration, which removes about 150 test-only assert and fixture-credential notes. **Early detection:** `scripts/security-scan.sh` (`pnpm security:scan`, run by the husky pre-push hook) applies the same Bandit config as CI. It fails on medium+ in shipped services and on high anywhere, then runs ESLint. `@axiom/eslint-config` now rejects `Math.random` and host-substring checks while editing. With `AXIOM_CODEQL` set, the script also runs CodeQL security-extended locally.
+
+**Follow-ups, not yet fixed:**
+
+- Five web screens still fabricate IDs, hashes and scores with `Math.random`. They are listed as tracked lint debt.
+- CodeQL flags world-readable SPIRE health files (deliberate cross-UID reads) and a URL built in `verify-controller-issuance.py`.
+- Bandit reports medium findings in test-harness SQL strings.
+
 The user's instruction still stands: continue in plan order after every green milestone. At each milestone, report it and keep the implementation, testing, documentation and no-fast-forward staging integration up to date. Use isolated Docker services for testing. The overall goal is active and incomplete. No cloud provisioning/apply is authorized.
 
 When operator input is unavailable, continue with the recommended option and record in Docs 11–16 that no input was received, together with the assumptions made.
