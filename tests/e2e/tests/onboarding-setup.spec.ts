@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createMfaAccount, selectTenant, signInAs } from '../fixtures';
+import { createMfaAccount, selectTenant, signIn, signInAs } from '../fixtures';
 
 // C-W3-5: the resumable onboarding checklist. Each step is saved server-side,
 // readiness is recomputed from live inventory, and the wizard never issues
@@ -97,8 +97,7 @@ test('an admin completes onboarding step by step and can resume between steps', 
 });
 
 test('a viewer sees progress but cannot start or change onboarding', async ({ page }) => {
-  const viewer = await createMfaAccount('setup-viewer', { role: 'viewer' });
-  await signInAs(page, viewer.email, viewer.password);
+  await signIn(page, 'viewer');
   await selectTenant(page, 'a');
   await page.goto('/estate/setup');
   await expect(page.getByTestId('setup-wizard')).toBeVisible();
