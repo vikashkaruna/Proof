@@ -272,3 +272,39 @@ export async function createMfaAccount(
 
   return { id, email, password, ...(totpSecret ? { totpSecret } : {}) };
 }
+
+/**
+ * Register and activate a workload identity through the reviewed lifecycle RPC
+ * (0048 revoked direct table writes). Each call uses its own trust domain so
+ * the one-ID-per-agent convention never collides across tests.
+ */
+export async function registerWorkload(agent: 'drishti' | 'karya', label: string): Promise<string> {
+  const id = crypto.randomUUID();
+  const spiffe = `spiffe://w-${label}.axiom.test/agent/${agent}`;
+  let version = 0;
+  for (const status of ['disabled', 'active']) {
+    const res = await fetch(`${state.supabaseUrl}/rest/v1/rpc/manage_workload_identity`, {
+      method: 'POST',
+      headers: {
+        apikey: state.publishableKey,
+        Authorization: `Bearer ${state.serviceKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_tenant_id: state.tenantA.id,
+        p_actor_id: state.accounts.owner.id,
+        p_correlation_id: crypto.randomUUID(),
+        p_workload_id: id,
+        p_expected_version: version,
+        p_agent: agent,
+        p_spiffe_id: spiffe,
+        p_status: status,
+      }),
+    });
+    const body = (await res.json()) as { version?: number; error?: string };
+    if (!res.ok || body.error || typeof body.version !== 'number')
+      throw new Error(`Workload registration failed: ${res.status} ${body.error ?? ''}`);
+    version = body.version;
+  }
+  return id;
+}

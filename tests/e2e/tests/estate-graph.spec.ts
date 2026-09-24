@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { registerWorkload, selectTenant, signIn, state } from '../fixtures';
 
 // W3.5: access edges come only from active grants; Sudhaar has none, and the
-// Karya write view shows write authority alone.
+// Karya write view shows write authority alone. Grants are seeded directly:
+// the reference fixture connector is not a production binding, so the
+// issuance RPC would (correctly) refuse the Karya write grant.
 
 async function service(path: string, row: Record<string, unknown>) {
   const res = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
@@ -51,12 +53,7 @@ test('the estate graph derives agent access from grants and isolates Karya write
     ['drishti', 'connector.read'],
     ['karya', 'connector.write'],
   ] as const) {
-    const identity = await service('workload_identities', {
-      tenant_id: state.tenantA.id,
-      agent_name: agent,
-      spiffe_id: `spiffe://axiom.test/tenant-a/${agent}-graph-${suffix}`,
-      status: 'active',
-    });
+    const identity = await registerWorkload(agent, `graph-${suffix}`);
     await service('connector_grants', {
       tenant_id: state.tenantA.id,
       connector_id: connectorId,

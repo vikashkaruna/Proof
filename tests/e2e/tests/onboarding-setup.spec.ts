@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createMfaAccount, selectTenant, signIn, signInAs, state } from '../fixtures';
+import {
+  createMfaAccount,
+  registerWorkload,
+  selectTenant,
+  signIn,
+  signInAs,
+  state,
+} from '../fixtures';
 
 // C-W3-5: the resumable onboarding checklist. Each step is saved server-side,
 // readiness is recomputed from live inventory, and the wizard never issues
@@ -164,13 +171,8 @@ test('an owner re-attests agent access: keep schedules the next review, revoke r
     data: { operation: 'transition', expectedVersion: 1, status: 'active' },
   });
   expect(enabled.status()).toBe(200);
-  // Workload registration is W4.3 infrastructure; the identity row is seeded.
-  const identity = await service('workload_identities', {
-    tenant_id: state.tenantA.id,
-    agent_name: 'drishti',
-    spiffe_id: `spiffe://axiom.test/tenant-a/drishti-${suffix}`,
-    status: 'active',
-  });
+  // Workload registration uses the reviewed W4.3 lifecycle RPC.
+  const identity = await registerWorkload('drishti', `access-${suffix}`);
 
   // W4.4: one grant through the page, one through the API; both are audited issues.
   await page.goto('/estate/setup');
