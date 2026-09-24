@@ -20,6 +20,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import boto3
 from botocore.client import Config
@@ -61,7 +62,8 @@ class EvidenceVault:
         s = settings or get_settings()
         self._settings = s
         endpoint = s.axiom_storage_endpoint or s.s3_endpoint
-        self._is_gcs = bool(endpoint and "storage.googleapis.com" in endpoint)
+        host = (urlparse(endpoint).hostname or "") if endpoint else ""
+        self._is_gcs = host == "storage.googleapis.com" or host.endswith(".storage.googleapis.com")
         region = s.axiom_region or s.aws_region
         access_key = s.axiom_storage_access_key_id or s.aws_access_key_id
         secret_key = s.axiom_storage_secret_access_key or s.aws_secret_access_key

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -43,13 +44,21 @@ async def handle_health(
         writer.write(response)
         await writer.drain()
     except (OSError, ConnectionError):
-        pass
+        # A probe that disconnects early needs no response.
+        log.debug("temporal_worker.health_probe_disconnected")
     finally:
-        try:
+        with contextlib.suppress(OSError, ConnectionError):
             writer.close()
             await writer.wait_closed()
-        except (OSError, ConnectionError):
-            pass
+
+
+def _is_temporal_cloud(address: str) -> bool:
+    """Match the Temporal Cloud host exactly; the address is ``host:port``."""
+    host = address.split("://")[-1].split("/")[0].rsplit(":", 1)[0].lower()
+    return any(
+        host == domain or host.endswith("." + domain)
+        for domain in ("tmprl.cloud", "temporal.io")
+    )
 
 
 def build_workers(
@@ -158,7 +167,8 @@ async def main():
     controller, outbox_pump = assessment_options()
     logging.basicConfig(level=logging.INFO)
     port = int(os.environ.get("PORT", "8080"))
-    server = await asyncio.start_server(handle_health, "0.0.0.0", port)
+    # Container health listener; exposure is controlled by the platform.
+    server = await asyncio.start_server(handle_health, "0.0.0.0", port)  # nosec B104
     log.info(f"temporal_worker.health_server_listening port={port}")
 
     address = os.environ.get("TEMPORAL_ADDRESS", "ap-south-1.aws.api.temporal.io:7233")
@@ -198,7 +208,7 @@ async def main():
         not api_key
         and not client_cert
         and not cert_path
-        and ("temporal.io" in address or "tmprl.cloud" in address)
+        and _is_temporal_cloud(address)
     ):
         log.warning(
             "No TEMPORAL_API_KEY or mTLS certs provided; proceeding with TLS enabled."

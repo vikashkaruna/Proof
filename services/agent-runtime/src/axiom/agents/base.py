@@ -264,8 +264,9 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                     )
                 )
                 entry_ids.append(r2.id)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                # The run already failed; record that its failure entry is missing.
+                self.log.error("agent.failure_ledger_append_failed")
             return AgentRunResult(
                 agent=self.name,
                 correlation_id=correlation_id,

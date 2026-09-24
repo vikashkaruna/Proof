@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, staging]
 
+# Least privilege by default; jobs that publish images or report status
+# declare their own, broader permissions.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

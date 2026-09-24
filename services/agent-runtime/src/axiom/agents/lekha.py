@@ -67,7 +67,8 @@ class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
                 first_break=result.get("firstBreak"),
             )
         elif input.operation == "reconstruct":
-            assert input.correlation_id, "reconstruct requires a correlation_id"
+            if not input.correlation_id:
+                raise ValueError("reconstruct requires a correlation_id")
             entries = await self.ledger.query(
                 tenant_id=input.tenant_id,
                 correlation_id=input.correlation_id,

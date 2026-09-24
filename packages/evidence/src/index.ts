@@ -114,7 +114,8 @@ export class EvidenceVault {
     private readonly endpoint?: string,
     credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string },
   ) {
-    this.isGcs = Boolean(endpoint && endpoint.includes('storage.googleapis.com'));
+    const host = endpoint ? new URL(endpoint).hostname : '';
+    this.isGcs = host === 'storage.googleapis.com' || host.endsWith('.storage.googleapis.com');
     this.s3 = new S3Client({
       region,
       endpoint,

@@ -148,7 +148,8 @@ def load_descriptor(source: str) -> ConnectorManifest:
     if root is None:
         raise ValueError("Empty descriptor")
     _check_tree(root)
-    return ConnectorManifest.model_validate(yaml.load(source, Loader=DescriptorLoader))
+    # DescriptorLoader subclasses yaml.SafeLoader and forbids aliases/tags above.
+    return ConnectorManifest.model_validate(yaml.load(source, Loader=DescriptorLoader))  # nosec B506
 
 
 def build_registry(sources: list[str]) -> dict[str, ConnectorManifest]:
