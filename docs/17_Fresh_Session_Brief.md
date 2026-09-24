@@ -18,7 +18,7 @@ Delivered on the same branch/PR as Revision 76. There is a shared versioned gap-
 
 ## Revision 78 — C-W1-3 tenant invitations
 
-Migration 0053, the invitation RPCs, the BFF routes, `/settings/members`, the `/invite` accept page, and the login open-redirect fix. See [audit 67](audits/67-tenant-invitations-review-2026-09-24.md). Staging (through Revision 77) was promoted to main in vikashkaruna/Proof#45 after a full branch audit. **Always unshallow before comparing branches** (`git fetch --unshallow`): the cloud clone is shallow and otherwise reports false "unrelated histories".
+Migration 0053, the invitation RPCs, the BFF routes, `/settings/members`, the `/invite` accept page, and the login open-redirect fix. See [audit 67](audits/67-tenant-invitations-review-2026-09-24.md). Staging (through Revision 77) is promoted to main through vikashkaruna/Proof#45 after a full branch audit, as a merge commit once its checks are green; Trivy was fixed (filesystem scan) so that check can pass. **Always unshallow before comparing branches** (`git fetch --unshallow`): the cloud clone is shallow and otherwise reports false "unrelated histories".
 
 ## Current work and continuation
 
