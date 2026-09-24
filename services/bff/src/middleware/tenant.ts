@@ -24,7 +24,7 @@ const SYNTHETIC_TOKENS = new Set(['dev-token', 'test-access-token']);
  * SEC-1 let an unauthenticated caller create tenants and self-assign
  * ownership (SEC-5).
  */
-const TENANTLESS_ROUTES = ['/organizations/onboard', '/user/tenants'];
+const TENANTLESS_ROUTES = ['/organizations/onboard', '/user/tenants', '/invitations/accept'];
 
 /**
  * The fixture tenants the local/test seed creates. Under `e2e-bypass` the

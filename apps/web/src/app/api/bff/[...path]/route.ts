@@ -43,7 +43,8 @@ async function forward(request: NextRequest, context: RouteContext) {
   // authenticates and authorizes them; the bridge supplies no tenant scope.
   const tenantless =
     (request.method === 'POST' && target.pathname === '/v1/organizations/onboard') ||
-    (request.method === 'GET' && target.pathname === '/v1/user/tenants');
+    (request.method === 'GET' && target.pathname === '/v1/user/tenants') ||
+    (request.method === 'POST' && target.pathname === '/v1/invitations/accept');
   if (tenantless) {
     headers.delete('x-tenant-id');
   } else if (!headers.has('x-tenant-id')) {

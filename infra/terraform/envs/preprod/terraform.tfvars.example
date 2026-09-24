@@ -39,6 +39,7 @@ contact_recipient_email = "hello@axiomminds.ai"
 
 report_email_mode = "disabled"
 contact_email_mode = "disabled"
+invitation_email_mode = "disabled"
 
 # Separate private Mumbai SPIRE issuer + runner foundation. Keep disabled until
 # bootstrap, state mounting, issuer enrollment, IAM and supervision are ready.

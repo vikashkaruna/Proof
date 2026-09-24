@@ -380,6 +380,7 @@ tfvar_value() {
     resend_api_key)             get_val "RESEND_API_KEY" ;;
     report_email_mode)          get_val "AXIOM_REPORT_EMAIL_MODE" "disabled" ;;
     contact_email_mode)         get_val "AXIOM_CONTACT_EMAIL_MODE" "disabled" ;;
+    invitation_email_mode)      get_val "AXIOM_INVITATION_EMAIL_MODE" "disabled" ;;
     contact_recipient_email)    get_val "CONTACT_RECIPIENT_EMAIL" "hello@axiomminds.ai" ;;
     axiom_from_email)           get_val "AXIOM_FROM_EMAIL" "Axiom Proof <platform@axiomproof.ai>" ;;
     axiom_sales_email)          get_val "AXIOM_SALES_EMAIL" "sales@axiomproof.ai" ;;

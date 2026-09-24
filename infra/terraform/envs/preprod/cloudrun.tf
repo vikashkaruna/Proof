@@ -225,6 +225,14 @@ resource "google_cloud_run_v2_service" "bff" {
         value = var.contact_email_mode
       }
       env {
+        name  = "AXIOM_INVITATION_EMAIL_MODE"
+        value = var.invitation_email_mode
+      }
+      env {
+        name  = "AXIOM_WEB_APP_URL"
+        value = local.web_service_url
+      }
+      env {
         name  = "CONTACT_RECIPIENT_EMAIL"
         value = var.contact_recipient_email
       }

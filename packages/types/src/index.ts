@@ -3,6 +3,7 @@ export * from './domain';
 export * from './api';
 export * from './agents';
 export * from './rbac';
+export * from './invitations';
 export * from './estate';
 
 export * from './connectors';

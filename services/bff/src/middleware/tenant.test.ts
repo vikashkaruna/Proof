@@ -45,6 +45,9 @@ async function buildApp(
   app.post('/v1/organizations/onboard', (c) =>
     c.json({ tenantId: c.get('tenantId') ?? null, role: c.get('role') }),
   );
+  app.post('/v1/invitations/accept', (c) =>
+    c.json({ tenantId: c.get('tenantId') ?? null, role: c.get('role') ?? null }),
+  );
   return app;
 }
 
@@ -138,5 +141,18 @@ describe('tenantResolver — SEC-5 · the onboarding exemption', () => {
     const res = await app.request('/v1/organizations/onboard', { method: 'POST' });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { tenantId: string | null }).tenantId).toBeNull();
+  });
+});
+
+describe('tenantResolver — C-W1-3 · invitation acceptance exemption', () => {
+  // The invitee is not yet a member; acceptance must not be handed any tenant scope.
+  it('exempts acceptance from tenant resolution without granting a tenant or role', async () => {
+    const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+    const res = await app.request('/v1/invitations/accept', {
+      method: 'POST',
+      headers: { 'x-tenant-id': '11111111-1111-4111-8111-111111111111' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tenantId: null, role: null });
   });
 });

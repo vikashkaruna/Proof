@@ -106,6 +106,8 @@ bff:
   # Founder-contact notification mail (C-W0-6). Inquiries persist regardless.
   contactEmailMode: disabled
   contactRecipientEmail: ""
+  # Tenant invitation mail (C-W1-3). Disabled: inviters share a one-time link.
+  invitationEmailMode: disabled
   reportEmailSecretName: axiom-report-email
   enabled: true
   replicaCount: 2

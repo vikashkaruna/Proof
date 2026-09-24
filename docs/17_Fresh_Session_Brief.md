@@ -1,4 +1,4 @@
-# Continuing implementation — Revision 77
+# Continuing implementation — Revision 78
 
 The user's instruction still stands: continue in plan order after every green milestone. At each milestone, report it and keep the implementation, testing, documentation and no-fast-forward staging integration up to date. Use isolated Docker services for testing. The overall goal is active and incomplete. No cloud provisioning/apply is authorized.
 
@@ -16,6 +16,10 @@ When operator input is unavailable, continue with the recommended option and rec
 
 Delivered on the same branch/PR as Revision 76. There is a shared versioned gap-scan question set, and benchmarks are labelled as editorial estimates. The portal and Workbench no longer invent figures; the Workbench's broken queries are fixed. Playwright passes 68/68. See [audit 66](audits/66-scoring-and-display-provenance-review-2026-09-24.md).
 
+## Revision 78 — C-W1-3 tenant invitations
+
+Migration 0053, the invitation RPCs, the BFF routes, `/settings/members`, the `/invite` accept page, and the login open-redirect fix. See [audit 67](audits/67-tenant-invitations-review-2026-09-24.md). Staging (through Revision 77) is promoted to main through vikashkaruna/Proof#45 after a full branch audit, as a merge commit once its checks are green; Trivy was fixed (filesystem scan) so that check can pass. **Always unshallow before comparing branches** (`git fetch --unshallow`): the cloud clone is shallow and otherwise reports false "unrelated histories".
+
 ## Current work and continuation
 
 - Branch `codex/revision75-controller-generation-transition` (the operator-designated branch), on top of `4dedecf` (already contained in staging). Integrate into `staging` through a PR and a no-fast-forward merge after source CI is green; then verify the staging push CI.
@@ -28,15 +32,14 @@ Delivered on the same branch/PR as Revision 76. There is a shared versioned gap-
   5. Symlink `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell` to Playwright's expected `chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`.
   6. `pnpm --filter @axiom/e2e exec playwright test` (67 journeys).
 - `registry.terraform.io` is blocked by the session proxy, so Terraform validate/test and Helm render run only in CI.
-- Never edit an applied migration. The next migration is **0053**. C-W0 code findings (C-W0-4/6/7) are all delivered.
+- Never edit an applied migration. The next migration is **0054**. C-W0 code findings (C-W0-4/6/7) and C-W1-1…4 are all delivered. Re-raise the Dependabot bumps (closed vikashkaruna/Proof#32–#36) against staging.
 
 ## Next in plan order
 
-1. **C-W1-3**: invitation workflow and provider adapter contract. Real delivery stays gated on provider/domain evidence.
-2. **W3**: C-W3-5 resumable company → estate → inventory → connector/grant → readiness wizard; C-W3-6 sustenance/re-attestation; the W3.5 `/estate/graph` page.
-3. **W4.4**: grant model enforcement per invocation, portal grant/revoke UI and ledger events. Then W4.5–W4.7.
-4. **Cloud-gated, when authorized:** secret publication/replication, effective IAM allow/deny evidence, private TLS/DNS, opaque scheduler, and real GCP IIT/caller/KMS/Mumbai recovery. Also W0 remote parity, C-W0-5 deployed IAM, and the EKS CIDR decision.
-5. **Follow-up hardening:** Helm `web` and `marketing` deployments still inject `SUPABASE_SERVICE_KEY`, which neither app reads.
+1. **W3**: C-W3-5 resumable company → estate → inventory → connector/grant → readiness wizard; C-W3-6 sustenance/re-attestation; the W3.5 `/estate/graph` page.
+2. **W4.4**: grant model enforcement per invocation, portal grant/revoke UI and ledger events. Then W4.5–W4.7.
+3. **Cloud-gated, when authorized:** secret publication/replication, effective IAM allow/deny evidence, private TLS/DNS, opaque scheduler, and real GCP IIT/caller/KMS/Mumbai recovery. Also W0 remote parity, C-W0-5 deployed IAM, and the EKS CIDR decision.
+4. **Follow-up hardening:** Helm `web` and `marketing` deployments still inject `SUPABASE_SERVICE_KEY`, which neither app reads.
 
 ## Invariants
 
