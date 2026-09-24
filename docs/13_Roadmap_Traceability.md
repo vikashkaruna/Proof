@@ -1,5 +1,35 @@
 # Axiom Proof — roadmap traceability and delivery status
 
+## Revision 77 — C-W0-7 scoring semantics and display provenance
+
+**Baseline:** Revision 76 (C-W0-6) is on the same branch and PR ([vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Operator input was not received; the assumptions in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md) still apply.
+
+**Implemented:**
+
+- **Question set:** a single versioned `GAP_SCAN_QUESTIONS` set (`2026-09-24`) in `@axiom/control-library` drives both the gap-scan form and BFF scoring.
+  - q7 now asks about least privilege (it previously asked about MFA while scoring SEC-002).
+  - q11 is phrased so that "yes" means compliant (previously admitting a transfer scored as compliant).
+  - q12 asks about a DPIA _before_ new high-risk processing.
+  - Reports record `questionSetVersion`; stored snapshots are never rescored.
+- **Benchmarks:** readiness figures carry `benchmarkBasis: 'editorial_estimate'` and are labelled "Indicative, not measured peer data" in the report page and email.
+- **Client portal:** the demo tenant, slug aliases, per-slug invented scores/exposure/control counts, "+6 vs baseline", "WORM lock active", "0 Active Breaches" and "1 nearing SLA" are all removed.
+  - It uses the verified tenant and the BFF saved-results projection through a shared `loadAssessmentSnapshot`.
+  - It scopes actions to the tenant's plans and shows explicit empty/unavailable/error states.
+- **Workbench:** the loader queried non-existent ledger columns and an invalid plan status, so it always showed invented counts (214/8). It now uses real columns with exact counts or "Unavailable", and the static "10/10 Online", "Env: Production" and prompt-registry figures are replaced with truthful labels.
+
+**Local evidence:**
+
+| Check                                 | Result                                               |
+| ------------------------------------- | ---------------------------------------------------- |
+| Control library tests                 | 83                                                   |
+| BFF tests                             | **1,022**                                            |
+| Workspace typecheck/lint/test         | pass                                                 |
+| Playwright on the real isolated stack | **68/68**, including a new portal provenance journey |
+
+A pre-existing MFA recovery journey timed out 1 in 3 times under `next dev` cold compiles. Its URL wait now matches the spec's existing 20-second waits; it passed 4/4 repeats and the full suite. See [audit 66](audits/66-scoring-and-display-provenance-review-2026-09-24.md).
+
+**Next and limits:** C-W0 code findings are now all delivered. W0 still needs remote parity acceptance, C-W0-5 deployed IAM and the EKS CIDR decision, which are operator/cloud-gated. Next in plan order is **C-W1-3 invitations**, then W3 wizard/sustenance/graph and W4.4 grants. W2 remains **19/40**. Schema is unchanged at **0052 / 53 migrations / 56 public tables**.
+
 ## Revision 76 — C-W0-6 durable contact inquiries behind the BFF
 
 **Verified baseline:** Revision 75 is complete at staging `6617e3283092462f40a13168d1f016da69048f14`. [PR 42](https://github.com/vikashkaruna/Proof/pull/42) was integrated by a no-fast-forward merge. Source [CI 35906474455](https://github.com/vikashkaruna/Proof/actions/runs/35906474455) (source `4dedecf`) and exact staging [CI 35908407498](https://github.com/vikashkaruna/Proof/actions/runs/35908407498) both concluded success.

@@ -65,7 +65,7 @@ export default function GapScanPage() {
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
-          Quarterly Readiness Benchmark
+          Indicative Readiness Benchmark
         </span>
       </div>
 

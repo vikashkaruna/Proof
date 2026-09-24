@@ -1,5 +1,35 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
+## Revision 77 — C-W0-7 scoring semantics and display provenance
+
+**Baseline:** Revision 76 (C-W0-6) is on the same branch and PR ([vikashkaruna/Proof#43](https://github.com/vikashkaruna/Proof/pull/43)). Operator input was not received; the assumptions in [audit 65](audits/65-contact-inquiry-persistence-review-2026-09-24.md) still apply.
+
+**Implemented:**
+
+- **Question set:** a single versioned `GAP_SCAN_QUESTIONS` set (`2026-09-24`) in `@axiom/control-library` drives both the gap-scan form and BFF scoring.
+  - q7 now asks about least privilege (it previously asked about MFA while scoring SEC-002).
+  - q11 is phrased so that "yes" means compliant (previously admitting a transfer scored as compliant).
+  - q12 asks about a DPIA _before_ new high-risk processing.
+  - Reports record `questionSetVersion`; stored snapshots are never rescored.
+- **Benchmarks:** readiness figures carry `benchmarkBasis: 'editorial_estimate'` and are labelled "Indicative, not measured peer data" in the report page and email.
+- **Client portal:** the demo tenant, slug aliases, per-slug invented scores/exposure/control counts, "+6 vs baseline", "WORM lock active", "0 Active Breaches" and "1 nearing SLA" are all removed.
+  - It uses the verified tenant and the BFF saved-results projection through a shared `loadAssessmentSnapshot`.
+  - It scopes actions to the tenant's plans and shows explicit empty/unavailable/error states.
+- **Workbench:** the loader queried non-existent ledger columns and an invalid plan status, so it always showed invented counts (214/8). It now uses real columns with exact counts or "Unavailable", and the static "10/10 Online", "Env: Production" and prompt-registry figures are replaced with truthful labels.
+
+**Local evidence:**
+
+| Check                                 | Result                                               |
+| ------------------------------------- | ---------------------------------------------------- |
+| Control library tests                 | 83                                                   |
+| BFF tests                             | **1,022**                                            |
+| Workspace typecheck/lint/test         | pass                                                 |
+| Playwright on the real isolated stack | **68/68**, including a new portal provenance journey |
+
+A pre-existing MFA recovery journey timed out 1 in 3 times under `next dev` cold compiles. Its URL wait now matches the spec's existing 20-second waits; it passed 4/4 repeats and the full suite. See [audit 66](audits/66-scoring-and-display-provenance-review-2026-09-24.md).
+
+**Next and limits:** C-W0 code findings are now all delivered. W0 still needs remote parity acceptance, C-W0-5 deployed IAM and the EKS CIDR decision, which are operator/cloud-gated. Next in plan order is **C-W1-3 invitations**, then W3 wizard/sustenance/graph and W4.4 grants. W2 remains **19/40**. Schema is unchanged at **0052 / 53 migrations / 56 public tables**.
+
 ## Revision 76 — C-W0-6 durable contact inquiries behind the BFF
 
 **Verified baseline:** Revision 75 is complete at staging `6617e3283092462f40a13168d1f016da69048f14`. [PR 42](https://github.com/vikashkaruna/Proof/pull/42) was integrated by a no-fast-forward merge. Source [CI 35906474455](https://github.com/vikashkaruna/Proof/actions/runs/35906474455) (source `4dedecf`) and exact staging [CI 35908407498](https://github.com/vikashkaruna/Proof/actions/runs/35908407498) both concluded success.
@@ -686,7 +716,7 @@ date. I make the change and the gate re-validates.
 The managed Supabase credentials now reach the correct Cloud Run processes; `check-cloudrun-auth-wiring.py` refuses placeholder/missing/cross-role bindings. No infrastructure was applied. Remote acceptance remains pending. C-W0-5 deployed acceptance remains open; the following findings remain engineering responsibilities:
 
 - **C-W0-6 engineering delivered in Revision 76:** contact inquiries persist through the BFF (0052) before any mail; the reply and UI report only the stored delivery status; marketing holds no mail credential. Deploy 0052 with the BFF and marketing together, keep `AXIOM_CONTACT_EMAIL_MODE=disabled` during acceptance, and remove the now-unused marketing `resend_api_key` accessor binding by applying the updated IAM (no secret value changes). See audit 65.
-- **C-W0-7:** reconcile q7/q11/q12 question/control scoring semantics and benchmark provenance. The current readiness benchmarks/percentiles are heuristics, not measured peer evidence. Stored historic reports remain immutable snapshots.
+- **C-W0-7 engineering delivered in Revision 77:** shared versioned gap-scan question set (q7/q11/q12 reconciled), benchmarks labelled as editorial estimates, portal and Workbench show only persisted data or explicit unavailable states. Stored historic reports remain immutable snapshots. See audit 66.
 
 For report rollout, apply 0037 and deploy BFF/marketing together; seed the published control library through the normal seed workflow. Keep `AXIOM_REPORT_EMAIL_MODE=disabled` during acceptance. Production mail requires an explicit BFF mode of `delivery` and its managed `RESEND_API_KEY`; marketing does not own the report mail credential. Contact mail is BFF-owned since Revision 76 and needs its own `AXIOM_CONTACT_EMAIL_MODE=delivery` opt-in. Real provider delivery was not exercised. Follow Doc 17 for the restart probe; emailed links do not carry bearer proof and work only in the owning browser. There is no cross-device recovery/share flow yet.
 

@@ -1,4 +1,4 @@
-# Continuing implementation — Revision 76
+# Continuing implementation — Revision 77
 
 The user's instruction still stands: continue in plan order after every green milestone. At each milestone, report it and keep the implementation, testing, documentation and no-fast-forward staging integration up to date. Use isolated Docker services for testing. The overall goal is active and incomplete. No cloud provisioning/apply is authorized.
 
@@ -12,6 +12,10 @@ When operator input is unavailable, continue with the recommended option and rec
 
 **Status:** W0/W1/W2/W3/W4 remain partial. W2 is **19/40**. Schema is **0052 / 53 migrations / 56 public tables**, plus three private credential tables.
 
+## Revision 77 — C-W0-7 scoring semantics and display provenance
+
+Delivered on the same branch/PR as Revision 76. There is a shared versioned gap-scan question set, and benchmarks are labelled as editorial estimates. The portal and Workbench no longer invent figures; the Workbench's broken queries are fixed. Playwright passes 68/68. See [audit 66](audits/66-scoring-and-display-provenance-review-2026-09-24.md).
+
 ## Current work and continuation
 
 - Branch `codex/revision75-controller-generation-transition` (the operator-designated branch), on top of `4dedecf` (already contained in staging). Integrate into `staging` through a PR and a no-fast-forward merge after source CI is green; then verify the staging push CI.
@@ -24,16 +28,15 @@ When operator input is unavailable, continue with the recommended option and rec
   5. Symlink `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell` to Playwright's expected `chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`.
   6. `pnpm --filter @axiom/e2e exec playwright test` (67 journeys).
 - `registry.terraform.io` is blocked by the session proxy, so Terraform validate/test and Helm render run only in CI.
-- Never edit an applied migration. The next migration is **0053**.
+- Never edit an applied migration. The next migration is **0053**. C-W0 code findings (C-W0-4/6/7) are all delivered.
 
 ## Next in plan order
 
-1. **C-W0-7**: reconcile q7/q11/q12 question-to-control scoring semantics, and label the readiness benchmark/percentile as heuristic with provenance. Stored reports stay immutable snapshots.
-2. **C-W1-3**: invitation workflow and provider adapter contract. Real delivery stays gated on provider/domain evidence.
-3. **W3**: C-W3-5 resumable company → estate → inventory → connector/grant → readiness wizard; C-W3-6 sustenance/re-attestation; the W3.5 `/estate/graph` page.
-4. **W4.4**: grant model enforcement per invocation, portal grant/revoke UI and ledger events. Then W4.5–W4.7.
-5. **Cloud-gated, when authorized:** secret publication/replication, effective IAM allow/deny evidence, private TLS/DNS, opaque scheduler, and real GCP IIT/caller/KMS/Mumbai recovery. Also W0 remote parity, C-W0-5 deployed IAM, and the EKS CIDR decision.
-6. **Follow-up hardening:** Helm `web` and `marketing` deployments still inject `SUPABASE_SERVICE_KEY`, which neither app reads.
+1. **C-W1-3**: invitation workflow and provider adapter contract. Real delivery stays gated on provider/domain evidence.
+2. **W3**: C-W3-5 resumable company → estate → inventory → connector/grant → readiness wizard; C-W3-6 sustenance/re-attestation; the W3.5 `/estate/graph` page.
+3. **W4.4**: grant model enforcement per invocation, portal grant/revoke UI and ledger events. Then W4.5–W4.7.
+4. **Cloud-gated, when authorized:** secret publication/replication, effective IAM allow/deny evidence, private TLS/DNS, opaque scheduler, and real GCP IIT/caller/KMS/Mumbai recovery. Also W0 remote parity, C-W0-5 deployed IAM, and the EKS CIDR decision.
+5. **Follow-up hardening:** Helm `web` and `marketing` deployments still inject `SUPABASE_SERVICE_KEY`, which neither app reads.
 
 ## Invariants
 

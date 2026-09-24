@@ -1,4 +1,9 @@
-import { controls, LIBRARY_VERSION } from '@axiom/control-library';
+import {
+  controls,
+  GAP_SCAN_QUESTIONS,
+  GAP_SCAN_QUESTION_SET_VERSION,
+  LIBRARY_VERSION,
+} from '@axiom/control-library';
 import type { GapScanReport } from '@axiom/types';
 
 /**
@@ -17,29 +22,16 @@ import type { GapScanReport } from '@axiom/types';
 export async function computeGapScanReport(
   answers: Record<string, boolean | string | number | string[]>,
 ): Promise<GapScanReport> {
-  const questionToControl: Record<string, string> = {
-    q1: 'DPDPA-GOV-002',
-    q2: 'DPDPA-CNS-001',
-    q3: 'DPDPA-CNS-004',
-    q4: 'DPDPA-DAT-003',
-    q5: 'DPDPA-RCD-001',
-    q6: 'DPDPA-SEC-001',
-    q7: 'DPDPA-SEC-002',
-    q8: 'DPDPA-BRCH-001',
-    q9: 'DPDPA-RCD-002',
-    q10: 'DPDPA-GOV-003',
-    q11: 'DPDPA-XBR-001',
-    q12: 'DPDPA-DPIA-001',
-  };
-
   const findings: GapScanReport['findings'] = [];
   let totalWeight = 0;
   let weightedScore = 0;
   let totalExposure = 0;
 
-  for (const [qid, controlId] of Object.entries(questionToControl)) {
+  // C-W0-7: the prompts the user answered and the controls scored come from one
+  // shared, versioned question set.
+  for (const { id: qid, controlId } of GAP_SCAN_QUESTIONS) {
     const control = controls.find((c) => c.id === controlId);
-    if (!control) continue;
+    if (!control) throw new Error(`Gap-scan question ${qid} maps to unknown control ${controlId}`);
 
     const answer = answers[qid];
     const isYes = answer === true;
@@ -91,5 +83,6 @@ export async function computeGapScanReport(
     // it was not scored against is a provenance claim that is simply false, and it
     // went stale the moment the library moved to 0.1.1.
     libraryVersion: LIBRARY_VERSION,
+    questionSetVersion: GAP_SCAN_QUESTION_SET_VERSION,
   };
 }

@@ -25,8 +25,13 @@ test.describe('Agent ↔ UI communication', () => {
       page.getByRole('main').getByRole('heading', { name: /Agent Workbench/i }),
     ).toBeVisible();
     await expect(page.getByText('Agent fleet')).toBeVisible();
-    await expect(page.getByText('10 / 10 Online')).toBeVisible();
+    // C-W0-7: no static fleet health or registry figures are presented as live data.
+    await expect(page.getByText('Health not monitored here')).toBeVisible();
+    await expect(page.getByText('10 / 10 Online')).toHaveCount(0);
     await expect(page.getByText('Prompt registry')).toBeVisible();
+    await expect(page.getByTestId('workbench-prompt-registry')).toContainText('not implemented');
+    await expect(page.getByTestId('workbench-ledger-today')).toHaveText(/^\d+$/);
+    await expect(page.getByTestId('workbench-awaiting-review')).toHaveText(/^\d+$/);
 
     // Verify key named agents exist in the cockpit execution selector
     await expect(page.locator('option[value="drishti"]')).toContainText(/Drishti/i);
@@ -38,7 +43,7 @@ test.describe('Agent ↔ UI communication', () => {
   test('the workbench renders the autonomy badges', async ({ page }) => {
     await page.goto('/workbench');
     await expect(page.getByText(/Autonomy/i).first()).toBeVisible();
-    await expect(page.getByText(/Env: Production/i)).toBeVisible();
+    await expect(page.getByText(/Env: \S+ · ap-south-1/)).toBeVisible();
     await expect(page.getByText(/ap-south-1/i).first()).toBeVisible();
   });
 });

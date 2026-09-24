@@ -95,16 +95,19 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
           <CardHeader className="border-b border-slate-100 bg-mist-50/50 pb-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <Badge variant="info">Quarterly Research Benchmark</Badge>
+                <Badge variant="info">Indicative Benchmark</Badge>
                 <CardTitle className="mt-2 text-xl text-indigo-500">
                   The Axiom Proof DPDPA Readiness Index — {readinessIndex.sector}
                 </CardTitle>
                 <CardDescription>
-                  Sector peer standing and quarterly statutory compliance progression milestones.
+                  Indicative sector comparison and quarterly statutory compliance progression
+                  milestones.
                 </CardDescription>
               </div>
               <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-right">
-                <span className="text-xs uppercase font-medium text-teal-700">Peer Standing</span>
+                <span className="text-xs uppercase font-medium text-teal-700">
+                  Indicative Standing
+                </span>
                 <p className="text-lg font-bold text-teal-900">
                   Top {100 - readinessIndex.percentileRank}%
                 </p>
@@ -112,13 +115,17 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
             </div>
           </CardHeader>
           <CardContent className="p-6">
+            <p className="mb-4 text-xs text-slate-500" data-testid="benchmark-provenance">
+              Sector benchmarks and standing are Axiom editorial estimates, not measured data from
+              peer organisations. Treat them as indicative context, not as a ranking.
+            </p>
             <div className="grid grid-cols-2 gap-4 rounded-lg bg-slate-50 p-4 sm:grid-cols-4">
               <div>
                 <p className="text-xs text-slate-500">Your Score</p>
                 <p className="text-xl font-bold text-teal-600">{readinessIndex.companyScore}/100</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Sector Benchmark</p>
+                <p className="text-xs text-slate-500">Indicative Sector Benchmark</p>
                 <p className="text-xl font-bold text-slate-700">
                   {readinessIndex.sectorBenchmarkScore}/100
                 </p>
