@@ -2,3 +2,6 @@
 # Current test lines carry the same narrow inline rationale; no secret/file/rule-wide exclusions.
 3468bdfc1f6275dcee1eb6ddb6ae6ecafb201c56:infra/terraform/modules/workload-vms/tests/permissions.tftest.hcl:generic-api-key:154
 3468bdfc1f6275dcee1eb6ddb6ae6ecafb201c56:infra/terraform/modules/workload-vms/tests/permissions.tftest.hcl:generic-api-key:186
+# Named disposable e2e harness fixtures (never deployed; loadEnv() refuses placeholders outside local/test).
+95c59182567c0d9ecce1d907f74553027de9c5bb:tests/e2e/personas.ts:generic-api-key:287
+95c59182567c0d9ecce1d907f74553027de9c5bb:tests/e2e/playwright.config.ts:generic-api-key:71
