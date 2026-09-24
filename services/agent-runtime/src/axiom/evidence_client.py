@@ -172,4 +172,6 @@ def content_key(
 def _md5_b64(data: bytes) -> str:
     import base64
 
-    return base64.b64encode(hashlib.md5(data).digest()).decode("ascii")
+    # S3 Content-MD5 transport integrity header (required for Object Lock
+    # PUTs), not a security primitive. Evidence integrity is the SHA-256 path.
+    return base64.b64encode(hashlib.md5(data, usedforsecurity=False).digest()).decode("ascii")
