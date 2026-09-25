@@ -1,0 +1,21 @@
+schemaVersion: 1
+id: 41410000-0000-4000-8000-000000000012
+target: hrms
+version: 1.0.0
+transport: rest
+targetBinding: reference-mock
+auth: oauth2.client_credentials
+assurance: high
+provenance: reference
+capabilities:
+  enumerate: { operation: rest.enumerate, mutating: false }
+  sample: { operation: rest.sample, mutating: false }
+dataCategoryHints: [identity, employment, financial]
+rateLimit: { requestsPerSecond: 5, burst: 10 }
+rest:
+  resources:
+    employees:
+      path: /v1/employees
+      itemsPointer: /data
+      pageSizeParam: limit
+      cursor: { param: cursor, responsePointer: /next_cursor }
