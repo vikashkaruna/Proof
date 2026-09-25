@@ -1,6 +1,92 @@
 # Continuing implementation — Revision 88
 
-**Current status board:** see [Doc 14 — Build status board (Revision 87)](14_Implementation_Progress.md#build-status-board--revision-87-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
+**Current status board:** see [Doc 14 — Build status board (Revision 88)](14_Implementation_Progress.md#build-status-board--revision-88-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
+
+## Session close-out and handoff — Revision 88 (2026-09-25)
+
+**Where to continue:**
+
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 88, merge commit `cfe985d` of PR #56).
+- Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–88 and the dependency updates (PR #57). Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
+
+**State at close:**
+
+- Schema is **0000–0059: 60 migrations, 61 public tables**. The next migration is **0060**; never edit an applied migration.
+- Latest audit is **76**.
+- No PRs are open and no check-ins are scheduled.
+
+**Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
+
+| Suite                                 | Result                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------- |
+| BFF (vitest)                          | 1089 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| Web                                   | 89                                                                                      |
+| MFA                                   | 180                                                                                     |
+| Control library                       | 83                                                                                      |
+| Config                                | 68                                                                                      |
+| Types                                 | 45                                                                                      |
+| Evidence                              | 19                                                                                      |
+| UI                                    | 17                                                                                      |
+| Approval engine                       | 13                                                                                      |
+| Supabase                              | 11                                                                                      |
+| Ledger                                | 8                                                                                       |
+| Marketing                             | 6                                                                                       |
+| Database suite                        | Fresh migrations with `service_role nobypassrls`, every `tests/database/*.test.sql`     |
+| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                   |
+| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                   |
+| Strict Auth/PostgREST parity          | Green                                                                                   |
+| Container API/browser acceptance (W0) | Green                                                                                   |
+| Python                                | Agent runtime, temporal workers and model gateway suites green                          |
+| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                       |
+
+The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
+
+**Operator decisions in force (2026-09-25):**
+
+1. The three held historical secrets stay held, not ignored, until the operator confirms rotation. They are two JWT secrets in `infra/docker/docker-compose.supabase.yml` (commit `7719f0c`) and `APPROVAL_SIGNING_KEY` in `infra/docker/environments/.env.preprod.example` (commit `7631b1f`).
+2. `main` branch protection is done.
+3. Stale branches are deleted together after plan completion.
+4. Dependabot #32–36 are closed out and their updates landed via PR #57. `tailwindcss` 4 and ESLint 10 are held back: the major-version migration and `scopeManager.addGlobals` breakage respectively.
+5. `saml2_bearer` is a TODO, not a blocker.
+6. Sector pack #1 will be chosen when W7 is reached.
+7. Promotion to `main` is paused.
+
+When operator input is missing, take the recommended option and record the assumptions in the revision's audit.
+
+**Standing constraints:**
+
+- Never provision or apply cloud resources.
+- Keep all of the following:
+  - tenant-bound approval with dry-run and validated rollback (BR-2);
+  - Sudhaar holds no write credentials;
+  - the append-only ledger, written only via `append_ledger`;
+  - WORM Compliance mode;
+  - `ap-south-1` data locality.
+- Never print credentials.
+- Every new ledger action must also be added to `LedgerActionType` in `packages/types/src/enums.ts`, or the compatibility test fails.
+- E2E workload fixtures use `registerWorkload()`. The `manage_workload_identity` RPC is the only registration path.
+
+**Recommended next order:**
+
+1. **W5 execution loop (XL):** an executor that consumes the dispatch outbox under a signed token, a dry-run simulator, rollback, and post-verification. It adds the 5 execution-detail tables, with PRD B.10 as the acceptance criteria. Its write path needs a W4.6/W4.7 write adapter bound to the approved plan.
+2. **W6 continuous compliance (XL):** scheduler and scheduled drift and discovery, reusing `onboarding_estate_drift` and `/internal/discovery/run`; standing policies; monitor health; 4 tables.
+3. **W8 rights, consent, breach, and review/release (XL).**
+4. **W7 multi-regulator tables and packs (L)**, which needs the sector pack #1 decision.
+5. **W9 performance and restore drills, and W10 on-prem (L each)**, which need a deployment.
+
+Smaller leftovers:
+
+- MySQL SQL binding;
+- an RDS staging acceptance run (operator);
+- vendor-verified descriptors (need client tenants);
+- `saml2_bearer`;
+- W3.5 derivation edges (need a lineage model), live updates and branded export;
+- a web view of discovery runs;
+- five web screens that still fabricate values (queued task);
+- the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
+- Bandit medium findings in the test-harness SQL.
 
 **Revision 88 — tool registry UI and PNG graph export (Claude cloud session):** the onboarding setup page gains a **Connector tools** card. It lists each active connector's registered tool versions, with their class and the first characters of the pinned description hash, and offers connector managers an append-only registration form. Registering still authorizes nothing; use needs a live grant whose scope matches the tool's class. The estate graph adds **Export PNG**: the same SVG rasterised at 2x in the browser, alongside Export SVG. Browser journeys now register a read tool through the page, check that a write tool on a reference binding is refused with 409, and check that both exports download. W3.5 still open: derivation edges (these need a data-lineage model and are recorded as a W6/W8 dependency), live updates, and branded export. No migration was added.
 
