@@ -1,5 +1,15 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
+**Revision 84 — W4.6 first real SQL binding, read side (Claude cloud session):** migration 0058 adds `resolve_sql_read_grant`, which resolves a Drishti read grant only for cloud-IAM `sql` descriptors and re-reads every lifecycle input and the kill switch on each call. `PostgresReadConnector` runs each call in a rolled-back `READ ONLY` transaction with deadline-bounded timeouts, and refuses privileged roles or any role with write privilege before reading. `enumerate` returns visible relations and columns with category hints; `sample` returns only counts of value shapes, never values; raw `read` is refused. `postgresSessions` allows only `ap-south-1` endpoints with a pinned CA and verified TLS, using a 15-minute RDS IAM token per connection. `SqlDiscoveryGate` verifies the SVID and re-resolves the grant before and after each call. A new CI job, "Live SQL binding (W4.6)", runs against a real PostgreSQL 16. Operator input was not received; assumptions and remaining scope are in [audit 73](audits/73-first-sql-binding-review-2026-09-25.md). Still to do: endpoint configuration store, invocation route, RDS staging acceptance (operator), and MySQL. Schema is **0058 / 59 migrations / 60 public tables**; the next migration is **0059**. Next in plan order: W4.7 REST/OpenAPI and GraphQL transports.
+
+**Operator action — W4.6 RDS staging acceptance (pending, not authorized in-session):** in `ap-south-1`:
+
+1. Provision a staging PostgreSQL with IAM authentication enabled.
+2. Create a database role granted `rds_iam` and SELECT only, with no INSERT, UPDATE, DELETE, TRUNCATE, CREATEROLE, CREATEDB or BYPASSRLS.
+3. Allow the Drishti workload role `rds-db:connect` for that user only.
+4. Record the endpoint (host, port, database, user, pinned RDS CA bundle) under the connector's `endpointRef`.
+5. Run discovery through `SqlDiscoveryGate` and attach the result to audit 73.
+
 **Revision 83 — W4.5 internal tool registry (Claude cloud session):** migration 0057 adds `register_connector_tool`, which is audited and append-only, makes read/write classification mandatory, and allows no write tools on sandbox bindings. It also adds `verify_connector_tool`, which rejects a tool unless its description matches the SHA-256 pinned at registration. `ToolRegistry` in the BFF refuses unregistered, reclassified or changed tools, and any tool whose class does not match the lease scope. `GET` and `POST /v1/connectors/:id/tools` expose it. See [audit 72](audits/72-internal-tool-registry-review-2026-09-24.md). Schema is **0057 / 58 migrations / 60 public tables**; the next migration is **0058**. Next in plan order: W4.6, the first real SQL binding.
 
 **Revision 82 — W4.4 grant issuance and enforcement (Claude cloud session):**
