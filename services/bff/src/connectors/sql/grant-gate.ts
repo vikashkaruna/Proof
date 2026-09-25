@@ -61,13 +61,14 @@ export class SqlDiscoveryGate {
     return parsed.success && parsed.data.spiffeId === spiffeId ? parsed.data : null;
   }
 
-  private async run(
+  /** Runs one operation and returns the result with the grant it ran under. */
+  async discover(
     request: SqlDiscoveryRequest,
     work: (
       connector: PostgresReadConnector,
       context: ConnectorInvocation,
     ) => Promise<ConnectorResult>,
-  ): Promise<ConnectorResult> {
+  ): Promise<{ result: ConnectorResult; grant: SqlGrant }> {
     const now = (this.deps.now ?? Date.now)();
     let workload;
     try {
@@ -99,14 +100,18 @@ export class SqlDiscoveryGate {
       after.connectorVersion !== grant.connectorVersion
     )
       throw new SqlConnectorRefused('grant_changed');
-    return result;
+    return { result, grant };
   }
 
   enumerate(request: SqlDiscoveryRequest, cursor?: string): Promise<ConnectorResult> {
-    return this.run(request, (connector, context) => connector.enumerate(context, cursor));
+    return this.discover(request, (connector, context) =>
+      connector.enumerate(context, cursor),
+    ).then((outcome) => outcome.result);
   }
 
   sample(request: SqlDiscoveryRequest, resource: string, limit: number): Promise<ConnectorResult> {
-    return this.run(request, (connector, context) => connector.sample(context, resource, limit));
+    return this.discover(request, (connector, context) =>
+      connector.sample(context, resource, limit),
+    ).then((outcome) => outcome.result);
   }
 }
