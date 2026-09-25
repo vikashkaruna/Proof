@@ -36,13 +36,13 @@ export const RestEndpointSchema = z
   .strict();
 export type RestEndpoint = z.infer<typeof RestEndpointSchema>;
 
-type Fetch = (input: string, init: RequestInit) => Promise<Response>;
-const MAX_BODY = 1024 * 1024;
+export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
+export const MAX_BODY = 1024 * 1024;
 const MAX_SAMPLE = 100;
 const MAX_FIELDS = 200;
-const CURSOR = /^[A-Za-z0-9._~+/=-]{1,500}$/;
+export const CURSOR = /^[A-Za-z0-9._~+/=-]{1,500}$/;
 
-function pointer(document: unknown, path: string): unknown {
+export function pointer(document: unknown, path: string): unknown {
   let current = document;
   for (const segment of path.slice(1).split('/')) {
     if (current === null || typeof current !== 'object' || Array.isArray(current)) return undefined;
@@ -53,7 +53,7 @@ function pointer(document: unknown, path: string): unknown {
 }
 
 /** Flattens an item into dotted field paths, depth 3, arrays summarised. */
-function flatten(item: unknown, prefix = '', depth = 0, out = new Map<string, unknown>()) {
+export function flatten(item: unknown, prefix = '', depth = 0, out = new Map<string, unknown>()) {
   if (item === null || typeof item !== 'object' || Array.isArray(item) || depth >= 3) {
     if (prefix) out.set(prefix, Array.isArray(item) ? null : item);
     return out;
@@ -63,6 +63,64 @@ function flatten(item: unknown, prefix = '', depth = 0, out = new Map<string, un
     flatten(value, prefix ? `${prefix}.${key}` : key, depth + 1, out);
   }
   return out;
+}
+
+/** One bounded JSON exchange with a broker token. Shared by REST and GraphQL.
+ * No redirects, deadline-bound, JSON only, 1 MiB cap; the token is destroyed
+ * after the call and bodies never enter errors. */
+export async function requestJson(
+  fetchImpl: Fetch,
+  url: URL,
+  token: AcquiredToken,
+  deadline: number,
+  now: () => number,
+  init: { method: 'GET' } | { method: 'POST'; body: string },
+): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await token.withValue((value) =>
+      fetchImpl(url.toString(), {
+        ...init,
+        redirect: 'error',
+        headers: {
+          authorization: `Bearer ${value}`,
+          accept: 'application/json',
+          ...(init.method === 'POST' ? { 'content-type': 'application/json' } : {}),
+        },
+        signal: AbortSignal.timeout(Math.max(1, deadline - now())),
+      }),
+    );
+  } catch {
+    throw new RestConnectorRefused('transport');
+  } finally {
+    token.destroy();
+  }
+  const refuse = async (reason: string): Promise<never> => {
+    await response.body?.cancel().catch(() => undefined);
+    throw new RestConnectorRefused(reason);
+  };
+  if (response.status !== 200) return refuse(`status_${response.status}`);
+  if (!/^application\/([a-z.+-]*\+)?json\b/i.test(response.headers.get('content-type') ?? ''))
+    return refuse('content_type');
+  if (Number(response.headers.get('content-length') ?? '0') > MAX_BODY) return refuse('too_large');
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY) {
+      await reader.cancel().catch(() => undefined);
+      throw new RestConnectorRefused('too_large');
+    }
+    chunks.push(value);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new RestConnectorRefused('malformed');
+  }
 }
 
 /**
@@ -108,42 +166,14 @@ export class RestReadConnector implements ReadConnector {
       if (!resource.cursor || !CURSOR.test(cursor)) throw new RestConnectorRefused('cursor');
       url.searchParams.set(resource.cursor.param, cursor);
     }
-    const token = await this.token(context);
-    let response: Response;
-    try {
-      response = await token.withValue((value) =>
-        this.fetchImpl(url.toString(), {
-          method: 'GET',
-          redirect: 'error',
-          headers: { authorization: `Bearer ${value}`, accept: 'application/json' },
-          signal: AbortSignal.timeout(Math.max(1, deadline - this.now())),
-        }),
-      );
-    } catch {
-      throw new RestConnectorRefused('transport');
-    } finally {
-      token.destroy();
-    }
-    if (response.status !== 200) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new RestConnectorRefused(`status_${response.status}`);
-    }
-    if (!/^application\/([a-z.+-]*\+)?json\b/i.test(response.headers.get('content-type') ?? '')) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new RestConnectorRefused('content_type');
-    }
-    const declared = Number(response.headers.get('content-length') ?? '0');
-    if (declared > MAX_BODY) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new RestConnectorRefused('too_large');
-    }
-    const body = await this.bounded(response);
-    let document: unknown;
-    try {
-      document = JSON.parse(body);
-    } catch {
-      throw new RestConnectorRefused('malformed');
-    }
+    const document = await requestJson(
+      this.fetchImpl,
+      url,
+      await this.token(context),
+      deadline,
+      this.now,
+      { method: 'GET' },
+    );
     const items = pointer(document, resource.itemsPointer);
     if (!Array.isArray(items)) throw new RestConnectorRefused('malformed');
     const next = resource.cursor ? pointer(document, resource.cursor.responsePointer) : undefined;
@@ -151,24 +181,6 @@ export class RestReadConnector implements ReadConnector {
       items: items.slice(0, pageSize),
       ...(typeof next === 'string' && CURSOR.test(next) ? { next } : {}),
     };
-  }
-
-  private async bounded(response: Response): Promise<string> {
-    const reader = response.body?.getReader();
-    if (!reader) return '';
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_BODY) {
-        await reader.cancel().catch(() => undefined);
-        throw new RestConnectorRefused('too_large');
-      }
-      chunks.push(value);
-    }
-    return Buffer.concat(chunks).toString('utf8');
   }
 
   /** Declared resources with the field paths observed in one small page. */

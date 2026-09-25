@@ -21,6 +21,23 @@ const restResource = z
     cursor: z.object({ param: identifier, responsePointer: jsonPointer }).strict().optional(),
   })
   .strict();
+// GraphQL resources declare a selection; Axiom generates the query document.
+const gqlName = z.string().regex(/^[_A-Za-z][_0-9A-Za-z]{0,63}$/);
+const graphqlResource = z
+  .object({
+    root: gqlName,
+    pageSizeArg: gqlName,
+    cursorArg: gqlName.optional(),
+    itemsPath: z.array(gqlName).max(3),
+    cursorPath: z.array(gqlName).min(1).max(3).optional(),
+    fields: z
+      .array(z.string().regex(/^[_A-Za-z][_0-9A-Za-z]{0,63}(\.[_A-Za-z][_0-9A-Za-z]{0,63}){0,2}$/))
+      .min(1)
+      .max(100)
+      .refine((fields) => new Set(fields).size === fields.length),
+  })
+  .strict()
+  .refine((r) => (r.cursorArg === undefined) === (r.cursorPath === undefined));
 const writeOperation = z
   .object({
     operation: identifier,
@@ -81,6 +98,15 @@ export const ConnectorManifestSchema = z
       })
       .strict()
       .optional(),
+    graphql: z
+      .object({
+        path: restPath,
+        resources: z
+          .record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), graphqlResource)
+          .refine((r) => Object.keys(r).length >= 1 && Object.keys(r).length <= 50),
+      })
+      .strict()
+      .optional(),
     rateLimit: z
       .object({
         requestsPerSecond: z.number().int().min(1).max(1000),
@@ -99,6 +125,11 @@ export const ConnectorManifestSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'REST descriptors declare their resources; other transports must not',
+      });
+    if ((m.transport === 'graphql') !== (m.graphql !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'GraphQL descriptors declare their resources; other transports must not',
       });
     if ((m.auth === 'legacy_static') !== (m.assurance === 'low'))
       ctx.addIssue({
