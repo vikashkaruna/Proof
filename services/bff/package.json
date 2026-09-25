@@ -18,6 +18,7 @@
   "dependencies": {
     "@aws-crypto/crc32c": "^5.2.0",
     "@aws-sdk/client-kms": "^3.1137.0",
+    "@aws-sdk/rds-signer": "^3.1137.0",
     "@axiom/approval-engine": "workspace:*",
     "@axiom/config": "workspace:*",
     "@axiom/control-library": "workspace:*",
@@ -33,12 +34,14 @@
     "@supabase/supabase-js": "^2.116.0",
     "hono": "^4.13.7",
     "jose": "6.2.12",
+    "pg": "^8.23.0",
     "yaml": "2.8.3",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@axiom/eslint-config": "workspace:*",
     "@types/node": "^26.5.1",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
