@@ -3,6 +3,41 @@ import { ConnectorTransportSchema, TargetBindingSchema } from './connectors';
 
 const identifier = z.string().regex(/^[a-z][a-z0-9_.-]{0,79}$/);
 const readOperation = z.object({ operation: identifier, mutating: z.literal(false) }).strict();
+// REST resources are literal, reviewed GET paths: no templating, no query text.
+const restPath = z
+  .string()
+  .max(300)
+  .regex(/^(\/[A-Za-z0-9._~-]+)+$/)
+  .refine((path) => !path.split('/').some((segment) => segment === '.' || segment === '..'));
+const jsonPointer = z
+  .string()
+  .max(200)
+  .regex(/^(\/[A-Za-z0-9_-]+){1,8}$/);
+const restResource = z
+  .object({
+    path: restPath,
+    itemsPointer: jsonPointer,
+    pageSizeParam: identifier,
+    cursor: z.object({ param: identifier, responsePointer: jsonPointer }).strict().optional(),
+  })
+  .strict();
+// GraphQL resources declare a selection; Axiom generates the query document.
+const gqlName = z.string().regex(/^[_A-Za-z][_0-9A-Za-z]{0,63}$/);
+const graphqlResource = z
+  .object({
+    root: gqlName,
+    pageSizeArg: gqlName,
+    cursorArg: gqlName.optional(),
+    itemsPath: z.array(gqlName).max(3),
+    cursorPath: z.array(gqlName).min(1).max(3).optional(),
+    fields: z
+      .array(z.string().regex(/^[_A-Za-z][_0-9A-Za-z]{0,63}(\.[_A-Za-z][_0-9A-Za-z]{0,63}){0,2}$/))
+      .min(1)
+      .max(100)
+      .refine((fields) => new Set(fields).size === fields.length),
+  })
+  .strict()
+  .refine((r) => (r.cursorArg === undefined) === (r.cursorPath === undefined));
 const writeOperation = z
   .object({
     operation: identifier,
@@ -52,6 +87,26 @@ export const ConnectorManifestSchema = z
       })
       .strict(),
     dataCategoryHints: z.array(identifier).max(40),
+    /** Where the descriptor's API shape comes from. Reference descriptors are
+     * exercised against Axiom's reference service, not a vendor tenant. */
+    provenance: z.enum(['reference', 'vendor-verified']).optional(),
+    rest: z
+      .object({
+        resources: z
+          .record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), restResource)
+          .refine((r) => Object.keys(r).length >= 1 && Object.keys(r).length <= 50),
+      })
+      .strict()
+      .optional(),
+    graphql: z
+      .object({
+        path: restPath,
+        resources: z
+          .record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), graphqlResource)
+          .refine((r) => Object.keys(r).length >= 1 && Object.keys(r).length <= 50),
+      })
+      .strict()
+      .optional(),
     rateLimit: z
       .object({
         requestsPerSecond: z.number().int().min(1).max(1000),
@@ -65,6 +120,16 @@ export const ConnectorManifestSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'Non-production bindings cannot declare write operations',
+      });
+    if ((m.transport === 'rest') !== (m.rest !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'REST descriptors declare their resources; other transports must not',
+      });
+    if ((m.transport === 'graphql') !== (m.graphql !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'GraphQL descriptors declare their resources; other transports must not',
       });
     if ((m.auth === 'legacy_static') !== (m.assurance === 'low'))
       ctx.addIssue({

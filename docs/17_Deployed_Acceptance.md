@@ -1,5 +1,107 @@
 # Deployed acceptance: API and browser parity
 
+## Session close-out and handoff — Revision 88 (2026-09-25)
+
+**Where to continue:**
+
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 88, merge commit `cfe985d` of PR #56).
+- Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–88 and the dependency updates (PR #57). Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
+
+**State at close:**
+
+- Schema is **0000–0059: 60 migrations, 61 public tables**. The next migration is **0060**; never edit an applied migration.
+- Latest audit is **76**.
+- No PRs are open and no check-ins are scheduled.
+
+**Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
+
+| Suite                                 | Result                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------- |
+| BFF (vitest)                          | 1089 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| Web                                   | 89                                                                                      |
+| MFA                                   | 180                                                                                     |
+| Control library                       | 83                                                                                      |
+| Config                                | 68                                                                                      |
+| Types                                 | 45                                                                                      |
+| Evidence                              | 19                                                                                      |
+| UI                                    | 17                                                                                      |
+| Approval engine                       | 13                                                                                      |
+| Supabase                              | 11                                                                                      |
+| Ledger                                | 8                                                                                       |
+| Marketing                             | 6                                                                                       |
+| Database suite                        | Fresh migrations with `service_role nobypassrls`, every `tests/database/*.test.sql`     |
+| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                   |
+| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                   |
+| Strict Auth/PostgREST parity          | Green                                                                                   |
+| Container API/browser acceptance (W0) | Green                                                                                   |
+| Python                                | Agent runtime, temporal workers and model gateway suites green                          |
+| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                       |
+
+The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
+
+**Operator decisions in force (2026-09-25):**
+
+1. The three held historical secrets stay held, not ignored, until the operator confirms rotation. They are two JWT secrets in `infra/docker/docker-compose.supabase.yml` (commit `7719f0c`) and `APPROVAL_SIGNING_KEY` in `infra/docker/environments/.env.preprod.example` (commit `7631b1f`).
+2. `main` branch protection is done.
+3. Stale branches are deleted together after plan completion.
+4. Dependabot #32–36 are closed out and their updates landed via PR #57. `tailwindcss` 4 and ESLint 10 are held back: the major-version migration and `scopeManager.addGlobals` breakage respectively.
+5. `saml2_bearer` is a TODO, not a blocker.
+6. Sector pack #1 will be chosen when W7 is reached.
+7. Promotion to `main` is paused.
+
+When operator input is missing, take the recommended option and record the assumptions in the revision's audit.
+
+**Standing constraints:**
+
+- Never provision or apply cloud resources.
+- Keep all of the following:
+  - tenant-bound approval with dry-run and validated rollback (BR-2);
+  - Sudhaar holds no write credentials;
+  - the append-only ledger, written only via `append_ledger`;
+  - WORM Compliance mode;
+  - `ap-south-1` data locality.
+- Never print credentials.
+- Every new ledger action must also be added to `LedgerActionType` in `packages/types/src/enums.ts`, or the compatibility test fails.
+- E2E workload fixtures use `registerWorkload()`. The `manage_workload_identity` RPC is the only registration path.
+
+**Recommended next order:**
+
+1. **W5 execution loop (XL):** an executor that consumes the dispatch outbox under a signed token, a dry-run simulator, rollback, and post-verification. It adds the 5 execution-detail tables, with PRD B.10 as the acceptance criteria. Its write path needs a W4.6/W4.7 write adapter bound to the approved plan.
+2. **W6 continuous compliance (XL):** scheduler and scheduled drift and discovery, reusing `onboarding_estate_drift` and `/internal/discovery/run`; standing policies; monitor health; 4 tables.
+3. **W8 rights, consent, breach, and review/release (XL).**
+4. **W7 multi-regulator tables and packs (L)**, which needs the sector pack #1 decision.
+5. **W9 performance and restore drills, and W10 on-prem (L each)**, which need a deployment.
+
+Smaller leftovers:
+
+- MySQL SQL binding;
+- an RDS staging acceptance run (operator);
+- vendor-verified descriptors (need client tenants);
+- `saml2_bearer`;
+- W3.5 derivation edges (need a lineage model), live updates and branded export;
+- a web view of discovery runs;
+- five web screens that still fabricate values (queued task);
+- the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
+- Bandit medium findings in the test-harness SQL.
+
+## Revisions 75–88 — deployed acceptance status (2026-09-25)
+
+**No deployed acceptance has been run for Revisions 75–88.** Every result below comes from CI or local runs against disposable containers. None was run against a provisioned environment, because cloud provisioning is not authorized in-session.
+
+| Item                                     | CI or source evidence                                         | Deployed acceptance still owed                                                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0.1 API and browser parity              | Container API/browser acceptance and strict parity jobs green | Two remote deployments compared by the manual lane                                                                                                                    |
+| W1 invitations (Rev 78)                  | Persona journeys green                                        | Real mail provider and domain delivery                                                                                                                                |
+| W3 onboarding and sustenance (Rev 79–80) | Database suite and persona journeys                           | None beyond W0.1                                                                                                                                                      |
+| W4.3 SPIRE workload identity             | Isolated, protected-host and native-runner jobs green         | SPIRE on the target cluster                                                                                                                                           |
+| W4.6 SQL discovery (Rev 84, 87)          | Live PostgreSQL 16 job green                                  | RDS in `ap-south-1` with an `rds_iam` SELECT-only role and pinned CA; enable `/internal/discovery/run` with SPIRE trust and broker KMS configuration (runbook doc 16) |
+| W4.7 REST and GraphQL (Rev 85–86)        | Loopback reference servers                                    | Vendor tenants for vendor-verified descriptors                                                                                                                        |
+| W8 WORM retention                        | Not provable in CI                                            | Object Lock Compliance bucket evidence                                                                                                                                |
+
+Promotion to `main` is paused by the operator; staging holds Revisions 85–88.
+
 ## Revision 74 — reviewed controller credential issuance
 
 **Verified baseline:** Revision 73 is complete on staging `5efb40d8d6b6e0a0788b961d028d0203fa608e97`; [CI 35890118690](https://github.com/vikashkaruna/Proof/actions/runs/35890118690) passed all **19 applicable jobs and 13 exact-revision reports**. [PR 39](https://github.com/vikashkaruna/Proof/pull/39) is merged. The full roadmap remains active and incomplete; continue in plan order after each green milestone.

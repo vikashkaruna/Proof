@@ -1,4 +1,7 @@
 import type { ConnectorInvocation, ConnectorResult, ReadConnector } from '@axiom/types';
+import { categoryHints, profileField } from '../profile.js';
+
+export { categoryHints };
 
 /** The subset of a node-postgres client this adapter uses. */
 export interface SqlSession {
@@ -22,34 +25,6 @@ const STATEMENT_TIMEOUT_MS = 5000;
 const RESOURCE = /^([a-z_][a-z0-9_$]{0,62})\.([a-z_][a-z0-9_$]{0,62})$/;
 // A catalogue cursor is the last "schema.table" returned, never SQL.
 const CURSOR = RESOURCE;
-
-/** Column-name hints only; a hint is a prompt for human review, not a finding. */
-const NAME_HINTS: readonly [RegExp, string][] = [
-  [/e_?mail/, 'contact'],
-  [/phone|mobile|msisdn/, 'contact'],
-  [/address|pincode|pin_code|postal|zip/, 'contact'],
-  [
-    /aadhaa?r|\bpan\b|pan_(no|number)|passport|voter|driving_?licen[cs]e|dob|date_of_birth|birth/,
-    'identity',
-  ],
-  [/first_?name|last_?name|full_?name|^name$|surname/, 'identity'],
-  [/account_?(no|number)|iban|ifsc|card|upi|salary|income/, 'financial'],
-  [/diagnos|medical|health|blood|allerg|prescription/, 'health'],
-  [/employee|designation|department|payroll/, 'employment'],
-  [/guardian|parent|minor|child/, 'children'],
-];
-export function categoryHints(column: string): string[] {
-  const name = column.toLowerCase();
-  return [...new Set(NAME_HINTS.filter(([re]) => re.test(name)).map(([, key]) => key))].sort();
-}
-
-/** Value detectors. Only counts leave the adapter; matched values never do. */
-const DETECTORS: readonly [string, RegExp][] = [
-  ['email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/],
-  ['phone_in', /^(\+?91[\s-]?)?[6-9]\d{9}$/],
-  ['pan', /^[A-Z]{5}\d{4}[A-Z]$/],
-  ['aadhaar_like', /^[2-9]\d{3}\s?\d{4}\s?\d{4}$/],
-];
 
 function quoteIdent(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
@@ -183,23 +158,11 @@ export class PostgresReadConnector implements ReadConnector {
          from ${quoteIdent(schema)}.${quoteIdent(table)} limit ${limit}`,
       );
       const records = names.map((name, index) => {
-        const detected: Record<string, number> = {};
-        let nonNull = 0;
-        for (const row of rows) {
-          const value = row[`c${index}`];
-          if (value === null || value === undefined) continue;
-          nonNull += 1;
-          const text = String(value).trim();
-          for (const [key, re] of DETECTORS)
-            if (re.test(text)) detected[key] = (detected[key] ?? 0) + 1;
-        }
-        return {
-          column: name,
-          sampled: rows.length,
-          nonNull,
-          detected,
-          categoryHints: categoryHints(name),
-        };
+        const { field, ...profile } = profileField(
+          name,
+          rows.map((row) => row[`c${index}`]),
+        );
+        return { column: field, ...profile };
       });
       return { records };
     });

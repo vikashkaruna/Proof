@@ -3,7 +3,7 @@ import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { SetupWizard, type WizardEstate, type WizardSystem } from './setup-wizard';
-import { GrantReview } from './sustenance';
+import { GrantReview, ToolRegistry } from './sustenance';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,6 +88,15 @@ export default async function EstateSetupPage() {
               spiffeId: w.spiffe_id,
             })),
           }}
+        />
+      )}
+      {!failed && (
+        <ToolRegistry
+          tenantId={ctx.tenantId}
+          canManage={can(Capability.CONNECTOR_MANAGE, { role: ctx.role })}
+          connectors={(connectors.data ?? [])
+            .filter((c) => c.status === 'active')
+            .map((c) => ({ id: c.id, name: c.name }))}
         />
       )}
     </div>
