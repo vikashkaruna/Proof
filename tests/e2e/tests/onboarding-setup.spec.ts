@@ -235,4 +235,31 @@ test('an owner re-attests agent access: keep schedules the next review, revoke r
   };
   expect(queue.data.find((g) => g.id === grants[0])?.lastAttestedAt).toBeTruthy();
   expect(queue.data.some((g) => g.id === grants[1])).toBe(false);
+
+  // W4.5: register a read tool version through the page; it is listed with its pin.
+  const tools = page.getByTestId('tool-registry');
+  await tools.getByLabel('Tool connector').selectOption({ label: `Access reader ${suffix}` });
+  await tools.locator('summary').click();
+  await tools.getByLabel('Tool name').fill(`crm.lookup_${suffix}`);
+  await tools.getByLabel('Version').fill('1.0.0');
+  await tools.getByLabel('Description (pinned by hash)').fill('Looks up a contact by id.');
+  const registered = page.waitForResponse(
+    (r) => r.url().endsWith(`/connectors/${connectorId}/tools`) && r.request().method() === 'POST',
+  );
+  await tools.getByRole('button', { name: 'Register tool' }).click();
+  expect((await registered).status()).toBe(201);
+  await expect(tools.getByRole('list', { name: 'Registered tools' })).toContainText(
+    `crm.lookup_${suffix}@1.0.0 · read · pinned`,
+  );
+  // Write tools cannot be registered on a reference binding.
+  const writeTool = await page.request.post(`/api/bff/v1/connectors/${connectorId}/tools`, {
+    data: {
+      toolName: `crm.update_${suffix}`,
+      toolVersion: '1.0.0',
+      operationClass: 'write',
+      description: 'Updates a contact.',
+      inputSchema: { type: 'object' },
+    },
+  });
+  expect(writeTool.status()).toBe(409);
 });

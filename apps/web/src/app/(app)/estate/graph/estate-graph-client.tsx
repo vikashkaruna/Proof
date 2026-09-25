@@ -27,15 +27,49 @@ export function EstateGraph({ input }: { input: GraphInput }) {
   const related = graph.edges.filter((e) => e.from === selected || e.to === selected);
   const label = (id: string) => graph.nodes.find((n) => n.id === id)?.label ?? id;
 
+  function download(url: string, name: string) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+  }
+
   function exportSvg() {
     if (!svg.current) return;
     const text = new XMLSerializer().serializeToString(svg.current);
     const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'estate-graph.svg';
-    link.click();
+    download(url, 'estate-graph.svg');
     URL.revokeObjectURL(url);
+  }
+
+  /** Rasterises the same SVG at 2x on a white background. The graph holds
+   * only names already visible on the page; nothing leaves the browser. */
+  function exportPng() {
+    if (!svg.current) return;
+    const text = new XMLSerializer().serializeToString(svg.current);
+    const source = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = WIDTH * 2;
+      canvas.height = height * 2;
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.scale(2, 2);
+        context.drawImage(image, 0, 0);
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          download(url, 'estate-graph.png');
+          URL.revokeObjectURL(url);
+        }, 'image/png');
+      }
+      URL.revokeObjectURL(source);
+    };
+    image.onerror = () => URL.revokeObjectURL(source);
+    image.src = source;
   }
 
   return (
@@ -98,6 +132,9 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         </Button>
         <Button type="button" onClick={exportSvg}>
           Export SVG
+        </Button>
+        <Button type="button" onClick={exportPng}>
+          Export PNG
         </Button>
       </div>
       <p className="text-sm" data-testid="graph-summary">

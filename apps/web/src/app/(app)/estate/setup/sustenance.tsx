@@ -22,6 +22,7 @@ async function get<T>(tenantId: string, path: string): Promise<Load<T>> {
 function useBff<T>(tenantId: string, path: string, revision: number): Load<T> {
   const [loaded, setLoaded] = useState<Load<T>>({ state: 'loading' });
   useEffect(() => {
+    if (!path) return;
     let active = true;
     void get<T>(tenantId, path).then((result) => {
       if (active) setLoaded(result);
@@ -218,6 +219,127 @@ export function GrantReview({
               </li>
             ))}
           </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+type RegisteredTool = {
+  id: string;
+  tool_name: string;
+  tool_version: string;
+  operation_class: 'read' | 'write';
+  description_sha256: string;
+  created_at: string;
+};
+
+/** W4.5 internal tool registry: registered tools per connector and an
+ * append-only registration form. Registering authorizes nothing by itself. */
+export function ToolRegistry({
+  tenantId,
+  canManage,
+  connectors,
+}: {
+  tenantId: string;
+  canManage: boolean;
+  connectors: { id: string; name: string }[];
+}) {
+  const [connectorId, setConnectorId] = useState(connectors[0]?.id ?? '');
+  const [revision, setRevision] = useState(0);
+  const tools = useBff<RegisteredTool[]>(
+    tenantId,
+    connectorId ? `/connectors/${connectorId}/tools` : '',
+    revision,
+  );
+  return (
+    <Card data-testid="tool-registry">
+      <CardHeader>
+        <CardTitle>Connector tools</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        {connectors.length === 0 ? (
+          <p>No active connectors. Register a connector before its tools.</p>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1">
+              Connector
+              <select
+                aria-label="Tool connector"
+                value={connectorId}
+                onChange={(e) => setConnectorId(e.target.value)}
+                className={fieldClass}
+              >
+                {connectors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {tools.state === 'loading' ? (
+              <p role="status">Loading tools…</p>
+            ) : tools.state === 'error' ? (
+              <p role="alert">Tools could not be loaded. Refresh to try again.</p>
+            ) : tools.data.length === 0 ? (
+              <p>No tools registered for this connector.</p>
+            ) : (
+              <ul className="flex flex-col gap-1" aria-label="Registered tools">
+                {tools.data.map((t) => (
+                  <li key={t.id}>
+                    <span className="font-medium">
+                      {t.tool_name}@{t.tool_version}
+                    </span>{' '}
+                    · {t.operation_class === 'write' ? 'write' : 'read'} · pinned{' '}
+                    <code>{t.description_sha256.slice(0, 12)}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canManage && (
+              <details>
+                <summary>Register a tool version</summary>
+                <MutationForm
+                  tenantId={tenantId}
+                  path={`/connectors/${connectorId}/tools`}
+                  method="POST"
+                  label="Register tool"
+                  onSuccess={() => setRevision((n) => n + 1)}
+                  body={(f) => ({
+                    toolName: String(f.get('toolName') ?? ''),
+                    toolVersion: String(f.get('toolVersion') ?? ''),
+                    operationClass: String(f.get('operationClass') ?? 'read'),
+                    description: String(f.get('description') ?? ''),
+                    inputSchema: { type: 'object' },
+                  })}
+                >
+                  <label className="flex flex-col gap-1">
+                    Tool name
+                    <input name="toolName" required className={fieldClass} />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    Version
+                    <input name="toolVersion" required className={fieldClass} />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    Class
+                    <select name="operationClass" className={fieldClass}>
+                      <option value="read">Read</option>
+                      <option value="write">Write</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    Description (pinned by hash)
+                    <textarea name="description" required maxLength={4000} className={fieldClass} />
+                  </label>
+                  <p>
+                    A registered version cannot be changed. Using a tool still needs a live grant
+                    whose scope matches its class.
+                  </p>
+                </MutationForm>
+              </details>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
