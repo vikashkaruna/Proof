@@ -1,5 +1,59 @@
 # Implementation progress — W0 through W4
 
+## Build status board — Revision 86 (2026-09-25)
+
+This board replaces the older W-status table below as the current summary. Effort covers implementing and testing (unit, database, live and browser), measured in session revisions. In this session a revision, including its PR, merge and promotion, cost about **$5–7 of cloud credit**. The sizes are:
+
+- **S**: at most 1 revision.
+- **M**: 2–3 revisions.
+- **L**: 4–6 revisions.
+- **XL**: 8 or more revisions.
+
+**Gate** names an outside dependency that no amount of code closes:
+
+- **Op**: operator provisioning or evidence;
+- **Fdr**: founder decision;
+- **Ten**: real client tenant.
+
+| Stream                                 | Status                   | Delivered (latest revision)                                                       | Pending                                                                                                       | Effort             | Gate                        |
+| -------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------- |
+| W0 Security and environment parity     | Code complete            | Security gates, strict parity, local code-scanning gate (Rev 75–77)               | Remote acceptance on two deployments; EKS CIDR policy                                                         | S                  | Op                          |
+| W1 Tenancy, RBAC, MFA, personas        | Code complete            | Invitations and mail adapter contract (Rev 78)                                    | Real mail delivery (provider and domain); deployed acceptance                                                 | S                  | Op                          |
+| W2 Data model                          | Partial                  | 0000–0058: 59 migrations, 60 public tables                                        | Tables owned by W5 (5), W6 (4), W7.3/7.4 (4), parity (4) and W8 (4)                                           | Inside each stream | —                           |
+| W3 Estate and onboarding               | Code complete            | Resumable wizard (Rev 79); drift and access re-attestation (Rev 80)               | Scheduled drift checks and notifications (moved to W6)                                                        | S                  | —                           |
+| W3.5 Estate graph                      | Partial                  | Graph, filters, SVG export (Rev 81)                                               | Derivation edges, live updates, PNG and branded export                                                        | M                  | —                           |
+| W4.1–W4.5 Connection framework core    | Code complete            | Registry, vault, broker, SPIFFE identity, grants (Rev 82), tool registry (Rev 83) | Tool registry UI; production broker composition                                                               | M                  | Op for SPIRE deployment     |
+| W4.6 First SQL binding                 | Partial                  | PostgreSQL read discovery, IAM tokens, grant gate, live CI (Rev 84)               | Endpoint configuration store and invocation route; MySQL; saving results to inventory; RDS staging acceptance | M                  | Op                          |
+| W4.7 REST and GraphQL                  | Partial (PR #56 in CI)   | REST and GraphQL read transports, five-system reference pack (Rev 85–86)          | `saml2_bearer` (needs an XML-DSig dependency); vendor-verified descriptors                                    | M                  | Fdr (dependency), Ten       |
+| W5 Execution loop                      | Authority layer only     | Signed tokens, claims, outbox, reconciliation, kill switch                        | Executor, dry-run simulator, rollback, post-verification, 5 tables, PRD B.10                                  | XL                 | Needs a W4.6/4.7 write path |
+| W6 Continuous compliance               | Pending                  | —                                                                                 | Scheduler, drift, standing policies, monitor health (W6.1–6.6), 4 tables                                      | XL                 | —                           |
+| W7 Control library and multi-regulator | Partial                  | 46 controls, count and parity gates                                               | Frameworks, mappings and sector packs (4 tables)                                                              | L                  | Fdr (sector pack #1)        |
+| W8 Reporting, evidence, rights         | Partial; retention gated | Evidence package, gap-scan report                                                 | DSAR and consent (W8.1), breach operations (W8.2), review and release (W8.3), WORM proof                      | XL                 | Op (WORM)                   |
+| W9 Test, audit, performance            | Partial                  | 52 CI checks green on main, live SQL job                                          | Load and NFR tests, restore drill (RPO/RTO)                                                                   | L                  | Needs a deployment          |
+| W10 On-prem                            | Partial                  | Helm renders, topology rehearsal                                                  | Deployed and air-gapped instance                                                                              | L                  | Op                          |
+
+**Test status at Revision 86:**
+
+- BFF: 1085 tests, plus 5 live PostgreSQL tests that run in CI.
+- Types: 45 tests.
+- Database suite: fresh migrations 0000–0058 with `service_role nobypassrls`.
+- Browser persona journeys, SPIRE workload-identity jobs, and Python runtime, temporal-worker and gateway suites.
+- CodeQL, Bandit, Trivy, semgrep and gitleaks.
+- Main was last promoted green at Revision 84, with all 52 checks passing.
+
+**Follow-ups:**
+
+- Five web screens still fabricate values; a task is queued.
+- Helm web and marketing still inject an unused `SUPABASE_SERVICE_KEY`.
+- Bandit medium findings remain in the test-harness SQL.
+
+**User actions:**
+
+- Confirm the three held historical secrets have been rotated.
+- Protect `main`.
+- Delete `claude/c-w3-5-onboarding-wizard-wip`.
+- Re-raise Dependabot PRs #32–36 against staging.
+
 **Revision 86 — W4.7 GraphQL read transport (Claude cloud session):** the manifest schema gains a `graphql` block. Each resource declares a root field, a page-size argument, an optional cursor argument and path, an items path, and up to 100 dotted field selections. It is required for `graphql` descriptors and forbidden for all other transports. `GraphqlReadConnector` generates the only query it sends, `query AxiomDiscovery(...)`, from those validated names. Values travel as variables; no descriptor or caller supplies query text, and no mutation can be expressed. It shares REST's bounded JSON transport (HTTPS origin, broker bearer token, no redirects, deadline timeout, 1 MiB cap). A response carrying GraphQL `errors` is refused without echoing it. `enumerate` reports observed and missing declared fields, `sample` returns value-shape counts only, and raw `read` is refused. The evidence runs against a loopback GraphQL reference server; see [audit 75](audits/75-graphql-transport-review-2026-09-25.md). Still to do in W4.7: `saml2_bearer` (this needs an XML-DSig signing dependency and a review decision), vendor-verified descriptors, and endpoint configuration plus invocation routes. No migration was added; schema stays at **0058 / 59 migrations / 60 public tables** and the next migration is **0059**.
 
 **Revision 85 — W4.7 REST/OpenAPI read transport and reference descriptor pack (Claude cloud session):** the manifest schema gains `provenance` and a declarative `rest.resources` block. It holds literal GET paths, an items pointer, a page-size parameter and an optional cursor; there is no templating, query text or code. `RestReadConnector` calls only declared resources, on an HTTPS origin, using the broker's bearer token. It allows no redirects, uses deadline-bound timeouts, and accepts only JSON under 1 MiB. `enumerate` returns field paths and `sample` returns value-shape counts; values and tokens never leave the adapter, and raw `read` is refused. The CRM, HRMS, data-warehouse, ticketing and code-repository descriptors ship with **reference** provenance on `reference-mock`, and are exercised over real HTTP against the reference service. Operator input was not received; see [audit 74](audits/74-rest-transport-review-2026-09-25.md). Still to do: GraphQL, `saml2_bearer`, vendor-verified descriptors (these need client tenants), and endpoint configuration plus invocation routes (shared with W4.6). No migration was added; schema stays at **0058 / 59 migrations / 60 public tables** and the next migration is **0059**. Next in plan order: finish W4.7 (GraphQL and `saml2_bearer`), then W5.
