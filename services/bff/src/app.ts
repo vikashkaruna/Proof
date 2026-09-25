@@ -1,3 +1,5 @@
+import { discoveryRoutes } from './routes/discovery.js';
+import type { DiscoveryService } from './connectors/discovery.js';
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
@@ -30,14 +32,20 @@ import { startRealtimeChannel } from './services/realtime.js';
  * Idempotency reads `user` and `tenantId` from the context, so it cannot run
  * before the two middlewares that set them.
  */
-export function createApp(options: { assessmentTools?: AssessmentTools } = {}) {
+export function createApp(
+  options: { assessmentTools?: AssessmentTools; discovery?: Pick<DiscoveryService, 'run'> } = {},
+) {
   const env = loadEnv();
   const app = new Hono();
 
   // ─── Cross-cutting middleware ────────────────────────────────────────
   app.use('*', async (c, next) => {
     // Private tool traffic must never enter request logs, including query strings.
-    if (c.req.path.startsWith('/internal/workload-tools')) return next();
+    if (
+      c.req.path.startsWith('/internal/workload-tools') ||
+      c.req.path.startsWith('/internal/discovery')
+    )
+      return next();
     return logger()(c, next);
   });
   app.use('*', secureHeaders());
@@ -77,6 +85,7 @@ export function createApp(options: { assessmentTools?: AssessmentTools } = {}) {
 
   // Private workload authority is independent of human session middleware.
   app.route('/internal/workload-tools', workloadToolsRoutes(options.assessmentTools));
+  app.route('/internal/discovery', discoveryRoutes(options.discovery));
 
   // Public routes (no auth) — gap-scan, public marketing endpoints
   app.route('/public', publicRoutes());

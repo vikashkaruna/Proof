@@ -77,4 +77,12 @@ test('the estate graph derives agent access from grants and isolates Karya write
   await expect(graph.locator('[data-edge="write"]')).toHaveCount(1);
   await graph.getByRole('button', { name: `connector Graph reader ${suffix}` }).click();
   await expect(page.getByTestId('graph-detail')).toContainText('WRITE Karya');
+  for (const [button, file] of [
+    ['Export SVG', 'estate-graph.svg'],
+    ['Export PNG', 'estate-graph.png'],
+  ] as const) {
+    const download = page.waitForEvent('download');
+    await graph.getByRole('button', { name: button }).click();
+    expect((await download).suggestedFilename()).toBe(file);
+  }
 });
