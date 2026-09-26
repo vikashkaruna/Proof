@@ -17,27 +17,27 @@
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
-| Suite                                 | Result                                                                                  |
-| ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1186 passed, plus live PostgreSQL and MySQL jobs in the "Live SQL binding (W4.6)" workflow |
-| Web                                   | 108                                                                                     |
-| MFA                                   | 180                                                                                     |
-| Control library                       | 91                                                                                      |
-| Config                                | 68                                                                                      |
-| Types                                 | 45                                                                                      |
-| Evidence                              | 19                                                                                      |
-| UI                                    | 17                                                                                      |
-| Approval engine                       | 13                                                                                      |
-| Supabase                              | 11                                                                                      |
-| Ledger                                | 8                                                                                       |
-| Marketing                             | 6                                                                                       |
+| Suite                                 | Result                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BFF (vitest)                          | 1186 passed, plus live PostgreSQL and MySQL jobs in the "Live SQL binding (W4.6)" workflow                                                                  |
+| Web                                   | 108                                                                                                                                                         |
+| MFA                                   | 180                                                                                                                                                         |
+| Control library                       | 91                                                                                                                                                          |
+| Config                                | 68                                                                                                                                                          |
+| Types                                 | 45                                                                                                                                                          |
+| Evidence                              | 19                                                                                                                                                          |
+| UI                                    | 17                                                                                                                                                          |
+| Approval engine                       | 13                                                                                                                                                          |
+| Supabase                              | 11                                                                                                                                                          |
+| Ledger                                | 8                                                                                                                                                           |
+| Marketing                             | 6                                                                                                                                                           |
 | Database suite                        | Fresh migrations with `service_role nobypassrls`, every `tests/database/*.test.sql` incl. consent-foundation, w7-regulator-packs and w8-breach-dsar-release |
-| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                   |
-| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                   |
-| Strict Auth/PostgREST parity          | Green                                                                                   |
-| Container API/browser acceptance (W0) | Green                                                                                   |
-| Python                                | Agent runtime 280, temporal workers and model gateway suites green                      |
-| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                       |
+| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                                                                                       |
+| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                                                                                       |
+| Strict Auth/PostgREST parity          | Green                                                                                                                                                       |
+| Container API/browser acceptance (W0) | Green                                                                                                                                                       |
+| Python                                | Agent runtime 280, temporal workers and model gateway suites green                                                                                          |
+| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                                                                                           |
 
 The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
 
