@@ -154,6 +154,12 @@ class Settings(BaseSettings):
         description="Origin of the Axiom reference write service; execution refuses when unset",
     )
 
+    # W6 — the continuous-compliance scheduler. Off by default: it must be
+    # enabled per environment, like the write path above, so a deployment
+    # never fires schedules its operator did not review.
+    feature_continuous_scheduler: bool = False
+    scheduler_poll_seconds: int = Field(default=300, ge=30, le=3600)
+
     # ─── Observability ─────────────────────────────────────────────
     otel_exporter_otlp_endpoint: str | None = None
     sentry_dsn: str | None = None
