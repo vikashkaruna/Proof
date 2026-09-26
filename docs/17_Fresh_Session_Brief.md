@@ -2,7 +2,7 @@
 
 **Current status board:** see [Doc 14 — Build status board (Revision 88)](14_Implementation_Progress.md#build-status-board--revision-88-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
 
-## Session close-out and handoff — Revision 95 (2026-09-26)
+## Session close-out and handoff — Revision 96 (2026-09-26)
 
 **Where to continue:**
 
@@ -14,7 +14,7 @@
 **State at close:**
 
 - Schema is **0000–0066: 67 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables; Rev 95 the scheduler write paths). The next migration is **0067**; never edit an applied migration.
-- Latest audit is **83**.
+- Latest audit is **84**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -87,6 +87,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 96 — drift acknowledgement and the monitoring-health surface (GLM session):**
+
+The drift story closes: migration 0067 adds `acknowledge_drift_event` — the human's write path onto a detection, binding `acknowledged_by`/`acknowledged_at` together, refusing a second judgement, and ledgering `monitoring.drift.acknowledged` as a human action (added to `LedgerActionType` in the same commit). The BFF gains `POST /v1/monitoring/drift-events/:id/acknowledge` (ESTATE_MANAGE, RPC refusals rendered as 409), `GET /v1/monitoring/drift-events` and `GET /v1/monitoring/health` — the monitoring-of-the-monitoring surface: per-schedule freshness with overdue flags and last-7-days drift counts by severity with an unacknowledged count. See [audit 84](audits/84-drift-acknowledgement-health-review-2026-09-26.md). Schema is **0067 / 68 migrations / 70 public tables**. Next in plan order: the standing-policy engine — the W6 piece that issues scoped approval tokens through the existing gate or escalates.
 
 **Revision 95 — the continuous-compliance scheduler (GLM session):**
 

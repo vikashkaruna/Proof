@@ -460,6 +460,12 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       where((row) => (value === null ? row[column] == null : row[column] === value));
     builder.in = (column: string, values: unknown[]) =>
       where((row) => values.includes(row[column]));
+    builder.gte = (column: string, value: unknown) =>
+      where((row) => {
+        const left = row[column];
+        if (typeof left === 'number' && typeof value === 'number') return left >= value;
+        return String(left) >= String(value);
+      });
     builder.or = (clause: string) => where(parseOrClause(clause));
 
     builder.single = async () => {
