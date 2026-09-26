@@ -32,42 +32,42 @@ class RuntimeIamTests(unittest.TestCase):
 
     def test_other_service_identity_is_refused(self):
         self.files['cloudrun.tf'] = self.files['cloudrun.tf'].replace('runtime["web"].email', 'runtime["bff"].email')
-        with self.assertRaisesRegex(AssertionError, 'wrong identity'):
+        with self.assertRaisesRegex(SystemExit, 'wrong identity'):
             CHECK(self.files)
 
     def test_project_wide_secret_permission_is_refused(self):
         self.files['iam.tf'] += '\nresource "google_project_iam_member" "backdoor" {role="roles/secretmanager.secretAccessor"}\n'
-        with self.assertRaisesRegex(AssertionError, 'project-wide'):
+        with self.assertRaisesRegex(SystemExit, 'project-wide'):
             CHECK(self.files)
 
     def test_grant_outside_the_policy_is_refused(self):
         self.files['iam.tf'] += '\nresource "google_secret_manager_secret_iam_member" "rogue" {}\n'
-        with self.assertRaisesRegex(AssertionError, 'outside the reviewed policy'):
+        with self.assertRaisesRegex(SystemExit, 'outside the reviewed policy'):
             CHECK(self.files)
 
     def test_impersonation_grant_is_refused(self):
         self.files['iam.tf'] += '\nresource "google_service_account_iam_member" "rogue" {}\n'
-        with self.assertRaisesRegex(AssertionError, 'impersonation'):
+        with self.assertRaisesRegex(SystemExit, 'impersonation'):
             CHECK(self.files)
 
     def test_extra_iam_secret_is_refused(self):
         self.files['iam.tf'] = self.files['iam.tf'].replace('["supabase_anon_key"]', '["supabase_anon_key", "supabase_service_key"]')
-        with self.assertRaisesRegex(AssertionError, 'IAM permission'):
+        with self.assertRaisesRegex(SystemExit, 'IAM permission'):
             CHECK(self.files)
 
     def test_secret_mount_without_permission_is_refused(self):
         self.files['cloudrun.tf'] = self.files['cloudrun.tf'].replace('secret["supabase_anon_key"]', 'secret["supabase_service_key"]')
-        with self.assertRaisesRegex(AssertionError, 'container secret'):
+        with self.assertRaisesRegex(SystemExit, 'container secret'):
             CHECK(self.files)
 
     def test_missing_rotation_dependency_is_refused(self):
         self.files['cloudrun.tf'] = self.files['cloudrun.tf'].replace('    google_secret_manager_secret_iam_member.mfa_previous_access,\n', '')
-        with self.assertRaisesRegex(AssertionError, 'rollout can race'):
+        with self.assertRaisesRegex(SystemExit, 'rollout can race'):
             CHECK(self.files)
 
     def test_wrong_temporal_token_binding_is_refused(self):
         self.files['cloudrun.tf'] = self.files['cloudrun.tf'].replace('name = "AGENT_RUNTIME_INTERNAL_TOKEN"', 'name = "UNREAD_TOKEN"')
-        with self.assertRaisesRegex(AssertionError, 'missing/wrong'):
+        with self.assertRaisesRegex(SystemExit, 'missing/wrong'):
             CHECK(self.files)
 
 
