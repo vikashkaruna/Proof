@@ -184,6 +184,8 @@ export const LedgerActionType = {
   // W6 — a monitoring schedule was registered (or its predecessor retired
   // by a re-registration) for an estate.
   MONITORING_SCHEDULE_REGISTERED: 'monitoring.schedule.registered',
+  MONITORING_SCHEDULE_FIRED: 'monitoring.schedule.fired',
+  MONITORING_DRIFT_DETECTED: 'monitoring.drift.detected',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',

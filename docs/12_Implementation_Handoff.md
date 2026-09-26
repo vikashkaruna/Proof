@@ -1,18 +1,18 @@
 # Axiom Proof — implementation handoff
 
-## Session close-out and handoff — Revision 94 (2026-09-26)
+## Session close-out and handoff — Revision 95 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 93, merge commit `52475da` of PR #65; Revision 94 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 94, merged via PR #66; Revision 95 lands via the codex/w6-scheduler branch's PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–93 (PRs #61–#65 merged); Revision 94 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–94 (PRs #61–#66 merged); Revision 95 lands via the codex/w6-scheduler branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0065: 66 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables). The next migration is **0066**; never edit an applied migration.
-- Latest audit is **82**.
+- Schema is **0000–0066: 67 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables; Rev 95 the scheduler write paths). The next migration is **0067**; never edit an applied migration.
+- Latest audit is **83**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 95 — the continuous-compliance scheduler (GLM session):**
+
+The scheduler fires due monitoring schedules through the database's own write paths. Migration 0066 adds `record_drift_event` (the only write path into `drift_events`: closed kind/severity sets, bounded identifier-shaped summaries, against a real estate, ledgered as `monitoring.drift.detected`) and `record_schedule_run` (advances an active schedule's bookkeeping to a strictly-future next fire, ledgered as `monitoring.schedule.fired`). The next fire is computed by a minimal deterministic cron engine (`axiom/cron_next.py`, standard DOM/DOW OR rule, month-length aware) — a cadence the engine cannot compute records a failed run with a day's grace, never a spin or a guess. `drift_check` schedules execute against the estate's sealed baseline (`onboarding_estate_drift`, 0055): each detected system becomes an event with severity by kind (connection loss and removal high). `rediscovery` and `reassessment` stay registered but unexecuted — left due for their executors' slice. The loop (`axiom/scheduler.py`) is off unless `feature_continuous_scheduler` is set per environment, absorbs single-pass failures, and is cancelled on shutdown. Both ledger values were added to `LedgerActionType` in the same commit. See [audit 83](audits/83-scheduler-review-2026-09-26.md). Schema is **0066 / 67 migrations / 70 public tables**. Next in plan order: the standing-policy engine, drift acknowledgement routes, rediscovery/reassessment executors and the monitoring-health surface.
 
 **Revision 94 — W6 foundation: the continuous-compliance tables (GLM session):**
 

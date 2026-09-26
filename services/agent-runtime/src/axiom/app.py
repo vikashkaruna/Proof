@@ -75,10 +75,27 @@ async def lifespan(app: FastAPI):
         for name, AgentCls in AGENTS.items()
     }
 
+    # W6 — the continuous-compliance scheduler, off unless the environment
+    # turns it on: a scheduler that fires without reviewed configuration is
+    # exactly the autonomous action this platform refuses.
+    scheduler_task = None
+    if settings.feature_continuous_scheduler:
+        from supabase import create_client as _create_client
+
+        from .scheduler import SchedulerDb, scheduler_loop
+
+        scheduler_db = SchedulerDb(_create_client(settings.supabase_url, settings.supabase_service_key))
+        scheduler_task = asyncio.create_task(
+            scheduler_loop(scheduler_db, settings.scheduler_poll_seconds)
+        )
+        log.info("scheduler.started", poll_seconds=settings.scheduler_poll_seconds)
+
     log.info("agent_runtime.ready", agents=[a.value for a in app.state.agents.keys()])
     try:
         yield
     finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
         await gateway.aclose()
         log.info("agent_runtime.shutdown")
 
