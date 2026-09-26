@@ -1450,6 +1450,107 @@ export function v1Routes(deps: Deps) {
     return c.json({ data });
   });
 
+  // POST /v1/monitoring/drift-events/:id/acknowledge — record the human
+  // judgement on a detection. ESTATE_MANAGE, audited.
+  app.post('/monitoring/drift-events/:id/acknowledge', async (c) => {
+    const ackRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (ackRefusal) return ackRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const eventId = c.req.param('id');
+    if (!z.uuid().safeParse(eventId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid event id' } }, 400);
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('acknowledge_drift_event', {
+      p_tenant_id: tenantId,
+      p_event_id: eventId,
+      p_acknowledged_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      return c.json({ error: { code: 'acknowledge_failed', message: error.message } }, 500);
+    }
+    if (!data || typeof data !== 'object' || !('acknowledged' in data)) {
+      const code = (data as { error?: string } | null)?.error ?? 'acknowledge_refused';
+      return c.json({ error: { code, message: 'The drift event was not acknowledged' } }, 409);
+    }
+    return c.json({ data });
+  });
+
+  // GET /v1/monitoring/drift-events — recent detections for the tenant.
+  app.get('/monitoring/drift-events', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from('drift_events')
+      .select(
+        'id, estate_id, kind, severity, summary, source_ref, detected_at, acknowledged_by, acknowledged_at',
+      )
+      .eq('tenant_id', tenantId)
+      .order('detected_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // GET /v1/monitoring/health — monitoring the monitoring: are schedules
+  // firing, when did each last run, which are overdue, and how much drift
+  // has been detected (and acknowledged) recently. This is what makes
+  // "continuous" defensible rather than assumed.
+  app.get('/monitoring/health', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const admin = createSupabaseAdmin();
+    const now = Date.now();
+    const { data: schedules, error: schedulesError } = await admin
+      .from('monitoring_schedules')
+      .select('id, estate_id, name, kind, status, last_run_at, next_run_at')
+      .eq('tenant_id', tenantId)
+      .order('next_run_at', { ascending: true })
+      .limit(100);
+    if (schedulesError) {
+      return c.json({ error: { code: 'query_failed', message: schedulesError.message } }, 500);
+    }
+    const { data: events, error: eventsError } = await admin
+      .from('drift_events')
+      .select('id, severity, detected_at, acknowledged_at')
+      .eq('tenant_id', tenantId)
+      .gte('detected_at', new Date(now - 7 * 86_400_000).toISOString())
+      .order('detected_at', { ascending: false })
+      .limit(500);
+    if (eventsError) {
+      return c.json({ error: { code: 'query_failed', message: eventsError.message } }, 500);
+    }
+    const rows = (schedules ?? []) as Array<Record<string, unknown>>;
+    const driftRows = (events ?? []) as Array<Record<string, unknown>>;
+    return c.json({
+      data: {
+        schedules: rows.map((s) => ({
+          ...s,
+          overdue:
+            s.status === 'active' &&
+            typeof s.next_run_at === 'string' &&
+            Date.parse(s.next_run_at) < now,
+        })),
+        drift: {
+          detectedLast7Days: driftRows.length,
+          unacknowledged: driftRows.filter((e) => e.acknowledged_at == null).length,
+          bySeverity: driftRows.reduce<Record<string, number>>((acc, e) => {
+            const severity = String(e.severity);
+            acc[severity] = (acc[severity] ?? 0) + 1;
+            return acc;
+          }, {}),
+        },
+      },
+    });
+  });
+
   // POST /v1/plans/:id/execute — THE EXECUTION GATE
   // Per ADR-2 / BR-1: no mutating action executes without a valid
   // approval token. The token is validated per-action.
