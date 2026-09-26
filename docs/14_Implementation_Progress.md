@@ -1,6 +1,6 @@
 # Implementation progress — W0 through W4
 
-## Session close-out and handoff — Revision 88 (2026-09-25)
+## Session close-out and handoff — Revision 98 (2026-09-27)
 
 **Where to continue:**
 
@@ -11,9 +11,9 @@
 
 **State at close:**
 
-- Schema is **0000–0059: 60 migrations, 61 public tables**. The next migration is **0060**; never edit an applied migration.
-- Latest audit is **76**.
-- No PRs are open and no check-ins are scheduled.
+- Schema is **0000–0071: 72 migrations, 78 public tables** (see the Revision 98 note below). The next migration is **0072**; never edit an applied migration.
+- Latest audit is **87**.
+- No PRs are open, no check-ins are scheduled, and no lanes are in flight (clean quota-limited signoff).
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
@@ -117,6 +117,10 @@ This is the current summary; it supersedes the older W-status tables below. Effo
 | **W8 Reporting, evidence, rights**     | Partial; retention gated | Evidence package, gap-scan report                                                                                                                                                           | DSAR and consent, breach operations, review and release, WORM proof                                         | **XL**             | Op (WORM)                     |
 | W9 Test, audit, performance            | Partial                  | 21 PR checks and 52 promotion checks green                                                                                                                                                  | Load and NFR tests, restore drill                                                                           | L                  | Deployment                    |
 | W10 On-prem                            | Partial                  | Helm renders, topology rehearsal                                                                                                                                                            | Deployed and air-gapped instance                                                                            | L                  | Op                            |
+
+**Revision 98 — W8 rights/consent/breach/release, W7 BFSI pack #1, and the W4.6 MySQL binding (GLM session, quota-limited close):**
+
+A five-PR session closed out cleanly at the promotional-quota limit. **PR #80** promoted main through Revision 97 plus the W6 rediscovery/reassessment executors and the W5 web surfaces (`23dcf4e`, merge commit). **PR #81** added the W5 manual rollback route — `POST /v1/plans/:id/rollback` (PLAN_EXECUTE, kill-switch gated, dispatch through `record_rollback_execution` 0062 with `triggered_by: 'manual'`, refusal loud 409s) — which closes the W5 execution-loop backend; only the operator-gated production connector composition remains. **PR #82** delivered the four W7.3/7.4 multi-regulator tables (migration 0070: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs`) and **BFSI pack #1** — six frameworks (RBI-MD-ITG, RBI-NBFC-AA, RBI-PAYMENT-DATA, SEBI-CYBER-RESILIENCE, IRDAI-CYBER-SECURITY, CERT-IN-DIRECTIONS-2022), 19 mappings, provenance `reference`/`mapped` only with `vendor-verified` excluded by CHECK constraint. **PRs #83/#84** split W8: my lane (PR #83) gave the 0006-era `dsars`/`breaches`/`reports` tables their sanctioned write paths — migration 0071 with the DSAR lifecycle (`record_dsar` server-owned 30-day clock + compliance_events deadline, `verify_dsar_identity`, `advance_dsar` closed map with evidence-bound completion and reason-required rejection), the breach chain (`record_breach` server-owned 72-hour §8(6) clock, strictly linear `advance_breach`, and the notification authority chain draft → reviewed-by-a-second-human → sent-by-a-non-drafter with every delivery attempt recorded as evidence and statutory timestamps written only by delivered sends), the founder release gate (`review_report`/`release_report` — Axiom-internal authority verified against the users table, released content hashed server-side), 13 BFF routes, and the honest `/breaches` rewrite plus the `/reports` review queue; the consent lane (PR #84) delivered migration 0069 — `consent_purposes`/`consent_records`/`consent_withdrawals` with `record_consent`, `withdraw_consent` (atomic, clock-stamped), `set_consent_legal_hold` and `complete_withdrawal_downstream`, the 7-year retention posture with no delete path, and four `consent.*` ledger values. **PR #85** delivered the last W4.6 transport — `MySqlReadConnector` mirroring the Postgres read contract (read-only rolled-back transactions, write-capable-account refusal, shape-count samples, pinned-CA TLS, ap-south-1 endpoint rule) with a live MySQL 8 CI job (audit 86). See [audit 87](audits/87-w8-rights-consent-breach-release-review-2026-09-27.md) for W8. Schema is **0071 / 72 migrations / 78 public tables**. Next in plan order: the consent BFF routes and the `/consent` + `/dsars` surfaces, drift alerting, the Healthcare/Tech packs, then W9/W10.
 
 **Revision 97 — the standing-policy engine (GLM session):**
 
