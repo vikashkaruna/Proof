@@ -1,116 +1,52 @@
+import { Capability, can } from '@axiom/types';
+import { z } from 'zod';
 import { requireTenantContext } from '@/lib/tenant-context';
-import { DsarClient, type DsarItem } from './dsar-client';
+import { DsarClient } from './dsar-client';
+import { dsarRowSchema, type DsarRow } from './dsar-workflow';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DsarPage() {
-  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
-  // by design, and these queries carried no tenant filter, so any
-  // authenticated user saw every tenant's data. The client below is
-  // user-scoped: RLS applies, and the explicit filters state the intent.
-  const { supabase, tenantId } = await requireTenantContext();
-  let dsarItems: DsarItem[] = [];
-  let accessCount = 6;
-  let erasureCount = 3;
-  let nearingSlaCount = 1;
-  let fulfilledCount = 14;
-
-  try {
-    const { data: dbDsars } = await supabase
-      .from('dsars')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('received_at', { ascending: false });
-
-    if (dbDsars && dbDsars.length > 0) {
-      accessCount = dbDsars.filter((d) => d.kind === 'access').length || accessCount;
-      erasureCount = dbDsars.filter((d) => d.kind === 'erasure').length || erasureCount;
-      fulfilledCount = dbDsars.filter((d) => d.status === 'completed').length || fulfilledCount;
-
-      dsarItems = dbDsars.map((d: any, idx: number) => {
-        let stage = 0;
-        if (d.status === 'identity_verification') stage = 1;
-        else if (d.status === 'in_fulfilment') stage = 3;
-        else if (d.status === 'completed') stage = 4;
-
-        const dueTime = d.due_by ? new Date(d.due_by).getTime() : Date.now() + 14 * 86400000;
-        const diffDays = Math.max(0, Math.round((dueTime - Date.now()) / (1000 * 60 * 60 * 24)));
-
-        return {
-          id: `DSAR-2026-0${idx + 88}`,
-          principal: d.data_principal_name || 'Anonymous Principal',
-          email: d.data_principal_email,
-          phone: d.data_principal_phone,
-          type: (d.kind || 'access').charAt(0).toUpperCase() + (d.kind || 'access').slice(1),
-          stage,
-          slaDays: diffDays,
-          systems: (idx % 3) + 2,
-          receivedAt: d.received_at,
-          notes: d.notes,
-        };
-      });
+  const { supabase, tenantId, role } = await requireTenantContext();
+  const canRead = can(Capability.POSTURE_READ, { role });
+  const canManage = can(Capability.ESTATE_MANAGE, { role });
+  let rows: DsarRow[] = [];
+  let error: string | null = canRead ? null : 'Your role cannot view rights requests.';
+  let hasMore = false;
+  if (canRead) {
+    try {
+      const result = await supabase
+        .from('dsars')
+        .select(
+          'id, kind, status, data_principal_name, data_principal_email, data_principal_phone, identity_verified, identity_verification_method, due_by, received_at, completed_at, rejection_reason, notes',
+        )
+        .eq('tenant_id', tenantId)
+        .order('due_by', { ascending: true })
+        .order('id', { ascending: true })
+        .limit(201);
+      const parsed = z.array(dsarRowSchema).safeParse(result.data);
+      if (result.error || !parsed.success)
+        error = 'Rights requests could not be loaded. Refresh to try again.';
+      else {
+        rows = parsed.data.slice(0, 200);
+        hasMore = parsed.data.length > 200;
+      }
+    } catch {
+      error = 'Rights requests could not be loaded. Refresh to try again.';
     }
-  } catch {
-    // Fallback
   }
-
-  if (dsarItems.length === 0) {
-    dsarItems = [
-      {
-        id: 'DSAR-2026-088',
-        principal: 'Ananya Sharma',
-        type: 'Erasure',
-        stage: 3,
-        slaDays: 2,
-        systems: 4,
-        receivedAt: '3 days ago',
-        notes:
-          'Requested complete erasure of historical transaction analytics upon account termination.',
-      },
-      {
-        id: 'DSAR-2026-089',
-        principal: 'Rahul K. Varma',
-        type: 'Access',
-        stage: 1,
-        slaDays: 24,
-        systems: 3,
-        receivedAt: 'Yesterday',
-        notes:
-          'Requested summary of personal data processed and third parties disclosed under DPDPA §11.',
-      },
-      {
-        id: 'DSAR-2026-090',
-        principal: 'Pooja Iyer',
-        type: 'Correction',
-        stage: 0,
-        slaDays: 28,
-        systems: 2,
-        receivedAt: 'Today',
-        notes: 'Updated communication address and mobile number update request.',
-      },
-      {
-        id: 'DSAR-2026-085',
-        principal: 'Vikramaditya Sen',
-        type: 'Portability',
-        stage: 4,
-        slaDays: 0,
-        systems: 5,
-        receivedAt: '12 days ago',
-        notes:
-          'Machine-readable JSON export delivered to verified recipient via encrypted vault link.',
-      },
-    ];
-  }
-
+  // A single request-time snapshot keeps the server HTML and hydrated deadline labels identical.
+  // eslint-disable-next-line react-hooks/purity -- async, force-dynamic server page, not a client render clock
+  const asOf = Date.now();
   return (
     <DsarClient
-      initialDsars={dsarItems}
-      stats={{
-        accessCount,
-        erasureCount,
-        nearingSlaCount,
-        fulfilledCount,
-      }}
+      key={tenantId}
+      tenantId={tenantId}
+      rows={rows}
+      canManage={canManage && !error}
+      loadError={error}
+      hasMore={hasMore}
+      asOf={asOf}
     />
   );
 }

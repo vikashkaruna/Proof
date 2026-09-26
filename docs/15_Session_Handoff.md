@@ -1,5 +1,15 @@
 # Axiom Proof — implementation session handoff
 
+## Active continuation — Revision 99 (2026-09-27; local validation green, CI pending)
+
+This section supersedes conflicting historical handoff instructions below. The current operator keeps **staging → main promotion for himself**; do not open or merge a main promotion. **W9 and W10 are in scope**, after earlier plan work. Work on `codex/revision75-controller-generation-transition`, with PRs into staging, merge commits only after green checks, then verify the exact staging revision. Never reset an active branch with uncommitted work.
+
+Baseline: staging `710b16968b095f0694a83d4577aa1e525bc42435` (PR #87), CI [36272325008](https://github.com/vikashkaruna/Proof/actions/runs/36272325008) passed. Revision 99 is not yet merged or accepted. Its pending migration is **0072**, adding retained notice versions and tightening consent/DSAR authority; verified local schema is 73 migrations / 79 public tables. W2 named targets remain **35/40**; notice history is an additional table, not a named-target completion.
+
+Current milestone: real consent purpose/notice/capture/withdrawal workflows and DSAR actions, with tenant isolation, reviewed EN/HI snapshots, stale-version refusals and verified identity before fulfilment. Unit tests alone do not close browser, database, deployed, delivery or WORM acceptance. See [audit 88](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) for the full remaining-scope matrix, validation and acceptance limits. Earlier test totals and “next migration” references below describe historical revisions.
+
+The accepted full plan remains authoritative: finish W8 reporting/evidence and W2 workflow parity, W6 actual scheduled executors and alerts plus accepted SMB/vendor/partner/Sanket work, W7 Healthcare → Tech packs and control-library completeness, then W9 measured load/restore and W10 offline installation. Infrastructure provisioning remains prohibited; use existing Docker for engineering acceptance, and record genuinely external gates separately. Scheduler stubs are not completed executors; existing random evidence hashes and boolean-only verification are not proof.
+
 ## Session close-out and handoff — Revision 98 (2026-09-27)
 
 **Where to continue:**

@@ -199,6 +199,9 @@ export const LedgerActionType = {
   // ledgered end to end — captured with the notice version it pinned,
   // withdrawn, frozen or unfrozen for retention (legal hold), and the
   // downstream propagation of a withdrawal confirmed complete.
+  CONSENT_PURPOSE_REGISTERED: 'consent.purpose.registered',
+  CONSENT_NOTICE_PUBLISHED: 'consent.notice.published',
+  CONSENT_PURPOSE_STATUS_CHANGED: 'consent.purpose.status_changed',
   CONSENT_RECORDED: 'consent.recorded',
   CONSENT_WITHDRAWN: 'consent.withdrawn',
   CONSENT_LEGAL_HOLD_SET: 'consent.legal_hold.set',
