@@ -1,4 +1,5 @@
 import { ReportsClient } from './reports-client';
+import { ReviewQueue, type ReportRow } from './review-queue';
 import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
@@ -12,9 +13,10 @@ export default async function ReportsPage() {
   let totalReports = 5;
   let postureScore = 74;
   let sealedEvidenceCount = 28;
+  let reviewRows: ReportRow[] = [];
 
   try {
-    const [ledgerRes, engagementRes, evidenceRes] = await Promise.all([
+    const [ledgerRes, engagementRes, evidenceRes, reportsRes] = await Promise.all([
       supabase
         .from('audit_ledger')
         .select('seq', { count: 'estimated', head: true })
@@ -31,6 +33,14 @@ export default async function ReportsPage() {
         .from('evidence')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId),
+      supabase
+        .from('reports')
+        .select(
+          'id, kind, title, status, generated_by_agent, generated_at, reviewed_by, rejection_reason, published_at, released_content_hash',
+        )
+        .eq('tenant_id', tenantId)
+        .order('generated_at', { ascending: false })
+        .limit(100),
     ]);
 
     if (ledgerRes.count != null && ledgerRes.count > 0) {
@@ -42,15 +52,19 @@ export default async function ReportsPage() {
     if (evidenceRes.count != null && evidenceRes.count > 0) {
       sealedEvidenceCount = evidenceRes.count;
     }
+    reviewRows = (reportsRes.data ?? []) as unknown as ReportRow[];
   } catch {
     // Fallback if database offline
   }
 
   return (
-    <ReportsClient
-      totalCount={totalReports}
-      postureScore={postureScore}
-      evidenceCount={sealedEvidenceCount}
-    />
+    <div className="space-y-6">
+      <ReportsClient
+        totalCount={totalReports}
+        postureScore={postureScore}
+        evidenceCount={sealedEvidenceCount}
+      />
+      <ReviewQueue rows={reviewRows} />
+    </div>
   );
 }
