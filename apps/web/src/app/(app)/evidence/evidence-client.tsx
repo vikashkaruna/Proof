@@ -1,521 +1,589 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { AgentIcon } from '@axiom/ui';
+import { z } from 'zod';
+import { EvidenceType } from '@axiom/types';
+import { evidenceUploadBytes, verifyLocalFile } from './evidence-workflow';
+import {
+  evidenceRowSchema,
+  uploadMetadataSchema,
+  operationSchema,
+  pageMetaSchema,
+  verificationSchema,
+  type EvidenceRow,
+  type EvidenceOperation,
+} from './evidence-contract';
 
-export interface EvidenceItem {
-  id: string;
-  title: string;
-  desc: string;
-  type: string;
-  ts: string;
-  hash: string;
-  fullHash: string;
-  s3: string;
-  links: string[];
-  byteSize?: number;
-  agent?: string;
+const field = 'w-full rounded border border-slate-300 px-3 py-2 text-sm';
+const button = 'rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
+const panel = 'rounded-xl border border-slate-200 bg-white p-5 space-y-4';
+const listSchema = z.object({ data: z.array(evidenceRowSchema), meta: pageMetaSchema });
+const operationsSchema = z.object({ data: z.array(operationSchema), meta: pageMetaSchema });
+const operationResponse = z.object({ data: operationSchema });
+const providerResponse = z.object({ data: verificationSchema });
+function date(value: string) {
+  return new Date(value).toLocaleString();
 }
 
-export interface EvidenceClientProps {
-  initialEvidence: EvidenceItem[];
-  vaultStats: {
-    totalArtifacts: number;
-    packsCount: number;
-    noticeCount: number;
-    retentionCount: number;
-    securityCount: number;
-  };
-}
-
-export function EvidenceClient({ initialEvidence, vaultStats }: EvidenceClientProps) {
-  const evidenceList = initialEvidence.length > 0 ? initialEvidence : [];
-  const [selId, setSelId] = useState<string>(evidenceList[0]?.id || 'e-8841');
-  const [verifiedHash, setVerifiedHash] = useState<boolean>(false);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-
-  const selectedItem = evidenceList.find((e) => e.id === selId) || evidenceList[0];
-
-  const filteredEvidence = evidenceList.filter((e) => {
-    if (!searchTerm) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      e.id.toLowerCase().includes(q) ||
-      e.title.toLowerCase().includes(q) ||
-      e.desc.toLowerCase().includes(q) ||
-      e.links.some((l) => l.toLowerCase().includes(q))
-    );
-  });
-
-  const [artifactViewerOpen, setArtifactViewerOpen] = useState(false);
-  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
-
-  const handleVerify = () => {
-    setVerifiedHash(true);
-    setTimeout(() => setVerifiedHash(false), 3000);
-  };
-
-  const handleDownloadArtifact = (item: EvidenceItem) => {
-    const content = {
-      artifact_id: item.id,
-      title: item.title,
-      description: item.desc,
-      evidence_type: item.type,
-      storage_uri: item.s3,
-      sha256_content_hash: item.fullHash,
-      timestamp: item.ts,
-      satisfies_controls: item.links,
-      vault_parameters: {
-        region: 'ap-south-1 (Mumbai)',
-        object_lock_mode: 'COMPLIANCE',
-        retention_years: 7,
-        tamper_evident: true,
-      },
-      sealed_evidence_payload: {
-        attestation: `Cryptographically sealed by Saakshi Agent under DPDPA 2023 §8(5).`,
-        chain_proof: `sha256:${item.fullHash}`,
-        status: 'IMMUTABLE_WORM_SEALED',
-      },
-    };
-    const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `axiom-evidence-${item.id}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportEvidencePack = () => {
-    const packManifest = {
-      manifestVersion: '1.0',
-      exportId: `EXP-EVID-${Math.floor(1000 + Math.random() * 9000)}`,
-      statutoryStandard: 'Digital Personal Data Protection Act 2023 (DPDPA)',
-      filingFormat: 'DPB Form-V3 Cryptographic Evidence Dossier',
-      exportedAt: new Date().toISOString(),
-      vaultLocation: 'AWS S3 ap-south-1 (Mumbai)',
-      wormLockMode: 'COMPLIANCE (Strict)',
-      generatingAgent: 'saakshi',
-      attestationHash:
-        'sha256:' +
-        Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-      vaultStatistics: vaultStats,
-      evidenceArtifacts: evidenceList.map((e) => ({
-        id: e.id,
-        title: e.title,
-        description: e.desc,
-        evidenceType: e.type,
-        collectedTimestamp: e.ts,
-        sha256ContentHash: e.fullHash || e.hash,
-        storageUri: e.s3,
-        demonstratesControlIds: e.links,
-        byteSize: e.byteSize || 10240,
-        collectorAgent: e.agent || 'saakshi',
-        wormLockDurationDays: 365 * 7,
-      })),
-    };
-
-    const jsonStr = JSON.stringify(packManifest, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `axiom-all-evidences-combined-dossier-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    setExportFeedback(
-      `All ${evidenceList.length} WORM-sealed evidence artifacts combined and exported into statutory dossier with SHA-256 proof seals.`,
-    );
-  };
-
+export function EvidenceClient({
+  tenantId,
+  canRecord,
+  canExport,
+}: {
+  tenantId: string;
+  canRecord: boolean;
+  canExport: boolean;
+}) {
+  const [rows, setRows] = useState<EvidenceRow[]>([]);
+  const [meta, setMeta] = useState({ limit: 20, offset: 0, total: 0, hasMore: false });
+  const [query, setQuery] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<EvidenceRow | null>(null);
+  const selection = useRef<string | null>(null);
+  const [localResult, setLocalResult] = useState<Awaited<
+    ReturnType<typeof verifyLocalFile>
+  > | null>(null);
+  const [providerResult, setProviderResult] = useState<z.infer<typeof verificationSchema> | null>(
+    null,
+  );
+  const [operations, setOperations] = useState<EvidenceOperation[]>([]);
+  const [operationOffset, setOperationOffset] = useState(0);
+  const [operationMore, setOperationMore] = useState(false);
+  const [operationsLoading, setOperationsLoading] = useState(true);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const uploadKeys = useRef(new Map<string, string>());
+  const headers = useCallback(() => ({ 'x-tenant-id': tenantId }), [tenantId]);
+  const request = useCallback(
+    async (path: string, body?: unknown, signal?: AbortSignal) => {
+      const response = await fetch(`/api/bff/v1/evidence${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        cache: 'no-store',
+        signal,
+        headers: {
+          ...headers(),
+          ...(body === undefined
+            ? {}
+            : { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      if (!response.ok) {
+        const parsed = z
+          .object({ error: z.object({ code: z.string() }) })
+          .safeParse(await response.json().catch(() => null));
+        throw new Error(
+          parsed.success ? parsed.data.error.code : `Request failed (${response.status}).`,
+        );
+      }
+      return response;
+    },
+    [headers],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    void request(`?limit=20&offset=${offset}${query}`, undefined, controller.signal)
+      .then((response) => response.json())
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        const result = listSchema.parse(value);
+        setRows(result.data);
+        setMeta(result.meta);
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted)
+          setError(err instanceof Error ? err.message : 'Unable to load evidence.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [request, query, offset, revision]);
+  useEffect(() => {
+    if (!canRecord) return;
+    const controller = new AbortController();
+    void request(`/ingestions?limit=20&offset=${operationOffset}`, undefined, controller.signal)
+      .then((response) => response.json())
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        const result = operationsSchema.parse(value);
+        setOperations(result.data);
+        setOperationMore(result.meta.hasMore);
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted)
+          setError(err instanceof Error ? err.message : 'Unable to load upload operations.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOperationsLoading(false);
+      });
+    return () => controller.abort();
+  }, [canRecord, request, revision, operationOffset]);
+  function refresh() {
+    setLoading(true);
+    setOperationsLoading(true);
+    setRows([]);
+    setError('');
+    setRevision((v) => v + 1);
+  }
+  function moveRecords(next: number) {
+    setLoading(true);
+    setRows([]);
+    setError('');
+    setOffset(next);
+  }
+  function moveOperations(next: number) {
+    setOperationsLoading(true);
+    setOperationOffset(next);
+  }
+  function choose(row: EvidenceRow) {
+    selection.current = row.id;
+    setSelected(row);
+    setLocalResult(null);
+    setProviderResult(null);
+    setError('');
+  }
+  async function action(work: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await work();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Request failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  function filter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const params = new URLSearchParams();
+    for (const key of ['q', 'controlId', 'source', 'from', 'to']) {
+      const value = String(data.get(key) || '').trim();
+      if (value) params.set(key, value);
+    }
+    setLoading(true);
+    setRows([]);
+    setError('');
+    setOffset(0);
+    setQuery(params.size ? `&${params}` : '');
+    setRevision((v) => v + 1);
+    setOperationsLoading(true);
+    selection.current = null;
+    setSelected(null);
+    setLocalResult(null);
+    setProviderResult(null);
+  }
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!uploadFile || !confirmed) return;
+    const form = new FormData(event.currentTarget);
+    const file = uploadFile;
+    await action(async () => {
+      const encoded = await evidenceUploadBytes(file);
+      const metadata = uploadMetadataSchema.parse({
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        evidenceType: String(form.get('evidenceType')),
+        description: String(form.get('description')).trim(),
+        controlIds: String(form.get('controls') || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        engagementId: String(form.get('engagementId') || '').trim() || null,
+      });
+      const fingerprint = JSON.stringify([encoded.fingerprint, metadata]);
+      const operationKey = uploadKeys.current.get(fingerprint) || crypto.randomUUID();
+      uploadKeys.current.set(fingerprint, operationKey);
+      // Retain the stable operation key on an uncertain response. No automatic retry or second PUT.
+      setMessage(
+        `Upload operation ${operationKey}. If interrupted, refresh operations before retrying.`,
+      );
+      const result = operationResponse.parse(
+        await (
+          await request('/ingestions', {
+            operationKey,
+            ...metadata,
+            contentBase64: encoded.contentBase64,
+          })
+        ).json(),
+      ).data;
+      setMessage(
+        result.status === 'settled'
+          ? 'Evidence stored; its exact-version receipt is recorded.'
+          : `Upload pending (${result.operationKey}). Reconcile to check storage; pending is not verified evidence.`,
+      );
+      refresh();
+    });
+  }
   return (
-    <div className="mx-auto max-w-[1180px] space-y-5 animate-in fade-in-0 duration-200">
-      {/* ============================================================ */}
-      {/* 1. HERO BANNER                                               */}
-      {/* ============================================================ */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-[280px]">
-            <div className="mb-2 flex items-center gap-2 flex-wrap">
-              <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-bold text-[#04322d] uppercase tracking-wider">
-                P1 · M1.5
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
-                <span>Agent ·</span>
-                <span className="inline-flex items-center gap-1">
-                  <AgentIcon agent="saakshi" size="xs" variant="on-dark" state="idle" />
-                  <span>Saakshi</span>
-                </span>
-              </div>
-              <span className="text-xs text-[#8a97b8]">Evidence Vault</span>
-              <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-[#C9A227]">
-                WORM Lock (ap-south-1)
-              </span>
-            </div>
-            <div className="flex items-baseline gap-3">
-              <h1 className="font-heading text-2xl md:text-[26px] font-bold text-white tracking-tight">
-                Evidence Explorer
-              </h1>
-              <span className="font-heading text-lg text-[#0FB5A5] font-normal">
-                साक्ष्य अन्वेषक
-              </span>
-            </div>
-            <p className="mt-2 max-w-2xl text-xs leading-relaxed text-[#c7cfe0]">
-              Saakshi captures, content-addresses and seals compliance artifacts (WORM lock in S3
-              ap-south-1). Every finding, action and dry-run is anchored to immutable evidence.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
+    <div className="space-y-5 text-slate-800">
+      <header>
+        <h1 className="text-2xl font-semibold text-[#1E2A4A]">Evidence vault</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Inspect recorded evidence, check exact stored versions, or compare a local file against
+          its recorded SHA-256.
+        </p>
+      </header>
+      {error && (
+        <p role="alert" className="rounded border border-red-200 bg-red-50 p-3">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p role="status" className="rounded border border-teal-200 bg-teal-50 p-3 break-all">
+          {message}
+        </p>
+      )}
+      <form onSubmit={filter} className={panel} aria-label="Evidence filters">
+        <div className="grid gap-3 md:grid-cols-3">
+          <label>
+            Search description
+            <input name="q" maxLength={120} className={field} />
+          </label>
+          <label>
+            Control ID
+            <input name="controlId" className={field} />
+          </label>
+          <label>
+            Source
+            <input name="source" placeholder="Exact source, e.g. human" className={field} />
+          </label>
+          <label>
+            Collected from (UTC)
+            <input name="from" type="date" className={field} />
+          </label>
+          <label>
+            Collected to (UTC)
+            <input name="to" type="date" className={field} />
+          </label>
+        </div>
+        <button className={button}>Apply filters</button>{' '}
+        <button type="button" className={button} onClick={() => refresh()}>
+          Refresh records
+        </button>
+      </form>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className={panel} aria-label="Evidence records">
+          <h2 className="font-semibold">Recorded evidence</h2>
+          {loading ? (
+            <p role="status">Loading evidence…</p>
+          ) : !error ? (
+            <p>{meta.total} matching records</p>
+          ) : null}
+          {!loading && !error && rows.length === 0 && <p>No evidence matches these filters.</p>}
+          {rows.map((row) => (
             <button
               type="button"
-              onClick={handleExportEvidencePack}
-              className="rounded-[9px] bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold py-2.5 px-4 shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+              key={row.id}
+              onClick={() => choose(row)}
+              aria-pressed={selected?.id === row.id}
+              className="block w-full rounded border border-slate-200 p-3 text-left hover:border-teal-600"
             >
-              <span>⬇</span> Download All Evidences (Combined Dossier)
+              <strong>{row.filename || row.description || row.id}</strong>
+              <span className="block break-all text-xs">{row.id}</span>
+              <span className="block text-sm">
+                {row.assurance === 'verified_at_ingest'
+                  ? 'Provider receipt recorded'
+                  : 'Legacy record — storage unverified'}{' '}
+                · {date(row.collected_at)}
+              </span>
+            </button>
+          ))}
+          <div className="flex gap-2">
+            <button
+              className={button}
+              disabled={loading || offset === 0}
+              onClick={() => moveRecords(Math.max(0, offset - 20))}
+            >
+              Previous records
+            </button>
+            <button
+              className={button}
+              disabled={loading || !meta.hasMore}
+              onClick={() => moveRecords(offset + 20)}
+            >
+              Next records
             </button>
           </div>
-        </div>
-      </div>
-
-      {exportFeedback && (
-        <div className="flex items-center justify-between rounded-xl border border-teal-300 bg-[#E5FAF7] p-3 text-xs text-[#04322d] shadow-sm animate-in fade-in-0 duration-150">
-          <div className="flex items-center gap-2">
-            <span>✓</span>
-            <span className="font-semibold">{exportFeedback}</span>
-          </div>
-          <button
-            onClick={() => setExportFeedback(null)}
-            className="text-xs font-bold opacity-60 hover:opacity-100 cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/* 2. VAULT & BY CONTROL CARDS                                  */}
-      {/* ============================================================ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-2xs">
-          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A] mb-3">Vault</h2>
-          <div className="divide-y divide-[#eef1f5]">
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#C9A227]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">
-                Sealed artifacts (WORM)
-              </span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">
-                {vaultStats.totalArtifacts.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#0FB5A5]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">Integrity verified</span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">100%</span>
-            </div>
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#1E2A4A]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">Retention mode</span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">Compliance</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-2xs">
-          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A] mb-3">By obligation</h2>
-          <div className="divide-y divide-[#eef1f5]">
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#1E2A4A]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">Notice & consent</span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">
-                {vaultStats.noticeCount}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#1E2A4A]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">Retention & erasure</span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">
-                {vaultStats.retentionCount}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-sm bg-[#1E2A4A]" />
-              <span className="flex-1 text-xs text-[#2F3542] font-medium">Access & security</span>
-              <span className="font-mono text-xs font-semibold text-[#1E2A4A]">
-                {vaultStats.securityCount}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ============================================================ */}
-      {/* 3. QUICK STATS ROW                                           */}
-      {/* ============================================================ */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
-          <div className="font-heading text-xl font-bold text-[#C9A227]">
-            {vaultStats.totalArtifacts.toLocaleString()}
-          </div>
-          <div className="text-[11px] text-slate-500">sealed artifacts (WORM)</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
-          <div className="font-heading text-xl font-bold text-[#1E2A4A]">
-            {vaultStats.packsCount}
-          </div>
-          <div className="text-[11px] text-slate-500">evidence packs assembled</div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
-          <div className="font-heading text-xl font-bold text-[#0a8d80]">✓ verified</div>
-          <div className="text-[11px] text-slate-500">content-hash integrity</div>
-        </div>
-      </div>
-
-      {/* Search and Filters */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-2xs flex items-center justify-between gap-3">
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Filter artifacts by title, ID, control (e.g. NOT-01, SEC-09)..."
-          className="h-9 flex-1 rounded-md border border-slate-300 bg-white px-3 text-xs placeholder:text-slate-400 focus:border-teal-500 focus:outline-none"
-        />
-        <div className="text-xs text-slate-500 font-mono">
-          Showing <strong>{filteredEvidence.length}</strong> artifacts
-        </div>
-      </div>
-
-      {/* ============================================================ */}
-      {/* 4. MAIN 2-COLUMN EXPLORER: LIST + STICKY INSPECTOR           */}
-      {/* ============================================================ */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
-        {/* Left Column: Artifacts Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredEvidence.map((ev) => {
-            const isSel = selectedItem?.id === ev.id;
-
-            return (
-              <div
-                key={ev.id}
-                onClick={() => setSelId(ev.id)}
-                className={`rounded-xl border p-4 bg-white cursor-pointer transition-all ${
-                  isSel
-                    ? 'border-[#C9A227] ring-2 ring-[#C9A227]/30 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 hover:shadow-2xs'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs font-semibold text-[#1E2A4A]">{ev.id}</span>
-                  <span className="font-mono text-[10px] text-slate-400">{ev.ts}</span>
-                </div>
-                <h3 className="text-xs font-bold text-[#1E2A4A] mb-1 line-clamp-1">{ev.title}</h3>
-                <p className="text-[11.5px] text-slate-600 leading-snug line-clamp-2 mb-3">
-                  {ev.desc}
+        </section>
+        {selected ? (
+          <section className={panel} aria-label="Evidence inspector">
+            <h2 className="font-semibold break-all">{selected.filename || selected.id}</h2>
+            <p>{selected.description || 'No description recorded.'}</p>
+            <dl className="space-y-2 text-sm break-all">
+              <dt>Evidence ID</dt>
+              <dd>{selected.id}</dd>
+              <dt>SHA-256</dt>
+              <dd className="font-mono">{selected.content_hash}</dd>
+              <dt>Recorded size</dt>
+              <dd>{selected.byte_size === null ? 'Unknown' : `${selected.byte_size} bytes`}</dd>
+              <dt>Source</dt>
+              <dd>{selected.collected_by_agent || 'Unspecified'}</dd>
+              <dt>Collected</dt>
+              <dd>{date(selected.collected_at)}</dd>
+              <dt>Linked controls</dt>
+              <dd>
+                {selected.demonstrates_control_ids.length
+                  ? selected.demonstrates_control_ids.map((id) => (
+                      <Link
+                        className="mr-3 underline"
+                        key={id}
+                        href={`/controls?q=${encodeURIComponent(id)}`}
+                      >
+                        {id}
+                      </Link>
+                    ))
+                  : 'None recorded'}
+              </dd>
+            </dl>
+            {selected.object_version ? (
+              <div className="rounded bg-slate-50 p-3 text-sm break-all">
+                <p>
+                  Provider: {selected.object_version.provider} · Encryption:{' '}
+                  {selected.object_version.encryption}
                 </p>
-                <div className="flex items-center justify-between text-[10.5px] pt-2 border-t border-slate-100">
-                  <span className="font-mono text-slate-400">{ev.hash}</span>
-                  <span className="font-semibold text-[#8a6d10] bg-[#f7f0d8] px-2 py-0.5 rounded text-[10px]">
-                    ✦ {ev.type}
-                  </span>
-                </div>
+                <p>Exact version: {selected.object_version.version_id}</p>
+                <p>
+                  COMPLIANCE retention recorded until {date(selected.object_version.retain_until)}
+                </p>
+                <p>
+                  Provider readback: {date(selected.object_version.readback_at)} · Legal hold:{' '}
+                  {selected.object_version.legal_hold ? 'On' : 'Off'}
+                </p>
+                <p>
+                  This receipt records the ingestion check. Use provider verification for a fresh
+                  check.
+                </p>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Right Column: Sticky Proof Sealed Panel */}
-        {selectedItem && (
-          <div className="sticky top-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs space-y-4">
-            <div className="inline-flex items-center gap-1.5 bg-[#f7f0d8] text-[#8a6d10] px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">
-              <span>✦</span>
-              <span>PROOF SEALED · S3 OBJECT LOCK</span>
-            </div>
-
-            <div>
-              <h2 className="font-heading text-base font-bold text-[#1E2A4A] leading-tight">
-                {selectedItem.title}
-              </h2>
-              <div className="font-mono text-xs text-slate-400 mt-1">
-                {selectedItem.id} · {selectedItem.ts}
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  SHA-256 Content Digest
-                </div>
-                <div className="font-mono text-[11px] text-[#1E2A4A] break-all bg-[#F4F6F8] p-2 rounded-md">
-                  {selectedItem.fullHash}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  S3 Storage URI (ap-south-1)
-                </div>
-                <div className="font-mono text-[10.5px] text-slate-600 break-all">
-                  {selectedItem.s3}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Object Lock Retention
-                </div>
-                <div className="font-semibold text-[#0a8d80]">7 years WORM · Compliance mode</div>
-              </div>
-
-              <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Satisfies Controls
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedItem.links.map((link) => (
-                    <Link
-                      key={link}
-                      href={`/controls?q=${link}`}
-                      className="font-mono text-[10.5px] bg-[#e6f7f5] text-[#0a8d80] px-2 py-0.5 rounded font-medium hover:underline"
-                    >
-                      {link}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {verifiedHash && (
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-center text-xs font-semibold text-emerald-800 animate-in fade-in-0 duration-150">
-                ✓ Cryptographic SHA-256 integrity check verified against ledger
-              </div>
+            ) : (
+              <p>
+                Legacy record: no immutable object-version receipt. Retention and stored-byte
+                integrity are unverified.
+              </p>
             )}
-
-            <div className="pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
-                type="button"
-                onClick={handleVerify}
-                className="flex-1 py-2 px-3 bg-[#1E2A4A] hover:bg-[#283863] text-white rounded-md text-xs font-semibold transition-colors cursor-pointer"
+                className={button}
+                disabled={busy || !selected.object_version}
+                onClick={() =>
+                  void action(async () => {
+                    const row = selected;
+                    setProviderResult(null);
+                    const result = providerResponse.parse(
+                      await (await request(`/${row.id}/verify`, {})).json(),
+                    ).data;
+                    if (selection.current === row.id && result.evidenceId === row.id)
+                      setProviderResult(result);
+                  })
+                }
               >
-                Verify hash
+                Verify provider receipt
               </button>
-              <button
-                type="button"
-                onClick={() => handleDownloadArtifact(selectedItem)}
-                className="py-2 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                title="Download JSON artifact"
-              >
-                <span>⬇</span>
-                <span>Download</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setArtifactViewerOpen(true)}
-                className="py-2 px-3 bg-teal-50 border border-teal-300 hover:bg-teal-100 text-teal-800 rounded-md text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                title="Inspect artifact contents and cryptographic seal"
-              >
-                <span>👁</span>
-                <span>View</span>
-              </button>
+              {canExport && (
+                <button
+                  className={button}
+                  disabled={busy || !selected.object_version}
+                  onClick={() =>
+                    void action(async () => {
+                      const row = selected;
+                      const response = await request(`/${row.id}/content`);
+                      const blob = await response.blob();
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = row.filename || `${row.id}.bin`;
+                      link.click();
+                      setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    })
+                  }
+                >
+                  Download exact version
+                </button>
+              )}
             </div>
-          </div>
+            {providerResult && (
+              <p role="status">
+                Stored-byte integrity and provider retention verified at{' '}
+                {date(providerResult.verifiedAt)} for version {providerResult.versionId}.
+              </p>
+            )}
+            <div className="border-t pt-4 space-y-2">
+              <h3 className="font-semibold">Compare a local file</h3>
+              <p className="text-sm">
+                Read locally only; this file is never uploaded. A hash match does not prove storage
+                retention. Maximum 32 MiB.
+              </p>
+              <input
+                key={selected.id}
+                aria-label="Local file to verify"
+                type="file"
+                disabled={busy}
+                onChange={(event) => {
+                  setLocalResult(null);
+                  const file = event.target.files?.[0];
+                  const row = selected;
+                  if (file)
+                    void action(async () => {
+                      const result = await verifyLocalFile(file, row.content_hash, row.byte_size);
+                      if (selection.current === row.id) setLocalResult(result);
+                    });
+                }}
+              />
+              {localResult && (
+                <div role="status" className="break-all text-sm">
+                  <p>SHA-256: {localResult.computedHash}</p>
+                  <p>
+                    {localResult.hashMatches
+                      ? 'Hash matches the recorded digest.'
+                      : 'Hash mismatch: this file differs from the recorded digest.'}
+                  </p>
+                  <p>
+                    {localResult.byteSize} bytes ·{' '}
+                    {localResult.sizeMatches === null
+                      ? 'Recorded size unknown'
+                      : localResult.sizeMatches
+                        ? 'Size matches'
+                        : 'Size mismatch'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        ) : (
+          <section className={panel}>
+            <p>Select a record to inspect its metadata and verification evidence.</p>
+          </section>
         )}
       </div>
-
-      {/* ============================================================ */}
-      {/* 5. ARTIFACT CONTENT & WORM SEAL VIEWER MODAL                 */}
-      {/* ============================================================ */}
-      {artifactViewerOpen && selectedItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in-0 duration-150 backdrop-blur-xs overflow-y-auto">
-          <div className="relative w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[90vh] flex flex-col justify-between">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="text-[#C9A227] text-lg">✦</span>
-                <h3 className="text-base font-bold text-[#1E2A4A]">
-                  Evidence Artifact: {selectedItem.id}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setArtifactViewerOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 overflow-y-auto pr-1">
-              <div>
-                <h4 className="text-sm font-semibold text-slate-900">{selectedItem.title}</h4>
-                <p className="text-xs text-slate-600 mt-1">{selectedItem.desc}</p>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 text-xs font-mono">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Storage URI:</span>
-                  <span className="text-indigo-700 font-semibold">{selectedItem.s3}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Vault Location:</span>
-                  <span className="text-teal-700">AWS S3 ap-south-1 (Mumbai)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">WORM Lock:</span>
-                  <span className="text-emerald-700 font-semibold">
-                    Object Lock (Compliance Mode)
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">SHA-256 Digest:</span>
-                  <span className="text-slate-800 break-all">{selectedItem.fullHash}</span>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Satisfies Controls
-                </span>
-                <div className="flex flex-wrap gap-1.5 mt-1">
-                  {selectedItem.links.map((link) => (
-                    <span
-                      key={link}
-                      className="font-mono text-xs bg-[#e6f7f5] text-[#0a8d80] px-2 py-0.5 rounded font-medium"
-                    >
-                      {link}
-                    </span>
+      {canRecord && (
+        <>
+          <form
+            onSubmit={(event) => void upload(event)}
+            className={panel}
+            aria-label="Upload evidence"
+          >
+            <h2 className="font-semibold">Upload evidence</h2>
+            <p className="text-sm">
+              Human-submitted evidence is retained under the product’s seven-year policy. COMPLIANCE
+              retention cannot be shortened or the object deleted before expiry.
+            </p>
+            <fieldset disabled={busy} className="grid gap-3 md:grid-cols-2">
+              <label>
+                Evidence file (maximum 8 MiB)
+                <input
+                  type="file"
+                  required
+                  className={field}
+                  onChange={(event) => {
+                    setUploadFile(event.target.files?.[0] || null);
+                    setConfirmed(false);
+                  }}
+                />
+              </label>
+              <label>
+                Evidence type
+                <select name="evidenceType" aria-label="Evidence type" className={field}>
+                  {Object.values(EvidenceType).map((type) => (
+                    <option key={type}>{type}</option>
                   ))}
-                </div>
+                </select>
+              </label>
+              <label>
+                Description
+                <textarea name="description" required maxLength={2000} className={field} />
+              </label>
+              <label>
+                Control IDs (comma separated)
+                <input name="controls" className={field} />
+              </label>
+              <label>
+                Engagement ID (optional)
+                <input name="engagementId" className={field} />
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  required
+                  checked={confirmed}
+                  onChange={(event) => setConfirmed(event.target.checked)}
+                />
+                I reviewed this file and authorize its seven-year retention.
+              </label>
+            </fieldset>
+            <button className={button} disabled={busy || !uploadFile || !confirmed}>
+              Upload evidence
+            </button>
+          </form>
+          <section className={panel} aria-label="Upload operations">
+            <h2 className="font-semibold">Upload operations</h2>
+            <p className="text-sm">
+              Pending operations are not verified evidence. Reconciliation checks whether the exact
+              uploaded version exists; it never uploads another copy.
+            </p>
+            {operationsLoading ? (
+              <p>Loading upload operations…</p>
+            ) : (
+              operations.length === 0 && <p>No upload operations recorded on this page.</p>
+            )}
+            {operations.map((operation) => (
+              <div key={operation.operationKey} className="rounded border p-3 text-sm break-all">
+                <p>
+                  {operation.operationKey} · {operation.status} · {date(operation.createdAt)}
+                </p>
+                {operation.errorCode && <p>Last outcome: {operation.errorCode}</p>}
+                {operation.evidenceId && <p>Evidence: {operation.evidenceId}</p>}
+                {operation.status === 'pending' && (
+                  <button
+                    className={button}
+                    disabled={busy}
+                    onClick={() =>
+                      void action(async () => {
+                        const result = operationResponse.parse(
+                          await (
+                            await request(`/ingestions/${operation.operationKey}/reconcile`, {})
+                          ).json(),
+                        ).data;
+                        setMessage(
+                          result.status === 'settled'
+                            ? 'Upload reconciled; receipt recorded.'
+                            : `Still pending: ${result.errorCode || 'no verifiable stored version yet'}.`,
+                        );
+                        refresh();
+                      })
+                    }
+                  >
+                    Reconcile upload
+                  </button>
+                )}
               </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            ))}
+            <div className="flex gap-2">
               <button
-                type="button"
-                onClick={() => setArtifactViewerOpen(false)}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                className={button}
+                disabled={operationOffset === 0 || busy}
+                onClick={() => moveOperations(Math.max(0, operationOffset - 20))}
               >
-                Close
+                Previous operations
               </button>
               <button
-                type="button"
-                onClick={() => {
-                  handleDownloadArtifact(selectedItem);
-                  setArtifactViewerOpen(false);
-                }}
-                className="rounded-lg bg-[#0FB5A5] hover:bg-[#0da294] px-4 py-2 text-xs font-bold text-white shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                className={button}
+                disabled={!operationMore || busy}
+                onClick={() => moveOperations(operationOffset + 20)}
               >
-                <span>⬇</span>
-                <span>Download Sealed Artifact</span>
+                Next operations
               </button>
             </div>
-          </div>
-        </div>
+          </section>
+        </>
       )}
     </div>
   );

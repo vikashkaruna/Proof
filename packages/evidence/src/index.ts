@@ -1,20 +1,4 @@
-/**
- * Evidence Vault — S3 client with Object Lock (WORM) Compliance mode.
- *
- * The evidence vault is the product's trust claim. Per Doc 04 §6.2 and
- * Doc 05 §5, this is plain S3 API (no AWS-proprietary conveniences) so
- * the bucket can use compatible S3/MinIO providers. GCS sealing requires a separate verified lock adapter.
- *
- * Object Lock with Compliance mode retention means:
- *   - Object cannot be deleted by ANY user, including root, until retention
- *     period expires
- *   - Object cannot be overwritten
- *   - Retention period itself cannot be shortened
- *
- * Combined with content-addressed storage (the canonical key is the
- * SHA-256 of the content), this is the substrate of "verifiable proof".
- */
-
+/** Exact-version S3 evidence. Object Lock protects a version, not the latest key. */
 import {
   S3Client,
   PutObjectCommand,
@@ -23,95 +7,111 @@ import {
   GetObjectLockConfigurationCommand,
   GetObjectRetentionCommand,
   GetObjectLegalHoldCommand,
-  type ObjectLockLegalHold,
-  type ObjectLockMode,
+  ListObjectVersionsCommand,
   type ServerSideEncryption,
-  type PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'node:crypto';
 
+export interface EvidenceReadOptions {
+  maxBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
 export interface SealEvidenceInput {
   bucket: string;
   key: string;
   body: Buffer | Uint8Array | string;
   contentType: string;
-  /** Compliance-mode retention duration in days. Cannot be shortened after sealing. */
   retentionDays: number;
-  /** Optional legal hold (separate from retention; can be removed by authorised user). */
+  retainUntil?: string;
+  operationId?: string;
   legalHold?: boolean;
-  /** Server-side encryption. AES-256 is the default. */
   encryption?: ServerSideEncryption;
-  /** Tenant ID encoded in object metadata for cross-bucket policies. */
   tenantId: string;
-  /** Engagement ID for the engagement-scoped evidence, or null for tenant-global. */
   engagementId?: string | null;
-  /** Agent that collected the evidence. */
   collectedByAgent: string;
-  /** Free-form metadata. */
   metadata?: Record<string, string>;
 }
-
-/**
- * How far a retention claim has been established. See `SealedEvidence`.
- *
- * Deliberately three values rather than a boolean: "we checked and it holds"
- * and "we cannot check from here" are different facts, and collapsing them is
- * what produced a COMPLIANCE label on storage nobody had probed.
- */
 export type RetentionAssurance = 'verified' | 'asserted' | 'unverified';
-
-export interface SealedEvidence {
-  /** SHA-256 of the content — the canonical identifier. */
-  contentHash: string;
-  /** The S3 object key (or composed URI for portability). */
-  storageUri: string;
-  /** The storage URI prefix. */
+export interface EvidenceReceiptInput {
   bucket: string;
   key: string;
-  /** Byte size of the sealed content. */
+  versionId: string;
+  contentHash: string;
   byteSize: number;
-  /** When the object becomes eligible for deletion (retention end). */
+  tenantId: string;
+  engagementId?: string | null;
+  collectedByAgent: string;
+  operationId?: string;
   retainUntil: string;
-  /**
-   * The object-lock mode actually applied.
-   *
-   * This used to be the literal 'COMPLIANCE' on every path, including the GCS
-   * path where no lock header is sent and nothing is probed (R-10). A sealed
-   * artifact asserting compliance-mode retention nobody verified is a false
-   * assurance printed on the evidence itself, which is the one place a
-   * compliance product cannot afford one.
-   */
-  lockMode: ObjectLockMode | 'NONE';
-  /**
-   * How far the retention claim has actually been established (R-10).
-   *
-   *   `verified`  provider readback confirms retention on the uploaded version
-   *   `asserted`  a configuration claim, retained for historical records
-   *   `unverified` no provider proof (including metadata written before readback)
-   *
-   * New seal() results are returned only after verification. Unsupported GCS
-   * verification fails closed; endpoint detection is never evidence of a lock.
-   *
-   * Anything short of `verified` must not be presented to an auditor as WORM
-   * evidence without naming which of these it is.
-   */
-  retentionAssurance: RetentionAssurance;
-  /** Why the assurance is what it is, in words an auditor can read. */
+  legalHold?: boolean;
+  encryption?: ServerSideEncryption;
+}
+export interface SealedEvidence {
+  contentHash: string;
+  storageUri: string;
+  bucket: string;
+  key: string;
+  byteSize: number;
+  retainUntil: string;
+  lockMode: 'COMPLIANCE';
+  retentionAssurance: 'verified';
   retentionAssuranceReason: string;
-  /** Version ID (S3 returns this; for true immutability we use the content hash). */
-  versionId: string | undefined;
-  /** Server-side encryption applied. */
+  versionId: string;
   encryption: ServerSideEncryption;
+  legalHold: boolean;
+  readbackAt: string;
+}
+const DEFAULT_BYTES = 16 * 1024 * 1024;
+const HARD_BYTES = 64 * 1024 * 1024;
+const HASH = /^[0-9a-f]{64}$/;
+function reference(bucket: string, key: string, versionId: string) {
+  if (!bucket || !key || !versionId?.trim() || versionId === 'null' || versionId.length > 1024)
+    throw new Error('Exact evidence version is required');
+  return { Bucket: bucket, Key: key, VersionId: versionId };
+}
+function boundBytes(value = DEFAULT_BYTES) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > HARD_BYTES)
+    throw new Error('Invalid evidence byte limit');
+  return value;
+}
+async function budget<T>(
+  options: EvidenceReadOptions,
+  work: (signal: AbortSignal, maxBytes: number) => Promise<T>,
+): Promise<T> {
+  const maxBytes = boundBytes(options.maxBytes);
+  const timeout = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 120_000)
+    throw new Error('Invalid evidence deadline');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timer = setTimeout(abort, timeout);
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
+  try {
+    controller.signal.throwIfAborted();
+    return await work(controller.signal, maxBytes);
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abort);
+  }
+}
+async function interruptible<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error('Evidence deadline or cancellation'));
+    signal.addEventListener('abort', abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 export class EvidenceVault {
   private readonly s3: S3Client;
   private readonly isGcs: boolean;
-
   constructor(
-    private readonly region: string,
-    private readonly endpoint?: string,
+    region: string,
+    endpoint?: string,
     credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string },
   ) {
     const host = endpoint ? new URL(endpoint).hostname : '';
@@ -119,195 +119,325 @@ export class EvidenceVault {
     this.s3 = new S3Client({
       region,
       endpoint,
-      forcePathStyle: endpoint !== undefined, // MinIO / R2 / GCS
+      forcePathStyle: endpoint !== undefined,
       credentials,
+      maxAttempts: 1,
     });
   }
 
-  /**
-   * Seal an artifact. Once sealed, it is WORM — cannot be deleted or
-   * overwritten for the retention period.
-   */
-  async seal(input: SealEvidenceInput): Promise<SealedEvidence> {
-    const body = Buffer.isBuffer(input.body)
-      ? input.body
-      : typeof input.body === 'string'
-        ? Buffer.from(input.body, 'utf-8')
-        : Buffer.from(input.body);
-
-    const contentHash = createHash('sha256').update(body).digest('hex');
-
-    if (!Number.isSafeInteger(input.retentionDays) || input.retentionDays <= 0) {
-      throw new Error('retentionDays must be a positive integer');
-    }
-    // Fail before upload if the provider cannot establish the required lock.
-    await this.assertObjectLockEnabled(input.bucket);
-    const retainUntilDate = new Date(
-      Math.ceil((Date.now() + input.retentionDays * 86_400_000) / 1000) * 1000,
-    );
-    if (!Number.isFinite(retainUntilDate.getTime())) throw new Error('Invalid retention date');
-
-    const legalHold: ObjectLockLegalHold = {
-      Status: input.legalHold ? 'ON' : 'OFF',
-    };
-
-    const putParams: PutObjectCommandInput = {
-      Bucket: input.bucket,
-      Key: input.key,
-      Body: body,
-      ContentType: input.contentType,
-      ContentMD5: createHash('md5').update(body).digest('base64'),
-      Metadata: {
-        ...Object.fromEntries(
-          Object.entries(input.metadata ?? {}).filter(
-            ([key]) => !key.toLowerCase().startsWith('axiom-'),
-          ),
-        ),
-        'axiom-content-sha256': contentHash,
-        'axiom-tenant-id': input.tenantId,
-        'axiom-engagement-id': input.engagementId ?? '',
-        'axiom-collected-by-agent': input.collectedByAgent,
-        'axiom-sealed-at': new Date().toISOString(),
-        // Upload metadata precedes readback and cannot claim its result.
-        'axiom-retention-assurance': 'unverified',
-        'axiom-retention-request': 'COMPLIANCE',
-      },
-      ServerSideEncryption: input.encryption ?? 'AES256',
-    };
-
-    // For native AWS S3, specify ObjectLock headers.
-    // For Google Cloud Storage as S3 WORM storage, immutability is enforced at the bucket level
-    // via GCS Bucket Lock (Retention Policy) without unsupported AWS-specific request headers.
-    if (!this.isGcs) {
-      putParams.ObjectLockMode = 'COMPLIANCE';
-      putParams.ObjectLockRetainUntilDate = retainUntilDate;
-      putParams.ObjectLockLegalHoldStatus = legalHold.Status;
-      putParams.ChecksumAlgorithm = 'SHA256';
-    }
-
-    const cmd = new PutObjectCommand(putParams);
-
-    const result = await this.s3.send(cmd);
-    if (!result.VersionId || result.VersionId === 'null') {
-      throw new Error('Uploaded evidence has no immutable version; seal not verified');
-    }
-    const objectRef = { Bucket: input.bucket, Key: input.key, VersionId: result.VersionId };
-    const readback = await this.s3.send(new GetObjectRetentionCommand(objectRef));
-    const retention = readback.Retention;
-    if (
-      retention?.Mode !== 'COMPLIANCE' ||
-      !retention.RetainUntilDate ||
-      !Number.isFinite(retention.RetainUntilDate.getTime()) ||
-      retention.RetainUntilDate.getTime() < retainUntilDate.getTime()
-    ) {
-      throw new Error('Provider did not confirm required COMPLIANCE retention; seal not verified');
-    }
-    if (input.legalHold) {
-      const hold = await this.s3.send(new GetObjectLegalHoldCommand(objectRef));
-      if (hold.LegalHold?.Status !== 'ON') throw new Error('Provider did not confirm legal hold');
-    }
-
-    return {
-      contentHash,
-      storageUri: `s3://${input.bucket}/${input.key}`,
-      bucket: input.bucket,
-      key: input.key,
-      byteSize: body.byteLength,
-      retainUntil: retention.RetainUntilDate.toISOString(),
-      lockMode: 'COMPLIANCE',
-      retentionAssurance: 'verified',
-      retentionAssuranceReason:
-        'Provider readback confirmed COMPLIANCE retention for the uploaded object version.',
-      versionId: result.VersionId,
-      encryption: input.encryption ?? 'AES256',
-    };
+  /** Release provider sockets when an isolated worker or acceptance fixture finishes. */
+  close(): void {
+    this.s3.destroy();
   }
 
-  /**
-   * Retrieve a sealed artifact. Returns the body and metadata.
-   */
+  async seal(input: SealEvidenceInput, options: EvidenceReadOptions = {}): Promise<SealedEvidence> {
+    if (!Number.isSafeInteger(input.retentionDays) || input.retentionDays <= 0)
+      throw new Error('retentionDays must be a positive integer');
+    const maxBytes = boundBytes(options.maxBytes);
+    const size =
+      typeof input.body === 'string'
+        ? Buffer.byteLength(input.body, 'utf8')
+        : input.body.byteLength;
+    if (size > maxBytes) throw new Error('Evidence exceeds byte limit');
+    const body = Buffer.isBuffer(input.body) ? input.body : Buffer.from(input.body);
+    const contentHash = createHash('sha256').update(body).digest('hex');
+    const retainUntil = input.retainUntil
+      ? new Date(input.retainUntil)
+      : new Date(Math.ceil((Date.now() + input.retentionDays * 86_400_000) / 1000) * 1000);
+    if (!Number.isFinite(retainUntil.getTime()) || retainUntil.getTime() <= Date.now())
+      throw new Error('Invalid retention date');
+    return budget(options, async (signal, maxBytes) => {
+      if (body.length > maxBytes) throw new Error('Evidence exceeds byte limit');
+      await this.assertObjectLockEnabled(input.bucket, signal);
+      const result = await this.s3.send(
+        new PutObjectCommand({
+          Bucket: input.bucket,
+          Key: input.key,
+          Body: body,
+          ContentType: input.contentType,
+          ContentMD5: createHash('md5').update(body).digest('base64'),
+          Metadata: {
+            ...Object.fromEntries(
+              Object.entries(input.metadata ?? {}).filter(
+                ([key]) => !key.toLowerCase().startsWith('axiom-'),
+              ),
+            ),
+            ...(input.operationId ? { 'axiom-operation-id': input.operationId } : {}),
+            'axiom-content-sha256': contentHash,
+            'axiom-tenant-id': input.tenantId,
+            'axiom-engagement-id': input.engagementId ?? '',
+            'axiom-collected-by-agent': input.collectedByAgent,
+            'axiom-sealed-at': new Date().toISOString(),
+            'axiom-retention-assurance': 'unverified',
+            'axiom-retention-request': 'COMPLIANCE',
+          },
+          ServerSideEncryption: input.encryption ?? 'AES256',
+          ObjectLockMode: 'COMPLIANCE',
+          ObjectLockRetainUntilDate: retainUntil,
+          ObjectLockLegalHoldStatus: input.legalHold ? 'ON' : 'OFF',
+          ChecksumAlgorithm: 'SHA256',
+        }),
+        { abortSignal: signal },
+      );
+      if (!result.VersionId || result.VersionId === 'null')
+        throw new Error('Uploaded evidence has no immutable version; seal not verified');
+      // Upload may already be durable if verification fails. The caller must
+      // retain its ingestion intent and reconcile, never delete as rollback.
+      return this.receipt(
+        {
+          ...input,
+          contentHash,
+          byteSize: body.length,
+          versionId: result.VersionId,
+          retainUntil: retainUntil.toISOString(),
+        },
+        signal,
+        maxBytes,
+      );
+    });
+  }
+
   async retrieve(
     bucket: string,
     key: string,
-  ): Promise<{
-    body: Buffer;
-    contentHash: string;
-    metadata: Record<string, string>;
-    contentType: string | undefined;
-    retainUntil: Date | undefined;
-    lockMode: ObjectLockMode | undefined;
-  }> {
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const result = await this.s3.send(cmd);
-    if (!result.Body) throw new Error(`Empty body for s3://${bucket}/${key}`);
-    const bytes = await result.Body.transformToByteArray();
-    const body = Buffer.from(bytes);
-    const contentHash = createHash('sha256').update(body).digest('hex');
-
-    return {
-      body,
-      contentHash,
-      metadata: Object.fromEntries(
-        Object.entries(result.Metadata ?? {}).map(([k, v]) => [k, v ?? '']),
-      ),
-      contentType: result.ContentType,
-      retainUntil: result.ObjectLockRetainUntilDate,
-      lockMode: result.ObjectLockMode as ObjectLockMode | undefined,
-    };
+    versionId: string,
+    options: EvidenceReadOptions = {},
+  ) {
+    const ref = reference(bucket, key, versionId);
+    return budget(options, (signal, maxBytes) => this.read(ref, signal, maxBytes));
   }
 
-  /**
-   * Verify that the on-disk content matches the recorded content hash.
-   * Used to detect bit-rot or accidental overwrite (the latter is
-   * blocked by Object Lock, but verifying is still good practice).
-   */
+  private async read(
+    ref: { Bucket: string; Key: string; VersionId: string },
+    signal: AbortSignal,
+    maxBytes: number,
+  ) {
+    const result = await this.s3.send(new GetObjectCommand(ref), { abortSignal: signal });
+    const body = result.Body as (AsyncIterable<Uint8Array> & { destroy?: () => void }) | undefined;
+    try {
+      if (result.VersionId !== ref.VersionId || result.DeleteMarker)
+        throw new Error('Evidence version mismatch');
+      if (
+        !Number.isSafeInteger(result.ContentLength) ||
+        result.ContentLength! < 0 ||
+        result.ContentLength! > maxBytes
+      )
+        throw new Error('Evidence exceeds byte limit or size is unavailable');
+      if (!body || !body[Symbol.asyncIterator]) throw new Error('Evidence body unavailable');
+      const chunks: Buffer[] = [];
+      let length = 0;
+      const iterator = body[Symbol.asyncIterator]();
+      while (true) {
+        const chunk = await interruptible(iterator.next(), signal);
+        if (chunk.done) break;
+        length += chunk.value.byteLength;
+        if (length > maxBytes || length > result.ContentLength!)
+          throw new Error('Evidence exceeds byte limit');
+        chunks.push(Buffer.from(chunk.value));
+      }
+      if (length !== result.ContentLength) throw new Error('Evidence size mismatch');
+      const bytes = Buffer.concat(chunks, length);
+      return {
+        body: bytes,
+        contentHash: createHash('sha256').update(bytes).digest('hex'),
+        metadata: result.Metadata ?? {},
+        contentType: result.ContentType,
+        retainUntil: result.ObjectLockRetainUntilDate,
+        lockMode: result.ObjectLockMode,
+        versionId: ref.VersionId,
+        encryption: result.ServerSideEncryption,
+      };
+    } finally {
+      body?.destroy?.();
+    }
+  }
+
   async verifyIntegrity(
     bucket: string,
     key: string,
+    versionId: string,
     expectedHash: string,
-  ): Promise<{
-    ok: boolean;
-    actualHash: string;
-  }> {
-    const r = await this.retrieve(bucket, key);
-    return { ok: r.contentHash === expectedHash, actualHash: r.contentHash };
+    options: EvidenceReadOptions = {},
+  ) {
+    if (!HASH.test(expectedHash)) throw new Error('Invalid evidence content hash');
+    const result = await this.retrieve(bucket, key, versionId, options);
+    return { ok: result.contentHash === expectedHash, actualHash: result.contentHash };
   }
 
-  /**
-   * Generate a time-limited signed URL for auditor access.
-   * Audit URLs are read-only and short-lived.
-   */
-  async presignedAuditUrl(bucket: string, key: string, expiresInSeconds = 300): Promise<string> {
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    return getSignedUrl(this.s3, cmd, { expiresIn: expiresInSeconds });
+  async verifyReceipt(
+    input: EvidenceReceiptInput,
+    options: EvidenceReadOptions = {},
+  ): Promise<SealedEvidence> {
+    reference(input.bucket, input.key, input.versionId);
+    return budget(options, async (signal, maxBytes) => {
+      await this.assertObjectLockEnabled(input.bucket, signal);
+      return this.receipt(input, signal, maxBytes);
+    });
   }
 
-  /**
-   * Head an object — useful for the Approval Console's "evidence ready" check
-   * without pulling the body.
-   */
-  async head(bucket: string, key: string) {
-    const cmd = new HeadObjectCommand({ Bucket: bucket, Key: key });
-    return this.s3.send(cmd);
+  private async receipt(
+    input: EvidenceReceiptInput,
+    signal: AbortSignal,
+    maxBytes: number,
+  ): Promise<SealedEvidence> {
+    const ref = reference(input.bucket, input.key, input.versionId);
+    if (
+      !HASH.test(input.contentHash) ||
+      !Number.isSafeInteger(input.byteSize) ||
+      input.byteSize < 0 ||
+      input.byteSize > maxBytes
+    )
+      throw new Error('Invalid evidence receipt');
+    const requestedUntil = Date.parse(input.retainUntil);
+    if (!Number.isFinite(requestedUntil)) throw new Error('Invalid evidence retention date');
+    const readback = await this.s3.send(new GetObjectRetentionCommand(ref), {
+      abortSignal: signal,
+    });
+    const until = readback.Retention?.RetainUntilDate;
+    if (
+      readback.Retention?.Mode !== 'COMPLIANCE' ||
+      !until ||
+      !Number.isFinite(until.getTime()) ||
+      until.getTime() < requestedUntil ||
+      until.getTime() <= Date.now()
+    )
+      throw new Error('Provider did not confirm required COMPLIANCE retention');
+    const hold = await this.s3.send(new GetObjectLegalHoldCommand(ref), { abortSignal: signal });
+    const legalHold = hold.LegalHold?.Status === 'ON';
+    if (!['ON', 'OFF'].includes(hold.LegalHold?.Status ?? '') || (input.legalHold && !legalHold))
+      throw new Error('Provider did not confirm legal hold');
+    const object = await this.read(ref, signal, maxBytes);
+    if (object.contentHash !== input.contentHash || object.body.length !== input.byteSize)
+      throw new Error('Evidence hash or size mismatch');
+    const expected = {
+      ...(input.operationId ? { 'axiom-operation-id': input.operationId } : {}),
+      'axiom-content-sha256': input.contentHash,
+      'axiom-tenant-id': input.tenantId,
+      'axiom-engagement-id': input.engagementId ?? '',
+      'axiom-collected-by-agent': input.collectedByAgent,
+    };
+    if (Object.entries(expected).some(([key, value]) => object.metadata[key] !== value))
+      throw new Error('Evidence metadata mismatch');
+    if (object.encryption !== (input.encryption ?? 'AES256'))
+      throw new Error('Provider did not confirm evidence encryption');
+    return {
+      bucket: input.bucket,
+      key: input.key,
+      versionId: input.versionId,
+      storageUri: `s3://${input.bucket}/${input.key}`,
+      contentHash: input.contentHash,
+      byteSize: input.byteSize,
+      retainUntil: until.toISOString(),
+      lockMode: 'COMPLIANCE',
+      retentionAssurance: 'verified',
+      retentionAssuranceReason:
+        'Exact-version bytes, metadata, encryption and COMPLIANCE retention verified by provider readback.',
+      encryption: object.encryption,
+      legalHold,
+      readbackAt: new Date().toISOString(),
+    };
   }
 
-  private async assertObjectLockEnabled(bucket: string): Promise<void> {
-    if (this.isGcs) {
-      throw new Error(
-        'GCS sealing requires verified Bucket/Object Retention Lock via a provider adapter; the S3 client cannot establish it',
+  /** Recovery only for a server-stored unique ingestion key. No upload or latest-key adoption. */
+  async findEvidenceVersion(
+    bucket: string,
+    key: string,
+    expected: {
+      tenantId: string;
+      contentHash: string;
+      byteSize: number;
+      operationId: string;
+      engagementId?: string | null;
+      collectedByAgent: string;
+    },
+    options: EvidenceReadOptions = {},
+  ): Promise<{ versionId: string } | null> {
+    if (
+      !bucket ||
+      !key ||
+      !expected.operationId ||
+      !HASH.test(expected.contentHash) ||
+      !Number.isSafeInteger(expected.byteSize) ||
+      expected.byteSize < 0
+    )
+      throw new Error('Invalid evidence reconciliation');
+    return budget(options, async (signal, maxBytes) => {
+      const listing = await this.s3.send(
+        new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key, MaxKeys: 11 }),
+        { abortSignal: signal },
       );
-    }
-    const result = await this.s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucket }));
-    if (result.ObjectLockConfiguration?.ObjectLockEnabled !== 'Enabled') {
-      throw new Error(`Bucket ${bucket} does not have verified Object Lock enabled`);
-    }
+      if (
+        listing.IsTruncated ||
+        (listing.Versions?.length ?? 0) > 10 ||
+        listing.DeleteMarkers?.some((item) => item.Key === key)
+      )
+        throw new Error('Ambiguous evidence versions');
+      const versions = (listing.Versions ?? []).filter((item) => item.Key === key);
+      if (versions.length === 0) return null;
+      if (versions.length !== 1) throw new Error('Ambiguous evidence versions');
+      const ref = reference(bucket, key, versions[0]!.VersionId!);
+      const object = await this.s3.send(new HeadObjectCommand(ref), { abortSignal: signal });
+      if (
+        object.VersionId !== ref.VersionId ||
+        object.DeleteMarker ||
+        object.ContentLength !== expected.byteSize ||
+        expected.byteSize > maxBytes
+      )
+        throw new Error('Evidence reconciliation mismatch');
+      const metadata = {
+        'axiom-operation-id': expected.operationId,
+        'axiom-tenant-id': expected.tenantId,
+        'axiom-content-sha256': expected.contentHash,
+        'axiom-engagement-id': expected.engagementId ?? '',
+        'axiom-collected-by-agent': expected.collectedByAgent,
+      };
+      if (Object.entries(metadata).some(([name, value]) => object.Metadata?.[name] !== value))
+        throw new Error('Evidence reconciliation mismatch');
+      return { versionId: ref.VersionId };
+    });
+  }
+
+  async presignedAuditUrl(
+    bucket: string,
+    key: string,
+    versionId: string,
+    expiresInSeconds = 300,
+  ): Promise<string> {
+    const ref = reference(bucket, key, versionId);
+    if (!Number.isSafeInteger(expiresInSeconds) || expiresInSeconds < 1 || expiresInSeconds > 900)
+      throw new Error('Invalid audit URL lifetime');
+    return getSignedUrl(this.s3, new GetObjectCommand(ref), { expiresIn: expiresInSeconds });
+  }
+
+  async head(bucket: string, key: string, versionId: string, options: EvidenceReadOptions = {}) {
+    const ref = reference(bucket, key, versionId);
+    return budget(options, async (signal, maxBytes) => {
+      const result = await this.s3.send(new HeadObjectCommand(ref), { abortSignal: signal });
+      if (result.VersionId !== versionId || result.DeleteMarker)
+        throw new Error('Evidence version mismatch');
+      if (
+        !Number.isSafeInteger(result.ContentLength) ||
+        result.ContentLength! < 0 ||
+        result.ContentLength! > maxBytes
+      )
+        throw new Error('Evidence exceeds byte limit or size is unavailable');
+      return result;
+    });
+  }
+
+  private async assertObjectLockEnabled(bucket: string, signal: AbortSignal) {
+    if (this.isGcs)
+      throw new Error(
+        'GCS sealing requires verified Bucket/Object Retention Lock via a provider adapter',
+      );
+    const result = await this.s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucket }), {
+      abortSignal: signal,
+    });
+    if (result.ObjectLockConfiguration?.ObjectLockEnabled !== 'Enabled')
+      throw new Error('Bucket does not have verified Object Lock enabled');
   }
 }
 
-/**
- * Compute SHA-256 of content for use as the canonical key.
- * Use as: `contentKey = \`tenants/\${tenantId}/evidence/\${sha256(content)}/${filename}\``
- */
 export function contentKey(args: {
   tenantId: string;
   contentHash: string;
