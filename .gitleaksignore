@@ -41,3 +41,15 @@ e65ecf5776d512af4b626492263a2f5724190479:services/agent-runtime/src/axiom/config
 e65ecf5776d512af4b626492263a2f5724190479:services/bff/.env.example:jwt:9
 e65ecf5776d512af4b626492263a2f5724190479:services/bff/.env.example:jwt:10
 e65ecf5776d512af4b626492263a2f5724190479:apps/web/src/middleware.ts:jwt:38
+
+# ─── Verified 2026-09-26 by operator instruction: the three held historical
+# secrets. HEAD has been clean since W0.0 — the compose file reads ONE JWT
+# secret from the environment (scripts/mint-supabase-keys.mjs), and the
+# preprod example documents the placeholder. These fingerprints cover the
+# historical commits only. The values remain burned in public history:
+# deployments MUST source fresh secrets via scripts/mint-supabase-keys.mjs
+# and never reuse them. Rotation of any deployed preprod values is the
+# operator's action item.
+7719f0c8611646db72f6e52656236f2dfebf367f:infra/docker/docker-compose.supabase.yml:generic-api-key:49
+7719f0c8611646db72f6e52656236f2dfebf367f:infra/docker/docker-compose.supabase.yml:generic-api-key:67
+7631b1fbbef36cfb4254414d665ebf28b23b9909:infra/docker/environments/.env.preprod.example:generic-api-key:38
