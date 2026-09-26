@@ -223,7 +223,13 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     const noticeEn = `Reviewed ${which} notice for this synthetic browser journey.`;
     const noticeHi = `${which} सहमति की समीक्षा की गई सूचना।`;
     await page.getByRole('button', { name: 'Register purpose', exact: true }).click();
+    const purposeKey = page.getByLabel('Purpose key', { exact: true });
+    await purposeKey.fill('Invalid purpose key');
+    expect(
+      await purposeKey.evaluate((input: HTMLInputElement) => input.validity.patternMismatch),
+    ).toBe(true);
     await page.getByLabel('Purpose key', { exact: true }).fill(`form-${which}-${suffix}`);
+    expect(await purposeKey.evaluate((input: HTMLInputElement) => input.validity.valid)).toBe(true);
     await page.getByLabel('English purpose name', { exact: true }).fill(name);
     await page.getByLabel('Hindi purpose name', { exact: true }).fill('सहमति उद्देश्य');
     await page.getByLabel('Lawful basis', { exact: true }).selectOption('consent');

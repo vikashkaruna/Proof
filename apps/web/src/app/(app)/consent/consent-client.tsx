@@ -219,7 +219,7 @@ export function ConsentClient({ tenantId, canManage }: { tenantId: string; canMa
                       className={field}
                       name="purposeKey"
                       required
-                      pattern="[a-z0-9_.-]{1,64}"
+                      pattern={'[a-z0-9_.\\-]{1,64}'}
                       maxLength={64}
                     />
                   </Field>
