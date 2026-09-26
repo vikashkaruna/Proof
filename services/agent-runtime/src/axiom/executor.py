@@ -58,6 +58,8 @@ class BatchResult:
     status: str
     replay: bool
     outcomes: list[ActionOutcome] = field(default_factory=list)
+    # The maker-checker statement (W5.6), recorded after the batch finished.
+    reconciliation: dict[str, Any] | None = None
 
 
 class ExecutorDb:
@@ -104,6 +106,7 @@ async def execute_batch(
     kill_switch: KillSwitchReader,
     adapter: WriteAdapter,
     verify_token: Any,
+    signing_key: str | bytes | None = None,
 ) -> BatchResult:
     """Execute one claimed batch.
 
@@ -147,6 +150,7 @@ async def execute_batch(
 
     spec = payload.approval_token.get("spec", {})
     outcomes: list[ActionOutcome] = []
+    action_rows: dict[str, dict[str, Any]] = {}
     halted = False
     failed = False
     semaphore = asyncio.Semaphore(max(1, int(payload.concurrency)))
@@ -199,6 +203,7 @@ async def execute_batch(
                     stop.set()
                 return
 
+            action_rows[action_id] = row
             declared = _declared_records(row.get("blast_radius") or {})
             try:
                 result = await adapter.execute(row["action_type"], row.get("parameters") or {})
@@ -306,7 +311,10 @@ async def execute_batch(
             else:
                 status = "failed"
             finished = _finish(db, payload, batch["id"], status)
-            return _final_result(batch["id"], finished, outcomes, payload.action_ids)
+            return await _post_finish(
+                db, kill_switch, adapter, payload, batch["id"], finished, status,
+                outcomes, action_rows, halted, signing_key,
+            )
 
     if halted:
         status = "halted"
@@ -317,7 +325,40 @@ async def execute_batch(
     else:
         status = "failed"
     finished = _finish(db, payload, batch["id"], status)
-    return _final_result(batch["id"], finished, outcomes, payload.action_ids)
+    return await _post_finish(
+        db, kill_switch, adapter, payload, batch["id"], finished, status,
+        outcomes, action_rows, halted, signing_key,
+    )
+
+
+async def _post_finish(
+    db: ExecutorDb,
+    kill_switch: KillSwitchReader,
+    adapter: WriteAdapter,
+    payload: Any,
+    batch_id: str,
+    finished: dict[str, Any],
+    status: str,
+    outcomes: list[ActionOutcome],
+    action_rows: dict[str, dict[str, Any]],
+    halted: bool,
+    signing_key: str | bytes | None,
+) -> BatchResult:
+    """Verification (M3.7) and the maker-checker statement (W5.6), after
+    the batch reached its terminal status. A halted batch skips
+    verification — an operator halting an incident stops estate calls —
+    but its statement is still recorded, because the reconciliation is
+    exactly what the incident review will read."""
+    from .verification import reconcile_batch, verify_batch
+
+    result = _final_result(batch_id, finished, outcomes, payload.action_ids)
+    if not halted:
+        await verify_batch(db, kill_switch, adapter, payload, batch_id, result.outcomes, action_rows)
+    if signing_key:
+        result.reconciliation = await reconcile_batch(
+            db, payload, batch_id, result.status, result.outcomes, signing_key
+        )
+    return result
 
 
 def _finish(db: ExecutorDb, payload: Any, batch_id: str, status: str) -> dict[str, Any]:
@@ -408,7 +449,7 @@ async def _run_rollbacks(
                 },
             )
             if "error" in recorded:
-                raise ExecutorRefused(recorded["error"])
+                raise ExecutorRefused(recorded["error"]) from refused
             for o in outcomes:
                 if o.action_id == action_id and o.outcome == "succeeded":
                     o.outcome = outcome

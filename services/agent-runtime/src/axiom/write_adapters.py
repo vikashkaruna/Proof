@@ -57,6 +57,11 @@ class WriteAdapter(Protocol):
         """Execute Sudhaar's stored rollback definition. Raise WriteRefused
         rather than guess."""
 
+    async def verify(self, action_type: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        """Re-run the checks the remediation targeted (M3.7). Returns the
+        checks with their outcomes; never estate values. Raise WriteRefused
+        rather than guess."""
+
 
 class ReferenceWriteAdapter:
     """Bounded write transport to the reference write service.
@@ -88,6 +93,57 @@ class ReferenceWriteAdapter:
         return await self._call(
             {"op": "rollback", "simulate": False, "action_type": action_type, "rollback": definition}
         )
+
+    async def verify(self, action_type: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        response = await self._call_raw(
+            {"op": "verify", "action_type": action_type, "parameters": parameters}
+        )
+        checks = response.get("checks")
+        if not isinstance(checks, list) or len(checks) > 100:
+            raise WriteRefused("write_response_invalid")
+        for check in checks:
+            if (
+                not isinstance(check, dict)
+                or not isinstance(check.get("check_id"), str)
+                or not check["check_id"]
+                or len(check["check_id"]) > 120
+                or not all(c.isalnum() or c in "._:/-" for c in check["check_id"])
+                or check.get("outcome") not in ("passed", "failed")
+            ):
+                raise WriteRefused("write_response_invalid")
+        return [
+            {
+                "check_id": check["check_id"],
+                "outcome": check["outcome"],
+                **({"detail": str(check["detail"])[:200]} if "detail" in check else {}),
+            }
+            for check in checks
+        ]
+
+    async def _call_raw(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(
+                timeout=WRITE_TIMEOUT_SECONDS, follow_redirects=False
+            ) as client:
+                response = await client.post(
+                    f"{self._origin}/writes",
+                    json=body,
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+        except httpx.HTTPError:
+            raise WriteRefused("write_transport_unavailable") from None
+        if response.status_code != 200:
+            raise WriteRefused("write_refused_by_target")
+        try:
+            payload = response.json()
+        except ValueError:
+            raise WriteRefused("write_response_unreadable") from None
+        if not isinstance(payload, dict):
+            raise WriteRefused("write_response_unreadable")
+        return payload
 
     async def _call(self, body: dict[str, Any]) -> WriteResult:
         try:
