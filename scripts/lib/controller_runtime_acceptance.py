@@ -12,6 +12,12 @@ from pathlib import Path
 from lib.controller_transition_acceptance import accept as transition_acceptance
 
 
+def require(condition, message):
+    # Explicit refusal: survives `python -O`, unlike `assert`.
+    if not condition:
+        raise RuntimeError('controller runtime acceptance refused: '+message)
+
+
 def accept(root, prefix, alpine, tenant, service_config, manifest_sha, api_volume, health_volume, foreign, run, control, active, wait_for):
     directory = root/'controller-runtime-fixture'; directory.mkdir(mode=0o700)
     image = prefix+':supervisor-fixture'
@@ -59,20 +65,20 @@ ENTRYPOINT ["/sbin/tini","--","node","--import","/app/node_modules/tsx/dist/load
         review = directory/'runtime.json'; review.write_bytes(raw); review.chmod(0o600)
         profile_path = profiles/(sha+'.json'); profile_paths.add(profile_path)
         run([*cli, '--install', str(review), sha]); run([*cli, '--install', str(review), sha])
-        assert all(p.stat().st_uid == 0 and p.stat().st_mode & 511 == 0o600 for p in (units[0], profile_path))
+        require(all(p.stat().st_uid == 0 and p.stat().st_mode & 511 == 0o600 for p in (units[0], profile_path)), 'delivered unit or profile ownership/mode changed')
         run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(units[0])])
-        assert control('is-enabled', production, check=False).returncode != 0
-        assert not state.exists()
+        require(control('is-enabled', production, check=False).returncode != 0, 'production unit enabled on delivery')
+        require(not state.exists(), 'state created on delivery')
         outcomes['controller-unit-delivery-is-reviewed-disabled-and-idempotent'] = True
         original_unit = units[0].read_bytes()
         units[0].write_bytes(original_unit+b'\n# conflicting fixture delivery\n')
-        assert run([*cli, '--install', str(review), sha], check=False).returncode != 0
-        assert units[0].read_bytes() != original_unit
+        require(run([*cli, '--install', str(review), sha], check=False).returncode != 0, 'conflicting delivery accepted')
+        require(units[0].read_bytes() != original_unit, 'conflicting delivery replaced the unit')
         units[0].write_bytes(original_unit)
         outcomes['controller-install-conflict-preserved-without-replacement'] = True
         control('daemon-reload'); control('start', production, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', production).stdout.strip() == b'failed')
-        assert not list(state.glob('*/intent.json'))
+        require(not list(state.glob('*/intent.json')), 'intent created before placement')
         outcomes['controller-production-placement-refuses-local-node-before-create'] = True
         control('reset-failed', production)
         # Private fixture wrapper only: replace GCP metadata comparison with the
@@ -127,22 +133,22 @@ except Exception as error:
             return run(['docker', 'inspect', '--format', '{{.State.Running}}', identifier], check=False).stdout.strip() == b'true'
         control('start', fixture_unit); wait_for(running)
         first = current(); first_id = json.loads((first/'container.json').read_text())['containerId']
-        assert run([*cli, '--run', sha], check=False).returncode != 0
-        assert running() and len(attempts()) == 1
+        require(run([*cli, '--run', sha], check=False).returncode != 0, 'concurrent start accepted')
+        require(running() and len(attempts()) == 1, 'concurrent start disturbed the owner')
         outcomes['controller-concurrent-start-refused-without-disturbing-owner'] = True
         control('stop', fixture_unit)
-        assert (first/'stopped.json').exists()
+        require((first/'stopped.json').exists(), 'owned stop receipt missing')
         observation = json.loads(run(['docker', 'inspect', first_id]).stdout)[0]
-        assert observation['State']['Running'] is False and observation['State']['ExitCode'] == 0
-        assert observation['HostConfig']['PortBindings'] == {'8443/tcp': [{'HostIp': private[0], 'HostPort': '8443'}]}
-        assert observation['Config']['User'] == '20000:20000' and observation['HostConfig']['ReadonlyRootfs'] is True
+        require(observation['State']['Running'] is False and observation['State']['ExitCode'] == 0, 'owned container not gracefully stopped')
+        require(observation['HostConfig']['PortBindings'] == {'8443/tcp': [{'HostIp': private[0], 'HostPort': '8443'}]}, 'port binding escaped the private interface')
+        require(observation['Config']['User'] == '20000:20000' and observation['HostConfig']['ReadonlyRootfs'] is True, 'container user or rootfs confinement changed')
         outcomes['controller-supervisor-private-confinement-and-graceful-owned-stop'] = True
         control('start', fixture_unit); wait_for(running)
         second = current(); second_id = json.loads((second/'container.json').read_text())['containerId']
-        assert second_id != first_id and second != first
+        require(second_id != first_id and second != first, 'restart reused identity or attempt')
         run(['docker', 'kill', second_id])
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
-        assert (second/'stopped.json').exists() and len(attempts()) == 2
+        require((second/'stopped.json').exists() and len(attempts()) == 2, 'unexpected-exit receipt missing')
         outcomes['controller-unexpected-exit-fails-without-automatic-restart'] = True
         control('reset-failed', fixture_unit); control('start', fixture_unit); wait_for(running)
         third = current(); record = third/'container.json'; original_record = record.read_bytes()
@@ -151,29 +157,29 @@ except Exception as error:
         record.write_bytes(encode({'schemaVersion': 1, 'containerId': foreign_id}))
         control('kill', '--kill-whom=main', '--signal=SIGKILL', fixture_unit)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
-        assert not (third/'stopped.json').exists()
-        assert run(['docker', 'inspect', '--format', '{{.State.Running}}', foreign_id]).stdout.strip() == b'true'
-        assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
+        require(not (third/'stopped.json').exists(), 'foreign-id stop wrote a receipt')
+        require(run(['docker', 'inspect', '--format', '{{.State.Running}}', foreign_id]).stdout.strip() == b'true', 'foreign container was disturbed')
+        require(run([*cli, '--stop', tenant, sha], check=False).returncode != 0, 'foreign-id stop accepted')
         outcomes['controller-foreign-id-refused-without-stopping-foreign-container'] = True
         record.write_bytes(original_record)
         run([*cli, '--stop', tenant, sha])  # Production path; no fixture metadata shim.
-        assert (third/'stopped.json').exists()
-        assert run(['docker', 'inspect', '--format', '{{.State.Running}}', original_id]).stdout.strip() == b'false'
+        require((third/'stopped.json').exists(), 'explicit stop receipt missing')
+        require(run(['docker', 'inspect', '--format', '{{.State.Running}}', original_id]).stdout.strip() == b'false', 'original container still running')
         outcomes['controller-explicit-owned-recovery-needs-no-placement-service'] = True
         control('reset-failed', fixture_unit); control('start', fixture_unit); wait_for(running)
         killed = current()
         control('kill', '--kill-whom=main', '--signal=SIGKILL', fixture_unit)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
-        assert (killed/'stopped.json').exists()
+        require((killed/'stopped.json').exists(), 'wrapper-death receipt missing')
         outcomes['controller-wrapper-death-recovers-exact-id-through-stop-post'] = True
         control('reset-failed', fixture_unit); control('start', fixture_unit); wait_for(running)
         dependent = current()
         control('stop', 'axiom-spire-health.service')
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'inactive')
-        assert (dependent/'stopped.json').exists()
+        require((dependent/'stopped.json').exists(), 'dependency-loss receipt missing')
         control('reset-failed', 'axiom-spire-health.service'); control('start', 'axiom-spire-health.service')
         wait_for(lambda: json.loads(Path('/run/spire-health/status.json').read_text()).get('healthy') is True)
-        assert not active(fixture_unit)
+        require(not active(fixture_unit), 'fixture restarted after dependency loss')
         outcomes['controller-dependency-loss-stops-owner-without-auto-resume'] = True
         # A successfully stopped unit may already be unloaded by systemd;
         # reset-failed is unnecessary here and would refuse an unloaded unit.
@@ -183,14 +189,14 @@ except Exception as error:
         control('start', fixture_unit, check=False)
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
         queued = current(); queued_id = json.loads((queued/'container.json').read_text())['containerId']; ids.add(queued_id)
-        assert (queued/'start.json').exists() and not (queued/'stopped.json').exists()
-        assert run(['docker', 'inspect', '--format', '{{.State.Status}}', queued_id]).stdout.strip() == b'created'
-        assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
-        assert run([*cli, '--run', sha], check=False).returncode != 0
+        require((queued/'start.json').exists() and not (queued/'stopped.json').exists(), 'queued start receipt missing')
+        require(run(['docker', 'inspect', '--format', '{{.State.Status}}', queued_id]).stdout.strip() == b'created', 'queued container left created state')
+        require(run([*cli, '--stop', tenant, sha], check=False).returncode != 0, 'queued uncertain start accepted stop')
+        require(run([*cli, '--run', sha], check=False).returncode != 0, 'queued uncertain start accepted run')
         # Fixture-only simulation of the daemon eventually completing the
         # uncertain request. Production never reissues start during recovery.
         run(['docker', 'start', queued_id]); run([*cli, '--stop', tenant, sha])
-        assert (queued/'stopped.json').exists()
+        require((queued/'stopped.json').exists(), 'queued stop receipt missing')
         (directory/'uncertain-start').unlink()
         outcomes['controller-uncertain-start-remains-blocked-until-owned-stop-observed'] = True
         control('reset-failed', fixture_unit); (directory/'uncertain').write_text('fixture')
@@ -198,11 +204,11 @@ except Exception as error:
         wait_for(lambda: control('show', '--property=ActiveState', '--value', fixture_unit).stdout.strip() == b'failed')
         uncertain_id = (directory/'created-id').read_text().strip(); ids.add(uncertain_id)
         last = next(p for p in attempts() if not (p/'container.json').exists())
-        assert (last/'intent.json').exists() and not (last/'stopped.json').exists()
-        assert run(['docker', 'inspect', '--format', '{{.State.Status}}', uncertain_id]).stdout.strip() == b'created'
-        assert run([*cli, '--run', sha], check=False).returncode != 0
-        assert run([*cli, '--stop', tenant, sha], check=False).returncode != 0
-        assert len(attempts()) == completed_attempts+2
+        require((last/'intent.json').exists() and not (last/'stopped.json').exists(), 'uncertain-create intent missing')
+        require(run(['docker', 'inspect', '--format', '{{.State.Status}}', uncertain_id]).stdout.strip() == b'created', 'uncertain create not left created')
+        require(run([*cli, '--run', sha], check=False).returncode != 0, 'uncertain create adopted by run')
+        require(run([*cli, '--stop', tenant, sha], check=False).returncode != 0, 'uncertain create adopted by stop')
+        require(len(attempts()) == completed_attempts+2, 'attempt inventory changed unexpectedly')
         outcomes['controller-uncertain-create-preserves-intent-without-adoption-or-start'] = True
         return outcomes
     finally:
