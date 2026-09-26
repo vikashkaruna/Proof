@@ -1,25 +1,25 @@
 # Axiom Proof — implementation handoff
 
-## Session close-out and handoff — Revision 93 (2026-09-26)
+## Session close-out and handoff — Revision 94 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 92, merge commit `b483618` of PR #64; Revision 93 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 93, merge commit `52475da` of PR #65; Revision 94 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–92 (PRs #61–#64 merged); Revision 93 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–93 (PRs #61–#65 merged); Revision 94 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0064: 65 migrations, 66 public tables** (Rev 89 the five W5 tables; Rev 90 the executor's four functions; Rev 91 the rollback function; Rev 92 verification + reconciliation; Rev 93 the run-record functions). The next migration is **0065**; never edit an applied migration.
-- Latest audit is **81**.
+- Schema is **0000–0065: 66 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables). The next migration is **0066**; never edit an applied migration.
+- Latest audit is **82**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
 | Suite                                 | Result                                                                                  |
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1112 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| BFF (vitest)                          | 1122 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
 | Web                                   | 89                                                                                      |
 | MFA                                   | 180                                                                                     |
 | Control library                       | 83                                                                                      |
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 94 — W6 foundation: the continuous-compliance tables (GLM session):**
+
+W6 opens with its foundation: migration 0065 creates the four monitoring/policy tables Doc 11 lists as missing — `monitoring_schedules` (per-estate cron schedules with a one-active-per-kind partial unique index; a re-registration retires the replaced schedule in the same audited transaction), `drift_events` (append-only, closed kind/severity sets, all-or-nothing acknowledgement), `standing_approval_policies` (human-authored AND human-approved, scope-bounded with a mandatory `action_types` array, expiring — the engine they feed issues scoped tokens through the existing approval gate or escalates, never bypassing BR-1/BR-2) and `policy_evaluations` (append-only, tenant-bound to the policy). `register_monitoring_schedule` is the estate manager's write path, and the BFF gains `POST /v1/monitoring/schedules` (ESTATE_MANAGE, future first fire required, RPC refusals rendered as 409) and `GET /v1/monitoring/schedules` (POSTURE_READ, tenant-scoped). Ledger action `monitoring.schedule.registered` is added to `LedgerActionType` in the same commit. The scheduler, drift write path and policy engine are the next W6 slices. See [audit 82](audits/82-continuous-compliance-foundation-review-2026-09-26.md). Schema is **0065 / 66 migrations / 70 public tables**; the next migration is **0066**.
 
 **Revision 93 — execution progress telemetry (GLM session):**
 
