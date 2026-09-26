@@ -21,7 +21,10 @@ else
   echo "security-scan: install uv (preferred) or bandit" >&2
   exit 1
 fi
-exclusions='*/tests/*,*/.venv/*,*/node_modules/*'
+# Agent-tool state and stale worktrees (.claude/.kilo/.codex) are gitignored,
+# so CI never checks them out; scanning them locally only reports findings from
+# stale copies of the source. Excluded alongside the other non-product paths.
+exclusions='*/tests/*,*/.venv/*,*/node_modules/*,*/.claude/*,*/.kilo/*,*/.codex/*'
 
 echo "security-scan: bandit (services, medium+)"
 "${bandit[@]}" -q -r services/agent-runtime/src services/model-gateway/src \

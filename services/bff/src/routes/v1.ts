@@ -6,6 +6,7 @@ import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
+import { dispatchDryRun } from '../services/dry-run-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -103,6 +104,44 @@ function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
     Number.isFinite(Date.parse(expiresAt)) &&
     Date.parse(expiresAt) > now
   );
+}
+
+/**
+ * Version of the BFF → agent-runtime dry-run payload (W5 · M3.2).
+ *
+ * Bump on any breaking payload change and update `InternalDryRunRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/dry-run-contract.test.ts` asserts they agree.
+ */
+export const DRY_RUN_CONTRACT_VERSION = 1;
+
+export interface DryRunDispatchInput {
+  tenantId: string;
+  actionId: string;
+  actionType: string;
+  parameters: Record<string, unknown>;
+  blastRadius: Record<string, unknown>;
+  rollbackDefinition: Record<string, unknown>;
+  correlationId: string;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/dry-run`, pinned to
+ * `tests/contracts/dry-run.v1.json` from both sides, like the execution
+ * dispatch contract above. The content is what the BFF read from the stored
+ * action; `record_dry_run` refuses anything that no longer matches it.
+ */
+export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
+  return {
+    contract_version: DRY_RUN_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    action_id: input.actionId,
+    action_type: input.actionType,
+    parameters: input.parameters,
+    blast_radius: input.blastRadius,
+    rollback_definition: input.rollbackDefinition,
+    correlation_id: input.correlationId,
+  };
 }
 
 interface Deps {
@@ -1181,6 +1220,139 @@ export function v1Routes(deps: Deps) {
     });
 
     return c.json({ ok: true });
+  });
+
+  // ─── W5 · M3.2 — the dry-run engine ────────────────────────────────
+  //
+  // Sudhaar's declared simulation for the plan's actions, recorded through
+  // `record_dry_run` (migration 0060) and returned only after it is
+  // recorded. A refusal is an outcome, not an error: the action routes to
+  // manual handling (Doc 04 §3.2) and any earlier dry-run that made it
+  // eligible is invalidated. Approval stays architecturally impossible
+  // without a fresh, successful dry-run (FR-6.3).
+
+  const DryRunRequestSchema = z.object({
+    actionIds: z.array(z.uuid()).max(50).optional(),
+  });
+
+  // POST /v1/plans/:id/dry-run — run (or re-run) the simulator.
+  app.post('/plans/:id/dry-run', async (c) => {
+    const dryRunRefusal = requireCapability(c, Capability.PLAN_CREATE);
+    if (dryRunRefusal) return dryRunRefusal;
+    const tenantId = c.get('tenantId');
+    const planId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const parsed = DryRunRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid dry-run request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const admin = createSupabaseAdmin();
+    // The stored action rows are the simulated content: what is stored is
+    // what the runtime receives, and `record_dry_run` refuses to record a
+    // run against anything else.
+    let query = admin
+      .from('remediation_actions')
+      .select(
+        'id, plan_id, action_type, parameters, blast_radius, rollback_definition, approval_status',
+      )
+      .eq('plan_id', planId)
+      .eq('tenant_id', tenantId);
+    if (parsed.data.actionIds) {
+      query = query.in('id', parsed.data.actionIds);
+    }
+    const { data: actions, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    if (!actions || actions.length === 0) {
+      return c.json(
+        { error: { code: 'plan_not_found', message: 'No eligible actions for this plan' } },
+        404,
+      );
+    }
+    // Dry-runs precede approval; approved content is frozen. An action the
+    // caller named past its eligibility is skipped, not silently run.
+    const eligible = actions.filter((a) =>
+      ['draft', 'awaiting_approval'].includes(a.approval_status as string),
+    );
+    if (eligible.length === 0) {
+      return c.json(
+        {
+          error: {
+            code: 'no_eligible_actions',
+            message: 'Every requested action is already approved or otherwise past dry-run',
+          },
+        },
+        409,
+      );
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const action of eligible) {
+      const dispatch = await dispatchDryRun(
+        env.AGENT_RUNTIME_URL,
+        env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+        buildDryRunDispatchPayload({
+          tenantId,
+          actionId: action.id,
+          actionType: action.action_type,
+          parameters: action.parameters ?? {},
+          blastRadius: action.blast_radius ?? {},
+          rollbackDefinition: action.rollback_definition ?? {},
+          correlationId: randomUUID(),
+        }),
+      );
+      results.push({
+        actionId: action.id,
+        status: dispatch.status,
+        outcome: dispatch.outcome,
+        refusalReason: dispatch.refusalReason,
+        dryRunId: dispatch.dryRunId,
+        ...(dispatch.status === 'unavailable' ? { error: dispatch.error } : {}),
+      });
+    }
+    return c.json({
+      data: results,
+      summary: {
+        requested: eligible.length,
+        recorded: results.filter((r) => r.status === 'recorded').length,
+        refused: results.filter((r) => r.status === 'refused').length,
+        unavailable: results.filter((r) => r.status === 'unavailable').length,
+      },
+    });
+  });
+
+  // GET /v1/plans/:id/dry-runs — the recorded simulation history, including
+  // the refusals an auditor looks for.
+  app.get('/plans/:id/dry-runs', async (c) => {
+    const readRefusal = requireCapability(c, Capability.PLAN_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const planId = c.req.param('id');
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from('dry_runs')
+      .select(
+        'id, action_id, status, diff, refusal_reason, renderable, parameters_hash, rollback_definition_hash, simulated_by, correlation_id, expires_at, created_at',
+      )
+      .eq('plan_id', planId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
   });
 
   // POST /v1/plans/:id/execute — THE EXECUTION GATE

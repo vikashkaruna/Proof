@@ -1,25 +1,25 @@
 # Axiom Proof — implementation session handoff
 
-## Session close-out and handoff — Revision 88 (2026-09-25)
+## Session close-out and handoff — Revision 89 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 88, merge commit `cfe985d` of PR #56).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 88, merge commit `fcf7759` of PR #58; Revision 89 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–88 and the dependency updates (PR #57). Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–88 plus the dependency updates (PR #57); Revision 89 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0059: 60 migrations, 61 public tables**. The next migration is **0060**; never edit an applied migration.
-- Latest audit is **76**.
+- Schema is **0000–0060: 61 migrations, 66 public tables** (Revision 89 adds the five W5 execution-detail tables). The next migration is **0061**; never edit an applied migration.
+- Latest audit is **77**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
 | Suite                                 | Result                                                                                  |
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1089 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| BFF (vitest)                          | 1110 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
 | Web                                   | 89                                                                                      |
 | MFA                                   | 180                                                                                     |
 | Control library                       | 83                                                                                      |
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 89 — W5 foundation: the dry-run engine and the five execution-detail tables (GLM session):**
+
+Migration 0060 creates the five W5 execution-detail tables — `dry_runs`, `execution_batches`, `rollback_executions`, `verification_results`, `plan_reconciliations` — tenant-bound with RLS, composite tenant-consistent foreign keys and no direct write path, plus `record_dry_run`, the M3.2 engine's SECURITY DEFINER write path. A dry-run is bound to exactly the stored action content (the RPC re-reads the row and refuses anything else), a success sets the 24-hour freshness gate, and a refusal — `custom` and unknown action types are never simulable — is recorded as an outcome that invalidates any earlier success. The simulator (`axiom/dry_run.py`) renders structured field-level diffs from declared parameters only and invents nothing: an undeclared record count stays null. `POST /internal/dry-run` records before it returns; the BFF routes `POST /v1/plans/:id/dry-run` and `GET /v1/plans/:id/dry-runs` report recorded/refused/unavailable per action, and the payload is pinned to `tests/contracts/dry-run.v1.json` from both sides. `plan_reconciliations` carries a constraint that `out_of_scope` must be empty: out-of-scope execution is a defect to fail on, not a finding to store. See [audit 77](audits/77-dry-run-engine-review-2026-09-26.md). Schema is **0060 / 61 migrations / 66 public tables**; the next migration is **0061**. Next in plan order: the W5 executor (M3.4) consuming the dispatch outbox under the signed token, then rollback (M3.5), post-verification (M3.7) and the reconciler (W5.6).
 
 **Revision 88 — tool registry UI and PNG graph export (Claude cloud session):** the onboarding setup page gains a **Connector tools** card. It lists each active connector's registered tool versions, with their class and the first characters of the pinned description hash, and offers connector managers an append-only registration form. Registering still authorizes nothing; use needs a live grant whose scope matches the tool's class. The estate graph adds **Export PNG**: the same SVG rasterised at 2x in the browser, alongside Export SVG. Browser journeys now register a read tool through the page, check that a write tool on a reference binding is refused with 409, and check that both exports download. W3.5 still open: derivation edges (these need a data-lineage model and are recorded as a W6/W8 dependency), live updates, and branded export. No migration was added.
 
