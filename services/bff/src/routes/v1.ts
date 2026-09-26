@@ -6,6 +6,7 @@ import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
+import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -104,6 +105,38 @@ function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
     Number.isFinite(Date.parse(expiresAt)) &&
     Date.parse(expiresAt) > now
   );
+}
+
+/**
+ * Version of the BFF → agent-runtime manual rollback payload (W5 · M3.5).
+ *
+ * Bump on any breaking payload change and update `InternalRollbackRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/rollback-contract.test.ts` asserts they agree
+ * against `tests/contracts/rollback-dispatch.v1.json`.
+ */
+export const ROLLBACK_CONTRACT_VERSION = 1;
+
+export interface RollbackDispatchInput {
+  tenantId: string;
+  batchId: string;
+  actionIds: string[];
+  correlationId: string;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/rollback`. The batch
+ * scopes the read on the runtime side; `record_rollback_execution` refuses an
+ * action whose batch differs, so nothing wider than one execution can undo.
+ */
+export function buildRollbackDispatchPayload(input: RollbackDispatchInput) {
+  return {
+    contract_version: ROLLBACK_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    batch_id: input.batchId,
+    action_ids: input.actionIds,
+    correlation_id: input.correlationId,
+  };
 }
 
 /**
@@ -3139,6 +3172,205 @@ export function v1Routes(deps: Deps) {
         startedAt: new Date().toISOString(),
       },
       status === 'rejected' ? 422 : 202,
+    );
+  });
+
+  // ─── W5 · M3.5 — the manual rollback route ────────────────────────
+  //
+  // The automated rollback pass runs only when a failure fires with
+  // stop-on-failure armed; every other completed action waits for exactly
+  // this: a human deciding to undo executed work. The route carries the
+  // human's authority and record — capability, kill switch, and a ledger
+  // entry with the human's own actor — while the undo itself runs where
+  // every other estate write runs, in the runtime, against each action's
+  // stored definition, recorded through `record_rollback_execution` with
+  // `triggered_by: 'manual'`. The BFF never writes a rollback row: only
+  // the adapter that attempted the undo may record its outcome.
+
+  // Unknown keys are refused, not stripped: a body the operator did not
+  // mean should fail loudly rather than be partially acted on.
+  const ManualRollbackRequestSchema = z
+    .object({
+      actionIds: z.array(z.string().uuid()).min(1).max(100),
+    })
+    .strict();
+
+  // POST /v1/plans/:id/rollback — undo executed actions of one execution.
+  app.post('/plans/:id/rollback', async (c) => {
+    const rollbackRefusal = requireCapability(c, Capability.PLAN_EXECUTE);
+    if (rollbackRefusal) return rollbackRefusal;
+    const tenantId = c.get('tenantId');
+    if (await deps.killSwitch.isActive(tenantId)) {
+      return c.json(
+        { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
+        423,
+      );
+    }
+    const planId = c.req.param('id');
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => null);
+    const parsed = ManualRollbackRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid rollback request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const admin = createSupabaseAdmin();
+    const { data: actions, error: actionsErr } = await admin
+      .from('remediation_actions')
+      .select('id, plan_id, action_type, execution_status, final_outcome, execution_batch_id')
+      .in('id', parsed.data.actionIds)
+      .eq('tenant_id', tenantId);
+    if (actionsErr) {
+      return c.json({ error: { code: 'lookup_failed', message: actionsErr.message } }, 500);
+    }
+
+    const rows = actions ?? [];
+    if (rows.length !== parsed.data.actionIds.length || rows.some((a) => a.plan_id !== planId)) {
+      // An unknown id and an action belonging to another plan are the same
+      // answer to this caller: nothing to roll back under this plan.
+      return c.json(
+        { error: { code: 'actions_not_found', message: 'No such actions under this plan' } },
+        404,
+      );
+    }
+
+    // One execution per request: the undo is scoped to the batch the actions
+    // ran in, which is also what the runtime's pass reads and what
+    // `record_rollback_execution` enforces per record.
+    const batchIds = new Set(rows.map((a) => a.execution_batch_id as string | null));
+    if (batchIds.size !== 1 || batchIds.has(null)) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_span_batches',
+            message: 'A rollback request must name actions from one execution',
+          },
+        },
+        422,
+      );
+    }
+    const batchId = [...batchIds][0] as string;
+
+    // Only an action the batch completed — and has not already reversed — is
+    // reversible. `record_rollback_execution` re-checks this under the row
+    // lock; refusing here keeps the undo from ever being attempted against a
+    // row the database would refuse to record.
+    const notReversible = rows
+      .filter((a) => a.final_outcome !== 'succeeded' || a.execution_status !== 'succeeded')
+      .map((a) => a.id as string);
+    if (notReversible.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_not_reversible',
+            message: 'Only executed, not-yet-rolled-back actions can be rolled back',
+            details: { actionIds: notReversible },
+          },
+        },
+        422,
+      );
+    }
+
+    const correlationId = randomUUID();
+
+    // The human's decision, on the ledger under their own actor. The
+    // runtime's RPC writes the execution phases as karya's; without this
+    // entry the ledger could not say who decided.
+    await deps.ledger.append({
+      tenantId,
+      correlationId,
+      actorType: 'human',
+      actorId: user.id,
+      actionType: 'execution.rollback.started',
+      targetRef: planId,
+      result: 'pending',
+      detail: { triggered_by: 'manual', batch_id: batchId, action_ids: parsed.data.actionIds },
+    });
+
+    const dispatch = await dispatchRollback(
+      env.AGENT_RUNTIME_URL,
+      env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+      buildRollbackDispatchPayload({
+        tenantId,
+        batchId,
+        actionIds: parsed.data.actionIds,
+        correlationId,
+      }),
+    );
+
+    // Per-action telemetry from the runtime's recorded acknowledgement: the
+    // action rows moved (or were refused) before the runtime answered, so a
+    // subscriber sees recorded state, not a prediction.
+    if (dispatch.status === 'accepted' && dispatch.outcomes) {
+      for (const outcome of dispatch.outcomes) {
+        deps.realtime.broadcast({
+          type: 'execution.progress',
+          executionId: batchId as `${string}-${string}-${string}-${string}-${string}`,
+          planId: planId as `${string}-${string}-${string}-${string}-${string}`,
+          actionId: outcome.actionId as `${string}-${string}-${string}-${string}-${string}`,
+          status: outcome.outcome,
+          result: outcome.errorCode,
+          occurredAt: new Date().toISOString(),
+        });
+      }
+      return c.json({
+        data: {
+          batchId,
+          correlationId,
+          outcomes: dispatch.outcomes,
+        },
+      });
+    }
+
+    // An explicit refusal concluded the request without effect; say so on
+    // the ledger under the human's actor so no requested rollback dangles
+    // open.
+    if (dispatch.status === 'failed') {
+      await deps.ledger.append({
+        tenantId,
+        correlationId,
+        actorType: 'human',
+        actorId: user.id,
+        actionType: 'execution.rollback.completed',
+        targetRef: planId,
+        result: 'failure',
+        detail: { stage: 'dispatch', error: dispatch.error, action_ids: parsed.data.actionIds },
+      });
+      return c.json(
+        {
+          error: {
+            code: 'rollback_dispatch_failed',
+            message: 'The runtime refused the rollback; nothing was undone.',
+            details: { error: dispatch.error },
+          },
+          correlationId,
+        },
+        503,
+      );
+    }
+
+    // Unknown: from here an unreachable runtime is indistinguishable from a
+    // rollback that ran. Like the execute route's ambiguous claim, this is
+    // reconciled by correlation id — never reported as success.
+    return c.json(
+      {
+        error: {
+          code: 'rollback_outcome_unknown',
+          message:
+            'The runtime did not confirm the rollback. Reconcile by correlation id before retrying.',
+        },
+        correlationId,
+      },
+      503,
     );
   });
 

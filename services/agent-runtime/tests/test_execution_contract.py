@@ -18,7 +18,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from axiom.app import EXECUTION_CONTRACT_VERSION, InternalExecuteRequest
+from axiom.app import (
+    EXECUTION_CONTRACT_VERSION,
+    ROLLBACK_CONTRACT_VERSION,
+    InternalExecuteRequest,
+    InternalRollbackRequest,
+)
 
 FIXTURE = (
     Path(__file__).resolve().parents[3] / "tests" / "contracts" / "execution-dispatch.v2.json"
@@ -120,5 +125,95 @@ def test_execution_refuses_without_a_configured_write_path(payload: dict) -> Non
         "accepted": False,
         "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": payload["correlation_id"],
+        "reason": "execution_unconfigured",
+    }
+
+
+# ─── W5 · M3.5 — the manual rollback dispatch contract ───────────────────
+#
+# The operator's undo is an estate write like execution, so it dispatches
+# over the same kind of versioned snake_case contract, pinned to one fixture
+# from both sides: ``services/bff/src/routes/rollback-contract.test.ts``
+# asserts the BFF produces it, and the tests below assert the runtime
+# accepts it.
+
+ROLLBACK_FIXTURE = (
+    Path(__file__).resolve().parents[3] / "tests" / "contracts" / "rollback-dispatch.v1.json"
+)
+
+
+@pytest.fixture
+def rollback_payload() -> dict:
+    return json.loads(ROLLBACK_FIXTURE.read_text())
+
+
+def test_rollback_fixture_exists() -> None:
+    assert ROLLBACK_FIXTURE.is_file(), f"shared contract fixture missing at {ROLLBACK_FIXTURE}"
+
+
+def test_runtime_accepts_the_rollback_payload(rollback_payload: dict) -> None:
+    parsed = InternalRollbackRequest(**rollback_payload)
+    assert parsed.batch_id == rollback_payload["batch_id"]
+    assert parsed.action_ids == rollback_payload["action_ids"]
+    assert parsed.correlation_id == rollback_payload["correlation_id"]
+
+
+def test_rollback_contract_versions_agree(rollback_payload: dict) -> None:
+    assert rollback_payload["contract_version"] == ROLLBACK_CONTRACT_VERSION
+
+
+def test_rollback_camel_case_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        InternalRollbackRequest(
+            contractVersion=1,
+            tenantId="t",
+            batchId="b",
+            actionIds=["a"],
+            correlationId="c",
+        )
+
+
+def test_rollback_unknown_fields_are_refused(rollback_payload: dict) -> None:
+    with pytest.raises(ValidationError):
+        InternalRollbackRequest(**{**rollback_payload, "unexpected_field": "x"})
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["contract_version", "tenant_id", "batch_id", "correlation_id", "action_ids"],
+)
+def test_rollback_required_fields_are_required(rollback_payload: dict, missing: str) -> None:
+    incomplete = {k: v for k, v in rollback_payload.items() if k != missing}
+    with pytest.raises(ValidationError):
+        InternalRollbackRequest(**incomplete)
+
+
+def test_rollback_refuses_without_a_configured_write_path(rollback_payload: dict) -> None:
+    """The undo is an estate write like execution: with no reference write
+    origin configured, the route refuses with a reason instead of executing
+    or pretending to."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from axiom.app import app
+
+    app.state.settings = SimpleNamespace(
+        internal_token="test-internal",
+        feature_execution_engine=True,
+        reference_write_origin=None,  # no write path configured
+    )
+    client = TestClient(app)
+    assert client.post("/internal/rollback", json=rollback_payload).status_code == 401
+    response = client.post(
+        "/internal/rollback",
+        json=rollback_payload,
+        headers={"X-Internal-Token": "test-internal"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "accepted": False,
+        "contract_version": ROLLBACK_CONTRACT_VERSION,
+        "correlation_id": rollback_payload["correlation_id"],
         "reason": "execution_unconfigured",
     }
