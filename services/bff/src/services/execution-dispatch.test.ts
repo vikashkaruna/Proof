@@ -1,28 +1,52 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dispatchExecution } from './execution-dispatch.js';
 
+/**
+ * W5 · M3.4 — the runtime is now a real executor. Its acknowledgement
+ * carries the recorded batch, whose id is the durable reference the
+ * outbox records; `contract_version` must be the version the BFF
+ * dispatched (2). Anything ambiguous stays `unknown`: actions are not
+ * released on a response that says nothing.
+ */
+
 const payload = { correlation_id: 'batch-1' };
 const ack = {
   accepted: true,
-  contract_version: 1,
+  contract_version: 2,
   correlation_id: 'batch-1',
-  reference: 'durable-1',
+  batch: { id: 'batch-1', status: 'completed', replay: false },
 };
 afterEach(() => vi.unstubAllGlobals());
 
 describe('dispatch responsibility', () => {
-  it('accepts an explicit correlated acknowledgement with a durable reference', async () => {
+  it('accepts an explicit correlated acknowledgement with the recorded batch', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(ack)));
     expect(await dispatchExecution('http://runtime', 'internal', payload)).toEqual({
       status: 'accepted',
-      reference: 'durable-1',
+      reference: 'batch-1',
       error: null,
     });
   });
-  it('records the current runtime stub as a refusal', async () => {
+  it('accepts a bare durable reference for callers without a batch object', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(Response.json({ ...ack, accepted: false }, { status: 501 })),
+      vi
+        .fn()
+        .mockResolvedValue(Response.json({ ...ack, batch: undefined, reference: 'durable-1' })),
+    );
+    expect(await dispatchExecution('http://runtime', 'internal', payload)).toMatchObject({
+      status: 'accepted',
+      reference: 'durable-1',
+    });
+  });
+  it('records a refusal as failed, never as work running', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ ...ack, accepted: false, batch: undefined }, { status: 409 }),
+        ),
     );
     expect(await dispatchExecution('http://runtime', 'internal', payload)).toMatchObject({
       status: 'failed',
@@ -32,8 +56,9 @@ describe('dispatch responsibility', () => {
     {},
     { ...ack, accepted: 'true' },
     { ...ack, correlation_id: 'other-batch' },
-    { ...ack, contract_version: 2 },
-    { ...ack, reference: undefined },
+    { ...ack, contract_version: 1 },
+    { ...ack, batch: undefined },
+    { ...ack, batch: {} },
   ])('does not release actions for ambiguous acknowledgement %j', async (body) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)));
     expect(await dispatchExecution('http://runtime', 'internal', payload)).toMatchObject({

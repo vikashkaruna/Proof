@@ -8,9 +8,15 @@ export interface DispatchOutcome {
 
 const Acknowledgement = z.object({
   accepted: z.boolean(),
-  contract_version: z.literal(1),
+  contract_version: z.literal(2),
   correlation_id: z.string(),
   reference: z.string().min(1).optional(),
+  // The executor answers with the recorded batch, whose id is the durable
+  // reference the outbox records.
+  batch: z
+    .object({ id: z.string().min(1) })
+    .passthrough()
+    .optional(),
 });
 
 /** A missing/malformed acknowledgement says nothing about whether work started. */
@@ -38,8 +44,12 @@ export async function dispatchExecution(
           error: `runtime refused dispatch (${response.status})`,
         };
       }
-      if (response.ok && parsed.data.reference) {
-        return { status: 'accepted', reference: parsed.data.reference, error: null };
+      if (response.ok && (parsed.data.reference || parsed.data.batch?.id)) {
+        return {
+          status: 'accepted',
+          reference: parsed.data.reference ?? parsed.data.batch!.id,
+          error: null,
+        };
       }
     }
     return {
