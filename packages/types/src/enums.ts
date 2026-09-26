@@ -187,6 +187,14 @@ export const LedgerActionType = {
   MONITORING_SCHEDULE_FIRED: 'monitoring.schedule.fired',
   MONITORING_DRIFT_DETECTED: 'monitoring.drift.detected',
   MONITORING_DRIFT_ACKNOWLEDGED: 'monitoring.drift.acknowledged',
+  // W6.2 — the standing-policy engine (migration 0068): a policy's lifecycle
+  // and the decisions it makes. within_policy is the evaluation that issued a
+  // scoped token THROUGH the approval gate; escalated is the one that handed
+  // the batch to a human instead.
+  MONITORING_POLICY_REGISTERED: 'monitoring.policy.registered',
+  MONITORING_POLICY_REVOKED: 'monitoring.policy.revoked',
+  MONITORING_POLICY_WITHIN_POLICY: 'monitoring.policy.within_policy',
+  MONITORING_POLICY_ESCALATED: 'monitoring.policy.escalated',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',

@@ -1,25 +1,25 @@
 # Axiom Proof — implementation handoff
 
-## Session close-out and handoff — Revision 96 (2026-09-26)
+## Session close-out and handoff — Revision 97 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 94, merged via PR #66; Revision 95 lands via the codex/w6-scheduler branch's PR).
+- Work from a branch cut fresh from `origin/staging` (Revision 96 merged via PR #73; Revision 97 lands via the standing-policy branch's PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–94 (PRs #61–#66 merged); Revision 95 lands via the codex/w6-scheduler branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
-- To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
+- **Promotion to `main` has resumed (2026-09-26).** Revisions 89–96 are on main via PRs #72 and #75, both merge commits — never squash, never direct pushes.
+- To start: `git fetch origin staging && git checkout -B codex/<your-branch> origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0066: 67 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables; Rev 95 the scheduler write paths). The next migration is **0067**; never edit an applied migration.
-- Latest audit is **84**.
-- No PRs are open and no check-ins are scheduled.
+- Schema is **0000–0068: 69 migrations, 70 public tables** (Rev 94 the four W6 monitoring/policy tables; Rev 95 the scheduler write paths; Rev 96 drift acknowledgement; Rev 97 the standing-policy engine — the dual-control constraint, the lifecycle RPCs and `evaluate_standing_policy`). The next migration is **0069**; never edit an applied migration.
+- Latest audit is **85**.
+- Parallel lanes in flight (each hands over via a green PR to staging): Bandit fixes (`codex/bandit-hardening`), W6 rediscovery/reassessment executors (`codex/w6-schedule-executors`), W5 web surfaces (`codex/w5-web-surfaces`). `claude/c-w3-5-onboarding-wizard-wip` is adjudicated stale (byte-identical to the Revision 79 migration) — delete after plan completion.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
 | Suite                                 | Result                                                                                  |
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1122 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| BFF (vitest)                          | 1148 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
 | Web                                   | 89                                                                                      |
 | MFA                                   | 180                                                                                     |
 | Control library                       | 83                                                                                      |
@@ -43,13 +43,13 @@ The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
 
 **Operator decisions in force (2026-09-25):**
 
-1. The three held historical secrets stay held, not ignored, until the operator confirms rotation. They are two JWT secrets in `infra/docker/docker-compose.supabase.yml` (commit `7719f0c`) and `APPROVAL_SIGNING_KEY` in `infra/docker/environments/.env.preprod.example` (commit `7631b1f`).
-2. `main` branch protection is done.
+1. **Rotation — still the operator's action item.** The three historical secret findings were retired via `.gitleaksignore` fingerprints with rationale (PR #74; full-history scan green), but the values are burned in public history: deployments must source fresh secrets via `scripts/mint-supabase-keys.mjs`, and deployed preprod values still need rotation.
+2. `main` branch protection/rulesets are done; the phantom required-check contexts that blocked PR #72 no longer block (PRs #72 and #75 merged clean).
 3. Stale branches are deleted together after plan completion.
 4. Dependabot #32–36 are closed out and their updates landed via PR #57. `tailwindcss` 4 and ESLint 10 are held back: the major-version migration and `scopeManager.addGlobals` breakage respectively.
 5. `saml2_bearer` is a TODO, not a blocker.
 6. Sector pack #1 will be chosen when W7 is reached.
-7. Promotion to `main` is paused.
+7. Promotion to `main` **resumed 2026-09-26** — PR #72 (through #74) and PR #75 (Revisions 95–96) merged with merge commits; keep `origin/main..origin/staging` empty after each promotion.
 
 When operator input is missing, take the recommended option and record the assumptions in the revision's audit.
 
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 97 — the standing-policy engine (GLM session):**
+
+W6.2 · M4.1 lands, the piece that lets pre-granted human approval move a batch without a human present — without weakening anything that makes approval safe. Migration 0068 gives `standing_approval_policies` its lifecycle and `policy_evaluations` its writer: `create_standing_policy` (dual-controlled by two different humans — a new schema constraint makes that a fact, not a convention — with a closed scope of only the keys the engine reads and an expiry of at most a year), `revoke_standing_policy` (once, ledgered) and `evaluate_standing_policy`, which routes every within-scope request THROUGH `issue_reviewed_plan_approval` — the plan-version check, the dry-run/rollback freshness gate (BR-2), the digest over the reviewed content and the atomic `approval.token.issued` ledger entry run exactly as an interactive approval, with the policy's named approver on the token and the policy id + version in its `conditions`. A scope miss or an oversize batch escalates (`monitoring.policy.escalated`, agent `nazar`); a lapsed policy retires itself against `clock_timestamp()` and records the evaluation; a gate refusal under the locks records no evaluation and mints no token, because the policy made no authority decision there. The BFF gains the policy CRUD (`POST/GET /v1/policies/standing`, `POST /v1/policies/standing/:id/revoke`) and `POST /v1/plans/:id/standing-approval` (PLAN_APPROVE, kill-switch gated, the same per-action dry-run hard gate as the approve route; escalation renders as a 200 decision, issuance as the same signed-token shape). All four ledger values were added to `LedgerActionType` in the same commit. See [audit 85](audits/85-standing-policy-engine-review-2026-09-26.md). Schema is **0068 / 69 migrations / 70 public tables**. Next in plan order: drift alerting, the monitoring/policy UI, the rediscovery/reassessment executors (in flight), the W5 web surfaces (in flight) and the manual rollback route.
 
 **Revision 96 — drift acknowledgement and the monitoring-health surface (GLM session):**
 
