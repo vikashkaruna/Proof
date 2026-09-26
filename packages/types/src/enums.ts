@@ -195,6 +195,14 @@ export const LedgerActionType = {
   MONITORING_POLICY_REVOKED: 'monitoring.policy.revoked',
   MONITORING_POLICY_WITHIN_POLICY: 'monitoring.policy.within_policy',
   MONITORING_POLICY_ESCALATED: 'monitoring.policy.escalated',
+  // W8.1 — the consent foundation (migration 0069): a consent's lifecycle is
+  // ledgered end to end — captured with the notice version it pinned,
+  // withdrawn, frozen or unfrozen for retention (legal hold), and the
+  // downstream propagation of a withdrawal confirmed complete.
+  CONSENT_RECORDED: 'consent.recorded',
+  CONSENT_WITHDRAWN: 'consent.withdrawn',
+  CONSENT_LEGAL_HOLD_SET: 'consent.legal_hold.set',
+  CONSENT_WITHDRAWAL_COMPLETED: 'consent.withdrawal.completed',
   // W8 — rights, breach operations and the founder release gate (migration
   // 0071): the DSAR lifecycle's recorded decisions, the breach state machine
   // and its notification authority chain, and BR-4's review gate. The
