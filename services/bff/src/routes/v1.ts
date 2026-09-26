@@ -1355,6 +1355,101 @@ export function v1Routes(deps: Deps) {
     return c.json({ data });
   });
 
+  // ─── W6 · Continuous compliance: monitoring schedules ─────────────
+  //
+  // Cron-style schedules per estate driving re-discovery, re-assessment
+  // and drift checks. Registration is an estate-manager action, audited;
+  // the scheduler that fires them is a later slice and reads the same
+  // rows, so registration can never be a side effect free promise.
+
+  const ScheduleRequestSchema = z.object({
+    estateId: z.uuid(),
+    name: z
+      .string()
+      .min(1)
+      .max(120)
+      .regex(/^[A-Za-z0-9_. -]+$/),
+    kind: z.enum(['rediscovery', 'reassessment', 'drift_check']),
+    cadence: z
+      .string()
+      .min(9)
+      .max(100)
+      .regex(/^[0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+$/),
+    nextRunAt: z.string().datetime(),
+  });
+
+  // POST /v1/monitoring/schedules — register (or replace) a schedule.
+  app.post('/monitoring/schedules', async (c) => {
+    const scheduleRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (scheduleRefusal) return scheduleRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => null);
+    const parsed = ScheduleRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid schedule request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+    const nextRunAt = Date.parse(parsed.data.nextRunAt);
+    if (!Number.isFinite(nextRunAt) || nextRunAt <= Date.now()) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'nextRunAt must be in the future' } },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('register_monitoring_schedule', {
+      p_tenant_id: tenantId,
+      p_estate_id: parsed.data.estateId,
+      p_name: parsed.data.name,
+      p_kind: parsed.data.kind,
+      p_cadence: parsed.data.cadence,
+      p_next_run_at: new Date(nextRunAt).toISOString(),
+      p_created_by: user.id,
+    });
+    if (error) {
+      return c.json({ error: { code: 'registration_failed', message: error.message } }, 500);
+    }
+    if (!data || typeof data !== 'object' || !('schedule' in data)) {
+      const code = (data as { error?: string } | null)?.error ?? 'registration_refused';
+      return c.json({ error: { code, message: 'The schedule was not registered' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/monitoring/schedules — the estate's schedules, newest first.
+  app.get('/monitoring/schedules', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const estateId = c.req.query('estateId');
+    const admin = createSupabaseAdmin();
+    let query = admin
+      .from('monitoring_schedules')
+      .select(
+        'id, estate_id, name, kind, cadence, status, created_by, last_run_at, next_run_at, created_at',
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (estateId) {
+      query = query.eq('estate_id', estateId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
   // POST /v1/plans/:id/execute — THE EXECUTION GATE
   // Per ADR-2 / BR-1: no mutating action executes without a valid
   // approval token. The token is validated per-action.

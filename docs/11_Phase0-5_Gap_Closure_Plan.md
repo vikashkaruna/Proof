@@ -1,16 +1,16 @@
 # Axiom Proof — Phase 0–5 Gap Closure Plan
 
-## Session close-out and handoff — Revision 93 (2026-09-26)
+## Session close-out and handoff — Revision 94 (2026-09-26)
 
 **Where to continue:**
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 92, merge commit `b483618` of PR #64; Revision 93 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 93, merge commit `52475da` of PR #65; Revision 94 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–92 (PRs #61–#64 merged); Revision 93 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–93 (PRs #61–#65 merged); Revision 94 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
-- Schema is **0000–0064: 65 migrations, 66 public tables** (Rev 89 the five W5 tables; Rev 90 the executor's four functions; Rev 91 the rollback function; Rev 92 verification + reconciliation; Rev 93 the run-record functions). The next migration is **0065**; never edit an applied migration.
-- Latest audit is **81**.
+- Schema is **0000–0065: 66 migrations, 70 public tables** (Rev 89 the five W5 tables; Rev 90–93 the executor/rollback/verification/telemetry functions; Rev 94 the four W6 monitoring/policy tables). The next migration is **0066**; never edit an applied migration.
+- Latest audit is **82**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -64,7 +64,7 @@ When operator input is missing, take the recommended option and record the assum
 
 **Recommended next order:**
 1. **W5 execution loop (XL), remainder:** the W5 web surfaces (dry-run results, batch/reconciliation/run views) and a manual rollback route. The dry-run engine (M3.2, Rev 89), the 5 execution-detail tables (Rev 89), the durable executor with the blast-radius governor (M3.4 + SEC-7, Rev 90), the rollback engine (M3.5, Rev 91), verification + reconciliation (M3.7 + W5.6, Rev 92) and progress telemetry (W5.7, Rev 93) are done; production connector execution still needs the operator-gated broker/SPIRE composition. PRD B.10's chain is implemented end-to-end on the reference transport.
-2. **W6 continuous compliance (XL):** scheduler and scheduled drift and discovery, reusing `onboarding_estate_drift` and `/internal/discovery/run`; standing policies; monitor health; 4 tables.
+2. **W6 continuous compliance (XL), remainder:** the scheduler that fires due schedules into drift checks and re-discovery (reusing `onboarding_estate_drift` and `/internal/discovery/run`), the drift write path (`record_drift_event`), the standing-policy engine (scoped tokens through the existing approval gate, never bypassing it), schedule pause/resume routes and the monitoring-health surface. The four W6 tables and schedule registration landed in Revision 94.
 3. **W8 rights, consent, breach, and review/release (XL).**
 4. **W7 multi-regulator tables and packs (L)**, which needs the sector pack #1 decision.
 5. **W9 performance and restore drills, and W10 on-prem (L each)**, which need a deployment.
@@ -131,6 +131,10 @@ Test code is excluded through a shared `.bandit` configuration, which removes ab
 - Five web screens still fabricate IDs, hashes and scores with `Math.random`. They are listed as tracked lint debt.
 - CodeQL flags world-readable SPIRE health files (deliberate cross-UID reads) and a URL built in `verify-controller-issuance.py`.
 - Bandit reports medium findings in test-harness SQL strings.
+
+## Revision 94 — W6 foundation: the continuous-compliance tables (GLM session)
+
+W6 opens with its foundation: migration 0065 creates the four monitoring/policy tables Doc 11 lists as missing — `monitoring_schedules` (per-estate cron schedules with a one-active-per-kind partial unique index; a re-registration retires the replaced schedule in the same audited transaction), `drift_events` (append-only, closed kind/severity sets, all-or-nothing acknowledgement), `standing_approval_policies` (human-authored AND human-approved, scope-bounded with a mandatory `action_types` array, expiring — the engine they feed issues scoped tokens through the existing approval gate or escalates, never bypassing BR-1/BR-2) and `policy_evaluations` (append-only, tenant-bound to the policy). `register_monitoring_schedule` is the estate manager's write path, and the BFF gains `POST /v1/monitoring/schedules` (ESTATE_MANAGE, future first fire required, RPC refusals rendered as 409) and `GET /v1/monitoring/schedules` (POSTURE_READ, tenant-scoped). Ledger action `monitoring.schedule.registered` is added to `LedgerActionType` in the same commit. The scheduler, drift write path and policy engine are the next W6 slices. See [audit 82](audits/82-continuous-compliance-foundation-review-2026-09-26.md). Schema is **0065 / 66 migrations / 70 public tables**; the next migration is **0066**.
 
 ## Revision 93 — execution progress telemetry (GLM session)
 
