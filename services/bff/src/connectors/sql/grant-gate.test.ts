@@ -51,6 +51,28 @@ const sessions = async (): Promise<SqlSession> => {
 };
 const gate = () => new SqlDiscoveryGate(identity, sessions, { client: () => fake.client as never });
 
+// The MySQL connector issues different session-control and catalogue SQL; this
+// fake answers the MySQL posture query and the information_schema page query.
+const mysqlSessions = async (): Promise<SqlSession> => {
+  opened += 1;
+  return {
+    query: async (text) =>
+      text.includes('@@session.transaction_read_only')
+        ? { rows: [{ read_only: 1, privileged: 0, can_write: 0 }] }
+        : text.includes('from information_schema.tables')
+          ? {
+              rows: [{ tschema: 'crm', tname: 'customers', kind: 'r', estimated_rows: 3 }],
+            }
+          : { rows: [] },
+    end: async () => undefined,
+  };
+};
+const mysqlGate = () =>
+  new SqlDiscoveryGate(identity, mysqlSessions, {
+    client: () => fake.client as never,
+    engine: 'mysql',
+  });
+
 beforeEach(() => {
   fake = createFakeDb();
   opened = 0;
@@ -88,5 +110,18 @@ describe('SqlDiscoveryGate (W4.6)', () => {
     });
     answers = [grant(), grant({ descriptorSha256: 'c'.repeat(64) })];
     await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'grant_changed' });
+  });
+
+  it('selects the MySQL connector when the descriptor targets MySQL', async () => {
+    const result = await mysqlGate().enumerate(request);
+    expect(result.records.map((r) => r.resource)).toEqual(['crm.customers']);
+    expect(opened).toBe(1);
+  });
+
+  it('withholds MySQL results under the same mid-invocation checks', async () => {
+    answers = [grant(), null];
+    await expect(mysqlGate().enumerate(request)).rejects.toMatchObject({
+      reason: 'grant_changed',
+    });
   });
 });

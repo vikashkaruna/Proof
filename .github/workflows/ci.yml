@@ -525,6 +525,35 @@ jobs:
           AXIOM_SQL_LIVE_URL: postgres://postgres:w46-ci-only@127.0.0.1:5432/postgres
           AXIOM_SQL_LIVE_REQUIRED: '1'
 
+  # ─── W4.6 MySQL read binding ────────────────────────────────────
+  # Runs the read-only MySQL adapter against a disposable live MySQL 8 server
+  # with least-privilege, writer and superuser accounts. Same class of
+  # assertions as the Postgres job; the suite refuses to skip here.
+  mysql-binding:
+    name: Live SQL binding (W4.6 MySQL)
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: w46-ci-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pw46-ci-only" --health-interval 2s --health-timeout 5s --health-retries 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @axiom/bff exec vitest run src/connectors/sql/mysql-read.live.test.ts
+        env:
+          AXIOM_MYSQL_LIVE_URL: mysql://root:w46-ci-only@127.0.0.1:3306/mysql
+          AXIOM_MYSQL_LIVE_REQUIRED: '1'
+
   test-python-runtime:
     name: Python (agent runtime) tests
     runs-on: ubuntu-latest

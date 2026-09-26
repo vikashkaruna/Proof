@@ -1,4 +1,5 @@
 import { Signer } from '@aws-sdk/rds-signer';
+import mysql from 'mysql2/promise';
 import pg from 'pg';
 import { z } from 'zod';
 import type { ConnectorInvocation } from '@axiom/types';
@@ -73,6 +74,52 @@ export function postgresSessions(options: {
     const session: SqlSession = {
       query: async (text, values) => client.query(text, values ? [...values] : undefined),
       end: () => client.end(),
+    };
+    return session;
+  };
+}
+
+/**
+ * Opens one TLS-verified MySQL session per invocation under the same contract
+ * as `postgresSessions`: the endpoint comes from reviewed configuration via the
+ * invocation's connector, never from the caller; the password is minted per
+ * connection by the credential provider (an RDS IAM token works for RDS MySQL
+ * unchanged); TLS verifies the server chain against the pinned CA. Dates
+ * arrive as strings so sampled values reach the profiler as text, mirroring
+ * the Postgres adapter's ::text casts. Multi-statement text is left disabled.
+ */
+export function mysqlSessions(options: {
+  endpoint: (context: ConnectorInvocation) => SqlEndpoint | undefined;
+  credentials: SqlCredentialProvider;
+  connectTimeoutMs?: number;
+}): SqlSessionFactory {
+  return async (context) => {
+    const candidate = options.endpoint(context);
+    const parsed = SqlEndpointSchema.safeParse(candidate);
+    if (!parsed.success) throw new SqlEndpointRefused();
+    const endpoint = parsed.data;
+    const connection = await mysql.createConnection({
+      host: endpoint.host,
+      port: endpoint.port,
+      database: endpoint.database,
+      user: endpoint.user,
+      password: await options.credentials.password(endpoint),
+      ssl: { ca: endpoint.caPem, rejectUnauthorized: true, minVersion: 'TLSv1.2' },
+      connectTimeout: options.connectTimeoutMs ?? 5000,
+      dateStrings: true,
+    });
+    const session: SqlSession = {
+      query: async (text, values) => {
+        const [result] = await connection.query({
+          sql: text,
+          values: values ? [...values] : undefined,
+        });
+        // Session-control statements answer with an OkPacket, not rows.
+        return { rows: Array.isArray(result) ? (result as Record<string, unknown>[]) : [] };
+      },
+      end: async () => {
+        await connection.end();
+      },
     };
     return session;
   };

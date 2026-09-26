@@ -2,11 +2,17 @@ import { z } from 'zod';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import type { ConnectorInvocation, ConnectorResult } from '@axiom/types';
 import type { JwtSvidVerifier } from '../../workloads/jwt-svid.js';
+import { MySqlReadConnector } from './mysql-read.js';
 import {
   PostgresReadConnector,
   SqlConnectorRefused,
   type SqlSessionFactory,
 } from './postgres-read.js';
+
+/** The SQL engines the read binding covers. Selected from the reviewed
+ * descriptor's target, never from the request. */
+export type SqlEngine = 'postgresql' | 'mysql';
+export type SqlReadConnector = PostgresReadConnector | MySqlReadConnector;
 
 const resolved = z
   .object({
@@ -43,7 +49,11 @@ export class SqlDiscoveryGate {
   constructor(
     private readonly identity: Pick<JwtSvidVerifier, 'verify'>,
     private readonly sessions: SqlSessionFactory,
-    private readonly deps: { client?: typeof createSupabaseAdmin; now?: () => number } = {},
+    private readonly deps: {
+      client?: typeof createSupabaseAdmin;
+      now?: () => number;
+      engine?: SqlEngine;
+    } = {},
   ) {}
 
   private async resolve(request: SqlDiscoveryRequest, spiffeId: string): Promise<SqlGrant | null> {
@@ -64,10 +74,7 @@ export class SqlDiscoveryGate {
   /** Runs one operation and returns the result with the grant it ran under. */
   async discover(
     request: SqlDiscoveryRequest,
-    work: (
-      connector: PostgresReadConnector,
-      context: ConnectorInvocation,
-    ) => Promise<ConnectorResult>,
+    work: (connector: SqlReadConnector, context: ConnectorInvocation) => Promise<ConnectorResult>,
   ): Promise<{ result: ConnectorResult; grant: SqlGrant }> {
     const now = (this.deps.now ?? Date.now)();
     let workload;
@@ -91,7 +98,11 @@ export class SqlDiscoveryGate {
       correlationId: request.correlationId,
       deadline: new Date(deadline).toISOString(),
     };
-    const result = await work(new PostgresReadConnector(this.sessions, this.deps.now), context);
+    const connector: SqlReadConnector =
+      this.deps.engine === 'mysql'
+        ? new MySqlReadConnector(this.sessions, this.deps.now)
+        : new PostgresReadConnector(this.sessions, this.deps.now);
+    const result = await work(connector, context);
     const after = await this.resolve(request, workload.spiffeId);
     if (
       !after ||
