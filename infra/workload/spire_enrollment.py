@@ -16,7 +16,7 @@ import os
 import re
 import selectors
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed systemctl/enrollment CLIs; argv lists are built from constant paths, never a shell
 import sys
 import time
 import traceback
@@ -97,10 +97,11 @@ def exclusive():
 def command(args: list[str], timeout=3, maximum=65536) -> bytes:
     # Bounded stdout and fixed diagnostics: even a misbehaving subprocess cannot
     # dump certificates, tokens or arbitrary private output into host logs.
-    with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV) as process:
+    with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV) as process:  # nosec B603 - argv comes from fixed internal caller paths, no shell, bounded output
         try:
             with selectors.DefaultSelector() as selector:
-                assert process.stdout is not None
+                if process.stdout is None:
+                    raise ValueError('enrollment command refused')
                 selector.register(process.stdout, selectors.EVENT_READ)
                 data = bytearray(); deadline = time.monotonic()+timeout
                 while True:

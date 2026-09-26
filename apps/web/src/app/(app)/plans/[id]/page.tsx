@@ -18,8 +18,11 @@ import {
   type StatusKind,
 } from '@axiom/ui';
 import { formatDateTime, formatINR, truncateHash } from '@axiom/ui';
+import { parseDryRunChanges, describeRefusal } from '@/lib/execution-view';
 import { ApprovalActions } from './approval-actions';
 import { KillSwitchButton } from './kill-switch-button';
+import { DryRunHistory, type DryRunRow } from './dry-run-history';
+import { DryRunDiffView } from '../../execution/dry-run-diff';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,6 +133,26 @@ export default async function PlanDetailPage({ params }: PageProps) {
     }
   }
 
+  // W5: the recorded dry-run history, newest first — the same rows the BFF's
+  // GET /v1/plans/:id/dry-runs returns, read here under RLS. The latest run
+  // per action drives the structured diff on the action cards.
+  const dryRunsRes = await supabase
+    .from('dry_runs')
+    .select(
+      `id, action_id, status, diff, refusal_reason, renderable, parameters_hash,
+       rollback_definition_hash, simulated_by, correlation_id, expires_at, created_at`,
+    )
+    .eq('plan_id', id)
+    .eq('tenant_id', typedPlan.tenant_id)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  const dryRuns = (dryRunsRes.data ?? []) as unknown as DryRunRow[];
+  const latestDryRunByAction = new Map<string, DryRunRow>();
+  for (const run of dryRuns) {
+    if (!latestDryRunByAction.has(run.action_id)) latestDryRunByAction.set(run.action_id, run);
+  }
+  const actionLabels = new Map(actions.map((a) => [a.id, a.action_type]));
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -229,18 +252,32 @@ export default async function PlanDetailPage({ params }: PageProps) {
 
       <div className="flex flex-col gap-3">
         {actions.map((a) => (
-          <ActionCard key={a.id} action={a} />
+          <ActionCard key={a.id} action={a} latestDryRun={latestDryRunByAction.get(a.id) ?? null} />
         ))}
       </div>
+
+      <DryRunHistory runs={dryRuns} actionLabels={actionLabels} />
     </div>
   );
 }
 
-function ActionCard({ action }: { action: RemediationAction }) {
+function ActionCard({
+  action,
+  latestDryRun,
+}: {
+  action: RemediationAction;
+  latestDryRun: DryRunRow | null;
+}) {
   const dryRunOk = action.dry_run_status === 'dry_run_complete';
   const rollbackOk = action.rollback_validated;
   const isApproved = action.approval_status === 'approved';
   const isEligible = dryRunOk && rollbackOk;
+  // The recorded run is the source of truth; the action row's `dry_run_result`
+  // is only its display cache. Parse defensively — a shape that does not fit
+  // falls back to the raw JSON below rather than rendering invented fields.
+  const changes =
+    latestDryRun?.status === 'succeeded' ? parseDryRunChanges(latestDryRun.diff) : null;
+  const refusedRun = latestDryRun && latestDryRun.status !== 'succeeded' ? latestDryRun : null;
 
   return (
     <div
@@ -327,17 +364,50 @@ function ActionCard({ action }: { action: RemediationAction }) {
           </div>
         </div>
 
-        <details className="rounded-md border border-slate-200 bg-mist-50 p-3">
+        {refusedRun && (
+          <p className="rounded-md border border-ember-500 bg-ember-50/50 p-3 text-xs text-ember-700">
+            <strong>Latest simulation refused.</strong> {describeRefusal(refusedRun.refusal_reason)}{' '}
+            Recorded {formatDateTime(refusedRun.created_at)} — any earlier dry-run that made this
+            action eligible is invalidated.
+          </p>
+        )}
+
+        <details
+          className="rounded-md border border-slate-200 bg-mist-50 p-3"
+          open={Boolean(changes)}
+        >
           <summary className="cursor-pointer text-sm font-medium text-indigo-700">
             View dry-run diff
+            {latestDryRun
+              ? ` — ${latestDryRun.status === 'succeeded' ? 'succeeded' : latestDryRun.status} ${formatDateTime(latestDryRun.created_at)}`
+              : ' — none recorded'}
           </summary>
-          <pre className="mt-2 overflow-x-auto rounded-md bg-slate-900 p-3 font-mono text-xs text-slate-100">
-            {JSON.stringify(
-              action.dry_run_result ?? { note: 'no dry-run result captured' },
-              null,
-              2,
-            )}
-          </pre>
+          {changes ? (
+            <div className="mt-2">
+              <DryRunDiffView changes={changes} />
+              <p className="mt-2 text-[11px] text-slate-500">
+                Values are the simulator&apos;s renderings from the declared parameters — it never
+                reads real estate data. Content binding:{' '}
+                <span className="font-mono">
+                  {truncateHash(latestDryRun?.parameters_hash ?? '', 6)}
+                </span>{' '}
+                (parameters) ·{' '}
+                <span className="font-mono">
+                  {truncateHash(latestDryRun?.rollback_definition_hash ?? '', 6)}
+                </span>{' '}
+                (rollback definition).
+              </p>
+            </div>
+          ) : (
+            <pre className="mt-2 overflow-x-auto rounded-md bg-slate-900 p-3 font-mono text-xs text-slate-100">
+              {JSON.stringify(
+                latestDryRun?.diff ??
+                  action.dry_run_result ?? { note: 'no dry-run result captured' },
+                null,
+                2,
+              )}
+            </pre>
+          )}
         </details>
 
         <details className="rounded-md border border-slate-200 bg-mist-50 p-3">

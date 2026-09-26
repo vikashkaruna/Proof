@@ -19,7 +19,7 @@ import socket
 import socketserver
 import ssl
 import struct
-import subprocess
+import subprocess  # nosec B404 - fixed fixture CLIs with list argv, no shell
 import sys
 import tempfile
 import threading
@@ -32,10 +32,11 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('controller_issuer',ROOT/'infra/credential-issuer/issuer.py')
 issuer=importlib.util.module_from_spec(spec);spec.loader.exec_module(issuer)
 phase='setup'
+DOCKER=shutil.which('docker');OPENSSL=shutil.which('openssl');PNPM=shutil.which('pnpm')
 
 
 def sql(statement):
-    result=subprocess.run(['docker','exec','-i','supabase_db_axiom-w0-parity','psql','-X','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1','-q','-A','-t'],input=statement.encode(),capture_output=True,timeout=10)
+    result=subprocess.run([DOCKER,'exec','-i','supabase_db_axiom-w0-parity','psql','-X','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1','-q','-A','-t'],input=statement.encode(),capture_output=True,timeout=10)  # nosec B603 - DOCKER resolved via PATH above, fixed fixture container, no shell
     if result.returncode:raise RuntimeError('fixture SQL refused')
     return result.stdout.decode().strip()
 
@@ -46,9 +47,13 @@ class ThreadedTCP(socketserver.ThreadingTCPServer):
 
 def main():
     global phase
-    args=json.load(sys.stdin);assert set(args)=={'tenantId','foreignTenantId'}
+    if not (DOCKER and OPENSSL and PNPM):
+        raise RuntimeError('docker, openssl and pnpm are required')
+    args=json.load(sys.stdin)
+    if set(args)!={'tenantId','foreignTenantId'}:raise RuntimeError('unexpected acceptance input')
     tenant=issuer.identifier(args['tenantId']);foreign=issuer.identifier(args['foreignTenantId'])
-    status=json.loads((ROOT/'.axiom-runtime/parity/status.json').read_text());assert status['API_URL']=='http://127.0.0.1:56321'
+    status=json.loads((ROOT/'.axiom-runtime/parity/status.json').read_text())
+    if status['API_URL']!='http://127.0.0.1:56321':raise RuntimeError('isolated loopback target required')
     os.umask(0o077)
     outcome={};reviews=[];issued=[];servers=[]
     username='axiom_issuer_fixture_'+uuid.uuid4().hex[:20];password=uuid.uuid4().hex+uuid.uuid4().hex
@@ -56,7 +61,7 @@ def main():
     role_created=False
     try:
         cert=root/'cert.pem';key=root/'tls.key'
-        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(key),'-out',str(cert),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=IP:127.0.0.1,DNS:localhost'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        subprocess.run([OPENSSL,'req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(key),'-out',str(cert),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=IP:127.0.0.1,DNS:localhost'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)  # nosec B603 - OPENSSL resolved via PATH, fixed fixture arguments, no shell
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)
         class DatabaseProxy(socketserver.BaseRequestHandler):
             def handle(self):
@@ -112,38 +117,42 @@ def main():
             path=root/(value['credentialId']+'.json');save(path.name,issuer.encode(value));reviews.append(value)
             return value,path,issuer.sha(path.read_bytes())
         def command(mode,path,expected,directory,success=True):
-            result=subprocess.run([sys.executable,'-I',str(ROOT/'infra/credential-issuer/issuer.py'),mode,str(path),expected,str(config),str(directory)],capture_output=True,timeout=30,env={'PATH':os.environ['PATH'],'HOME':str(Path.home())})
+            result=subprocess.run([sys.executable,'-I',str(ROOT/'infra/credential-issuer/issuer.py'),mode,str(path),expected,str(config),str(directory)],capture_output=True,timeout=30,env={'PATH':os.environ['PATH'],'HOME':str(Path.home())})  # nosec B603 - argv is sys.executable plus reviewed repo paths and fixture digests, no shell
             if (result.returncode==0)!=success:
                 stage=re.search(rb'uncertain at ([a-z-]+);',result.stderr)
                 if stage:print('Issuer fixture diagnostic stage: '+stage[1].decode(),file=sys.stderr)
                 raise RuntimeError('issuer command outcome refused')
-            for secret in (password,status['JWT_SECRET'],status['ANON_KEY']):assert secret.encode() not in result.stdout+result.stderr
+            for secret in (password,status['JWT_SECRET'],status['ANON_KEY']):
+                if secret.encode() in result.stdout+result.stderr:raise RuntimeError('credential leak refused')
             return result
         def consumer(directory,selected=tenant,success=True):
-            result=subprocess.run(['pnpm','exec','tsx','scripts/lib/controller-issued-file-check.ts',str(directory/'backend.key'),settings['backendOrigin'],selected],capture_output=True,timeout=20,cwd=ROOT,env={'PATH':os.environ['PATH'],'HOME':str(Path.home()),'NODE_EXTRA_CA_CERTS':ca['path']})
-            assert (result.returncode==0)==success,'production credential consumer outcome refused'
-            if success:assert result.stdout==b'issued-file-accepted\n'
+            result=subprocess.run([PNPM,'exec','tsx','scripts/lib/controller-issued-file-check.ts',str(directory/'backend.key'),settings['backendOrigin'],selected],capture_output=True,timeout=20,cwd=ROOT,env={'PATH':os.environ['PATH'],'HOME':str(Path.home()),'NODE_EXTRA_CA_CERTS':ca['path']})  # nosec B603 - PNPM resolved via PATH, repo-owned script, no shell
+            if (result.returncode==0)!=success:raise RuntimeError('production credential consumer outcome refused')
+            if success and result.stdout!=b'issued-file-accepted\n':raise RuntimeError('unexpected consumer output')
         phase='first-issuance'
         first,path,expected=review();firstdir=root/'first';command('--issue',path,expected,firstdir);issued.append((first,path,expected));consumer(firstdir)
-        result=json.loads((firstdir/'ready.json').read_bytes());assert result['status']=='active'
-        assert sql(f"select count(*) from controller_security.credentials where id='{first['credentialId']}';")=='1'
+        result=json.loads((firstdir/'ready.json').read_bytes())
+        if result['status']!='active':raise RuntimeError('issuance did not activate')
+        # credentialId is an internally generated UUID from this fixture process.
+        if sql(f"select count(*) from controller_security.credentials where id='{first['credentialId']}';")!='1':raise RuntimeError('issued credential record missing')  # nosec B608 - internal UUID constant, no external input
         outcome['controller-issuance-real-cli-scoped-db-tls-and-backend-consumer']=True
         phase='idempotent-resume'
         before={p.name:(p.stat().st_ino,p.read_bytes()) for p in firstdir.iterdir()};command('--resume-issue',path,expected,firstdir)
-        assert before=={p.name:(p.stat().st_ino,p.read_bytes()) for p in firstdir.iterdir()};command('--issue',path,expected,firstdir,False)
-        assert sql(f"select count(*) from controller_security.issuances where credential_id='{first['credentialId']}';")=='1'
+        if before!={p.name:(p.stat().st_ino,p.read_bytes()) for p in firstdir.iterdir()}:raise RuntimeError('idempotent resume replaced files')
+        command('--issue',path,expected,firstdir,False)
+        if sql(f"select count(*) from controller_security.issuances where credential_id='{first['credentialId']}';")!='1':raise RuntimeError('duplicate issuance record')  # nosec B608 - internal UUID constant, no external input
         outcome['controller-issuance-explicit-resume-preserves-token-and-single-record']=True
         phase='foreign-consumer'
         consumer(firstdir,foreign,False)
         bad,reviewpath,badhash=review(first['credentialId'],foreign);command('--issue',reviewpath,badhash,root/'foreign',False)
-        assert sql(f"select count(*) from controller_security.credentials where id='{bad['credentialId']}';")=='0'
+        if sql(f"select count(*) from controller_security.credentials where id='{bad['credentialId']}';")!='0':raise RuntimeError('foreign tenant credential issued')  # nosec B608 - internal UUID constant, no external input
         outcome['controller-issuance-foreign-tenant-and-predecessor-refused']=True
         phase='renewal'
         nextvalue,nextpath,nexthash=review(first['credentialId']);nextdir=root/'next';command('--issue',nextpath,nexthash,nextdir);issued.append((nextvalue,nextpath,nexthash));consumer(nextdir);consumer(firstdir)
-        assert json.loads((nextdir/'ready.json').read_bytes())['predecessorId']==first['credentialId']
+        if json.loads((nextdir/'ready.json').read_bytes())['predecessorId']!=first['credentialId']:raise RuntimeError('renewal predecessor mismatch')
         outcome['controller-renewal-fresh-subject-keeps-predecessor-for-reviewed-rollout']=True
         branch,branchpath,branchhash=review(first['credentialId']);command('--issue',branchpath,branchhash,root/'branch',False)
-        assert sql(f"select count(*) from controller_security.credentials where id='{branch['credentialId']}';")=='0'
+        if sql(f"select count(*) from controller_security.credentials where id='{branch['credentialId']}';")!='0':raise RuntimeError('second successor issued')  # nosec B608 - internal UUID constant, no external input
         outcome['controller-renewal-second-successor-refused-atomically']=True
         phase='retirement'
         def retirement(value,issuehash,name):
@@ -155,8 +164,8 @@ def main():
         outcome['controller-retirement-real-revocation-blocks-old-token-and-remint']=True
         phase='private-output'
         allbytes=b'\n'.join(p.read_bytes() for directory in (firstdir,nextdir) for p in directory.iterdir())
-        assert password.encode() not in allbytes and status['JWT_SECRET'].encode() not in allbytes
-        assert all(p.stat().st_mode&0o777==0o600 for directory in (firstdir,nextdir) for p in directory.iterdir())
+        if password.encode() in allbytes or status['JWT_SECRET'].encode() in allbytes:raise RuntimeError('private output leaked')
+        if not all(p.stat().st_mode&0o777==0o600 for directory in (firstdir,nextdir) for p in directory.iterdir()):raise RuntimeError('delivered file permissions widened')
         outcome['controller-issuance-signing-and-db-secrets-excluded-from-delivery']=True
         last,lasthash,lastdir=retirement(nextvalue,nexthash,'retired-next');command('--revoke',last,lasthash,lastdir);consumer(nextdir,success=False)
         outcome['controller-issuance-all-fixture-authority-revoked']=True
@@ -165,7 +174,7 @@ def main():
         # Emergency fixture cleanup uses existing DB administration, never
         # changes or deletes immutable reviews. No production authority here.
         for value in reviews:
-            sql(f"update controller_security.credentials set revoked_at=clock_timestamp() where id='{value['credentialId']}' and revoked_at is null;")
+            sql(f"update controller_security.credentials set revoked_at=clock_timestamp() where id='{value['credentialId']}' and revoked_at is null;")  # nosec B608 - internal UUID constants from this fixture's own reviews
         if role_created:sql(f"revoke axiom_controller_issuer from {username}; drop role {username};")
         for server in servers:server.shutdown();server.server_close()
         temporary.cleanup()
