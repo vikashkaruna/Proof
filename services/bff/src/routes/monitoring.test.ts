@@ -67,19 +67,24 @@ async function app(role: UserRole = UserRole.ADMIN) {
     c.set('role', role);
     await next();
   });
-  hono.route('/v1', v1Routes({
-    approvalEngine: {} as never,
-    killSwitch: { isActive: async () => false } as never,
-    ledger: { append: vi.fn() } as never,
-    mfa: {} as never,
-    realtime: { broadcast } as never,
-  }));
+  hono.route(
+    '/v1',
+    v1Routes({
+      approvalEngine: {} as never,
+      killSwitch: { isActive: async () => false } as never,
+      ledger: { append: vi.fn() } as never,
+      mfa: {} as never,
+      realtime: { broadcast } as never,
+    }),
+  );
   return hono;
 }
 
 describe('POST /v1/monitoring/schedules', () => {
   it('registers a schedule for an estate manager', async () => {
-    const res = await (await app()).request('/v1/monitoring/schedules', {
+    const res = await (
+      await app()
+    ).request('/v1/monitoring/schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -89,7 +94,9 @@ describe('POST /v1/monitoring/schedules', () => {
   });
 
   it('refuses a caller without ESTATE_MANAGE', async () => {
-    const res = await (await app(UserRole.AXIOM_ANALYST)).request('/v1/monitoring/schedules', {
+    const res = await (
+      await app(UserRole.AXIOM_ANALYST)
+    ).request('/v1/monitoring/schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -103,7 +110,9 @@ describe('POST /v1/monitoring/schedules', () => {
     { ...body, name: 'bad; name <script>' },
     { ...body, kind: 'everything' },
   ])('refuses an invalid schedule %j', async (payload) => {
-    const res = await (await app()).request('/v1/monitoring/schedules', {
+    const res = await (
+      await app()
+    ).request('/v1/monitoring/schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -113,7 +122,9 @@ describe('POST /v1/monitoring/schedules', () => {
 
   it('renders the RPC refusal as a 409, not a success', async () => {
     fake.onRpc('register_monitoring_schedule', () => ({ error: 'estate_not_found' }));
-    const res = await (await app()).request('/v1/monitoring/schedules', {
+    const res = await (
+      await app()
+    ).request('/v1/monitoring/schedules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

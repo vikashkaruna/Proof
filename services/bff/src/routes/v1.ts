@@ -1364,7 +1364,11 @@ export function v1Routes(deps: Deps) {
 
   const ScheduleRequestSchema = z.object({
     estateId: z.uuid(),
-    name: z.string().min(1).max(120).regex(/^[A-Za-z0-9_. -]+$/),
+    name: z
+      .string()
+      .min(1)
+      .max(120)
+      .regex(/^[A-Za-z0-9_. -]+$/),
     kind: z.enum(['rediscovery', 'reassessment', 'drift_check']),
     cadence: z
       .string()
