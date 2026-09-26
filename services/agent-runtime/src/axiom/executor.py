@@ -285,6 +285,29 @@ async def execute_batch(
         status = finished.get("batch", {}).get("status", "failed") if "error" not in finished else "failed"
         return BatchResult(batch_id=batch["id"], status=status, replay=False, outcomes=outcomes)
 
+    if not halted:
+        # M3.5 — auto-rollback on the failure threshold: with stop-on-failure
+        # armed, any failure rolls back what the batch DID complete, in
+        # reverse order, each rollback simulated first. A governor or
+        # kill-switch halt escalates instead: automatic further mutation is
+        # the last thing an incident needs, so the succeeded actions stay
+        # and a human decides.
+        succeeded_ids = [o.action_id for o in outcomes if o.outcome == "succeeded"]
+        if failed and payload.stop_on_failure and succeeded_ids:
+            rolled, attempted = await _run_rollbacks(
+                db, kill_switch, adapter, payload, batch["id"], succeeded_ids, outcomes
+            )
+            if rolled:
+                status = "rolled_back"
+            elif any(o.outcome == "succeeded" for o in outcomes) or attempted:
+                # An applied change whose undo failed is the most dangerous
+                # state there is: it needs a human, and it is never `failed`.
+                status = "partial_failure"
+            else:
+                status = "failed"
+            finished = _finish(db, payload, batch["id"], status)
+            return _final_result(batch["id"], finished, outcomes, payload.action_ids)
+
     if halted:
         status = "halted"
     elif not failed:
@@ -293,25 +316,124 @@ async def execute_batch(
         status = "partial_failure"
     else:
         status = "failed"
+    finished = _finish(db, payload, batch["id"], status)
+    return _final_result(batch["id"], finished, outcomes, payload.action_ids)
+
+
+def _finish(db: ExecutorDb, payload: Any, batch_id: str, status: str) -> dict[str, Any]:
     finished = db.rpc(
         "finish_execution_batch",
         {
             "p_tenant_id": payload.tenant_id,
-            "p_batch_id": batch["id"],
+            "p_batch_id": batch_id,
             "p_status": status,
             "p_correlation_id": payload.correlation_id,
         },
     )
     if "error" in finished:
         raise ExecutorRefused(finished["error"])
+    return finished
+
+
+def _final_result(
+    batch_id: str, finished: dict[str, Any], outcomes: list[ActionOutcome], action_ids: list[str]
+) -> BatchResult:
     final_status = finished["batch"]["status"]
     # The sweep's skipped actions appear here as outcomes so the caller sees
     # every action accounted for.
     settled = {o.action_id for o in outcomes}
-    for action_id in payload.action_ids:
+    for action_id in action_ids:
         if action_id not in settled:
             outcomes.append(ActionOutcome(action_id=action_id, outcome="skipped"))
-    return BatchResult(batch_id=batch["id"], status=final_status, replay=False, outcomes=outcomes)
+    return BatchResult(batch_id=batch_id, status=final_status, replay=False, outcomes=outcomes)
+
+
+async def _run_rollbacks(
+    db: ExecutorDb,
+    kill_switch: KillSwitchReader,
+    adapter: WriteAdapter,
+    payload: Any,
+    batch_id: str,
+    succeeded_ids: list[str],
+    outcomes: list[ActionOutcome],
+) -> bool:
+    """Roll the batch's completed actions back, reverse order, simulated
+    first. Returns True when every rollback succeeded.
+
+    A rollback is executed against the action's STORED definition, and
+    `record_rollback_execution` re-reads and re-compares it, so the engine
+    cannot reverse anything with a definition other than Sudhaar's.
+
+    Returns (all_rolled_back, any_rollback_attempted).
+    """
+    all_ok = True
+    attempted = False
+    for action_id in reversed(succeeded_ids):
+        # The stop outranks the undo: a halt mid-rollback leaves the
+        # remaining completed actions as they are for a human to judge.
+        try:
+            kill_switch.raise_if_engaged(payload.tenant_id)
+        except KillSwitchEngaged as halt:
+            all_ok = False
+            structlog.get_logger().warning(
+                "executor.rollback_halted", reason=halt.reason, action_id=action_id
+            )
+            break
+        row = db.action_row(payload.tenant_id, action_id)
+        if row is None:
+            raise ExecutorRefused("record_unavailable")
+        definition = row.get("rollback_definition") or {}
+        # Dry-run the rollback first: a definition the target refuses to
+        # simulate is never executed.
+        try:
+            await adapter.simulate_rollback(row["action_type"], definition)
+            attempted = True
+            result = await adapter.execute_rollback(row["action_type"], definition)
+        except WriteRefused as refused:
+            all_ok = False
+            attempted = True
+            outcome = "failed"
+            detail: dict[str, Any] = {"reason": refused.reason}
+            recorded = db.rpc(
+                "record_rollback_execution",
+                {
+                    "p_tenant_id": payload.tenant_id,
+                    "p_action_id": action_id,
+                    "p_batch_id": batch_id,
+                    "p_definition": definition,
+                    "p_triggered_by": "failure_threshold",
+                    "p_status": "failed",
+                    "p_result": detail,
+                    "p_correlation_id": payload.correlation_id,
+                },
+            )
+            if "error" in recorded:
+                raise ExecutorRefused(recorded["error"])
+            for o in outcomes:
+                if o.action_id == action_id and o.outcome == "succeeded":
+                    o.outcome = outcome
+                    o.error_code = f"rollback_failed: {refused.reason}"
+            continue
+        recorded = db.rpc(
+            "record_rollback_execution",
+            {
+                "p_tenant_id": payload.tenant_id,
+                "p_action_id": action_id,
+                "p_batch_id": batch_id,
+                "p_definition": definition,
+                "p_triggered_by": "failure_threshold",
+                "p_status": "succeeded",
+                "p_result": {"rows_affected": result.rows_affected},
+                "p_correlation_id": payload.correlation_id,
+            },
+        )
+        if "error" in recorded:
+            raise ExecutorRefused(recorded["error"])
+        for o in outcomes:
+            if o.action_id == action_id and o.outcome == "succeeded":
+                o.outcome = "rolled_back"
+                o.rows_affected = result.rows_affected
+    return all_ok, attempted
 
 
 def _settle(

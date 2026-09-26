@@ -2,19 +2,19 @@
 
 **Current status board:** see [Doc 14 — Build status board (Revision 88)](14_Implementation_Progress.md#build-status-board--revision-88-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
 
-## Session close-out and handoff — Revision 90 (2026-09-26)
+## Session close-out and handoff — Revision 91 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 89, merge commit `d3a1b16` of PR #61; Revision 90 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 90, merge commit `5ad1adc` of PR #62; Revision 91 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–89 (PR #61 merged); Revision 90 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–90 (PRs #61, #62 merged); Revision 91 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0061: 62 migrations, 66 public tables** (Revision 89 added the five W5 execution-detail tables; Revision 90 added the executor's four functions). The next migration is **0062**; never edit an applied migration.
-- Latest audit is **78**.
+- Schema is **0000–0062: 63 migrations, 66 public tables** (Rev 89 added the five W5 execution-detail tables; Rev 90 the executor's four functions; Rev 91 the rollback function). The next migration is **0063**; never edit an applied migration.
+- Latest audit is **79**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -87,6 +87,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 91 — the rollback engine (GLM session):**
+
+M3.5 lands: migration 0062 adds `record_rollback_execution`, the only write path into `rollback_executions`. It executes Sudhaar's stored definition — re-read and compared against the row (`definition_mismatch`), so a reconstructed definition cannot be reversed with — and only against an action the batch actually completed and only once (`action_not_reversible`), with batch membership enforced (`batch_mismatch`). The action lands `rolled_back` with the definition hash computed server-side, and both ledger phases (`execution.rollback.started`/`completed`) commit atomically with the record. The rollback pass in the executor runs in reverse order over the batch's completed actions when a failure fires with stop-on-failure armed, kill-switch-checked per rollback (the stop outranks the undo), and every rollback is simulated before it is executed: an unsimulable definition is never executed. A rollback that itself fails leaves the batch `partial_failure` with the action honestly `failed` — an applied change whose undo failed is the one state that must never be rendered clean. Governor and kill-switch halts escalate without auto-rollback: automatic further mutation during an incident is refused by design. See [audit 79](audits/79-rollback-engine-review-2026-09-26.md). Schema is **0062 / 63 migrations / 66 public tables**. Next in plan order: post-execution verification (M3.7) and the maker-checker reconciler (W5.6).
 
 **Revision 90 — the durable executor (GLM session):**
 
