@@ -1498,6 +1498,469 @@ export function v1Routes(deps: Deps) {
     return c.json({ data });
   });
 
+  // ─── W6.2 · M4.1 — standing approval policies ──────────────────────
+  //
+  // A standing policy is pre-granted human approval with a bounded scope and
+  // an expiry: the named approver signs ONCE (at creation, via a different
+  // human than the author), and evaluations inside that scope can issue a
+  // scoped token through the ordinary approval gate. The gate is not relaxed
+  // here — a policy changes WHO approved, never WHAT must be true (fresh
+  // dry-run, validated rollback, unchanged content). Anything outside the
+  // scope escalates to the ordinary approve route.
+
+  const StandingPolicyScopeSchema = z
+    .object({
+      actionTypes: z
+        .array(z.string().regex(/^[a-z][a-z0-9_.]{0,79}$/))
+        .min(1)
+        .max(32),
+      maxActions: z.number().int().min(1).max(1000).optional(),
+      environments: z
+        .array(z.string().regex(/^[a-z0-9][a-z0-9_.-]{0,79}$/))
+        .min(1)
+        .max(32)
+        .optional(),
+    })
+    // Unknown keys are refused here as in the database: a key the engine
+    // ignores today is a grant nobody vetted the day the engine reads it.
+    .strict();
+
+  const StandingPolicyCreateSchema = z.object({
+    name: z.string().regex(/^[A-Za-z0-9_. -]{1,120}$/),
+    scope: StandingPolicyScopeSchema,
+    expiresAt: z.string().datetime(),
+    // The second human. Dual control is enforced here and again in the
+    // database (migration 0068), because a policy approved by its own author
+    // is one compromised session away from a standing backdoor.
+    approvedById: z.string().uuid(),
+  });
+
+  // POST /v1/policies/standing — dual-controlled creation.
+  app.post('/policies/standing', async (c) => {
+    const createRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (createRefusal) return createRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => null);
+    const parsed = StandingPolicyCreateSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid standing policy request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+    const expiresAt = Date.parse(parsed.data.expiresAt);
+    if (
+      !Number.isFinite(expiresAt) ||
+      expiresAt <= Date.now() ||
+      expiresAt > Date.now() + 365 * 86_400_000
+    ) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'expiresAt must be in the future and no more than a year out',
+          },
+        },
+        400,
+      );
+    }
+    if (parsed.data.approvedById === user.id) {
+      return c.json(
+        {
+          error: {
+            code: 'dual_control_required',
+            message: 'A standing policy may not be approved by its own author.',
+          },
+        },
+        422,
+      );
+    }
+    const scope: Record<string, unknown> = { action_types: parsed.data.scope.actionTypes };
+    if (parsed.data.scope.maxActions !== undefined) {
+      scope.max_actions = parsed.data.scope.maxActions;
+    }
+    if (parsed.data.scope.environments !== undefined) {
+      scope.environments = parsed.data.scope.environments;
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('create_standing_policy', {
+      p_tenant_id: tenantId,
+      p_name: parsed.data.name,
+      p_scope: scope,
+      p_expires_at: new Date(expiresAt).toISOString(),
+      p_created_by: user.id,
+      p_approved_by: parsed.data.approvedById,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      return c.json({ error: { code: 'creation_failed', message: error.message } }, 500);
+    }
+    if (!data || typeof data !== 'object' || !('policy' in data)) {
+      const code = (data as { error?: string } | null)?.error ?? 'creation_refused';
+      return c.json({ error: { code, message: 'The standing policy was not created' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/policies/standing — the tenant's policies, newest first.
+  app.get('/policies/standing', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const status = c.req.query('status');
+    const admin = createSupabaseAdmin();
+    let query = admin
+      .from('standing_approval_policies')
+      .select(
+        'id, name, version, scope, status, created_by, approved_by, expires_at, created_at, updated_at',
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (status) {
+      query = query.eq('status', status);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/policies/standing/:id/revoke — the off switch, ledgered.
+  app.post('/policies/standing/:id/revoke', async (c) => {
+    const revokeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (revokeRefusal) return revokeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const policyId = c.req.param('id');
+    if (!z.string().uuid().safeParse(policyId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid policy id' } }, 400);
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('revoke_standing_policy', {
+      p_tenant_id: tenantId,
+      p_policy_id: policyId,
+      p_revoked_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      return c.json({ error: { code: 'revoke_failed', message: error.message } }, 500);
+    }
+    if (!data || typeof data !== 'object' || !('policy' in data)) {
+      const code = (data as { error?: string } | null)?.error ?? 'revoke_refused';
+      return c.json(
+        { error: { code, message: 'The standing policy was not revoked' } },
+        code === 'policy_not_found' ? 404 : 409,
+      );
+    }
+    return c.json({ data });
+  });
+
+  const StandingApprovalRequestSchema = z.object({
+    policyId: z.string().uuid(),
+    actionIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+    mode: z.enum(['batch', 'individual']).default('batch'),
+    concurrency: z.number().int().positive().max(20).default(1),
+    stopOnFailure: z.boolean().default(true),
+    expiresInMinutes: z
+      .number()
+      .int()
+      .positive()
+      .max(7 * 24 * 60)
+      .default(60),
+  });
+
+  // POST /v1/plans/:id/standing-approval — evaluate the plan's actions
+  // against a standing policy. Either every requested action falls inside the
+  // policy's scope and the token is issued through the same gate as an
+  // interactive approval (the policy's named approver on the token), or the
+  // evaluation escalates and the ordinary approve route is the human path.
+  // Escalation is a decision, not an error: 200 with decision 'escalated'.
+  app.post('/plans/:id/standing-approval', async (c) => {
+    if (await deps.killSwitch.isActive(c.get('tenantId'))) {
+      return c.json(
+        { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
+        423,
+      );
+    }
+    const evaluationRefusal = requireCapability(c, Capability.PLAN_APPROVE);
+    if (evaluationRefusal) return evaluationRefusal;
+    const planId = c.req.param('id');
+    const tenantId = c.get('tenantId');
+    const body = await c.req.json().catch(() => null);
+    const parsed = StandingApprovalRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid standing approval request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+    const input = parsed.data;
+    const admin = createSupabaseAdmin();
+
+    const { data: plan, error: planErr } = await admin
+      .from('remediation_plans')
+      .select('id, status, tenant_id, version')
+      .eq('id', planId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (planErr || !plan) {
+      return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
+    }
+    if (!['draft', 'review', 'approved', 'cancelled'].includes(plan.status)) {
+      return c.json(
+        { error: { code: 'plan_not_approvable', message: 'Plan is not ready for approval' } },
+        422,
+      );
+    }
+
+    // Default to the plan's still-unapproved actions: a standing policy
+    // evaluation covers what would otherwise be awaiting a human.
+    let actionIds = input.actionIds;
+    if (!actionIds) {
+      const { data: pending, error: pendingErr } = await admin
+        .from('remediation_actions')
+        .select('id')
+        .eq('plan_id', planId)
+        .eq('tenant_id', tenantId)
+        .in('approval_status', ['draft', 'awaiting_approval']);
+      if (pendingErr) {
+        return c.json({ error: { code: 'lookup_failed', message: pendingErr.message } }, 500);
+      }
+      actionIds = (pending ?? []).map((a) => a.id);
+      if (actionIds.length === 0) {
+        return c.json(
+          { error: { code: 'nothing_to_approve', message: 'The plan has no pending actions' } },
+          422,
+        );
+      }
+    }
+
+    const { data: actions, error: actErr } = await admin
+      .from('remediation_actions')
+      .select(
+        'id, tenant_id, plan_id, action_type, dry_run_status, rollback_validated, dry_run_expires_at, parameters, rollback_definition, closes_finding_ids, dry_run_result',
+      )
+      .eq('plan_id', planId)
+      .eq('tenant_id', tenantId)
+      .in('id', actionIds);
+    if (actErr) {
+      return c.json({ error: { code: 'lookup_failed', message: actErr.message } }, 500);
+    }
+    const foundActionIds = new Set((actions ?? []).map((a) => a.id));
+    const missing = actionIds.filter((actionId) => !foundActionIds.has(actionId));
+    if (missing.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_not_found',
+            message: 'Every requested action must belong to this tenant and plan',
+            details: { missing },
+          },
+        },
+        404,
+      );
+    }
+
+    // The policy is read here for a fast, readable failure; the RPC re-checks
+    // everything under row locks, and its decision is the only one that
+    // counts.
+    const { data: policy, error: policyErr } = await admin
+      .from('standing_approval_policies')
+      .select('id, name, version, scope, status, approved_by, expires_at')
+      .eq('id', input.policyId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (policyErr || !policy) {
+      return c.json(
+        { error: { code: 'policy_not_found', message: 'Standing policy not found' } },
+        404,
+      );
+    }
+    if (policy.status !== 'active') {
+      return c.json(
+        {
+          error: {
+            code: 'policy_inactive',
+            message: `The standing policy is ${policy.status}; only an active policy can authorise an approval`,
+          },
+        },
+        409,
+      );
+    }
+    if (policy.expires_at && Date.parse(policy.expires_at) <= Date.now()) {
+      return c.json(
+        { error: { code: 'policy_expired', message: 'The standing policy has expired' } },
+        409,
+      );
+    }
+
+    // Same per-action hard gate as the approve route (BR-2): no approval —
+    // standing or interactive — without a successful dry-run and a validated
+    // rollback, both fresh.
+    const ineligible = (actions ?? []).filter(
+      (a) => a.dry_run_status !== 'dry_run_complete' || !a.rollback_validated,
+    );
+    if (ineligible.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_ineligible',
+            message:
+              'A standing policy does not replace the dry-run gate: every action needs a fresh dry-run and a validated rollback first',
+            details: { ineligible: ineligible.map((a) => a.id) },
+          },
+        },
+        422,
+      );
+    }
+    const now = Date.now();
+    const stale = (actions ?? []).filter((a) => !hasFreshDryRun(a.dry_run_expires_at, now));
+    if (stale.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'dry_run_expired',
+            message: 'Dry-runs have expired; re-run them before evaluating the policy',
+            details: { expired: stale.map((a) => a.id) },
+          },
+        },
+        422,
+      );
+    }
+
+    // The digest of the content as read, so the issuance under locks can
+    // prove the content the policy evaluated is the content that was there.
+    const { data: expectedDigest, error: digestErr } = await admin.rpc(
+      'reviewed_action_content_digest',
+      { p_actions: actions ?? [] },
+    );
+    if (digestErr || typeof expectedDigest !== 'string') {
+      logger.error({ err: digestErr?.message, planId }, 'content digest unreadable');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not read the action content' } },
+        500,
+      );
+    }
+
+    const expiresAt = new Date(now + input.expiresInMinutes * 60_000).toISOString();
+    const signed = await deps.approvalEngine.issue(tenantId, {
+      planId,
+      actionIds,
+      approverId: policy.approved_by,
+      mode: input.mode,
+      concurrency: input.concurrency,
+      stopOnFailure: input.stopOnFailure,
+      expiresAt,
+      contentDigest: expectedDigest,
+    });
+
+    const correlationId = randomUUID();
+    const { data: evaluation, error: evalErr } = await admin.rpc('evaluate_standing_policy', {
+      p_tenant_id: tenantId,
+      p_plan_id: planId,
+      p_action_ids: actionIds,
+      p_policy_id: input.policyId,
+      p_mode: input.mode,
+      p_concurrency: input.concurrency,
+      p_stop_on_failure: input.stopOnFailure,
+      p_signature: signed.signature,
+      p_signed_payload: signed.spec,
+      p_nonce: signed.spec.nonce,
+      p_expires_at: expiresAt,
+      p_expected_digest: expectedDigest,
+      p_expected_plan_version: (plan as { version?: number }).version ?? null,
+      p_correlation_id: correlationId,
+    });
+    if (evalErr) {
+      logger.error({ err: evalErr.message, planId }, 'standing-policy evaluation failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not evaluate the policy' } },
+        500,
+      );
+    }
+
+    const result = evaluation as {
+      decision?: string;
+      token_id?: string;
+      evaluation_id?: string;
+      uncovered_action_types?: string[];
+      expires_at?: string;
+      content_digest?: string;
+    } | null;
+    const decision = result?.decision;
+
+    if (decision === 'issued') {
+      deps.realtime.broadcast({
+        type: 'approval.pending',
+        planId,
+        actionIds,
+        correlationId,
+        occurredAt: new Date().toISOString(),
+      });
+      return c.json(
+        {
+          decision: 'issued',
+          approvalTokenId: result?.token_id,
+          policyEvaluationId: result?.evaluation_id,
+          expiresAt: result?.expires_at,
+          contentDigest: result?.content_digest,
+          // The signed token, same shape the approve route returns; the
+          // execute call presents it exactly as an interactively approved one.
+          token: signed,
+        },
+        201,
+      );
+    }
+    if (decision === 'escalated') {
+      return c.json({
+        decision: 'escalated',
+        policyEvaluationId: result?.evaluation_id,
+        uncoveredActionTypes: result?.uncovered_action_types ?? [],
+      });
+    }
+    if (decision === 'policy_expired' || decision === 'policy_revoked') {
+      return c.json(
+        {
+          error: {
+            code: decision,
+            message: 'The standing policy lapsed under lock; re-read it and retry or escalate',
+          },
+        },
+        409,
+      );
+    }
+    // content_changed / plan_changed are the two where the caller should
+    // re-read before retrying, exactly as the approve route treats them.
+    const message =
+      decision === 'content_changed' || decision === 'plan_changed'
+        ? 'The plan or an action changed while the policy was being evaluated. Re-read the plan and retry.'
+        : decision === 'actions_not_ready'
+          ? 'A dry-run expired or a rollback became invalid while the policy was being evaluated.'
+          : decision === 'actions_in_flight'
+            ? 'Some of these actions are already executing or finished.'
+            : 'The standing policy could not authorise this approval.';
+    logger.warn({ decision, planId }, 'standing-policy evaluation refused under row locks');
+    return c.json(
+      { error: { code: decision ?? 'evaluation_refused', message } },
+      decision === 'content_changed' || decision === 'plan_changed' ? 409 : 422,
+    );
+  });
+
   // GET /v1/monitoring/health — monitoring the monitoring: are schedules
   // firing, when did each last run, which are overdue, and how much drift
   // has been detected (and acknowledged) recently. This is what makes

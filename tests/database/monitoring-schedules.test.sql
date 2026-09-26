@@ -31,9 +31,11 @@ end $$;
 
 -- ─── Fixture ─────────────────────────────────────────────────────────
 insert into auth.users(id, email) values
-  ('00000000-0000-0000-0000-0000000000a9', 'manager@test.invalid');
+  ('00000000-0000-0000-0000-0000000000a9', 'manager@test.invalid'),
+  ('00000000-0000-0000-0000-0000000000a8', 'checker@test.invalid');
 insert into public.users(id, email) values
-  ('00000000-0000-0000-0000-0000000000a9', 'manager@test.invalid');
+  ('00000000-0000-0000-0000-0000000000a9', 'manager@test.invalid'),
+  ('00000000-0000-0000-0000-0000000000a8', 'checker@test.invalid');
 insert into public.tenants(id, slug, name) values
   ('00000000-0000-0000-0000-0000000000c1', 'w6-a', 'Compliance A');
 insert into public.tenant_users(tenant_id, user_id, role) values
@@ -118,7 +120,7 @@ insert into public.standing_approval_policies(id, tenant_id, name, scope, create
 values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000c1',
         'Auto-remediate small retention purges',
         '{"action_types": ["data.retention_purge"], "max_records": 1000, "environments": ["non-production"]}'::jsonb,
-        '00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a9',
+        '00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a8',
         now() + interval '90 days');
 
 insert into public.policy_evaluations(tenant_id, policy_id, plan_id, decision, matched_scope, correlation_id)
@@ -134,7 +136,7 @@ select pg_temp.raises('23514',
   $q$insert into public.standing_approval_policies(id, tenant_id, name, scope, created_by, approved_by, expires_at)
     values ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000c1',
             'No action types', '{"max_records": 10}'::jsonb,
-            '00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a9',
+            '00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a8',
             now() + interval '90 days')$q$,
   'a policy without an action_types scope cannot exist');
 
