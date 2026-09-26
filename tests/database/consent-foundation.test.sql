@@ -42,8 +42,8 @@ insert into public.tenants(id, slug, name) values
 insert into public.tenant_users(tenant_id, user_id, role) values
   ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a1', 'owner'),
   ('00000000-0000-0000-0000-0000000000c9', '00000000-0000-0000-0000-0000000000a2', 'owner');
--- The registry has no write RPC yet (a later slice), so fixtures insert
--- directly; the RLS tables still deny writes to every non-definer role.
+-- Legacy registry fixture: current notice snapshots are explicitly inserted
+-- by the test owner. Real purpose creation uses the audited 0072 RPC.
 insert into public.consent_purposes(id, tenant_id, purpose_key, name_en, lawful_basis,
                                     notice_version, notice_en, created_by) values
   ('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000c1',
@@ -61,6 +61,10 @@ insert into public.consent_purposes(id, tenant_id, purpose_key, name_en, lawful_
 update public.consent_purposes set is_active = false
  where id = '00000000-0000-0000-0000-0000000000d3';
 
+insert into public.consent_notice_versions(tenant_id,purpose_id,notice_version,notice_en,notice_hi,snapshot_sha256,provenance,created_by)
+select tenant_id,id,notice_version,notice_en,notice_hi,public.consent_notice_hash(id,notice_version,notice_en,notice_hi),'legacy_current',created_by
+from public.consent_purposes;
+
 -- ─── Happy path: grant, withdraw, complete, revive ───────────────────
 do $$
 declare
@@ -72,7 +76,7 @@ declare
   v_first_grant timestamptz;
 begin
   v_out := public.record_consent(
-    '00000000-0000-0000-0000-0000000000c1', v_purpose,
+    '00000000-0000-0000-0000-0000000000c1', v_purpose, 3,
     'email', 'data.subject@example.invalid', 'en', 'form', null,
     v_owner, '00000000-0000-0000-0000-0000000000b1');
   if v_out ->> 'status' is distinct from 'granted' then
@@ -155,9 +159,15 @@ begin
   -- A re-grant revives the row as a fresh capture: the CURRENT notice
   -- version is pinned, the withdrawal references clear, the clock restarts,
   -- and the row count stays at one.
-  update public.consent_purposes set notice_version = 4 where id = v_purpose;
+  v_out := public.publish_consent_notice(
+    '00000000-0000-0000-0000-0000000000c1', v_purpose, 3,
+    'We will email you about revised offers.', 'हम आपको संशोधित ऑफ़र के बारे में ईमेल करेंगे।',
+    true, v_owner, gen_random_uuid());
+  if v_out ->> 'notice_version' is distinct from '4' then
+    raise exception 'ASSERTION FAILED: reviewed replacement notice published (got %)', v_out;
+  end if;
   v_out := public.record_consent(
-    '00000000-0000-0000-0000-0000000000c1', v_purpose,
+    '00000000-0000-0000-0000-0000000000c1', v_purpose, 4,
     'email', 'data.subject@example.invalid', 'en', 'form', now() + interval '30 days',
     v_owner, '00000000-0000-0000-0000-0000000000b5');
   if v_out ->> 'status' is distinct from 'granted' then
@@ -187,7 +197,7 @@ end $$;
 -- ─── Refusals ─────────────────────────────────────────────────────────
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'email', 'data.subject@example.invalid', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b6')
    ->> 'error'),
@@ -195,21 +205,21 @@ select pg_temp.assert_eq(
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d3',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d3', 1,
      'email', 'other.subject@example.invalid', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'purpose_inactive', 'an inactive purpose takes no new consent');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d9',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d9', 1,
      'email', 'cross.tenant@example.invalid', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'purpose_not_found', 'another tenant''s purpose is not found, not refused differently');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', gen_random_uuid(),
+     '00000000-0000-0000-0000-0000000000c1', gen_random_uuid(), 1,
      'email', 'unknown.purpose@example.invalid', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'purpose_not_found', 'a purpose that exists nowhere is not found');
@@ -217,63 +227,63 @@ select pg_temp.assert_eq(
 -- Bounded principal shapes: every type, several ways to be malformed.
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'email', 'not-an-email', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'an email principal must be an address');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'phone', '1234567', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'a phone principal carries 8 to 15 digits');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'phone', 'abcdefghij', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'a phone principal is digits, not prose');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2', 1,
      'cookie_id', 'has a space', 'en', 'cookie', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'a cookie_id principal is identifier-shaped');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2', 1,
      'user_id', 'not-a-uuid', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'a user_id principal is a uuid');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2', 1,
      'user_id', '00000000-0000-0000-0000-0000000000a2', 'en', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'a user_id principal is a member of THIS tenant');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'email', 'future.subject@example.invalid', 'en', 'form', now() - interval '1 day',
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'an expiry in the past is not an offer anyone made');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'email', 'channel.subject@example.invalid', 'en', 'in_person', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'the capture channel is a closed set');
 
 select pg_temp.assert_eq(
   (select public.record_consent(
-     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
      'email', 'language.subject@example.invalid', 'fr', 'form', null,
      '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
   'invalid_request', 'the notice language is EN or HI');
@@ -297,7 +307,7 @@ do $$
 declare v_consent uuid; v_out jsonb;
 begin
   v_out := public.record_consent(
-    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2',
+    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2', 1,
     'cookie_id', 'tracker-001', 'en', 'cookie', null,
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000b7');
   v_consent := (v_out ->> 'consent_id')::uuid;
@@ -473,7 +483,7 @@ select pg_temp.denied($q$insert into public.consent_purposes(
 -- The write paths are RPC-only in the other direction too: no EXECUTE
 -- outside the BFF service role.
 select pg_temp.denied($q$select public.record_consent(
-  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+  '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
   'email', 'browser@example.invalid', 'en', 'form', null,
   '00000000-0000-0000-0000-0000000000a1', gen_random_uuid())$q$);
 select pg_temp.denied($q$select public.withdraw_consent(
@@ -481,14 +491,13 @@ select pg_temp.denied($q$select public.withdraw_consent(
   '00000000-0000-0000-0000-0000000000a1', gen_random_uuid())$q$);
 reset role;
 
--- The Axiom-internal read: staff can see a tenant's consent state without
--- being a member of it.
+-- An internal employee flag alone grants no cross-client reads (0016/0072).
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000a3","role":"authenticated"}';
 select pg_temp.assert_true(
-  (select count(*) >= 1 from public.consent_records
+  (select count(*) = 0 from public.consent_records
     where tenant_id = '00000000-0000-0000-0000-0000000000c1'),
-  'Axiom-internal staff read across tenants');
+  'Axiom-internal nonmembers cannot read across tenants');
 reset role;
 
 -- The BFF's service role has no direct writes either — only the RPCs.
@@ -509,7 +518,7 @@ declare
   v_consent uuid; v_withdrawal uuid; v_out jsonb;
 begin
   v_out := public.record_consent(
-    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1',
+    '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 4,
     'email', 'bff.subject@example.invalid', 'en', 'api', null,
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000b14');
   if v_out ->> 'status' is distinct from 'granted' then
@@ -566,7 +575,16 @@ select pg_temp.assert_eq(
   'r', 'a granter cannot take their grants along');
 select pg_temp.assert_eq(
   pg_temp.fk_delete_action('consent_records', 'tenant_id'),
-  'c', 'the only cascade is tenant teardown, which the design specifies');
+  'r', 'tenant teardown cannot erase retained consent history');
+select pg_temp.assert_eq(
+  pg_temp.fk_delete_action('consent_purposes', 'tenant_id'),
+  'r', 'tenant teardown cannot erase retained purpose notices');
+select pg_temp.assert_eq(
+  pg_temp.fk_delete_action('consent_withdrawals', 'tenant_id'),
+  'r', 'tenant teardown cannot erase withdrawal evidence');
+select pg_temp.assert_eq(
+  pg_temp.fk_delete_action('consent_notice_versions', 'tenant_id'),
+  'r', 'tenant teardown cannot erase immutable notice versions');
 select pg_temp.assert_true(
   (select count(*) = 0 from pg_catalog.pg_class
     where oid in ('public.consent_purposes'::regclass,

@@ -137,10 +137,10 @@ select pg_temp.assert_eq(
     gen_random_uuid()) ->> 'status'),
   'in_fulfilment', 'a verified DSAR enters fulfilment');
 
-insert into public.dsars(id, tenant_id, kind, status, data_principal_email, due_by)
+insert into public.dsars(id, tenant_id, kind, status, data_principal_email, due_by, identity_verified)
 values ('00000000-0000-0000-0000-0000000000d2', '00000000-0000-0000-0000-0000000000c1',
         'erasure', 'identity_verification', 'skip@example.invalid',
-        clock_timestamp() + interval '20 days');
+        clock_timestamp() + interval '20 days', true);
 select pg_temp.assert_eq(
   (public.advance_dsar('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000d2', 'in_fulfilment', null, null,

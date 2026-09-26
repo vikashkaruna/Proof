@@ -65,6 +65,7 @@ bash tests/database/concurrent-dispatch-key-policy.sh "$container"
 bash tests/database/concurrent-workload-registration.sh "$container"
 bash tests/database/concurrent-controller-issuance.sh "$container"
 bash tests/database/concurrent-invitation.sh "$container"
+bash tests/database/concurrent-consent-notice.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.
@@ -83,5 +84,6 @@ bash tests/database/assessment-retention-upgrade.sh "$container"
 bash tests/database/dispatch-key-policy-upgrade.sh "$container"
 bash tests/database/workload-registration-upgrade.sh "$container"
 bash tests/database/controller-issuance-upgrade.sh "$container"
+bash tests/database/consent-notice-upgrade.sh "$container"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."
