@@ -69,10 +69,25 @@ class FakeAdapter:
     def __init__(self, results: dict[str, Any] | None = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.results = results or {}
+        self.rollback_calls: list[tuple[str, dict[str, Any]]] = []
+        self.rollback_results: dict[str, Any] = {}
+        self.simulate_refuses: bool = False
 
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> Any:
         self.calls.append((action_type, parameters))
-        result = self.results.get(action_type, {"rows_affected": 1})
+        return self._result(self.results.get(action_type, {"rows_affected": 1}))
+
+    async def simulate_rollback(self, action_type: str, definition: dict[str, Any]) -> Any:
+        self.rollback_calls.append(("simulate", action_type, definition))
+        if self.simulate_refuses:
+            raise WriteRefused("rollback_not_simulable")
+        return SimpleNamespace(rows_affected=0, pre_state_ref=None, post_state_ref=None)
+
+    async def execute_rollback(self, action_type: str, definition: dict[str, Any]) -> Any:
+        self.rollback_calls.append(("execute", action_type, definition))
+        return self._result(self.rollback_results.get(action_type, {"rows_affected": 1}))
+
+    def _result(self, result: Any) -> Any:
         if isinstance(result, Exception):
             raise result
         return SimpleNamespace(
@@ -326,3 +341,148 @@ def test_db_wrapper_refuses_on_non_dict_payload() -> None:
 
     with pytest.raises(ExecutorRefused):
         ExecutorDb(OddClient()).rpc("start_execution_batch", {})
+
+
+# ── the rollback engine (M3.5) ─────────────────────────────────────────
+
+
+def rollback_records(db: FakeDb) -> list[dict[str, Any]]:
+    return [args for fn, args in db.rpc_calls if fn == "record_rollback_execution"]
+
+
+@pytest.mark.asyncio
+async def test_failure_with_stop_on_failure_rolls_back_completed_actions() -> None:
+    db = FakeDb()
+    definition = {"steps": [{"op": "restore_from_backup"}]}
+    db.rows["a-1"] = {
+        "id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    db.rows["a-2"] = {
+        "id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    adapter = FakeAdapter(
+        results={"data.delete": WriteRefused("write_refused_by_target")}
+    )
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok
+    )
+    # a-1 succeeded, a-2 failed: the failure threshold rolls a-1 back.
+    assert result.status == "rolled_back"
+    records = rollback_records(db)
+    assert len(records) == 1
+    assert records[0]["p_action_id"] == "a-1"
+    assert records[0]["p_definition"] == definition
+    assert records[0]["p_triggered_by"] == "failure_threshold"
+    assert records[0]["p_status"] == "succeeded"
+    # Simulated before executed, and executed against the stored definition.
+    assert [c[0] for c in adapter.rollback_calls] == ["simulate", "execute"]
+    assert adapter.rollback_calls[1][2] == definition
+    by_id = {o.action_id: o.outcome for o in result.outcomes}
+    assert by_id["a-1"] == "rolled_back"
+    assert by_id["a-2"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_rollback_leaves_a_partial_failure() -> None:
+    db = FakeDb()
+    definition = {"steps": [{"op": "restore_from_backup"}]}
+    db.rows["a-1"] = {
+        "id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    db.rows["a-2"] = {
+        "id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    adapter = FakeAdapter(results={"data.delete": WriteRefused("write_refused_by_target")})
+    adapter.rollback_results["data.mask"] = WriteRefused("write_refused_by_target")
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok
+    )
+    assert result.status == "partial_failure"
+    records = rollback_records(db)
+    assert len(records) == 1
+    assert records[0]["p_status"] == "failed"
+    by_id = {o.action_id: o.outcome for o in result.outcomes}
+    assert by_id["a-1"] == "failed"  # the rollback failed; the action did not silently vanish
+    assert by_id["a-1"] != "rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_unsimulable_rollback_is_never_executed() -> None:
+    db = FakeDb()
+    definition = {"steps": [{"op": "restore_from_backup"}]}
+    db.rows["a-1"] = {
+        "id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    db.rows["a-2"] = {
+        "id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    adapter = FakeAdapter(results={"data.delete": WriteRefused("write_refused_by_target")})
+    adapter.simulate_refuses = True
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok
+    )
+    assert result.status == "partial_failure"
+    assert [c[0] for c in adapter.rollback_calls] == ["simulate"]
+    records = rollback_records(db)
+    assert len(records) == 1
+    assert records[0]["p_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failure_without_stop_on_failure_does_not_auto_rollback() -> None:
+    db = FakeDb()
+    definition = {"steps": [{"op": "restore_from_backup"}]}
+    db.rows["a-1"] = {
+        "id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    db.rows["a-2"] = {
+        "id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {},
+        "rollback_definition": definition,
+    }
+    adapter = FakeAdapter(results={"data.delete": WriteRefused("write_refused_by_target")})
+    result = await execute_batch(
+        make_payload(stop_on_failure=False),
+        db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok,
+    )
+    assert result.status == "partial_failure"
+    assert adapter.rollback_calls == []
+    assert rollback_records(db) == []
+
+
+@pytest.mark.asyncio
+async def test_governor_halt_does_not_auto_rollback() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {
+        "id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {"records": 10},
+    }
+    adapter = FakeAdapter(results={"data.delete": {"rows_affected": 11}})
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok
+    )
+    # The breach halts and escalates; automatic further mutation is the
+    # last thing an incident needs.
+    assert result.status == "halted"
+    assert adapter.rollback_calls == []
+    assert rollback_records(db) == []
+
+
+@pytest.mark.asyncio
+async def test_no_completed_actions_means_nothing_to_roll_back() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    adapter = FakeAdapter(results={"data.mask": WriteRefused("write_refused_by_target")})
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter, verify_token=verify_token_ok
+    )
+    assert result.status == "failed"
+    assert adapter.rollback_calls == []
+    assert rollback_records(db) == []

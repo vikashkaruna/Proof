@@ -1,18 +1,18 @@
-"""W5 · M3.4 — the write-adapter seam and the reference write adapter.
+"""W5 · M3.4/M3.5 — the write-adapter seam and the reference write adapter.
 
 The executor executes through a `WriteAdapter`, never through a connector
 credential or a caller-supplied URL. The adapter is bound to the approved
-plan by construction: it receives only the action type and parameters the
-claim authorises, and returns metadata (a row count and state digests) —
-never estate values.
+plan by construction: it receives only the action type, parameters and
+rollback definition the claim authorises, and returns metadata (a row
+count and state digests) — never estate values.
 
 `ReferenceWriteAdapter` is the one shipped implementation: a bounded HTTP
 call to the Axiom reference write service (`reference-mock` provenance).
-It exists so the executor's structural guarantees — scope, digest,
-idempotency, ledger, halt — are proved end-to-end in CI. Production
-connector execution (broker leases against real client systems) is a
-separate, operator-gated composition and is deliberately NOT delivered
-here; with no write origin configured the executor refuses.
+It exists so the executor's and rollback engine's structural guarantees —
+scope, digest, idempotency, ledger, halt — are proved end-to-end in CI.
+Production connector execution (broker leases against real client
+systems) is a separate, operator-gated composition and is deliberately
+NOT delivered here; with no write origin configured the executor refuses.
 """
 
 from __future__ import annotations
@@ -45,6 +45,18 @@ class WriteAdapter(Protocol):
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> WriteResult:
         """Execute one approved action. Raise WriteRefused rather than guess."""
 
+    async def simulate_rollback(
+        self, action_type: str, definition: dict[str, Any]
+    ) -> WriteResult:
+        """Simulate a rollback without mutating (M3.5: the rollback engine
+        is itself dry-run-able). Raise WriteRefused rather than guess."""
+
+    async def execute_rollback(
+        self, action_type: str, definition: dict[str, Any]
+    ) -> WriteResult:
+        """Execute Sudhaar's stored rollback definition. Raise WriteRefused
+        rather than guess."""
+
 
 class ReferenceWriteAdapter:
     """Bounded write transport to the reference write service.
@@ -61,7 +73,23 @@ class ReferenceWriteAdapter:
         self._token = token
 
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> WriteResult:
-        body = {"action_type": action_type, "parameters": parameters}
+        return await self._call({"action_type": action_type, "parameters": parameters})
+
+    async def simulate_rollback(
+        self, action_type: str, definition: dict[str, Any]
+    ) -> WriteResult:
+        return await self._call(
+            {"op": "rollback", "simulate": True, "action_type": action_type, "rollback": definition}
+        )
+
+    async def execute_rollback(
+        self, action_type: str, definition: dict[str, Any]
+    ) -> WriteResult:
+        return await self._call(
+            {"op": "rollback", "simulate": False, "action_type": action_type, "rollback": definition}
+        )
+
+    async def _call(self, body: dict[str, Any]) -> WriteResult:
         try:
             async with httpx.AsyncClient(
                 timeout=WRITE_TIMEOUT_SECONDS, follow_redirects=False
