@@ -243,14 +243,63 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
             ),
         )
 
-    # No durable consumer exists yet. Logging an intent does not transfer
-    # responsibility for execution; report a refusal until enqueueing exists.
-    return JSONResponse(status_code=501, content={
-        "accepted": False,
+    # W5 · M3.4 — the durable executor. The structural guarantees (scope,
+    # content digest, idempotency, the fresh-approval sweep) live in the
+    # migration-0061 functions; this handler owns the kill switch, the
+    # token re-validation and the adapter loop.
+    settings: Settings = req.app.state.settings
+    if not settings.feature_execution_engine or not settings.reference_write_origin:
+        # No write path is configured: refuse rather than improvise a target.
+        return JSONResponse(status_code=503, content={
+            "accepted": False,
+            "contract_version": EXECUTION_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": "execution_unconfigured",
+        })
+
+    from supabase import create_client
+
+    from .approval_engine import ApprovalEngine
+    from .executor import ExecutorDb, ExecutorRefused, execute_batch
+    from .kill_switch import KillSwitchReader
+    from .write_adapters import ReferenceWriteAdapter
+
+    db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
+    engine = ApprovalEngine(signing_key=settings.approval_signing_key)
+
+    async def verify_token(tenant_id: str, token: dict[str, Any]) -> tuple[bool, str | None]:
+        result = await engine.verify(tenant_id, token)
+        return result.valid, result.reason
+
+    try:
+        result = await execute_batch(
+            body,
+            db=db,
+            kill_switch=KillSwitchReader.from_settings(settings),
+            adapter=ReferenceWriteAdapter(
+                settings.reference_write_origin, settings.internal_token or ""
+            ),
+            verify_token=verify_token,
+        )
+    except ExecutorRefused as refused:
+        status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
+        return JSONResponse(status_code=status, content={
+            "accepted": False,
+            "contract_version": EXECUTION_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": refused.reason.split(":", 1)[0],
+        })
+    return {
+        "accepted": True,
         "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
-        "reason": "execution_not_implemented",
-    })
+        "batch": {"id": result.batch_id, "status": result.status, "replay": result.replay},
+        "outcomes": [
+            {"action_id": o.action_id, "outcome": o.outcome,
+             "error_code": o.error_code, "rows_affected": o.rows_affected}
+            for o in result.outcomes
+        ],
+    }
 
 
 # W5 · M3.2 — the dry-run engine. Sudhaar's declared simulation for one

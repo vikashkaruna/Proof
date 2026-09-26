@@ -145,12 +145,21 @@ class Settings(BaseSettings):
     feature_live_connectors: bool = False
     feature_kill_switch: bool = True
 
+    # W5 · M3.4 — the reference write service origin (Axiom-controlled,
+    # `reference-mock` provenance). Execution refuses without it: there is
+    # no production connector write path yet, and the executor must never
+    # improvise a target.
+    reference_write_origin: str | None = Field(
+        default=None,
+        description="Origin of the Axiom reference write service; execution refuses when unset",
+    )
+
     # ─── Observability ─────────────────────────────────────────────
     otel_exporter_otlp_endpoint: str | None = None
     sentry_dsn: str | None = None
 
     @model_validator(mode="after")
-    def validate_production_security(self) -> "Settings":
+    def validate_production_security(self) -> Settings:
         if self.environment == "production":
             if not self.supabase_url or "localhost" in self.supabase_url or "127.0.0.1" in self.supabase_url:
                 raise ValueError("Valid production SUPABASE_URL is required")

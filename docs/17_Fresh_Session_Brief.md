@@ -2,26 +2,26 @@
 
 **Current status board:** see [Doc 14 — Build status board (Revision 88)](14_Implementation_Progress.md#build-status-board--revision-88-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
 
-## Session close-out and handoff — Revision 89 (2026-09-26)
+## Session close-out and handoff — Revision 90 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 88, merge commit `fcf7759` of PR #58; Revision 89 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 89, merge commit `d3a1b16` of PR #61; Revision 90 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–88 plus the dependency updates (PR #57); Revision 89 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–89 (PR #61 merged); Revision 90 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0060: 61 migrations, 66 public tables** (Revision 89 adds the five W5 execution-detail tables). The next migration is **0061**; never edit an applied migration.
-- Latest audit is **77**.
+- Schema is **0000–0061: 62 migrations, 66 public tables** (Revision 89 added the five W5 execution-detail tables; Revision 90 added the executor's four functions). The next migration is **0062**; never edit an applied migration.
+- Latest audit is **78**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
 | Suite                                 | Result                                                                                  |
 | ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1110 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
+| BFF (vitest)                          | 1112 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
 | Web                                   | 89                                                                                      |
 | MFA                                   | 180                                                                                     |
 | Control library                       | 83                                                                                      |
@@ -87,6 +87,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 90 — the durable executor (GLM session):**
+
+`/internal/execute` no longer refuses: the executor consumes the dispatch outbox's claimed batches and records everything through migration 0061's SECURITY DEFINER functions — `start_execution_batch` (which enforces the two structural guarantees at the database: executed actions are a subset of the approved token's `action_ids`, and the content digest is recomputed over the stored rows and matched against the token's signed snapshot), per-action start/settle, and `finish_execution_batch` with the sweep that returns unsettled actions to `approved`, retryable only under a fresh approval. A redelivery under the same request key replays the recorded batch instead of re-executing; the same key with a different payload is a conflict. The executor loop owns the kill switch's two checks, stop-on-failure, bounded concurrency and the SEC-7 blast-radius governor: an affected count above the declared one fails `blast_radius_breach` and halts the batch. Execution goes through a write-adapter seam whose only shipped implementation is the bounded reference write transport; with no write origin configured the route refuses `execution_unconfigured` rather than improvising a target. Ledger entries commit inside the RPCs, so every state change and its audit entry appear together or not at all. See [audit 78](audits/78-executor-review-2026-09-26.md). Schema is **0061 / 62 migrations / 66 public tables** (no new tables; four executor functions). Next in plan order: the rollback engine (M3.5), post-execution verification (M3.7) and the maker-checker reconciler (W5.6).
 
 **Revision 89 — W5 foundation: the dry-run engine and the five execution-detail tables (GLM session):**
 
