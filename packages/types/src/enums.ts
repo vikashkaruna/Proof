@@ -186,6 +186,7 @@ export const LedgerActionType = {
   MONITORING_SCHEDULE_REGISTERED: 'monitoring.schedule.registered',
   MONITORING_SCHEDULE_FIRED: 'monitoring.schedule.fired',
   MONITORING_DRIFT_DETECTED: 'monitoring.drift.detected',
+  MONITORING_DRIFT_ACKNOWLEDGED: 'monitoring.drift.acknowledged',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',
