@@ -103,13 +103,16 @@ async function app(role: UserRole = UserRole.ADMIN) {
     c.set('role', role);
     await next();
   });
-  hono.route('/v1', v1Routes({
-    approvalEngine: {} as never,
-    killSwitch: { isActive: async () => false } as never,
-    ledger: { append: vi.fn() } as never,
-    mfa: {} as never,
-    realtime: { broadcast: vi.fn() } as never,
-  }));
+  hono.route(
+    '/v1',
+    v1Routes({
+      approvalEngine: {} as never,
+      killSwitch: { isActive: async () => false } as never,
+      ledger: { append: vi.fn() } as never,
+      mfa: {} as never,
+      realtime: { broadcast: vi.fn() } as never,
+    }),
+  );
   return hono;
 }
 
@@ -122,15 +125,13 @@ const post = async (role?: UserRole, payload: unknown = {}) =>
 
 describe('POST /v1/plans/:id/dry-run', () => {
   it('dispatches the stored content of each eligible action and reports results', async () => {
-    dispatchDryRun
-      .mockResolvedValueOnce(recorded('dr-a'))
-      .mockResolvedValueOnce({
-        status: 'recorded',
-        dryRunId: 'dr-b',
-        outcome: 'refused',
-        refusalReason: 'action_type_not_simulable',
-        error: null,
-      });
+    dispatchDryRun.mockResolvedValueOnce(recorded('dr-a')).mockResolvedValueOnce({
+      status: 'recorded',
+      dryRunId: 'dr-b',
+      outcome: 'refused',
+      refusalReason: 'action_type_not_simulable',
+      error: null,
+    });
     const res = await post();
     expect(res.status).toBe(200);
     const body = (await res.json()) as { summary: Record<string, number>; data: unknown[] };
@@ -161,7 +162,9 @@ describe('POST /v1/plans/:id/dry-run', () => {
   });
 
   it('reports 404 for a plan with no actions', async () => {
-    const res = await (await app()).request(`/v1/plans/${crypto.randomUUID()}/dry-run`, {
+    const res = await (
+      await app()
+    ).request(`/v1/plans/${crypto.randomUUID()}/dry-run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',

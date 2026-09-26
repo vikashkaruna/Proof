@@ -50,7 +50,11 @@ describe('dry-run dispatch responsibility', () => {
   it('maps the runtime refusal (409) to refused with its reason', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(Response.json({ accepted: false, reason: 'content_mismatch' }, { status: 409 })),
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ accepted: false, reason: 'content_mismatch' }, { status: 409 }),
+        ),
     );
     expect(await dispatchDryRun('http://runtime', 'internal', payload)).toEqual({
       status: 'refused',
