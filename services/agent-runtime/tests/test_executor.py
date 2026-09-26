@@ -36,6 +36,10 @@ class FakeDb:
             if isinstance(scripted, list):
                 return scripted.pop(0)
             return scripted
+        if name == "record_verification_result":
+            return {"verification": {"id": "v-1", "outcome": args.get("p_outcome")}}
+        if name == "record_plan_reconciliation":
+            return {"reconciliation": {"unexecuted": 0, "content_digest_drift": False}}
         if name == "finish_execution_batch":
             # Echo the requested status: the database's terminal status is
             # what the executor reports.
@@ -72,6 +76,8 @@ class FakeAdapter:
         self.rollback_calls: list[tuple[str, dict[str, Any]]] = []
         self.rollback_results: dict[str, Any] = {}
         self.simulate_refuses: bool = False
+        self.verify_calls: list[tuple[str, dict[str, Any]]] = []
+        self.verify_results: dict[str, Any] = {}
 
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> Any:
         self.calls.append((action_type, parameters))
@@ -86,6 +92,16 @@ class FakeAdapter:
     async def execute_rollback(self, action_type: str, definition: dict[str, Any]) -> Any:
         self.rollback_calls.append(("execute", action_type, definition))
         return self._result(self.rollback_results.get(action_type, {"rows_affected": 1}))
+
+    async def verify(self, action_type: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        self.verify_calls: list[tuple[str, dict[str, Any]]] = getattr(self, "verify_calls", [])
+        self.verify_calls.append((action_type, parameters))
+        checks = self.verify_results.get(action_type)
+        if isinstance(checks, Exception):
+            raise checks
+        if checks is not None:
+            return checks
+        return [{"check_id": "state_matches", "outcome": "passed"}]
 
     def _result(self, result: Any) -> Any:
         if isinstance(result, Exception):
@@ -486,3 +502,116 @@ async def test_no_completed_actions_means_nothing_to_roll_back() -> None:
     assert result.status == "failed"
     assert adapter.rollback_calls == []
     assert rollback_records(db) == []
+
+
+# ── verification (M3.7) and the maker-checker reconciler (W5.6) ────────
+
+
+def verification_records(db: FakeDb) -> list[dict[str, Any]]:
+    return [args for fn, args in db.rpc_calls if fn == "record_verification_result"]
+
+
+def reconciliation_records(db: FakeDb) -> list[dict[str, Any]]:
+    return [args for fn, args in db.rpc_calls if fn == "record_plan_reconciliation"]
+
+
+@pytest.mark.asyncio
+async def test_executed_actions_are_verified_after_the_batch() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    adapter = FakeAdapter()
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter,
+        verify_token=verify_token_ok, signing_key="k" * 32,
+    )
+    records = verification_records(db)
+    assert len(records) == 2
+    assert all(r["p_outcome"] == "passed" for r in records)
+    # The maker-checker statement is recorded for the finished batch.
+    recs = reconciliation_records(db)
+    assert len(recs) == 1
+    assert recs[0]["p_batch_id"] == result.batch_id
+    assert len(recs[0]["p_statement_signature"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_failed_verification_is_recorded_not_hidden() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    adapter = FakeAdapter()
+    adapter.verify_results["data.mask"] = [{"check_id": "state_matches", "outcome": "failed"}]
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter,
+        verify_token=verify_token_ok, signing_key="k" * 32,
+    )
+    # The action still executed; the verification failure is on the record.
+    assert result.status == "completed"
+    records = verification_records(db)
+    assert all(r["p_outcome"] == "failed" for r in records)
+
+
+@pytest.mark.asyncio
+async def test_halted_batches_skip_verification_but_state_their_reality() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {"records": 10}}
+    adapter = FakeAdapter(results={"data.delete": {"rows_affected": 11}})
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=adapter,
+        verify_token=verify_token_ok, signing_key="k" * 32,
+    )
+    assert result.status == "halted"
+    assert adapter.verify_calls == []
+    assert verification_records(db) == []
+    # The statement is still recorded: it is what the incident review reads.
+    assert len(reconciliation_records(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_statement_accounts_for_every_action() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.delete", "parameters": {}, "blast_radius": {}}
+    adapter = FakeAdapter(results={"data.delete": WriteRefused("write_refused_by_target")})
+    await execute_batch(
+        make_payload(stop_on_failure=False),
+        db=db, kill_switch=FakeKillSwitch(), adapter=adapter,
+        verify_token=verify_token_ok, signing_key="k" * 32,
+    )
+    recs = reconciliation_records(db)
+    assert len(recs) == 1
+    statement = recs[0]["p_statement"]
+    assert "partial_failure" in statement
+    assert "2 action(s)" in statement
+    assert "succeeded=1" in statement
+    assert "failed=1" in statement
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_refusal_surfaces() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.script("record_plan_reconciliation", {"error": "out_of_scope_executed"})
+    with pytest.raises(ExecutorRefused) as excinfo:
+        await execute_batch(
+            make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=FakeAdapter(),
+            verify_token=verify_token_ok, signing_key="k" * 32,
+        )
+    assert excinfo.value.reason == "out_of_scope_executed"
+
+
+@pytest.mark.asyncio
+async def test_no_signing_key_skips_reconciliation_but_not_verification() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=FakeAdapter(),
+        verify_token=verify_token_ok, signing_key=None,
+    )
+    assert len(verification_records(db)) == 2
+    assert result.reconciliation is None
+    assert reconciliation_records(db) == []

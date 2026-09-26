@@ -1,18 +1,18 @@
 # Axiom Proof — implementation handoff
 
-## Session close-out and handoff — Revision 91 (2026-09-26)
+## Session close-out and handoff — Revision 92 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 90, merge commit `5ad1adc` of PR #62; Revision 91 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 91, merge commit `5003e2e` of PR #63; Revision 92 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–90 (PRs #61, #62 merged); Revision 91 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–91 (PRs #61–#63 merged); Revision 92 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0062: 63 migrations, 66 public tables** (Rev 89 added the five W5 execution-detail tables; Rev 90 the executor's four functions; Rev 91 the rollback function). The next migration is **0063**; never edit an applied migration.
-- Latest audit is **79**.
+- Schema is **0000–0063: 64 migrations, 66 public tables** (Rev 89 the five W5 tables; Rev 90 the executor's four functions; Rev 91 the rollback function; Rev 92 verification + reconciliation). The next migration is **0064**; never edit an applied migration.
+- Latest audit is **80**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 92 — post-execution verification and the maker-checker reconciler (GLM session):**
+
+The last two record-keeping halves of the execution loop land together. Migration 0063 adds `record_verification_result` (Parikshan re-runs the targeted checks per settled action through the adapter's new `verify` op; a refused verification is recorded as a failed check, never swallowed; a halted batch skips verification entirely because an operator halting an incident stops estate calls) and `record_plan_reconciliation` — the maker-checker statement whose facts are computed at the database: approved scope from the token row, out-of-scope execution computed from the batch and refused with the offending ids (`out_of_scope_executed`), swept actions listed as unexecuted with their reason, and the content digest recomputed over the approved action set with any drift stated in `parameter_diffs` rather than hidden. The statement is signed with the approval signing key (HMAC-SHA256, the same key that bound the approval) and the whole chain — finding, plan, dry-run, approval, execution, verification, reconciliation — is now reconstructable from the ledger. WORM sealing of the statement stays gated on the locked-storage decision (R-10). See [audit 80](audits/80-verification-reconciliation-review-2026-09-26.md). Schema is **0063 / 64 migrations / 66 public tables** (no new tables; two functions and one ledger enum value). Next in plan order: execution progress telemetry, then a manual rollback route — W5's remaining pieces are UI/telemetry and the operator-gated production write path.
 
 **Revision 91 — the rollback engine (GLM session):**
 

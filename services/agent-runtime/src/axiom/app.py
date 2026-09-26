@@ -280,6 +280,7 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
                 settings.reference_write_origin, settings.internal_token or ""
             ),
             verify_token=verify_token,
+            signing_key=settings.approval_signing_key,
         )
     except ExecutorRefused as refused:
         status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
