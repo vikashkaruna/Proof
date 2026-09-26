@@ -203,6 +203,21 @@ export const LedgerActionType = {
   CONSENT_WITHDRAWN: 'consent.withdrawn',
   CONSENT_LEGAL_HOLD_SET: 'consent.legal_hold.set',
   CONSENT_WITHDRAWAL_COMPLETED: 'consent.withdrawal.completed',
+  // W8 — rights, breach operations and the founder release gate (migration
+  // 0071): the DSAR lifecycle's recorded decisions, the breach state machine
+  // and its notification authority chain, and BR-4's review gate. The
+  // statutory sends (breach.notified.dpb / breach.notified.principals) and
+  // the DSAR endpoints (dsar.received/verified/fulfilled/rejected) reuse the
+  // values 0006 defined.
+  DSAR_STATUS_CHANGED: 'dsar.status.changed',
+  DSAR_ESCALATED: 'dsar.escalated',
+  BREACH_STATUS_CHANGED: 'breach.status.changed',
+  BREACH_NOTIFICATION_DRAFTED: 'breach.notification.drafted',
+  BREACH_NOTIFICATION_REVIEWED: 'breach.notification.reviewed',
+  BREACH_NOTIFICATION_ATTEMPT: 'breach.notification.attempt',
+  REPORT_APPROVED: 'report.approved',
+  REPORT_REJECTED: 'report.rejected',
+  REPORT_RELEASED: 'report.released',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',
