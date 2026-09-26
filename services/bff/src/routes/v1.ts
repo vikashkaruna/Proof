@@ -6,6 +6,7 @@ import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
+import { dispatchDryRun } from '../services/dry-run-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -103,6 +104,44 @@ function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
     Number.isFinite(Date.parse(expiresAt)) &&
     Date.parse(expiresAt) > now
   );
+}
+
+/**
+ * Version of the BFF → agent-runtime dry-run payload (W5 · M3.2).
+ *
+ * Bump on any breaking payload change and update `InternalDryRunRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/dry-run-contract.test.ts` asserts they agree.
+ */
+export const DRY_RUN_CONTRACT_VERSION = 1;
+
+export interface DryRunDispatchInput {
+  tenantId: string;
+  actionId: string;
+  actionType: string;
+  parameters: Record<string, unknown>;
+  blastRadius: Record<string, unknown>;
+  rollbackDefinition: Record<string, unknown>;
+  correlationId: string;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/dry-run`, pinned to
+ * `tests/contracts/dry-run.v1.json` from both sides, like the execution
+ * dispatch contract above. The content is what the BFF read from the stored
+ * action; `record_dry_run` refuses anything that no longer matches it.
+ */
+export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
+  return {
+    contract_version: DRY_RUN_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    action_id: input.actionId,
+    action_type: input.actionType,
+    parameters: input.parameters,
+    blast_radius: input.blastRadius,
+    rollback_definition: input.rollbackDefinition,
+    correlation_id: input.correlationId,
+  };
 }
 
 interface Deps {
@@ -1183,6 +1222,234 @@ export function v1Routes(deps: Deps) {
     return c.json({ ok: true });
   });
 
+  // ─── W5 · M3.2 — the dry-run engine ────────────────────────────────
+  //
+  // Sudhaar's declared simulation for the plan's actions, recorded through
+  // `record_dry_run` (migration 0060) and returned only after it is
+  // recorded. A refusal is an outcome, not an error: the action routes to
+  // manual handling (Doc 04 §3.2) and any earlier dry-run that made it
+  // eligible is invalidated. Approval stays architecturally impossible
+  // without a fresh, successful dry-run (FR-6.3).
+
+  const DryRunRequestSchema = z.object({
+    actionIds: z.array(z.uuid()).max(50).optional(),
+  });
+
+  // POST /v1/plans/:id/dry-run — run (or re-run) the simulator.
+  app.post('/plans/:id/dry-run', async (c) => {
+    const dryRunRefusal = requireCapability(c, Capability.PLAN_CREATE);
+    if (dryRunRefusal) return dryRunRefusal;
+    const tenantId = c.get('tenantId');
+    const planId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const parsed = DryRunRequestSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid dry-run request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const admin = createSupabaseAdmin();
+    // The stored action rows are the simulated content: what is stored is
+    // what the runtime receives, and `record_dry_run` refuses to record a
+    // run against anything else.
+    let query = admin
+      .from('remediation_actions')
+      .select(
+        'id, plan_id, action_type, parameters, blast_radius, rollback_definition, approval_status',
+      )
+      .eq('plan_id', planId)
+      .eq('tenant_id', tenantId);
+    if (parsed.data.actionIds) {
+      query = query.in('id', parsed.data.actionIds);
+    }
+    const { data: actions, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    if (!actions || actions.length === 0) {
+      return c.json(
+        { error: { code: 'plan_not_found', message: 'No eligible actions for this plan' } },
+        404,
+      );
+    }
+    // Dry-runs precede approval; approved content is frozen. An action the
+    // caller named past its eligibility is skipped, not silently run.
+    const eligible = actions.filter((a) =>
+      ['draft', 'awaiting_approval'].includes(a.approval_status as string),
+    );
+    if (eligible.length === 0) {
+      return c.json(
+        {
+          error: {
+            code: 'no_eligible_actions',
+            message: 'Every requested action is already approved or otherwise past dry-run',
+          },
+        },
+        409,
+      );
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const action of eligible) {
+      const dispatch = await dispatchDryRun(
+        env.AGENT_RUNTIME_URL,
+        env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+        buildDryRunDispatchPayload({
+          tenantId,
+          actionId: action.id,
+          actionType: action.action_type,
+          parameters: action.parameters ?? {},
+          blastRadius: action.blast_radius ?? {},
+          rollbackDefinition: action.rollback_definition ?? {},
+          correlationId: randomUUID(),
+        }),
+      );
+      results.push({
+        actionId: action.id,
+        status: dispatch.status,
+        outcome: dispatch.outcome,
+        refusalReason: dispatch.refusalReason,
+        dryRunId: dispatch.dryRunId,
+        ...(dispatch.status === 'unavailable' ? { error: dispatch.error } : {}),
+      });
+    }
+    return c.json({
+      data: results,
+      summary: {
+        requested: eligible.length,
+        recorded: results.filter((r) => r.status === 'recorded').length,
+        refused: results.filter((r) => r.status === 'refused').length,
+        unavailable: results.filter((r) => r.status === 'unavailable').length,
+      },
+    });
+  });
+
+  // GET /v1/plans/:id/dry-runs — the recorded simulation history, including
+  // the refusals an auditor looks for.
+  app.get('/plans/:id/dry-runs', async (c) => {
+    const readRefusal = requireCapability(c, Capability.PLAN_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const planId = c.req.param('id');
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from('dry_runs')
+      .select(
+        'id, action_id, status, diff, refusal_reason, renderable, parameters_hash, rollback_definition_hash, simulated_by, correlation_id, expires_at, created_at',
+      )
+      .eq('plan_id', planId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // ─── W6 · Continuous compliance: monitoring schedules ─────────────
+  //
+  // Cron-style schedules per estate driving re-discovery, re-assessment
+  // and drift checks. Registration is an estate-manager action, audited;
+  // the scheduler that fires them is a later slice and reads the same
+  // rows, so registration can never be a side effect free promise.
+
+  const ScheduleRequestSchema = z.object({
+    estateId: z.uuid(),
+    name: z
+      .string()
+      .min(1)
+      .max(120)
+      .regex(/^[A-Za-z0-9_. -]+$/),
+    kind: z.enum(['rediscovery', 'reassessment', 'drift_check']),
+    cadence: z
+      .string()
+      .min(9)
+      .max(100)
+      .regex(/^[0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+ [0-9*,/-]+$/),
+    nextRunAt: z.string().datetime(),
+  });
+
+  // POST /v1/monitoring/schedules — register (or replace) a schedule.
+  app.post('/monitoring/schedules', async (c) => {
+    const scheduleRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (scheduleRefusal) return scheduleRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => null);
+    const parsed = ScheduleRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid schedule request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+    const nextRunAt = Date.parse(parsed.data.nextRunAt);
+    if (!Number.isFinite(nextRunAt) || nextRunAt <= Date.now()) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'nextRunAt must be in the future' } },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('register_monitoring_schedule', {
+      p_tenant_id: tenantId,
+      p_estate_id: parsed.data.estateId,
+      p_name: parsed.data.name,
+      p_kind: parsed.data.kind,
+      p_cadence: parsed.data.cadence,
+      p_next_run_at: new Date(nextRunAt).toISOString(),
+      p_created_by: user.id,
+    });
+    if (error) {
+      return c.json({ error: { code: 'registration_failed', message: error.message } }, 500);
+    }
+    if (!data || typeof data !== 'object' || !('schedule' in data)) {
+      const code = (data as { error?: string } | null)?.error ?? 'registration_refused';
+      return c.json({ error: { code, message: 'The schedule was not registered' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/monitoring/schedules — the estate's schedules, newest first.
+  app.get('/monitoring/schedules', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const estateId = c.req.query('estateId');
+    const admin = createSupabaseAdmin();
+    let query = admin
+      .from('monitoring_schedules')
+      .select(
+        'id, estate_id, name, kind, cadence, status, created_by, last_run_at, next_run_at, created_at',
+      )
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (estateId) {
+      query = query.eq('estate_id', estateId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
   // POST /v1/plans/:id/execute — THE EXECUTION GATE
   // Per ADR-2 / BR-1: no mutating action executes without a valid
   // approval token. The token is validated per-action.
@@ -1590,6 +1857,7 @@ export function v1Routes(deps: Deps) {
       status: 'failed',
       reference: null,
       error: 'dispatch not attempted',
+      outcomes: null,
     };
     if (claimedActions.length > 0 && claimedDigest === null) {
       // Unreachable through `claim_plan_execution`, which refuses a token
@@ -1629,6 +1897,24 @@ export function v1Routes(deps: Deps) {
           contentDigest: claimedDigest ?? '',
         }),
       );
+
+      // W5.7 — per-action telemetry over the realtime channel, from the
+      // executor's recorded acknowledgement. Each event describes recorded
+      // state (the runtime settles and ledger-records before it answers),
+      // so a subscriber sees the batch's reality, not a prediction.
+      if (dispatch.status === 'accepted' && dispatch.outcomes) {
+        for (const actionOutcome of dispatch.outcomes) {
+          deps.realtime.broadcast({
+            type: 'execution.progress',
+            executionId: dispatch.reference as `${string}-${string}-${string}-${string}-${string}`,
+            planId: planId as `${string}-${string}-${string}-${string}-${string}`,
+            actionId: actionOutcome.actionId as `${string}-${string}-${string}-${string}-${string}`,
+            status: actionOutcome.outcome,
+            result: actionOutcome.errorCode,
+            occurredAt: new Date().toISOString(),
+          });
+        }
+      }
 
       // An ambiguous acknowledgement retains the claim. Only an explicit
       // refusal permits a fresh approval to retry the actions.

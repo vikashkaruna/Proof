@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import secrets
 import time
-import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -18,7 +17,7 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .agents import (
     DrishtiAgent,
@@ -34,10 +33,10 @@ from .agents import (
 )
 from .agents.base import AgentName, AgentRunResult
 from .config import Settings, get_settings, setup_logging
-from .ledger_client import LedgerClient
+from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
 from .evidence_client import EvidenceVault
+from .ledger_client import LedgerClient
 from .model_gateway import ModelGateway
-
 
 AGENTS: dict[AgentName, Any] = {
     AgentName.DRISHTI: DrishtiAgent,
@@ -76,10 +75,27 @@ async def lifespan(app: FastAPI):
         for name, AgentCls in AGENTS.items()
     }
 
+    # W6 — the continuous-compliance scheduler, off unless the environment
+    # turns it on: a scheduler that fires without reviewed configuration is
+    # exactly the autonomous action this platform refuses.
+    scheduler_task = None
+    if settings.feature_continuous_scheduler:
+        from supabase import create_client as _create_client
+
+        from .scheduler import SchedulerDb, scheduler_loop
+
+        scheduler_db = SchedulerDb(_create_client(settings.supabase_url, settings.supabase_service_key))
+        scheduler_task = asyncio.create_task(
+            scheduler_loop(scheduler_db, settings.scheduler_poll_seconds)
+        )
+        log.info("scheduler.started", poll_seconds=settings.scheduler_poll_seconds)
+
     log.info("agent_runtime.ready", agents=[a.value for a in app.state.agents.keys()])
     try:
         yield
     finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
         await gateway.aclose()
         log.info("agent_runtime.shutdown")
 
@@ -244,11 +260,156 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
             ),
         )
 
-    # No durable consumer exists yet. Logging an intent does not transfer
-    # responsibility for execution; report a refusal until enqueueing exists.
-    return JSONResponse(status_code=501, content={
-        "accepted": False,
+    # W5 · M3.4 — the durable executor. The structural guarantees (scope,
+    # content digest, idempotency, the fresh-approval sweep) live in the
+    # migration-0061 functions; this handler owns the kill switch, the
+    # token re-validation and the adapter loop.
+    settings: Settings = req.app.state.settings
+    if not settings.feature_execution_engine or not settings.reference_write_origin:
+        # No write path is configured: refuse rather than improvise a target.
+        return JSONResponse(status_code=503, content={
+            "accepted": False,
+            "contract_version": EXECUTION_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": "execution_unconfigured",
+        })
+
+    from supabase import create_client
+
+    from .approval_engine import ApprovalEngine
+    from .executor import ExecutorDb, ExecutorRefused, execute_batch
+    from .kill_switch import KillSwitchReader
+    from .write_adapters import ReferenceWriteAdapter
+
+    db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
+    engine = ApprovalEngine(signing_key=settings.approval_signing_key)
+
+    async def verify_token(tenant_id: str, token: dict[str, Any]) -> tuple[bool, str | None]:
+        result = await engine.verify(tenant_id, token)
+        return result.valid, result.reason
+
+    try:
+        result = await execute_batch(
+            body,
+            db=db,
+            kill_switch=KillSwitchReader.from_settings(settings),
+            adapter=ReferenceWriteAdapter(
+                settings.reference_write_origin, settings.internal_token or ""
+            ),
+            verify_token=verify_token,
+            signing_key=settings.approval_signing_key,
+        )
+    except ExecutorRefused as refused:
+        status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
+        return JSONResponse(status_code=status, content={
+            "accepted": False,
+            "contract_version": EXECUTION_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": refused.reason.split(":", 1)[0],
+        })
+    return {
+        "accepted": True,
         "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
-        "reason": "execution_not_implemented",
-    })
+        "batch": {"id": result.batch_id, "status": result.status, "replay": result.replay},
+        "outcomes": [
+            {"action_id": o.action_id, "outcome": o.outcome,
+             "error_code": o.error_code, "rows_affected": o.rows_affected}
+            for o in result.outcomes
+        ],
+    }
+
+
+# W5 · M3.2 — the dry-run engine. Sudhaar's declared simulation for one
+# action: simulate from the content the BFF read from the stored action,
+# then record through `record_dry_run` (migration 0060). A result is
+# returned only after it is recorded — a recorded refusal is an outcome
+# (the action routes to manual handling); an unrecorded diff returns
+# nothing at all.
+class InternalDryRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int
+    tenant_id: str
+    action_id: str
+    action_type: str
+    parameters: dict[str, Any]
+    blast_radius: dict[str, Any] = Field(default_factory=dict)
+    rollback_definition: dict[str, Any]
+    correlation_id: str
+
+
+def _record_dry_run_via_rpc(
+    settings: Settings, payload: InternalDryRunRequest, outcome: DryRunOutcome
+) -> dict[str, Any]:
+    """Call `record_dry_run` (0060) with the service role. Returns the RPC's
+    jsonb: `{'dryRun': ...}` on success, `{'error': code}` on refusal."""
+    from supabase import create_client
+
+    client = create_client(settings.supabase_url, settings.supabase_service_key)
+    result = (
+        client.rpc(
+            "record_dry_run",
+            {
+                "p_tenant_id": payload.tenant_id,
+                "p_action_id": payload.action_id,
+                "p_status": outcome.status,
+                "p_diff": outcome.diff,
+                "p_refusal_reason": outcome.refusal_reason,
+                "p_simulated_by": "sudhaar",
+                "p_parameters": payload.parameters,
+                "p_rollback_definition": payload.rollback_definition,
+                "p_correlation_id": payload.correlation_id,
+            },
+        )
+        .execute()
+    )
+    return result.data if isinstance(result.data, dict) else {"error": "record_failed"}
+
+
+# RPC error codes the caller can act on; anything else is reported as a
+# generic refusal so the BFF never renders an unknown state as success.
+_RECODER_REFUSALS = {
+    "action_not_found",
+    "action_not_eligible",
+    "content_mismatch",
+    "invalid_record",
+    "invalid_diff",
+    "invalid_refusal",
+}
+
+
+@app.post("/internal/dry-run")
+async def internal_dry_run(body: InternalDryRunRequest, req: Request):
+    require_internal_caller(req)
+
+    if body.contract_version != DRY_RUN_CONTRACT_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported dry-run contract version {body.contract_version}; "
+                f"this runtime speaks version {DRY_RUN_CONTRACT_VERSION}"
+            ),
+        )
+
+    settings: Settings = req.app.state.settings
+    outcome = simulate(
+        body.action_type, body.parameters, body.blast_radius, body.rollback_definition
+    )
+    try:
+        recorded = _record_dry_run_via_rpc(settings, body, outcome)
+    except Exception:
+        structlog.get_logger().warning("dry_run.record_unavailable", action_id=body.action_id)
+        return JSONResponse(
+            status_code=503,
+            content={"accepted": False, "reason": "recorder_unavailable"},
+        )
+    if "error" in recorded:
+        code = recorded["error"] if recorded["error"] in _RECODER_REFUSALS else "record_refused"
+        return JSONResponse(status_code=409, content={"accepted": False, "reason": code})
+    return {
+        "accepted": True,
+        "contract_version": DRY_RUN_CONTRACT_VERSION,
+        "correlation_id": body.correlation_id,
+        "dry_run": recorded.get("dryRun"),
+    }

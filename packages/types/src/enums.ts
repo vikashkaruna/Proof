@@ -178,6 +178,14 @@ export const LedgerActionType = {
   // is a tamper-evident ledger, that is not a cosmetic defect.
   EXECUTION_KILL_SWITCH_RELEASED: 'execution.kill_switch.released',
   EXECUTION_DISPATCH_RECONCILED: 'execution.dispatch.reconciled',
+  // W5.6 — the maker-checker statement: an independent reconciler proves
+  // approved scope matched executed reality, per batch.
+  EXECUTION_RECONCILIATION_RECORDED: 'execution.reconciliation.recorded',
+  // W6 — a monitoring schedule was registered (or its predecessor retired
+  // by a re-registration) for an estate.
+  MONITORING_SCHEDULE_REGISTERED: 'monitoring.schedule.registered',
+  MONITORING_SCHEDULE_FIRED: 'monitoring.schedule.fired',
+  MONITORING_DRIFT_DETECTED: 'monitoring.drift.detected',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',
