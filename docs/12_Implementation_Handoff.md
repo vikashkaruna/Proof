@@ -1,18 +1,18 @@
 # Axiom Proof — implementation handoff
 
-## Session close-out and handoff — Revision 92 (2026-09-26)
+## Session close-out and handoff — Revision 93 (2026-09-26)
 
 **Where to continue:**
 
-- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 91, merge commit `5003e2e` of PR #63; Revision 92 is this branch's open PR).
+- Work from branch **`codex/revision75-controller-generation-transition`**, cut fresh from `origin/staging` (currently at Revision 92, merge commit `b483618` of PR #64; Revision 93 is this branch's open PR).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–91 (PRs #61–#63 merged); Revision 92 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
+- **Promotion to `main` is paused by the operator.** Main was last promoted at Revision 84 (PR #55, 52 checks green). Staging is ahead with Revisions 85–92 (PRs #61–#64 merged); Revision 93 lands via this branch's PR. Promote only when the operator asks, using a staging → main PR merged with a merge commit.
 - To start: `git fetch origin staging && git checkout -B codex/revision75-controller-generation-transition origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0063: 64 migrations, 66 public tables** (Rev 89 the five W5 tables; Rev 90 the executor's four functions; Rev 91 the rollback function; Rev 92 verification + reconciliation). The next migration is **0064**; never edit an applied migration.
-- Latest audit is **80**.
+- Schema is **0000–0064: 65 migrations, 66 public tables** (Rev 89 the five W5 tables; Rev 90 the executor's four functions; Rev 91 the rollback function; Rev 92 verification + reconciliation; Rev 93 the run-record functions). The next migration is **0065**; never edit an applied migration.
+- Latest audit is **81**.
 - No PRs are open and no check-ins are scheduled.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
@@ -85,6 +85,10 @@ Smaller leftovers:
 - five web screens that still fabricate values (queued task);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
 - Bandit medium findings in the test-harness SQL.
+
+**Revision 93 — execution progress telemetry (GLM session):**
+
+W5.7 lands, the last record-keeping item of the W5 list. Migration 0064 adds `record_karya_run_start`/`record_karya_run_finish`: every action the executor starts opens an `agent_runs` row (agent `karya`, `running`, bound to the plan and action, carrying a hash of the executed parameters and `pii_redacted`), and closes exactly once with the outcome, latency and output hash — through bounded error codes, and with `service_role`'s leftover direct UPDATE on the table revoked. No task, no record: skipped and swept actions open nothing, which is what makes started→finished trustworthy. The executor opens the record after the kill-switch check and closes it on every terminal path. The BFF broadcasts `execution.progress` per action from the executor's acknowledgement — an ack the runtime gives only after every action is settled and ledger-recorded — so subscribers see recorded state, not predictions; ambiguous acknowledgements (bad uuids, invented outcomes) release nothing. Live in-batch streaming stays with the operator-gated CDC composition, whose source of truth (the ledger and `agent_runs`) now exists. See [audit 81](audits/81-execution-telemetry-review-2026-09-26.md). Schema is **0064 / 65 migrations / 66 public tables** (no new tables; two functions and one grant revoke). W5's remaining items are web surfaces, a manual rollback route and the production write path — all UI/composition work. Next in plan order: **W6 continuous compliance** (scheduler, drift and discovery schedules, standing policies, monitor health).
 
 **Revision 92 — post-execution verification and the maker-checker reconciler (GLM session):**
 

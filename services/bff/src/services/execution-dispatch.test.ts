@@ -15,6 +15,14 @@ const ack = {
   contract_version: 2,
   correlation_id: 'batch-1',
   batch: { id: 'batch-1', status: 'completed', replay: false },
+  outcomes: [
+    { action_id: '44444444-4444-4444-8444-44444444000a', outcome: 'succeeded', error_code: null },
+    {
+      action_id: '44444444-4444-4444-8444-44444444000b',
+      outcome: 'skipped',
+      error_code: 'kill_switch_engaged',
+    },
+  ],
 };
 afterEach(() => vi.unstubAllGlobals());
 
@@ -25,6 +33,11 @@ describe('dispatch responsibility', () => {
       status: 'accepted',
       reference: 'batch-1',
       error: null,
+      outcomes: ack.outcomes.map((o) => ({
+        actionId: o.action_id,
+        outcome: o.outcome,
+        errorCode: o.error_code,
+      })),
     });
   });
   it('accepts a bare durable reference for callers without a batch object', async () => {
@@ -59,6 +72,17 @@ describe('dispatch responsibility', () => {
     { ...ack, contract_version: 1 },
     { ...ack, batch: undefined },
     { ...ack, batch: {} },
+    { ...ack, outcomes: [{ action_id: 'not-a-uuid', outcome: 'succeeded', error_code: null }] },
+    {
+      ...ack,
+      outcomes: [
+        {
+          action_id: '44444444-4444-4444-8444-44444444000a',
+          outcome: 'invented',
+          error_code: null,
+        },
+      ],
+    },
   ])('does not release actions for ambiguous acknowledgement %j', async (body) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)));
     expect(await dispatchExecution('http://runtime', 'internal', payload)).toMatchObject({

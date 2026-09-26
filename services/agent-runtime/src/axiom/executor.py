@@ -27,6 +27,9 @@ audit entry commit or fail together.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -205,9 +208,15 @@ async def execute_batch(
 
             action_rows[action_id] = row
             declared = _declared_records(row.get("blast_radius") or {})
+
+            # W5.7 — the pre-task record: `agent_runs` opens `running` for
+            # this action, with a hash of the executed parameters (never
+            # the parameters themselves).
+            run_id, run_t0 = _start_karya_run(db, payload, action_id, row)
             try:
                 result = await adapter.execute(row["action_type"], row.get("parameters") or {})
             except WriteRefused as refused:
+                _finish_karya_run(db, payload, run_id, "failed", refused.reason, run_t0, None)
                 failed = True
                 outcomes.append(
                     ActionOutcome(action_id=action_id, outcome="failed", error_code=refused.reason)
@@ -236,6 +245,7 @@ async def execute_batch(
                         rows_affected=result.rows_affected,
                     )
                 )
+                _finish_karya_run(db, payload, run_id, "failed", "blast_radius_breach", run_t0, None)
                 _settle(
                     db, payload, batch["id"], action_id, "failed", "blast_radius_breach",
                     result.pre_state_ref, result.post_state_ref,
@@ -257,9 +267,11 @@ async def execute_batch(
                 outcomes.append(
                     ActionOutcome(action_id=action_id, outcome="failed", error_code="scope_exceeded")
                 )
+                _finish_karya_run(db, payload, run_id, "failed", "scope_exceeded", run_t0, None)
                 _settle(db, payload, batch["id"], action_id, "failed", "scope_exceeded", None, None, None)
                 return
 
+            _finish_karya_run(db, payload, run_id, "succeeded", None, run_t0, result.post_state_ref)
             outcomes.append(
                 ActionOutcome(
                     action_id=action_id,
@@ -504,6 +516,58 @@ def _settle(
     )
     if "error" in result:
         raise ExecutorRefused(result["error"])
+
+
+def _start_karya_run(
+    db: ExecutorDb, payload: Any, action_id: str, row: dict[str, Any]
+) -> tuple[str, float]:
+    """Open the action's `agent_runs` record (W5.7)."""
+    parameters_hash = hashlib.sha256(
+        json.dumps(row.get("parameters") or {}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    started = db.rpc(
+        "record_karya_run_start",
+        {
+            "p_tenant_id": payload.tenant_id,
+            "p_plan_id": payload.plan_id,
+            "p_action_id": action_id,
+            "p_correlation_id": payload.correlation_id,
+            "p_input_redacted_hash": parameters_hash,
+        },
+    )
+    if "error" in started:
+        raise ExecutorRefused(started["error"])
+    return str(started["run_id"]), time.monotonic()
+
+
+def _finish_karya_run(
+    db: ExecutorDb,
+    payload: Any,
+    run_id: str,
+    status: str,
+    error_code: str | None,
+    started_at: float,
+    post_state_ref: str | None,
+) -> None:
+    """Close the action's `agent_runs` record, once, with the outcome."""
+    output_hash = (
+        hashlib.sha256(f"{post_state_ref}".encode("utf-8")).hexdigest()
+        if post_state_ref
+        else None
+    )
+    finished = db.rpc(
+        "record_karya_run_finish",
+        {
+            "p_tenant_id": payload.tenant_id,
+            "p_run_id": run_id,
+            "p_status": status,
+            "p_error_code": error_code,
+            "p_latency_ms": int((time.monotonic() - started_at) * 1000),
+            "p_output_redacted_hash": output_hash,
+        },
+    )
+    if "error" in finished:
+        raise ExecutorRefused(finished["error"])
 
 
 def _declared_records(blast_radius: dict[str, Any]) -> int | None:

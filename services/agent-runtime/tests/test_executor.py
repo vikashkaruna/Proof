@@ -10,6 +10,7 @@ refusal instead of guessing past it.
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,6 +37,10 @@ class FakeDb:
             if isinstance(scripted, list):
                 return scripted.pop(0)
             return scripted
+        if name == "record_karya_run_start":
+            return {"run_id": f"run-{len(self.rpc_calls)}"}
+        if name == "record_karya_run_finish":
+            return {"ok": True}
         if name == "record_verification_result":
             return {"verification": {"id": "v-1", "outcome": args.get("p_outcome")}}
         if name == "record_plan_reconciliation":
@@ -615,3 +620,48 @@ async def test_no_signing_key_skips_reconciliation_but_not_verification() -> Non
     assert len(verification_records(db)) == 2
     assert result.reconciliation is None
     assert reconciliation_records(db) == []
+
+
+def karya_run_starts(db: FakeDb) -> list[dict[str, Any]]:
+    return [args for fn, args in db.rpc_calls if fn == "record_karya_run_start"]
+
+
+def karya_run_finishes(db: FakeDb) -> list[dict[str, Any]]:
+    return [args for fn, args in db.rpc_calls if fn == "record_karya_run_finish"]
+
+
+@pytest.mark.asyncio
+async def test_every_executed_action_opens_and_closes_a_karya_run() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {"system": "crm"}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    result = await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(), adapter=FakeAdapter(),
+        verify_token=verify_token_ok, signing_key="k" * 32,
+    )
+    assert result.status == "completed"
+    starts = karya_run_starts(db)
+    finishes = karya_run_finishes(db)
+    assert len(starts) == 2 and len(finishes) == 2
+    # The pre-record carries a hash of the executed parameters, never them.
+    assert starts[0]["p_input_redacted_hash"] == hashlib.sha256(
+        b'{"system":"crm"}'
+    ).hexdigest()
+    assert all(f["p_status"] == "succeeded" for f in finishes)
+    assert all(f["p_latency_ms"] >= 0 for f in finishes)
+
+
+@pytest.mark.asyncio
+async def test_failed_actions_close_their_run_as_failed() -> None:
+    db = FakeDb()
+    db.rows["a-1"] = {"id": "a-1", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    db.rows["a-2"] = {"id": "a-2", "action_type": "data.mask", "parameters": {}, "blast_radius": {}}
+    await execute_batch(
+        make_payload(), db=db, kill_switch=FakeKillSwitch(),
+        adapter=FakeAdapter(results={"data.mask": WriteRefused("write_refused_by_target")}),
+        verify_token=verify_token_ok, signing_key=None,
+    )
+    finishes = karya_run_finishes(db)
+    assert len(finishes) == 1  # a-2 was never started: no pre-record, no post-record
+    assert finishes[0]["p_status"] == "failed"
+    assert finishes[0]["p_error_code"] == "write_refused_by_target"

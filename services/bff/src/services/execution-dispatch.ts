@@ -4,6 +4,8 @@ export interface DispatchOutcome {
   status: 'accepted' | 'failed' | 'unknown';
   reference: string | null;
   error: string | null;
+  /** W5.7 — per-action recorded outcomes from the executor's acknowledgement. */
+  outcomes: Array<{ actionId: string; outcome: string; errorCode: string | null }> | null;
 }
 
 const Acknowledgement = z.object({
@@ -17,6 +19,18 @@ const Acknowledgement = z.object({
     .object({ id: z.string().min(1) })
     .passthrough()
     .optional(),
+  // W5.7 — the recorded per-action outcomes, as reported by the executor
+  // after the batch reached its terminal status.
+  outcomes: z
+    .array(
+      z.object({
+        action_id: z.string().uuid(),
+        outcome: z.enum(['succeeded', 'failed', 'skipped', 'rolled_back']),
+        error_code: z.string().nullable(),
+      }),
+    )
+    .max(100)
+    .optional(),
 });
 
 /** A missing/malformed acknowledgement says nothing about whether work started. */
@@ -26,7 +40,12 @@ export async function dispatchExecution(
   payload: { correlation_id: string } & Record<string, unknown>,
 ): Promise<DispatchOutcome> {
   if (!runtimeUrl) {
-    return { status: 'failed', reference: null, error: 'AGENT_RUNTIME_URL is not configured' };
+    return {
+      status: 'failed',
+      reference: null,
+      error: 'AGENT_RUNTIME_URL is not configured',
+      outcomes: null,
+    };
   }
   try {
     const response = await fetch(`${runtimeUrl}/internal/execute`, {
@@ -42,6 +61,7 @@ export async function dispatchExecution(
           status: 'failed',
           reference: null,
           error: `runtime refused dispatch (${response.status})`,
+          outcomes: null,
         };
       }
       if (response.ok && (parsed.data.reference || parsed.data.batch?.id)) {
@@ -49,6 +69,12 @@ export async function dispatchExecution(
           status: 'accepted',
           reference: parsed.data.reference ?? parsed.data.batch!.id,
           error: null,
+          outcomes:
+            parsed.data.outcomes?.map((o) => ({
+              actionId: o.action_id,
+              outcome: o.outcome,
+              errorCode: o.error_code,
+            })) ?? null,
         };
       }
     }
@@ -56,10 +82,16 @@ export async function dispatchExecution(
       status: 'unknown',
       reference: null,
       error: `unconfirmed runtime acknowledgement (${response.status})`,
+      outcomes: null,
     };
   } catch {
     // Do not persist arbitrary upstream errors: they may include credentials
     // or personal data. Reconcile using the correlation id and request key.
-    return { status: 'unknown', reference: null, error: 'runtime acknowledgement unavailable' };
+    return {
+      status: 'unknown',
+      reference: null,
+      error: 'runtime acknowledgement unavailable',
+      outcomes: null,
+    };
   }
 }
