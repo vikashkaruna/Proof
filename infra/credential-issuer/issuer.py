@@ -22,7 +22,7 @@ import signal
 import selectors
 import ssl
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed psql CLI with a validated settings path; list argv, never a shell
 import sys
 import time
 import urllib.request
@@ -164,10 +164,11 @@ def database(settings: dict,operation: str,raw: bytes,expected: str,v: dict):
     # Input is <8KiB metadata, output is bounded even if the server/CLI misbehaves.
     payload=sql.encode()
     if len(payload)>8192:raise ValueError('database input refused')
-    with subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env) as child:
+    with subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env) as child:  # nosec B603 - psql path from validated settings, all flags constant, no shell
         try:
             data=bytearray();offset=0;end=time.monotonic()+10
-            assert child.stdin is not None and child.stdout is not None
+            if child.stdin is None or child.stdout is None:
+                raise ValueError('database operation refused')
             os.set_blocking(child.stdin.fileno(),False)
             with selectors.DefaultSelector() as poll:
                 poll.register(child.stdin,selectors.EVENT_WRITE);poll.register(child.stdout,selectors.EVENT_READ)
