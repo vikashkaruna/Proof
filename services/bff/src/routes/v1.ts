@@ -1762,6 +1762,7 @@ export function v1Routes(deps: Deps) {
       status: 'failed',
       reference: null,
       error: 'dispatch not attempted',
+      outcomes: null,
     };
     if (claimedActions.length > 0 && claimedDigest === null) {
       // Unreachable through `claim_plan_execution`, which refuses a token
@@ -1801,6 +1802,24 @@ export function v1Routes(deps: Deps) {
           contentDigest: claimedDigest ?? '',
         }),
       );
+
+      // W5.7 — per-action telemetry over the realtime channel, from the
+      // executor's recorded acknowledgement. Each event describes recorded
+      // state (the runtime settles and ledger-records before it answers),
+      // so a subscriber sees the batch's reality, not a prediction.
+      if (dispatch.status === 'accepted' && dispatch.outcomes) {
+        for (const actionOutcome of dispatch.outcomes) {
+          deps.realtime.broadcast({
+            type: 'execution.progress',
+            executionId: dispatch.reference as `${string}-${string}-${string}-${string}-${string}`,
+            planId: planId as `${string}-${string}-${string}-${string}-${string}`,
+            actionId: actionOutcome.actionId as `${string}-${string}-${string}-${string}-${string}`,
+            status: actionOutcome.outcome,
+            result: actionOutcome.errorCode,
+            occurredAt: new Date().toISOString(),
+          });
+        }
+      }
 
       // An ambiguous acknowledgement retains the claim. Only an explicit
       // refusal permits a fresh approval to retry the actions.
