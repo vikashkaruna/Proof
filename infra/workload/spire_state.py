@@ -8,7 +8,7 @@ import itertools
 import os
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed blkid probe; constant argv, no shell
 import sys
 from pathlib import Path
 
@@ -114,7 +114,7 @@ def mounted_device(value: dict) -> int:
     if not stat.S_ISBLK(meta.st_mode) or meta.st_uid != OWNER or meta.st_mode & 0o002:
         raise ValueError('state device refused')
     # Probe the actual superblock rather than trusting a possibly stale UUID alias.
-    observed = subprocess.run(['/usr/sbin/blkid', '-p', '-s', 'UUID', '-o', 'value', '--', str(target)], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, env={'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C'}).stdout
+    observed = subprocess.run(['/usr/sbin/blkid', '-p', '-s', 'UUID', '-o', 'value', '--', str(target)], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, env={'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C'}).stdout  # nosec B603 - target is a resolved block-device path checked above, constant argv, no shell
     if observed != (value['filesystemUuid'] + '\n').encode('ascii'):
         raise ValueError('filesystem binding refused')
     return meta.st_rdev

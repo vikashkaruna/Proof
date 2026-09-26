@@ -14,7 +14,7 @@ import os
 import resource
 import signal
 import stat
-import subprocess
+import subprocess  # nosec B404 - launches the fixed in-package worker module; no shell, no CLI-supplied command
 import sys
 import time
 from contextlib import suppress
@@ -91,7 +91,7 @@ def supervise(command=WORKER, seconds: float = MAX_SECONDS) -> tuple[int, dict]:
 
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
-        child = subprocess.Popen(
+        child = subprocess.Popen(  # nosec B603 - command is the fixed WORKER module tuple or a trusted process-tree test override, never CLI input; no shell
             command,
             stdin=sys.stdin.buffer,
             stdout=sys.stdout.buffer,
