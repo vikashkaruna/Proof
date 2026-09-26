@@ -61,6 +61,16 @@ export function ApprovalActions({
   );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // The execute route answers 202 with the dispatch verdict, which is not
+  // always "accepted": `partial` means some actions were refused the batch,
+  // and `dispatch_failed`/`dispatch_unknown` mean the runtime's answer was
+  // negative or ambiguous. Rendering all of those as success would lie about
+  // the one thing this screen exists to show.
+  const [executionOutcome, setExecutionOutcome] = useState<{
+    status: string;
+    accepted: number;
+    rejected: number;
+  } | null>(null);
 
   // W1 · SEC-8 — the step-up. The BFF will not issue an approval token without
   // a freshly satisfied challenge bound to this exact plan and action set, so
@@ -202,6 +212,7 @@ export function ApprovalActions({
     if (!approvalToken || approvedActionIds.length === 0) return;
     setError(null);
     setSuccess(null);
+    setExecutionOutcome(null);
     setSubmitting(true);
     try {
       const res = await fetch(`/api/bff/v1/plans/${planId}/execute`, {
@@ -225,9 +236,19 @@ export function ApprovalActions({
         setError(body?.error?.message ?? `Execution failed (HTTP ${res.status})`);
         return;
       }
+      const body = (await res.json()) as {
+        status?: string;
+        acceptedActionIds?: string[];
+        rejectedActionIds?: string[];
+      };
       setApprovalToken(null);
       setApprovedActionIds([]);
-      setSuccess('Actions executed successfully.');
+      setExecutionOutcome({
+        status: body.status ?? 'unknown',
+        accepted: body.acceptedActionIds?.length ?? 0,
+        rejected: body.rejectedActionIds?.length ?? 0,
+      });
+      setSuccess(null);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Execution failed');
@@ -310,6 +331,47 @@ export function ApprovalActions({
       {success && (
         <div className="rounded-md border border-teal-500 bg-teal-50 p-3 text-sm text-teal-800">
           {success}
+        </div>
+      )}
+
+      {executionOutcome && (
+        <div
+          className={`rounded-md border p-3 text-sm ${
+            executionOutcome.status === 'accepted'
+              ? 'border-teal-500 bg-teal-50 text-teal-800'
+              : executionOutcome.status === 'partial'
+                ? 'border-amber-300 bg-amber-50 text-amber-800'
+                : 'border-ember-500 bg-ember-50 text-ember-700'
+          }`}
+        >
+          {executionOutcome.status === 'accepted' && (
+            <>
+              <strong>Execution accepted.</strong> {executionOutcome.accepted} action(s) were
+              dispatched to the executor under the signed token. The batch and its per-action
+              outcomes appear under Execution &amp; Rollback once the executor settles them.
+            </>
+          )}
+          {executionOutcome.status === 'partial' && (
+            <>
+              <strong>Partially dispatched.</strong> {executionOutcome.accepted} action(s) entered
+              the batch; {executionOutcome.rejected} were refused and keep their approval. Check
+              Execution &amp; Rollback for the recorded outcomes before retrying.
+            </>
+          )}
+          {executionOutcome.status === 'dispatch_failed' && (
+            <>
+              <strong>Dispatch refused by the executor.</strong> The refusal is recorded in the
+              audit ledger. Retrying requires a fresh approval — this token has been spent.
+            </>
+          )}
+          {executionOutcome.status === 'dispatch_unknown' && (
+            <>
+              <strong>Dispatch outcome unknown.</strong> The executor&apos;s acknowledgement was
+              ambiguous, so the claim is retained and nothing was re-issued. Check Execution &amp;
+              Rollback and the audit ledger before any retry — redelivery always needs a fresh
+              approval.
+            </>
+          )}
         </div>
       )}
 
