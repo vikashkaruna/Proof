@@ -12,7 +12,8 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
+import shutil
+import subprocess  # nosec B404 - fixed read-only git queries; list argv, no shell
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -114,12 +115,15 @@ async def main() -> None:
         raise RuntimeError("ledger verification failed")
     output = ROOT / ".axiom-runtime" / "runtime-audit" / "results.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is required for revision reporting")
+    revision = subprocess.run(  # nosec B603 - git resolved above, constant read-only arguments, no shell
+        [git, "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.strip()
     dirty = bool(
-        subprocess.run(
-            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True
+        subprocess.run(  # nosec B603 - git resolved above, constant read-only arguments, no shell
+            [git, "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True
         ).stdout
     )
     if os.environ.get("CI") == "true" and dirty:

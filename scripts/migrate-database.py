@@ -11,7 +11,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
-import subprocess
+import subprocess  # nosec B404 - psql/docker invocation with validated list argv, no shell
 import sys
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -50,23 +50,29 @@ revoke all on axiom_migrations.applied from public,anon,authenticated,service_ro
         raw = path.read_bytes()
         checksum = hashlib.sha256(raw).hexdigest()
         name = path.name
-        program += [fr"""
-do $migration_check$ begin
-  if exists (select 1 from axiom_migrations.applied where name='{name}' and sha256<>'{checksum}') then
-    raise exception 'Applied migration has changed: {name}';
-  end if;
-end $migration_check$;
-select exists(select 1 from axiom_migrations.applied where name='{name}') as applied \gset
-\if :applied
-\echo Already applied: {name}
-\else
-\echo Applying: {name}
-begin;
-{unwrap_transaction(raw.decode())}
-insert into axiom_migrations.applied(name,sha256) values('{name}','{checksum}');
-commit;
-\endif
-"""]
+        # Every interpolation is the regex-validated filename or the computed
+        # hex digest; migration SQL itself is a checksummed, append-only file.
+        # No external input reaches any statement below.
+        program += [
+            '',
+            'do $migration_check$ begin',
+            # nosec B608 - name is regex-validated and checksum is a computed digest; no external input
+            f"  if exists (select 1 from axiom_migrations.applied where name='{name}' and sha256<>'{checksum}') then",  # nosec B608 - internal constants only
+            f"    raise exception 'Applied migration has changed: {name}';",
+            '  end if;',
+            'end $migration_check$;',
+            f"select exists(select 1 from axiom_migrations.applied where name='{name}') as applied \\gset",  # nosec B608 - internal constants only
+            '\\if :applied',
+            f"\\echo Already applied: {name}",
+            '\\else',
+            f"\\echo Applying: {name}",
+            'begin;',
+            unwrap_transaction(raw.decode()),
+            f"insert into axiom_migrations.applied(name,sha256) values('{name}','{checksum}');",  # nosec B608 - internal constants only
+            'commit;',
+            '\\endif',
+            '',
+        ]
     program.append('select pg_advisory_unlock(756823010001);')
     return '\n'.join(program)
 
@@ -115,6 +121,14 @@ def main() -> int:
     if args.dsn and args.container:
         print('--dsn and --container name different databases; pass one.', file=sys.stderr)
         return 2
+    # Operator CLI input reaches argv below; pin both to their reviewed grammars
+    # (Docker container name, PostgreSQL role name) before execution.
+    if args.container and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,126}', args.container):
+        print('Invalid --container name.', file=sys.stderr)
+        return 2
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', args.user):
+        print('Invalid --user role name.', file=sys.stderr)
+        return 2
 
     env = None
     if args.dsn:
@@ -130,7 +144,7 @@ def main() -> int:
         cmd = ['psql', '-X', '-q', '-w', '-v', 'ON_ERROR_STOP=1', '-U', args.user, '-d', args.database]
         if args.container:
             cmd = ['docker', 'exec', '-i', args.container] + cmd
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - argv is a fixed psql/docker layout with container and role validated above, no shell
         cmd, input=migration_program(args.migrations), text=True, capture_output=True, env=env
     )
     # Only progress or SQL errors; no connection strings, environment or rows.

@@ -9,7 +9,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - fixture runner for fixed local systemctl/docker CLIs; list argv, no shell
 import sys
 import tempfile
 import time
@@ -33,8 +33,14 @@ IP = '10.231.7.1/32'
 ENV = {'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOME':'/root', 'LC_ALL':'C'}
 
 
+def check(condition, message):
+    # Explicit refusal: survives `python -O`, unlike `assert`.
+    if not condition:
+        raise ValueError('fixture acceptance refused: '+message)
+
+
 def run(argv, check=True, timeout=45):
-    result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=ENV)
+    result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=ENV)  # nosec B603 - every call site passes fixed repo/docker/systemd argv, no shell
     if check and result.returncode:
         # Only a fixed enrollment diagnostic with function/line locations may
         # reach CI logs; arbitrary subprocess output remains private.
@@ -146,103 +152,103 @@ def main():
                         print(f'Fixture destination ancestry refused: {parent} uid={meta.st_uid} mode={oct(meta.st_mode & 0o7777)}', flush=True)
                         raise
         host.install(directory, hashlib.sha256(metadata).hexdigest()); installed = True
-        assert not STATE.exists() and not active(SERVICE)
+        check(not STATE.exists() and not active(SERVICE), 'delivery activated or initialized state')
         outcomes['delivery-does-not-activate-or-initialize']=True
         run(['/usr/bin/systemd-analyze', 'verify', '--man=no', str(host.layout('issuer')['state.mount'][0]), str(host.layout('issuer')['spire.service'][0]), str(host.layout('issuer')['enroll.service'][0])])
         control('daemon-reload'); control('start', MOUNT)
         STATE.chmod(0o700)  # New disposable filesystem only; never product repair.
         guard = ['/usr/bin/python3', '-I', '-B', str(host.PREFIX/'spire_state.py')]
         run([*guard, '--empty', 'issuer'])
-        assert control('start', SERVICE, check=False).returncode != 0
+        check(control('start', SERVICE, check=False).returncode != 0, 'blank state start accepted')
         control('stop', SERVICE); control('reset-failed', SERVICE)
-        assert not (STATE/'server').exists()
+        check(not (STATE/'server').exists(), 'blank state created server directory')
         outcomes['blank-state-refused-before-launch']=True
         run(['/usr/sbin/ip', 'address', 'add', IP, 'dev', 'lo']); address_added = True
         enrollment = ['/usr/bin/python3', '-I', '-B', str(host.PREFIX/'spire_enrollment.py')]
         # Direct initial-unit start is refused without an explicit live permit.
-        assert control('start', INITIAL, check=False).returncode != 0
+        check(control('start', INITIAL, check=False).returncode != 0, 'initial unit started without permit')
         control('stop', INITIAL); control('reset-failed', INITIAL)
-        assert not (STATE/'server').exists()
+        check(not (STATE/'server').exists(), 'server state created without permit')
         outcomes['explicit-root-permit-required']=True
         manifest_sha = hashlib.sha256(metadata).hexdigest()
         run([*enrollment, '--initialize', 'issuer', manifest_sha], timeout=90)
-        assert stopped(INITIAL) and stopped(SERVICE)
+        check(stopped(INITIAL) and stopped(SERVICE), 'initialization left units running')
         receipt_path = Path('/etc/axiom/spire/initialization-receipt.json')
         receipt_raw = receipt_path.read_bytes(); receipt = json.loads(receipt_raw)
         receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
-        assert hashlib.sha256(Path('/etc/axiom/spire/initialization-bundle.json').read_bytes()).hexdigest() == receipt['trust']['bundleSha256']
-        assert hashlib.sha256(Path('/etc/axiom/spire/initialization-ca.pem').read_bytes()).hexdigest() == receipt['trust']['bootstrapCaSha256']
-        assert not (STATE/'.axiom-state.json').exists()
-        assert run([*guard, '--ready', 'issuer'], check=False).returncode != 0
+        check(hashlib.sha256(Path('/etc/axiom/spire/initialization-bundle.json').read_bytes()).hexdigest() == receipt['trust']['bundleSha256'], 'bundle digest mismatch')
+        check(hashlib.sha256(Path('/etc/axiom/spire/initialization-ca.pem').read_bytes()).hexdigest() == receipt['trust']['bootstrapCaSha256'], 'bootstrap CA digest mismatch')
+        check(not (STATE/'.axiom-state.json').exists(), 'state marker published before seal')
+        check(run([*guard, '--ready', 'issuer'], check=False).returncode != 0, 'ready admitted before marker')
         run([*guard, '--unsealed', 'issuer'])
         outcomes['reviewed-initialization-stops-unmarked']=True
-        assert run([*enrollment, '--seal', 'issuer', '0'*64], check=False).returncode != 0
-        assert not Path('/etc/axiom/spire/initialization-approval.json').exists()
+        check(run([*enrollment, '--seal', 'issuer', '0'*64], check=False).returncode != 0, 'mismatched seal accepted')
+        check(not Path('/etc/axiom/spire/initialization-approval.json').exists(), 'approval published for refused seal')
         outcomes['receipt-hash-mismatch-refused']=True
         keys = STATE/'server/keys.json'; original_keys = keys.read_bytes()
         keys.write_bytes(original_keys+b' ')
-        assert run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0
-        assert not (STATE/'.axiom-state.json').exists()
-        assert not Path('/etc/axiom/spire/initialization-approval.json').exists()
+        check(run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0, 'seal accepted with altered state')
+        check(not (STATE/'.axiom-state.json').exists(), 'marker published despite refused seal')
+        check(not Path('/etc/axiom/spire/initialization-approval.json').exists(), 'approval published despite refused seal')
         keys.write_bytes(original_keys)
         outcomes['changed-unsealed-state-refused']=True
         run([*enrollment, '--seal', 'issuer', receipt_sha], timeout=90)
-        assert stopped(SERVICE) and stopped(INITIAL)
-        assert json.loads((STATE/'.axiom-state.json').read_text()) == json.loads(payload['state.json'])
+        check(stopped(SERVICE) and stopped(INITIAL), 'seal left units running')
+        check(json.loads((STATE/'.axiom-state.json').read_text()) == json.loads(payload['state.json']), 'published marker diverges from reviewed state')
         approval = json.loads(Path('/etc/axiom/spire/initialization-approval.json').read_text())
-        assert approval['receiptSha256'] == receipt_sha
+        check(approval['receiptSha256'] == receipt_sha, 'approval receipt mismatch')
         outcomes['reviewed-receipt-publishes-marker-only']=True
-        assert run([*enrollment, '--initialize', 'issuer', manifest_sha], check=False).returncode != 0
-        assert run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0
-        assert receipt_path.read_bytes() == receipt_raw
+        check(run([*enrollment, '--initialize', 'issuer', manifest_sha], check=False).returncode != 0, 'sealed state reinitialized')
+        check(run([*enrollment, '--seal', 'issuer', receipt_sha], check=False).returncode != 0, 'sealed state resealed')
+        check(receipt_path.read_bytes() == receipt_raw, 'receipt rewritten')
         outcomes['sealed-state-cannot-be-reinitialized']=True
         run([*guard, '--ready', 'issuer'])
         outcomes['explicit-initialization-and-reviewed-marker-required']=True
-        control('start', SERVICE); assert active(SERVICE)
+        control('start', SERVICE); check(active(SERVICE), 'reviewed service failed to start')
         before_bundle = trust()
-        assert hashlib.sha256((json.dumps(before_bundle,sort_keys=True,separators=(',',':'))+'\n').encode()).hexdigest() == receipt['trust']['bundleSha256']
+        check(hashlib.sha256((json.dumps(before_bundle,sort_keys=True,separators=(',',':'))+'\n').encode()).hexdigest() == receipt['trust']['bundleSha256'], 'published bundle changed')
         cli('entry', 'create', '-parentID', 'spiffe://host.axiomproof.test/fixture-node', '-spiffeID', 'spiffe://host.axiomproof.test/fixture-workload', '-selector', 'unix:uid:20003')
         before_registry = registry()
         outcomes['real-service-namespace-and-state-guard-pass']=True
         # Stop the mounted unit while SPIRE is live: BindsTo must stop its user.
         control('stop', MOUNT)
-        assert stopped(SERVICE) and not active(MOUNT)
-        assert not (STATE/'server').exists()
+        check(stopped(SERVICE) and not active(MOUNT), 'mount loss left issuer running')
+        check(not (STATE/'server').exists(), 'server state exposed')
         outcomes['mount-loss-stops-live-issuer']=True
-        control('start', SERVICE); assert active(SERVICE) and active(MOUNT)
-        assert trust() == before_bundle
-        assert registry() == before_registry
+        control('start', SERVICE); check(active(SERVICE) and active(MOUNT), 'remount restart failed')
+        check(trust() == before_bundle, 'trust changed after remount')
+        check(registry() == before_registry, 'registry changed after remount')
         outcomes['remount-restart-preserves-trust-and-registry']=True
         # Kernel mount disappearance, without asking systemd to stop SPIRE.
         run(['/usr/bin/umount', '--lazy', str(STATE)])
         deadline = time.monotonic()+30
         while not stopped(SERVICE) and time.monotonic()<deadline:
             time.sleep(0.25)
-        assert stopped(SERVICE) and not active(MOUNT)
+        check(stopped(SERVICE) and not active(MOUNT), 'external mount loss left issuer running')
         control('start', SERVICE)
-        assert trust() == before_bundle
-        assert registry() == before_registry
+        check(trust() == before_bundle, 'trust changed after external mount loss')
+        check(registry() == before_registry, 'registry changed after external mount loss')
         outcomes['external-mount-disappearance-stops-and-recovers']=True
         control('stop', SERVICE)
         keys = STATE/'server/keys.json'; original = keys.read_bytes()
         saved = STATE/'server/keys.fixture-saved'; keys.rename(saved)
-        assert control('start', SERVICE, check=False).returncode != 0
+        check(control('start', SERVICE, check=False).returncode != 0, 'missing keys start accepted')
         control('stop', SERVICE); control('reset-failed', SERVICE)
-        assert not keys.exists() and saved.read_bytes() == original
+        check(not keys.exists() and saved.read_bytes() == original, 'keys regenerated or altered')
         outcomes['missing-keys-refused-without-regeneration']=True
         saved.rename(keys); control('start', SERVICE)
-        assert trust() == before_bundle
-        assert registry() == before_registry
+        check(trust() == before_bundle, 'trust changed after state restore')
+        check(registry() == before_registry, 'registry changed after state restore')
         outcomes['restored-original-state-recovers-original-trust']=True
         control('stop', SERVICE)
         config = Path('/etc/axiom/spire/server.conf'); original_config = config.read_bytes()
         config.write_bytes(original_config+b'\n')
-        assert control('start', SERVICE, check=False).returncode != 0
+        check(control('start', SERVICE, check=False).returncode != 0, 'changed config start accepted')
         control('stop', SERVICE); control('reset-failed', SERVICE)
-        assert config.read_bytes() == original_config+b'\n'
+        check(config.read_bytes() == original_config+b'\n', 'config repaired in place')
         outcomes['changed-installed-config-refused-without-repair']=True
         config.write_bytes(original_config); control('start', SERVICE)
-        assert active(SERVICE)
+        check(active(SERVICE), 'reviewed config recovery failed')
         outcomes['reviewed-config-recovery-passes']=True
         revision = run(['git', '-c', 'safe.directory='+str(ROOT), '-C', str(ROOT), 'rev-parse', 'HEAD']).stdout.decode().strip()
         dirty = bool(run(['git', '-c', 'safe.directory='+str(ROOT), '-C', str(ROOT), 'status', '--porcelain']).stdout.strip())

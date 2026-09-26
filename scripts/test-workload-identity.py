@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - fixture runner for pinned local docker CLIs; list argv, no shell
 import sys
 import tarfile
 import tempfile
@@ -47,7 +47,7 @@ AGENTS = [
 def run(
     args: list[str], *, data: str | None = None, required: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - every call site passes fixed repo/docker argv, no shell
         args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False
     )
     if required and result.returncode:

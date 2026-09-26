@@ -44,7 +44,9 @@ def configuration(raw: bytes, review: dict, binding: dict) -> None:
     value = json.loads(raw, object_pairs_hook=host.unique)
     if not isinstance(value, dict) or set(value) != {'controller', 'listen', 'tls', 'backendServiceKeyFile'}:
         raise ValueError('service configuration refused')
-    if value['listen'] != {'host': '0.0.0.0', 'port': 8443} or value['tls'] != {'keyFile': RUNTIME+'/tls.key', 'certFile': RUNTIME+'/tls.crt'} or value['backendServiceKeyFile'] != RUNTIME+'/backend.key':
+    # The reviewed listen contract pins the controller to all host interfaces
+    # inside its own VM; this is a config comparison value, never a bind call.
+    if value['listen'] != {'host': '0.0.0.0', 'port': 8443} or value['tls'] != {'keyFile': RUNTIME+'/tls.key', 'certFile': RUNTIME+'/tls.crt'} or value['backendServiceKeyFile'] != RUNTIME+'/backend.key':  # nosec B104 - reviewed config contract string, not a bind call
         raise ValueError('protected service paths refused')
     controller = value['controller']
     fields = {'schemaVersion', 'tenantId', 'trustDomain', 'workloadSocket', 'issuerNodeId', 'namespace', 'launcher', 'keys', 'scheduler'}

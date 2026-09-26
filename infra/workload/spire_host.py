@@ -8,7 +8,7 @@ import os
 import platform
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed prerequisite/readiness CLIs; argv lists are constant, never a shell
 import sys
 import time
 from pathlib import Path
@@ -116,7 +116,7 @@ def host_profile(value: dict) -> None:
     expected = {'amd64': 'x86_64', 'arm64': 'aarch64'}[value['architecture']]
     if platform.machine() != expected:
         raise ValueError('host architecture refused')
-    version = subprocess.run(['/usr/bin/systemctl', '--version'], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, env={'PATH': '/usr/bin', 'LC_ALL': 'C'}).stdout
+    version = subprocess.run(['/usr/bin/systemctl', '--version'], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, env={'PATH': '/usr/bin', 'LC_ALL': 'C'}).stdout  # nosec B603 - constant argv with absolute path, no shell
     if not version.startswith(b'systemd 255 '):
         raise ValueError('service manager refused')
     prerequisites = ['/usr/sbin/blkid', '/usr/bin/python3', '/usr/bin/systemctl']
@@ -225,8 +225,10 @@ def runtime(role: str) -> None:
     for path in (Path('/run/workload'), Path('/run/spire-health')):
         protected_directory(path.parent)
         try:
-            path.mkdir(mode=0o755)
-            os.chmod(path, 0o755)
+            # Workload consumers run under unregistered UIDs and must traverse
+            # these socket directories; 0o755 is the reviewed runtime contract.
+            path.mkdir(mode=0o755)  # nosec B103 - workload socket directory must stay world-traversable by contract
+            os.chmod(path, 0o755)  # nosec B103 - workload socket directory must stay world-traversable by contract
         except FileExistsError:
             pass
         protected_directory(path)
@@ -241,7 +243,7 @@ def wait_ready(role: str) -> None:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         try:
-            result = subprocess.run(['/usr/local/bin/' + binary, 'healthcheck', '-socketPath', socket], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(2, max(0.01, deadline-time.monotonic())), env={'PATH':'/usr/local/bin:/usr/bin','HOME':'/nonexistent'})
+            result = subprocess.run(['/usr/local/bin/' + binary, 'healthcheck', '-socketPath', socket], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(2, max(0.01, deadline-time.monotonic())), env={'PATH':'/usr/local/bin:/usr/bin','HOME':'/nonexistent'})  # nosec B603 - binary comes from the fixed issuer/runner tuple, no shell
             if result.returncode == 0:
                 return
         except subprocess.TimeoutExpired:
