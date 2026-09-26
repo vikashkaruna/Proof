@@ -11,7 +11,7 @@ import os
 import re
 import selectors
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed local spire-agent CLI probe; argv is the module-level COMMAND constant, never a shell
 import sys
 import tempfile
 import time
@@ -61,11 +61,12 @@ def snapshot(info: object, expected: str, now_ms: int) -> dict[str, object]:
 def query() -> object:
     # Fixed command and minimal environment; bounded output, deadline, no shell
     # or private stderr. CLI process is killed/reaped even on oversized output.
-    with subprocess.Popen(COMMAND, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+    with subprocess.Popen(COMMAND, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,  # nosec B603 - argv is the fixed COMMAND constant, no shell, bounded output
                           stderr=subprocess.DEVNULL, env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/nonexistent"}) as process:
         try:
             with selectors.DefaultSelector() as selector:
-                assert process.stdout is not None
+                if process.stdout is None:
+                    raise ValueError("node observation refused")
                 selector.register(process.stdout, selectors.EVENT_READ)
                 data = bytearray()
                 deadline = time.monotonic() + 2
@@ -98,7 +99,9 @@ def publish(value: dict[str, object], directory: Path = DIRECTORY) -> None:
     meta = directory.lstat()
     if not stat.S_ISDIR(meta.st_mode) or meta.st_uid != os.geteuid() or meta.st_mode & 0o022:
         raise ValueError("health directory refused")
-    os.chmod(directory, 0o755)
+    # Read-only consumer mounts expose this directory to unregistered workload
+    # UIDs; status.json is published 0644 by design, so traversal must remain.
+    os.chmod(directory, 0o755)  # nosec B103 - published health metadata is world-readable by reviewed contract
     fd, temporary = tempfile.mkstemp(prefix=".status-", dir=directory)
     try:
         with os.fdopen(fd, "w") as stream:

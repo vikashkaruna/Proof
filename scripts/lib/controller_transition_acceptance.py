@@ -9,6 +9,12 @@ import uuid
 from pathlib import Path
 
 
+def require(condition, message):
+    # Explicit refusal: survives `python -O`, unlike `assert`.
+    if not condition:
+        raise RuntimeError('controller transition acceptance refused: '+message)
+
+
 def accept(directory, tenant, old_sha, old_generation, old_review, old_placement, file_review, payload,
            production_path, fixture_path, wrapper, runtime_helper, cli, run, control, wait_for,
            current, running, attempts, profile_paths):
@@ -31,28 +37,28 @@ def accept(directory, tenant, old_sha, old_generation, old_review, old_placement
     request=directory/'transition.json';save(request,encode(review));sha=digest(request.read_bytes())
     def operation(mode,success=True):
         result=run([*tool,'--'+mode,str(request),sha],check=False)
-        assert (result.returncode==0)==success,'transition CLI result refused'
+        require((result.returncode==0)==success,'transition CLI result refused')
     def update_fixture():
         save(fixture_path,production_path.read_bytes().replace((runtime_helper+' --run').encode(),(str(wrapper)+' --run').encode()))
         control('daemon-reload')
     # A root operator's concurrent live fixture holds the same tenant lifetime
     # lock even though the canonical production service is inactive.
     control('start',fixture_path.name);wait_for(running)
-    operation('publish',False);assert not state.exists()
+    operation('publish',False);require(not state.exists(),'state created while lifetime lock held')
     control('stop',fixture_path.name)
     results['controller-transition-refuses-live-owned-lifetime']=True
     control('enable',production_path.name)
-    try:operation('publish',False);assert production_path.read_bytes()==old_unit
+    try:operation('publish',False);require(production_path.read_bytes()==old_unit,'enabled unit publication replaced the unit')
     finally:control('disable',production_path.name)
     dropin=Path(str(production_path)+'.d');dropin.mkdir(mode=0o755);override=dropin/'fixture.conf';save(override,b'[Service]\nEnvironment=UNREVIEWED=1\n')
     control('daemon-reload')
-    try:operation('publish',False);assert not state.exists()
+    try:operation('publish',False);require(not state.exists(),'state created under overridden unit')
     finally:override.unlink();dropin.rmdir();control('daemon-reload')
     results['controller-transition-refuses-enabled-or-overridden-unit']=True
     # Deliberately restart a stopped exact-ID container behind its stop receipt.
     previous=attempts()[0];previous_id=json.loads((previous/'container.json').read_bytes())['containerId']
     run(['docker','start',previous_id]);operation('publish',False)
-    assert not state.exists();run(['docker','stop','--time','90',previous_id])
+    require(not state.exists(),'state created behind a live stale container');run(['docker','stop','--time','90',previous_id])
     results['controller-transition-refuses-stale-stop-receipt-with-live-container']=True
     # Inject loss of the publication acknowledgement after the real atomic
     # rename, then recover with the unmodified production CLI.
@@ -69,45 +75,45 @@ try:transition.main()
 except Exception:sys.exit(1)
 ''')
     failed=run(['/usr/bin/python3','-I','-B',str(interrupted),'--publish',str(request),sha],check=False)
-    assert failed.returncode!=0 and production_path.read_bytes()!=old_unit
-    assert not (state/sha/'published.json').exists()
-    inode=production_path.stat().st_ino;operation('resume');assert production_path.stat().st_ino==inode
+    require(failed.returncode!=0 and production_path.read_bytes()!=old_unit,'interrupted publication completed cleanly')
+    require(not (state/sha/'published.json').exists(),'interrupted publication left its receipt')
+    inode=production_path.stat().st_ino;operation('resume');require(production_path.stat().st_ino==inode,'resume replaced the reviewed unit')
     results['controller-interrupted-publication-resumes-without-replacing-reviewed-unit']=True
     new_unit=production_path.read_bytes()
-    assert new_unit!=old_unit and (state/sha/'published.json').exists() and not (state/sha/'confirmed.json').exists()
-    assert control('is-enabled',production_path.name,check=False).stdout.strip()==b'disabled'
-    assert control('show','--property=ActiveState','--value',production_path.name).stdout.strip()==b'inactive'
-    for selected in (old_sha,next_sha):assert run([*cli,'--run',selected],check=False).returncode!=0
+    require(new_unit!=old_unit and (state/sha/'published.json').exists() and not (state/sha/'confirmed.json').exists(),'publication receipts inconsistent')
+    require(control('is-enabled',production_path.name,check=False).stdout.strip()==b'disabled','published unit enabled')
+    require(control('show','--property=ActiveState','--value',production_path.name).stdout.strip()==b'inactive','published unit activated')
+    for selected in (old_sha,next_sha):require(run([*cli,'--run',selected],check=False).returncode!=0,'unconfirmed profile start accepted')
     # Inactive unreferenced units may be garbage-collected and loaded afresh.
     # NeedDaemonReload describes loaded state, not who invoked a reload; the
     # deterministic stale-state refusal is covered by the state-machine tests.
     results['controller-transition-publishes-disabled-unit-and-blocks-unconfirmed-starts']=True
     control('daemon-reload');operation('confirm');operation('resume');operation('confirm')
-    assert run([*cli,'--run',old_sha],check=False).returncode!=0
+    require(run([*cli,'--run',old_sha],check=False).returncode!=0,'superseded profile start accepted')
     update_fixture();control('start',fixture_path.name);wait_for(running)
     active=current();identifier=json.loads((active/'container.json').read_bytes())['containerId']
     inspect=json.loads(run(['docker','inspect',identifier]).stdout)[0]
-    assert inspect['Config']['Labels']['ai.axiomproof.controller.profile']==next_sha
+    require(inspect['Config']['Labels']['ai.axiomproof.controller.profile']==next_sha,'confirmed container carries the wrong profile')
     expected=str(Path('/etc/axiom/controllers')/tenant/generation/'files')
-    assert any(m['Source']==expected and m['Destination']=='/run/controller-secrets' and m['RW'] is False for m in inspect['Mounts'])
-    assert run(['docker','exec',identifier,'cat','/run/controller-secrets/backend.key']).stdout==changed['backend.key']
-    control('stop',fixture_path.name);assert (active/'stopped.json').exists()
+    require(any(m['Source']==expected and m['Destination']=='/run/controller-secrets' and m['RW'] is False for m in inspect['Mounts']),'confirmed mount escaped the protected generation')
+    require(run(['docker','exec',identifier,'cat','/run/controller-secrets/backend.key']).stdout==changed['backend.key'],'confirmed container reads stale credentials')
+    control('stop',fixture_path.name);require((active/'stopped.json').exists(),'confirmed stop receipt missing')
     results['controller-confirmed-cutover-starts-fresh-id-with-new-protected-generation']=True
     # A separate reverse review can return to a prior immutable generation;
     # real credentials must still be unexpired/unrevoked at application startup.
     review={**review,'approvalReference':str(uuid.uuid4()),'previousTransitionSha256':sha,'previousProfileSha256':next_sha,'nextProfileFile':str(old_review),'nextProfileSha256':old_sha,'previousGenerationSha256':generation,'nextGenerationSha256':old_generation}
     first_sha=sha;request=directory/'reverse-transition.json';save(request,encode(review));sha=digest(request.read_bytes())
-    operation('publish');control('daemon-reload');operation('confirm');assert production_path.read_bytes()==old_unit
-    assert (state/first_sha/'confirmed.json').exists() and (state/sha/'confirmed.json').exists()
-    assert run([*cli,'--run',next_sha],check=False).returncode!=0
-    update_fixture();assert fixture_path.read_bytes()==old_fixture
+    operation('publish');control('daemon-reload');operation('confirm');require(production_path.read_bytes()==old_unit,'reverse transition restored the wrong unit')
+    require((state/first_sha/'confirmed.json').exists() and (state/sha/'confirmed.json').exists(),'transition history receipts missing')
+    require(run([*cli,'--run',next_sha],check=False).returncode!=0,'retired profile start accepted')
+    update_fixture();require(fixture_path.read_bytes()==old_fixture,'reverse transition changed the fixture wrapper')
     control('start',fixture_path.name);wait_for(running);back=current()
-    back_id=json.loads((back/'container.json').read_bytes())['containerId'];assert back_id!=identifier
-    assert run(['docker','exec',back_id,'cat','/run/controller-secrets/backend.key']).stdout==payload['backend.key']
-    control('stop',fixture_path.name);assert (back/'stopped.json').exists()
+    back_id=json.loads((back/'container.json').read_bytes())['containerId'];require(back_id!=identifier,'reverse transition reused the container identity')
+    require(run(['docker','exec',back_id,'cat','/run/controller-secrets/backend.key']).stdout==payload['backend.key'],'reverse transition serves renewed credentials')
+    control('stop',fixture_path.name);require((back/'stopped.json').exists(),'reverse stop receipt missing')
     results['controller-separately-reviewed-reverse-transition-preserves-history-and-new-lifetime']=True
     # A second request claiming the older predecessor cannot fork the chain.
     branch={**review,'approvalReference':str(uuid.uuid4())};request=directory/'stale-transition.json';save(request,encode(branch));sha=digest(request.read_bytes())
-    operation('publish',False);assert production_path.read_bytes()==old_unit
+    operation('publish',False);require(production_path.read_bytes()==old_unit,'stale predecessor forked the chain')
     results['controller-transition-stale-predecessor-refused-without-replacement']=True
     return results

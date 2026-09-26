@@ -13,7 +13,7 @@ import json
 import math
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - fixed spire-agent CLI for SVID fetch; constant argv, no shell
 import sys
 from functools import partial
 from uuid import UUID
@@ -56,7 +56,7 @@ def fetch_svid(spiffe_id: str) -> str:
     # Arguments contain only public identity selectors; no bearer or task secret.
     if not re.fullmatch(r"spiffe://[a-z0-9.-]+/agent/parikshan", spiffe_id):
         raise ValueError("Invalid workload identity")
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - spiffe_id is regex-validated above, all other argv is constant, no shell
         [
             "/usr/local/bin/spire-agent",
             "api",

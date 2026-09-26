@@ -5,10 +5,11 @@ import json
 import os
 import platform
 import shutil
-import subprocess
+import subprocess  # nosec B404 - fixture runner for local docker/openssl/git CLIs; list argv, no shell
 import sys
 import tempfile
 import traceback
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -19,6 +20,7 @@ from lib.spire_host_bundle import prepare
 ROOT=Path(__file__).resolve().parents[1]
 UBUNTU='ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3'
 OUT=ROOT/'.axiom-runtime/workload-host'
+DOCKER=shutil.which('docker')
 VERIFY='''import hashlib,json,os,subprocess,sys
 from pathlib import Path
 sys.path.insert(0,'/fixture')
@@ -87,7 +89,7 @@ print(json.dumps(outcomes))
 
 
 def run(args,**kwargs):
-    result=subprocess.run(args,cwd=ROOT,capture_output=True,text=True,timeout=kwargs.pop('timeout',300),**kwargs)
+    result=subprocess.run(args,cwd=ROOT,capture_output=True,text=True,timeout=kwargs.pop('timeout',300),**kwargs)  # nosec B603 - every call site passes fixed repo/docker argv, no shell
     if result.returncode:
         diagnostic=OUT/'private-diagnostic.txt'
         diagnostic.write_text(result.stderr[-16384:]);diagnostic.chmod(0o600)
@@ -100,7 +102,10 @@ def main():
     arch={'arm64':'arm64','aarch64':'arm64','x86_64':'amd64'}[platform.machine()]
     archive=OUT/f'spire-{VERSION}-linux-{arch}-musl.tar.gz'
     if not archive.exists():
-        urllib.request.urlretrieve(f'https://github.com/spiffe/spire/releases/download/v{VERSION}/{archive.name}',archive)
+        release=f'https://github.com/spiffe/spire/releases/download/v{VERSION}/{archive.name}'
+        parsed=urllib.parse.urlsplit(release)
+        if parsed.scheme!='https' or parsed.hostname!='github.com':raise ValueError('release host refused')
+        urllib.request.urlretrieve(release,archive)  # nosec B310 - https and github.com allowlist checked above
     raw_archive=archive.read_bytes()
     root=Path(tempfile.mkdtemp(prefix='axiom-host-review-'));image='axiom-workload-host:'+uuid.uuid4().hex[:12]
     containers=[]
@@ -132,7 +137,7 @@ ENTRYPOINT ["/usr/bin/python3", "-I", "-B", "/fixture/verify.py"]
         for role in ('issuer','runner'):
             name='axiom-host-test-'+uuid.uuid4().hex[:12];containers.append(name)
             print(f'Workload host acceptance: {role} delivery and unit verification.',flush=True)
-            output=run(['docker','run','--rm','--name',name,'--read-only','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--tmpfs','/tmp:rw,nosuid,nodev,noexec,mode=1777','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/etc/axiom:rw,nosuid,nodev,mode=755','--tmpfs','/etc/systemd/system:rw,nosuid,nodev,mode=755','--tmpfs','/opt/axiom:rw,nosuid,nodev,mode=755','--tmpfs','/usr/local/bin:rw,exec,nosuid,nodev,mode=755',image,role])
+            output=run(['docker','run','--rm','--name',name,'--read-only','--network','none','--cap-drop','ALL','--security-opt','no-new-privileges','--log-driver','none','--tmpfs','/tmp:rw,nosuid,nodev,noexec,mode=1777','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/etc/axiom:rw,nosuid,nodev,mode=755','--tmpfs','/etc/systemd/system:rw,nosuid,nodev,mode=755','--tmpfs','/opt/axiom:rw,nosuid,nodev,mode=755','--tmpfs','/usr/local/bin:rw,exec,nosuid,nodev,mode=755',image,role])  # nosec B108 - container-internal tmpfs mount specification, not a host temp path
             values=json.loads(output)
             if len(values)!=8 or any(v is not True for v in values.values()):raise ValueError('host outcomes refused')
             outcomes.update({role+'-'+key:value for key,value in values.items()})
@@ -140,8 +145,10 @@ ENTRYPOINT ["/usr/bin/python3", "-I", "-B", "/fixture/verify.py"]
         (OUT/'results.json').write_text(json.dumps(report,indent=2)+'\n')
         print(f'Workload host acceptance: {len(outcomes)} outcomes passed.',flush=True)
     finally:
-        for name in containers:subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        subprocess.run(['docker','image','rm',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        # Without a resolved docker there is nothing this fixture created to clean up.
+        if DOCKER is not None:
+            for name in containers:subprocess.run([DOCKER,'rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)  # nosec B603 - DOCKER resolved via PATH, fixture-owned container names, no shell
+            subprocess.run([DOCKER,'image','rm',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)  # nosec B603 - DOCKER resolved via PATH, fixture-owned image name, no shell
         shutil.rmtree(root,ignore_errors=True)
 
 

@@ -21,16 +21,21 @@ def block_at(source, opening):
 
 
 def check(source):
+    def refuse(message):
+        raise SystemExit(message)
+
     for service in ('bff', 'web', 'marketing'):
         match = re.search(r'resource\s+"google_cloud_run_v2_service"\s+"' + service + r'"\s*{', source)
-        assert match, f'Missing Cloud Run service {service}'
+        if match is None:
+            refuse(f'Missing Cloud Run service {service}')
         resource = block_at(source, match.end() - 1)
         env = {}
         for match in re.finditer(r'\benv\s*{', resource):
             block = block_at(resource, match.end() - 1)
             name = re.search(r'\bname\s*=\s*"([A-Z_]+)"', block)
             if name:
-                assert name[1] not in env, f'{service}: duplicate {name[1]}'
+                if name[1] in env:
+                    refuse(f'{service}: duplicate {name[1]}')
                 env[name[1]] = block
         required = {'SUPABASE_ANON_KEY': 'supabase_anon_key'}
         if service == 'bff':
@@ -38,17 +43,21 @@ def check(source):
         else:
             required['NEXT_PUBLIC_SUPABASE_ANON_KEY'] = 'supabase_anon_key'
             for private in ('SUPABASE_SERVICE_KEY', 'APPROVAL_SIGNING_KEY', 'AXIOM_MFA_ENCRYPTION_KEY', 'AGENT_RUNTIME_INTERNAL_TOKEN'):
-                assert private not in env, f'{service}: backend credential {private} must not be injected into SSR'
+                if private in env:
+                    refuse(f'{service}: backend credential {private} must not be injected into SSR')
         for name, secret in required.items():
             block = env.get(name, '')
-            assert 'value_source' in block and 'secret_key_ref' in block, f'{service}: {name} must use a managed secret reference'
-            assert f'google_secret_manager_secret.secret["{secret}"].secret_id' in block, f'{service}: wrong source for {name}'
-            assert 'placeholder' not in block, f'{service}: placeholder credential'
+            if 'value_source' not in block or 'secret_key_ref' not in block:
+                refuse(f'{service}: {name} must use a managed secret reference')
+            if f'google_secret_manager_secret.secret["{secret}"].secret_id' not in block:
+                refuse(f'{service}: wrong source for {name}')
+            if 'placeholder' in block:
+                refuse(f'{service}: placeholder credential')
 
 
 if __name__ == '__main__':
     try:
         check(Path(sys.argv[1] if len(sys.argv) > 1 else 'infra/terraform/envs/preprod/cloudrun.tf').read_text())
-    except (AssertionError, ValueError) as error:
+    except ValueError as error:
         sys.exit(str(error))
     print('Cloud Run Auth wiring: managed BFF credentials; scoped SSR credentials only.')

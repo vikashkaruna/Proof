@@ -12,7 +12,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - fixture runner for pinned local docker CLIs; list argv, no shell
 import sys
 import tarfile
 import tempfile
@@ -29,7 +29,7 @@ IMAGE = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc
 
 
 def run(args: list[str], *, data: str | None = None, required: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False)
+    result = subprocess.run(args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False)  # nosec B603 - every call site passes fixed repo/docker argv, no shell
     if required and result.returncode:
         raise RuntimeError("SPIRE deployment acceptance command refused")
     return result
