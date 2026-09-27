@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { AxiomLogo } from '@axiom/ui';
@@ -30,7 +30,7 @@ export interface TenantOption {
   role: string;
 }
 
-const TENANT_COLORS = ['#1E2A4A', '#0FB5A5', '#C9A227', '#5B6BA8', '#7A5C9E', '#3F7D6B'];
+const TENANT_COLORS = ['#1E2A4A', '#0FB5A5', '#475569', '#5B6BA8', '#7A5C9E', '#3F7D6B'];
 
 /** Stable per tenant, so the same client keeps the same chip between visits. */
 function tenantColor(id: string): string {
@@ -76,6 +76,19 @@ export function AppShell({
   const [killOn, setKillOn] = useState(false);
   const [tenantsOpen, setTenantsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const mobileNav = useRef<HTMLDialogElement>(null);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  useEffect(() => {
+    const wide = window.matchMedia('(min-width: 1024px)');
+    const closeOnWide = () => {
+      if (wide.matches) mobileNav.current?.close();
+    };
+    wide.addEventListener('change', closeOnWide);
+    return () => wide.removeEventListener('change', closeOnWide);
+  }, []);
+  useEffect(() => {
+    mobileNav.current?.close();
+  }, [pathname]);
 
   const held = new Set(capabilities);
   const navGroups = visibleNavGroups(capabilities);
@@ -212,95 +225,153 @@ export function AppShell({
     }
   }
 
+  const sidebarContent = (
+    <>
+      {/* Brand Header */}
+      <div className="flex h-16 shrink-0 items-center px-5 border-b border-white/10">
+        <Link href="/dashboard" className="flex items-center gap-3">
+          <AxiomLogo size="md" theme="dark" showSubtitle={true} />
+        </Link>
+      </div>
+
+      {/* Navigation Stream */}
+      <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-2">
+        {navGroups.map((group) => (
+          <div key={group.label} className="mb-1">
+            <div className="px-5 pt-3.5 pb-1 text-[9.5px] font-semibold tracking-[0.08em] uppercase text-[#6f7ba0]">
+              {group.label}
+            </div>
+            {group.items.map((item) => {
+              const isActive =
+                pathname === item.route ||
+                (item.route !== '/dashboard' && pathname.startsWith(item.route));
+
+              return (
+                <Link
+                  key={item.route}
+                  href={item.route}
+                  aria-current={isActive ? 'page' : undefined}
+                  onClick={() => mobileNav.current?.close()}
+                  className={`flex min-h-11 lg:min-h-0 items-center gap-2.5 px-5 py-1.5 transition-colors ${
+                    isActive
+                      ? 'border-l-[3px] border-[#0FB5A5] bg-[#0FB5A5]/10 text-white font-semibold'
+                      : 'border-l-[3px] border-transparent text-[#c7cfe0] hover:bg-white/5'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      isActive ? 'bg-[#0FB5A5]' : 'bg-[#3d4863]'
+                    }`}
+                  />
+                  <span className="flex flex-1 items-center gap-1.5 text-[13px] truncate">
+                    <span className={isActive ? 'text-white' : 'text-[#c7cfe0]'}>{item.en}</span>
+                    <span className="font-heading text-[10.5px] text-[#6f7ba0] font-normal">
+                      {item.hi}
+                    </span>
+                  </span>
+                  {item.star && <span className="text-[#0FB5A5] text-xs">★</span>}
+                  <span
+                    className={`text-[8.5px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-[#8a97b8]'
+                    }`}
+                  >
+                    {item.phase}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* User Profile Bar */}
+      <div className="flex items-center gap-2.5 border-t border-white/10 px-4 py-3 bg-[#182238]/60">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0FB5A5] font-heading text-xs font-bold text-[#1E2A4A]">
+          {(user.user_metadata?.full_name ?? user.email ?? 'P')[0]?.toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-semibold text-white">
+            {user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Signed-in user'}
+          </div>
+          <div className="text-[10px] text-[#6f7ba0]">
+            {selectedTenant?.role ?? 'No active membership'}
+          </div>
+        </div>
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            title="Sign out"
+            className="text-[11px] text-[#8a909b] hover:text-white transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
+    </>
+  );
+
   return (
     <div className="flex min-h-screen bg-[#F4F6F8]">
       {/* ============ SIDEBAR ============ */}
-      <aside className="sticky top-0 z-30 flex h-screen w-[266px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10">
-        {/* Brand Header */}
-        <div className="flex h-16 shrink-0 items-center px-5 border-b border-white/10">
-          <Link href="/dashboard" className="flex items-center gap-3">
-            <AxiomLogo size="md" theme="dark" showSubtitle={true} />
-          </Link>
-        </div>
-
-        {/* Navigation Stream */}
-        <div className="flex-1 overflow-y-auto py-2">
-          {navGroups.map((group) => (
-            <div key={group.label} className="mb-1">
-              <div className="px-5 pt-3.5 pb-1 text-[9.5px] font-semibold tracking-[0.08em] uppercase text-[#6f7ba0]">
-                {group.label}
-              </div>
-              {group.items.map((item) => {
-                const isActive =
-                  pathname === item.route ||
-                  (item.route !== '/dashboard' && pathname.startsWith(item.route));
-
-                return (
-                  <Link
-                    key={item.route}
-                    href={item.route}
-                    className={`flex items-center gap-2.5 px-5 py-1.5 transition-colors ${
-                      isActive
-                        ? 'border-l-[3px] border-[#0FB5A5] bg-[#0FB5A5]/10 text-white font-semibold'
-                        : 'border-l-[3px] border-transparent text-[#c7cfe0] hover:bg-white/5'
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        isActive ? 'bg-[#0FB5A5]' : 'bg-[#3d4863]'
-                      }`}
-                    />
-                    <span className="flex flex-1 items-center gap-1.5 text-[13px] truncate">
-                      <span className={isActive ? 'text-white' : 'text-[#c7cfe0]'}>{item.en}</span>
-                      <span className="font-heading text-[10.5px] text-[#6f7ba0] font-normal">
-                        {item.hi}
-                      </span>
-                    </span>
-                    {item.star && <span className="text-[#C9A227] text-xs">★</span>}
-                    <span
-                      className={`text-[8.5px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${
-                        isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-[#8a97b8]'
-                      }`}
-                    >
-                      {item.phase}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-
-        {/* User Profile Bar */}
-        <div className="flex items-center gap-2.5 border-t border-white/10 px-4 py-3 bg-[#182238]/60">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#C9A227] font-heading text-xs font-bold text-[#1E2A4A]">
-            {(user.user_metadata?.full_name ?? user.email ?? 'P')[0]?.toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-semibold text-white">
-              {user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Priya Nair'}
-            </div>
-            <div className="text-[10px] text-[#6f7ba0]">Compliance Head · Approver</div>
-          </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              title="Sign out"
-              className="text-[11px] text-[#8a909b] hover:text-white transition-colors"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
-
-        {/* Bespoke 10-Agent Panel (Preserved!) */}
+      <aside className="sticky top-0 z-30 hidden h-screen w-[266px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10 lg:flex">
+        {sidebarContent}
         <SidebarAgentPanel />
       </aside>
+      <dialog
+        id="mobile-navigation"
+        ref={mobileNav}
+        aria-label="Application navigation"
+        onClose={() => setNavigationOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return;
+          const controls = event.currentTarget.querySelectorAll<HTMLElement>(
+            'a[href], button:not(:disabled), [tabindex="0"]',
+          );
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+          }
+        }}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) mobileNav.current?.close();
+        }}
+        className="fixed inset-y-0 left-0 right-auto m-0 h-dvh max-h-none w-[min(86vw,300px)] max-w-none border-0 bg-[#1E2A4A] p-0 text-[#c7cfe0] backdrop:bg-black/50 lg:hidden"
+      >
+        <div className="flex h-full flex-col">
+          <button
+            type="button"
+            className="min-h-11 border-b border-white/10 px-5 py-3 text-left text-sm text-white"
+            onClick={() => mobileNav.current?.close()}
+          >
+            Close navigation
+          </button>
+          {sidebarContent}
+        </div>
+      </dialog>
 
       {/* ============ MAIN AREA ============ */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Topbar */}
-        <header className="sticky top-0 z-20 flex h-[60px] shrink-0 items-center gap-4 border-b border-[#e4e8ee] bg-white px-6">
+        <header className="sticky top-0 z-20 flex min-h-[60px] flex-wrap shrink-0 items-center gap-2 border-b border-[#e4e8ee] bg-white px-3 py-2 sm:flex-nowrap sm:gap-4 sm:px-6">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            aria-haspopup="dialog"
+            aria-controls="mobile-navigation"
+            aria-expanded={navigationOpen}
+            className="min-h-11 rounded border border-slate-300 px-3 text-sm lg:hidden"
+            onClick={() => {
+              mobileNav.current?.showModal();
+              setNavigationOpen(true);
+            }}
+          >
+            Menu
+          </button>
           <div className="flex-1 min-w-0">
             <div className="text-[11px] text-[#8a909b] truncate">{activeBreadcrumb}</div>
             <h1 className="font-heading text-[17px] font-semibold leading-tight text-[#1E2A4A] truncate">
@@ -310,9 +381,13 @@ export function AppShell({
 
           {/* Tenant Switcher */}
           <div className="relative">
-            <div
+            <button
+              type="button"
+              aria-label="Switch organization"
+              aria-expanded={tenantsOpen}
+              aria-controls="organization-choices"
               onClick={() => setTenantsOpen(!tenantsOpen)}
-              className="flex items-center gap-2.5 rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 cursor-pointer shadow-sm hover:border-[#0FB5A5] transition-colors"
+              className="flex min-h-11 max-w-[180px] sm:max-w-[240px] items-center gap-2.5 rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 cursor-pointer shadow-sm hover:border-[#0FB5A5] transition-colors"
             >
               <span
                 style={{
@@ -322,8 +397,8 @@ export function AppShell({
               >
                 {selectedTenant ? tenantMark(selectedTenant.name) : '—'}
               </span>
-              <div className="leading-tight text-left">
-                <div className="text-xs font-semibold text-[#2F3542]">
+              <div className="min-w-0 leading-tight text-left">
+                <div className="truncate text-xs font-semibold text-[#2F3542]">
                   {selectedTenant?.name ?? 'No organization'}
                 </div>
                 {/* The role, which is a fact. What stood here was an invented
@@ -333,10 +408,13 @@ export function AppShell({
                 </div>
               </div>
               <span className="text-[10px] text-[#8a909b] ml-1">▾</span>
-            </div>
+            </button>
 
             {tenantsOpen && (
-              <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e4e8ee] bg-white p-1.5 shadow-xl max-h-[420px] overflow-y-auto">
+              <div
+                id="organization-choices"
+                className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e4e8ee] bg-white p-1.5 shadow-xl max-h-[420px] overflow-y-auto"
+              >
                 {/* Only memberships. The "Demo environments" section that stood
                     here listed three invented companies to every user, and was
                     consulted BEFORE real memberships when resolving the active
@@ -347,11 +425,12 @@ export function AppShell({
                       Your organizations
                     </div>
                     {tenants.map((t) => (
-                      <div
+                      <button
+                        type="button"
                         key={t.id}
                         onClick={() => void handleSelectTenant(t)}
-                        aria-disabled={switching}
-                        className={`flex items-center gap-2.5 rounded-lg p-2 transition-colors ${
+                        disabled={switching}
+                        className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg p-2 transition-colors ${
                           switching ? 'cursor-wait opacity-60' : 'cursor-pointer'
                         } ${t.id === selectedTenantId ? 'bg-[#F4F6F8]' : 'hover:bg-[#F4F6F8]'}`}
                       >
@@ -370,7 +449,7 @@ export function AppShell({
                         {t.id === selectedTenantId && (
                           <span className="text-xs font-bold font-mono text-[#0FB5A5]">Active</span>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
@@ -434,7 +513,7 @@ export function AppShell({
         )}
 
         {/* Main Content Viewport */}
-        <main className="flex-1 overflow-y-auto px-8 py-7">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-5 sm:px-8 sm:py-7">{children}</main>
       </div>
     </div>
   );

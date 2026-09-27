@@ -122,7 +122,12 @@ test('a viewer sees progress but cannot start or change onboarding', async ({ pa
   await page.goto('/estate/setup');
   await expect(page.getByTestId('setup-wizard')).toBeVisible();
   await expect(page.getByRole('button', { name: /Start (re-)?onboarding/ })).toHaveCount(0);
-  const refused = await page.request.post('/api/bff/v1/onboarding/wizard', { data: {} });
+  // This is a new authorization probe, not a retry from an earlier fixture login.
+  // The bridge's body-derived fallback key would reuse that prior session's claim.
+  const refused = await page.request.post('/api/bff/v1/onboarding/wizard', {
+    headers: { 'idempotency-key': crypto.randomUUID() },
+    data: {},
+  });
   expect(refused.status()).toBe(403);
 });
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ConnectorManifest } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: vi.fn() }));
 import { AcquiredToken } from './broker/oauth-grants.js';
@@ -10,9 +11,11 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const ESTATE = '22222222-2222-4222-8222-222222222222';
 const SQL_CONN = '33333333-3333-4333-8333-333333333333';
 const REST_CONN = '44444444-4444-4444-8444-444444444444';
+const MYSQL_CONN = '33333333-3333-4333-8333-333333333334';
 const GRANT = '55555555-5555-4555-8555-555555555555';
 const SPIFFE = 'spiffe://axiom.test/agent/drishti';
 const SQL_DESCRIPTOR = '41410000-0000-4000-8000-000000000001';
+const MYSQL_DESCRIPTOR = '41420000-0000-4000-8000-000000000001';
 const CRM_DESCRIPTOR = '41410000-0000-4000-8000-000000000011';
 const sqlEndpoint = {
   host: 'crm.cluster-x.ap-south-1.rds.amazonaws.com',
@@ -172,6 +175,47 @@ describe('DiscoveryService (W4.6/W4.7)', () => {
           { identity },
         ),
     ).toThrow();
+  });
+
+  it('routes mysql-target descriptors through the MySQL connector and refuses unknown SQL engines', async () => {
+    fake.seed('connectors', {
+      id: MYSQL_CONN,
+      tenant_id: TENANT,
+      descriptor_id: MYSQL_DESCRIPTOR,
+      status: 'active',
+    });
+    const mysqlSessions = async (): Promise<SqlSession> => ({
+      query: async (text) =>
+        text.includes('@@session.transaction_read_only')
+          ? { rows: [{ read_only: 1, privileged: 0, can_write: 0 }] }
+          : text.includes('from information_schema.tables')
+            ? { rows: [{ tschema: 'crm', tname: 'customers', kind: 'r', estimated_rows: 3 }] }
+            : { rows: [] },
+      end: async () => undefined,
+    });
+    const mysqlService = new DiscoveryService(
+      { sql: [{ tenantId: TENANT, connectorId: MYSQL_CONN, endpoint: sqlEndpoint }] },
+      { identity, sqlSessions: mysqlSessions, client: () => fake.client as never },
+    );
+    const out = await mysqlService.run(
+      { tenantId: TENANT, estateId: ESTATE, connectorId: MYSQL_CONN, operation: 'enumerate' },
+      'svid',
+    );
+    expect(out.records.map((r) => r.resource)).toEqual(['crm.customers']);
+
+    const oracleService = new DiscoveryService(config, {
+      identity,
+      client: () => fake.client as never,
+      registry: new Map([
+        [SQL_DESCRIPTOR, { transport: 'sql', target: 'oracle' } as ConnectorManifest],
+      ]),
+    });
+    await expect(
+      oracleService.run(
+        { tenantId: TENANT, estateId: ESTATE, connectorId: SQL_CONN, operation: 'enumerate' },
+        'svid',
+      ),
+    ).rejects.toMatchObject({ reason: 'engine_unsupported' });
   });
 
   it('route denies by default, requires the SVID header and hides refusal reasons', async () => {

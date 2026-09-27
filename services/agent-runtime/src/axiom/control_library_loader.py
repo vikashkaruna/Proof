@@ -235,3 +235,159 @@ def load_default_library() -> ControlLibrary:
         ),
     ]
     return ControlLibrary(version="0.1.0", controls=fallback)
+
+
+# ─── W7.3/W7.4 · Multi-regulator overlay and sector packs ────────────
+# The generated JSON carries a `sector_packs` section (frameworks,
+# framework_controls, control_mappings, packs) built from the TypeScript
+# source of truth. The runtime scores DPDPA controls; this section lets it
+# report cross-framework coverage and pack membership. Parsing is additive:
+# a file without the section yields an empty bundle, so older JSON stays
+# loadable.
+
+
+class MappingStrength(str, Enum):
+    """M4.2 mapping strength. 'equivalent' requires regulator-side verification."""
+
+    EQUIVALENT = "equivalent"
+    PARTIAL = "partial"
+    INDICATIVE = "indicative"
+
+
+class MappingProvenance(str, Enum):
+    """Honest provenance vocabulary; 'vendor-verified' is deliberately absent
+    until client tenants exist."""
+
+    REFERENCE = "reference"
+    MAPPED = "mapped"
+
+
+@dataclass(frozen=True)
+class Framework:
+    code: str
+    regulator: str
+    title: str
+    description: str
+    source_url: str
+    verified_on: str
+    verified_by: str
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class FrameworkControl:
+    framework_code: str
+    ref: str
+    heading: str
+
+
+@dataclass(frozen=True)
+class ControlMapping:
+    framework_code: str
+    ref: str
+    control_id: str
+    mapping_strength: MappingStrength
+    provenance: MappingProvenance
+    note: str
+
+
+@dataclass(frozen=True)
+class SectorPack:
+    code: str
+    name: str
+    sector: str
+    description: str
+    framework_codes: tuple[str, ...]
+    control_ids: tuple[str, ...]
+    evidence_requirements: tuple[dict, ...]
+    remediation_patterns: tuple[str, ...]
+    provenance: MappingProvenance
+    basis: str
+
+
+@dataclass(frozen=True)
+class SectorPackBundle:
+    frameworks: tuple[Framework, ...]
+    framework_controls: tuple[FrameworkControl, ...]
+    control_mappings: tuple[ControlMapping, ...]
+    packs: tuple[SectorPack, ...]
+
+    def for_control(self, control_id: str) -> tuple[ControlMapping, ...]:
+        """Cross-framework coverage for one DPDPA control."""
+        return tuple(m for m in self.control_mappings if m.control_id == control_id)
+
+    def pack_for_sector(self, sector: str) -> SectorPack | None:
+        for p in self.packs:
+            if p.sector == sector:
+                return p
+        return None
+
+
+def load_sector_packs_from_file(path: str | os.PathLike[str]) -> SectorPackBundle:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    raw = data.get("sector_packs") or {}
+    frameworks = tuple(
+        Framework(
+            code=f["code"],
+            regulator=f["regulator"],
+            title=f["title"],
+            description=f.get("description", ""),
+            source_url=f["source_url"],
+            verified_on=f["verified_on"],
+            verified_by=f["verified_by"],
+            notes=f.get("notes"),
+        )
+        for f in raw.get("frameworks", [])
+    )
+    framework_controls = tuple(
+        FrameworkControl(
+            framework_code=fc["framework_code"],
+            ref=fc["ref"],
+            heading=fc["heading"],
+        )
+        for fc in raw.get("framework_controls", [])
+    )
+    control_mappings = tuple(
+        ControlMapping(
+            framework_code=m["framework_code"],
+            ref=m["ref"],
+            control_id=m["control_id"],
+            mapping_strength=MappingStrength(m["mapping_strength"]),
+            provenance=MappingProvenance(m["provenance"]),
+            note=m["note"],
+        )
+        for m in raw.get("control_mappings", [])
+    )
+    packs = tuple(
+        SectorPack(
+            code=p["code"],
+            name=p["name"],
+            sector=p["sector"],
+            description=p.get("description", ""),
+            framework_codes=tuple(p.get("framework_codes", [])),
+            control_ids=tuple(p.get("control_ids", [])),
+            evidence_requirements=tuple(p.get("evidence_requirements", [])),
+            remediation_patterns=tuple(p.get("remediation_patterns", [])),
+            provenance=MappingProvenance(p.get("provenance", "reference")),
+            basis=p.get("basis", ""),
+        )
+        for p in raw.get("packs", [])
+    )
+    return SectorPackBundle(
+        frameworks=frameworks,
+        framework_controls=framework_controls,
+        control_mappings=control_mappings,
+        packs=packs,
+    )
+
+
+def load_default_sector_packs() -> SectorPackBundle:
+    """Load the bundled sector-pack section of the generated library JSON.
+
+    Returns an empty bundle when the file is missing or predates the
+    section — callers degrade to DPDPA-only behaviour, never to an error.
+    """
+    if not _DEFAULT_LIB_PATH.exists():
+        return SectorPackBundle(frameworks=(), framework_controls=(), control_mappings=(), packs=())
+    return load_sector_packs_from_file(_DEFAULT_LIB_PATH)

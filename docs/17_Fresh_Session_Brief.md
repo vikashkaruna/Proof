@@ -1,45 +1,57 @@
 # Continuing implementation — Revision 88
 
-**Current status board:** see [Doc 14 — Build status board (Revision 88)](14_Implementation_Progress.md#build-status-board--revision-88-2026-09-25). It lists each stream's status, pending work, effort (S/M/L/XL) and outside gates.
+## Active continuation — Revision 101 (2026-09-27; Revision 100 staging accepted)
 
-## Session close-out and handoff — Revision 97 (2026-09-26)
+This section supersedes conflicting historical handoff instructions below. **Main promotion remains the operator’s responsibility. W9 and W10 remain in scope.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. No cloud provisioning/apply is authorized; existing isolated Docker services are available for engineering acceptance.
+
+**Revision 99 is complete in staging.** [PR #88](https://github.com/vikashkaruna/Proof/pull/88) merged as `2ecbcc005fe24dd692b09550fe443c2002509055`; [source CI 36275413848](https://github.com/vikashkaruna/Proof/actions/runs/36275413848) and [exact staging CI 36276479197](https://github.com/vikashkaruna/Proof/actions/runs/36276479197) passed all 21 applicable checks. Source/staging container acceptance each passed 89 API and 80 browser outcomes in both preprod and production profiles. Consent purpose/notice/capture/withdrawal and DSAR actions are implemented with immutable reviewed EN/HI notice versions, tenant/role locks, stale-version refusals and verified identity before fulfilment. See [audit 88](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md).
+
+**Revision 100, evidence foundations, is complete in staging.** [PR #89](https://github.com/vikashkaruna/Proof/pull/89) merged into staging as `ac5a072613cd8cad79867900d529e9abf27684f7`; the working branch is fast-forwarded to that merge. [Source CI 36286566063](https://github.com/vikashkaruna/Proof/actions/runs/36286566063) passed all 22 applicable checks. Its verified artifacts record 89 API and 83 browser outcomes in each preprod and production profile, plus 14 provider checks and four dedicated evidence browser journeys. [Exact staging CI 36287342406](https://github.com/vikashkaruna/Proof/actions/runs/36287342406) passed all 22 applicable checks on that merge; its independently verified artifacts match the source counts, with no unexpected, flaky or skipped acceptance outcomes. The source and merge have the same Git tree.
+
+The foundation provides bounded exact-version vault reads, durable human upload intents, immutable provider receipts, real evidence filters/downloads and local independent SHA-256 checks. Migration **0073 is locally validated and applied to isolated Docker parity**, adding two supporting tables; the accepted Revision 100 schema was **0000–0073, 74 migrations / 81 public tables**, with W2 named targets **35/40**. Revision 100 remains the latest fully accepted staging milestone. This foundation does not complete W8 or the overall goal; see [audit 89](audits/89-evidence-foundations-2026-09-27.md) for validation and limitations.
+
+**Current implementation: Revision 101 — evidence packs and digest-bound founder report review/release — has completed local acceptance; PR and CI acceptance remain pending.** [Audit 90](audits/90-evidence-packs-release-2026-09-27.md) records the current implementation and acceptance gates: immutable exact-byte manifests and member-version references, founder review bound to the manifest digest, durable archive build/reconciliation, release bound to the archive digest, independent offline verification, and honest report/evidence-pack interfaces. The collapsible preparation UI uses readable storage errors. Engagement selection uses a paginated, tenant-scoped manager API and title/library choices; preparation requires an applicable published library or a real engagement with its recorded library. Migration **0074 passed the exclusive full database suite and is applied to existing isolated Docker parity; it is permanently immutable**. Catalog verification confirms **0000–0074, 75 migration files / 86 public tables**, with W2 named targets now **36/40** through `evidence_packs`. Local tests passed 17 report-kit TypeScript, 28 independent Python, 184 web, 1,390 BFF and 54 shared-types cases; all 15 workspace test tasks and 16 typecheck tasks are green. Final dedicated storage acceptance passed all eight browser journeys and 14 provider outcomes, with zero browser skips, retries or flaky outcomes, including the final friendly error-copy polish. Provider assertions verify zero committed versions for a never-uploaded intent and only the original committed version after recovery/replay. The final 85-journey general browser run passed with zero skips, retries or flaky outcomes; the existing authentication probe uses a fresh idempotency key and still requires 403. Final workspace tests/typecheck, all four build tasks, security scans and repository formatting are green. The 390 px mobile layout was visually reviewed. CI gitleaks, the Revision 101 PR/source CI, staging merge and exact-staging acceptance remain pending. These local results do not replace the accepted Revision 100 staging baseline.
+
+**Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. The four remaining W2 workflows are `ropa_records`, `policy_drafts`, `playbook_entries` and `classification_reviews`, including their usable workflows and acceptance tests. Continue next with the accepted W8 remainder, then W6 actual scheduler composition/alerts and accepted SMB/vendor/partner/Sanket work, W7 Healthcare → Tech and library completeness, W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
+
+## Session close-out and handoff — Revision 98 (2026-09-27)
 
 **Where to continue:**
 
-- Work from a branch cut fresh from `origin/staging` (Revision 96 merged via PR #73; Revision 97 lands via the standing-policy branch's PR).
+- Work from a branch cut fresh from `origin/staging` (Revision 98, 2026-09-27: PRs #81–#85 merged — W5 manual rollback, W7 multi-regulator tables + BFSI pack #1, W8 split across migrations 0069 and 0071, W4.6 MySQL read binding).
 - Open every PR into **`staging`** with a merge commit, and merge only when all checks are green.
-- **Promotion to `main` has resumed (2026-09-26).** Revisions 89–96 are on main via PRs #72 and #75, both merge commits — never squash, never direct pushes.
+- **Promotion to `main` has resumed (2026-09-26).** Revisions 89–97 are on main via PRs #72/#75/#80, all merge commits — never squash, never direct pushes. **The Revision 98 promotion (PRs #81–#85) to main is still due**: open a staging → main PR, merge-commit only, once all checks are green.
 - To start: `git fetch origin staging && git checkout -B codex/<your-branch> origin/staging`.
 
 **State at close:**
 
-- Schema is **0000–0068: 69 migrations, 70 public tables** (Rev 94 the four W6 monitoring/policy tables; Rev 95 the scheduler write paths; Rev 96 drift acknowledgement; Rev 97 the standing-policy engine — the dual-control constraint, the lifecycle RPCs and `evaluate_standing_policy`). The next migration is **0069**; never edit an applied migration.
-- Latest audit is **85**.
-- Parallel lanes in flight (each hands over via a green PR to staging): Bandit fixes (`codex/bandit-hardening`), W6 rediscovery/reassessment executors (`codex/w6-schedule-executors`), W5 web surfaces (`codex/w5-web-surfaces`). `claude/c-w3-5-onboarding-wizard-wip` is adjudicated stale (byte-identical to the Revision 79 migration) — delete after plan completion.
+- Schema is **0000–0071: 72 migrations, 78 public tables** (0068 the standing-policy engine; 0069 the W8.1 consent foundation; 0070 the four W7.3/7.4 multi-regulator tables with BFSI pack #1; 0071 the W8 DSAR lifecycle, breach operations chain and the founder release gate). The next migration is **0072**; never edit an applied migration.
+- Latest audit is **87**.
+- **No lanes in flight.** Every subagent worktree was deleted after its PR merged (operator rule: subagent folders are removed post-merge; only the main workspace remains — the `.codex`/`.claude`/`.kilo` worktrees belong to other models and are theirs to clear). The session ended on a promotional-quota limit with a clean signoff: nothing unfinished, nothing unmerged.
 
 **Build and test status** (staging, PR #56 head `bc176d5`, 21 of 21 CI checks green):
 
-| Suite                                 | Result                                                                                  |
-| ------------------------------------- | --------------------------------------------------------------------------------------- |
-| BFF (vitest)                          | 1148 passed, plus 5 live PostgreSQL tests that run in the "Live SQL binding (W4.6)" job |
-| Web                                   | 89                                                                                      |
-| MFA                                   | 180                                                                                     |
-| Control library                       | 83                                                                                      |
-| Config                                | 68                                                                                      |
-| Types                                 | 45                                                                                      |
-| Evidence                              | 19                                                                                      |
-| UI                                    | 17                                                                                      |
-| Approval engine                       | 13                                                                                      |
-| Supabase                              | 11                                                                                      |
-| Ledger                                | 8                                                                                       |
-| Marketing                             | 6                                                                                       |
-| Database suite                        | Fresh migrations with `service_role nobypassrls`, every `tests/database/*.test.sql`     |
-| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                   |
-| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                   |
-| Strict Auth/PostgREST parity          | Green                                                                                   |
-| Container API/browser acceptance (W0) | Green                                                                                   |
-| Python                                | Agent runtime, temporal workers and model gateway suites green                          |
-| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                       |
+| Suite                                 | Result                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BFF (vitest)                          | 1186 passed, plus live PostgreSQL and MySQL jobs in the "Live SQL binding (W4.6)" workflow                                                                  |
+| Web                                   | 108                                                                                                                                                         |
+| MFA                                   | 180                                                                                                                                                         |
+| Control library                       | 91                                                                                                                                                          |
+| Config                                | 68                                                                                                                                                          |
+| Types                                 | 45                                                                                                                                                          |
+| Evidence                              | 19                                                                                                                                                          |
+| UI                                    | 17                                                                                                                                                          |
+| Approval engine                       | 13                                                                                                                                                          |
+| Supabase                              | 11                                                                                                                                                          |
+| Ledger                                | 8                                                                                                                                                           |
+| Marketing                             | 6                                                                                                                                                           |
+| Database suite                        | Fresh migrations with `service_role nobypassrls`, every `tests/database/*.test.sql` incl. consent-foundation, w7-regulator-packs and w8-breach-dsar-release |
+| Browser persona journeys (W1)         | Green, including the tool-registry, PNG/SVG export and grant journeys                                                                                       |
+| SPIRE (W4.3)                          | Isolated, protected-host and native-runner jobs green                                                                                                       |
+| Strict Auth/PostgREST parity          | Green                                                                                                                                                       |
+| Container API/browser acceptance (W0) | Green                                                                                                                                                       |
+| Python                                | Agent runtime 280, temporal workers and model gateway suites green                                                                                          |
+| Security                              | CodeQL, Bandit, Trivy, semgrep and gitleaks green                                                                                                           |
 
 The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
 
@@ -47,11 +59,13 @@ The local gate `scripts/security-scan.sh` runs on the husky pre-push hook.
 
 1. **Rotation — still the operator's action item.** The three historical secret findings were retired via `.gitleaksignore` fingerprints with rationale (PR #74; full-history scan green), but the values are burned in public history: deployments must source fresh secrets via `scripts/mint-supabase-keys.mjs`, and deployed preprod values still need rotation.
 2. `main` branch protection/rulesets are done; the phantom required-check contexts that blocked PR #72 no longer block (PRs #72 and #75 merged clean).
-3. Stale branches are deleted together after plan completion.
+3. Stale branches are deleted together after plan completion. Subagent worktree folders are deleted as each lane merges (all merged lanes' folders are already gone); remote lane branches and the two `claude/*` stale candidates (`c-w3-5-onboarding-wizard-wip`, `dependency-bumps`) remain for the plan-close cleanup.
 4. Dependabot #32–36 are closed out and their updates landed via PR #57. `tailwindcss` 4 and ESLint 10 are held back: the major-version migration and `scopeManager.addGlobals` breakage respectively.
 5. `saml2_bearer` is a TODO, not a blocker.
-6. Sector pack #1 will be chosen when W7 is reached.
-7. Promotion to `main` **resumed 2026-09-26** — PR #72 (through #74) and PR #75 (Revisions 95–96) merged with merge commits; keep `origin/main..origin/staging` empty after each promotion.
+6. **Sector pack #1 = BFSI** (order: BFSI → Healthcare → Tech/E-commerce; decided 2026-09-26). Delivered in PR #82 with reference/mapped provenance only — `vendor-verified` is structurally impossible in the schema until client tenants exist.
+7. Promotion to `main` **resumed 2026-09-26** — PR #72 (through #74), PR #75 (Revisions 95–96) and PR #80 (through the W6 executors, W5 web surfaces and Revision 97) merged with merge commits. Keep `origin/main..origin/staging` empty after each promotion; **the Revision 98 promotion is outstanding**.
+8. **W9 and W10 are deferred** until every other workstream closes (2026-09-27); quality outranks speed.
+9. The 2026-09-27 session ended on the promotional-quota limit: only in-flight lanes were completed and merged; everything below in "Recommended next order" is deliberately deferred to the next session.
 
 When operator input is missing, take the recommended option and record the assumptions in the revision's audit.
 
@@ -70,23 +84,26 @@ When operator input is missing, take the recommended option and record the assum
 
 **Recommended next order:**
 
-1. **W5 execution loop (XL):** an executor that consumes the dispatch outbox under a signed token, a dry-run simulator, rollback, and post-verification. It adds the 5 execution-detail tables, with PRD B.10 as the acceptance criteria. Its write path needs a W4.6/W4.7 write adapter bound to the approved plan.
-2. **W6 continuous compliance (XL):** scheduler and scheduled drift and discovery, reusing `onboarding_estate_drift` and `/internal/discovery/run`; standing policies; monitor health; 4 tables.
-3. **W8 rights, consent, breach, and review/release (XL).**
-4. **W7 multi-regulator tables and packs (L)**, which needs the sector pack #1 decision.
-5. **W9 performance and restore drills, and W10 on-prem (L each)**, which need a deployment.
+1. **W8 rights, consent, breach, review/release (XL), remainder:** the consent BFF routes over 0069 (mirroring the 0071 route style — refusals as verbatim 409s), the `/consent` page honest rewrite (it is still a fabricated demo), the `/dsars` workflow actions (intake/verify/advance over the routes already built), and deadline notifications for DSAR/breach compliance_events (the rows and the `?overdue=true` filter exist; a push channel is drift-alerting scope). Done: the whole database layer (0069 + 0071), the 0071 BFF routes, `/breaches` and the `/reports` review queue.
+2. **W6 continuous compliance (XL), remainder:** drift alerting/notifications (in-app only — no egress) and deployed acceptance with the scheduler enabled. Everything else (tables, scheduler, drift write path, acknowledgement, health, standing-policy engine, executors, monitoring/policy UI) is delivered.
+3. **W7 packs (L):** Healthcare, then Tech/E-commerce (BFSI pack #1 done).
+4. **W9 performance and restore drills, and W10 on-prem (L each)**: deferred until the above close and a deployment exists.
 
 Smaller leftovers:
 
-- MySQL SQL binding;
 - an RDS staging acceptance run (operator);
 - vendor-verified descriptors (need client tenants);
-- `saml2_bearer`;
+- `saml2_bearer` (TODO, not a blocker);
 - W3.5 derivation edges (need a lineage model), live updates and branded export;
 - a web view of discovery runs;
-- five web screens that still fabricate values (queued task);
+- the remaining fabricated web screens (the reports summary cards and the `/consent` demo — `/breaches` was fixed in Revision 98);
 - the unused `SUPABASE_SERVICE_KEY` in the Helm web and marketing charts;
-- Bandit medium findings in the test-harness SQL.
+- Bandit medium findings in the test-harness SQL;
+- **the Revision 98 promotion to main** (staging → main PR, merge commit).
+
+**Revision 98 — W8 rights/consent/breach/release, W7 BFSI pack #1, and the W4.6 MySQL binding (GLM session, quota-limited close):**
+
+A five-PR session closed out cleanly at the promotional-quota limit. **PR #80** promoted main through Revision 97 plus the W6 rediscovery/reassessment executors and the W5 web surfaces (`23dcf4e`, merge commit). **PR #81** added the W5 manual rollback route — `POST /v1/plans/:id/rollback` (PLAN_EXECUTE, kill-switch gated, dispatch through `record_rollback_execution` 0062 with `triggered_by: 'manual'`, refusal loud 409s) — which closes the W5 execution-loop backend; only the operator-gated production connector composition remains. **PR #82** delivered the four W7.3/7.4 multi-regulator tables (migration 0070: `frameworks`, `framework_controls`, `control_mappings`, `sector_packs`) and **BFSI pack #1** — six frameworks (RBI-MD-ITG, RBI-NBFC-AA, RBI-PAYMENT-DATA, SEBI-CYBER-RESILIENCE, IRDAI-CYBER-SECURITY, CERT-IN-DIRECTIONS-2022), 19 mappings, provenance `reference`/`mapped` only with `vendor-verified` excluded by CHECK constraint. **PRs #83/#84** split W8: my lane (PR #83) gave the 0006-era `dsars`/`breaches`/`reports` tables their sanctioned write paths — migration 0071 with the DSAR lifecycle (`record_dsar` server-owned 30-day clock + compliance_events deadline, `verify_dsar_identity`, `advance_dsar` closed map with evidence-bound completion and reason-required rejection), the breach chain (`record_breach` server-owned 72-hour §8(6) clock, strictly linear `advance_breach`, and the notification authority chain draft → reviewed-by-a-second-human → sent-by-a-non-drafter with every delivery attempt recorded as evidence and statutory timestamps written only by delivered sends), the founder release gate (`review_report`/`release_report` — Axiom-internal authority verified against the users table, released content hashed server-side), 13 BFF routes, and the honest `/breaches` rewrite plus the `/reports` review queue; the consent lane (PR #84) delivered migration 0069 — `consent_purposes`/`consent_records`/`consent_withdrawals` with `record_consent`, `withdraw_consent` (atomic, clock-stamped), `set_consent_legal_hold` and `complete_withdrawal_downstream`, the 7-year retention posture with no delete path, and four `consent.*` ledger values. **PR #85** delivered the last W4.6 transport — `MySqlReadConnector` mirroring the Postgres read contract (read-only rolled-back transactions, write-capable-account refusal, shape-count samples, pinned-CA TLS, ap-south-1 endpoint rule) with a live MySQL 8 CI job (audit 86). See [audit 87](audits/87-w8-rights-consent-breach-release-review-2026-09-27.md) for W8. Schema is **0071 / 72 migrations / 78 public tables**. Next in plan order: the consent BFF routes and the `/consent` + `/dsars` surfaces, drift alerting, the Healthcare/Tech packs, then W9/W10.
 
 **Revision 97 — the standing-policy engine (GLM session):**
 

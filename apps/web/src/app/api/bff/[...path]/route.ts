@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import {
+  boundedRequestBody,
+  RequestBodyTooLarge,
+  RequestBodyUnavailable,
+} from '@/lib/bounded-request-body';
 import { selectTenantMembership, type TenantMembership } from '@/lib/tenant-selection';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -35,8 +40,40 @@ async function forward(request: NextRequest, context: RouteContext) {
   const base = process.env.BFF_PUBLIC_URL || 'http://localhost:4000';
   const target = new URL(`${base.replace(/\/$/, '')}/${path.join('/')}`);
   target.search = request.nextUrl.search;
-  const bodyBytes =
-    request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
+  let bodyBytes: ArrayBuffer | undefined;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    const bodyLimit = /^\/v1\/evidence\/ingestions\/?$/.test(target.pathname)
+      ? 12 * 1024 * 1024
+      : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
+        ? 64 * 1024
+        : null;
+    try {
+      bodyBytes =
+        bodyLimit !== null
+          ? await boundedRequestBody(request, bodyLimit)
+          : await request.arrayBuffer();
+    } catch (error) {
+      const oversized = error instanceof RequestBodyTooLarge;
+      const unavailable = error instanceof RequestBodyUnavailable;
+      return NextResponse.json(
+        {
+          error: {
+            code: oversized
+              ? 'request_body_too_large'
+              : unavailable
+                ? 'request_body_unavailable'
+                : 'invalid_request_body',
+            message: oversized
+              ? 'Request exceeds the allowed size.'
+              : unavailable
+                ? 'Request interrupted or timed out. Check its recorded state before retrying.'
+                : 'Unable to read request body.',
+          },
+        },
+        { status: oversized ? 413 : unavailable ? 408 : 400 },
+      );
+    }
+  }
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${accessToken}`);
   // These exact endpoints run before a caller has a tenant. The BFF still
@@ -125,6 +162,7 @@ async function forward(request: NextRequest, context: RouteContext) {
     headers,
     body: bodyBytes,
     redirect: 'manual',
+    signal: request.signal,
   });
   return new NextResponse(response.body, { status: response.status, headers: response.headers });
 }

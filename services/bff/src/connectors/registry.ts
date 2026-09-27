@@ -42,6 +42,8 @@ export function buildRegistry(sources: readonly string[]): ReadonlyMap<string, C
 export const connectorRegistry = buildRegistry([
   readFileSync(new URL('./descriptors/postgresql-production.yaml', import.meta.url), 'utf8'),
   readFileSync(new URL('./descriptors/postgresql-reference.yaml', import.meta.url), 'utf8'),
+  // W4.6 MySQL: the second SQL engine of the read binding, same contract.
+  readFileSync(new URL('./descriptors/mysql-production.yaml', import.meta.url), 'utf8'),
   // W4.7 REST pack: reference provenance, exercised against the reference
   // service only. Vendor-verified descriptors replace these per client tenant.
   ...['crm', 'hrms', 'data-warehouse', 'ticketing', 'code-repository'].map((target) =>

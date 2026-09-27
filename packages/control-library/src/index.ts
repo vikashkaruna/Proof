@@ -33,3 +33,25 @@ export type {
 export { buildLibrarySeed } from './seed';
 export { GAP_SCAN_QUESTIONS, GAP_SCAN_QUESTION_SET_VERSION } from './gap-scan-questions';
 export type { GapScanQuestion } from './gap-scan-questions';
+export {
+  BFSI_CONTROL_MAPPINGS,
+  BFSI_FRAMEWORK_CONTROLS,
+  BFSI_FRAMEWORKS,
+  BFSI_SECTOR_PACK,
+  MappingProvenanceSchema,
+  MappingStrengthSchema,
+  OverlayRegulatorSchema,
+  SectorPackSectorSchema,
+  validateSectorPacks,
+} from './sector-packs';
+export type {
+  MappingProvenance,
+  MappingStrength,
+  OverlayRegulator,
+  SectorPack,
+  SectorPackEvidenceRequirement,
+  SectorPackFramework,
+  SectorPackFrameworkControl,
+  SectorPackMapping,
+  SectorPackSector,
+} from './sector-packs';

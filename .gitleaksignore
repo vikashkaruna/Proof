@@ -53,3 +53,8 @@ e65ecf5776d512af4b626492263a2f5724190479:apps/web/src/middleware.ts:jwt:38
 7719f0c8611646db72f6e52656236f2dfebf367f:infra/docker/docker-compose.supabase.yml:generic-api-key:49
 7719f0c8611646db72f6e52656236f2dfebf367f:infra/docker/docker-compose.supabase.yml:generic-api-key:67
 7631b1fbbef36cfb4254414d665ebf28b23b9909:infra/docker/environments/.env.preprod.example:generic-api-key:38
+
+# Verified 2026-09-27: this exact finding is the synthetic S3 object path
+# `synthetic/operation/proof` in the isolated evidence storage fixture.
+# It is an object name, not an access key, secret, or provider credential.
+7d36dbdc32fd229d7be202dbfe94ecfaf100f8f7:packages/evidence/src/storage-acceptance.ts:generic-api-key:45

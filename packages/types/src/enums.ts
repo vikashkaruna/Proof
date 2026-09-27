@@ -154,6 +154,9 @@ export const LedgerActionType = {
   ASSESSMENT_STARTED: 'assessment.started',
   ASSESSMENT_SCORED: 'assessment.scored',
   ASSESSMENT_REPORT_GENERATED: 'assessment.report.generated',
+  EVIDENCE_INGESTION_STARTED: 'evidence.ingestion.started',
+  EVIDENCE_INGESTION_PENDING: 'evidence.ingestion.pending',
+  EVIDENCE_INGESTION_SETTLED: 'evidence.ingestion.settled',
   EVIDENCE_COLLECTED: 'evidence.collected',
   EVIDENCE_SEALED: 'evidence.sealed',
   EVIDENCE_LINKED: 'evidence.linked',
@@ -195,6 +198,32 @@ export const LedgerActionType = {
   MONITORING_POLICY_REVOKED: 'monitoring.policy.revoked',
   MONITORING_POLICY_WITHIN_POLICY: 'monitoring.policy.within_policy',
   MONITORING_POLICY_ESCALATED: 'monitoring.policy.escalated',
+  // W8.1 — the consent foundation (migration 0069): a consent's lifecycle is
+  // ledgered end to end — captured with the notice version it pinned,
+  // withdrawn, frozen or unfrozen for retention (legal hold), and the
+  // downstream propagation of a withdrawal confirmed complete.
+  CONSENT_PURPOSE_REGISTERED: 'consent.purpose.registered',
+  CONSENT_NOTICE_PUBLISHED: 'consent.notice.published',
+  CONSENT_PURPOSE_STATUS_CHANGED: 'consent.purpose.status_changed',
+  CONSENT_RECORDED: 'consent.recorded',
+  CONSENT_WITHDRAWN: 'consent.withdrawn',
+  CONSENT_LEGAL_HOLD_SET: 'consent.legal_hold.set',
+  CONSENT_WITHDRAWAL_COMPLETED: 'consent.withdrawal.completed',
+  // W8 — rights, breach operations and the founder release gate (migration
+  // 0071): the DSAR lifecycle's recorded decisions, the breach state machine
+  // and its notification authority chain, and BR-4's review gate. The
+  // statutory sends (breach.notified.dpb / breach.notified.principals) and
+  // the DSAR endpoints (dsar.received/verified/fulfilled/rejected) reuse the
+  // values 0006 defined.
+  DSAR_STATUS_CHANGED: 'dsar.status.changed',
+  DSAR_ESCALATED: 'dsar.escalated',
+  BREACH_STATUS_CHANGED: 'breach.status.changed',
+  BREACH_NOTIFICATION_DRAFTED: 'breach.notification.drafted',
+  BREACH_NOTIFICATION_REVIEWED: 'breach.notification.reviewed',
+  BREACH_NOTIFICATION_ATTEMPT: 'breach.notification.attempt',
+  REPORT_APPROVED: 'report.approved',
+  REPORT_REJECTED: 'report.rejected',
+  REPORT_RELEASED: 'report.released',
   VERIFICATION_STARTED: 'verification.started',
   VERIFICATION_PASSED: 'verification.passed',
   VERIFICATION_FAILED: 'verification.failed',
@@ -262,6 +291,10 @@ export const LedgerActionType = {
   BREACH_NOTIFIED_PRINCIPALS: 'breach.notified.principals',
   REPORT_GENERATED: 'report.generated',
   REPORT_EXPORTED: 'report.exported',
+  EVIDENCE_PACK_PREPARED: 'evidence.pack.prepared',
+  EVIDENCE_PACK_BUILD_STARTED: 'evidence.pack.build.started',
+  EVIDENCE_PACK_BUILD_PENDING: 'evidence.pack.build.pending',
+  EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];

@@ -1,3 +1,6 @@
+import { evidenceRoutes } from './evidence.js';
+import { evidencePackRoutes } from './evidence-packs.js';
+import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
@@ -6,6 +9,7 @@ import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
+import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -107,6 +111,38 @@ function hasFreshDryRun(expiresAt: unknown, now: number): boolean {
 }
 
 /**
+ * Version of the BFF → agent-runtime manual rollback payload (W5 · M3.5).
+ *
+ * Bump on any breaking payload change and update `InternalRollbackRequest` in
+ * `services/agent-runtime/src/axiom/app.py` in the same commit;
+ * `services/bff/src/routes/rollback-contract.test.ts` asserts they agree
+ * against `tests/contracts/rollback-dispatch.v1.json`.
+ */
+export const ROLLBACK_CONTRACT_VERSION = 1;
+
+export interface RollbackDispatchInput {
+  tenantId: string;
+  batchId: string;
+  actionIds: string[];
+  correlationId: string;
+}
+
+/**
+ * The exact body sent to the agent runtime's `/internal/rollback`. The batch
+ * scopes the read on the runtime side; `record_rollback_execution` refuses an
+ * action whose batch differs, so nothing wider than one execution can undo.
+ */
+export function buildRollbackDispatchPayload(input: RollbackDispatchInput) {
+  return {
+    contract_version: ROLLBACK_CONTRACT_VERSION,
+    tenant_id: input.tenantId,
+    batch_id: input.batchId,
+    action_ids: input.actionIds,
+    correlation_id: input.correlationId,
+  };
+}
+
+/**
  * Version of the BFF → agent-runtime dry-run payload (W5 · M3.2).
  *
  * Bump on any breaking payload change and update `InternalDryRunRequest` in
@@ -155,6 +191,9 @@ interface Deps {
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', estateRoutes());
+  app.route('/', consentRoutes());
+  app.route('/', evidenceRoutes());
+  app.route('/', evidencePackRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());
@@ -1961,6 +2000,490 @@ export function v1Routes(deps: Deps) {
     );
   });
 
+  // ─── W8 — rights requests, breach operations, and the release gate ──
+  //
+  // Three human workflows whose tables existed since 0006 but had no
+  // sanctioned write path. A DSAR moves through identity verification,
+  // fulfilment, and a closed set of terminal states; a breach walks a
+  // strictly linear state machine under a server-owned 72-hour DPB clock,
+  // and nothing about a notification is "sent" until a second human has
+  // reviewed a draft and a hand other than the drafter's records the
+  // dispatch; and no client output leaves the building without the
+  // founder's recorded review (BR-4). Every write is an RPC whose refusals
+  // render as 409 — the database remains the only author of what is allowed.
+
+  const dsarIntakeSchema = z.object({
+    kind: z.enum(['access', 'correction', 'erasure', 'nominate', 'portability']),
+    principalName: z.string().min(1).max(200).optional(),
+    principalEmail: z.string().max(320).optional(),
+    principalPhone: z.string().max(20).optional(),
+    dueDays: z.number().int().min(1).max(90),
+    notes: z.string().max(2000).optional(),
+  });
+
+  const dsarStatusSchema = z.enum(['in_fulfilment', 'completed', 'rejected', 'escalated']);
+
+  const breachIntakeSchema = z.object({
+    title: z.string().min(1).max(300),
+    description: z.string().min(1).max(5000),
+    severity: z.enum(['low', 'medium', 'high', 'critical']),
+    occurredAt: z.string().datetime().optional(),
+    dataCategories: z.array(z.string().min(1).max(100)).max(20).optional(),
+    affectedCount: z.number().int().min(0).optional(),
+  });
+
+  const breachStatusSchema = z.enum([
+    'triaging',
+    'contained',
+    'notifying_dpb',
+    'notifying_principals',
+    'post_mortem',
+    'closed',
+  ]);
+
+  const breachNotificationSchema = z.object({
+    kind: z.enum(['dpb', 'affected_principal']),
+    language: z.enum(['en', 'hi']),
+    subject: z.string().min(1).max(300),
+    body: z.string().min(1).max(20000),
+  });
+
+  const notificationSendSchema = z.object({
+    outcome: z.enum(['delivered', 'failed', 'deferred']),
+    detail: z.record(z.string(), z.unknown()).optional(),
+  });
+
+  // POST /v1/dsars — intake starts the statutory clock server-side.
+  app.post('/dsars', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const parsed = dsarIntakeSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid DSAR intake' } }, 400);
+    }
+    const input = parsed.data;
+    if (!input.principalEmail && !input.principalPhone) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'A principal email or phone is required',
+          },
+        },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('record_dsar', {
+      p_tenant_id: tenantId,
+      p_kind: input.kind,
+      p_principal_name: input.principalName ?? null,
+      p_principal_email: input.principalEmail ?? null,
+      p_principal_phone: input.principalPhone ?? null,
+      p_due_days: input.dueDays,
+      p_notes: input.notes ?? null,
+      p_recorded_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'dsar intake failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not record the DSAR' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The DSAR was not recorded' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/dsars — the tenant's rights requests, most urgent first.
+  app.get('/dsars', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from('dsars')
+      .select(
+        'id, kind, status, data_principal_name, data_principal_email, data_principal_phone, identity_verified, identity_verification_method, due_by, received_at, completed_at, rejection_reason, assigned_to, notes',
+      )
+      .eq('tenant_id', tenantId)
+      .order('due_by', { ascending: true })
+      .limit(200);
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/dsars/:id/verify — bind who verified the principal's identity
+  // and how, before any fulfilment may start.
+  app.post('/dsars/:id/verify', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const dsarId = c.req.param('id');
+    if (!z.uuid().safeParse(dsarId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid DSAR id' } }, 400);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { method?: unknown };
+    const method = typeof body.method === 'string' ? body.method.trim() : '';
+    if (method.length < 1 || method.length > 120) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'A verification method is required' } },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('verify_dsar_identity', {
+      p_tenant_id: tenantId,
+      p_dsar_id: dsarId,
+      p_method: method,
+      p_verified_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'dsar identity verification failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not verify the DSAR' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'Identity was not verified' } }, 409);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/dsars/:id/advance — the closed transition map. Fulfilment
+  // needs a verified identity; completion needs the fulfilment evidence
+  // artifact; rejection needs a captured reason (FR-7.6).
+  app.post('/dsars/:id/advance', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const dsarId = c.req.param('id');
+    if (!z.uuid().safeParse(dsarId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid DSAR id' } }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      toStatus?: unknown;
+      note?: unknown;
+      fulfilmentEvidenceId?: unknown;
+    } | null;
+    const toStatus = typeof body?.toStatus === 'string' ? body.toStatus : '';
+    const statusParsed = dsarStatusSchema.safeParse(toStatus);
+    if (!statusParsed.success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid DSAR status' } }, 400);
+    }
+    const note = typeof body?.note === 'string' ? body.note : undefined;
+    const fulfilmentEvidenceId =
+      typeof body?.fulfilmentEvidenceId === 'string' ? body.fulfilmentEvidenceId : undefined;
+    if (fulfilmentEvidenceId && !z.uuid().safeParse(fulfilmentEvidenceId).success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid fulfilment evidence id' } },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('advance_dsar', {
+      p_tenant_id: tenantId,
+      p_dsar_id: dsarId,
+      p_to_status: statusParsed.data,
+      p_note: note ?? null,
+      p_fulfilment_evidence_id: fulfilmentEvidenceId ?? null,
+      p_advanced_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'dsar advance failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not advance the DSAR' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The DSAR was not advanced' } }, 409);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/breaches — intake starts the 72-hour DPB clock server-side and
+  // opens the deadline compliance event.
+  app.post('/breaches', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const parsed = breachIntakeSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid breach intake' } },
+        400,
+      );
+    }
+    const input = parsed.data;
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('record_breach', {
+      p_tenant_id: tenantId,
+      p_title: input.title,
+      p_description: input.description,
+      p_severity: input.severity,
+      p_occurred_at: input.occurredAt ?? null,
+      p_data_categories: input.dataCategories ?? [],
+      p_affected_count: input.affectedCount ?? null,
+      p_reported_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'breach intake failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not record the breach' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The breach was not recorded' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/breaches — the tenant's incidents, deadline order first; the
+  // overdue filter answers "which 72-hour clocks are burning".
+  app.get('/breaches', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const admin = createSupabaseAdmin();
+    const overdue = c.req.query('overdue') === 'true';
+    let query = admin
+      .from('breaches')
+      .select(
+        'id, title, description, severity, status, occurred_at, detected_at, dpb_notification_due_by, affected_count, data_categories, dpb_notified_at, dpb_reference, principals_notified_at, owner_id, post_mortem',
+      )
+      .eq('tenant_id', tenantId)
+      .order('dpb_notification_due_by', { ascending: true })
+      .limit(200);
+    if (overdue) {
+      query = query
+        .lt('dpb_notification_due_by', new Date().toISOString())
+        .is('dpb_notified_at', null);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/breaches/:id/advance — the strictly linear state machine.
+  app.post('/breaches/:id/advance', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const breachId = c.req.param('id');
+    if (!z.uuid().safeParse(breachId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid breach id' } }, 400);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      toStatus?: unknown;
+      note?: unknown;
+    } | null;
+    const statusParsed = breachStatusSchema.safeParse(
+      typeof body?.toStatus === 'string' ? body.toStatus : '',
+    );
+    if (!statusParsed.success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid breach status' } },
+        400,
+      );
+    }
+    const note = typeof body?.note === 'string' ? body.note : undefined;
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('advance_breach', {
+      p_tenant_id: tenantId,
+      p_breach_id: breachId,
+      p_to_status: statusParsed.data,
+      p_note: note ?? null,
+      p_advanced_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'breach advance failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not advance the breach' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The breach was not advanced' } }, 409);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/breaches/:id/notifications — a draft. Drafts are revisions:
+  // the previous unsent draft of the same kind is superseded, never deleted.
+  app.post('/breaches/:id/notifications', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const breachId = c.req.param('id');
+    if (!z.uuid().safeParse(breachId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid breach id' } }, 400);
+    }
+    const parsed = breachNotificationSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid notification draft' } },
+        400,
+      );
+    }
+    const input = parsed.data;
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('draft_breach_notification', {
+      p_tenant_id: tenantId,
+      p_breach_id: breachId,
+      p_kind: input.kind,
+      p_language: input.language,
+      p_subject: input.subject,
+      p_body: input.body,
+      p_created_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'breach notification draft failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not draft the notification' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The draft was not created' } }, 409);
+    }
+    return c.json({ data }, 201);
+  });
+
+  // GET /v1/breaches/:id/notifications — the draft chain with its review
+  // and delivery evidence.
+  app.get('/breaches/:id/notifications', async (c) => {
+    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
+    if (readRefusal) return readRefusal;
+    const tenantId = c.get('tenantId');
+    const breachId = c.req.param('id');
+    if (!z.uuid().safeParse(breachId).success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid breach id' } }, 400);
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from('breach_notifications')
+      .select(
+        'id, breach_id, kind, status, language, subject, body, reviewed_by, reviewed_at, sent_by, sent_at, delivery_outcome, delivery_attempts, delivery_detail, superseded_by, correlation_id, created_by, created_at',
+      )
+      .eq('tenant_id', tenantId)
+      .eq('breach_id', breachId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/breach-notifications/:id/review — the second human's
+  // judgement. The RPC refuses the drafter reviewing their own draft.
+  app.post('/breach-notifications/:id/review', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const notificationId = c.req.param('id');
+    if (!z.uuid().safeParse(notificationId).success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid notification id' } },
+        400,
+      );
+    }
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('review_breach_notification', {
+      p_tenant_id: tenantId,
+      p_notification_id: notificationId,
+      p_reviewed_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'breach notification review failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not review the notification' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json(
+        { error: { code: refused, message: 'The notification was not reviewed' } },
+        409,
+      );
+    }
+    return c.json({ data });
+  });
+
+  // POST /v1/breach-notifications/:id/send — record the human's own-channel
+  // dispatch. The platform never transmits; a delivered send is what writes
+  // the statutory timestamp on the breach.
+  app.post('/breach-notifications/:id/send', async (c) => {
+    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
+    if (writeRefusal) return writeRefusal;
+    const tenantId = c.get('tenantId');
+    const user = c.get('user');
+    const notificationId = c.req.param('id');
+    if (!z.uuid().safeParse(notificationId).success) {
+      return c.json(
+        { error: { code: 'validation_failed', message: 'Invalid notification id' } },
+        400,
+      );
+    }
+    const parsed = notificationSendSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: { code: 'validation_failed', message: 'Invalid send outcome' } }, 400);
+    }
+    const input = parsed.data;
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin.rpc('send_breach_notification', {
+      p_tenant_id: tenantId,
+      p_notification_id: notificationId,
+      p_outcome: input.outcome,
+      p_detail: input.detail ?? {},
+      p_sent_by: user.id,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) {
+      logger.error({ err: error.message }, 'breach notification send failed');
+      return c.json(
+        { error: { code: 'persistence_failed', message: 'Could not record the send' } },
+        500,
+      );
+    }
+    const refused = (data as { error?: string } | null)?.error;
+    if (refused) {
+      return c.json({ error: { code: refused, message: 'The send was not recorded' } }, 409);
+    }
+    return c.json({ data });
+  });
+
   // GET /v1/monitoring/health — monitoring the monitoring: are schedules
   // firing, when did each last run, which are overdue, and how much drift
   // has been detected (and acknowledged) recently. This is what makes
@@ -2550,6 +3073,205 @@ export function v1Routes(deps: Deps) {
         startedAt: new Date().toISOString(),
       },
       status === 'rejected' ? 422 : 202,
+    );
+  });
+
+  // ─── W5 · M3.5 — the manual rollback route ────────────────────────
+  //
+  // The automated rollback pass runs only when a failure fires with
+  // stop-on-failure armed; every other completed action waits for exactly
+  // this: a human deciding to undo executed work. The route carries the
+  // human's authority and record — capability, kill switch, and a ledger
+  // entry with the human's own actor — while the undo itself runs where
+  // every other estate write runs, in the runtime, against each action's
+  // stored definition, recorded through `record_rollback_execution` with
+  // `triggered_by: 'manual'`. The BFF never writes a rollback row: only
+  // the adapter that attempted the undo may record its outcome.
+
+  // Unknown keys are refused, not stripped: a body the operator did not
+  // mean should fail loudly rather than be partially acted on.
+  const ManualRollbackRequestSchema = z
+    .object({
+      actionIds: z.array(z.string().uuid()).min(1).max(100),
+    })
+    .strict();
+
+  // POST /v1/plans/:id/rollback — undo executed actions of one execution.
+  app.post('/plans/:id/rollback', async (c) => {
+    const rollbackRefusal = requireCapability(c, Capability.PLAN_EXECUTE);
+    if (rollbackRefusal) return rollbackRefusal;
+    const tenantId = c.get('tenantId');
+    if (await deps.killSwitch.isActive(tenantId)) {
+      return c.json(
+        { error: { code: 'kill_switch_active', message: 'Kill switch is engaged' } },
+        423,
+      );
+    }
+    const planId = c.req.param('id');
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => null);
+    const parsed = ManualRollbackRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Invalid rollback request',
+            details: parsed.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const admin = createSupabaseAdmin();
+    const { data: actions, error: actionsErr } = await admin
+      .from('remediation_actions')
+      .select('id, plan_id, action_type, execution_status, final_outcome, execution_batch_id')
+      .in('id', parsed.data.actionIds)
+      .eq('tenant_id', tenantId);
+    if (actionsErr) {
+      return c.json({ error: { code: 'lookup_failed', message: actionsErr.message } }, 500);
+    }
+
+    const rows = actions ?? [];
+    if (rows.length !== parsed.data.actionIds.length || rows.some((a) => a.plan_id !== planId)) {
+      // An unknown id and an action belonging to another plan are the same
+      // answer to this caller: nothing to roll back under this plan.
+      return c.json(
+        { error: { code: 'actions_not_found', message: 'No such actions under this plan' } },
+        404,
+      );
+    }
+
+    // One execution per request: the undo is scoped to the batch the actions
+    // ran in, which is also what the runtime's pass reads and what
+    // `record_rollback_execution` enforces per record.
+    const batchIds = new Set(rows.map((a) => a.execution_batch_id as string | null));
+    if (batchIds.size !== 1 || batchIds.has(null)) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_span_batches',
+            message: 'A rollback request must name actions from one execution',
+          },
+        },
+        422,
+      );
+    }
+    const batchId = [...batchIds][0] as string;
+
+    // Only an action the batch completed — and has not already reversed — is
+    // reversible. `record_rollback_execution` re-checks this under the row
+    // lock; refusing here keeps the undo from ever being attempted against a
+    // row the database would refuse to record.
+    const notReversible = rows
+      .filter((a) => a.final_outcome !== 'succeeded' || a.execution_status !== 'succeeded')
+      .map((a) => a.id as string);
+    if (notReversible.length > 0) {
+      return c.json(
+        {
+          error: {
+            code: 'actions_not_reversible',
+            message: 'Only executed, not-yet-rolled-back actions can be rolled back',
+            details: { actionIds: notReversible },
+          },
+        },
+        422,
+      );
+    }
+
+    const correlationId = randomUUID();
+
+    // The human's decision, on the ledger under their own actor. The
+    // runtime's RPC writes the execution phases as karya's; without this
+    // entry the ledger could not say who decided.
+    await deps.ledger.append({
+      tenantId,
+      correlationId,
+      actorType: 'human',
+      actorId: user.id,
+      actionType: 'execution.rollback.started',
+      targetRef: planId,
+      result: 'pending',
+      detail: { triggered_by: 'manual', batch_id: batchId, action_ids: parsed.data.actionIds },
+    });
+
+    const dispatch = await dispatchRollback(
+      env.AGENT_RUNTIME_URL,
+      env.AGENT_RUNTIME_INTERNAL_TOKEN ?? '',
+      buildRollbackDispatchPayload({
+        tenantId,
+        batchId,
+        actionIds: parsed.data.actionIds,
+        correlationId,
+      }),
+    );
+
+    // Per-action telemetry from the runtime's recorded acknowledgement: the
+    // action rows moved (or were refused) before the runtime answered, so a
+    // subscriber sees recorded state, not a prediction.
+    if (dispatch.status === 'accepted' && dispatch.outcomes) {
+      for (const outcome of dispatch.outcomes) {
+        deps.realtime.broadcast({
+          type: 'execution.progress',
+          executionId: batchId as `${string}-${string}-${string}-${string}-${string}`,
+          planId: planId as `${string}-${string}-${string}-${string}-${string}`,
+          actionId: outcome.actionId as `${string}-${string}-${string}-${string}-${string}`,
+          status: outcome.outcome,
+          result: outcome.errorCode,
+          occurredAt: new Date().toISOString(),
+        });
+      }
+      return c.json({
+        data: {
+          batchId,
+          correlationId,
+          outcomes: dispatch.outcomes,
+        },
+      });
+    }
+
+    // An explicit refusal concluded the request without effect; say so on
+    // the ledger under the human's actor so no requested rollback dangles
+    // open.
+    if (dispatch.status === 'failed') {
+      await deps.ledger.append({
+        tenantId,
+        correlationId,
+        actorType: 'human',
+        actorId: user.id,
+        actionType: 'execution.rollback.completed',
+        targetRef: planId,
+        result: 'failure',
+        detail: { stage: 'dispatch', error: dispatch.error, action_ids: parsed.data.actionIds },
+      });
+      return c.json(
+        {
+          error: {
+            code: 'rollback_dispatch_failed',
+            message: 'The runtime refused the rollback; nothing was undone.',
+            details: { error: dispatch.error },
+          },
+          correlationId,
+        },
+        503,
+      );
+    }
+
+    // Unknown: from here an unreachable runtime is indistinguishable from a
+    // rollback that ran. Like the execute route's ambiguous claim, this is
+    // reconciled by correlation id — never reported as success.
+    return c.json(
+      {
+        error: {
+          code: 'rollback_outcome_unknown',
+          message:
+            'The runtime did not confirm the rollback. Reconcile by correlation id before retrying.',
+        },
+        correlationId,
+      },
+      503,
     );
   });
 

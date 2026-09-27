@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConnectorInvocation } from '@axiom/types';
+import { MySqlReadConnector } from './mysql-read.js';
 import { PostgresReadConnector, categoryHints, type SqlSession } from './postgres-read.js';
-import { SqlEndpointRefused, postgresSessions, rdsIamCredentials } from './session.js';
+import {
+  SqlEndpointRefused,
+  mysqlSessions,
+  postgresSessions,
+  rdsIamCredentials,
+} from './session.js';
 
 const context: ConnectorInvocation = {
   tenantId: 't',
@@ -22,6 +28,98 @@ const endpoint = {
   region: 'ap-south-1' as const,
   caPem: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----',
 };
+
+describe('MySqlReadConnector transaction discipline', () => {
+  function fake(posture: Record<string, unknown>, failOn?: string) {
+    const statements: string[] = [];
+    let ended = false;
+    const session: SqlSession = {
+      query: async (text) => {
+        statements.push(text);
+        if (failOn && text.includes(failOn)) throw new Error('boom');
+        if (text.includes('@@session.transaction_read_only')) return { rows: [posture] };
+        return { rows: [] };
+      },
+      end: async () => {
+        ended = true;
+      },
+    };
+    return { open: async () => session, statements, ended: () => ended };
+  }
+  const safe = { read_only: 1, privileged: 0, can_write: 0 };
+  const safeBooleans = { read_only: true, privileged: false, can_write: false };
+
+  it('always rolls back and closes, even when the query fails', async () => {
+    const f = fake(safe, 'from information_schema.tables');
+    await expect(new MySqlReadConnector(f.open).enumerate(context)).rejects.toThrow('boom');
+    expect(f.statements[0]).toBe('set session transaction read only');
+    expect(f.statements).toContain('start transaction read only');
+    expect(f.statements.at(-1)).toBe('rollback');
+    expect(f.ended()).toBe(true);
+  });
+
+  it('bounds the statement timeout by the invocation deadline', async () => {
+    const f = fake(safe);
+    const soon = { ...context, deadline: new Date(Date.now() + 1200).toISOString() };
+    await new MySqlReadConnector(f.open).enumerate(soon);
+    const timeout = Number(/max_execution_time = (\d+)/.exec(f.statements[2]!)?.[1]);
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(1200);
+  });
+
+  it('accepts the server flag shape and fails closed on an unknown posture', async () => {
+    const booleans = fake(safeBooleans);
+    await expect(new MySqlReadConnector(booleans.open).enumerate(context)).resolves.toMatchObject({
+      records: [],
+    });
+    for (const [posture, reason] of [
+      [{ read_only: 0, privileged: 0, can_write: 0 }, 'not_read_only'],
+      [{ read_only: 1, privileged: null, can_write: 0 }, 'privileged_role'],
+      [{ read_only: 1, privileged: 0, can_write: 2 }, 'write_privilege'],
+    ] as const) {
+      const f = fake(posture);
+      await expect(new MySqlReadConnector(f.open).enumerate(context)).rejects.toMatchObject({
+        reason,
+      });
+      expect(f.ended()).toBe(true);
+    }
+  });
+
+  it('refuses write-capable and privileged accounts before reading', async () => {
+    const writer = fake({ read_only: 1, privileged: 0, can_write: 1 });
+    await expect(new MySqlReadConnector(writer.open).enumerate(context)).rejects.toMatchObject({
+      reason: 'write_privilege',
+    });
+    expect(writer.statements.some((text) => text.startsWith('select t.table_schema'))).toBe(false);
+    const super_ = fake({ read_only: 1, privileged: 1, can_write: 0 });
+    await expect(
+      new MySqlReadConnector(super_.open).sample(context, 'crm.customers', 5),
+    ).rejects.toMatchObject({
+      reason: 'privileged_role',
+    });
+  });
+});
+
+describe('mysqlSessions endpoint configuration', () => {
+  it('refuses unconfigured, non-Mumbai or CA-less endpoints before minting a credential', async () => {
+    const password = vi.fn(async () => 'token');
+    const mysqlEndpoint = { ...endpoint, port: 3306 };
+    for (const candidate of [
+      undefined,
+      { ...mysqlEndpoint, region: 'us-east-1' },
+      { ...mysqlEndpoint, caPem: undefined },
+      { ...mysqlEndpoint, host: 'evil host' },
+      { ...mysqlEndpoint, extra: true },
+    ]) {
+      const open = mysqlSessions({
+        endpoint: () => candidate as never,
+        credentials: { password },
+      });
+      await expect(open(context)).rejects.toBeInstanceOf(SqlEndpointRefused);
+    }
+    expect(password).not.toHaveBeenCalled();
+  });
+});
 
 describe('SQL session factory', () => {
   it('refuses unconfigured, non-Mumbai or CA-less endpoints before minting a credential', async () => {

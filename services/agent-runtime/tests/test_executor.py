@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from axiom.executor import ExecutorDb, ExecutorRefused, execute_batch
+from axiom.executor import ExecutorDb, ExecutorRefused, execute_batch, run_manual_rollbacks
 from axiom.kill_switch import KillSwitchEngaged
 from axiom.write_adapters import ReferenceWriteAdapter, WriteRefused
 
@@ -26,6 +26,9 @@ class FakeDb:
         self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
         self.rpc_script: dict[str, Any] = {}
         self.rows: dict[str, dict[str, Any]] = {}
+        # Rows the manual rollback pass reads back, mirroring the real read's
+        # tenant/batch scoping (W5 · M3.5).
+        self.batch_rows: list[dict[str, Any]] = []
 
     def script(self, fn: str, response: dict[str, Any]) -> None:
         self.rpc_script[fn] = response
@@ -61,6 +64,17 @@ class FakeDb:
 
     def action_row(self, tenant_id: str, action_id: str) -> dict[str, Any] | None:
         return self.rows.get(action_id)
+
+    def rollback_rows(
+        self, tenant_id: str, batch_id: str, action_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.batch_rows
+            if row.get("tenant_id") == tenant_id
+            and row.get("execution_batch_id") == batch_id
+            and row["id"] in action_ids
+        ]
 
 
 class FakeKillSwitch:
@@ -665,3 +679,212 @@ async def test_failed_actions_close_their_run_as_failed() -> None:
     assert len(finishes) == 1  # a-2 was never started: no pre-record, no post-record
     assert finishes[0]["p_status"] == "failed"
     assert finishes[0]["p_error_code"] == "write_refused_by_target"
+
+
+# ── the manual rollback route (W5 · M3.5) ──────────────────────────────
+#
+# The operator's undo runs through the same simulate-first,
+# record-through-the-RPC path as the failure-threshold pass, with
+# `triggered_by: 'manual'` on the record. What these tests pin: the trigger
+# value on the wire, the reverse-execution-order undo, the rows the pass
+# refuses to attempt (never a mutation the database would refuse to record),
+# the stop outranking the undo, and refusals surfacing instead of guessing.
+
+
+def manual_row(action_id: str, **overrides: Any) -> dict[str, Any]:
+    row = {
+        "id": action_id,
+        "tenant_id": "t-1",
+        "execution_batch_id": "b-1",
+        "action_type": "data.mask",
+        "rollback_definition": {"steps": [{"op": "restore_from_backup"}]},
+        "execution_status": "succeeded",
+        "final_outcome": "succeeded",
+        "executed_at": "2026-09-26T00:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_records_with_triggered_by_manual() -> None:
+    db = FakeDb()
+    db.batch_rows = [
+        manual_row("a-1", action_type="data.mask", executed_at="2026-09-26T00:00:01+00:00"),
+        manual_row("a-2", action_type="data.delete", executed_at="2026-09-26T00:00:02+00:00"),
+    ]
+    adapter = FakeAdapter()
+    outcomes = await run_manual_rollbacks(
+        db,
+        FakeKillSwitch(),
+        adapter,
+        tenant_id="t-1",
+        batch_id="b-1",
+        action_ids=["a-1", "a-2"],
+        correlation_id="c-1",
+    )
+    assert [(o.action_id, o.outcome) for o in outcomes] == [
+        ("a-1", "rolled_back"),
+        ("a-2", "rolled_back"),
+    ]
+    records = rollback_records(db)
+    assert len(records) == 2
+    for record in records:
+        assert record["p_triggered_by"] == "manual"
+        assert record["p_correlation_id"] == "c-1"
+        assert record["p_batch_id"] == "b-1"
+        assert record["p_status"] == "succeeded"
+        assert record["p_definition"] == manual_row("a-1")["rollback_definition"]
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_undoes_in_reverse_execution_order() -> None:
+    db = FakeDb()
+    db.batch_rows = [
+        manual_row("a-1", action_type="data.mask", executed_at="2026-09-26T00:00:01+00:00"),
+        manual_row("a-2", action_type="data.delete", executed_at="2026-09-26T00:00:02+00:00"),
+    ]
+    adapter = FakeAdapter()
+    await run_manual_rollbacks(
+        db,
+        FakeKillSwitch(),
+        adapter,
+        tenant_id="t-1",
+        batch_id="b-1",
+        action_ids=["a-1", "a-2"],
+        correlation_id="c-1",
+    )
+    # The last change applied is the first undone.
+    assert [c[1] for c in adapter.rollback_calls] == [
+        "data.delete",
+        "data.delete",
+        "data.mask",
+        "data.mask",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_refuses_to_start_under_kill_switch() -> None:
+    db = FakeDb()
+    db.batch_rows = [manual_row("a-1")]
+    adapter = FakeAdapter()
+    with pytest.raises(ExecutorRefused) as excinfo:
+        await run_manual_rollbacks(
+            db,
+            FakeKillSwitch(engage_after=0),
+            adapter,
+            tenant_id="t-1",
+            batch_id="b-1",
+            action_ids=["a-1"],
+            correlation_id="c-1",
+        )
+    assert excinfo.value.reason.startswith("kill_switch_engaged")
+    assert adapter.rollback_calls == []
+    assert rollback_records(db) == []
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_stops_at_the_switch_and_skips_the_remainder() -> None:
+    db = FakeDb()
+    db.batch_rows = [
+        manual_row("a-1", action_type="data.mask", executed_at="2026-09-26T00:00:01+00:00"),
+        manual_row("a-2", action_type="data.delete", executed_at="2026-09-26T00:00:02+00:00"),
+    ]
+    adapter = FakeAdapter()
+    outcomes = await run_manual_rollbacks(
+        db,
+        FakeKillSwitch(engage_after=2),  # start and the first undo clear; then engaged
+        adapter,
+        tenant_id="t-1",
+        batch_id="b-1",
+        action_ids=["a-1", "a-2"],
+        correlation_id="c-1",
+    )
+    by_id = {o.action_id: o for o in outcomes}
+    assert by_id["a-2"].outcome == "rolled_back"
+    assert by_id["a-1"].outcome == "skipped"
+    assert by_id["a-1"].error_code == "kill_switch_engaged"
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_never_attempts_a_non_reversible_action() -> None:
+    db = FakeDb()
+    db.batch_rows = [
+        manual_row("a-failed", final_outcome="failed", execution_status="failed"),
+        manual_row("a-undone", final_outcome="rolled_back", execution_status="rolled_back"),
+        manual_row("a-unsettled", final_outcome=None, execution_status="executing"),
+    ]
+    adapter = FakeAdapter()
+    outcomes = await run_manual_rollbacks(
+        db,
+        FakeKillSwitch(),
+        adapter,
+        tenant_id="t-1",
+        batch_id="b-1",
+        action_ids=["a-failed", "a-undone", "a-unsettled", "a-foreign"],
+        correlation_id="c-1",
+    )
+    by_id = {o.action_id: o for o in outcomes}
+    assert by_id["a-failed"].outcome == "skipped"
+    assert by_id["a-failed"].error_code == "not_reversible"
+    assert by_id["a-undone"].outcome == "skipped"
+    assert by_id["a-undone"].error_code == "already_rolled_back"
+    assert by_id["a-unsettled"].outcome == "skipped"
+    assert by_id["a-unsettled"].error_code == "not_reversible"
+    assert by_id["a-foreign"].outcome == "skipped"
+    assert by_id["a-foreign"].error_code == "action_not_in_batch"
+    # Nothing was attempted and nothing was recorded: the undo is never run
+    # against a row `record_rollback_execution` would refuse to record.
+    assert adapter.rollback_calls == []
+    assert rollback_records(db) == []
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_records_a_refused_undo_as_failed() -> None:
+    db = FakeDb()
+    db.batch_rows = [manual_row("a-1")]
+    adapter = FakeAdapter()
+    adapter.simulate_refuses = True
+    outcomes = await run_manual_rollbacks(
+        db,
+        FakeKillSwitch(),
+        adapter,
+        tenant_id="t-1",
+        batch_id="b-1",
+        action_ids=["a-1"],
+        correlation_id="c-1",
+    )
+    assert outcomes[0].outcome == "failed"
+    assert outcomes[0].error_code == "rollback_failed: rollback_not_simulable"
+    records = rollback_records(db)
+    assert len(records) == 1
+    assert records[0]["p_status"] == "failed"
+    assert records[0]["p_result"] == {"reason": "rollback_not_simulable"}
+
+
+@pytest.mark.asyncio
+async def test_manual_rollback_surfaces_a_record_refusal() -> None:
+    db = FakeDb()
+    db.batch_rows = [manual_row("a-1")]
+    db.script("record_rollback_execution", {"error": "definition_mismatch"})
+    with pytest.raises(ExecutorRefused) as excinfo:
+        await run_manual_rollbacks(
+            db,
+            FakeKillSwitch(),
+            FakeAdapter(),
+            tenant_id="t-1",
+            batch_id="b-1",
+            action_ids=["a-1"],
+            correlation_id="c-1",
+        )
+    assert excinfo.value.reason == "definition_mismatch"
+
+
+def test_rollback_rows_wrapper_refuses_on_transport_failure() -> None:
+    class BrokenClient:
+        def from_(self, table: str) -> Any:
+            raise RuntimeError("connection refused")
+
+    with pytest.raises(ExecutorRefused) as excinfo:
+        ExecutorDb(BrokenClient()).rollback_rows("t-1", "b-1", ["a-1"])
+    assert excinfo.value.reason == "record_unavailable"

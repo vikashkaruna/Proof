@@ -320,6 +320,95 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
     }
 
 
+# W5 · M3.5 — the manual rollback route's contract. The operator's undo runs
+# through the same executor pass as the failure-threshold rollback, with
+# `triggered_by: 'manual'` on the record. Bump on any breaking payload change
+# and update `buildRollbackDispatchPayload` in
+# `services/bff/src/routes/v1.ts` in the same commit;
+# `services/bff/src/routes/rollback-contract.test.ts` asserts the BFF
+# produces this payload and `tests/contracts/rollback-dispatch.v1.json`
+# pins both sides.
+ROLLBACK_CONTRACT_VERSION = 1
+
+
+class InternalRollbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int
+    tenant_id: str
+    # The execution the requested actions belong to: `record_rollback_execution`
+    # refuses an action whose batch differs, so the pass reads the rows scoped
+    # to this batch and nothing wider.
+    batch_id: str
+    action_ids: list[str]
+    correlation_id: str
+
+
+@app.post("/internal/rollback")
+async def internal_rollback(body: InternalRollbackRequest, req: Request):
+    require_internal_caller(req)
+
+    if body.contract_version != ROLLBACK_CONTRACT_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported rollback contract version {body.contract_version}; "
+                f"this runtime speaks version {ROLLBACK_CONTRACT_VERSION}"
+            ),
+        )
+
+    # The same write-path gate as /internal/execute: the undo is an estate
+    # write like any other, and with no write origin configured the honest
+    # answer is a refusal, not an improvised target.
+    settings: Settings = req.app.state.settings
+    if not settings.feature_execution_engine or not settings.reference_write_origin:
+        return JSONResponse(status_code=503, content={
+            "accepted": False,
+            "contract_version": ROLLBACK_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": "execution_unconfigured",
+        })
+
+    from supabase import create_client
+
+    from .executor import ExecutorDb, ExecutorRefused, run_manual_rollbacks
+    from .kill_switch import KillSwitchReader
+    from .write_adapters import ReferenceWriteAdapter
+
+    db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
+    try:
+        outcomes = await run_manual_rollbacks(
+            db,
+            KillSwitchReader.from_settings(settings),
+            ReferenceWriteAdapter(
+                settings.reference_write_origin, settings.internal_token or ""
+            ),
+            tenant_id=body.tenant_id,
+            batch_id=body.batch_id,
+            action_ids=body.action_ids,
+            correlation_id=body.correlation_id,
+        )
+    except ExecutorRefused as refused:
+        status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
+        return JSONResponse(status_code=status, content={
+            "accepted": False,
+            "contract_version": ROLLBACK_CONTRACT_VERSION,
+            "correlation_id": body.correlation_id,
+            "reason": refused.reason.split(":", 1)[0],
+        })
+    return {
+        "accepted": True,
+        "contract_version": ROLLBACK_CONTRACT_VERSION,
+        "correlation_id": body.correlation_id,
+        "batch": {"id": body.batch_id},
+        "outcomes": [
+            {"action_id": o.action_id, "outcome": o.outcome,
+             "error_code": o.error_code, "rows_affected": o.rows_affected}
+            for o in outcomes
+        ],
+    }
+
+
 # W5 · M3.2 — the dry-run engine. Sudhaar's declared simulation for one
 # action: simulate from the content the BFF read from the stored action,
 # then record through `record_dry_run` (migration 0060). A result is

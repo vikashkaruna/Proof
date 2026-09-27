@@ -11,6 +11,7 @@ import { SqlDiscoveryGate } from './sql/grant-gate.js';
 import type { SqlSessionFactory } from './sql/postgres-read.js';
 import {
   SqlEndpointSchema,
+  mysqlSessions,
   postgresSessions,
   rdsIamCredentials,
   type SqlCredentialProvider,
@@ -148,15 +149,32 @@ export class DiscoveryService {
     const manifest = await this.manifest(request);
     let outcome: { result: ConnectorResult; grantId: string; spiffeId: string };
     if (manifest.transport === 'sql') {
+      // The engine comes from the reviewed descriptor's target, never from the
+      // request; an unknown SQL target fails closed.
+      const engine =
+        manifest.target === 'mysql'
+          ? ('mysql' as const)
+          : manifest.target === 'postgresql'
+            ? ('postgresql' as const)
+            : null;
+      if (!engine) throw new DiscoveryRefused('engine_unsupported');
       const endpoint = this.#sqlEndpoints.get(key(request.tenantId, request.connectorId));
       if (!endpoint) throw new DiscoveryRefused('endpoint_unconfigured');
       const sessions =
         this.deps.sqlSessions ??
-        postgresSessions({
-          endpoint: () => endpoint,
-          credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
-        });
-      const gate = new SqlDiscoveryGate(this.deps.identity, sessions, { client: this.deps.client });
+        (engine === 'mysql'
+          ? mysqlSessions({
+              endpoint: () => endpoint,
+              credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
+            })
+          : postgresSessions({
+              endpoint: () => endpoint,
+              credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
+            }));
+      const gate = new SqlDiscoveryGate(this.deps.identity, sessions, {
+        client: this.deps.client,
+        engine,
+      });
       const { result, grant } = await gate.discover(
         { ...request, correlationId, workloadProof },
         (connector, context) =>

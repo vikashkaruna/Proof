@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { abortableResult } from './abortable-result.js';
 
 /**
  * A small in-memory stand-in for the PostgREST query builder.
@@ -23,6 +24,7 @@ function parseOrClause(clause: string): Filter {
     const [column, op, rawValue] = term.split('.');
     if (!column || !op) throw new Error(`fake-postgrest: unparseable or() term "${term}"`);
     if (op === 'is' && rawValue === 'null') return (row: Row) => row[column] == null;
+    if (op === 'eq') return (row: Row) => String(row[column]) === rawValue;
     if (op === 'lt') {
       const value = Number(rawValue);
       return (row: Row) => row[column] != null && Number(row[column]) < value;
@@ -368,6 +370,7 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     let payload: Row | Row[] | null = null;
     let returning = false;
     let rowLimit: number | undefined;
+    let rowOffset = 0;
     let exactCount = false;
     let ordering: { column: string; ascending: boolean } | null = null;
     let settled: { data: unknown; error: { message: string } | null; count?: number } | null = null;
@@ -412,7 +415,10 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
               String(a[column] ?? '').localeCompare(String(b[column] ?? '')) * (ascending ? 1 : -1),
           );
         }
-        data = rowLimit === undefined ? rows : rows.slice(0, rowLimit);
+        data =
+          rowLimit === undefined
+            ? rows.slice(rowOffset)
+            : rows.slice(rowOffset, rowOffset + rowLimit);
       }
 
       settled = { data, error: null, ...(exactCount ? { count: matched().length } : {}) };
@@ -420,6 +426,10 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     }
 
     const builder: Record<string, unknown> = {};
+    builder.abortSignal = (signal: AbortSignal) => {
+      signal.throwIfAborted();
+      return builder;
+    };
 
     builder.order = (column: string, options: { ascending?: boolean } = {}) => {
       ordering = { column, ascending: options.ascending ?? true };
@@ -427,6 +437,11 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     };
     builder.limit = (count: number) => {
       rowLimit = count;
+      return builder;
+    };
+    builder.range = (from: number, to: number) => {
+      rowOffset = from;
+      rowLimit = to - from + 1;
       return builder;
     };
     builder.select = (_columns?: string, options?: { count?: string }) => {
@@ -465,6 +480,12 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
         const left = row[column];
         if (typeof left === 'number' && typeof value === 'number') return left >= value;
         return String(left) >= String(value);
+      });
+    builder.lt = (column: string, value: unknown) =>
+      where((row) => {
+        const left = row[column];
+        if (typeof left === 'number' && typeof value === 'number') return left < value;
+        return String(left) < String(value);
       });
     builder.or = (clause: string) => where(parseOrClause(clause));
 
@@ -507,7 +528,7 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
   }
 
   return {
-    client: { from, rpc },
+    client: { from, rpc: (fn, args) => abortableResult(rpc(fn, args)) },
     onRpc: (fn, handler) => rpcHandlers.set(fn, handler),
     failNextRpc: (fn) => failingRpc.add(fn),
     rows: (name) => table(name),

@@ -101,6 +101,30 @@ class ExecutorDb:
             raise ExecutorRefused("record_unavailable") from exc
         return response.data if isinstance(response.data, dict) else None
 
+    def rollback_rows(
+        self, tenant_id: str, batch_id: str, action_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """The rows a manual rollback pass may act on, in one read: an action
+        the batch never held is absent here, and the pass reports it skipped
+        rather than guessing what happened to it."""
+        try:
+            response = (
+                self._client.from_("remediation_actions")
+                .select(
+                    "id, action_type, rollback_definition, execution_status, "
+                    "final_outcome, executed_at"
+                )
+                .eq("tenant_id", tenant_id)
+                .eq("execution_batch_id", batch_id)
+                .in_("id", action_ids)
+                .execute()
+            )
+        except Exception as exc:
+            structlog.get_logger().warning("executor.rollback_rows_unreadable")
+            raise ExecutorRefused("record_unavailable") from exc
+        data = response.data if isinstance(response.data, list) else []
+        return [row for row in data if isinstance(row, dict)]
+
 
 async def execute_batch(
     payload: Any,
@@ -401,6 +425,71 @@ def _final_result(
     return BatchResult(batch_id=batch_id, status=final_status, replay=False, outcomes=outcomes)
 
 
+async def _attempt_rollback(
+    db: ExecutorDb,
+    adapter: WriteAdapter,
+    *,
+    tenant_id: str,
+    action_id: str,
+    batch_id: str,
+    row: dict[str, Any],
+    triggered_by: str,
+    correlation_id: str,
+) -> tuple[str, dict[str, Any], str | None]:
+    """Simulate, execute and record ONE rollback against the action's stored
+    definition — the path shared by the failure-threshold pass and the
+    operator's manual route. The only thing that differs between them is
+    `triggered_by`, which says on the record and in the ledger what asked
+    for the undo.
+
+    `record_rollback_execution` re-reads the row and re-compares the
+    definition, so nothing but the stored definition can be reversed with;
+    a recording refusal raises, because the database — not this loop — is
+    the source of truth.
+
+    Returns (status, result, refusal): 'succeeded' | 'failed', the recorded
+    result payload, and the adapter's refusal reason when the undo was
+    refused before it ran.
+    """
+    definition = row.get("rollback_definition") or {}
+    try:
+        await adapter.simulate_rollback(row["action_type"], definition)
+        result = await adapter.execute_rollback(row["action_type"], definition)
+    except WriteRefused as refused:
+        recorded = db.rpc(
+            "record_rollback_execution",
+            {
+                "p_tenant_id": tenant_id,
+                "p_action_id": action_id,
+                "p_batch_id": batch_id,
+                "p_definition": definition,
+                "p_triggered_by": triggered_by,
+                "p_status": "failed",
+                "p_result": {"reason": refused.reason},
+                "p_correlation_id": correlation_id,
+            },
+        )
+        if "error" in recorded:
+            raise ExecutorRefused(recorded["error"]) from refused
+        return "failed", {"reason": refused.reason}, refused.reason
+    recorded = db.rpc(
+        "record_rollback_execution",
+        {
+            "p_tenant_id": tenant_id,
+            "p_action_id": action_id,
+            "p_batch_id": batch_id,
+            "p_definition": definition,
+            "p_triggered_by": triggered_by,
+            "p_status": "succeeded",
+            "p_result": {"rows_affected": result.rows_affected},
+            "p_correlation_id": correlation_id,
+        },
+    )
+    if "error" in recorded:
+        raise ExecutorRefused(recorded["error"])
+    return "succeeded", {"rows_affected": result.rows_affected}, None
+
+
 async def _run_rollbacks(
     db: ExecutorDb,
     kill_switch: KillSwitchReader,
@@ -435,58 +524,129 @@ async def _run_rollbacks(
         row = db.action_row(payload.tenant_id, action_id)
         if row is None:
             raise ExecutorRefused("record_unavailable")
-        definition = row.get("rollback_definition") or {}
-        # Dry-run the rollback first: a definition the target refuses to
-        # simulate is never executed.
-        try:
-            await adapter.simulate_rollback(row["action_type"], definition)
-            attempted = True
-            result = await adapter.execute_rollback(row["action_type"], definition)
-        except WriteRefused as refused:
-            all_ok = False
-            attempted = True
-            outcome = "failed"
-            detail: dict[str, Any] = {"reason": refused.reason}
-            recorded = db.rpc(
-                "record_rollback_execution",
-                {
-                    "p_tenant_id": payload.tenant_id,
-                    "p_action_id": action_id,
-                    "p_batch_id": batch_id,
-                    "p_definition": definition,
-                    "p_triggered_by": "failure_threshold",
-                    "p_status": "failed",
-                    "p_result": detail,
-                    "p_correlation_id": payload.correlation_id,
-                },
-            )
-            if "error" in recorded:
-                raise ExecutorRefused(recorded["error"]) from refused
-            for o in outcomes:
-                if o.action_id == action_id and o.outcome == "succeeded":
-                    o.outcome = outcome
-                    o.error_code = f"rollback_failed: {refused.reason}"
-            continue
-        recorded = db.rpc(
-            "record_rollback_execution",
-            {
-                "p_tenant_id": payload.tenant_id,
-                "p_action_id": action_id,
-                "p_batch_id": batch_id,
-                "p_definition": definition,
-                "p_triggered_by": "failure_threshold",
-                "p_status": "succeeded",
-                "p_result": {"rows_affected": result.rows_affected},
-                "p_correlation_id": payload.correlation_id,
-            },
+        attempted = True
+        status, result, refusal = await _attempt_rollback(
+            db,
+            adapter,
+            tenant_id=payload.tenant_id,
+            action_id=action_id,
+            batch_id=batch_id,
+            row=row,
+            triggered_by="failure_threshold",
+            correlation_id=payload.correlation_id,
         )
-        if "error" in recorded:
-            raise ExecutorRefused(recorded["error"])
+        if status != "succeeded":
+            all_ok = False
         for o in outcomes:
             if o.action_id == action_id and o.outcome == "succeeded":
-                o.outcome = "rolled_back"
-                o.rows_affected = result.rows_affected
+                if status == "succeeded":
+                    o.outcome = "rolled_back"
+                    o.rows_affected = result["rows_affected"]
+                else:
+                    o.outcome = "failed"
+                    o.error_code = f"rollback_failed: {refusal}"
     return all_ok, attempted
+
+
+async def run_manual_rollbacks(
+    db: ExecutorDb,
+    kill_switch: KillSwitchReader,
+    adapter: WriteAdapter,
+    *,
+    tenant_id: str,
+    batch_id: str,
+    action_ids: list[str],
+    correlation_id: str,
+) -> list[ActionOutcome]:
+    """The operator's rollback pass (W5 · M3.5 — the manual rollback route).
+
+    A human decided to undo executed work; this runs the same simulate-first,
+    record-through-the-RPC undo as the failure-threshold pass, with
+    `triggered_by: 'manual'` on the record. The requester's identity is on
+    the ledger under the BFF's human-actor entry; the execution records as
+    karya's, because karya's adapter is the hand on the estate.
+
+    Only an action this batch actually completed is attempted —
+    reversibility is read from the rows here so the undo is never attempted
+    against something `record_rollback_execution` would refuse to record,
+    and it is re-checked there under the row lock. Every requested id is
+    accounted for in the returned outcomes; one the batch never held is
+    `skipped`, not silently dropped. The stop outranks the undo here too:
+    a halt leaves the remaining completed actions for a later decision.
+    """
+    # First check: refuse to start at all under the stop, as execute_batch does.
+    try:
+        kill_switch.raise_if_engaged(tenant_id)
+    except KillSwitchEngaged as halt:
+        raise ExecutorRefused(f"kill_switch_engaged: {halt.reason}") from halt
+
+    rows = db.rollback_rows(tenant_id, batch_id, action_ids)
+    by_id = {str(row["id"]): row for row in rows}
+
+    outcomes: dict[str, ActionOutcome] = {}
+    for action_id in action_ids:
+        row = by_id.get(action_id)
+        if row is None:
+            outcomes[action_id] = ActionOutcome(
+                action_id=action_id, outcome="skipped", error_code="action_not_in_batch"
+            )
+        elif row.get("final_outcome") == "rolled_back":
+            outcomes[action_id] = ActionOutcome(
+                action_id=action_id, outcome="skipped", error_code="already_rolled_back"
+            )
+        elif row.get("final_outcome") != "succeeded":
+            outcomes[action_id] = ActionOutcome(
+                action_id=action_id, outcome="skipped", error_code="not_reversible"
+            )
+
+    # Reverse execution order: the last change applied is the first undone.
+    reversible = sorted(
+        (row for row in rows if row.get("final_outcome") == "succeeded"),
+        key=lambda row: (str(row.get("executed_at") or ""), str(row["id"])),
+        reverse=True,
+    )
+    for row in reversible:
+        action_id = str(row["id"])
+        if action_id in outcomes:
+            continue
+        try:
+            kill_switch.raise_if_engaged(tenant_id)
+        except KillSwitchEngaged as halt:
+            for pending in reversible:
+                pending_id = str(pending["id"])
+                if pending_id not in outcomes:
+                    outcomes[pending_id] = ActionOutcome(
+                        action_id=pending_id, outcome="skipped", error_code="kill_switch_engaged"
+                    )
+            structlog.get_logger().warning(
+                "executor.manual_rollback_halted", reason=halt.reason, action_id=action_id
+            )
+            break
+        status, result, refusal = await _attempt_rollback(
+            db,
+            adapter,
+            tenant_id=tenant_id,
+            action_id=action_id,
+            batch_id=batch_id,
+            row=row,
+            triggered_by="manual",
+            correlation_id=correlation_id,
+        )
+        outcomes[action_id] = ActionOutcome(
+            action_id=action_id,
+            outcome="rolled_back" if status == "succeeded" else "failed",
+            error_code=None if status == "succeeded" else f"rollback_failed: {refusal}",
+            rows_affected=result["rows_affected"] if status == "succeeded" else None,
+        )
+
+    # Account for any requested id the read did not return at all.
+    for action_id in action_ids:
+        if action_id not in outcomes:
+            outcomes[action_id] = ActionOutcome(
+                action_id=action_id, outcome="skipped", error_code="action_not_in_batch"
+            )
+
+    return [outcomes[action_id] for action_id in action_ids]
 
 
 def _settle(
