@@ -10,6 +10,7 @@ import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
+import { monitoringAlertRoutes } from './monitoring-alerts.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
@@ -204,6 +205,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', invitationRoutes());
   app.route('/', onboardingWizardRoutes());
   app.route('/', sustenanceRoutes());
+  app.route('/', monitoringAlertRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //

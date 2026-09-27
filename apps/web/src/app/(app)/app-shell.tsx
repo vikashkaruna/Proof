@@ -76,6 +76,20 @@ export function AppShell({
   const [killOn, setKillOn] = useState(false);
   const [tenantsOpen, setTenantsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [alertsSummary, setAlertsSummary] = useState<{
+    unread: number;
+    critical: number;
+    high: number;
+    alerts: Array<{
+      id: string;
+      title: string;
+      summary: string;
+      severity: string;
+      alert_type: string;
+      created_at: string;
+    }>;
+  } | null>(null);
   const mobileNav = useRef<HTMLDialogElement>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
   useEffect(() => {
@@ -141,6 +155,39 @@ export function AppShell({
     return () => {
       active = false;
       window.removeEventListener('axiom:kill-switch-changed', handleEvent);
+    };
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function fetchAlerts() {
+      if (!selectedTenantId) return;
+      try {
+        const res = await fetch('/api/bff/v1/monitoring/alerts?limit=10', {
+          headers: { 'X-Tenant-Id': selectedTenantId },
+        });
+        if (res.ok) {
+          const body = await res.json();
+          if (active && body?.data?.summary) {
+            setAlertsSummary({
+              unread: body.data.summary.unread ?? 0,
+              critical: body.data.summary.critical ?? 0,
+              high: body.data.summary.high ?? 0,
+              alerts: (body.data.alerts ?? []).filter(
+                (a: { status: string }) => a.status === 'unread' || a.status === 'read'
+              ),
+            });
+          }
+        }
+      } catch {
+        // silent
+      }
+    }
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 30_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
     };
   }, [selectedTenantId]);
 
@@ -466,6 +513,82 @@ export function AppShell({
                   >
                     <span>+ Onboard New Organization</span>
                   </Link>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Continuous Monitoring Alerts Bell & Tray */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Continuous monitoring alerts"
+              aria-expanded={alertsOpen}
+              onClick={() => setAlertsOpen(!alertsOpen)}
+              className="relative flex min-h-11 items-center justify-center rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 shadow-sm hover:border-[#0FB5A5] transition-colors"
+              title="Continuous monitoring alerts"
+            >
+              <span className="text-sm">🔔</span>
+              {(alertsSummary?.unread ?? 0) > 0 && (
+                <span
+                  className={`absolute -top-1.5 -right-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow ${
+                    (alertsSummary?.critical ?? 0) > 0 ? 'bg-[#D9534F]' : 'bg-[#C9A227]'
+                  }`}
+                >
+                  {alertsSummary?.unread}
+                </span>
+              )}
+            </button>
+
+            {alertsOpen && (
+              <div className="absolute right-0 top-12 z-50 w-80 sm:w-96 rounded-xl border border-[#e4e8ee] bg-white p-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="text-xs font-semibold text-[#1E2A4A]">Continuous Alerts</span>
+                  <Link
+                    href="/monitoring"
+                    onClick={() => setAlertsOpen(false)}
+                    className="text-[11px] font-medium text-[#0FB5A5] hover:underline"
+                  >
+                    View monitoring →
+                  </Link>
+                </div>
+                <div className="mt-2 flex flex-col gap-2 max-h-72 overflow-y-auto">
+                  {!alertsSummary?.alerts || alertsSummary.alerts.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-slate-500">
+                      No active unacknowledged alerts
+                    </div>
+                  ) : (
+                    alertsSummary.alerts.map((alert) => (
+                      <div
+                        key={alert.id}
+                        className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 text-xs text-slate-700"
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white ${
+                              alert.severity === 'critical'
+                                ? 'bg-[#D9534F]'
+                                : alert.severity === 'high'
+                                  ? 'bg-[#C9A227]'
+                                  : 'bg-slate-500'
+                            }`}
+                          >
+                            {alert.severity}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(alert.created_at).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <p className="font-medium text-slate-800 line-clamp-1">{alert.title}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                          {alert.summary}
+                        </p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}

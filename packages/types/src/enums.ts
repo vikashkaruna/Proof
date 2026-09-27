@@ -198,6 +198,8 @@ export const LedgerActionType = {
   MONITORING_POLICY_REVOKED: 'monitoring.policy.revoked',
   MONITORING_POLICY_WITHIN_POLICY: 'monitoring.policy.within_policy',
   MONITORING_POLICY_ESCALATED: 'monitoring.policy.escalated',
+  MONITORING_ALERT_DISPATCHED: 'monitoring.alert.dispatched',
+  MONITORING_ALERT_DISMISSED: 'monitoring.alert.dismissed',
   // W8.1 — the consent foundation (migration 0069): a consent's lifecycle is
   // ledgered end to end — captured with the notice version it pinned,
   // withdrawn, frozen or unfrozen for retention (legal hold), and the
