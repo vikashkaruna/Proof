@@ -39,7 +39,6 @@ Browser integration corrected an implicit select label and two test assertions (
 
 Source CI36279114106 caught the fixture-only storage journey being discovered and skipped in general container acceptance, whose no-skip guard correctly refused it. The dedicated storage job passed14 provider checks and4 browser tests. The general Playwright configuration now excludes that spec unless the explicit storage fixture flag is enabled; the strict skip guard is unchanged. Discovery verifies83 general tests and4 dedicated evidence tests. The follow-up also restores assessment links using `/evidence?q=<UUID>`, with tenant-scoped exact-ID matching;3 real-auth evidence journeys pass again without retries. Full source/staging acceptance remains pending on the follow-up commit.
 
-
 ## Expanded quality review before merge
 
 The follow-up review measured a real mobile defect: at a390px viewport the fixed sidebar left the evidence page horizontally overflowing. Responsive modal navigation now preserves the full content width, native navigation semantics and keyboard focus. Intrinsic file-input sizing and unbroken metadata are bounded; reviewed desktop/mobile screenshots remain private synthetic acceptance artifacts. The browser suite checks record/operation pagination, keyboard selection, drawer focus/escape, transport failure versus honest emptiness, retry and stale-control behavior.
@@ -48,8 +47,6 @@ The browser bridge now enforces a30-second upload-body deadline and caller cance
 
 Real-provider browser acceptance now exercises provider pause/unpause, clearing a prior successful verification on fresh failure, and a sanctioned durable begin plus real object upload interrupted before settlement. The latter must reconcile through the UI and download the same exact version. The final local expanded run passed all4 journeys in46.1seconds, with zero unexpected, flaky or skipped outcomes. Initial quality runs exposed a fixture pause-inspection issue and a mobile keyboard focus-loop issue, both corrected before rerunning. No skipped, flaky or retry-only result qualifies as acceptance.
 
-
 Source CI36284499860 passed21 applicable checks, including general container acceptance and the real storage job, but gitleaks identified the historical synthetic S3 object key `synthetic/operation/proof` as a generic API key. It is a path in the acceptance fixture, not a credential. A reviewed exact commit/file/rule/line fingerprint is recorded in `.gitleaksignore`; no rule, directory or source-file scan is disabled. The complete replacement source CI and exact staging CI still must pass after this follow-up.
-
 
 Final quality acceptance: full general browser suite83/83 passed in2.6minutes with zero retries; dedicated storage browser4/4 passed in46.1seconds with zero retries/skips/flakes. Workspace units and typechecks passed, security scan clean, web lint has only the two existing invitation-navigation warnings. The temporary owned provider was removed after acceptance; parity Auth/Postgres remains running. Exact latest-commit CI still gates staging merge.
