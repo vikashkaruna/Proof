@@ -105,7 +105,9 @@ test.describe('real provider evidence ingestion', () => {
     expect((await replayDetail.json()).data.object_version).toEqual(record.object_version);
 
     const filters = page.getByRole('form', { name: 'Evidence filters', exact: true });
-    await filters.getByLabel('Search description', { exact: true }).fill(description);
+    await filters
+      .getByLabel('Search description or evidence ID', { exact: true })
+      .fill(description);
     await filters.getByLabel('Source', { exact: true }).fill('human');
     await filters.getByRole('button', { name: 'Apply filters', exact: true }).click();
     const records = page.getByRole('region', { name: 'Evidence records', exact: true });

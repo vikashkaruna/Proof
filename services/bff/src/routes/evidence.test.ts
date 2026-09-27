@@ -110,6 +110,24 @@ describe('tenant evidence explorer and human ingestion routes', () => {
       data: [],
     });
   });
+  it('resolves assessment UUID searches by exact tenant-owned ID rather than description', async () => {
+    const id = await seed();
+    fixture.rows('evidence').push({
+      ...fixture.rows('evidence')[0],
+      id: crypto.randomUUID(),
+      description: `Reference to ${id}`,
+    });
+    const response = await app().request(`/v1/evidence?q=${id.toUpperCase()}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [{ id }],
+      meta: { total: 1, hasMore: false },
+    });
+    const absent = await app().request(`/v1/evidence?q=${crypto.randomUUID()}`);
+    expect(await absent.json()).toMatchObject({ data: [], meta: { total: 0 } });
+    const foreignResult = await app(UserRole.ADMIN, foreign).request(`/v1/evidence?q=${id}`);
+    expect(await foreignResult.json()).toMatchObject({ data: [], meta: { total: 0 } });
+  });
   it('shows retained readback separately from legacy claims and never follows legacy storage URIs', async () => {
     const id = await seed();
     const verified = (await (await app().request(`/v1/evidence/${id}`)).json()) as {

@@ -132,8 +132,12 @@ export function evidenceRoutes(
         .from('evidence')
         .select(columns, { count: 'exact' })
         .eq('tenant_id', c.get('tenantId'));
-      // Literal description search: escapes LIKE wildcards; no PostgREST OR grammar is assembled from input.
-      if (input.q) query = query.ilike('description', `%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
+      // Assessment links carry an evidence UUID; all other text remains literal description search.
+      // No PostgREST OR grammar is assembled from input.
+      if (input.q)
+        query = z.uuid().safeParse(input.q).success
+          ? query.eq('id', input.q.toLowerCase())
+          : query.ilike('description', `%${input.q.replace(/[\\%_]/g, '\\$&')}%`);
       if (input.controlId) query = query.contains('demonstrates_control_ids', [input.controlId]);
       if (input.source) query = query.eq('collected_by_agent', input.source);
       if (input.from)

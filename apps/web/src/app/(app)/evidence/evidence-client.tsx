@@ -30,14 +30,18 @@ export function EvidenceClient({
   tenantId,
   canRecord,
   canExport,
+  initialQuery = '',
 }: {
   tenantId: string;
   canRecord: boolean;
   canExport: boolean;
+  initialQuery?: string;
 }) {
   const [rows, setRows] = useState<EvidenceRow[]>([]);
   const [meta, setMeta] = useState({ limit: 20, offset: 0, total: 0, hasMore: false });
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() =>
+    initialQuery ? `&${new URLSearchParams({ q: initialQuery })}` : '',
+  );
   const [offset, setOffset] = useState(0);
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -246,8 +250,8 @@ export function EvidenceClient({
       <form onSubmit={filter} className={panel} aria-label="Evidence filters">
         <div className="grid gap-3 md:grid-cols-3">
           <label>
-            Search description
-            <input name="q" maxLength={120} className={field} />
+            Search description or evidence ID
+            <input name="q" defaultValue={initialQuery} maxLength={120} className={field} />
           </label>
           <label>
             Control ID

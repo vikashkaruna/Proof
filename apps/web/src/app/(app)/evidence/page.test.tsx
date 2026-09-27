@@ -14,13 +14,13 @@ beforeEach(() => {
 });
 it('refuses evidence surface to an agent role', async () => {
   state.role = UserRole.AGENT;
-  const html = renderToStaticMarkup(await EvidencePage());
+  const html = renderToStaticMarkup(await EvidencePage({ searchParams: Promise.resolve({}) }));
   expect(html).toContain('Your role cannot view evidence records');
   expect(html).not.toContain('Upload evidence');
 });
 it('renders a read-only viewer with no upload form or invented records', async () => {
   state.role = UserRole.VIEWER;
-  const html = renderToStaticMarkup(await EvidencePage());
+  const html = renderToStaticMarkup(await EvidencePage({ searchParams: Promise.resolve({}) }));
   expect(html).toContain('Loading evidence');
   expect(html).not.toContain('Upload evidence');
   expect(html).not.toContain('sealed artifacts');
@@ -28,9 +28,17 @@ it('renders a read-only viewer with no upload form or invented records', async (
   expect(html).not.toContain('1,284');
 });
 it('requires actual API outcomes and explicit retention review for managers', async () => {
-  const html = renderToStaticMarkup(await EvidencePage());
+  const html = renderToStaticMarkup(await EvidencePage({ searchParams: Promise.resolve({}) }));
   expect(html).toContain('I reviewed this file and authorize its seven-year retention.');
   expect(html).toContain('Loading upload operations');
   expect(html).not.toContain('No upload operations recorded');
   expect(html).not.toContain('Cryptographic SHA-256 integrity check verified');
+});
+
+it('preserves an assessment evidence link as the initial server filter', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const html = renderToStaticMarkup(
+    await EvidencePage({ searchParams: Promise.resolve({ q: id }) }),
+  );
+  expect(html).toContain(`value="${id}"`);
 });

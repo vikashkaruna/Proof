@@ -43,7 +43,7 @@ async function legacyEvidence(options: {
   return { id, filename, bytes, hash };
 }
 
-async function openVault(page: Page, role: 'owner' | 'viewer') {
+async function openVault(page: Page, role: 'owner' | 'viewer', evidenceId?: string) {
   await signIn(page, role);
   await selectTenant(page, 'a');
   const loaded = page.waitForResponse(
@@ -51,7 +51,7 @@ async function openVault(page: Page, role: 'owner' | 'viewer') {
       new URL(response.url()).pathname === '/api/bff/v1/evidence' &&
       response.request().method() === 'GET',
   );
-  await page.goto('/evidence');
+  await page.goto(evidenceId ? `/evidence?q=${encodeURIComponent(evidenceId)}` : '/evidence');
   expect((await loaded).status()).toBe(200);
   await expect(page.getByRole('heading', { name: 'Evidence vault', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Evidence records' })).not.toContainText(
@@ -81,8 +81,15 @@ test('legacy evidence stays unverified and local hash comparison never uploads t
 }) => {
   const marker = `legacy-compare-${crypto.randomUUID()}`;
   const fixture = await legacyEvidence({ description: marker });
-  await openVault(page, 'owner');
-  await page.getByLabel('Search description', { exact: true }).fill(marker);
+  await openVault(page, 'owner', fixture.id);
+  await expect(page.getByLabel('Search description or evidence ID', { exact: true })).toHaveValue(
+    fixture.id,
+  );
+  await expect(page.getByRole('region', { name: 'Evidence records' })).toContainText(
+    '1 matching records',
+  );
+  await expect(page.getByRole('region', { name: 'Evidence records' })).toContainText(fixture.id);
+  await page.getByLabel('Search description or evidence ID', { exact: true }).fill(marker);
   await applyFilters(page);
   const records = page.getByRole('region', { name: 'Evidence records' });
   await expect(records).toContainText('1 matching records');
@@ -160,7 +167,7 @@ test('real evidence search and combined filters show honest empty results', asyn
   });
   await openVault(page, 'owner');
   const records = page.getByRole('region', { name: 'Evidence records' });
-  await page.getByLabel('Search description', { exact: true }).fill(marker);
+  await page.getByLabel('Search description or evidence ID', { exact: true }).fill(marker);
   await applyFilters(page);
   await expect(records).toContainText('2 matching records');
   await page.getByLabel('Control ID', { exact: true }).fill('DPDPA-CNS-001');
@@ -195,7 +202,7 @@ test('viewer reads tenant evidence without upload affordances or foreign tenant 
   const own = await legacyEvidence({ description: marker });
   const foreign = await legacyEvidence({ tenantId: state.tenantB.id, description: marker });
   await openVault(page, 'viewer');
-  await page.getByLabel('Search description', { exact: true }).fill(marker);
+  await page.getByLabel('Search description or evidence ID', { exact: true }).fill(marker);
   await applyFilters(page);
   const records = page.getByRole('region', { name: 'Evidence records' });
   await expect(records).toContainText('1 matching records');
