@@ -485,3 +485,39 @@ export const MonitoringAlertSchema = z.object({
 });
 export type MonitoringAlert = z.infer<typeof MonitoringAlertSchema>;
 
+// ─── Approval Export (W8 Statutory Exports) ───────────────────────────
+
+export const ApprovalExportFormat = z.enum(['json', 'html', 'pdf', 'csv']);
+export type ApprovalExportFormat = z.infer<typeof ApprovalExportFormat>;
+
+export const ApprovalExportSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  exportedBy: z.string().uuid(),
+  planId: z.string().uuid().nullable(),
+  format: ApprovalExportFormat,
+  filterParams: z.record(z.string(), z.unknown()),
+  summary: z.record(z.string(), z.unknown()),
+  artifactSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  artifactBytes: z.number().int().min(1),
+  createdAt: z.string().datetime(),
+});
+export type ApprovalExport = z.infer<typeof ApprovalExportSchema>;
+
+// ─── Statutory Report Artifact (W8 Multi-Format Reports) ─────────────
+
+export const StatutoryReportArtifactSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  reportId: z.string().uuid(),
+  kind: z.enum(['board', 'auditor', 'dpb', 'technical', 'gap_scan', 'evidence_pack', 'custom']),
+  sourceJsonSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sourceJsonBytes: z.number().int().min(1),
+  htmlSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  htmlBytes: z.number().int().min(1),
+  pdfSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  pdfBytes: z.number().int().min(1).nullable(),
+  createdAt: z.string().datetime(),
+});
+export type StatutoryReportArtifact = z.infer<typeof StatutoryReportArtifactSchema>;
+

@@ -168,6 +168,7 @@ export const LedgerActionType = {
   APPROVAL_TOKEN_REVOKED: 'approval.token.revoked',
   APPROVAL_TOKEN_EXPIRED: 'approval.token.expired',
   APPROVAL_TOKEN_INVALID: 'approval.token.invalid',
+  APPROVAL_EXPORTED: 'approval.exported',
   EXECUTION_STARTED: 'execution.started',
   EXECUTION_ACTION_STARTED: 'execution.action.started',
   EXECUTION_ACTION_SUCCEEDED: 'execution.action.succeeded',

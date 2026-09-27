@@ -10,6 +10,11 @@
     "./schema": "./src/schema.ts",
     "./archive": "./src/archive.ts",
     "./board-report": "./src/board-report.ts",
+    "./auditor-pack": "./src/auditor-pack.ts",
+    "./dpb-submission": "./src/dpb-submission.ts",
+    "./technical-remediation": "./src/technical-remediation.ts",
+    "./approval-history": "./src/approval-history.ts",
+    "./consumer-reports": "./src/consumer-reports.ts",
     "./renderer": "./src/renderer.ts"
   },
   "scripts": {

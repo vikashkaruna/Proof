@@ -1,30 +1,10 @@
 # Axiom Proof — roadmap traceability and delivery status
 
-## Active continuation — Revision 106 (2026-09-28; Revision 105 W6 Continuous Alerting completed)
+## Active continuation — Revision 107 (2026-09-28; Revision 106 W8 Final Report-Kit & Approval Exports completed)
 
 This section supersedes conflicting historical handoff instructions below. **W9 and W10 remain in scope. The latest user instruction adds production deployment and deployed end-to-end acceptance after the entire plan passes engineering clearance.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. Use existing isolated Docker services for current engineering acceptance. No production deployment or main promotion is due at this milestone. The final release must reconcile deployment targets, credentials, residency, operational prerequisites and the earlier operator-owned main-promotion workflow; the new production instruction is conditional on full-plan clearance, not permission to bypass those gates.
 
-**Revision 104 — W7 Healthcare & Tech Sector Packs (Complete) — is complete locally and verified across tests.**
-
-- **Database & Regulators:** Migration `0077_w7_healthcare_tech_regulators.sql` (78 migrations, 0000–0077, 93 public tables) extends `public.frameworks` regulator check constraint to include `NHA`, `MoHFW`, `MeitY`, `CCPA` alongside `RBI`, `SEBI`, `IRDAI`, `CERT-In`. Updates `publish_regulatory_framework()` SECURITY DEFINER RPC to accept all 8 regulators. Verified via `tests/database/w7-regulator-packs.test.sql` in `scripts/test-database.sh`.
-- **Control Library & Multi-Regulator Overlay:**
-  - Added Healthcare frameworks (`NHA-ABDM-HDMP`, `MOHFW-EHR-STANDARDS`) and 8 framework controls.
-  - Added Tech/E-commerce frameworks (`MEITY-INTERMEDIARY-2021`, `CCPA-ECOMMERCE-2020`, `MEITY-SPDI-2011`) and 10 framework controls.
-  - Added honest reference-provenance cross-walk mappings with capped strengths (`partial` or `indicative`).
-  - Added `HEALTHCARE_SECTOR_PACK` (`IN-HEALTHCARE-2024`, sector: `Healthcare`) and `TECH_SECTOR_PACK` (`IN-TECH-2024`, sector: `Tech/E-commerce`).
-  - Exported unified collections: `ALL_FRAMEWORKS` (11 frameworks), `ALL_FRAMEWORK_CONTROLS` (34 controls), `ALL_CONTROL_MAPPINGS` (44 mappings), `ALL_SECTOR_PACKS` (3 packs).
-  - Vitest test suite `packages/control-library/src/sector-packs.test.ts` (9 tests) green.
-- **Python Agent Runtime & Drift Gate:**
-  - `scripts/build-controls-json.mjs` synchronized: emits all 3 packs and 11 frameworks into `controls.json`.
-  - `scripts/check-controls-drift.sh` passes 100% with zero drift.
-  - Pytest `services/agent-runtime/tests/test_control_library_sector_packs.py` tests all 3 packs and passes 100%. Full agent-runtime test suite (307 tests) green.
-- **Database Seeding & Docker Parity:**
-  - Enhanced `packages/control-library/scripts/seed.ts` to idempotently seed frameworks, framework controls, control mappings, and sector packs.
-  - Applied migration 0077 and seeded all 3 packs, 11 frameworks, and 40 unique mappings into the active local docker database (`supabase_db_axiom-proof`).
-- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green.
-
 **Revision 105 — W6 Continuous Alerting (Complete) — is complete locally and verified across tests.**
-
 - **Database & Alert Ledgering:** Migration `0078_w6_continuous_alerting.sql` (79 migrations, 0000–0078, 94 public tables) adds `monitoring.alert.dispatched` and `monitoring.alert.dismissed` to enum `ledger_action_type`. Introduces table `public.monitoring_alerts` with RLS, composite foreign keys `(tenant_id, id)`, and unique idempotency constraint `(tenant_id, alert_type, source_id)`. Added SECURITY DEFINER RPCs: `dispatch_monitoring_alerts(p_tenant_id uuid, p_correlation_id uuid)` and `dismiss_monitoring_alert(p_tenant_id uuid, p_alert_id uuid, p_user_id uuid, p_correlation_id uuid)`. Verified via `tests/database/monitoring-alerts.test.sql` in `scripts/test-database.sh`.
 - **Contracts & Domain Schemas:** Added `MONITORING_ALERT_DISPATCHED` and `MONITORING_ALERT_DISMISSED` to `LedgerActionType` in `@axiom/types/enums`. Added `MonitoringAlertSchema`, `MonitoringAlertType`, `MonitoringAlertSeverity`, `MonitoringAlertStatus`, and `MonitoringAlert` domain types in `@axiom/types/domain`. Vitest test suite `packages/types/src/ledger-actions.test.ts` (54 tests) green.
 - **BFF Endpoints & Unit Tests:** Added `MonitoringAlertsService` and `monitoringAlertRoutes` mounted at `/v1/monitoring/alerts`:
@@ -38,10 +18,42 @@ This section supersedes conflicting historical handoff instructions below. **W9 
   - Enhanced `apps/web/src/app/(app)/app-shell.tsx` with topbar Alert Bell button and popover tray polling `/api/bff/v1/monitoring/alerts`.
 - **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green, `uv run pytest` 307/307 green.
 
-**Current implementation: Revision 106 — W8 Final Report-Kit & Approval Exports — is active.**
+**Revision 106 — W8 Final Report-Kit & Approval Exports (Complete) — is complete locally and verified across tests.**
+- **Database & Report Artifacts:** Migration `0079_w8_report_formats_and_approval_exports.sql` (80 migrations, 0000–0079, 96 public tables):
+  - Added `approval.exported` and `report.exported` to `public.ledger_action_type`.
+  - Created `public.approval_exports` table with strict RLS and foreign key to `remediation_plans(tenant_id, id)`.
+  - Created `public.statutory_report_artifacts` table tracking all four statutory report formats (`board`, `auditor`, `dpb`, `technical`) with exact SHA-256 and byte sizes.
+  - Created SECURITY DEFINER RPCs: `record_approval_export`, `record_statutory_report_draft`, `attach_statutory_report_pdf`.
+  - Verified via `tests/database/w8-report-formats-and-approvals.test.sql` in `scripts/test-database.sh`.
+- **Contracts & Shared Report-Kit:**
+  - Added `APPROVAL_EXPORTED` to `LedgerActionType` in `@axiom/types/enums`. Added `ApprovalExportFormat`, `ApprovalExportSchema`, `ApprovalExport`, `StatutoryReportArtifactSchema`, `StatutoryReportArtifact` in `@axiom/types/domain`.
+  - Added full report schemas and deterministic HTML renderers in `@axiom/report-kit`:
+    - `packages/report-kit/src/approval-history.ts` (`ApprovalHistoryExportContentV1Schema`, `renderApprovalHistoryHtml`).
+    - `packages/report-kit/src/auditor-pack.ts` (`AuditorPackContentV1Schema`, `renderAuditorPackHtml`).
+    - `packages/report-kit/src/dpb-submission.ts` (`DpbSubmissionContentV1Schema`, `renderDpbSubmissionHtml`).
+    - `packages/report-kit/src/technical-remediation.ts` (`TechnicalRemediationRegisterContentV1Schema`, `renderTechnicalRemediationRegisterHtml`).
+    - `packages/report-kit/src/consumer-reports.ts` (DSAR response, breach notification, gap-scan report schemas and deterministic HTML renderers).
+  - All 27 unit tests in `@axiom/report-kit` passing.
+- **BFF Services & Routes:**
+  - `ApprovalExportService` and `approvalExportRoutes`:
+    - `GET /v1/approvals/history` (lists approvals enriched with plan, approver, action types, dry-run, and rollback metadata).
+    - `GET /v1/approvals/export` (exports approval audit trails in `json`, `html`, `pdf`, `csv` formats with SHA-256 verification and immutable ledgering).
+    - `GET /v1/plans/:id/approval-export` (plan-specific approval exports).
+    - Unit tests in `services/bff/src/routes/approval-exports.test.ts` (7/7 tests passing).
+  - `StatutoryReportService` and `statutoryReportRoutes`:
+    - `POST /v1/reports/statutory/generate` (draft synthesis across board, auditor, dpb, technical formats with deterministic HTML & server PDF attachment).
+    - `GET /v1/reports/statutory/:id/pdf` (immutable PDF streaming).
+    - `GET /v1/reports/statutory/:id/html` (deterministic HTML view).
+    - `GET /v1/reports/statutory` (lists statutory reports with kind filtering).
+    - Unit tests in `services/bff/src/routes/statutory-reports.test.ts` (4/4 tests passing).
+  - All 86 test suites (1,430 tests) in `@axiom/bff` passing.
+- **Web UI:**
+  - Enhanced `apps/web/src/app/(app)/plans/[id]/page.tsx` with "Export Approvals (PDF)" and "Export JSON" action buttons in the PageHeader.
+  - Enhanced `apps/web/src/app/(app)/reports/reports-client.tsx` with a Statutory Report Formats grid (Board Report, Auditor Pack, DPB Submission, Technical Register) and quick export actions for Tenant Approval History (PDF, JSON, CSV).
+- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green, `uv run pytest` 307/307 green.
 
-- Objective: Shared report-kit adoption across all artifact consumers (Prativedan, DSAR responses, breach notifications, gap-scan output, approval/reconciliation exports).
-- Complete approval-history/audit-ledger exports and evidence pack alignment.
+**Current implementation: Revision 107 — W9 Measured Coverage & Enforced Per-Module Floors — is active.**
+- Objective: Enforced test coverage floors across all modules, verified load/restore operations, and deterministic validation suites.
 
 **Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. Continue next with W8 final report-kit and approval exports, then W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
 

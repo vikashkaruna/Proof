@@ -172,6 +172,26 @@ export default async function PlanDetailPage({ params }: PageProps) {
         }
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <a
+                href={`/api/bff/v1/plans/${typedPlan.id}/approval-export?format=pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`approval-history-${typedPlan.id}.pdf`}
+              >
+                Export Approvals (PDF)
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a
+                href={`/api/bff/v1/plans/${typedPlan.id}/approval-export?format=json`}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`approval-history-${typedPlan.id}.json`}
+              >
+                Export JSON
+              </a>
+            </Button>
             {canKillSwitch && (
               <KillSwitchButton planId={typedPlan.id} tenantId={typedPlan.tenant_id} />
             )}

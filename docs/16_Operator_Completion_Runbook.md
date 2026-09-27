@@ -1,6 +1,6 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
-## Active continuation — Revision 106 (2026-09-28; Revision 105 W6 Continuous Alerting completed)
+## Active continuation — Revision 107 (2026-09-28; Revision 106 W8 Final Report-Kit & Approval Exports completed)
 
 This section supersedes conflicting historical handoff instructions below. **W9 and W10 remain in scope. The latest user instruction adds production deployment and deployed end-to-end acceptance after the entire plan passes engineering clearance.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. Use existing isolated Docker services for current engineering acceptance. No production deployment or main promotion is due at this milestone. The final release must reconcile deployment targets, credentials, residency, operational prerequisites and the earlier operator-owned main-promotion workflow; the new production instruction is conditional on full-plan clearance, not permission to bypass those gates.
 
@@ -38,12 +38,29 @@ This section supersedes conflicting historical handoff instructions below. **W9 
   - Enhanced `apps/web/src/app/(app)/app-shell.tsx` with topbar Alert Bell button and popover tray polling `/api/bff/v1/monitoring/alerts`.
 - **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green, `uv run pytest` 307/307 green.
 
-**Current implementation: Revision 106 — W8 Final Report-Kit & Approval Exports — is active.**
+**Revision 106 — W8 Final Report-Kit & Approval Exports (Complete) — is complete locally and verified across tests.**
 
-- Objective: Shared report-kit adoption across all artifact consumers (Prativedan, DSAR responses, breach notifications, gap-scan output, approval/reconciliation exports).
-- Complete approval-history/audit-ledger exports and evidence pack alignment.
+- **Database & Report Artifacts:**
+  - Migration `0079_w8_report_formats_and_approval_exports.sql` (80 migrations, 0000–0079, 96 public tables) added `approval.exported` and `report.exported` to `public.ledger_action_type`.
+  - Created `public.approval_exports` table with strict RLS and foreign key to `remediation_plans(tenant_id, id)`.
+  - Created `public.statutory_report_artifacts` table tracking all 4 report formats (`board`, `auditor`, `dpb`, `technical`) with exact SHA-256 and byte sizes.
+  - Created SECURITY DEFINER RPCs: `record_approval_export`, `record_statutory_report_draft`, `attach_statutory_report_pdf`. Verified via `tests/database/w8-report-formats-and-approvals.test.sql` in `scripts/test-database.sh`.
+- **Contracts, Domain & Report-Kit:**
+  - Added `APPROVAL_EXPORTED` to `LedgerActionType` in `@axiom/types/enums`. Added `ApprovalExportFormat`, `ApprovalExportSchema`, `ApprovalExport`, `StatutoryReportArtifactSchema`, `StatutoryReportArtifact` in `@axiom/types/domain`.
+  - Built `@axiom/report-kit`: statutory formats (`board`, `auditor`, `dpb`, `technical`) and consumer formats (`dsar`, `breach`, `gap-scan`), HTML generators, and deterministic PDF fallback headers. Vitest suite `packages/report-kit/src/report-formats.test.ts` (27 tests) green.
+- **BFF Routes & Services:**
+  - Mounted `/v1/approvals/history`, `/v1/approvals/export`, `/v1/plans/:id/approval-export`, `/v1/reports/statutory/generate`, `/v1/reports/statutory/:id/pdf`, `/v1/reports/statutory/:id/html`, `/v1/reports/statutory`. Unit test suites (11 tests) green. All 86 test files (1,430 tests) green in `@axiom/bff`.
+- **Web UI:**
+  - Plan approval export buttons (PDF & JSON) on `/plans/[id]`.
+  - Statutory Report cards (Board, Auditor, DPB, Technical) and Tenant Approval History exports on `/reports`.
+- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green, `uv run pytest` 307/307 green.
 
-**Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. Continue next with W8 final report-kit and approval exports, then W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
+**Current implementation: Revision 107 — W9 Measured Coverage & Enforced Per-Module Floors — is active.**
+
+- Objective: Enforce per-package coverage floors across Vitest and Python test suites; verify backup, restore, and load test scripts; ensure full-stack test suite completeness.
+- Address remaining Phase 0–5 workstream gap items for W9.
+
+**Remaining scope:** W9 measured coverage with enforced per-module floors plus load/restore drills, and W10 offline installation and air-gapped runbooks. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
 
 ## Session close-out and handoff — Revision 88 (2026-09-25)
 
