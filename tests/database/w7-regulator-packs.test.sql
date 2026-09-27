@@ -281,6 +281,67 @@ select pg_temp.assert_eq(
      '[{"ref": "cyber-resilience-baseline", "heading": "Baseline cyber-security controls"}]'::jsonb)
    -> 'framework' ->> 'regulator'),
   'SEBI', 'the BFF service publishes a framework');
+
+-- Healthcare framework (NHA) & pack
+select pg_temp.assert_eq(
+  (select public.publish_regulatory_framework(
+     'NHA-ABDM-HDMP', 'NHA',
+     'Ayushman Bharat Digital Mission — Health Data Management Policy',
+     'NHA digital health data processing policy.',
+     'https://abdm.gov.in', '2026-09-27', 'Axiom Minds · Founder',
+     '00000000-0000-0000-0000-0000000000b1',
+     '[{"ref": "abdm-consent-manager", "heading": "Granular electronic consent"}]'::jsonb)
+   -> 'framework' ->> 'regulator'),
+  'NHA', 'NHA healthcare regulator framework is published');
+
+select pg_temp.assert_eq(
+  (select public.record_control_mapping(
+     'NHA-ABDM-HDMP', 'abdm-consent-manager', 'DPDPA-SEC-001', 'test-w7',
+     'partial', 'reference', 'Healthcare consent manager overlap with security.',
+     '00000000-0000-0000-0000-0000000000b1')
+   -> 'mapping' ->> 'strength'),
+  'partial', 'cross-walk for healthcare framework records normally');
+
+select pg_temp.assert_eq(
+  (select public.publish_sector_pack(
+     'IN-HEALTHCARE-2024', 'Healthcare sector pack #2', 'Healthcare',
+     'Healthcare sector pack overlay for ABDM.',
+     'test-w7', array['DPDPA-SEC-001'], array['NHA-ABDM-HDMP'],
+     '[{"requirement": "Clinical system audit", "evidenceType": "report"}]'::jsonb,
+     '["policy"]'::jsonb, null, '00000000-0000-0000-0000-0000000000b1')
+   -> 'pack' ->> 'code'),
+  'IN-HEALTHCARE-2024', 'Healthcare sector pack publishes cleanly');
+
+-- Tech/E-commerce framework (MeitY) & pack
+select pg_temp.assert_eq(
+  (select public.publish_regulatory_framework(
+     'MEITY-INTERMEDIARY-2021', 'MeitY',
+     'Information Technology Intermediary Rules 2021',
+     'MeitY intermediary due diligence.',
+     'https://www.meity.gov.in', '2026-09-27', 'Axiom Minds · Founder',
+     '00000000-0000-0000-0000-0000000000b1',
+     '[{"ref": "intermediary-privacy-notice", "heading": "Terms of use and privacy notice"}]'::jsonb)
+   -> 'framework' ->> 'regulator'),
+  'MeitY', 'MeitY tech regulator framework is published');
+
+select pg_temp.assert_eq(
+  (select public.record_control_mapping(
+     'MEITY-INTERMEDIARY-2021', 'intermediary-privacy-notice', 'DPDPA-XBR-001', 'test-w7',
+     'partial', 'reference', 'Intermediary privacy notice mapping.',
+     '00000000-0000-0000-0000-0000000000b1')
+   -> 'mapping' ->> 'strength'),
+  'partial', 'cross-walk for tech framework records normally');
+
+select pg_temp.assert_eq(
+  (select public.publish_sector_pack(
+     'IN-TECH-2024', 'Tech and E-commerce sector pack #3', 'Tech/E-commerce',
+     'Tech and e-commerce sector pack overlay.',
+     'test-w7', array['DPDPA-XBR-001'], array['MEITY-INTERMEDIARY-2021'],
+     '[{"requirement": "Infra review", "evidenceType": "report"}]'::jsonb,
+     '["policy"]'::jsonb, null, '00000000-0000-0000-0000-0000000000b1')
+   -> 'pack' ->> 'code'),
+  'IN-TECH-2024', 'Tech sector pack publishes cleanly');
+
 select pg_temp.assert_true(
   (select count(*) >= 2 from public.frameworks), 'the BFF service reads the catalogue');
 select pg_temp.denied($q$insert into public.frameworks(code, regulator, title, source_url, verified_on, verified_by, published_by)

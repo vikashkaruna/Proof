@@ -1,6 +1,6 @@
 # Axiom Proof — Phase 0–5 Gap Closure Plan
 
-## Active continuation — Revision 104 (2026-09-28; Revision 103 W2 parity completed)
+## Active continuation — Revision 105 (2026-09-28; Revision 104 W7 Healthcare & Tech Sector Packs completed)
 
 This section supersedes conflicting historical handoff instructions below. **W9 and W10 remain in scope. The latest user instruction adds production deployment and deployed end-to-end acceptance after the entire plan passes engineering clearance.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. Use existing isolated Docker services for current engineering acceptance.
 
@@ -15,11 +15,29 @@ This section supersedes conflicting historical handoff instructions below. **W9 
   All 83 test suites (1,411 tests) green in `@axiom/bff`.
 - **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean.
 
-**Current implementation: Revision 104 — W7 Healthcare & Tech Sector Packs — is active.**
-- Objective: Seed Healthcare (`IN-HEALTHCARE-2024`) and Tech/E-commerce (`IN-TECH-2024`) sector packs via `publish_sector_pack`.
-- Regulatory mappings: Map controls to sector frameworks, verify indicative provenance constraints, and wire to UI/catalogue endpoints.
+**Revision 104 — W7 Healthcare & Tech Sector Packs (Complete) — is complete locally and verified across tests.**
+- **Database & Regulators:** Migration `0077_w7_healthcare_tech_regulators.sql` (78 migrations, 0000–0077, 93 public tables) extends `public.frameworks` regulator check constraint to include `NHA`, `MoHFW`, `MeitY`, `CCPA` alongside `RBI`, `SEBI`, `IRDAI`, `CERT-In`. Updates `publish_regulatory_framework()` SECURITY DEFINER RPC to accept all 8 regulators. Verified via `tests/database/w7-regulator-packs.test.sql` in `scripts/test-database.sh`.
+- **Control Library & Multi-Regulator Overlay:**
+  - Added Healthcare frameworks (`NHA-ABDM-HDMP`, `MOHFW-EHR-STANDARDS`) and 8 framework controls.
+  - Added Tech/E-commerce frameworks (`MEITY-INTERMEDIARY-2021`, `CCPA-ECOMMERCE-2020`, `MEITY-SPDI-2011`) and 10 framework controls.
+  - Added honest reference-provenance cross-walk mappings with capped strengths (`partial` or `indicative`).
+  - Added `HEALTHCARE_SECTOR_PACK` (`IN-HEALTHCARE-2024`, sector: `Healthcare`) and `TECH_SECTOR_PACK` (`IN-TECH-2024`, sector: `Tech/E-commerce`).
+  - Exported unified collections: `ALL_FRAMEWORKS` (11 frameworks), `ALL_FRAMEWORK_CONTROLS` (34 controls), `ALL_CONTROL_MAPPINGS` (44 mappings), `ALL_SECTOR_PACKS` (3 packs).
+  - Vitest test suite `packages/control-library/src/sector-packs.test.ts` (9 tests) green.
+- **Python Agent Runtime & Drift Gate:**
+  - `scripts/build-controls-json.mjs` synchronized: emits all 3 packs and 11 frameworks into `controls.json`.
+  - `scripts/check-controls-drift.sh` passes 100% with zero drift.
+  - Pytest `services/agent-runtime/tests/test_control_library_sector_packs.py` tests all 3 packs and passes 100%. Full agent-runtime test suite (307 tests) green.
+- **Database Seeding & Docker Parity:**
+  - Enhanced `packages/control-library/scripts/seed.ts` to idempotently seed frameworks, framework controls, control mappings, and sector packs.
+  - Applied migration 0077 and seeded all 3 packs, 11 frameworks, and 40 unique mappings into the active local docker database (`supabase_db_axiom-proof`).
+- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean, `scripts/test-database.sh` 100% green.
 
-**Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. The four remaining W2 workflows are `ropa_records`, `policy_drafts`, `playbook_entries` and `classification_reviews`, including their usable workflows and acceptance tests. Continue next with the accepted W8 remainder, then W6 actual scheduler composition/alerts and accepted SMB/vendor/partner/Sanket work, W7 Healthcare → Tech and library completeness, W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
+**Current implementation: Revision 105 — W6 Continuous Alerting — is active.**
+- Objective: Continuous alerting and monitoring surface for configuration drift, scheduled assessment triggers, and health notification channels.
+- Wire alert dispatch logic to notification channels and dashboard notification feeds.
+
+**Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. Continue next with W6 continuous alerting, then accepted W8 remainder, W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
 
 ## Session close-out and handoff — Revision 98 (2026-09-27)
 
