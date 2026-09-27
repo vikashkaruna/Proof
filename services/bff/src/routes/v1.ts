@@ -1,6 +1,7 @@
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
 import { boardReportRoutes } from './board-reports.js';
+import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
@@ -196,6 +197,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
+  app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());

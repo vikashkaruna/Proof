@@ -1,23 +1,23 @@
 # Axiom Proof — implementation session handoff
 
-## Active continuation — Revision 103 (2026-09-27; Revision 102 board report generation completed)
+## Active continuation — Revision 104 (2026-09-28; Revision 103 W2 parity completed)
 
 This section supersedes conflicting historical handoff instructions below. **W9 and W10 remain in scope. The latest user instruction adds production deployment and deployed end-to-end acceptance after the entire plan passes engineering clearance.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. Use existing isolated Docker services for current engineering acceptance.
 
-**Revision 102 — board reports from finalized assessment sources & stateless PDF renderer — is complete locally and verified across tests.**
-- **Database & Authority:** Migration `0075_board_report_generation.sql` applies 76 migrations (0000–0075, 88 public tables). Implements `board_report_requests` (manager-initiated bound to finalized assessment run), `board_report_artifacts` (exact SHA-256 and byte size tracking for JSON, HTML, PDF), dual-visibility RLS, and SECURITY DEFINER RPCs: `request_board_report`, `record_board_report_draft`, `attach_board_report_pdf`. Verified with `tests/database/board-report-generation.test.sql` in `scripts/test-database.sh`.
-- **Contracts & Renderer:** Added `@axiom/report-kit/board-report` with strict Zod `BoardReportContentV1Schema` and deterministic HTML renderer following Axiom design tokens and DPDPA statutory obligations. Added `@axiom/report-kit/renderer` supporting headless Chromium (`chrome-headless-shell`) with deterministic `%PDF-1.4` standard engine fallback. 22/22 unit tests passing in report-kit.
-- **BFF Endpoints:** Added `BoardReportService` and `boardReportRoutes` mounted on `/v1`:
-  - `POST /v1/reports/board/request` (manager-initiated request, RBAC-checked).
-  - `POST /v1/reports/board/:id/generate` (founder & Prativedan synthesis, HTML/PDF artifact sealing).
-  - `GET /v1/reports/board/:id/pdf` (streams signed PDF with `application/pdf` and `X-Report-SHA256`).
-  - `GET /v1/reports/board/requests` (tenant request pagination).
-  All 82 test suites (1,398 tests) green in `@axiom/bff`.
-- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean.
+**Revision 103 — W2 Parity Target Tables (40/40 Complete) — is complete locally and verified across tests.**
+- **Database & Authority:** Migration `0076_w2_parity_tables.sql` applies 77 migrations (0000–0076, 93 public tables). Completes all 40 named W2 target tables (40/40, 100%) by introducing `ropa_records`, `policy_drafts`, `playbook_entries`, and `classification_reviews`. Includes strict RLS policies, composite foreign keys `(tenant_id, id)`, and SECURITY DEFINER RPCs: `create_ropa_record`, `create_policy_draft`, `review_policy_draft`, `create_playbook_entry`, `submit_classification_review`. Verified in `scripts/test-database.sh` via `tests/database/w2-parity-tables.test.sql`.
+- **Contracts & Ledger Action Types:** Added `ropa.recorded`, `policy.drafted`, `policy.reviewed`, `playbook.created`, `classification.reviewed` to `LedgerActionType` in `@axiom/types/enums`. All 15 TypeScript monorepo test suites passing.
+- **BFF Endpoints:** Added `W2ParityService` and `w2ParityRoutes` mounted on `/v1`:
+  - `POST /v1/ropa` & `GET /v1/ropa` (ROPA management).
+  - `POST /v1/policies/drafts`, `GET /v1/policies/drafts`, `POST /v1/policies/drafts/:id/review` (policy lifecycle & founder review gate).
+  - `POST /v1/playbooks` & `GET /v1/playbooks` (incident/DSAR/monitoring playbooks).
+  - `POST /v1/classification/reviews` & `GET /v1/classification/reviews` (human data classification reviews).
+  All 83 test suites (1,411 tests) green in `@axiom/bff`.
+- **Security & Quality:** `scripts/security-scan.sh` clean, 0 vulnerabilities, `pnpm lint` 16/16 clean, `pnpm build` 4/4 clean.
 
-**Current implementation: Revision 103 — W2 Parity Target Tables (40/40 Complete) — is active.**
-- Objective: Deliver the final four missing named parity tables from the W2 40-table requirement: `ropa_records`, `policy_drafts`, `playbook_entries`, and `classification_reviews` with strict foreign keys, composite tenant isolation, append-only ledger action logging, and supporting BFF routes.
-- Schema target: Migration `0076_w2_parity_tables.sql` bringing W2 named targets to **40/40 (100%)**.
+**Current implementation: Revision 104 — W7 Healthcare & Tech Sector Packs — is active.**
+- Objective: Seed Healthcare (`IN-HEALTHCARE-2024`) and Tech/E-commerce (`IN-TECH-2024`) sector packs via `publish_sector_pack`.
+- Regulatory mappings: Map controls to sector frameworks, verify indicative provenance constraints, and wire to UI/catalogue endpoints.
 
 **Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. The four remaining W2 workflows are `ropa_records`, `policy_drafts`, `playbook_entries` and `classification_reviews`, including their usable workflows and acceptance tests. Continue next with the accepted W8 remainder, then W6 actual scheduler composition/alerts and accepted SMB/vendor/partner/Sanket work, W7 Healthcare → Tech and library completeness, W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
 

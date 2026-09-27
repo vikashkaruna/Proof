@@ -298,6 +298,11 @@ export const LedgerActionType = {
   EVIDENCE_PACK_BUILD_PENDING: 'evidence.pack.build.pending',
   EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
+  ROPA_RECORDED: 'ropa.recorded',
+  POLICY_DRAFTED: 'policy.drafted',
+  POLICY_REVIEWED: 'policy.reviewed',
+  PLAYBOOK_CREATED: 'playbook.created',
+  CLASSIFICATION_REVIEWED: 'classification.reviewed',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 
