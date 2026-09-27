@@ -535,6 +535,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # report-kit cross-language and adversarial verifier tests run inside pnpm test.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 

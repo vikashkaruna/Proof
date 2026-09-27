@@ -1,4 +1,5 @@
 import { evidenceRoutes } from './evidence.js';
+import { evidencePackRoutes } from './evidence-packs.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
@@ -192,6 +193,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
   app.route('/', evidenceRoutes());
+  app.route('/', evidencePackRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());
@@ -2478,111 +2480,6 @@ export function v1Routes(deps: Deps) {
     const refused = (data as { error?: string } | null)?.error;
     if (refused) {
       return c.json({ error: { code: refused, message: 'The send was not recorded' } }, 409);
-    }
-    return c.json({ data });
-  });
-
-  // GET /v1/reports — the review queue: everything the founder owes a
-  // decision on, oldest first.
-  app.get('/reports', async (c) => {
-    const readRefusal = requireCapability(c, Capability.POSTURE_READ);
-    if (readRefusal) return readRefusal;
-    const tenantId = c.get('tenantId');
-    const admin = createSupabaseAdmin();
-    const status = c.req.query('status');
-    let query = admin
-      .from('reports')
-      .select(
-        'id, engagement_id, kind, title, library_version, generated_by_agent, generated_at, reviewed_by, reviewed_at, review_notes, status, approved_at, published_at, rejected_by, rejected_at, rejection_reason, released_content_hash',
-      )
-      .eq('tenant_id', tenantId)
-      .order('generated_at', { ascending: true })
-      .limit(200);
-    if (status && ['draft', 'approved', 'rejected', 'published', 'archived'].includes(status)) {
-      query = query.eq('status', status);
-    }
-    const { data, error } = await query;
-    if (error) {
-      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
-    }
-    return c.json({ data });
-  });
-
-  // POST /v1/reports/:id/review — approve or reject. BR-4 authority is
-  // enforced in the RPC (Axiom-internal reviewer, reason on rejection); the
-  // route refuses to pretend otherwise.
-  app.post('/reports/:id/review', async (c) => {
-    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
-    if (writeRefusal) return writeRefusal;
-    const tenantId = c.get('tenantId');
-    const user = c.get('user');
-    const reportId = c.req.param('id');
-    if (!z.uuid().safeParse(reportId).success) {
-      return c.json({ error: { code: 'validation_failed', message: 'Invalid report id' } }, 400);
-    }
-    const body = (await c.req.json().catch(() => null)) as {
-      decision?: unknown;
-      note?: unknown;
-    } | null;
-    const decision = typeof body?.decision === 'string' ? body.decision : '';
-    if (decision !== 'approved' && decision !== 'rejected') {
-      return c.json(
-        { error: { code: 'validation_failed', message: 'Decision must be approved or rejected' } },
-        400,
-      );
-    }
-    const note = typeof body?.note === 'string' ? body.note : undefined;
-    const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('review_report', {
-      p_tenant_id: tenantId,
-      p_report_id: reportId,
-      p_decision: decision,
-      p_note: note ?? null,
-      p_reviewed_by: user.id,
-      p_correlation_id: randomUUID(),
-    });
-    if (error) {
-      logger.error({ err: error.message }, 'report review failed');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not review the report' } },
-        500,
-      );
-    }
-    const refused = (data as { error?: string } | null)?.error;
-    if (refused) {
-      return c.json({ error: { code: refused, message: 'The report was not reviewed' } }, 409);
-    }
-    return c.json({ data });
-  });
-
-  // POST /v1/reports/:id/release — the founder's release. The RPC refuses
-  // anything that has not been approved, and hashes the released content.
-  app.post('/reports/:id/release', async (c) => {
-    const writeRefusal = requireCapability(c, Capability.ESTATE_MANAGE);
-    if (writeRefusal) return writeRefusal;
-    const tenantId = c.get('tenantId');
-    const user = c.get('user');
-    const reportId = c.req.param('id');
-    if (!z.uuid().safeParse(reportId).success) {
-      return c.json({ error: { code: 'validation_failed', message: 'Invalid report id' } }, 400);
-    }
-    const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('release_report', {
-      p_tenant_id: tenantId,
-      p_report_id: reportId,
-      p_released_by: user.id,
-      p_correlation_id: randomUUID(),
-    });
-    if (error) {
-      logger.error({ err: error.message }, 'report release failed');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not release the report' } },
-        500,
-      );
-    }
-    const refused = (data as { error?: string } | null)?.error;
-    if (refused) {
-      return c.json({ error: { code: refused, message: 'The report was not released' } }, 409);
     }
     return c.json({ data });
   });

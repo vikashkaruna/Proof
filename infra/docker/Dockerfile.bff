@@ -18,6 +18,7 @@ COPY packages/mfa/package.json ./packages/mfa/
 COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY packages/control-library/package.json ./packages/control-library/
 COPY packages/evidence/package.json ./packages/evidence/
+COPY packages/report-kit/package.json ./packages/report-kit/
 COPY packages/ledger/package.json ./packages/ledger/
 COPY packages/supabase/package.json ./packages/supabase/
 COPY packages/types/package.json ./packages/types/

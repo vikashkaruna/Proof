@@ -13,6 +13,17 @@ import { Capability, authorize, can, capabilitiesFor, rolesWith } from './rbac';
 
 const ALL_ROLES = Object.values(UserRole);
 
+describe('founder report review and release', () => {
+  it.each([Capability.REPORT_REVIEW, Capability.REPORT_RELEASE])(
+    'reserves %s for the founder role; live internal membership is also required by the backend',
+    (capability) => {
+      expect(rolesWith(capability)).toEqual([UserRole.FOUNDER]);
+      for (const role of ALL_ROLES)
+        expect(can(capability, { role })).toBe(role === UserRole.FOUNDER);
+    },
+  );
+});
+
 describe('the approval chain — the capabilities that matter', () => {
   // The single most important assertion in the file.
   it('lets only founder, owner, admin and approver approve a plan', () => {
