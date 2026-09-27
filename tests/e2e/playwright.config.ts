@@ -84,6 +84,13 @@ const bffEnv = {
 
 export default defineConfig({
   testDir: './tests',
+  // The dedicated storage job owns its real Object Lock fixture. General
+  // deployed acceptance forbids skipped journeys, so do not discover that
+  // fixture-only spec unless the explicit storage launcher enables it.
+  testIgnore:
+    process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
+      ? []
+      : ['**/evidence-ingestion.spec.ts'],
   globalSetup: require.resolve('./global-setup.ts'),
   /**
    * Next compiles each route the first time it is requested, and several

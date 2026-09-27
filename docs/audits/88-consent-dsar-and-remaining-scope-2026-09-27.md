@@ -1,6 +1,6 @@
 # Revision 99 — Consent, DSAR and full-plan continuation
 
-Status: local implementation and validation green; source/staging CI pending.
+Status: complete in staging via PR #88 (`2ecbcc005fe24dd692b09550fe443c2002509055`). Source CI 36275413848 and exact staging CI 36276479197 each passed all 21 applicable checks; both profiles each passed 89 API / 80 browser container outcomes. Main remains operator-owned. The scope audit below records the pre-Revision99 baseline; consent/DSAR items are now delivered as described under Delivered behavior.
 
 # Remaining scope audit — 710b169, 2026-09-27
 
@@ -26,7 +26,7 @@ Consent UI acceptance: actor/tenant from session, write controls only ESTATE_MAN
 
 ## Validation
 
-Local workspace unit suites pass (BFF 1,317 with 10 external binding tests skipped; web 143; other suites unchanged), full build and typecheck pass. Lint passes with two pre-existing invite-navigation warnings. The complete fresh PostgreSQL suite passes, including the new publication/capture/deactivation/demotion races and populated 0071→0072 upgrade. The existing isolated Docker Auth/Postgres stack has been migrated and verified at 79 public tables. All six real-auth consent/DSAR browser journeys pass against the existing isolated Docker Auth/Postgres stack (zero retries). The local Bandit/gitleaks/ESLint security scan is green. Exact source/staging CI remains pending.
+Local workspace unit suites pass (BFF 1,317 with 10 external binding tests skipped; web 143; other suites unchanged), full build and typecheck pass. Lint passes with two pre-existing invite-navigation warnings. The complete fresh PostgreSQL suite passes, including the new publication/capture/deactivation/demotion races and populated 0071→0072 upgrade. The existing isolated Docker Auth/Postgres stack has been migrated and verified at 79 public tables. All six real-auth consent/DSAR browser journeys pass against the existing isolated Docker Auth/Postgres stack (zero retries). The local Bandit/gitleaks/ESLint security scan is green. Exact source/staging CI subsequently passed as recorded above.
 
 Initial database runs caught two stale test assumptions: re-grant without an expected current notice, and tenant teardown cascading into retained records. Tests now publish the new notice via the audited RPC and require all four consent tenant references to restrict deletion. No historical migration was edited.
 
@@ -36,4 +36,4 @@ Eleven consent BFF routes bind authenticated tenant/actor identity and preserve 
 
 The consent page reads real bounded BFF lists, shows capture provenance/expiry, requires fresh acknowledgement when notice/purpose/language changes, and records withdrawal/legal hold/downstream human attestation. DSAR uses tenant-scoped real records and human intake, verification, fulfilment, evidence-linked completion, rejection and escalation. Every consent mutation and the touched DSAR transitions recheck a locked live manager membership. DSAR fulfilment/completion refuse unverified identity; consent RLS excludes nonmember employees, and retained consent records cannot disappear via tenant deletion.
 
-These changes do not deliver downstream connector propagation, actual identity verification, DSAR response transmission, provider delivery, external object-lock acceptance, the full W8 report/evidence workflows or the full plan. Lists disclose their 200-row cap. No cloud resources provisioned, outbound messages sent, or main promotion performed. Continue the remaining-scope matrix after exact staging checks pass.
+These changes do not deliver downstream connector propagation, actual identity verification, DSAR response transmission, provider delivery, external object-lock acceptance, the full W8 report/evidence workflows or the full plan. Lists disclose their 200-row cap. No cloud resources provisioned, outbound messages sent, or main promotion performed. Exact staging checks passed. Revision100 continues evidence foundations; the remaining-scope matrix stays active.

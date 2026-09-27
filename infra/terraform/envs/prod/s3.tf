@@ -120,6 +120,20 @@ data "aws_iam_policy_document" "evidence_access" {
       "${aws_s3_bucket.evidence.arn}/*",
     ]
   }
+  # A lost PUT response can be reconciled only by discovering the exact
+  # immutable version under a server-selected ingestion key. This grants no
+  # listing outside the ingestion namespace and no deletion/retention bypass.
+  statement {
+    sid       = "AllowIngestionVersionRecovery"
+    effect    = "Allow"
+    actions   = ["s3:ListBucketVersions"]
+    resources = [aws_s3_bucket.evidence.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["tenants/*/evidence-ingestions/*"]
+    }
+  }
   statement {
     sid       = "DenyDeleteForWORM"
     effect    = "Deny"

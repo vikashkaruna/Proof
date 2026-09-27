@@ -1,6 +1,14 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { S3Client, GetObjectRetentionCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  GetObjectCommand,
+  GetObjectLegalHoldCommand,
+  GetObjectRetentionCommand,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import { EvidenceVault, contentKey } from './index';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 describe('contentKey', () => {
   it('builds a tenant-scoped key without engagement', () => {
@@ -60,7 +68,20 @@ describe('seal verifies the uploaded version', () => {
       .spyOn(sendClient, 'send')
       .mockResolvedValueOnce({ ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' } })
       .mockResolvedValueOnce({ VersionId: 'immutable-version' })
-      .mockResolvedValueOnce({ Retention: retention });
+      .mockResolvedValueOnce({ Retention: retention })
+      .mockResolvedValueOnce({ LegalHold: { Status: 'OFF' } })
+      .mockResolvedValue({
+        VersionId: 'immutable-version',
+        ContentLength: 5,
+        ServerSideEncryption: 'AES256',
+        Metadata: {
+          'axiom-tenant-id': 'tenant-a',
+          'axiom-engagement-id': '',
+          'axiom-collected-by-agent': 'saakshi',
+          'axiom-content-sha256': createHash('sha256').update('proof').digest('hex'),
+        },
+        Body: Readable.from([Buffer.from('proof')]),
+      });
   }
   it('returns verified only after retention readback for the uploaded version', async () => {
     const send = provider();
@@ -138,7 +159,7 @@ describe('seal verifies the uploaded version', () => {
     expect(send).not.toHaveBeenCalled();
   });
   it('refuses unconfirmed legal hold', async () => {
-    provider().mockResolvedValueOnce({ LegalHold: { Status: 'OFF' } });
+    provider();
     await expect(
       new EvidenceVault('ap-south-1').seal({ ...input, legalHold: true }),
     ).rejects.toThrow('legal hold');

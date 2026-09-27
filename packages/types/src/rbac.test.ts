@@ -234,3 +234,15 @@ describe('matrix integrity', () => {
     }
   });
 });
+
+describe('human evidence ingestion authority', () => {
+  it('allows only founder, owner and admin to record retained evidence', () => {
+    expect(rolesWith(Capability.EVIDENCE_RECORD).sort()).toEqual(['admin', 'founder', 'owner']);
+  });
+  it.each(ALL_ROLES.filter((role) => !['founder', 'owner', 'admin'].includes(role)))(
+    'does not turn read or export permission into ingestion authority for %s',
+    (role) => {
+      expect(authorize(Capability.EVIDENCE_RECORD, { role }).allowed).toBe(false);
+    },
+  );
+});

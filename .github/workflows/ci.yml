@@ -59,6 +59,47 @@ jobs:
         if: always()
         run: supabase stop --workdir .axiom-runtime/parity --no-backup
 
+  evidence-storage:
+    name: Exact-version evidence storage and human ingestion (W8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: pnpm install --frozen-lockfile
+      # Archived upstream is pinned, synthetic and isolated; this is provider
+      # protocol acceptance, not a maintained production distribution.
+      - run: python3 scripts/test-evidence-storage.py --keep-running
+      - run: ./scripts/start-parity-supabase.sh
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+      - run: pnpm exec tsx scripts/seed-personas.ts
+      - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - run: python3 scripts/test-evidence-storage.py --browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-storage-acceptance
+          path: |
+            .axiom-runtime/evidence-storage/report.json
+            .axiom-runtime/evidence-storage/browser-results.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop isolated evidence fixture
+        if: always()
+        run: python3 scripts/test-evidence-storage.py --stop
+      - name: Stop isolated Auth stack
+        if: always()
+        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+
   workload-identity:
     name: Isolated SPIRE workload identity (W4.3)
     runs-on: ubuntu-latest

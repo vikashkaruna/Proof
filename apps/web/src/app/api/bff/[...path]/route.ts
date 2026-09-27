@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import {
+  boundedRequestBody,
+  RequestBodyTooLarge,
+  RequestBodyUnavailable,
+} from '@/lib/bounded-request-body';
 import { selectTenantMembership, type TenantMembership } from '@/lib/tenant-selection';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -35,8 +40,34 @@ async function forward(request: NextRequest, context: RouteContext) {
   const base = process.env.BFF_PUBLIC_URL || 'http://localhost:4000';
   const target = new URL(`${base.replace(/\/$/, '')}/${path.join('/')}`);
   target.search = request.nextUrl.search;
-  const bodyBytes =
-    request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
+  let bodyBytes: ArrayBuffer | undefined;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    try {
+      bodyBytes = /^\/v1\/evidence\/ingestions\/?$/.test(target.pathname)
+        ? await boundedRequestBody(request, 12 * 1024 * 1024)
+        : await request.arrayBuffer();
+    } catch (error) {
+      const oversized = error instanceof RequestBodyTooLarge;
+      const unavailable = error instanceof RequestBodyUnavailable;
+      return NextResponse.json(
+        {
+          error: {
+            code: oversized
+              ? 'request_body_too_large'
+              : unavailable
+                ? 'request_body_unavailable'
+                : 'invalid_request_body',
+            message: oversized
+              ? 'Upload request exceeds 12 MiB.'
+              : unavailable
+                ? 'Upload interrupted or timed out. Try again.'
+                : 'Unable to read request body.',
+          },
+        },
+        { status: oversized ? 413 : unavailable ? 408 : 400 },
+      );
+    }
+  }
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${accessToken}`);
   // These exact endpoints run before a caller has a tenant. The BFF still
