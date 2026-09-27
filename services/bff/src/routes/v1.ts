@@ -3831,6 +3831,19 @@ export function v1Routes(deps: Deps) {
         403,
       );
     }
+    // Generated reports must stay in the private source/review/artifact lifecycle.
+    // Generic runtime output would bypass that visibility and release boundary.
+    if (name === 'prativedan') {
+      return c.json(
+        {
+          error: {
+            code: 'board_report_workflow_required',
+            message: 'Use the dedicated board report request workflow.',
+          },
+        },
+        403,
+      );
+    }
     if (['sanket', 'nazar', 'lekha'].includes(name)) {
       const internalRefusal = requireCapability(c, Capability.WORKBENCH_ACCESS);
       if (internalRefusal) return internalRefusal;

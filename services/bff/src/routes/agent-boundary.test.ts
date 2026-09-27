@@ -16,9 +16,14 @@ const state = vi.hoisted(() => {
     AGENT_RUNTIME_URL: 'http://runtime.invalid',
     AGENT_RUNTIME_INTERNAL_TOKEN: 't'.repeat(40),
   });
-  return { db: null as FakeDb | null };
+  return { db: null as FakeDb | null, adminCalls: 0 };
 });
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => state.db!.client }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => {
+    state.adminCalls++;
+    return state.db!.client;
+  },
+}));
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const ENGAGEMENT = '33333333-3333-4333-8333-333333333333';
@@ -70,6 +75,7 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
 
 beforeEach(() => {
   state.db = createFakeDb();
+  state.adminCalls = 0;
   transport.mockReset();
   transport.mockImplementation(async (_url, init) => new Response(JSON.stringify(success(init))));
   broadcast.mockReset();
@@ -105,6 +111,24 @@ describe('agent invocation authority', () => {
     expect((await request(UserRole.FOUNDER, 'karya', {})).status).toBe(403);
     expect(transport).not.toHaveBeenCalled();
   });
+  it.each([UserRole.OWNER, UserRole.ADMIN, UserRole.FOUNDER])(
+    'refuses generic Prativedan for %s before database access or runtime dispatch',
+    async (role) => {
+      const response = await request(role, 'Prativedan', {
+        engagement_id: ENGAGEMENT,
+        tenant_id: A,
+        report_type: 'board',
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'board_report_workflow_required' },
+      });
+      expect(state.adminCalls).toBe(0);
+      expect(state.db!.rows('agent_runs')).toHaveLength(0);
+      expect(transport).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalled();
+    },
+  );
   it.each(['sanket', 'nazar', 'lekha'])('denies customer invocation of %s', async (agent) => {
     expect((await request(UserRole.OWNER, agent, {})).status).toBe(403);
     expect(transport).not.toHaveBeenCalled();
