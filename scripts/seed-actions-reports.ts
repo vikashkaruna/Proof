@@ -1,10 +1,10 @@
 import { createSupabaseAdmin } from '@axiom/supabase';
+import { randomUUID } from 'node:crypto';
 
 const admin = createSupabaseAdmin();
 
 async function main() {
   const tenantId = '00000000-0000-0000-0000-000000000001';
-  const libVersion = '0.1.0';
 
   const { data: plans } = await admin
     .from('remediation_plans')
@@ -134,59 +134,41 @@ async function main() {
       .eq('tenant_id', tenantId);
 
     if (!repCount || repCount === 0) {
-      const reports = [
-        {
-          tenant_id: tenantId,
-          engagement_id: engagementId,
-          kind: 'board',
-          title: 'Executive Board DPDPA Compliance Briefing — Q3 2026',
-          storage_uri: 's3://axiom-reports-ap-south-1/meridian/board-briefing-q3.pdf',
-          library_version: libVersion,
-          generated_by_agent: 'prativedan',
-          status: 'published',
-          content: {
-            score: 74,
-            open_gaps: 6,
-            controls_passing: 32,
-            exposure: '₹18–46 cr',
-            narrative: 'Executive board compliance summary under DPDP Act 2023.',
-          },
-        },
-        {
-          tenant_id: tenantId,
-          engagement_id: engagementId,
-          kind: 'auditor',
-          title: 'Statutory DPB Auditor Evidence & Cryptographic Proof Pack',
-          storage_uri: 's3://axiom-reports-ap-south-1/meridian/dpb-auditor-pack.pdf',
-          library_version: libVersion,
-          generated_by_agent: 'prativedan',
-          status: 'published',
-          content: {
-            sealed_artifacts: 5,
-            ledger_entries: 142,
-            integrity_verified: true,
-          },
-        },
-        {
-          tenant_id: tenantId,
-          engagement_id: engagementId,
-          kind: 'technical',
-          title: 'Technical Safeguards & Architectural Isolation Audit Report',
-          storage_uri: 's3://axiom-reports-ap-south-1/meridian/technical-safeguards.pdf',
-          library_version: libVersion,
-          generated_by_agent: 'prativedan',
-          status: 'published',
-          content: {
-            databases_scanned: 4,
-            buckets_audited: 8,
-            encryption_at_rest: '100% AES-256-GCM',
-          },
-        },
-      ];
-
-      const { error: rErr } = await admin.from('reports').insert(reports);
-      if (rErr) console.error('Reports insert error:', rErr);
-      else console.log(`✓ Seeded ${reports.length} reports into DB`);
+      // Synthetic drafts exercise the real lifecycle; they claim no completed
+      // audit, provider object, human approval, or publication.
+      const { data: manager, error: managerError } = await admin
+        .from('tenant_users')
+        .select('user_id')
+        .eq('tenant_id', tenantId)
+        .in('role', ['founder', 'owner', 'admin'])
+        .order('user_id')
+        .limit(1)
+        .maybeSingle();
+      if (managerError || !manager)
+        throw new Error('A live tenant manager is required to seed report drafts.');
+      for (const kind of ['board', 'auditor', 'technical']) {
+        const { data, error } = await admin.rpc('record_report_draft', {
+          p_tenant_id: tenantId,
+          p_actor_id: manager.user_id,
+          p_operation_key: randomUUID(),
+          p_kind: kind,
+          p_title: `Synthetic ${kind} draft — not a released client report`,
+          p_engagement_id: engagementId ?? null,
+          p_library_version: null,
+          p_content_text: JSON.stringify({
+            synthetic: true,
+            notice:
+              'Seed fixture only. No compliance, storage, approval or publication assurance is asserted.',
+            kind,
+            sections: [],
+          }),
+          p_generated_by_agent: 'synthetic-seed-fixture',
+          p_correlation_id: randomUUID(),
+        });
+        if (error || data?.error || data?.status !== 'draft')
+          throw new Error('Synthetic report draft creation failed.');
+      }
+      console.log('✓ Seeded three explicitly synthetic, unreviewed report drafts');
     } else {
       console.log(`✓ Reports already present (${repCount})`);
     }

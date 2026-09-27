@@ -90,7 +90,11 @@ export default defineConfig({
   testIgnore:
     process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
       ? []
-      : ['**/evidence-ingestion.spec.ts'],
+      : [
+          '**/evidence-ingestion.spec.ts',
+          '**/evidence-packs.spec.ts',
+          '**/evidence-packs-access.spec.ts',
+        ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**
    * Next compiles each route the first time it is requested, and several

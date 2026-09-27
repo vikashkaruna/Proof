@@ -291,6 +291,10 @@ export const LedgerActionType = {
   BREACH_NOTIFIED_PRINCIPALS: 'breach.notified.principals',
   REPORT_GENERATED: 'report.generated',
   REPORT_EXPORTED: 'report.exported',
+  EVIDENCE_PACK_PREPARED: 'evidence.pack.prepared',
+  EVIDENCE_PACK_BUILD_STARTED: 'evidence.pack.build.started',
+  EVIDENCE_PACK_BUILD_PENDING: 'evidence.pack.build.pending',
+  EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];

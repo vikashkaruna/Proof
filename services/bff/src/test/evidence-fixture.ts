@@ -79,12 +79,26 @@ export function evidenceFixture(): EvidenceFixture {
       };
     }
     const builder = {
+      abortSignal(signal: AbortSignal) {
+        signal.throwIfAborted();
+        return builder;
+      },
       select(_columns?: string, options?: { count?: string }) {
         exactCount = options?.count === 'exact';
         return builder;
       },
       eq(key: string, value: unknown) {
         filters.push((row) => row[key] === value);
+        return builder;
+      },
+      or(expression: string) {
+        const terms = expression.split(',').map((term) => {
+          const [key, operator, value] = term.split('.');
+          if (!key || operator !== 'eq' || value === undefined)
+            throw new Error('Unsupported fixture OR expression');
+          return (row: Row) => row[key] === value;
+        });
+        filters.push((row) => terms.some((matches) => matches(row)));
         return builder;
       },
       in(key: string, values: unknown[]) {

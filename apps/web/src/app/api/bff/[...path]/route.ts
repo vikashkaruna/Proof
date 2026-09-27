@@ -42,10 +42,16 @@ async function forward(request: NextRequest, context: RouteContext) {
   target.search = request.nextUrl.search;
   let bodyBytes: ArrayBuffer | undefined;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
+    const bodyLimit = /^\/v1\/evidence\/ingestions\/?$/.test(target.pathname)
+      ? 12 * 1024 * 1024
+      : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
+        ? 64 * 1024
+        : null;
     try {
-      bodyBytes = /^\/v1\/evidence\/ingestions\/?$/.test(target.pathname)
-        ? await boundedRequestBody(request, 12 * 1024 * 1024)
-        : await request.arrayBuffer();
+      bodyBytes =
+        bodyLimit !== null
+          ? await boundedRequestBody(request, bodyLimit)
+          : await request.arrayBuffer();
     } catch (error) {
       const oversized = error instanceof RequestBodyTooLarge;
       const unavailable = error instanceof RequestBodyUnavailable;
@@ -58,9 +64,9 @@ async function forward(request: NextRequest, context: RouteContext) {
                 ? 'request_body_unavailable'
                 : 'invalid_request_body',
             message: oversized
-              ? 'Upload request exceeds 12 MiB.'
+              ? 'Request exceeds the allowed size.'
               : unavailable
-                ? 'Upload interrupted or timed out. Try again.'
+                ? 'Request interrupted or timed out. Check its recorded state before retrying.'
                 : 'Unable to read request body.',
           },
         },
@@ -156,6 +162,7 @@ async function forward(request: NextRequest, context: RouteContext) {
     headers,
     body: bodyBytes,
     redirect: 'manual',
+    signal: request.signal,
   });
   return new NextResponse(response.body, { status: response.status, headers: response.headers });
 }

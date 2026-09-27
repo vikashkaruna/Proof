@@ -47,6 +47,7 @@ insert into public.tenants(id, slug, name) values
 insert into public.tenant_users(tenant_id, user_id, role) values
   ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a1', 'owner'),
   ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a2', 'admin'),
+  ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a3', 'founder'),
   ('00000000-0000-0000-0000-0000000000c9', '00000000-0000-0000-0000-0000000000a4', 'owner');
 insert into public.control_libraries(version, published_at, published_by, change_log, control_count)
   values ('test-w8', now(), 'test', 'test', 0);
@@ -57,16 +58,18 @@ insert into public.evidence(id, tenant_id, content_hash, storage_uri, evidence_t
 values ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000c1',
         repeat('f', 64), 's3://w8-test/fulfilment', 'report', 'test');
 
+-- Owner-only fixture inserts represent exact-byte drafts for the current RPC contract.
+-- Service-role direct creation is separately refused below.
 -- Draft reports: r1 approved→released, r2 rejected, r3 stays draft.
 insert into public.reports(id, tenant_id, kind, title, storage_uri, content,
-                           library_version, generated_by_agent)
+                           library_version, generated_by_agent, created_by, content_text, content_sha256)
 values
   ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000c1', 'board',
-   'Board report', 's3://w8-test/r1', '{"blocks": [1, 2, 3]}'::jsonb, 'test-w8', 'parikshan'),
+   'Board report', 's3://w8-test/r1', '{"blocks": [1, 2, 3]}'::jsonb, 'test-w8', 'parikshan', '00000000-0000-0000-0000-0000000000a1', '{"blocks": [1, 2, 3]}', encode(sha256(convert_to('{"blocks": [1, 2, 3]}','UTF8')),'hex')),
   ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000c1', 'dpb',
-   'DPB submission', 's3://w8-test/r2', '{"blocks": [4]}'::jsonb, 'test-w8', 'parikshan'),
+   'DPB submission', 's3://w8-test/r2', '{"blocks": [4]}'::jsonb, 'test-w8', 'parikshan', '00000000-0000-0000-0000-0000000000a1', '{"blocks": [4]}', encode(sha256(convert_to('{"blocks": [4]}','UTF8')),'hex')),
   ('00000000-0000-0000-0000-0000000000f3', '00000000-0000-0000-0000-0000000000c1', 'auditor',
-   'Auditor pack', 's3://w8-test/r3', '{"blocks": [5]}'::jsonb, 'test-w8', 'parikshan');
+   'Auditor pack', 's3://w8-test/r3', '{"blocks": [5]}'::jsonb, 'test-w8', 'parikshan', '00000000-0000-0000-0000-0000000000a1', '{"blocks": [5]}', encode(sha256(convert_to('{"blocks": [5]}','UTF8')),'hex'));
 
 -- ─── W8.1 · DSAR intake, verification, the closed chain ──────────────
 
@@ -488,17 +491,17 @@ select pg_temp.assert_eq(
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1', 'approved', null,
-    '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a1', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f1'), gen_random_uuid()) ->> 'error'),
   'founder_authority_required', 'a tenant user cannot review a report (BR-4)');
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f3',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f3'), null, gen_random_uuid()) ->> 'error'),
   'not_approved', 'a draft report cannot be released');
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1', 'approved', null,
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'status'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f1'), gen_random_uuid()) ->> 'status'),
   'approved', 'the founder approves the board report');
 select pg_temp.assert_true(
   (select count(*) = 1 from public.audit_ledger
@@ -507,17 +510,17 @@ select pg_temp.assert_true(
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1', 'rejected', 'Second thoughts',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f1'), gen_random_uuid()) ->> 'error'),
   'not_reviewable', 'a decided report cannot be re-decided');
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f2', 'rejected', null,
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f2'), gen_random_uuid()) ->> 'error'),
   'reason_required', 'rejection without a captured reason is refused');
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f2', 'rejected', 'Numbers do not match the ledger.',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'status'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f2'), gen_random_uuid()) ->> 'status'),
   'rejected', 'a reasoned rejection is recorded');
 select pg_temp.assert_true(
   (select rejected_by = '00000000-0000-0000-0000-0000000000a3'
@@ -527,22 +530,22 @@ select pg_temp.assert_true(
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f2',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f2'), null, gen_random_uuid()) ->> 'error'),
   'not_approved', 'a rejected report cannot be released');
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1',
-    '00000000-0000-0000-0000-0000000000a1', gen_random_uuid()) ->> 'error'),
+    '00000000-0000-0000-0000-0000000000a1', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f1'), null, gen_random_uuid()) ->> 'error'),
   'founder_authority_required', 'release is founder authority too');
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'status'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f1'), null, gen_random_uuid()) ->> 'status'),
   'published', 'the founder releases the approved report');
 select pg_temp.assert_true(
-  (select released_content_hash = encode(digest(content::text, 'sha256'), 'hex')
+  (select released_content_hash = encode(sha256(convert_to(content_text,'UTF8')), 'hex')
     from public.reports where id = '00000000-0000-0000-0000-0000000000f1'),
-  'the released content hash is computed over the actual content');
+  'the released hash is computed over the exact reviewed text bytes');
 select pg_temp.assert_true(
   (select count(*) = 1 from public.audit_ledger
     where action_type = 'report.released' and target_ref like '%f1%'),
@@ -575,7 +578,7 @@ select pg_temp.denied($q$delete from public.breach_notifications where true$q$);
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f3', 'approved', 'Foundry pass',
-    '00000000-0000-0000-0000-0000000000a3', gen_random_uuid()) ->> 'status'),
+    '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f3'), gen_random_uuid()) ->> 'status'),
   'approved', 'the BFF service role can call the review path');
 reset role;
 

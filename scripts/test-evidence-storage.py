@@ -11,12 +11,14 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
 import os
 import secrets
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -47,70 +49,78 @@ def build(directory: Path, run_id: str) -> str:
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     archive = directory / "source.tar.gz"
     if not archive.exists():
-        with urllib.request.urlopen(URL, timeout=60) as response, archive.open("wb") as output:
+        with (
+            urllib.request.urlopen(URL, timeout=60) as response,
+            archive.open("wb") as output,
+        ):
             shutil.copyfileobj(response, output)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != ARCHIVE_SHA:
+    verified_archive = archive.read_bytes()
+    if hashlib.sha256(verified_archive).hexdigest() != ARCHIVE_SHA:
         raise RuntimeError("Source archive checksum mismatch")
-    source = directory / f"minio-{COMMIT}"
-    if not source.exists():
-        with tarfile.open(archive) as bundle:
-            bundle.extractall(directory, filter="data")
     output = directory / "output"
     output.mkdir(exist_ok=True)
     log_path = directory / "build.log"
     builder_name = f"axiom-evidence-build-{run_id}"
-    try:
-        with log_path.open("w") as log:
-            command(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--name",
-                    builder_name,
-                    "--cpus=2",
-                    "--memory=4g",
-                    "-e",
-                    "GOMAXPROCS=2",
-                    "-e",
-                    "CGO_ENABLED=0",
-                    "-e",
-                    "GOCACHE=/out/cache",
-                    "-e",
-                    "GOMODCACHE=/out/modules",
-                    "-v",
-                    f"{source}:/src:ro",
-                    "-v",
-                    f"{output}:/out",
-                    "-w",
-                    "/src",
-                    BUILDER,
-                    "go",
-                    "build",
-                    "-p",
-                    "2",
-                    "-trimpath",
-                    "-o",
-                    "/out/minio",
-                    ".",
-                ],
-                log=log,
+    # A cached extracted tree is mutable and cannot inherit the archive's hash.
+    # Re-extract exactly the verified bytes for every build; only Go caches persist.
+    with tempfile.TemporaryDirectory(prefix="verified-source-", dir=directory) as fresh:
+        with tarfile.open(fileobj=io.BytesIO(verified_archive)) as bundle:
+            bundle.extractall(fresh, filter="data")
+        source = Path(fresh) / f"minio-{COMMIT}"
+        try:
+            with log_path.open("w") as log:
+                command(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--name",
+                        builder_name,
+                        "--cpus=2",
+                        "--memory=4g",
+                        "-e",
+                        "GOMAXPROCS=2",
+                        "-e",
+                        "CGO_ENABLED=0",
+                        "-e",
+                        "GOCACHE=/out/cache",
+                        "-e",
+                        "GOMODCACHE=/out/modules",
+                        "-v",
+                        f"{source}:/src:ro",
+                        "-v",
+                        f"{output}:/out",
+                        "-w",
+                        "/src",
+                        BUILDER,
+                        "go",
+                        "build",
+                        "-p",
+                        "2",
+                        "-trimpath",
+                        "-o",
+                        "/out/minio",
+                        ".",
+                    ],
+                    log=log,
+                )
+        finally:
+            subprocess.run(
+                ["docker", "rm", "-f", builder_name],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
-    finally:
-        subprocess.run(
-            ["docker", "rm", "-f", builder_name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    return package(directory, source, output)
+        # Package the same verified archive snapshot, not a concurrently replaced path.
+        return package(directory, source, output, verified_archive)
 
 
-def package(directory: Path, source: Path, output: Path) -> str:
+def package(directory: Path, source: Path, output: Path, verified_archive: bytes) -> str:
     context = directory / "image"
     context.mkdir(exist_ok=True)
     shutil.copy2(output / "minio", context / "minio")
     shutil.copy2(source / "LICENSE", context / "LICENSE")
-    shutil.copy2(directory / "source.tar.gz", context / "source.tar.gz")
+    (context / "source.tar.gz").write_bytes(verified_archive)
     (context / "Dockerfile").write_text(f'''FROM scratch
 LABEL org.opencontainers.image.source="https://github.com/minio/minio" axiom.fixture.source="{COMMIT}" axiom.fixture.archive="{ARCHIVE_SHA}" axiom.fixture.test-only="true"
 COPY minio /minio
@@ -173,7 +183,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path, default=ROOT / ".axiom-runtime/evidence-storage")
     parser.add_argument(
-        "--image-id", help="Existing source-built fixture image; provenance labels are checked"
+        "--image-id",
+        help="Existing source-built fixture image; provenance labels are checked",
     )
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument(
@@ -182,7 +193,9 @@ def main():
         help="Pause only the owned synthetic provider without changing its port",
     )
     parser.add_argument(
-        "--resume-provider", action="store_true", help="Resume only the owned synthetic provider"
+        "--resume-provider",
+        action="store_true",
+        help="Resume only the owned synthetic provider",
     )
     parser.add_argument(
         "--browser",
@@ -252,6 +265,8 @@ def main():
                     "test",
                     "evidence-ingestion.spec.ts",
                     "evidence-vault.spec.ts",
+                    "evidence-packs.spec.ts",
+                    "evidence-packs-access.spec.ts",
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
@@ -267,11 +282,11 @@ def main():
             }
             if (
                 result.returncode
-                or stats.get("expected") != 4
+                or stats.get("expected") != 8
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all four tests without skips or retries"
+                    "Evidence browser acceptance requires all eight tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
@@ -282,6 +297,10 @@ def main():
                 "paused-provider-refuses-fresh-verification-and-clears-prior-success",
                 "legacy-evidence-local-hash-and-honest-search",
                 "tenant-and-role-access-controls",
+                "retained-pack-founder-review-release-and-independent-offline-verification",
+                "pack-prepare-replay-and-honest-read-failure-rejection",
+                "pack-post-upload-settlement-recovery-and-begin-only-pending",
+                "pack-live-membership-internal-authority-and-export-revocation",
             ]
         finally:
             try:
@@ -349,7 +368,16 @@ def main():
     outcomes = []
     keep = False
     try:
-        command(["docker", "volume", "create", "--label", f"axiom.fixture.run={run_id}", volume])
+        command(
+            [
+                "docker",
+                "volume",
+                "create",
+                "--label",
+                f"axiom.fixture.run={run_id}",
+                volume,
+            ]
+        )
         command(
             [
                 "docker",
@@ -446,7 +474,9 @@ def main():
         # Names include a random run ID and are owned exclusively by this harness.
         if not keep:
             subprocess.run(
-                ["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                ["docker", "rm", "-f", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             subprocess.run(
                 ["docker", "volume", "rm", volume],

@@ -142,10 +142,23 @@ function seedReads() {
     generated_by_agent: 'parikshan',
     generated_at: new Date().toISOString(),
     status: 'draft',
+    engagement_id: null,
+    created_by: USER,
+    content: { fixture: true },
+    content_text: '{"fixture":true}',
+    content_sha256: 'a'.repeat(64),
+    reviewed_content_hash: null,
+    published_at: null,
+    released_by: null,
+    released_archive_hash: null,
   });
 }
 
 async function buildApp(role: UserRole = UserRole.ADMIN) {
+  fake.rows('tenant_users').splice(0);
+  fake.seed('tenant_users', { tenant_id: TENANT, user_id: USER, role });
+  fake.rows('users').splice(0);
+  fake.seed('users', { id: USER, is_axiom_internal: role === UserRole.FOUNDER });
   const { v1Routes } = await import('./v1.js');
   const routes = v1Routes({
     approvalEngine: {} as never,
@@ -397,7 +410,7 @@ describe('the breach notification authority chain', () => {
 describe('the report review and release gate', () => {
   it('lists the queue and filters by status', async () => {
     seedReads();
-    const app = await buildApp();
+    const app = await buildApp(UserRole.FOUNDER);
     const res = await app.request('/v1/reports?status=draft');
     expect(res.status).toBe(200);
     const { data } = (await res.json()) as { data: { id: string }[] };
@@ -409,9 +422,13 @@ describe('the report review and release gate', () => {
 
   it('submits the founder decision with the captured note', async () => {
     const res = await post(
-      await buildApp(),
+      await buildApp(UserRole.FOUNDER),
       `/v1/reports/${REPORT}/review`,
-      JSON.stringify({ decision: 'rejected', note: 'Numbers do not match the ledger.' }),
+      JSON.stringify({
+        decision: 'rejected',
+        note: 'Numbers do not match the ledger.',
+        expectedContentHash: 'a'.repeat(64),
+      }),
     );
     expect(res.status).toBe(200);
     expect(lastRpc?.args['p_decision']).toBe('rejected');
@@ -421,7 +438,7 @@ describe('the report review and release gate', () => {
 
   it('refuses a decision outside the pair before touching the database', async () => {
     const res = await post(
-      await buildApp(),
+      await buildApp(UserRole.FOUNDER),
       `/v1/reports/${REPORT}/review`,
       JSON.stringify({ decision: 'kind_of_ok' }),
     );
@@ -430,17 +447,21 @@ describe('the report review and release gate', () => {
   });
 
   it('renders reason_required and not_approved as 409s', async () => {
-    const app = await buildApp();
+    const app = await buildApp(UserRole.FOUNDER);
     fake.onRpc('review_report', () => ({ error: 'reason_required' }));
     const rejected = await post(
       app,
       `/v1/reports/${REPORT}/review`,
-      JSON.stringify({ decision: 'rejected' }),
+      JSON.stringify({ decision: 'rejected', expectedContentHash: 'a'.repeat(64) }),
     );
     expect(rejected.status).toBe(409);
 
     fake.onRpc('release_report', () => ({ error: 'not_approved' }));
-    const released = await post(app, `/v1/reports/${REPORT}/release`);
+    const released = await post(
+      app,
+      `/v1/reports/${REPORT}/release`,
+      JSON.stringify({ expectedContentHash: 'a'.repeat(64), expectedArchiveHash: null }),
+    );
     expect(released.status).toBe(409);
     expect(((await released.json()) as { error: { code: string } }).error.code).toBe(
       'not_approved',
@@ -448,7 +469,11 @@ describe('the report review and release gate', () => {
   });
 
   it('releases through the RPC with the caller as releaser', async () => {
-    const res = await post(await buildApp(), `/v1/reports/${REPORT}/release`);
+    const res = await post(
+      await buildApp(UserRole.FOUNDER),
+      `/v1/reports/${REPORT}/release`,
+      JSON.stringify({ expectedContentHash: 'a'.repeat(64), expectedArchiveHash: null }),
+    );
     expect(res.status).toBe(200);
     expect(lastRpc?.args['p_released_by']).toBe(USER);
     expect(((await res.json()) as { data: { status: string } }).data.status).toBe('published');

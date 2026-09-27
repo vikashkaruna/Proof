@@ -25,6 +25,7 @@
     "@axiom/evidence": "workspace:*",
     "@axiom/ledger": "workspace:*",
     "@axiom/mfa": "workspace:*",
+    "@axiom/report-kit": "workspace:*",
     "@axiom/supabase": "workspace:*",
     "@axiom/types": "workspace:*",
     "@google-cloud/kms": "^6.2.0",
