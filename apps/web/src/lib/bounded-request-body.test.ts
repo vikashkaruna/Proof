@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { boundedRequestBody, RequestBodyTooLarge } from './bounded-request-body';
+import {
+  boundedRequestBody,
+  RequestBodyTooLarge,
+  RequestBodyUnavailable,
+} from './bounded-request-body';
 
 function request(chunks: number[][], declaredLength?: string) {
   let cancelled = false;
@@ -22,6 +26,49 @@ function request(chunks: number[][], declaredLength?: string) {
 }
 
 describe('bounded proxy bodies', () => {
+  it.each(['deadline', 'abort', 'already-aborted'])(
+    'releases a stalled stream on %s even when cancellation never resolves',
+    async (mode) => {
+      let cancelled = false;
+      const controller = new AbortController();
+      const stream = new ReadableStream<Uint8Array>({
+        cancel() {
+          cancelled = true;
+          return new Promise<void>(() => undefined);
+        },
+      });
+      const input = new Request('https://example.test/upload', {
+        method: 'POST',
+        body: stream,
+        signal: controller.signal,
+        ...{ duplex: 'half' },
+      });
+      if (mode === 'already-aborted') controller.abort();
+      const pending = boundedRequestBody(input, 4, 20);
+      if (mode === 'abort') controller.abort();
+      await expect(pending).rejects.toBeInstanceOf(RequestBodyUnavailable);
+      expect(cancelled).toBe(true);
+      expect(stream.locked).toBe(false);
+    },
+  );
+  it.each([undefined, '5'])('never waits for oversized body cancellation (%s)', async (length) => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(5));
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const input = new Request('https://example.test/upload', {
+      method: 'POST',
+      body: stream,
+      headers: length ? { 'content-length': length } : {},
+      ...{ duplex: 'half' },
+    });
+    await expect(boundedRequestBody(input, 4, 20)).rejects.toBeInstanceOf(RequestBodyTooLarge);
+    expect(stream.locked).toBe(false);
+  });
   it.each([undefined, '1'])(
     'cancels oversized chunked bodies despite declared length %s',
     async (length) => {

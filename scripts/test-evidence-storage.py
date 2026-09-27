@@ -21,6 +21,7 @@ import time
 import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a"
@@ -143,6 +144,31 @@ def endpoint_for(name: str) -> str:
     return f"http://127.0.0.1:{binding['HostPort']}"
 
 
+def owned_provider(directory: Path):
+    state = json.loads((directory / "private-fixture.json").read_text())
+    info = json.loads(command(["docker", "inspect", state["name"]]))[0]
+    if info["Config"]["Labels"].get("axiom.fixture.run") != state["runId"]:
+        raise RuntimeError("Fixture ownership mismatch")
+    config = json.loads((directory / "private-config.json").read_text())
+    endpoint = urlparse(config["endpoint"])
+    if endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or not endpoint.port:
+        raise RuntimeError("Private fixture endpoint is not loopback")
+    # Docker Desktop omits NetworkSettings.Ports while a container is paused.
+    # Ownership remains provable from its label; verify the live endpoint again
+    # immediately after unpause instead of refusing the recovery operation.
+    if not info["State"]["Paused"] and config["endpoint"] != endpoint_for(state["name"]):
+        raise RuntimeError("Private fixture endpoint mismatch")
+    return state, info
+
+
+def resume_provider(directory: Path):
+    state, info = owned_provider(directory)
+    if info["State"]["Paused"]:
+        command(["docker", "unpause", state["name"]])
+    owned_provider(directory)
+    healthy(endpoint_for(state["name"]))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path, default=ROOT / ".axiom-runtime/evidence-storage")
@@ -150,6 +176,14 @@ def main():
         "--image-id", help="Existing source-built fixture image; provenance labels are checked"
     )
     parser.add_argument("--build-only", action="store_true")
+    parser.add_argument(
+        "--pause-provider",
+        action="store_true",
+        help="Pause only the owned synthetic provider without changing its port",
+    )
+    parser.add_argument(
+        "--resume-provider", action="store_true", help="Resume only the owned synthetic provider"
+    )
     parser.add_argument(
         "--browser",
         action="store_true",
@@ -170,9 +204,22 @@ def main():
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     state_file = directory / "private-fixture.json"
+    if args.pause_provider or args.resume_provider:
+        if args.pause_provider and args.resume_provider:
+            raise RuntimeError("Choose one provider action")
+        state, info = owned_provider(directory)
+        if not info["State"]["Running"]:
+            raise RuntimeError("Owned provider is not running")
+        if args.pause_provider:
+            if not info["State"]["Paused"]:
+                command(["docker", "pause", state["name"]])
+            print("Owned synthetic evidence provider paused")
+        else:
+            resume_provider(directory)
+            print("Owned synthetic evidence provider resumed")
+        return
     if args.browser:
-        state = json.loads(state_file.read_text())
-        info = json.loads(command(["docker", "inspect", state["name"]]))[0]
+        state, info = owned_provider(directory)
         if (
             info["Config"]["Labels"].get("axiom.fixture.run") != state["runId"]
             or not info["State"]["Running"]
@@ -185,6 +232,7 @@ def main():
             )
         )
         env["AXIOM_EVIDENCE_STORAGE_ACCEPTANCE"] = "true"
+        env["AXIOM_EVIDENCE_FIXTURE_DIRECTORY"] = str(directory)
         raw_report = directory / "private-playwright.json"
         env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(raw_report)
         summary = {
@@ -207,6 +255,7 @@ def main():
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
+                    "--trace=off",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -227,23 +276,41 @@ def main():
             summary["status"] = "passed"
             summary["outcomes"] = [
                 "real-provider-human-ingestion-and-exact-version-browser-lifecycle",
+                "real-post-upload-pending-intent-reconciles-through-browser-to-exact-version",
+                "begin-only-no-object-reconciliation-remains-pending-without-evidence",
+                "file-and-metadata-changes-revoke-retention-review-acknowledgement",
+                "paused-provider-refuses-fresh-verification-and-clears-prior-success",
                 "legacy-evidence-local-hash-and-honest-search",
                 "tenant-and-role-access-controls",
             ]
         finally:
-            (directory / "browser-results.json").write_text(json.dumps(summary, indent=2) + "\n")
-            raw_report.unlink(missing_ok=True)
+            try:
+                resume_provider(directory)
+            except Exception:
+                summary["status"] = "failed"
+                summary["cleanup"] = "provider_resume_failed"
+                raise
+            finally:
+                (directory / "browser-results.json").write_text(
+                    json.dumps(summary, indent=2) + "\n"
+                )
+                raw_report.unlink(missing_ok=True)
         return
     if args.stop:
         if not state_file.exists():
             print("No retained fixture to remove")
             return
         state = json.loads(state_file.read_text())
+        paused = False
         for kind, name in [("container", state["name"]), ("volume", state["volume"])]:
             info = json.loads(command(["docker", kind, "inspect", name]))[0]
             labels = info["Config"]["Labels"] if kind == "container" else info["Labels"]
             if labels.get("axiom.fixture.run") != state["runId"]:
                 raise RuntimeError("Fixture ownership mismatch")
+            if kind == "container":
+                paused = info["State"]["Paused"]
+        if paused:
+            command(["docker", "unpause", state["name"]])
         command(["docker", "rm", "-f", state["name"]])
         command(["docker", "volume", "rm", state["volume"]])
         for private in [

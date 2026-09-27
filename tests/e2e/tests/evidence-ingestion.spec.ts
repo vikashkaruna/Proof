@@ -1,7 +1,113 @@
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
 import { selectTenant, signIn, state } from '../fixtures';
+import { acceptanceTarget, repoRoot } from '../target';
+import { EvidenceVault } from '../../../packages/evidence/src/index';
+
+const execFileAsync = promisify(execFile);
+async function providerAction(action: '--pause-provider' | '--resume-provider') {
+  const directory = process.env.AXIOM_EVIDENCE_FIXTURE_DIRECTORY;
+  if (!directory || acceptanceTarget) throw new Error('Owned local evidence fixture required');
+  await execFileAsync(
+    'python3',
+    [`${repoRoot}/scripts/test-evidence-storage.py`, '--directory', directory, action],
+    { cwd: repoRoot, timeout: 100_000 },
+  );
+}
+
+/** Simulate real crash boundaries after begin or Put/readback, before settlement.
+ * The fixture invokes the sanctioned manager-authorized begin RPC and real
+ * vault seal; no table writes, fabricated receipt, provider mock or settlement.
+ */
+async function pendingEvidence(sealObject: boolean) {
+  const endpoint = process.env.AXIOM_STORAGE_ENDPOINT;
+  const bucket = process.env.AXIOM_EVIDENCE_BUCKET;
+  const accessKeyId = process.env.AXIOM_STORAGE_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AXIOM_STORAGE_SECRET_ACCESS_KEY;
+  if (
+    acceptanceTarget ||
+    !endpoint ||
+    new URL(endpoint).hostname !== '127.0.0.1' ||
+    new URL(state.supabaseUrl).hostname !== '127.0.0.1' ||
+    !bucket ||
+    !accessKeyId ||
+    !secretAccessKey
+  )
+    throw new Error('Synthetic local storage and Auth fixture required');
+  const operationKey = crypto.randomUUID();
+  const description = `Pending provider acceptance ${operationKey}`;
+  const filename = `pending-${operationKey}.bin`;
+  const bytes = Buffer.from(`Synthetic post-upload crash boundary ${operationKey}\n`);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const key = `tenants/${state.tenantA.id}/evidence-ingestions/${operationKey}/${hash}`;
+  const response = await fetch(`${state.supabaseUrl}/rest/v1/rpc/begin_evidence_ingest`, {
+    method: 'POST',
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      apikey: state.publishableKey,
+      authorization: `Bearer ${state.serviceKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_tenant_id: state.tenantA.id,
+      p_actor_id: state.accounts.owner.id,
+      p_operation_key: operationKey,
+      p_correlation_id: crypto.randomUUID(),
+      p_request: {
+        content_hash: hash,
+        byte_size: bytes.length,
+        mime_type: 'application/octet-stream',
+        filename,
+        evidence_type: 'document',
+        description,
+        control_ids: [],
+        engagement_id: null,
+        collected_by_agent: 'human',
+        provider: 's3-compatible',
+        bucket,
+        object_key: key,
+        retention_policy: 'seven_years',
+        legal_hold: false,
+      },
+    }),
+  });
+  if (!response.ok) throw new Error('Synthetic pending ingestion begin refused');
+  const operation = (await response.json()) as {
+    operation_id?: string;
+    status?: string;
+    retain_until?: string;
+    replayed?: boolean;
+  };
+  if (
+    !operation.operation_id ||
+    operation.status !== 'pending' ||
+    !operation.retain_until ||
+    operation.replayed !== false
+  )
+    throw new Error('Synthetic pending ingestion was not created');
+  if (!sealObject) return { operationKey, filename, description, bytes, hash, versionId: null };
+  const vault = new EvidenceVault('ap-south-1', endpoint, { accessKeyId, secretAccessKey });
+  try {
+    const sealed = await vault.seal({
+      bucket,
+      key,
+      body: bytes,
+      contentType: 'application/octet-stream',
+      retentionDays: 2555,
+      retainUntil: operation.retain_until,
+      tenantId: state.tenantA.id,
+      collectedByAgent: 'human',
+      operationId: operation.operation_id,
+    });
+    return { operationKey, filename, description, bytes, hash, versionId: sealed.versionId };
+  } finally {
+    vault.close();
+  }
+}
 
 // This journey requires the explicit Object Lock fixture and real GoTrue/BFF/DB.
 // It never substitutes a provider mock or treats a legacy URI as a sealed receipt.
@@ -15,7 +121,7 @@ test.describe('real provider evidence ingestion', () => {
     page,
     browser,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
     await signIn(page, 'owner');
     await selectTenant(page, 'a');
     await page.goto('/evidence');
@@ -37,12 +143,37 @@ test.describe('real provider evidence ingestion', () => {
     await expect(
       upload.getByRole('button', { name: 'Upload evidence', exact: true }),
     ).toBeDisabled();
-    await upload
-      .getByRole('checkbox', {
-        name: 'I reviewed this file and authorize its seven-year retention.',
-        exact: true,
-      })
-      .check();
+    const review = upload.getByRole('checkbox', {
+      name: 'I reviewed this file and authorize its seven-year retention.',
+      exact: true,
+    });
+    const submit = upload.getByRole('button', { name: 'Upload evidence', exact: true });
+    await review.check();
+    await upload.getByLabel('Evidence file (maximum 8 MiB)', { exact: true }).setInputFiles({
+      ...file,
+      name: `replacement-${filename}`,
+      buffer: Buffer.from('Synthetic replacement requiring another review'),
+    });
+    await expect(review).not.toBeChecked();
+    await expect(submit).toBeDisabled();
+    await upload.getByLabel('Evidence file (maximum 8 MiB)', { exact: true }).setInputFiles(file);
+    await review.check();
+    await upload.getByLabel('Evidence type', { exact: true }).selectOption('config');
+    await expect(review).not.toBeChecked();
+    await expect(submit).toBeDisabled();
+    await upload.getByLabel('Evidence type', { exact: true }).selectOption('document');
+    for (const [label, changed, restored] of [
+      ['Description', `${description} revised`, description],
+      ['Control IDs (comma separated)', 'synthetic-review-change', ''],
+      ['Engagement ID (optional)', state.engagementA, ''],
+    ]) {
+      await review.check();
+      await upload.getByLabel(label!, { exact: true }).fill(changed!);
+      await expect(review).not.toBeChecked();
+      await expect(submit).toBeDisabled();
+      await upload.getByLabel(label!, { exact: true }).fill(restored!);
+    }
+    await review.check();
     const responsePromise = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === '/api/bff/v1/evidence/ingestions' &&
@@ -139,6 +270,119 @@ test.describe('real provider evidence ingestion', () => {
     ).toBeVisible();
     await expect(inspector.getByText(`SHA-256: ${digest}`, { exact: true })).toBeVisible();
     await expect(inspector.getByText(/bytes · Size matches/)).toBeVisible();
+
+    // A real provider outage must replace the previous successful check with
+    // an honest refusal. Pause preserves the exact endpoint and stored data.
+    try {
+      await providerAction('--pause-provider');
+      await inspector.getByRole('button', { name: 'Verify provider receipt', exact: true }).click();
+      await expect(
+        inspector.getByText(/Stored-byte integrity and provider retention verified at/),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'provider_verification_failed' }),
+      ).toBeVisible({ timeout: 45_000 });
+      await expect(
+        inspector.getByText(/Stored-byte integrity and provider retention verified at/),
+      ).toHaveCount(0);
+    } finally {
+      await providerAction('--resume-provider');
+    }
+    await inspector.getByRole('button', { name: 'Verify provider receipt', exact: true }).click();
+    await expect(
+      inspector.getByText(/Stored-byte integrity and provider retention verified at/),
+    ).toContainText(record.object_version.version_id);
+
+    const pending = await pendingEvidence(true);
+    await page.reload();
+    const operationRow = page
+      .getByRole('region', { name: 'Upload operations', exact: true })
+      .locator('div.rounded')
+      .filter({ hasText: pending.operationKey });
+    await expect(operationRow).toContainText('pending');
+    await expect(operationRow).not.toContainText('Evidence:');
+    const reconciledResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/bff/v1/evidence/ingestions/${pending.operationKey}/reconcile` &&
+        response.request().method() === 'POST',
+    );
+    await operationRow.getByRole('button', { name: 'Reconcile upload', exact: true }).click();
+    const reconciled = await reconciledResponse;
+    expect(reconciled.status()).toBe(200);
+    const settled = (await reconciled.json()).data as { status: string; evidenceId: string };
+    expect(settled.status).toBe('settled');
+    await expect(
+      page.getByText('Upload reconciled; receipt recorded.', { exact: true }),
+    ).toBeVisible();
+    const recoveredDetail = await page.request.get(`/api/bff/v1/evidence/${settled.evidenceId}`, {
+      headers,
+    });
+    expect(recoveredDetail.status()).toBe(200);
+    expect((await recoveredDetail.json()).data).toMatchObject({
+      content_hash: pending.hash,
+      byte_size: pending.bytes.length,
+      assurance: 'verified_at_ingest',
+      object_version: { version_id: pending.versionId },
+    });
+    await filters
+      .getByLabel('Search description or evidence ID', { exact: true })
+      .fill(pending.description);
+    await filters.getByRole('button', { name: 'Apply filters', exact: true }).click();
+    await records.getByRole('button').filter({ hasText: pending.filename }).click();
+    await expect(inspector.getByText(`Exact version: ${pending.versionId}`)).toBeVisible();
+    const recoveredDownloadPromise = page.waitForEvent('download');
+    await inspector.getByRole('button', { name: 'Download exact version', exact: true }).click();
+    const recoveredDownload = await recoveredDownloadPromise;
+    expect(await recoveredDownload.failure()).toBeNull();
+    const recoveredPath = await recoveredDownload.path();
+    expect(recoveredPath).not.toBeNull();
+    expect((await readFile(recoveredPath!)).equals(pending.bytes)).toBe(true);
+
+    // Begin committed, but no storage write ever happened. Reconciliation
+    // must not fabricate a version or evidence row, and the UI explains why.
+    const missing = await pendingEvidence(false);
+    await page.reload();
+    const missingRow = page
+      .getByRole('region', { name: 'Upload operations', exact: true })
+      .locator('div.rounded')
+      .filter({ hasText: missing.operationKey });
+    await expect(missingRow).toContainText('pending');
+    const missingResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/bff/v1/evidence/ingestions/${missing.operationKey}/reconcile` &&
+        response.request().method() === 'POST',
+    );
+    await missingRow.getByRole('button', { name: 'Reconcile upload', exact: true }).click();
+    const unresolved = await missingResponse;
+    expect(unresolved.status()).toBe(202);
+    expect((await unresolved.json()).data).toMatchObject({
+      status: 'pending',
+      evidenceId: null,
+      errorCode: 'object_version_not_found',
+    });
+    await expect(missingRow).toContainText('Reconciliation cannot create a missing object.');
+    await expect(missingRow).toContainText(
+      'operation remains pending and is not verified evidence.',
+    );
+    await expect(missingRow).not.toContainText('Evidence:');
+    const missingOperation = await page.request.get(
+      `/api/bff/v1/evidence/ingestions/${missing.operationKey}`,
+      { headers },
+    );
+    expect(missingOperation.status()).toBe(200);
+    expect((await missingOperation.json()).data).toMatchObject({
+      status: 'pending',
+      evidenceId: null,
+      errorCode: 'object_version_not_found',
+    });
+    const missingSearch = await page.request.get(
+      `/api/bff/v1/evidence?q=${encodeURIComponent(missing.description)}`,
+      { headers },
+    );
+    expect(missingSearch.status()).toBe(200);
+    expect((await missingSearch.json()).data).toEqual([]);
 
     // Owner has no tenant B membership; explicit foreign selection is refused.
     const foreign = await page.request.get(detailUrl, {

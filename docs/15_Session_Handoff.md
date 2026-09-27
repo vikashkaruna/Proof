@@ -1,6 +1,6 @@
 # Axiom Proof — implementation session handoff
 
-## Active continuation — Revision 100 (2026-09-27; local validation green, CI pending)
+## Active continuation — Revision 100 (2026-09-27; expanded local validation green, CI pending)
 
 This section supersedes conflicting historical handoff instructions below. **Main promotion remains the operator’s responsibility. W9 and W10 remain in scope.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. No cloud provisioning/apply is authorized; existing isolated Docker services are available for engineering acceptance.
 

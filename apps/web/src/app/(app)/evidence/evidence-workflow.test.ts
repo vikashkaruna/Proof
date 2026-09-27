@@ -3,6 +3,7 @@ import {
   evidenceUploadBytes,
   verifyLocalFile,
   MAX_EVIDENCE_UPLOAD_BYTES,
+  MAX_LOCAL_VERIFY_BYTES,
 } from './evidence-workflow';
 
 const abc = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
@@ -36,6 +37,19 @@ describe('independent evidence integrity', () => {
     await expect(
       verifyLocalFile(new File(['abc'], 'fixture.txt'), 'not-a-seal', 3),
     ).rejects.toThrow('recorded SHA-256');
+  });
+  it('rejects oversized local comparison before reading bytes or making any request', async () => {
+    const file = new File(['abc'], 'large.bin');
+    Object.defineProperty(file, 'size', { value: MAX_LOCAL_VERIFY_BYTES + 1 });
+    const read = vi.spyOn(file, 'arrayBuffer');
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    try {
+      await expect(verifyLocalFile(file, abc, file.size)).rejects.toThrow('32 MiB');
+      expect(read).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
   });
   it('encodes exact binary bytes for an explicitly requested upload', async () => {
     const input = Uint8Array.from([0, 255, 10, 128]);

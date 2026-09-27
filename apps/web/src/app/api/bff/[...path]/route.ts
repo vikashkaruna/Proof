@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
-import { boundedRequestBody, RequestBodyTooLarge } from '@/lib/bounded-request-body';
+import {
+  boundedRequestBody,
+  RequestBodyTooLarge,
+  RequestBodyUnavailable,
+} from '@/lib/bounded-request-body';
 import { selectTenantMembership, type TenantMembership } from '@/lib/tenant-selection';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -44,14 +48,23 @@ async function forward(request: NextRequest, context: RouteContext) {
         : await request.arrayBuffer();
     } catch (error) {
       const oversized = error instanceof RequestBodyTooLarge;
+      const unavailable = error instanceof RequestBodyUnavailable;
       return NextResponse.json(
         {
           error: {
-            code: oversized ? 'request_body_too_large' : 'invalid_request_body',
-            message: oversized ? 'Upload request exceeds 12 MiB.' : 'Unable to read request body.',
+            code: oversized
+              ? 'request_body_too_large'
+              : unavailable
+                ? 'request_body_unavailable'
+                : 'invalid_request_body',
+            message: oversized
+              ? 'Upload request exceeds 12 MiB.'
+              : unavailable
+                ? 'Upload interrupted or timed out. Try again.'
+                : 'Unable to read request body.',
           },
         },
-        { status: oversized ? 413 : 400 },
+        { status: oversized ? 413 : unavailable ? 408 : 400 },
       );
     }
   }

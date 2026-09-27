@@ -15,9 +15,11 @@ import {
   type EvidenceOperation,
 } from './evidence-contract';
 
-const field = 'w-full rounded border border-slate-300 px-3 py-2 text-sm';
-const button = 'rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
-const panel = 'rounded-xl border border-slate-200 bg-white p-5 space-y-4';
+const field = 'w-full min-w-0 max-w-full rounded border border-slate-300 px-3 py-2 text-sm';
+const button =
+  'max-w-full whitespace-normal break-words rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
+const panel =
+  'min-w-0 max-w-full break-words rounded-xl border border-slate-200 bg-white p-5 space-y-4';
 const listSchema = z.object({ data: z.array(evidenceRowSchema), meta: pageMetaSchema });
 const operationsSchema = z.object({ data: z.array(operationSchema), meta: pageMetaSchema });
 const operationResponse = z.object({ data: operationSchema });
@@ -46,6 +48,7 @@ export function EvidenceClient({
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [recordsError, setRecordsError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<EvidenceRow | null>(null);
@@ -60,6 +63,8 @@ export function EvidenceClient({
   const [operationOffset, setOperationOffset] = useState(0);
   const [operationMore, setOperationMore] = useState(false);
   const [operationsLoading, setOperationsLoading] = useState(true);
+  const [operationsError, setOperationsError] = useState('');
+  const [operationsRevision, setOperationsRevision] = useState(0);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const uploadKeys = useRef(new Map<string, string>());
@@ -102,7 +107,13 @@ export function EvidenceClient({
       })
       .catch((err) => {
         if (!controller.signal.aborted)
-          setError(err instanceof Error ? err.message : 'Unable to load evidence.');
+          setRecordsError(
+            err instanceof z.ZodError
+              ? 'The server returned unreadable evidence records. Refresh to try again.'
+              : err instanceof Error
+                ? err.message
+                : 'Unable to load evidence.',
+          );
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -120,31 +131,42 @@ export function EvidenceClient({
         setOperations(result.data);
         setOperationMore(result.meta.hasMore);
       })
-      .catch((err) => {
+      .catch(() => {
         if (!controller.signal.aborted)
-          setError(err instanceof Error ? err.message : 'Unable to load upload operations.');
+          setOperationsError(
+            'Unable to load upload operations. Retry to check their current status.',
+          );
       })
       .finally(() => {
         if (!controller.signal.aborted) setOperationsLoading(false);
       });
     return () => controller.abort();
-  }, [canRecord, request, revision, operationOffset]);
+  }, [canRecord, request, revision, operationOffset, operationsRevision]);
   function refresh() {
     setLoading(true);
     setOperationsLoading(true);
+    setOperationsError('');
     setRows([]);
+    setRecordsError('');
     setError('');
     setRevision((v) => v + 1);
   }
   function moveRecords(next: number) {
     setLoading(true);
     setRows([]);
+    setRecordsError('');
     setError('');
     setOffset(next);
   }
   function moveOperations(next: number) {
     setOperationsLoading(true);
+    setOperationsError('');
     setOperationOffset(next);
+  }
+  function retryOperations() {
+    setOperationsLoading(true);
+    setOperationsError('');
+    setOperationsRevision((value) => value + 1);
   }
   function choose(row: EvidenceRow) {
     selection.current = row.id;
@@ -161,7 +183,13 @@ export function EvidenceClient({
     try {
       await work();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed.');
+      setError(
+        err instanceof z.ZodError
+          ? 'The server returned an unreadable response. Refresh the records and upload operations before retrying.'
+          : err instanceof Error
+            ? err.message
+            : 'Request failed.',
+      );
     } finally {
       setBusy(false);
     }
@@ -176,11 +204,13 @@ export function EvidenceClient({
     }
     setLoading(true);
     setRows([]);
+    setRecordsError('');
     setError('');
     setOffset(0);
     setQuery(params.size ? `&${params}` : '');
     setRevision((v) => v + 1);
     setOperationsLoading(true);
+    setOperationsError('');
     selection.current = null;
     setSelected(null);
     setLocalResult(null);
@@ -193,7 +223,7 @@ export function EvidenceClient({
     const file = uploadFile;
     await action(async () => {
       const encoded = await evidenceUploadBytes(file);
-      const metadata = uploadMetadataSchema.parse({
+      const metadataResult = uploadMetadataSchema.safeParse({
         filename: file.name,
         contentType: file.type || 'application/octet-stream',
         evidenceType: String(form.get('evidenceType')),
@@ -204,6 +234,28 @@ export function EvidenceClient({
           .filter(Boolean),
         engagementId: String(form.get('engagementId') || '').trim() || null,
       });
+      if (!metadataResult.success) {
+        const guidance: Record<string, string> = {
+          filename: 'Use a filename of 1–160 characters without slashes or control characters.',
+          contentType:
+            'This file has an unsupported media type. Select a file with a valid media type.',
+          evidenceType: 'Select an evidence type from the list.',
+          description: 'Enter a description of 1–2,000 characters.',
+          controlIds: 'Enter at most 40 comma-separated control IDs, each at most 80 characters.',
+          engagementId: 'Enter a valid engagement UUID or leave the engagement field empty.',
+        };
+        throw new Error(
+          [
+            ...new Set(
+              metadataResult.error.issues.map(
+                (issue) =>
+                  guidance[String(issue.path[0])] || 'Check the evidence details before uploading.',
+              ),
+            ),
+          ].join(' '),
+        );
+      }
+      const metadata = metadataResult.data;
       const fingerprint = JSON.stringify([encoded.fingerprint, metadata]);
       const operationKey = uploadKeys.current.get(fingerprint) || crypto.randomUUID();
       uploadKeys.current.set(fingerprint, operationKey);
@@ -249,23 +301,23 @@ export function EvidenceClient({
       )}
       <form onSubmit={filter} className={panel} aria-label="Evidence filters">
         <div className="grid gap-3 md:grid-cols-3">
-          <label>
+          <label className="min-w-0">
             Search description or evidence ID
             <input name="q" defaultValue={initialQuery} maxLength={120} className={field} />
           </label>
-          <label>
+          <label className="min-w-0">
             Control ID
             <input name="controlId" className={field} />
           </label>
-          <label>
+          <label className="min-w-0">
             Source
             <input name="source" placeholder="Exact source, e.g. human" className={field} />
           </label>
-          <label>
+          <label className="min-w-0">
             Collected from (UTC)
             <input name="from" type="date" className={field} />
           </label>
-          <label>
+          <label className="min-w-0">
             Collected to (UTC)
             <input name="to" type="date" className={field} />
           </label>
@@ -278,21 +330,24 @@ export function EvidenceClient({
       <div className="grid gap-5 lg:grid-cols-2">
         <section className={panel} aria-label="Evidence records">
           <h2 className="font-semibold">Recorded evidence</h2>
+          {recordsError && <p role="alert">{recordsError} Use Refresh records to retry.</p>}
           {loading ? (
             <p role="status">Loading evidence…</p>
-          ) : !error ? (
+          ) : !recordsError ? (
             <p>{meta.total} matching records</p>
           ) : null}
-          {!loading && !error && rows.length === 0 && <p>No evidence matches these filters.</p>}
+          {!loading && !recordsError && rows.length === 0 && (
+            <p>No evidence matches these filters.</p>
+          )}
           {rows.map((row) => (
             <button
               type="button"
               key={row.id}
               onClick={() => choose(row)}
               aria-pressed={selected?.id === row.id}
-              className="block w-full rounded border border-slate-200 p-3 text-left hover:border-teal-600"
+              className="block w-full min-w-0 rounded border border-slate-200 p-3 text-left hover:border-teal-600"
             >
-              <strong>{row.filename || row.description || row.id}</strong>
+              <strong className="break-all">{row.filename || row.description || row.id}</strong>
               <span className="block break-all text-xs">{row.id}</span>
               <span className="block text-sm">
                 {row.assurance === 'verified_at_ingest'
@@ -302,17 +357,17 @@ export function EvidenceClient({
               </span>
             </button>
           ))}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               className={button}
-              disabled={loading || offset === 0}
+              disabled={loading || !!recordsError || offset === 0}
               onClick={() => moveRecords(Math.max(0, offset - 20))}
             >
               Previous records
             </button>
             <button
               className={button}
-              disabled={loading || !meta.hasMore}
+              disabled={loading || !!recordsError || !meta.hasMore}
               onClick={() => moveRecords(offset + 20)}
             >
               Next records
@@ -322,7 +377,7 @@ export function EvidenceClient({
         {selected ? (
           <section className={panel} aria-label="Evidence inspector">
             <h2 className="font-semibold break-all">{selected.filename || selected.id}</h2>
-            <p>{selected.description || 'No description recorded.'}</p>
+            <p className="break-all">{selected.description || 'No description recorded.'}</p>
             <dl className="space-y-2 text-sm break-all">
               <dt>Evidence ID</dt>
               <dd>{selected.id}</dd>
@@ -429,6 +484,7 @@ export function EvidenceClient({
               <input
                 key={selected.id}
                 aria-label="Local file to verify"
+                className="w-full min-w-0 max-w-full text-sm"
                 type="file"
                 disabled={busy}
                 onChange={(event) => {
@@ -480,8 +536,8 @@ export function EvidenceClient({
               Human-submitted evidence is retained under the product’s seven-year policy. COMPLIANCE
               retention cannot be shortened or the object deleted before expiry.
             </p>
-            <fieldset disabled={busy} className="grid gap-3 md:grid-cols-2">
-              <label>
+            <fieldset disabled={busy} className="grid min-w-0 gap-3 md:grid-cols-2">
+              <label className="min-w-0">
                 Evidence file (maximum 8 MiB)
                 <input
                   type="file"
@@ -493,27 +549,38 @@ export function EvidenceClient({
                   }}
                 />
               </label>
-              <label>
+              <label className="min-w-0">
                 Evidence type
-                <select name="evidenceType" aria-label="Evidence type" className={field}>
+                <select
+                  name="evidenceType"
+                  aria-label="Evidence type"
+                  className={field}
+                  onChange={() => setConfirmed(false)}
+                >
                   {Object.values(EvidenceType).map((type) => (
                     <option key={type}>{type}</option>
                   ))}
                 </select>
               </label>
-              <label>
+              <label className="min-w-0">
                 Description
-                <textarea name="description" required maxLength={2000} className={field} />
+                <textarea
+                  name="description"
+                  required
+                  maxLength={2000}
+                  className={field}
+                  onChange={() => setConfirmed(false)}
+                />
               </label>
-              <label>
+              <label className="min-w-0">
                 Control IDs (comma separated)
-                <input name="controls" className={field} />
+                <input name="controls" className={field} onChange={() => setConfirmed(false)} />
               </label>
-              <label>
+              <label className="min-w-0">
                 Engagement ID (optional)
-                <input name="engagementId" className={field} />
+                <input name="engagementId" className={field} onChange={() => setConfirmed(false)} />
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex min-w-0 items-center gap-2">
                 <input
                   type="checkbox"
                   required
@@ -527,60 +594,76 @@ export function EvidenceClient({
               Upload evidence
             </button>
           </form>
-          <section className={panel} aria-label="Upload operations">
+          <section className={panel} aria-label="Upload operations" aria-busy={operationsLoading}>
             <h2 className="font-semibold">Upload operations</h2>
             <p className="text-sm">
               Pending operations are not verified evidence. Reconciliation checks whether the exact
               uploaded version exists; it never uploads another copy.
             </p>
             {operationsLoading ? (
-              <p>Loading upload operations…</p>
+              <p role="status">Loading upload operations…</p>
+            ) : operationsError ? (
+              <div className="space-y-2">
+                <p role="alert">{operationsError}</p>
+                <button className={button} disabled={busy} onClick={retryOperations}>
+                  Retry upload operations
+                </button>
+              </div>
             ) : (
               operations.length === 0 && <p>No upload operations recorded on this page.</p>
             )}
-            {operations.map((operation) => (
-              <div key={operation.operationKey} className="rounded border p-3 text-sm break-all">
-                <p>
-                  {operation.operationKey} · {operation.status} · {date(operation.createdAt)}
-                </p>
-                {operation.errorCode && <p>Last outcome: {operation.errorCode}</p>}
-                {operation.evidenceId && <p>Evidence: {operation.evidenceId}</p>}
-                {operation.status === 'pending' && (
-                  <button
-                    className={button}
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
-                        const result = operationResponse.parse(
-                          await (
-                            await request(`/ingestions/${operation.operationKey}/reconcile`, {})
-                          ).json(),
-                        ).data;
-                        setMessage(
-                          result.status === 'settled'
-                            ? 'Upload reconciled; receipt recorded.'
-                            : `Still pending: ${result.errorCode || 'no verifiable stored version yet'}.`,
-                        );
-                        refresh();
-                      })
-                    }
-                  >
-                    Reconcile upload
-                  </button>
-                )}
-              </div>
-            ))}
-            <div className="flex gap-2">
+            {!operationsLoading &&
+              !operationsError &&
+              operations.map((operation) => (
+                <div key={operation.operationKey} className="rounded border p-3 text-sm break-all">
+                  <p>
+                    {operation.operationKey} · {operation.status} · {date(operation.createdAt)}
+                  </p>
+                  {operation.errorCode && <p>Last outcome: {operation.errorCode}</p>}
+                  {operation.errorCode === 'object_version_not_found' && (
+                    <p>
+                      No matching uploaded object was found. Reconciliation cannot create a missing
+                      object. Keep this operation ID and ask your operator to investigate; this
+                      operation remains pending and is not verified evidence.
+                    </p>
+                  )}
+                  {operation.evidenceId && <p>Evidence: {operation.evidenceId}</p>}
+                  {operation.status === 'pending' && (
+                    <button
+                      className={button}
+                      disabled={busy || operationsLoading}
+                      onClick={() =>
+                        void action(async () => {
+                          const result = operationResponse.parse(
+                            await (
+                              await request(`/ingestions/${operation.operationKey}/reconcile`, {})
+                            ).json(),
+                          ).data;
+                          setMessage(
+                            result.status === 'settled'
+                              ? 'Upload reconciled; receipt recorded.'
+                              : `Still pending: ${result.errorCode || 'no verifiable stored version yet'}.`,
+                          );
+                          refresh();
+                        })
+                      }
+                    >
+                      Reconcile upload
+                    </button>
+                  )}
+                </div>
+              ))}
+            <div className="flex flex-wrap gap-2">
               <button
                 className={button}
-                disabled={operationOffset === 0 || busy}
+                disabled={operationOffset === 0 || busy || operationsLoading || !!operationsError}
                 onClick={() => moveOperations(Math.max(0, operationOffset - 20))}
               >
                 Previous operations
               </button>
               <button
                 className={button}
-                disabled={!operationMore || busy}
+                disabled={!operationMore || busy || operationsLoading || !!operationsError}
                 onClick={() => moveOperations(operationOffset + 20)}
               >
                 Next operations

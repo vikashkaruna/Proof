@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+import { repoRoot } from '../target';
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { selectTenant, signIn, state } from '../fixtures';
 
@@ -41,6 +43,44 @@ async function legacyEvidence(options: {
   });
   expect(response.status).toBe(201);
   return { id, filename, bytes, hash };
+}
+
+// Durable fixture intent only: no upload or verified receipt is fabricated.
+async function pendingOperation() {
+  const operationKey = crypto.randomUUID();
+  const hash = createHash('sha256').update(operationKey).digest('hex');
+  const response = await fetch(`${state.supabaseUrl}/rest/v1/rpc/begin_evidence_ingest`, {
+    method: 'POST',
+    headers: {
+      apikey: state.publishableKey,
+      Authorization: `Bearer ${state.serviceKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_tenant_id: state.tenantA.id,
+      p_actor_id: state.accounts.owner.id,
+      p_operation_key: operationKey,
+      p_correlation_id: crypto.randomUUID(),
+      p_request: {
+        content_hash: hash,
+        byte_size: 1,
+        mime_type: 'application/octet-stream',
+        filename: `pending-${operationKey}.bin`,
+        evidence_type: 'document',
+        description: 'Controlled browser fixture: no object uploaded',
+        control_ids: [],
+        engagement_id: null,
+        collected_by_agent: 'human',
+        provider: 's3-compatible',
+        bucket: 'controlled-browser-pending-fixture',
+        object_key: `tenants/${state.tenantA.id}/evidence-ingestions/${operationKey}/${hash}`,
+        retention_policy: 'seven_years',
+        legal_hold: false,
+      },
+    }),
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ status: 'pending', replayed: false });
 }
 
 async function openVault(page: Page, role: 'owner' | 'viewer', evidenceId?: string) {
@@ -193,6 +233,139 @@ test('real evidence search and combined filters show honest empty results', asyn
   await expect(records.getByRole('button', { name: 'Previous records' })).toBeDisabled();
   await expect(records.getByRole('button', { name: 'Next records' })).toBeDisabled();
   await expect(page.getByRole('alert').filter({ hasText: /\S/ })).toHaveCount(0);
+  // Exercise real server pagination and keyboard selection, then check the
+  // same complete flow at a narrow viewport (no browser response mocks).
+  const pagingMarker = `paging-evidence-${crypto.randomUUID()}`;
+  await Promise.all(
+    Array.from({ length: 21 }, (_, index) =>
+      legacyEvidence({ description: `${pagingMarker} ${index}` }),
+    ),
+  );
+  await page.getByLabel('Search description or evidence ID', { exact: true }).fill(pagingMarker);
+  await page.getByLabel('Control ID', { exact: true }).fill('');
+  await page.getByLabel('Source', { exact: true }).fill('');
+  await applyFilters(page);
+  await expect(records).toContainText('21 matching records');
+  await expect(records.locator('button[aria-pressed]')).toHaveCount(20);
+  const nextPage = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/bff/v1/evidence' &&
+      new URL(response.url()).searchParams.get('offset') === '20',
+  );
+  await records.getByRole('button', { name: 'Next records' }).click();
+  expect((await nextPage).status()).toBe(200);
+  await expect(records.locator('button[aria-pressed]')).toHaveCount(1);
+  await expect(records.getByRole('button', { name: 'Next records' })).toBeDisabled();
+  await expect(records.getByRole('button', { name: 'Previous records' })).toBeEnabled();
+  const recordButton = records.locator('button[aria-pressed]').first();
+  await recordButton.focus();
+  await expect(recordButton).toBeFocused();
+  await recordButton.press('Enter');
+  await expect(recordButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Evidence inspector' })).toBeVisible();
+  if (process.env.AXIOM_VISUAL_REVIEW === 'true') {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: resolve(repoRoot, '.axiom-runtime/revision100/evidence-desktop.png'),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (process.env.AXIOM_VISUAL_REVIEW === 'true') {
+    await page.screenshot({
+      path: resolve(repoRoot, '.axiom-runtime/revision100/evidence-mobile.png'),
+      fullPage: true,
+    });
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const menu = page.getByRole('button', { name: 'Open navigation' });
+  await menu.focus();
+  await menu.press('Enter');
+  const drawer = page.getByRole('dialog', { name: 'Application navigation' });
+  await expect(drawer).toBeVisible();
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  await expect(drawer.getByRole('button', { name: 'Close navigation' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(drawer.getByRole('button', { name: 'Sign out' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(drawer).not.toBeVisible();
+  await expect(menu).toBeFocused();
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+
+  // Fault injection changes transport only. Every successful result still
+  // comes from the real authenticated BFF and durable fixture intents.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await Promise.all(Array.from({ length: 21 }, () => pendingOperation()));
+  const operations = page.getByRole('region', { name: 'Upload operations' });
+  const operationsUrl = '**/api/bff/v1/evidence/ingestions?*';
+  await page.route(operationsUrl, (route) => route.abort('failed'), { times: 1 });
+  await page.getByRole('button', { name: 'Refresh records', exact: true }).click();
+  await expect(operations.getByRole('alert')).toContainText('Unable to load upload operations');
+  await expect(operations).not.toContainText('No upload operations recorded');
+  await expect(records).toContainText('21 matching records');
+  await expect(records.getByRole('alert')).toHaveCount(0);
+  await expect(operations.getByRole('button', { name: 'Next operations' })).toBeDisabled();
+  const retried = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/bff/v1/evidence/ingestions',
+  );
+  await operations.getByRole('button', { name: 'Retry upload operations' }).click();
+  const retryResponse = await retried;
+  expect(retryResponse.status()).toBe(200);
+  const firstOperationKey = (await retryResponse.json()).data[0].operationKey as string;
+  await expect(operations.getByRole('alert')).toHaveCount(0);
+  await expect(operations).toContainText(firstOperationKey);
+  await expect(operations.getByRole('button', { name: 'Next operations' })).toBeEnabled();
+
+  let releasePage = () => {};
+  const pageGate = new Promise<void>((resolve) => {
+    releasePage = resolve;
+  });
+  await page.route(
+    operationsUrl,
+    async (route) => {
+      await pageGate;
+      await route.continue();
+    },
+    { times: 1 },
+  );
+  try {
+    await operations.getByRole('button', { name: 'Next operations' }).click();
+    await expect(operations).toHaveAttribute('aria-busy', 'true');
+    await expect(operations.getByRole('status')).toHaveText('Loading upload operations…');
+    await expect(operations).not.toContainText(firstOperationKey);
+    await expect(operations.getByRole('button', { name: 'Reconcile upload' })).toHaveCount(0);
+    await expect(operations.getByRole('button', { name: 'Previous operations' })).toBeDisabled();
+    await expect(operations.getByRole('button', { name: 'Next operations' })).toBeDisabled();
+    const nextOperations = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/bff/v1/evidence/ingestions' &&
+        new URL(response.url()).searchParams.get('offset') === '20',
+    );
+    releasePage();
+    const nextOperationsResponse = await nextOperations;
+    expect(nextOperationsResponse.status()).toBe(200);
+    expect((await nextOperationsResponse.json()).meta.offset).toBe(20);
+    await expect(operations).toHaveAttribute('aria-busy', 'false');
+    await expect(operations.getByRole('button', { name: 'Previous operations' })).toBeEnabled();
+    await expect(
+      operations.getByRole('button', { name: 'Reconcile upload' }).first(),
+    ).toBeVisible();
+  } finally {
+    releasePage();
+    await page.unroute(operationsUrl);
+  }
+
+  // An evidence-list outage is independent of successful operations reads.
+  await page.route('**/api/bff/v1/evidence?*', (route) => route.abort('failed'), { times: 1 });
+  await page.getByRole('button', { name: 'Refresh records', exact: true }).click();
+  await expect(records.getByRole('alert')).toContainText('Use Refresh records to retry');
+  await expect(records).not.toContainText('No evidence matches these filters');
+  await expect(operations).toHaveAttribute('aria-busy', 'false');
+  await expect(operations.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Refresh records', exact: true }).click();
+  await expect(records.getByRole('alert')).toHaveCount(0);
+  await expect(records).toContainText('21 matching records');
 });
 
 test('viewer reads tenant evidence without upload affordances or foreign tenant access', async ({
