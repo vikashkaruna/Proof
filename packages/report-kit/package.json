@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
-    "./archive": "./src/archive.ts"
+    "./archive": "./src/archive.ts",
+    "./board-report": "./src/board-report.ts",
+    "./renderer": "./src/renderer.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -289,6 +289,8 @@ export const LedgerActionType = {
   BREACH_DETECTED: 'breach.detected',
   BREACH_NOTIFIED_DPB: 'breach.notified.dpb',
   BREACH_NOTIFIED_PRINCIPALS: 'breach.notified.principals',
+  REPORT_REQUESTED: 'report.requested',
+  REPORT_DRAFTED: 'report.drafted',
   REPORT_GENERATED: 'report.generated',
   REPORT_EXPORTED: 'report.exported',
   EVIDENCE_PACK_PREPARED: 'evidence.pack.prepared',
