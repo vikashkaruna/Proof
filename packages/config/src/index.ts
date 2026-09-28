@@ -588,6 +588,23 @@ function normalizeEnv(source: NodeJS.ProcessEnv = process.env): Record<string, u
     norm.AXIOM_FOUNDER_EMAIL = norm.FOUNDER_EMAIL;
   }
 
+  // Strip empty strings for optional URL and credential variables so Zod .optional() sees them as undefined
+  const optionalKeysToStripIfEmpty = [
+    'UPSTASH_REDIS_URL',
+    'REDIS_URL',
+    'UPSTASH_REDIS_REST_URL',
+    'UPSTASH_REDIS_REST_TOKEN',
+    'RESEND_API_KEY',
+    'AXIOM_STORAGE_ENDPOINT',
+    'AWS_S3_ENDPOINT',
+    'S3_ENDPOINT',
+  ];
+  for (const k of optionalKeysToStripIfEmpty) {
+    if (norm[k] === '') {
+      delete norm[k];
+    }
+  }
+
   return norm;
 }
 

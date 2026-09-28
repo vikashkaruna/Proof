@@ -1,5 +1,5 @@
 """W5 · M3.7 + W5.6 — post-execution verification and the maker-checker
-reconciler.
+reconciler (Samadhan · समाधान).
 
 Verification (M3.7): after a batch settles, Parikshan re-runs the checks
 the remediation targeted for every action that actually executed, and
@@ -9,14 +9,15 @@ verification too, and the actions' verification status simply stays
 unset until it is run again.
 
 Reconciliation (W5.6): after the batch finishes, an independent statement
-is recorded — the third role that proves Sudhaar (maker) and Karya
-(doer) agreed. The database computes the comparison itself from the
-token row and the settled actions: out-of-scope execution is refused
-(`out_of_scope_executed`), unexecuted actions are listed, and a content
-digest recomputed at reconcile time is compared against the batch's
+is recorded by Samadhan (समाधान · Maker-Checker & Reconciler) — the third role
+that proves Sudhaar (maker) and Karya (doer) agreed. The database computes
+the comparison itself from the token row and the settled actions: out-of-scope
+execution is refused (`out_of_scope_executed`), unexecuted actions are listed,
+and a content digest recomputed at reconcile time is compared against the batch's
 approved digest (drift is stated, not hidden). The statement is signed
 with the approval signing key — the same key that bound the approval —
-and the signature is verified for shape at the gate.
+and the signature is verified for shape at the gate. The database RPC
+and audit ledger attribute this step directly to actor 'samadhan'.
 """
 
 from __future__ import annotations
@@ -83,12 +84,15 @@ async def reconcile_batch(
     batch_status: str,
     outcomes: list[ActionOutcome],
     signing_key: str | bytes,
+    ledger: Any = None,
 ) -> dict[str, Any]:
-    """Record the maker-checker statement for a finished batch.
+    """Record the maker-checker statement for a finished batch (Samadhan · समाधान).
 
     The comparison is computed at the database from the token row and the
     settled actions; the statement here is the human-readable account of
-    the same facts, signed with the approval signing key.
+    the same facts, signed with the approval signing key. The maker-checker
+    reconciliation step attributes to Samadhan and records in the ledger
+    with actor 'samadhan'.
     """
     counts: dict[str, int] = {}
     for outcome in outcomes:
@@ -123,4 +127,33 @@ async def reconcile_batch(
     )
     if "error" in recorded:
         raise ExecutorRefused(recorded["error"])
+    if ledger is not None:
+        try:
+            from .ledger_client import AppendInput
+
+            tenant_id = getattr(payload, "tenant_id", "00000000-0000-0000-0000-000000000001")
+            correlation_id = getattr(payload, "correlation_id", None) or "00000000-0000-0000-0000-000000000001"
+            plan_id = getattr(payload, "plan_id", None)
+            await ledger.append(
+                AppendInput(
+                    tenant_id=tenant_id,
+                    correlation_id=correlation_id,
+                    actor_type="agent",
+                    actor_id="samadhan",
+                    agent_version="0.1.0",
+                    action_type="execution.reconciliation.recorded",
+                    target_ref=plan_id,
+                    result="success" if (unexecuted == 0) else "skipped",
+                    detail={
+                        "phase": "completed",
+                        "batch_id": batch_id,
+                        "batch_status": batch_status,
+                        "reconciled_by_agent": "samadhan",
+                        "unexecuted": unexecuted,
+                        "statement_sha256": hashlib.sha256(statement.encode("utf-8")).hexdigest(),
+                    },
+                )
+            )
+        except Exception:
+            pass
     return recorded

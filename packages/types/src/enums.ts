@@ -306,6 +306,10 @@ export const LedgerActionType = {
   POLICY_REVIEWED: 'policy.reviewed',
   PLAYBOOK_CREATED: 'playbook.created',
   CLASSIFICATION_REVIEWED: 'classification.reviewed',
+  // Extension: Samadhan & Pramaan Closure Architecture
+  CLOSURE_PRAMAAN_DRAFTED: 'closure.pramaan.drafted',
+  CLOSURE_PRAMAAN_SEALED: 'closure.pramaan.sealed',
+  REPORT_DISPATCHED_EMAIL: 'report.dispatched.email',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 
@@ -353,9 +357,11 @@ export const AgentName = {
   SAAKSHI: 'saakshi',
   SUDHAAR: 'sudhaar',
   KARYA: 'karya',
+  SAMADHAN: 'samadhan',
   LEKHA: 'lekha',
   NAZAR: 'nazar',
   PRATIVEDAN: 'prativedan',
+  PRAMAAN: 'pramaan',
   SANKET: 'sanket',
 } as const;
 export type AgentName = (typeof AgentName)[keyof typeof AgentName];
@@ -367,8 +373,10 @@ export const ALL_AGENTS: AgentName[] = [
   'saakshi',
   'sudhaar',
   'karya',
+  'samadhan',
   'lekha',
   'nazar',
   'prativedan',
+  'pramaan',
   'sanket',
 ];

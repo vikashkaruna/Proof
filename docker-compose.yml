@@ -38,7 +38,7 @@ services:
     networks:
       - axiom-network
 
-  # ─── Agent Runtime (10 Named Agents) ───────────────────────────
+  # ─── Agent Runtime (12 Named Agents) ───────────────────────────
   agent-runtime:
     build:
       context: .

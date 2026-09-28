@@ -13,6 +13,9 @@ import {
   type ReportSummary,
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
+import { ClosureDossiersTab } from './closure-dossiers-tab';
+import { EmailDispatchModal } from './email-dispatch-modal';
+import { AgentIcon } from '@axiom/ui';
 
 const date = (value: string) => new Date(value).toLocaleString();
 
@@ -35,6 +38,8 @@ export function ReportsClient(access: Access) {
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'pramaan' | 'prativedan'>('prativedan');
+  const [reportEmailTarget, setReportEmailTarget] = useState<ReportSummary | null>(null);
   const preparation = useRef<HTMLDetailsElement>(null);
   const refresh = useCallback(() => {
     setLoading(true);
@@ -81,7 +86,49 @@ export function ReportsClient(access: Access) {
         </p>
       </header>
 
-      {/* Statutory Formats Grid */}
+      {/* Role-Segregated Navigation Tabs: Pramaan (Closure Authority) vs Prativedan (Clerical Drafter) */}
+      <div className="flex border-b border-slate-200 gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('pramaan');
+            setSelectedId(null);
+          }}
+          className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+            activeTab === 'pramaan'
+              ? 'border-[#C9A227] text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <AgentIcon agent="pramaan" size="sm" state="idle" />
+          Statutory Proof Dossiers (Pramaan · Closure Seal)
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('prativedan');
+            setSelectedId(null);
+          }}
+          className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+            activeTab === 'prativedan'
+              ? 'border-indigo-600 text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <AgentIcon agent="prativedan" size="sm" state="idle" />
+          Working Reports & Registers (Prativedan · Clerical Drafter)
+        </button>
+      </div>
+
+      {activeTab === 'pramaan' ? (
+        <ClosureDossiersTab
+          tenantId={tenantId}
+          canRelease={access.canRelease}
+          canPrepare={access.canPrepare}
+        />
+      ) : (
+        <>
+          {/* Statutory Formats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
@@ -237,11 +284,11 @@ export function ReportsClient(access: Access) {
             ) : (
               <ul className="space-y-2">
                 {reports.map((report) => (
-                  <li key={report.id}>
+                  <li key={report.id} className="flex items-center gap-2">
                     <button
                       type="button"
                       aria-pressed={selectedId === report.id}
-                      className="w-full min-w-0 rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 aria-pressed:border-teal-600"
+                      className="flex-1 min-w-0 rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 aria-pressed:border-teal-600"
                       onClick={() => setSelectedId(report.id)}
                     >
                       <span className="block break-words font-medium">{report.title}</span>
@@ -253,6 +300,13 @@ export function ReportsClient(access: Access) {
                           Historical record — no verified release assurance
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportEmailTarget(report)}
+                      className="rounded border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shrink-0"
+                    >
+                      ✉ Email
                     </button>
                   </li>
                 ))}
@@ -278,8 +332,29 @@ export function ReportsClient(access: Access) {
         </div>
       </section>
       {selectedId && (
-        <ReportInspector key={selectedId} {...access} reportId={selectedId} onChanged={refresh} />
+        <ReportInspector
+          key={selectedId}
+          {...access}
+          reportId={selectedId}
+          onChanged={refresh}
+          onSendEmail={(rep) => setReportEmailTarget(rep)}
+        />
       )}
+        </>
+      )}
+
+      {/* Report Email Dispatch Modal */}
+      <EmailDispatchModal
+        tenantId={tenantId}
+        isOpen={Boolean(reportEmailTarget)}
+        onClose={() => setReportEmailTarget(null)}
+        target={{
+          reportId: reportEmailTarget?.id,
+          title: reportEmailTarget?.title || '',
+          kind: reportEmailTarget?.kind || '',
+          proofSealHash: reportEmailTarget?.contentHash || undefined,
+        }}
+      />
     </div>
   );
 }
@@ -287,8 +362,13 @@ export function ReportsClient(access: Access) {
 function ReportInspector({
   reportId,
   onChanged,
+  onSendEmail,
   ...access
-}: Access & { reportId: string; onChanged: () => void }) {
+}: Access & {
+  reportId: string;
+  onChanged: () => void;
+  onSendEmail?: (report: ReportDetail) => void;
+}) {
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState('');
@@ -382,9 +462,21 @@ function ReportInspector({
         <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold">
           Report detail
         </h2>
-        <button className={button} disabled={busy || loading} onClick={refresh}>
-          Refresh report detail
-        </button>
+        <div className="flex items-center gap-2">
+          {report && onSendEmail && (
+            <button
+              type="button"
+              className="rounded border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shadow-xs"
+              onClick={() => onSendEmail(report)}
+              disabled={busy}
+            >
+              ✉ Send via Email
+            </button>
+          )}
+          <button className={button} disabled={busy || loading} onClick={refresh}>
+            Refresh report detail
+          </button>
+        </div>
       </div>
       {message && (
         <p role="status" className="text-sm">

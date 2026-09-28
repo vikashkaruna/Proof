@@ -136,7 +136,7 @@ The repository provides automated cross-platform runners that execute this entir
 
 1. Dynamically generated Compliance Officer email & password.
 2. Dynamically onboarded Tenant UUID and Engagement UUID.
-3. Live execution status and latencies for all 10 agents:
+3. Live execution status and latencies for all 12 agents:
    - Drishti (`succeeded`, ~40ms)
    - Vibhaag (`succeeded`)
    - Parikshan (`succeeded`, 46 controls evaluated)

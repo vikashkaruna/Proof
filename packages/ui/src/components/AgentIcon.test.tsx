@@ -12,14 +12,16 @@ const AGENTS: AgentName[] = [
   'saakshi',
   'sudhaar',
   'karya',
+  'samadhan',
   'lekha',
   'nazar',
   'prativedan',
+  'pramaan',
   'sanket',
 ];
 
 describe('AgentIcon Component', () => {
-  it('renders all 10 agents in idle state', () => {
+  it('renders all 12 agents in idle state', () => {
     for (const agent of AGENTS) {
       const html = renderToString(<AgentIcon agent={agent} state="idle" size="sm" />);
       expect(html).toContain(agent);

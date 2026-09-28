@@ -1,12 +1,13 @@
 """Agent implementations for Axiom Proof.
 
-10 named agents:
+Named agents:
   - Drishti   (Discovery)
   - Vibhaag   (Classification)
   - Parikshan (Assessment)
   - Saakshi   (Evidence)
   - Sudhaar   (Remediation Planning)
   - Karya     (Execution) — Phase 3, stub here
+  - Samadhan  (Maker-Checker & Reconciler)
   - Lekha     (Audit & Traceability)
   - Nazar     (Regulatory Watch)
   - Prativedan (Reporting)
@@ -23,6 +24,8 @@ from .lekha import LekhaAgent
 from .nazar import NazarAgent
 from .sanket import SanketAgent
 from .karya import KaryaAgent
+from .samadhan import SamadhanAgent
+from .pramaan import PramaanAgent
 
 __all__ = [
     "ParikshanAgent",
@@ -35,4 +38,6 @@ __all__ = [
     "NazarAgent",
     "SanketAgent",
     "KaryaAgent",
+    "SamadhanAgent",
+    "PramaanAgent",
 ]

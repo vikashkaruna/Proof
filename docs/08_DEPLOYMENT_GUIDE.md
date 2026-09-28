@@ -118,7 +118,7 @@ Executes a self-contained 5-stage verification pipeline before committing or pus
 #### Pipeline Stages:
 
 1. **TypeScript Workspace Unit Tests**: Runs `pnpm test` via Turborepo across all 10 packages (`@axiom/config`, `@axiom/types`, `@axiom/evidence`, `@axiom/ledger`, `@axiom/approval-engine`, `@axiom/control-library`, `@axiom/ui`, `@axiom/supabase`, `@axiom/bff`, `@axiom/web`).
-2. **Agent Runtime Pytest Suite**: Runs `uv run pytest` inside `services/agent-runtime` (32 tests verifying all 10 named agents, PII redaction, canonicalization, and approval tokens).
+2. **Agent Runtime Pytest Suite**: Runs `uv run pytest` inside `services/agent-runtime` (338 tests verifying all 12 named agents, PII redaction, canonicalization, and approval tokens).
 3. **Model Gateway Pytest Suite**: Runs `uv run pytest` inside `services/model-gateway` (14 tests verifying PII redactors, ap-south-1 residency checks, and token budgets).
 4. **Live HTTP Smoke Tests**: Issues HTTP probes to verify all 6 active container endpoints.
 5. **Playwright E2E Browser Suite**: Runs `cd tests/e2e && pnpm test:e2e` against the live Web Workbench (`:3001`) and Marketing (`:3000`) applications (10 browser tests).

@@ -61,7 +61,7 @@ class BatchResult:
     status: str
     replay: bool
     outcomes: list[ActionOutcome] = field(default_factory=list)
-    # The maker-checker statement (W5.6), recorded after the batch finished.
+    # The Samadhan maker-checker statement (W5.6), recorded after the batch finished.
     reconciliation: dict[str, Any] | None = None
 
 
@@ -380,11 +380,12 @@ async def _post_finish(
     halted: bool,
     signing_key: str | bytes | None,
 ) -> BatchResult:
-    """Verification (M3.7) and the maker-checker statement (W5.6), after
-    the batch reached its terminal status. A halted batch skips
-    verification — an operator halting an incident stops estate calls —
-    but its statement is still recorded, because the reconciliation is
-    exactly what the incident review will read."""
+    """Verification (M3.7, Parikshan) and the maker-checker reconciliation
+    statement (W5.6, Samadhan · समाधान), after the batch reached its
+    terminal status. A halted batch skips verification — an operator
+    halting an incident stops estate calls — but its statement is still
+    recorded, because the reconciliation is exactly what the incident review
+    will read."""
     from .verification import reconcile_batch, verify_batch
 
     result = _final_result(batch_id, finished, outcomes, payload.action_ids)

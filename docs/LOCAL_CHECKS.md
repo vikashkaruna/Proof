@@ -226,7 +226,7 @@ cd "/Users/vikash/Axiom Proof"
 brew install uv
 # or: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Agent runtime (10 named agents, FastAPI)
+# Agent runtime (12 named agents, FastAPI)
 cd services/agent-runtime
 uv sync
 uv run pytest          # ~24 tests
