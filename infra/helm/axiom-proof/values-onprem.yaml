@@ -1,0 +1,81 @@
+# ==============================================================================
+# Axiom Proof — Sovereign On-Premise Helm Configuration (W10)
+# ==============================================================================
+# Tailored for self-contained, air-gapped on-premise Kubernetes clusters:
+# - Zero public cloud egress requirements
+# - In-perimeter MinIO S3-compatible evidence vault with Object Lock WORM
+# - In-perimeter Self-hosted Model Gateway (vLLM / Ollama)
+# - In-cluster Temporal durable orchestration (plain TLS or mutual intranet)
+# - Standalone / self-hosted PostgreSQL & Supabase services
+# ==============================================================================
+
+image:
+  registry: registry.local/axiom-minds
+  tag: 0.1.0-onprem
+  pullPolicy: IfNotPresent
+
+config:
+  awsRegion: ap-south-1
+  supabaseUrl: "http://axiom-supabase.axiom-proof.svc.cluster.local:55321"
+  s3EvidenceBucket: "axiom-proof-evidence-onprem"
+  bffPublicUrl: "http://axiom-bff.axiom-proof.svc.cluster.local:4000"
+  modelGatewayUrl: "http://axiom-model-gateway.axiom-proof.svc.cluster.local:8001"
+  agentRuntimeUrl: "http://axiom-agent-runtime.axiom-proof.svc.cluster.local:8000"
+  temporalAddress: "temporal.axiom-proof.svc.cluster.local:7233"
+  temporalNamespace: "axiom-proof"
+  assessmentDispatchRetentionDays: 90
+
+web:
+  enabled: true
+  replicaCount: 2
+  ingress:
+    enabled: true
+    className: nginx
+    host: workbench.axiomproof.local
+    tls:
+      enabled: false
+  env:
+    NEXT_PUBLIC_SUPABASE_URL: "http://axiom-supabase.axiom-proof.svc.cluster.local:55321"
+    BFF_PUBLIC_URL: "http://axiom-bff.axiom-proof.svc.cluster.local:4000"
+
+marketing:
+  enabled: true
+  replicaCount: 1
+  ingress:
+    enabled: true
+    className: nginx
+    host: portal.axiomproof.local
+    tls:
+      enabled: false
+  env:
+    NEXT_PUBLIC_MARKETING_URL: "http://portal.axiomproof.local"
+    NEXT_PUBLIC_APP_URL: "http://workbench.axiomproof.local"
+    NEXT_PUBLIC_BFF_URL: "http://axiom-bff.axiom-proof.svc.cluster.local:4000"
+    BFF_PUBLIC_URL: "http://axiom-bff.axiom-proof.svc.cluster.local:4000"
+
+bff:
+  enabled: true
+  replicaCount: 2
+  reportEmailMode: disabled
+  contactEmailMode: disabled
+  invitationEmailMode: disabled
+
+agentRuntime:
+  enabled: true
+  replicaCount: 2
+
+modelGateway:
+  enabled: true
+  replicaCount: 2
+  env:
+    piiRedactionEnabled: "true"
+    selfHostedBaseUrl: "http://vllm.axiom-proof.svc.cluster.local:8000"
+    selfHostedModel: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  autoscaling:
+    enabled: false
+
+temporalWorker:
+  enabled: true
+  replicaCount: 2
+  env:
+    TEMPORAL_TLS: "false"

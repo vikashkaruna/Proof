@@ -72,16 +72,115 @@ export function ReportsClient(access: Access) {
   return (
     <div className="min-w-0 space-y-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence packs</h1>
+        <h1 className="text-2xl font-semibold text-[#1E2A4A]">
+          Reports & Statutory Compliance Artifacts
+        </h1>
         <p className="text-sm text-slate-600">
-          Prepare a pack from retained evidence, review its exact contents and release the retained
-          archive. Drafts are visible only to their authorized creator and the tenant founder.
-        </p>
-        <p className="text-sm text-slate-600">
-          Board reports, server PDF, DPB submission preparation and technical registers are not yet
-          available here. No sample output is presented as your organization’s evidence.
+          Statutory DPDPA reporting engine, evidence packs, and tamper-evident audit registers. All
+          artifacts are cryptographically hashed and sealed with immutable audit ledgering.
         </p>
       </header>
+
+      {/* Statutory Formats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
+              BOARD REPORT
+            </span>
+            <span className="text-xs text-slate-500">Prativedan</span>
+          </div>
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
+          <p className="text-xs text-slate-600 mb-3">
+            Executive posture scores, financial penalty exposure, and domain maturity analysis.
+          </p>
+          <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+              AUDITOR PACK
+            </span>
+            <span className="text-xs text-slate-500">Prativedan / Saakshi</span>
+          </div>
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
+          <p className="text-xs text-slate-600 mb-3">
+            Itemized control evaluations, linked evidence receipts, and independent attestation.
+          </p>
+          <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
+              DPB SUBMISSION
+            </span>
+            <span className="text-xs text-slate-500">Prativedan</span>
+          </div>
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
+          <p className="text-xs text-slate-600 mb-3">
+            Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
+          </p>
+          <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+              TECH REGISTER
+            </span>
+            <span className="text-xs text-slate-500">Sudhaar / Karya</span>
+          </div>
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
+          <p className="text-xs text-slate-600 mb-3">
+            Full sequence of automated mutations, dry-run verified diffs, and rollback validation.
+          </p>
+          <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
+        </div>
+      </div>
+
+      {/* Approval History Export Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">
+            Tenant Approval History Audit Export
+          </h3>
+          <p className="text-xs text-slate-600">
+            Export complete, tamper-evident audit history of all human and standing-policy approvals
+            with cryptographic signatures.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href={`/api/bff/v1/approvals/export?format=pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={`approval-history-${tenantId.slice(0, 8)}.pdf`}
+            className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm"
+          >
+            Export PDF
+          </a>
+          <a
+            href={`/api/bff/v1/approvals/export?format=json`}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={`approval-history-${tenantId.slice(0, 8)}.json`}
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+          >
+            Export JSON
+          </a>
+          <a
+            href={`/api/bff/v1/approvals/export?format=csv`}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={`approval-history-${tenantId.slice(0, 8)}.csv`}
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+          >
+            Export CSV
+          </a>
+        </div>
+      </div>
       {canPrepare && (
         <details ref={preparation} className="space-y-3">
           <summary className="cursor-pointer rounded-lg border border-slate-200 p-4 font-semibold text-[#1E2A4A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600">

@@ -14,12 +14,25 @@ def test_bundled_pack_loads_with_reference_provenance():
     assert len(bundle.frameworks) > 0
     assert len(bundle.framework_controls) > 0
     assert len(bundle.control_mappings) > 0
-    assert len(bundle.packs) == 1
+    assert len(bundle.packs) == 3
 
-    pack = bundle.packs[0]
-    assert pack.code == "BFSI-1"
-    assert pack.sector == "BFSI"
-    assert len(pack.control_ids) > 0
+    bfsi = bundle.pack_for_sector("BFSI")
+    assert bfsi is not None
+    assert bfsi.code == "BFSI-1"
+    assert bfsi.sector == "BFSI"
+    assert len(bfsi.control_ids) > 0
+
+    healthcare = bundle.pack_for_sector("Healthcare")
+    assert healthcare is not None
+    assert healthcare.code == "IN-HEALTHCARE-2024"
+    assert healthcare.sector == "Healthcare"
+    assert len(healthcare.control_ids) > 0
+
+    tech = bundle.pack_for_sector("Tech/E-commerce")
+    assert tech is not None
+    assert tech.code == "IN-TECH-2024"
+    assert tech.sector == "Tech/E-commerce"
+    assert len(tech.control_ids) > 0
 
     # Every mapping is honestly labelled: reference provenance, and no
     # mapping claims equivalence — none has been verified against the
@@ -34,14 +47,18 @@ def test_bundled_pack_loads_with_reference_provenance():
     known = {c.id for c in library}
     for mapping in bundle.control_mappings:
         assert mapping.control_id in known
-    for control_id in pack.control_ids:
-        assert control_id in known
+    for pack in bundle.packs:
+        for control_id in pack.control_ids:
+            assert control_id in known
 
 
 def test_pack_subset_is_the_mapped_control_union():
     bundle = load_default_sector_packs()
-    pack = bundle.packs[0]
-    assert sorted(pack.control_ids) == sorted({m.control_id for m in bundle.control_mappings})
+    for pack in bundle.packs:
+        pack_mappings = [
+            m for m in bundle.control_mappings if m.framework_code in pack.framework_codes
+        ]
+        assert sorted(pack.control_ids) == sorted({m.control_id for m in pack_mappings})
 
 
 def test_for_control_returns_cross_framework_coverage():
@@ -49,14 +66,21 @@ def test_for_control_returns_cross_framework_coverage():
     # SEC-001 is deliberately mapped from more than one regulator.
     coverage = bundle.for_control("DPDPA-SEC-001")
     assert len(coverage) >= 2
-    assert {m.framework_code for m in coverage} >= {"RBI-MD-ITG", "SEBI-CYBER-RESILIENCE"}
+    assert {m.framework_code for m in coverage} >= {
+        "RBI-MD-ITG",
+        "SEBI-CYBER-RESILIENCE",
+        "MOHFW-EHR-STANDARDS",
+        "MEITY-SPDI-2011",
+    }
     assert bundle.for_control("DPDPA-GOV-001")
 
 
 def test_pack_for_sector_lookup():
     bundle = load_default_sector_packs()
     assert bundle.pack_for_sector("BFSI") is not None
-    assert bundle.pack_for_sector("Healthcare") is None
+    assert bundle.pack_for_sector("Healthcare") is not None
+    assert bundle.pack_for_sector("Tech/E-commerce") is not None
+    assert bundle.pack_for_sector("UnknownSector") is None
 
 
 def test_missing_section_degrades_to_empty_bundle(tmp_path):

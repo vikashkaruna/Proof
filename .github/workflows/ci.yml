@@ -630,7 +630,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/temporal-workers
-      - run: uv run pytest
+      - run: uv run pytest --cov --cov-report=xml
         working-directory: services/temporal-workers
         env:
           AXIOM_TEMPORAL_ACCEPTANCE_REPORT: ../../.axiom-runtime/temporal/results.json

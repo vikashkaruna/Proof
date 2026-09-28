@@ -16,6 +16,8 @@ services/agent-runtime/src/axiom/data/controls.json
 
 # Firebase CLI cache & build outputs
 .firebase/
+.claude/
+.kilo/
 
 
 # Hand-authored reference documents.

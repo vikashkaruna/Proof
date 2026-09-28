@@ -132,7 +132,7 @@ values
     'security@streamline.io',
     now(), now(), now()
   )
-on conflict (provider, id) do update set
+on conflict (provider_id, provider) do update set
   identity_data = excluded.identity_data,
   updated_at = now();
 
