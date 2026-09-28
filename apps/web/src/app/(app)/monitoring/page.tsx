@@ -1,4 +1,4 @@
-import { Capability } from '@axiom/types';
+import { Capability, can } from '@axiom/types';
 import {
   Badge,
   Card,
@@ -15,6 +15,7 @@ import {
 import { formatDateTime, relativeTime } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { computeMonitoringHealth, isScheduleOverdue } from '@/lib/execution-view';
+import { DispatchAlertsButton, DismissAlertButton } from './alert-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +48,22 @@ interface DriftRow {
   estates: { name?: string } | null;
 }
 
+interface AlertRow {
+  id: string;
+  tenant_id: string;
+  alert_type: string;
+  severity: string;
+  title: string;
+  summary: string;
+  source_id: string;
+  source_type: string;
+  status: string;
+  dispatched_at: string;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  created_at: string;
+}
+
 const KIND_LABELS: Record<string, string> = {
   rediscovery: 'Re-discovery',
   reassessment: 'Re-assessment',
@@ -61,17 +78,25 @@ const DRIFT_KIND_LABELS: Record<string, string> = {
   control_drift: 'Control drift',
 };
 
+const ALERT_TYPE_LABELS: Record<string, string> = {
+  drift_critical: 'Critical Drift',
+  drift_high: 'High Drift',
+  schedule_overdue: 'Schedule Overdue',
+  compliance_deadline_burning: 'Statutory Deadline Burning',
+  compliance_deadline_breached: 'Statutory Deadline Breached',
+};
+
 /**
- * W6 monitoring surface: schedules, drift detections and the health of the
- * monitoring itself. Reads `monitoring_schedules` and `drift_events`
- * (migrations 0065-0067) through the user-scoped client; the health figures
- * are computed with the same definition as the BFF's GET /v1/monitoring/health
- * so the two surfaces cannot disagree.
+ * W6 monitoring surface: schedules, drift detections and continuous alerts.
+ * Reads `monitoring_schedules`, `drift_events`, and `monitoring_alerts`
+ * through the user-scoped client; the health figures are computed with the
+ * same definition as the BFF's GET /v1/monitoring/health.
  */
 export default async function MonitoringPage() {
-  const { supabase, tenantId } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const canManage = can(Capability.ESTATE_MANAGE, { role });
 
-  const [schedulesRes, driftRes] = await Promise.all([
+  const [schedulesRes, driftRes, alertsRes] = await Promise.all([
     supabase
       .from('monitoring_schedules')
       .select(
@@ -90,6 +115,12 @@ export default async function MonitoringPage() {
       .eq('tenant_id', tenantId)
       .order('detected_at', { ascending: false })
       .limit(DRIFT_LIMIT),
+    supabase
+      .from('monitoring_alerts')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(50),
   ]);
 
   if (schedulesRes.error || driftRes.error) {
@@ -111,15 +142,22 @@ export default async function MonitoringPage() {
 
   const schedules = (schedulesRes.data ?? []) as unknown as ScheduleRow[];
   const driftEvents = (driftRes.data ?? []) as unknown as DriftRow[];
+  const alerts = (alertsRes.data ?? []) as unknown as AlertRow[];
 
   const health = computeMonitoringHealth(schedules, driftEvents);
+  const unreadAlerts = alerts.filter((a) => a.status === 'unread' || a.status === 'read');
+  const criticalAlerts = unreadAlerts.filter((a) => a.severity === 'critical');
+  const highAlerts = unreadAlerts.filter((a) => a.severity === 'high');
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Continuous Monitoring"
-        description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections stay open until a human acknowledges them — monitoring that never surfaces what it found would be a promise, not a control."
-      />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <PageHeader
+          title="Continuous Monitoring & Alerting"
+          description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
+        />
+        <DispatchAlertsButton tenantId={tenantId} canManage={canManage} />
+      </div>
 
       <StatGrid>
         <Stat
@@ -144,16 +182,80 @@ export default async function MonitoringPage() {
             .join(' · ')}
         />
         <Stat
-          label="Unacknowledged"
-          value={String(health.drift.unacknowledged)}
+          label="Active Alerts"
+          value={String(unreadAlerts.length)}
           hint={
-            health.drift.unacknowledged > 0
-              ? 'awaiting a human judgement'
-              : 'every detection acknowledged'
+            unreadAlerts.length > 0
+              ? `${criticalAlerts.length} critical · ${highAlerts.length} high`
+              : 'all alerts acknowledged'
           }
         />
       </StatGrid>
 
+      {/* ─── Continuous Monitoring Alerts ─── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Continuous monitoring alerts</CardTitle>
+          <p className="text-xs text-slate-500">
+            Real-time alerting for configuration drift, overdue assessment schedules, and statutory
+            DSAR/breach compliance deadlines.
+          </p>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {alerts.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
+              <p className="text-sm font-medium text-indigo-500">No alerts dispatched</p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+                When drift is detected, schedules miss their cadence, or statutory deadlines burn,
+                alerts will appear here and in the alert tray.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-slate-100">
+              {alerts.map((a) => {
+                const unread = a.status === 'unread' || a.status === 'read';
+                return (
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-1.5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SeverityChip severity={a.severity} />
+                        <span className="text-xs font-semibold text-slate-700">
+                          {ALERT_TYPE_LABELS[a.alert_type] ?? a.alert_type}
+                        </span>
+                        {unread && <Badge variant="warning">active alert</Badge>}
+                        {!unread && <Badge variant="neutral">acknowledged</Badge>}
+                      </div>
+                      <p className="text-xs font-medium text-slate-800">{a.title}</p>
+                      <p className="text-xs text-slate-600">{a.summary}</p>
+                      <p className="text-[11px] text-slate-500">
+                        dispatched {formatDateTime(a.dispatched_at)} (
+                        {relativeTime(a.dispatched_at)})
+                        {a.acknowledged_at
+                          ? ` · acknowledged ${formatDateTime(a.acknowledged_at)}`
+                          : ''}
+                      </p>
+                    </div>
+                    {unread && canManage && (
+                      <div className="shrink-0 mt-2 sm:mt-0">
+                        <DismissAlertButton
+                          tenantId={tenantId}
+                          alertId={a.id}
+                          canManage={canManage}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Monitoring Schedules ─── */}
       <Card>
         <CardHeader>
           <CardTitle>Monitoring schedules</CardTitle>
@@ -240,6 +342,7 @@ export default async function MonitoringPage() {
         </CardContent>
       </Card>
 
+      {/* ─── Drift Events ─── */}
       <Card>
         <CardHeader>
           <CardTitle>Drift events</CardTitle>

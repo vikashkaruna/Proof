@@ -58,3 +58,9 @@ e65ecf5776d512af4b626492263a2f5724190479:apps/web/src/middleware.ts:jwt:38
 # `synthetic/operation/proof` in the isolated evidence storage fixture.
 # It is an object name, not an access key, secret, or provider credential.
 7d36dbdc32fd229d7be202dbfe94ecfaf100f8f7:packages/evidence/src/storage-acceptance.ts:generic-api-key:45
+
+# Verified 2026-09-28: Offline license authority key in historical commit 9c9be10 (removed in 68ff4ee)
+# and mock ED25519 key used strictly in unit tests for sovereign license verification.
+9c9be105a128c0165fb1af22564d2b074086e30c:scripts/mint-license.ts:private-key:30
+9c9be105a128c0165fb1af22564d2b074086e30c:services/bff/src/routes/sovereign-license.test.ts:private-key:6
+

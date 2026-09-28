@@ -68,3 +68,45 @@ def test_redaction_summary_hashes():
     # Hashes are 64 chars (SHA-256 hex)
     assert len(r.original_hash) == 64
     assert len(r.redacted_hash) == 64
+
+
+def test_redact_empty_text():
+    r = redact("")
+    assert r.redacted_text == ""
+    assert r.redactions == {}
+
+
+def test_presidio_analyzer_integration(monkeypatch):
+    class MockResult:
+        def __init__(self, start, end, entity_type):
+            self.start = start
+            self.end = end
+            self.entity_type = entity_type
+
+    class MockAnalyzer:
+        def analyze(self, **kwargs):
+            return [MockResult(0, 4, "PERSON"), MockResult(8, 14, "LOCATION")]
+
+    import model_gateway.redaction as red_mod
+    monkeypatch.setattr(red_mod, "_presidio_analyzer", lambda: MockAnalyzer())
+
+    r = redact("John in Mumbai")
+    assert "John" not in r.redacted_text
+    assert "Mumbai" not in r.redacted_text
+    assert r.redactions.get("PERSON") == 1
+    assert r.redactions.get("LOCATION") == 1
+
+
+def test_presidio_analyzer_exception(monkeypatch):
+    class FailingAnalyzer:
+        def analyze(self, **kwargs):
+            raise RuntimeError("Presidio model failed")
+
+    import model_gateway.redaction as red_mod
+    monkeypatch.setattr(red_mod, "_presidio_analyzer", lambda: FailingAnalyzer())
+
+    # Should not raise; fails back to regex pass
+    r = redact("Customer PAN is ABCDE1234F")
+    assert "ABCDE1234F" not in r.redacted_text
+    assert r.redactions.get("PAN") == 1
+

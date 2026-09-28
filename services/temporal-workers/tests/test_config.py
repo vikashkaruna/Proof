@@ -54,3 +54,45 @@ def test_non_deployed_environments_are_not_gated(environment: str) -> None:
 def test_agent_runtime_url_is_topology_and_overridable() -> None:
     settings = _settings(agent_runtime_url="https://agent-runtime.preprod.example")
     assert settings.agent_runtime_url == "https://agent-runtime.preprod.example"
+
+
+@pytest.mark.asyncio
+async def test_worker_handle_health() -> None:
+    import asyncio
+    from temporal_workers.worker import handle_health
+
+    reader = asyncio.StreamReader()
+    reader.feed_data(b"GET /health HTTP/1.1\r\n\r\n")
+    reader.feed_eof()
+
+    class MockWriter:
+        def __init__(self):
+            self.data = bytearray()
+
+        def write(self, data: bytes) -> None:
+            self.data.extend(data)
+
+        async def drain(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            pass
+
+    writer = MockWriter()
+    await handle_health(reader, writer)  # type: ignore[arg-type]
+    assert b"200 OK" in writer.data
+    assert b"temporal-worker" in writer.data
+
+
+def test_assessment_options_parsing() -> None:
+    from temporal_workers.worker import assessment_options
+
+    ctl, pump = assessment_options(
+        ["--assessment-controller-origin", "https://controller.local"]
+    )
+    assert ctl is not None
+    assert pump is False
+

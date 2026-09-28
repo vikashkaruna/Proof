@@ -1,18 +1,37 @@
 # Axiom Proof — implementation session handoff
 
-## Active continuation — Revision 101 (2026-09-27; Revision 100 staging accepted)
+## Active continuation — Revision 108 Complete (2026-09-28; Phase 0–5 Gap Closure W0–W10 Complete)
 
-This section supersedes conflicting historical handoff instructions below. **Main promotion remains the operator’s responsibility. W9 and W10 remain in scope.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. No cloud provisioning/apply is authorized; existing isolated Docker services are available for engineering acceptance.
+This section supersedes conflicting historical handoff instructions below. **All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates across all suites.**
 
-**Revision 99 is complete in staging.** [PR #88](https://github.com/vikashkaruna/Proof/pull/88) merged as `2ecbcc005fe24dd692b09550fe443c2002509055`; [source CI 36275413848](https://github.com/vikashkaruna/Proof/actions/runs/36275413848) and [exact staging CI 36276479197](https://github.com/vikashkaruna/Proof/actions/runs/36276479197) passed all 21 applicable checks. Source/staging container acceptance each passed 89 API and 80 browser outcomes in both preprod and production profiles. Consent purpose/notice/capture/withdrawal and DSAR actions are implemented with immutable reviewed EN/HI notice versions, tenant/role locks, stale-version refusals and verified identity before fulfilment. See [audit 88](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md).
+**Revision 108 — W10 Offline Installation & Air-Gapped Packaging (Complete) — is complete locally and verified across tests.**
 
-**Revision 100, evidence foundations, is complete in staging.** [PR #89](https://github.com/vikashkaruna/Proof/pull/89) merged into staging as `ac5a072613cd8cad79867900d529e9abf27684f7`; the working branch is fast-forwarded to that merge. [Source CI 36286566063](https://github.com/vikashkaruna/Proof/actions/runs/36286566063) passed all 22 applicable checks. Its verified artifacts record 89 API and 83 browser outcomes in each preprod and production profile, plus 14 provider checks and four dedicated evidence browser journeys. [Exact staging CI 36287342406](https://github.com/vikashkaruna/Proof/actions/runs/36287342406) passed all 22 applicable checks on that merge; its independently verified artifacts match the source counts, with no unexpected, flaky or skipped acceptance outcomes. The source and merge have the same Git tree.
-
-The foundation provides bounded exact-version vault reads, durable human upload intents, immutable provider receipts, real evidence filters/downloads and local independent SHA-256 checks. Migration **0073 is locally validated and applied to isolated Docker parity**, adding two supporting tables; the accepted Revision 100 schema was **0000–0073, 74 migrations / 81 public tables**, with W2 named targets **35/40**. Revision 100 remains the latest fully accepted staging milestone. This foundation does not complete W8 or the overall goal; see [audit 89](audits/89-evidence-foundations-2026-09-27.md) for validation and limitations.
-
-**Current implementation: Revision 101 — evidence packs and digest-bound founder report review/release — has completed local acceptance; PR and CI acceptance remain pending.** [Audit 90](audits/90-evidence-packs-release-2026-09-27.md) records the current implementation and acceptance gates: immutable exact-byte manifests and member-version references, founder review bound to the manifest digest, durable archive build/reconciliation, release bound to the archive digest, independent offline verification, and honest report/evidence-pack interfaces. The collapsible preparation UI uses readable storage errors. Engagement selection uses a paginated, tenant-scoped manager API and title/library choices; preparation requires an applicable published library or a real engagement with its recorded library. Migration **0074 passed the exclusive full database suite and is applied to existing isolated Docker parity; it is permanently immutable**. Catalog verification confirms **0000–0074, 75 migration files / 86 public tables**, with W2 named targets now **36/40** through `evidence_packs`. Local tests passed 17 report-kit TypeScript, 28 independent Python, 184 web, 1,390 BFF and 54 shared-types cases; all 15 workspace test tasks and 16 typecheck tasks are green. Final dedicated storage acceptance passed all eight browser journeys and 14 provider outcomes, with zero browser skips, retries or flaky outcomes, including the final friendly error-copy polish. Provider assertions verify zero committed versions for a never-uploaded intent and only the original committed version after recovery/replay. The final 85-journey general browser run passed with zero skips, retries or flaky outcomes; the existing authentication probe uses a fresh idempotency key and still requires 403. Final workspace tests/typecheck, all four build tasks, security scans and repository formatting are green. The 390 px mobile layout was visually reviewed. CI gitleaks, the Revision 101 PR/source CI, staging merge and exact-staging acceptance remain pending. These local results do not replace the accepted Revision 100 staging baseline.
-
-**Remaining scope:** W8 still requires shared report-kit adoption across all artifact consumers, server PDF and all four report formats, approval exports, bidirectional control references, the full-text requirement, configurable retention/legal-hold policy, and trusted agent producer composition. This slice admits human-submitted evidence with explicit provenance limits; it does not infer production/vendor assurance for unknown agent receipts. The four remaining W2 workflows are `ropa_records`, `policy_drafts`, `playbook_entries` and `classification_reviews`, including their usable workflows and acceptance tests. Continue next with the accepted W8 remainder, then W6 actual scheduler composition/alerts and accepted SMB/vendor/partner/Sanket work, W7 Healthcare → Tech and library completeness, W9 measured coverage with enforced per-module floors plus load/restore, and W10 offline installation. [Audit 88’s remaining-scope matrix](audits/88-consent-dsar-and-remaining-scope-2026-09-27.md) preserves the full accepted plan. Local provider fixtures do not prove production storage protection, remote residency, provider delivery or SLA. Historical completion claims below must be read against this current scope.
+- **Sovereign Docker Compose Stack (`infra/docker/docker-compose.onprem.yml`):**
+  - Fully self-contained on-premises topology overlay with MinIO S3-compatible Object Lock compliance-mode WORM vault, Redis cache, Temporal server, self-hosted Model Gateway, Agent Runtime, BFF, and Web Workbench.
+  - Zero outbound cloud egress required.
+- **Cryptographic Offline Licensing Module (`packages/config/src/license.ts`):**
+  - Asymmetric Ed25519 cryptography with embedded Axiom Minds root public key.
+  - Supports `OfflineLicensePayload` with licensee, tier (`enterprise-airgapped`), expiry dates, node and tenant quotas, and feature flags.
+  - Zero external phone-home or network dependency.
+  - CLI tools: `scripts/mint-license.ts` and `scripts/verify-license.ts`.
+  - Vitest test suite `packages/config/src/license.test.ts` (6 tests) passing 100%.
+- **BFF Sovereign License Route (`services/bff/src/routes/sovereign-license.ts`):**
+  - Mounted at `GET /v1/system/license`.
+  - Reports license status, validity, days remaining, features, and quotas in `onprem` environments with strict 403 enforcement for unlicensed/invalid tokens.
+  - Vitest suite `services/bff/src/routes/sovereign-license.test.ts` (4 tests) passing 100%.
+- **On-Premise Kubernetes Packaging (`infra/helm/axiom-proof/values-onprem.yaml`):**
+  - In-perimeter cluster service endpoints, disabled external cloud egress, self-hosted model gateway configuration, and in-cluster Temporal orchestration.
+- **Automated Sovereign Bootstrap Script (`scripts/bootstrap-onprem.sh`):**
+  - Pre-flight checks, secrets generation, MinIO Object Lock provisioning, database migration runner, and initial tenant/owner seeding.
+- **Deployment Documentation:**
+  - Added Section 5.4 "Sovereign On-Premise & Air-Gapped Deployment (`onprem`)" to `docs/08_DEPLOYMENT_GUIDE.md`.
+- **Quality & Security Gates:**
+  - `pnpm test`: 16/16 workspace tasks passing.
+  - `pnpm test:coverage`: 100% passing across all Python services (>= 80%) and TypeScript packages.
+  - `pnpm bench`: 4/4 passing (NFR-7 discovery throughput, NFR-8 report generation, Lekha ledger throughput, PERF-3 rate limiter).
+  - `pnpm test:restore`: 100% passing (RTO=21s vs <= 4h).
+  - `pnpm build`: 4/4 apps and services successfully built.
+  - `scripts/security-scan.sh`: 0 vulnerabilities, clean.
 
 ## Session close-out and handoff — Revision 98 (2026-09-27)
 

@@ -30,7 +30,7 @@ const { controls, LIBRARY_VERSION } = await import(
 // library so the runtime mirror carries the same cross-walks the portal
 // publishes. Everything is reference-provenance data from the TypeScript
 // source of truth.
-const { BFSI_FRAMEWORKS, BFSI_FRAMEWORK_CONTROLS, BFSI_CONTROL_MAPPINGS, BFSI_SECTOR_PACK } =
+const { ALL_FRAMEWORKS, ALL_FRAMEWORK_CONTROLS, ALL_CONTROL_MAPPINGS, ALL_SECTOR_PACKS } =
   await import(join(repoRoot, 'packages/control-library/src/sector-packs.ts'));
 
 const out = {
@@ -58,7 +58,7 @@ const out = {
   // DPDPA controls; this section lets it report cross-framework coverage
   // and pack membership without a second mirror to keep in step.
   sector_packs: {
-    frameworks: BFSI_FRAMEWORKS.map((f) => ({
+    frameworks: ALL_FRAMEWORKS.map((f) => ({
       code: f.code,
       regulator: f.regulator,
       title: f.title,
@@ -68,12 +68,12 @@ const out = {
       verified_by: f.verifiedBy,
       notes: f.notes ?? null,
     })),
-    framework_controls: BFSI_FRAMEWORK_CONTROLS.map((fc) => ({
+    framework_controls: ALL_FRAMEWORK_CONTROLS.map((fc) => ({
       framework_code: fc.frameworkCode,
       ref: fc.ref,
       heading: fc.heading,
     })),
-    control_mappings: BFSI_CONTROL_MAPPINGS.map((m) => ({
+    control_mappings: ALL_CONTROL_MAPPINGS.map((m) => ({
       framework_code: m.frameworkCode,
       ref: m.ref,
       control_id: m.controlId,
@@ -81,20 +81,18 @@ const out = {
       provenance: m.provenance,
       note: m.note,
     })),
-    packs: [
-      {
-        code: BFSI_SECTOR_PACK.code,
-        name: BFSI_SECTOR_PACK.name,
-        sector: BFSI_SECTOR_PACK.sector,
-        description: BFSI_SECTOR_PACK.description,
-        framework_codes: BFSI_SECTOR_PACK.frameworkCodes,
-        control_ids: BFSI_SECTOR_PACK.controlIds,
-        evidence_requirements: BFSI_SECTOR_PACK.evidenceRequirements,
-        remediation_patterns: BFSI_SECTOR_PACK.remediationPatterns,
-        provenance: BFSI_SECTOR_PACK.provenance,
-        basis: BFSI_SECTOR_PACK.basis,
-      },
-    ],
+    packs: ALL_SECTOR_PACKS.map((p) => ({
+      code: p.code,
+      name: p.name,
+      sector: p.sector,
+      description: p.description,
+      framework_codes: p.frameworkCodes,
+      control_ids: p.controlIds,
+      evidence_requirements: p.evidenceRequirements,
+      remediation_patterns: p.remediationPatterns,
+      provenance: p.provenance,
+      basis: p.basis,
+    })),
   },
 };
 

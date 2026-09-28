@@ -168,6 +168,7 @@ export const LedgerActionType = {
   APPROVAL_TOKEN_REVOKED: 'approval.token.revoked',
   APPROVAL_TOKEN_EXPIRED: 'approval.token.expired',
   APPROVAL_TOKEN_INVALID: 'approval.token.invalid',
+  APPROVAL_EXPORTED: 'approval.exported',
   EXECUTION_STARTED: 'execution.started',
   EXECUTION_ACTION_STARTED: 'execution.action.started',
   EXECUTION_ACTION_SUCCEEDED: 'execution.action.succeeded',
@@ -198,6 +199,8 @@ export const LedgerActionType = {
   MONITORING_POLICY_REVOKED: 'monitoring.policy.revoked',
   MONITORING_POLICY_WITHIN_POLICY: 'monitoring.policy.within_policy',
   MONITORING_POLICY_ESCALATED: 'monitoring.policy.escalated',
+  MONITORING_ALERT_DISPATCHED: 'monitoring.alert.dispatched',
+  MONITORING_ALERT_DISMISSED: 'monitoring.alert.dismissed',
   // W8.1 — the consent foundation (migration 0069): a consent's lifecycle is
   // ledgered end to end — captured with the notice version it pinned,
   // withdrawn, frozen or unfrozen for retention (legal hold), and the
@@ -289,6 +292,8 @@ export const LedgerActionType = {
   BREACH_DETECTED: 'breach.detected',
   BREACH_NOTIFIED_DPB: 'breach.notified.dpb',
   BREACH_NOTIFIED_PRINCIPALS: 'breach.notified.principals',
+  REPORT_REQUESTED: 'report.requested',
+  REPORT_DRAFTED: 'report.drafted',
   REPORT_GENERATED: 'report.generated',
   REPORT_EXPORTED: 'report.exported',
   EVIDENCE_PACK_PREPARED: 'evidence.pack.prepared',
@@ -296,6 +301,11 @@ export const LedgerActionType = {
   EVIDENCE_PACK_BUILD_PENDING: 'evidence.pack.build.pending',
   EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
+  ROPA_RECORDED: 'ropa.recorded',
+  POLICY_DRAFTED: 'policy.drafted',
+  POLICY_REVIEWED: 'policy.reviewed',
+  PLAYBOOK_CREATED: 'playbook.created',
+  CLASSIFICATION_REVIEWED: 'classification.reviewed',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 

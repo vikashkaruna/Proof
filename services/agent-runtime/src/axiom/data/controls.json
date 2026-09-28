@@ -2738,11 +2738,61 @@
         "code": "CERT-IN-DIRECTIONS-2022",
         "regulator": "CERT-In",
         "title": "Directions under section 70B(6) of the Information Technology Act, 2000",
-        "description": "Six-hour incident reporting to CERT-In and a rolling 180-day in-India log retention for all ICT systems — cross-sector, but unavoidable in BFSI.",
+        "description": "Six-hour incident reporting to CERT-In and a rolling 180-day in-India log retention for all ICT systems — cross-sector baseline.",
         "source_url": "https://www.cert-in.org.in",
         "verified_on": "2026-09-26",
         "verified_by": "Axiom Minds · Founder",
         "notes": "Reference record; the Directions are public and clause refs are slugs pending verification."
+      },
+      {
+        "code": "NHA-ABDM-HDMP",
+        "regulator": "NHA",
+        "title": "Ayushman Bharat Digital Mission — Health Data Management Policy",
+        "description": "National Health Authority policy governing the processing of digital health records, electronic consent management frameworks, and patient data rights across the ABDM ecosystem.",
+        "source_url": "https://abdm.gov.in",
+        "verified_on": "2026-09-27",
+        "verified_by": "Axiom Minds · Founder",
+        "notes": "Reference record. Covers ABDM consent manager integration, data minimisation, and patient data rights. Paragraph-level citations pending formal audit."
+      },
+      {
+        "code": "MOHFW-EHR-STANDARDS",
+        "regulator": "MoHFW",
+        "title": "Electronic Health Record (EHR) Standards for India",
+        "description": "Ministry of Health and Family Welfare guidelines establishing technical and security baselines for electronic clinical data, role-based access control, cryptographic protection, and audit logs.",
+        "source_url": "https://main.mohfw.gov.in",
+        "verified_on": "2026-09-27",
+        "verified_by": "Axiom Minds · Founder",
+        "notes": "Reference record; clinical IT system security baseline. Specific guideline edition must be confirmed per clinical establishment engagement."
+      },
+      {
+        "code": "MEITY-INTERMEDIARY-2021",
+        "regulator": "MeitY",
+        "title": "Information Technology (Intermediary Guidelines and Digital Media Ethics Code) Rules, 2021",
+        "description": "MeitY rules governing due diligence, user privacy notices, resident grievance officers, and data preservation for online platforms, social media, and digital intermediaries.",
+        "source_url": "https://www.meity.gov.in",
+        "verified_on": "2026-09-27",
+        "verified_by": "Axiom Minds · Founder",
+        "notes": "Reference record. Due diligence, grievance officer timelines, and lawful disclosure data preservation. Circular verification pending."
+      },
+      {
+        "code": "CCPA-ECOMMERCE-2020",
+        "regulator": "CCPA",
+        "title": "Consumer Protection (E-Commerce) Rules, 2020",
+        "description": "Rules under the Consumer Protection Act for marketplace and inventory e-commerce entities on explicit opt-in consent, grievance redressal, and seller data transparency.",
+        "source_url": "https://consumeraffairs.nic.in",
+        "verified_on": "2026-09-27",
+        "verified_by": "Axiom Minds · Founder",
+        "notes": "Reference record; prohibition of pre-ticked consent boxes and mandatory grievance tracking."
+      },
+      {
+        "code": "MEITY-SPDI-2011",
+        "regulator": "MeitY",
+        "title": "Information Technology (Reasonable Security Practices and Sensitive Personal Data) Rules, 2011",
+        "description": "Baseline SPDI rules on privacy policy publication, purpose disclosure, third-party disclosure consent, and ISO/IEC 27001 or equivalent security practice standards.",
+        "source_url": "https://www.meity.gov.in",
+        "verified_on": "2026-09-27",
+        "verified_by": "Axiom Minds · Founder",
+        "notes": "Reference record; historical SPDI baseline continuing to inform reasonable security practice."
       }
     ],
     "framework_controls": [
@@ -2825,6 +2875,96 @@
         "framework_code": "CERT-IN-DIRECTIONS-2022",
         "ref": "logs-180-days-india",
         "heading": "Retain ICT system logs for a rolling 180 days, within India"
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-consent-manager",
+        "heading": "Granular, informed electronic consent collected via registered consent managers"
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-data-minimisation",
+        "heading": "Health data collection limited strictly to specified healthcare or diagnostic purpose"
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-patient-rights",
+        "heading": "Patient rights to access, summary of processing, rectification and consent withdrawal"
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-anonymisation-research",
+        "heading": "Mandatory anonymisation and de-identification standards for health research data"
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-access-control",
+        "heading": "Strict role-based access control and multi-factor authentication for clinical systems"
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-audit-logging",
+        "heading": "Tamper-evident access and alteration logging for protected health information"
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-storage-encryption",
+        "heading": "Cryptographic protection for clinical and diagnostic data at rest and in transit"
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-retention-disposal",
+        "heading": "Defined retention registers and secure cryptographic disposal of health records"
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-privacy-notice",
+        "heading": "Prominently publish terms of use, privacy policy and user agreement detailing information collection"
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-grievance-officer",
+        "heading": "Appoint resident Grievance Officer; acknowledge complaints within 24h and resolve within 15 days"
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-data-retention",
+        "heading": "Preserve user registration information and access logs for 180 days after account deletion/cancellation"
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-takedown-reporting",
+        "heading": "Time-bound compliance and reporting for lawful agency requests and court orders"
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-explicit-consent",
+        "heading": "Explicit opt-in consent for purchase terms and data capture; pre-ticked checkboxes strictly prohibited"
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-grievance-mechanism",
+        "heading": "Consumer grievance redressal mechanism with unique ticket tracking and time-bound resolution"
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-seller-transparency",
+        "heading": "Disclosures regarding seller identity, data sharing, and cross-border vendor arrangements"
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-privacy-policy",
+        "heading": "Comprehensive documented privacy policy for collection, handling and storage of personal information"
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-security-practices",
+        "heading": "Implementation of reasonable security practices and procedures (ISO/IEC 27001 or equivalent standard)"
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-disclosure-third-party",
+        "heading": "Prior permission requirement before disclosing sensitive personal data to third parties"
       }
     ],
     "control_mappings": [
@@ -2834,7 +2974,7 @@
         "control_id": "DPDPA-GOV-001",
         "mapping_strength": "partial",
         "provenance": "reference",
-        "note": "Both regimes demand board-level accountability — the MD for IT risk, DPDPA s.8 for personal-data fiduciary accountability. Overlap is real but the scopes differ; not an equivalence claim."
+        "note": "Both regimes demand board-level accountability — the MD for IT risk, DPDPA s.8 for personal-data fiduciary accountability. Overlap is real but scopes differ; not an equivalence claim."
       },
       {
         "framework_code": "RBI-MD-ITG",
@@ -2979,6 +3119,206 @@
         "mapping_strength": "indicative",
         "provenance": "reference",
         "note": "Log-retention schedules must be reconciled so the CERT-In minimum and DPDPA erasure duties do not collide in the retention register."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-consent-manager",
+        "control_id": "DPDPA-CNS-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "ABDM electronic consent manager architecture provides structured patient consent; overlaps DPDPA s.6 consent mechanism with healthcare-specific artifacts."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-consent-manager",
+        "control_id": "DPDPA-CNS-002",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "ABDM purpose specification parallels DPDPA s.5 itemised notice for health data collection."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-data-minimisation",
+        "control_id": "DPDPA-RTN-002",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Purpose limitation in health data parallels DPDPA purpose completion erasure; clinical retention rules must be reconciled."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-patient-rights",
+        "control_id": "DPDPA-DAT-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "Patient rights under ABDM overlap DPDPA s.11 right to information about processed health data."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-patient-rights",
+        "control_id": "DPDPA-DAT-002",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Clinical correction and rectification rights inform DPDPA s.12 correction/erasure implementation."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-patient-rights",
+        "control_id": "DPDPA-DAT-003",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "ABDM patient grievance redressal parallels DPDPA s.13 grievance redressal officer mechanism."
+      },
+      {
+        "framework_code": "NHA-ABDM-HDMP",
+        "ref": "abdm-anonymisation-research",
+        "control_id": "DPDPA-DPF-001",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Anonymisation standards for medical research inform privacy-by-design architecture under DPDPA s.8(4)."
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-access-control",
+        "control_id": "DPDPA-SEC-002",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "EHR role-based access control and clinical least privilege satisfy core aspects of DPDPA s.8(5) access controls."
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-audit-logging",
+        "control_id": "DPDPA-SEC-003",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "Audit logging for EHR modifications directly supports DPDPA s.8(5) audit log maintenance and tamper protection."
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-storage-encryption",
+        "control_id": "DPDPA-SEC-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "EHR cryptographic standards for data at rest and in transit align with DPDPA reasonable security safeguards."
+      },
+      {
+        "framework_code": "MOHFW-EHR-STANDARDS",
+        "ref": "ehr-retention-disposal",
+        "control_id": "DPDPA-RTN-001",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Clinical retention periods under EHR standards must be codified alongside DPDPA retention schedules."
+      },
+      {
+        "framework_code": "CERT-IN-DIRECTIONS-2022",
+        "ref": "six-hour-incident-report",
+        "control_id": "DPDPA-BRCH-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "CERT-In 6-hour reporting clock applies to healthcare critical systems; distinct statutory duty from DPB breach intimation."
+      },
+      {
+        "framework_code": "CERT-IN-DIRECTIONS-2022",
+        "ref": "logs-180-days-india",
+        "control_id": "DPDPA-SEC-003",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "CERT-In 180-day in-India logging mandate applies to hospital networks and patient portal infrastructure."
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-privacy-notice",
+        "control_id": "DPDPA-CNS-002",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "Intermediary privacy notice requirements overlap DPDPA s.5 itemised notice obligations for digital platforms."
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-grievance-officer",
+        "control_id": "DPDPA-DAT-003",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "Resident grievance officer requirement under Intermediary Rules satisfies core organizational duties of DPDPA s.13."
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-data-retention",
+        "control_id": "DPDPA-RTN-001",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "180-day post-deletion retention duty must be harmonized with DPDPA s.8(7) purpose-completion erasure in retention register."
+      },
+      {
+        "framework_code": "MEITY-INTERMEDIARY-2021",
+        "ref": "intermediary-takedown-reporting",
+        "control_id": "DPDPA-GOV-001",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Legal compliance and disclosure workflows overlap broader DPDPA data fiduciary governance structure."
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-explicit-consent",
+        "control_id": "DPDPA-CNS-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "Prohibition of pre-ticked consent checkboxes directly aligns with DPDPA s.6 affirmative, clear consent requirements."
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-grievance-mechanism",
+        "control_id": "DPDPA-DAT-003",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "E-commerce consumer grievance ticket tracking overlaps DPDPA grievance redressal mechanism."
+      },
+      {
+        "framework_code": "CCPA-ECOMMERCE-2020",
+        "ref": "ecommerce-seller-transparency",
+        "control_id": "DPDPA-GOV-003",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "Marketplace seller and vendor data sharing oversight parallels DPDPA processor agreement controls."
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-privacy-policy",
+        "control_id": "DPDPA-GOV-001",
+        "mapping_strength": "indicative",
+        "provenance": "reference",
+        "note": "SPDI privacy policy mandate overlaps DPDPA general accountability and policy governance."
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-security-practices",
+        "control_id": "DPDPA-SEC-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "SPDI reasonable security practices standard (ISO 27001) aligns with DPDPA s.8(5) reasonable security safeguards."
+      },
+      {
+        "framework_code": "MEITY-SPDI-2011",
+        "ref": "spdi-disclosure-third-party",
+        "control_id": "DPDPA-CNS-003",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "SPDI prior permission for third-party disclosure overlaps DPDPA specified purpose consent limitation."
+      },
+      {
+        "framework_code": "CERT-IN-DIRECTIONS-2022",
+        "ref": "six-hour-incident-report",
+        "control_id": "DPDPA-BRCH-001",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "CERT-In 6-hour incident report applies to tech intermediaries and cloud services; distinct statutory recipient from DPB."
+      },
+      {
+        "framework_code": "CERT-IN-DIRECTIONS-2022",
+        "ref": "logs-180-days-india",
+        "control_id": "DPDPA-SEC-003",
+        "mapping_strength": "partial",
+        "provenance": "reference",
+        "note": "CERT-In 180-day log maintenance in India applies to web apps, cloud servers and API gateways."
       }
     ],
     "packs": [
@@ -3040,6 +3380,122 @@
         ],
         "provenance": "reference",
         "basis": "Reference pack: derived from the regulators' public materials, with topical framework-control slugs and mapping strengths capped at partial. No mapping claims equivalence, and nothing is vendor-verified — that requires client tenants."
+      },
+      {
+        "code": "IN-HEALTHCARE-2024",
+        "name": "Healthcare sector pack #2 — ABDM, EHR and health data protection",
+        "sector": "Healthcare",
+        "description": "Overlay of National Health Authority (NHA) ABDM Health Data Management Policy, MoHFW Electronic Health Record Standards, and CERT-In Directions onto the DPDPA control set (M4.2/M4.8). Pack #2 per operator decision of 2026-09-26.",
+        "framework_codes": [
+          "NHA-ABDM-HDMP",
+          "MOHFW-EHR-STANDARDS",
+          "CERT-IN-DIRECTIONS-2022"
+        ],
+        "control_ids": [
+          "DPDPA-BRCH-001",
+          "DPDPA-CNS-001",
+          "DPDPA-CNS-002",
+          "DPDPA-DAT-001",
+          "DPDPA-DAT-002",
+          "DPDPA-DAT-003",
+          "DPDPA-DPF-001",
+          "DPDPA-RTN-001",
+          "DPDPA-RTN-002",
+          "DPDPA-SEC-001",
+          "DPDPA-SEC-002",
+          "DPDPA-SEC-003"
+        ],
+        "evidence_requirements": [
+          {
+            "requirement": "Clinical information system access audit reports showing role-based access control and MFA enforcement",
+            "evidenceType": "report"
+          },
+          {
+            "requirement": "ABDM ecosystem registration and consent manager integration certificate / logs",
+            "evidenceType": "attestation"
+          },
+          {
+            "requirement": "Data protection and patient privacy policy approved by hospital board / clinical director",
+            "evidenceType": "document"
+          },
+          {
+            "requirement": "Health data encryption configuration and key management policies",
+            "evidenceType": "config"
+          },
+          {
+            "requirement": "Incident register tracking clinical breach intimations to CERT-In and DPB",
+            "evidenceType": "log"
+          }
+        ],
+        "remediation_patterns": [
+          "policy",
+          "consent",
+          "config",
+          "data-masking",
+          "dpo-appointment",
+          "breach-process",
+          "review",
+          "reporting"
+        ],
+        "provenance": "reference",
+        "basis": "Reference pack: derived from NHA ABDM Health Data Management Policy, MoHFW EHR Standards (2016), and CERT-In Directions (2022). Mapping strengths capped at partial; no equivalence claim without clinical environment verification."
+      },
+      {
+        "code": "IN-TECH-2024",
+        "name": "Tech and E-commerce sector pack #3 — Intermediary rules, SPDI and consumer data protection",
+        "sector": "Tech/E-commerce",
+        "description": "Overlay of MeitY IT Intermediary Guidelines (2021) and SPDI Rules (2011), CCPA Consumer Protection (E-Commerce) Rules (2020), and CERT-In Directions onto the DPDPA control set (M4.2/M4.8). Pack #3 per operator decision of 2026-09-26.",
+        "framework_codes": [
+          "MEITY-INTERMEDIARY-2021",
+          "CCPA-ECOMMERCE-2020",
+          "MEITY-SPDI-2011",
+          "CERT-IN-DIRECTIONS-2022"
+        ],
+        "control_ids": [
+          "DPDPA-BRCH-001",
+          "DPDPA-CNS-001",
+          "DPDPA-CNS-002",
+          "DPDPA-CNS-003",
+          "DPDPA-DAT-003",
+          "DPDPA-GOV-001",
+          "DPDPA-GOV-003",
+          "DPDPA-RTN-001",
+          "DPDPA-SEC-001",
+          "DPDPA-SEC-003"
+        ],
+        "evidence_requirements": [
+          {
+            "requirement": "Architecture and infrastructure security review report (ISO/IEC 27001 or SOC 2 Type II)",
+            "evidenceType": "report"
+          },
+          {
+            "requirement": "Privacy policy and user terms published on web/mobile apps with version history",
+            "evidenceType": "document"
+          },
+          {
+            "requirement": "Consent capture audit log verifying un-ticked default checkboxes and timestamped opt-in",
+            "evidenceType": "log"
+          },
+          {
+            "requirement": "Grievance portal ticket log showing acknowledgement under 24 hours and resolution workflows",
+            "evidenceType": "log"
+          },
+          {
+            "requirement": "Data retention configuration specifying 180-day audit log retention and automated erasure triggers",
+            "evidenceType": "config"
+          }
+        ],
+        "remediation_patterns": [
+          "policy",
+          "consent",
+          "config",
+          "vendor-risk",
+          "data-deletion",
+          "review",
+          "reporting"
+        ],
+        "provenance": "reference",
+        "basis": "Reference pack: derived from MeitY Intermediary Guidelines (2021), SPDI Rules (2011), CCPA E-Commerce Rules (2020), and CERT-In Directions (2022). Mapping strengths capped at partial; no equivalence claim without client tenant verification."
       }
     ]
   }

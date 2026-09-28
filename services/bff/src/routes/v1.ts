@@ -1,5 +1,7 @@
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
+import { boardReportRoutes } from './board-reports.js';
+import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
@@ -8,6 +10,10 @@ import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
 import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
+import { monitoringAlertRoutes } from './monitoring-alerts.js';
+import { approvalExportRoutes } from './approval-exports.js';
+import { statutoryReportRoutes } from './statutory-reports.js';
+import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
@@ -194,12 +200,18 @@ export function v1Routes(deps: Deps) {
   app.route('/', consentRoutes());
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
+  app.route('/', boardReportRoutes());
+  app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
   app.route('/', onboardingProposalRoutes());
   app.route('/', invitationRoutes());
   app.route('/', onboardingWizardRoutes());
   app.route('/', sustenanceRoutes());
+  app.route('/', monitoringAlertRoutes());
+  app.route('/', approvalExportRoutes());
+  app.route('/', statutoryReportRoutes());
+  app.route('/', sovereignLicenseRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //
@@ -3826,6 +3838,19 @@ export function v1Routes(deps: Deps) {
           error: {
             code: 'execution_gate_required',
             message: 'Use the approved plan execution endpoint.',
+          },
+        },
+        403,
+      );
+    }
+    // Generated reports must stay in the private source/review/artifact lifecycle.
+    // Generic runtime output would bypass that visibility and release boundary.
+    if (name === 'prativedan') {
+      return c.json(
+        {
+          error: {
+            code: 'board_report_workflow_required',
+            message: 'Use the dedicated board report request workflow.',
           },
         },
         403,
