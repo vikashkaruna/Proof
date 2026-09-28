@@ -404,6 +404,59 @@ helm upgrade --install axiom-proof ./infra/helm/axiom-proof \
 
 ---
 
+### 5.4 Sovereign On-Premise & Air-Gapped Deployment (`onprem`)
+
+Target Architecture: Intranet sovereign host or on-premise Kubernetes cluster. Fully air-gapped, zero external egress required, MinIO compliance-mode WORM object lock, self-hosted LLM models, and offline cryptographic licensing (W10).
+
+#### Step 1: Mint Sovereign Offline License
+
+```bash
+# Generate a cryptographically signed Ed25519 offline license token
+pnpm tsx scripts/mint-license.ts \
+  --licensee "Sovereign Customer Organization" \
+  --tier enterprise-airgapped \
+  --days 365 \
+  --max-tenants 10 \
+  --max-nodes 50
+```
+
+Add the generated `AXIOM_OFFLINE_LICENSE=v1....` token to `infra/docker/environments/.env.onprem`.
+
+#### Step 2: Automated Sovereign Bootstrap
+
+```bash
+# Automates pre-flight, secrets injection, migration execution, and initial identity seeding
+./scripts/bootstrap-onprem.sh
+```
+
+#### Step 3: Launch Sovereign Docker Compose Overlay
+
+```bash
+docker compose -f docker-compose.yml -f infra/docker/docker-compose.onprem.yml \
+  --env-file infra/docker/environments/.env.onprem up -d
+```
+
+_Provisions the complete self-contained stack: PostgreSQL/Supabase, MinIO S3 WORM with Object Lock, Redis, Temporal, Model Gateway (self-hosted mode), Agent Runtime, BFF API gate, and Web Workbench._
+
+#### Step 4: Air-Gapped Kubernetes Deployment (Helm)
+
+```bash
+helm upgrade --install axiom-proof ./infra/helm/axiom-proof \
+  --namespace axiom-proof \
+  --create-namespace \
+  --values ./infra/helm/axiom-proof/values-onprem.yaml
+```
+
+#### Step 5: Verify Sovereign License & Health
+
+```bash
+# Verify offline license status from BFF API Gateway
+curl -fsS http://localhost:4000/v1/system/license
+# Expected: {"environment":"onprem","status":"valid","licensed":true,"tier":"enterprise-airgapped",...}
+```
+
+---
+
 ## 6. Pre-Flight & Post-Deployment Checks
 
 ### 6.1 Pre-Flight Verification Checklist

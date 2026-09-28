@@ -674,3 +674,5 @@ export const BRAND = {
   jurisdiction: 'India',
   dataResidencyRegion: 'ap-south-1',
 } as const;
+
+export * from './license';

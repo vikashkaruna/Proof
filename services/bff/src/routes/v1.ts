@@ -13,6 +13,7 @@ import { sustenanceRoutes } from './sustenance.js';
 import { monitoringAlertRoutes } from './monitoring-alerts.js';
 import { approvalExportRoutes } from './approval-exports.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
+import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
@@ -210,6 +211,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', monitoringAlertRoutes());
   app.route('/', approvalExportRoutes());
   app.route('/', statutoryReportRoutes());
+  app.route('/', sovereignLicenseRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //
