@@ -24,12 +24,24 @@ import {
   type OfflineLicenseTier,
 } from '../packages/config/src/license';
 
-// Default Axiom Minds Root Authority Private Key for minting sovereign licenses
-const AXIOM_ROOT_AUTHORITY_PRIVATE_KEY =
-  process.env.AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY ||
-  `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIM+Xo6dK7vqEwOeJ8a19E9qrLHsyqXCiAVJwJ7WpMsxg
------END PRIVATE KEY-----`;
+import fs from 'node:fs';
+
+function getAuthorityPrivateKey(flags: Record<string, string>): string {
+  if (flags['key-file']) {
+    return fs.readFileSync(flags['key-file'], 'utf-8').trim();
+  }
+  if (process.env.AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY) {
+    return process.env.AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY.trim();
+  }
+  const defaultKeyPath = '.axiom-authority-key.pem';
+  if (fs.existsSync(defaultKeyPath)) {
+    return fs.readFileSync(defaultKeyPath, 'utf-8').trim();
+  }
+  throw new Error(
+    'Authority private key required to mint licenses. ' +
+      'Provide via AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY environment variable or --key-file <path>.',
+  );
+}
 
 function parseArgs(args: string[]) {
   const result: Record<string, string> = {};
@@ -84,7 +96,8 @@ async function main() {
     features,
   };
 
-  const token = mintOfflineLicense(payload, AXIOM_ROOT_AUTHORITY_PRIVATE_KEY);
+  const privateKey = getAuthorityPrivateKey(flags);
+  const token = mintOfflineLicense(payload, privateKey);
   const verifyResult = verifyOfflineLicense(token);
 
   if (!verifyResult.valid) {

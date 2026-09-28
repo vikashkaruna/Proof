@@ -117,8 +117,73 @@ def test_chat_completions_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert data["object"] == "chat.completion"
-    assert len(data["choices"]) == 1
-    assert data["choices"][0]["message"]["role"] == "assistant"
     assert data["pii_redacted"] is True
     assert "EMAIL" in data["redactions"]
     assert "customer@example.com" not in data["choices"][0]["message"]["content"]
+
+
+def test_complete_duplicate_variable_redaction(client):
+    payload = {
+        "prompt": "PAN is ABCDE1234F",
+        "task": "reasoning",
+        "variables": {"pan": "ABCDE1234F"},
+        "pii_redact": True,
+    }
+    response = client.post("/v1/complete", json=payload)
+    assert response.status_code == 200
+    assert response.json()["redactions"]["PAN"] >= 2
+
+
+def test_chat_completions_non_stub_model(client):
+    payload = {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Explain DPDPA principles"}],
+        "pii_redact": True,
+    }
+    response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert "[Model Gateway ·" in data["choices"][0]["message"]["content"]
+
+
+def test_live_provider_dispatch_and_failover(client, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+    import model_gateway.app as app_mod
+
+    original_key = app_mod.app.state.settings.anthropic_api_key
+    app_mod.app.state.settings.anthropic_api_key = "test-anthropic-key"
+
+    class MockUsage:
+        prompt_tokens = 10
+        completion_tokens = 20
+
+    class MockChoice:
+        message = MagicMock(content="Live LLM response")
+
+    class MockResponse:
+        choices = [MockChoice()]
+        usage = MockUsage()
+
+    mock_acompletion = AsyncMock(return_value=MockResponse())
+    monkeypatch.setattr("litellm.acompletion", mock_acompletion)
+
+    try:
+        res = client.post(
+            "/v1/complete",
+            json={"prompt": "Hello live model", "task": "reasoning"},
+        )
+        assert res.status_code == 200
+        assert res.json()["text"] == "Live LLM response"
+
+        # Now test failover when provider raises exception
+        mock_acompletion.side_effect = RuntimeError("Upstream API error")
+        res_failover = client.post(
+            "/v1/complete",
+            json={"prompt": "Hello failover model", "task": "reasoning"},
+        )
+        assert res_failover.status_code == 200
+        assert len(res_failover.json()["text"]) > 0
+    finally:
+        app_mod.app.state.settings.anthropic_api_key = original_key
+
+

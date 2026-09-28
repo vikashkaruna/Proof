@@ -67,17 +67,21 @@ fi
 # 3. Cryptographic Offline License Token
 echo "[3/6] Verifying offline cryptographic sovereign license..."
 if ! grep -q "^AXIOM_OFFLINE_LICENSE=v1\." "${ENV_FILE}" 2>/dev/null; then
-  echo "  -> Minting fresh 365-day sovereign air-gapped license token..."
-  LICENSE_TOKEN=$(pnpm tsx scripts/mint-license.ts \
-    --licensee "Sovereign Enterprise Customer" \
-    --tier enterprise-airgapped \
-    --days 365 \
-    --max-tenants 10 \
-    --max-nodes 50 | grep "^v1\." || true)
+  if [ -n "${AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY:-}" ] || [ -f ".axiom-authority-key.pem" ]; then
+    LICENSE_TOKEN=$(pnpm tsx scripts/mint-license.ts \
+      --licensee "Sovereign Enterprise Customer" \
+      --tier enterprise-airgapped \
+      --days 365 \
+      --max-tenants 10 \
+      --max-nodes 50 | grep "^v1\." || true)
 
-  if [ -n "${LICENSE_TOKEN}" ]; then
-    echo "AXIOM_OFFLINE_LICENSE=${LICENSE_TOKEN}" >> "${ENV_FILE}"
-    echo "  -> Offline license appended to ${ENV_FILE}."
+    if [ -n "${LICENSE_TOKEN}" ]; then
+      echo "AXIOM_OFFLINE_LICENSE=${LICENSE_TOKEN}" >> "${ENV_FILE}"
+      echo "  -> Offline license appended to ${ENV_FILE}."
+    fi
+  else
+    echo "  -> Note: No authority private key configured in environment."
+    echo "     Set AXIOM_OFFLINE_LICENSE in ${ENV_FILE} using token provided by Axiom Minds."
   fi
 fi
 
