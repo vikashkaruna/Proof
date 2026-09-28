@@ -147,6 +147,7 @@ describe('JWT-SVID identity verification', () => {
       await expect(f.verifier.verify(candidate)).rejects.toThrow(WorkloadIdentityRefused);
   });
   it('requires exact service audience, issuance time, expiry, acceptable lifetime and validity', async () => {
+    vi.useFakeTimers();
     const now = Math.floor(Date.now() / 1000);
     const f = fixture();
     for (const claims of [

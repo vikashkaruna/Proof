@@ -69,20 +69,81 @@ function findChromiumExecutable(): string | null {
 }
 
 /**
+ * Safely extracts visible text from HTML using a linear character scanner without
+ * regular expressions, preventing polynomial backtracking (ReDoS) and sanitization bypasses.
+ */
+function extractVisibleText(htmlContent: string): string {
+  let inTag = false;
+  let inScript = false;
+  let inStyle = false;
+  let currentTag = '';
+  let result = '';
+
+  for (let i = 0; i < htmlContent.length; i++) {
+    const char = htmlContent[i];
+    if (char === '<') {
+      inTag = true;
+      currentTag = '';
+    } else if (char === '>') {
+      inTag = false;
+      const tagLower = currentTag.trim().toLowerCase();
+      if (tagLower.startsWith('script')) {
+        inScript = true;
+      } else if (tagLower.startsWith('/script')) {
+        inScript = false;
+      } else if (tagLower.startsWith('style')) {
+        inStyle = true;
+      } else if (tagLower.startsWith('/style')) {
+        inStyle = false;
+      }
+      result += ' ';
+    } else if (inTag) {
+      currentTag += char;
+    } else if (!inScript && !inStyle) {
+      result += char;
+    }
+  }
+
+  // Collapse whitespaces linearly without regex
+  let collapsed = '';
+  let prevSpace = false;
+  for (let i = 0; i < result.length; i++) {
+    const c = result[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      if (!prevSpace) {
+        collapsed += ' ';
+        prevSpace = true;
+      }
+    } else {
+      collapsed += c;
+      prevSpace = false;
+    }
+  }
+  return collapsed.trim();
+}
+
+/**
+ * Safely extracts document title without regular expressions.
+ */
+function extractTitle(htmlContent: string): string {
+  const startIdx = htmlContent.toLowerCase().indexOf('<title>');
+  if (startIdx === -1) return 'Axiom Proof Board Report';
+  const afterStart = startIdx + 7;
+  const endIdx = htmlContent.toLowerCase().indexOf('</title>', afterStart);
+  if (endIdx === -1) return 'Axiom Proof Board Report';
+  const title = htmlContent.slice(afterStart, endIdx).trim();
+  return title || 'Axiom Proof Board Report';
+}
+
+/**
  * Deterministically generates a compliant, minimal %PDF-1.4 document buffer from HTML text.
  * Used when headless browser is absent or disabled.
  */
 function generateDeterministicPdf(htmlContent: string): Buffer {
-  const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
-  const title = titleMatch && titleMatch[1] ? titleMatch[1] : 'Axiom Proof Board Report';
+  const title = extractTitle(htmlContent);
 
-  // Extract a few visible text lines for PDF stream
-  const cleanText = htmlContent
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // Extract a few visible text lines for PDF stream safely without regex backtracking
+  const cleanText = extractVisibleText(htmlContent);
 
   const snippet = cleanText.slice(0, 1500).replace(/[()\\]/g, '\\$&');
 
