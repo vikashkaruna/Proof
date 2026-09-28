@@ -105,9 +105,11 @@ export const agentAccents = {
   saakshi: '#C9A227', // gold — evidence / witness
   sudhaar: '#0EA5E9', // sky — planning
   karya: '#D9534F', // ember — execution (high-stakes; alert color intentional)
+  samadhan: '#0D9488', // teal-green — maker-checker & reconciliation equilibrium
   lekha: '#525B71', // slate — ledger
   nazar: '#16A34A', // green — watch
-  prativedan: '#9333EA', // purple — reporting
+  prativedan: '#9333EA', // purple — reporting (drafts & working registers)
+  pramaan: '#C9A227', // gold — statutory closure proof & sealed attestation
   sanket: '#EA580C', // orange — signal
 } as const;
 

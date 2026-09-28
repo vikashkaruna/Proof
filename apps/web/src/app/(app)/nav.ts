@@ -25,7 +25,9 @@ export interface NavItem {
   en: string;
   hi: string;
   phase: string;
+  agentRole?: string;
   star?: boolean;
+  gold?: boolean;
   /** The capability a persona must hold for this item to appear. */
   capability: Capability;
 }
@@ -199,13 +201,24 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Report · Prativedan',
+    label: 'Reporting & Statutory Proof · Prativedan + Pramaan',
     items: [
       {
         route: '/reports',
-        en: 'Reports',
-        hi: 'रिपोर्ट',
+        en: 'Working Reports & Registers',
+        agentRole: 'Prativedan · Clerical Drafter',
+        hi: 'कार्यकारी रिपोर्ट · प्रतिवेदन',
         phase: 'P2',
+        capability: Capability.REPORT_READ,
+      },
+      {
+        route: '/reports?tab=pramaan',
+        en: 'Statutory Proof Dossiers',
+        agentRole: 'Pramaan · Closure Seal',
+        hi: 'वैधानिक प्रमाण · संप्रभु मुहर',
+        phase: 'Final Proof',
+        star: true,
+        gold: true,
         capability: Capability.REPORT_READ,
       },
     ],

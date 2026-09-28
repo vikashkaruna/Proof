@@ -13,6 +13,8 @@ const AGENT_PERSONAS: Record<AgentName, { persona: string; emoji: string }> = {
   nazar: { persona: 'Regulatory Watch', emoji: '◉' },
   prativedan: { persona: 'Reporting', emoji: '▥' },
   sanket: { persona: 'Market Signal', emoji: '◐' },
+  samadhan: { persona: 'Reconciliation', emoji: '⚖' },
+  pramaan: { persona: 'Closure Proof', emoji: '⊛' },
 };
 
 export interface AgentPillProps {

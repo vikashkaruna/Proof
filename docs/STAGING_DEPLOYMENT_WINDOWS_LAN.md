@@ -157,7 +157,7 @@ Once deployed, access points are available at both `localhost` and your LAN IP:
 | **Web Workbench**          | `http://localhost:3001`            | `http://<HOST_IP>:3001`            | Main operator dashboard & compliance center    |
 | **Onboarding Wizard**      | `http://localhost:3001/onboarding` | `http://<HOST_IP>:3001/onboarding` | Onboard dynamic organizations live             |
 | **Human Approval Console** | `http://localhost:3001/approval`   | `http://<HOST_IP>:3001/approval`   | Token issuance and blast radius dry-run review |
-| **Agent Fleet Cockpit**    | `http://localhost:3001/workbench`  | `http://<HOST_IP>:3001/workbench`  | Live execution cockpit for all 10 agents       |
+| **Agent Fleet Cockpit**    | `http://localhost:3001/workbench`  | `http://<HOST_IP>:3001/workbench`  | Live execution cockpit for all 12 agents       |
 | **Audit Ledger**           | `http://localhost:3001/ledger`     | `http://<HOST_IP>:3001/ledger`     | Append-only Merkle hash chain viewer           |
 | **Evidence Explorer**      | `http://localhost:3001/evidence`   | `http://<HOST_IP>:3001/evidence`   | Cryptographically sealed S3 evidence vault     |
 | **Marketing Site**         | `http://localhost:3000`            | `http://<HOST_IP>:3000`            | Public gap-scan assessment tool                |

@@ -59,7 +59,7 @@ ARG AXIOM_RELEASE_SHA
 ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
 LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
 WORKDIR /app
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini chromium font-noto
 ENV NODE_ENV=production
 ENV PORT=4000
 COPY --from=build /app /app

@@ -26,15 +26,17 @@ const SIZE_MAP: Record<'xs' | 'sm' | 'md' | 'lg', { box: number; icon: number }>
 };
 
 const ON_DARK_ACCENTS: Record<string, string> = {
-  parikshan: '#818CF8', // high-contrast light indigo on dark background
   lekha: '#94A3B8', // high-contrast slate on dark background
   drishti: '#0FB5A5',
   vibhaag: '#A78BFA',
+  parikshan: '#818CF8',
   saakshi: '#FACC15',
   sudhaar: '#38BDF8',
   karya: '#F87171',
+  samadhan: '#2DD4BF',
   nazar: '#4ADE80',
   prativedan: '#C084FC',
+  pramaan: '#FACC15',
   sanket: '#FB923C',
   policy: '#0FB5A5',
   policy_engine: '#0FB5A5',
@@ -81,7 +83,7 @@ export function AgentIcon({
         width: `${sizeConfig.box}px`,
         height: `${sizeConfig.box}px`,
         backgroundColor: variant === 'on-dark' ? 'rgba(255,255,255,0.1)' : `${accent}15`,
-        borderColor: variant === 'on-dark' ? 'rgba(255,255,255,0.2)' : `${accent}40`,
+        borderColor: variant === 'on-dark' ? 'rgba(255,255,255,0.2)' : `${accent}38`,
         borderWidth: '1px',
         borderStyle: 'solid',
       }}
@@ -228,6 +230,49 @@ export function AgentIcon({
           100% {
             r: 13;
             opacity: 0;
+          }
+        }
+        @keyframes samadhan-balance {
+          0%,
+          100% {
+            transform: rotate(-6deg);
+          }
+          50% {
+            transform: rotate(6deg);
+          }
+        }
+        @keyframes samadhan-scale-pan {
+          0%,
+          100% {
+            transform: translateY(1.5px);
+          }
+          50% {
+            transform: translateY(-1.5px);
+          }
+        }
+        @keyframes pramaan-seal-breathe {
+          0%,
+          100% {
+            transform: scale(0.96);
+            opacity: 0.85;
+          }
+          50% {
+            transform: scale(1.06);
+            opacity: 1;
+          }
+        }
+        @keyframes pramaan-stamp-press {
+          0% {
+            transform: scale(1) translateY(0);
+          }
+          30% {
+            transform: scale(0.92) translateY(2px);
+          }
+          60% {
+            transform: scale(1.08) translateY(-1px);
+          }
+          100% {
+            transform: scale(1) translateY(0);
           }
         }
         @keyframes breath-slow {
@@ -750,6 +795,173 @@ function AgentSvgContent({ agent, state, accent }: SvgContentProps) {
                 : undefined,
             }}
           />
+        </g>
+      );
+
+    // ── 11. Samadhan (Maker-Checker & Reconciliation) ───────────────────
+    // Balance scales of dual-control with reconciling checkmarks
+    case 'samadhan':
+      return (
+        <g>
+          {/* Vertical mast and stand */}
+          <line
+            x1="16"
+            y1="8"
+            x2="16"
+            y2="26"
+            stroke={accent}
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+          <line
+            x1="10"
+            y1="26"
+            x2="22"
+            y2="26"
+            stroke={accent}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          <circle cx="16" cy="8" r="2" fill={accent} />
+          {/* Oscillating balance beam */}
+          <g
+            style={{
+              transformOrigin: '16px 11px',
+              animation: isWorking
+                ? 'samadhan-balance 2s ease-in-out infinite'
+                : isThinking
+                  ? 'samadhan-balance 4s ease-in-out infinite'
+                  : undefined,
+            }}
+          >
+            <line
+              x1="6"
+              y1="11"
+              x2="26"
+              y2="11"
+              stroke={accent}
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            {/* Left suspension & pan (Maker / Sudhaar) */}
+            <line
+              x1="8"
+              y1="11"
+              x2="5"
+              y2="17"
+              stroke={accent}
+              strokeWidth="1"
+              strokeDasharray={isWorking ? '2 1' : 'none'}
+            />
+            <line
+              x1="8"
+              y1="11"
+              x2="11"
+              y2="17"
+              stroke={accent}
+              strokeWidth="1"
+              strokeDasharray={isWorking ? '2 1' : 'none'}
+            />
+            <path
+              d="M4 17C4 19 12 19 12 17Z"
+              fill={`${accent}30`}
+              stroke={accent}
+              strokeWidth="1.25"
+            />
+            <path
+              d="M6 16L7.5 17.5L10 15"
+              stroke={accent}
+              strokeWidth="1.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Right suspension & pan (Checker / Karya) */}
+            <line
+              x1="24"
+              y1="11"
+              x2="21"
+              y2="17"
+              stroke={accent}
+              strokeWidth="1"
+              strokeDasharray={isWorking ? '2 1' : 'none'}
+            />
+            <line
+              x1="24"
+              y1="11"
+              x2="27"
+              y2="17"
+              stroke={accent}
+              strokeWidth="1"
+              strokeDasharray={isWorking ? '2 1' : 'none'}
+            />
+            <path
+              d="M20 17C20 19 28 19 28 17Z"
+              fill={`${accent}30`}
+              stroke={accent}
+              strokeWidth="1.25"
+            />
+            <path
+              d="M22 16L23.5 17.5L26 15"
+              stroke={accent}
+              strokeWidth="1.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+          {/* Zero-drift central equilibrium beacon */}
+          <circle
+            cx="16"
+            cy="11"
+            r={isWorking ? 2.5 : 1.75}
+            fill={isWorking ? '#2DD4BF' : accent}
+          />
+        </g>
+      );
+
+    // ── 12. Pramaan (Statutory Closure & Proof Attestation) ──────────────
+    // Sovereign Gold Wax Proof Seal with Axiom 4-Point Star and Attestation Ribbons
+    case 'pramaan':
+      return (
+        <g
+          style={{
+            transformOrigin: '16px 14px',
+            animation: isWorking
+              ? 'pramaan-stamp-press 1.4s ease-in-out infinite'
+              : isThinking
+                ? 'pramaan-seal-breathe 2.5s ease-in-out infinite'
+                : undefined,
+          }}
+        >
+          {/* Dual draped ribbons of attestation */}
+          <path
+            d="M12 21L9 29L13.5 26L16 28.5L18.5 26L23 29L20 21"
+            fill={`${accent}35`}
+            stroke={accent}
+            strokeWidth="1.25"
+            strokeLinejoin="round"
+          />
+          {/* Scalloped outer medallion ring (12-point seal) */}
+          <circle
+            cx="16"
+            cy="14"
+            r="11"
+            stroke={accent}
+            strokeWidth="1.75"
+            strokeDasharray={isWorking ? '3 1.5' : 'none'}
+            fill={`${accent}20`}
+          />
+          {/* Concentric inner proof ring */}
+          <circle cx="16" cy="14" r="8" stroke={accent} strokeWidth="1" strokeDasharray="1.5 1.5" />
+          {/* Central 4-pointed Axiom Proof Star */}
+          <path
+            d="M16 8L17.5 12.5L22 14L17.5 15.5L16 20L14.5 15.5L10 14L14.5 12.5Z"
+            fill={accent}
+            stroke={isWorking ? '#FFFFFF' : accent}
+            strokeWidth="0.75"
+          />
+          {/* Center core diamond */}
+          <circle cx="16" cy="14" r="1.5" fill="#FFFFFF" />
         </g>
       );
 

@@ -164,6 +164,34 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     moduleLabel: 'Breach & Signals',
     actionLabel: 'Scan Market & Breach Signals',
   },
+  {
+    name: 'samadhan',
+    persona: 'Reconciliation',
+    indic: 'समाधान · Maker-Checker',
+    autonomy: 'L1 Autonomous',
+    phase: 'Phase 3 · Dual Control',
+    description:
+      'Maker-checker reconciler. Verifies executed reality against approved scope, detects parameter drift, and cryptographically signs the dual-control statement.',
+    statutoryBoundary:
+      'Evaluates token scope post-execution. Refuses out-of-scope executions and signs immutable statement with approval-keyed HMAC.',
+    modulePath: '/execution',
+    moduleLabel: 'Execution Batches',
+    actionLabel: 'Verify Batch Reconciliation',
+  },
+  {
+    name: 'pramaan',
+    persona: 'Closure Seal',
+    indic: 'प्रमाण · Statutory Proof',
+    autonomy: 'L1 Autonomous',
+    phase: 'Phase 5 · Proof Seal',
+    description:
+      'Statutory closure authority. Synthesizes multi-agent proof dossiers, Merkle trees, and WORM evidence archives, applying the sovereign Gold ProofSeal.',
+    statutoryBoundary:
+      'Master synthesis for DPB statutory submissions and Board closure packs. Non-mutating authority backed by Founder co-signature.',
+    modulePath: '/reports',
+    moduleLabel: 'Compliance Reports',
+    actionLabel: 'Synthesize Closure Dossier',
+  },
 ];
 
 export interface SidebarAgentPanelProps {
@@ -323,8 +351,8 @@ export function SidebarAgentPanel({
         </button>
       </div>
 
-      {/* 10 Agent Mini Icons Grid */}
-      <div className="mt-2.5 grid grid-cols-5 gap-1.5">
+      {/* 12 Agent Mini Icons Grid (3 rows x 4) */}
+      <div className="mt-2.5 grid grid-cols-4 gap-1.5">
         {ALL_AGENTS.map((agent) => {
           const state = getAgentState(agent.name);
           const isSelected = selectedAgent?.name === agent.name;

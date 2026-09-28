@@ -17,16 +17,18 @@ describe('Design tokens', () => {
     expect(colors.ember[500]).toBe('#D9534F');
   });
 
-  it('defines all 10 agent accent colors', () => {
+  it('defines all 12 agent accent colors', () => {
     expect(agentAccents.drishti).toBe('#0FB5A5');
     expect(agentAccents.vibhaag).toBe('#7C3AED');
     expect(agentAccents.parikshan).toBe('#1E2A4A');
     expect(agentAccents.saakshi).toBe('#C9A227');
     expect(agentAccents.sudhaar).toBe('#0EA5E9');
     expect(agentAccents.karya).toBe('#D9534F');
+    expect(agentAccents.samadhan).toBe('#0D9488');
     expect(agentAccents.lekha).toBe('#525B71');
     expect(agentAccents.nazar).toBe('#16A34A');
     expect(agentAccents.prativedan).toBe('#9333EA');
+    expect(agentAccents.pramaan).toBe('#C9A227');
     expect(agentAccents.sanket).toBe('#EA580C');
   });
 

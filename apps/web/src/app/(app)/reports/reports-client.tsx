@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PackPreparation } from './pack-preparation';
 import { button, field, panel, failure } from './report-ui';
 import { z } from 'zod';
@@ -13,6 +14,9 @@ import {
   type ReportSummary,
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
+import { ClosureDossiersTab } from './closure-dossiers-tab';
+import { EmailDispatchModal } from './email-dispatch-modal';
+import { AgentIcon } from '@axiom/ui';
 
 const date = (value: string) => new Date(value).toLocaleString();
 
@@ -35,6 +39,20 @@ export function ReportsClient(access: Access) {
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: 'pramaan' | 'prativedan' = tabParam === 'pramaan' ? 'pramaan' : 'prativedan';
+
+  const handleSelectTab = (tab: 'pramaan' | 'prativedan') => {
+    setSelectedId(null);
+    if (tab === 'pramaan') {
+      router.replace('/reports?tab=pramaan');
+    } else {
+      router.replace('/reports');
+    }
+  };
+  const [reportEmailTarget, setReportEmailTarget] = useState<ReportSummary | null>(null);
   const preparation = useRef<HTMLDetailsElement>(null);
   const refresh = useCallback(() => {
     setLoading(true);
@@ -81,205 +99,270 @@ export function ReportsClient(access: Access) {
         </p>
       </header>
 
-      {/* Statutory Formats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
-              BOARD REPORT
-            </span>
-            <span className="text-xs text-slate-500">Prativedan</span>
-          </div>
-          <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
-          <p className="text-xs text-slate-600 mb-3">
-            Executive posture scores, financial penalty exposure, and domain maturity analysis.
-          </p>
-          <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
-              AUDITOR PACK
-            </span>
-            <span className="text-xs text-slate-500">Prativedan / Saakshi</span>
-          </div>
-          <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
-          <p className="text-xs text-slate-600 mb-3">
-            Itemized control evaluations, linked evidence receipts, and independent attestation.
-          </p>
-          <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
-              DPB SUBMISSION
-            </span>
-            <span className="text-xs text-slate-500">Prativedan</span>
-          </div>
-          <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
-          <p className="text-xs text-slate-600 mb-3">
-            Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
-          </p>
-          <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
-              TECH REGISTER
-            </span>
-            <span className="text-xs text-slate-500">Sudhaar / Karya</span>
-          </div>
-          <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
-          <p className="text-xs text-slate-600 mb-3">
-            Full sequence of automated mutations, dry-run verified diffs, and rollback validation.
-          </p>
-          <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
-        </div>
+      {/* Role-Segregated Navigation Tabs: Pramaan (Closure Authority) vs Prativedan (Clerical Drafter) */}
+      <div className="flex border-b border-slate-200 gap-2">
+        <button
+          type="button"
+          onClick={() => handleSelectTab('pramaan')}
+          className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+            activeTab === 'pramaan'
+              ? 'border-[#C9A227] text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <AgentIcon agent="pramaan" size="sm" state="idle" />
+          Statutory Proof Dossiers (Pramaan · Closure Seal)
+        </button>
+        <button
+          type="button"
+          onClick={() => handleSelectTab('prativedan')}
+          className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+            activeTab === 'prativedan'
+              ? 'border-indigo-600 text-slate-900'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <AgentIcon agent="prativedan" size="sm" state="idle" />
+          Working Reports & Registers (Prativedan · Clerical Drafter)
+        </button>
       </div>
 
-      {/* Approval History Export Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">
-            Tenant Approval History Audit Export
-          </h3>
-          <p className="text-xs text-slate-600">
-            Export complete, tamper-evident audit history of all human and standing-policy approvals
-            with cryptographic signatures.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <a
-            href={`/api/bff/v1/approvals/export?format=pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-            download={`approval-history-${tenantId.slice(0, 8)}.pdf`}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm"
-          >
-            Export PDF
-          </a>
-          <a
-            href={`/api/bff/v1/approvals/export?format=json`}
-            target="_blank"
-            rel="noopener noreferrer"
-            download={`approval-history-${tenantId.slice(0, 8)}.json`}
-            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-          >
-            Export JSON
-          </a>
-          <a
-            href={`/api/bff/v1/approvals/export?format=csv`}
-            target="_blank"
-            rel="noopener noreferrer"
-            download={`approval-history-${tenantId.slice(0, 8)}.csv`}
-            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-          >
-            Export CSV
-          </a>
-        </div>
-      </div>
-      {canPrepare && (
-        <details ref={preparation} className="space-y-3">
-          <summary className="cursor-pointer rounded-lg border border-slate-200 p-4 font-semibold text-[#1E2A4A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600">
-            Prepare evidence pack
-          </summary>
-          <PackPreparation
-            tenantId={tenantId}
-            onPrepared={(reportId) => {
-              if (preparation.current) preparation.current.open = false;
-              setSelectedId(reportId);
-              refresh();
-            }}
-          />
-        </details>
-      )}
-      <section aria-label="Recorded reports" className={panel} aria-busy={loading}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h2 className="text-lg font-semibold">Recorded reports</h2>
-          <label className="text-sm">
-            Status
-            <select
-              className={`${field} mt-1`}
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setOffset(0);
-                setSelectedId(null);
-                refresh();
-              }}
-            >
-              <option value="">All visible reports</option>
-              {['draft', 'approved', 'rejected', 'published', 'archived'].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className={button} disabled={loading} onClick={refresh}>
-            Refresh reports
-          </button>
-        </div>
-        {loading ? (
-          <p role="status">Loading recorded reports…</p>
-        ) : error ? (
-          <p role="alert" className="text-[#D9534F]">
-            {error}
-          </p>
-        ) : (
-          <>
-            <p className="text-sm text-slate-600">{total} visible reports</p>
-            {reports.length === 0 ? (
-              <p>No reports recorded for this view.</p>
+      {activeTab === 'pramaan' ? (
+        <ClosureDossiersTab
+          tenantId={tenantId}
+          canRelease={access.canRelease}
+          canPrepare={access.canPrepare}
+        />
+      ) : (
+        <>
+          {/* Statutory Formats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                  BOARD REPORT
+                </span>
+                <span className="text-xs text-slate-500">Prativedan</span>
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
+              <p className="text-xs text-slate-600 mb-3">
+                Executive posture scores, financial penalty exposure, and domain maturity analysis.
+              </p>
+              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+                  AUDITOR PACK
+                </span>
+                <span className="text-xs text-slate-500">Prativedan / Saakshi</span>
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
+              <p className="text-xs text-slate-600 mb-3">
+                Itemized control evaluations, linked evidence receipts, and independent attestation.
+              </p>
+              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
+                  DPB SUBMISSION
+                </span>
+                <span className="text-xs text-slate-500">Prativedan</span>
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
+              <p className="text-xs text-slate-600 mb-3">
+                Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
+              </p>
+              <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                  TECH REGISTER
+                </span>
+                <span className="text-xs text-slate-500">Sudhaar / Karya</span>
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
+              <p className="text-xs text-slate-600 mb-3">
+                Full sequence of automated mutations, dry-run verified diffs, and rollback
+                validation.
+              </p>
+              <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
+            </div>
+          </div>
+
+          {/* Approval History Export Banner */}
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                Tenant Approval History Audit Export
+              </h3>
+              <p className="text-xs text-slate-600">
+                Export complete, tamper-evident audit history of all human and standing-policy
+                approvals with cryptographic signatures.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={`/api/bff/v1/approvals/export?format=pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`approval-history-${tenantId.slice(0, 8)}.pdf`}
+                className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm"
+              >
+                Export PDF
+              </a>
+              <a
+                href={`/api/bff/v1/approvals/export?format=json`}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`approval-history-${tenantId.slice(0, 8)}.json`}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+              >
+                Export JSON
+              </a>
+              <a
+                href={`/api/bff/v1/approvals/export?format=csv`}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={`approval-history-${tenantId.slice(0, 8)}.csv`}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+              >
+                Export CSV
+              </a>
+            </div>
+          </div>
+          {canPrepare && (
+            <details ref={preparation} className="space-y-3">
+              <summary className="cursor-pointer rounded-lg border border-slate-200 p-4 font-semibold text-[#1E2A4A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600">
+                Prepare evidence pack
+              </summary>
+              <PackPreparation
+                tenantId={tenantId}
+                onPrepared={(reportId) => {
+                  if (preparation.current) preparation.current.open = false;
+                  setSelectedId(reportId);
+                  refresh();
+                }}
+              />
+            </details>
+          )}
+          <section aria-label="Recorded reports" className={panel} aria-busy={loading}>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <h2 className="text-lg font-semibold">Recorded reports</h2>
+              <label className="text-sm">
+                Status
+                <select
+                  className={`${field} mt-1`}
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value);
+                    setOffset(0);
+                    setSelectedId(null);
+                    refresh();
+                  }}
+                >
+                  <option value="">All visible reports</option>
+                  {['draft', 'approved', 'rejected', 'published', 'archived'].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className={button} disabled={loading} onClick={refresh}>
+                Refresh reports
+              </button>
+            </div>
+            {loading ? (
+              <p role="status">Loading recorded reports…</p>
+            ) : error ? (
+              <p role="alert" className="text-[#D9534F]">
+                {error}
+              </p>
             ) : (
-              <ul className="space-y-2">
-                {reports.map((report) => (
-                  <li key={report.id}>
-                    <button
-                      type="button"
-                      aria-pressed={selectedId === report.id}
-                      className="w-full min-w-0 rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 aria-pressed:border-teal-600"
-                      onClick={() => setSelectedId(report.id)}
-                    >
-                      <span className="block break-words font-medium">{report.title}</span>
-                      <span className="block text-sm text-slate-600">
-                        {report.kind} · {report.status} · {date(report.generatedAt)}
-                      </span>
-                      {report.assurance === 'legacy_unverified' && (
-                        <span className="block text-sm text-slate-600">
-                          Historical record — no verified release assurance
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <p className="text-sm text-slate-600">{total} visible reports</p>
+                {reports.length === 0 ? (
+                  <p>No reports recorded for this view.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {reports.map((report) => (
+                      <li key={report.id} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={selectedId === report.id}
+                          className="flex-1 min-w-0 rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 aria-pressed:border-teal-600"
+                          onClick={() => setSelectedId(report.id)}
+                        >
+                          <span className="block break-words font-medium">{report.title}</span>
+                          <span className="block text-sm text-slate-600">
+                            {report.kind} · {report.status} · {date(report.generatedAt)}
+                          </span>
+                          {report.assurance === 'legacy_unverified' && (
+                            <span className="block text-sm text-slate-600">
+                              Historical record — no verified release assurance
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReportEmailTarget(report)}
+                          className="rounded border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shrink-0"
+                        >
+                          ✉ Email
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
-          </>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button
-            className={button}
-            disabled={loading || offset === 0}
-            onClick={() => changePage(Math.max(0, offset - 20))}
-          >
-            Previous reports
-          </button>
-          <button
-            className={button}
-            disabled={loading || !!error || !more}
-            onClick={() => changePage(offset + 20)}
-          >
-            Next reports
-          </button>
-        </div>
-      </section>
-      {selectedId && (
-        <ReportInspector key={selectedId} {...access} reportId={selectedId} onChanged={refresh} />
+            <div className="flex flex-wrap gap-2">
+              <button
+                className={button}
+                disabled={loading || offset === 0}
+                onClick={() => changePage(Math.max(0, offset - 20))}
+              >
+                Previous reports
+              </button>
+              <button
+                className={button}
+                disabled={loading || !!error || !more}
+                onClick={() => changePage(offset + 20)}
+              >
+                Next reports
+              </button>
+            </div>
+          </section>
+          {selectedId && (
+            <ReportInspector
+              key={selectedId}
+              {...access}
+              reportId={selectedId}
+              onChanged={refresh}
+              onSendEmail={(rep) => setReportEmailTarget(rep)}
+            />
+          )}
+        </>
       )}
+
+      {/* Report Email Dispatch Modal */}
+      <EmailDispatchModal
+        tenantId={tenantId}
+        isOpen={Boolean(reportEmailTarget)}
+        onClose={() => setReportEmailTarget(null)}
+        target={{
+          reportId: reportEmailTarget?.id,
+          title: reportEmailTarget?.title || '',
+          kind: reportEmailTarget?.kind || '',
+          proofSealHash: reportEmailTarget?.contentHash || undefined,
+        }}
+      />
     </div>
   );
 }
@@ -287,8 +370,13 @@ export function ReportsClient(access: Access) {
 function ReportInspector({
   reportId,
   onChanged,
+  onSendEmail,
   ...access
-}: Access & { reportId: string; onChanged: () => void }) {
+}: Access & {
+  reportId: string;
+  onChanged: () => void;
+  onSendEmail?: (report: ReportDetail) => void;
+}) {
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState('');
@@ -382,9 +470,21 @@ function ReportInspector({
         <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold">
           Report detail
         </h2>
-        <button className={button} disabled={busy || loading} onClick={refresh}>
-          Refresh report detail
-        </button>
+        <div className="flex items-center gap-2">
+          {report && onSendEmail && (
+            <button
+              type="button"
+              className="rounded border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shadow-xs"
+              onClick={() => onSendEmail(report)}
+              disabled={busy}
+            >
+              ✉ Send via Email
+            </button>
+          )}
+          <button className={button} disabled={busy || loading} onClick={refresh}>
+            Refresh report detail
+          </button>
+        </div>
       </div>
       {message && (
         <p role="status" className="text-sm">

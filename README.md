@@ -70,7 +70,7 @@ and [`docs/07_SECURITY_REVIEW.md`](./docs/07_SECURITY_REVIEW.md)):
 │   └── marketing/                     # Public site (positioning, gap-scan, agents)
 ├── services/                          # Backend services
 │   ├── bff/                           # Node/TypeScript BFF (Hono) — the API + execution gate
-│   ├── agent-runtime/                 # Python FastAPI — 10 named agents
+│   ├── agent-runtime/                 # Python FastAPI — 12 named agents
 │   ├── model-gateway/                 # Python FastAPI — self-hosted LLM gateway with PII redaction
 │   └── temporal-workers/              # Python — durable workflow orchestration
 ├── packages/                          # Shared libraries
@@ -232,7 +232,7 @@ Each layer runs as an independent Docker container for modular scalability and l
 | **Web Workbench**    | `http://localhost:3001`  | Core operator UI, plan review, approval console, kill switch |
 | **Marketing Site**   | `http://localhost:3000`  | Public funnel & interactive 5-minute DPDPA gap-scan          |
 | **BFF API Engine**   | `http://localhost:4000`  | Execution gate, auth, approval token issuance, kill switch   |
-| **Agent Runtime**    | `http://localhost:8000`  | 10 named compliance agents (Drishti, Sudhaar, etc.)          |
+| **Agent Runtime**    | `http://localhost:8000`  | 12 named compliance agents (Drishti, Sudhaar, etc.)          |
 | **Model Gateway**    | `http://localhost:8001`  | PII redactor (Presidio + regex) & LLM router                 |
 | **Temporal UI**      | `http://localhost:8233`  | Durable workflow state machine visualizer                    |
 | **Temporal Server**  | `localhost:7233`         | gRPC orchestration engine                                    |
@@ -277,7 +277,7 @@ For preproduction deployment on **Google Cloud Platform (GCP)** in Mumbai (`asia
 ### 2. Run 100% Non-Hardcoded Preprod Live Functional Flow
 
 ```bash
-# Runs dynamic user registration, tenant onboarding, all 10 agents,
+# Runs dynamic user registration, tenant onboarding, all 12 agents,
 # human approval token issuance, evidence sealing, and ledger verification:
 ./scripts/run-preprod-flow.sh "https://<YOUR_BFF_URL>"
 ```

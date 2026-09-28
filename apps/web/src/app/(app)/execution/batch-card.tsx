@@ -7,6 +7,7 @@ import {
   CardTitle,
   ProofSeal,
   StatusBadge,
+  AgentIcon,
   type StatusKind,
 } from '@axiom/ui';
 import { formatDateTime, truncateHash } from '@axiom/ui';
@@ -403,9 +404,17 @@ function ReconciliationSection({ reconciliation: rec }: { reconciliation: Reconc
 
   return (
     <section className="flex flex-col gap-2">
-      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-        Maker-checker reconciliation
-      </h4>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <AgentIcon agent="samadhan" size="sm" state="idle" />
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+            Samadhan · समाधान · Maker-Checker Reconciliation
+          </h4>
+        </div>
+        <span className="text-[11px] text-teal-700 font-medium bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+          Dual-Control Enforcement
+        </span>
+      </div>
       <div
         className={`rounded-md border p-3 text-xs ${
           verdict === 'clean' ? 'border-teal-500 bg-teal-50/40' : 'border-ember-500 bg-ember-50/40'

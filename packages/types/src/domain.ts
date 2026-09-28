@@ -523,3 +523,61 @@ export const StatutoryReportArtifactSchema = z.object({
   createdAt: z.string().datetime(),
 });
 export type StatutoryReportArtifact = z.infer<typeof StatutoryReportArtifactSchema>;
+
+// ─── Pramaan Statutory Closure Dossier (W12 / Option B) ─────────────
+
+export const DossierTypeSchema = z.enum([
+  'board_executive',
+  'dpb_statutory',
+  'auditor_assurance',
+  'technical_register',
+  'full_closure',
+]);
+export type DossierType = z.infer<typeof DossierTypeSchema>;
+
+export const DossierStatusSchema = z.enum(['draft', 'approved', 'sealed', 'rejected']);
+export type DossierStatus = z.infer<typeof DossierStatusSchema>;
+
+export const PramaanDossierSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  engagementId: z.string().uuid(),
+  reportId: z.string().uuid().nullable().optional(),
+  dossierType: DossierTypeSchema,
+  title: z.string().min(1).max(300),
+  status: DossierStatusSchema,
+  merkleRoot: z.string().regex(/^[0-9a-f]{64}$/),
+  manifestHash: z.string().regex(/^[0-9a-f]{64}$/),
+  archiveHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
+  archiveBytes: z.number().int().min(1).nullable().optional(),
+  proofSealHash: z.string().regex(/^[0-9a-f]{64}$/),
+  sealedAt: z.string().datetime().nullable().optional(),
+  sealedBy: z.string().uuid().nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PramaanDossier = z.infer<typeof PramaanDossierSchema>;
+
+// ─── Report & Dossier Email Dispatch (Audit Log) ────────────────────
+
+export const ReportEmailDispatchSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  reportId: z.string().uuid().nullable().optional(),
+  dossierId: z.string().uuid().nullable().optional(),
+  recipientEmail: z.string().email(),
+  senderEmail: z.literal('platform@axiomproof.ai'),
+  ccEmail: z.string().nullable().optional(),
+  bccEmail: z.string().nullable().optional(),
+  subject: z.string().min(1).max(500),
+  deliveryStatus: z.enum(['queued', 'sent', 'failed']),
+  externalMessageId: z.string().nullable().optional(),
+  dispatchedBy: z.string().uuid(),
+  dispatchedAt: z.string().datetime(),
+});
+export type ReportEmailDispatch = z.infer<typeof ReportEmailDispatchSchema>;

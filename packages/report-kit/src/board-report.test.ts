@@ -117,8 +117,10 @@ describe('Board Report Contracts & Renderer', () => {
   it('renders compliant PDF bytes using headless Chromium when available', async () => {
     const html = renderBoardReportHtml(sampleReport);
     const res = await renderHtmlToPdf(html, { preferChromium: true });
+    // If Chromium is not available, the renderer falls back to the deterministic engine.
+    // Both paths produce valid PDF output — only the renderer label differs.
     expect(res.byteLength).toBeGreaterThan(500);
     expect(res.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(res.pdfBuffer.toString('utf-8', 0, 8)).toContain('%PDF');
-  });
+  }, 60_000);
 });

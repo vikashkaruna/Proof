@@ -24,7 +24,9 @@ from axiom.agents.lekha import LekhaAgent
 from axiom.agents.nazar import NazarAgent
 from axiom.agents.parikshan import ParikshanAgent
 from axiom.agents.prativedan import PrativedanAgent
+from axiom.agents.pramaan import PramaanAgent
 from axiom.agents.saakshi import SaakshiAgent
+from axiom.agents.samadhan import SamadhanAgent
 from axiom.agents.sanket import SanketAgent
 from axiom.agents.sudhaar import SudhaarAgent
 from axiom.agents.vibhaag import VibhaagAgent
@@ -36,9 +38,11 @@ PYTHON_AGENTS = {
     "saakshi": SaakshiAgent,
     "sudhaar": SudhaarAgent,
     "karya": KaryaAgent,
+    "samadhan": SamadhanAgent,
     "lekha": LekhaAgent,
     "nazar": NazarAgent,
     "prativedan": PrativedanAgent,
+    "pramaan": PramaanAgent,
     "sanket": SanketAgent,
 }
 

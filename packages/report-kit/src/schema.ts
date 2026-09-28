@@ -27,6 +27,7 @@ export const BRANDING = Object.freeze({
   company: 'Axiom Minds Private Limited',
   company_url: 'https://axiomminds.ai',
 });
+export const MANIFEST_BRANDING = BRANDING;
 // Match Unicode code-point order (Postgres UTF8 COLLATE "C" / Python), not UTF-16 units.
 function compareText(a: string, b: string) {
   const left = Array.from(a),
