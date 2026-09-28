@@ -124,9 +124,7 @@ export function DossierViewerModal({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-[#A0821F]">
-                      {isSealed
-                        ? '★ SOVEREIGN GOLD PROOF SEAL'
-                        : '⚠ PENDING FOUNDER PROOF SEAL'}
+                      {isSealed ? '★ SOVEREIGN GOLD PROOF SEAL' : '⚠ PENDING FOUNDER PROOF SEAL'}
                     </span>
                     <span className="text-[11px] text-slate-500">
                       Type: {dossier.dossierType.replace(/_/g, ' ').toUpperCase()}
@@ -179,7 +177,9 @@ export function DossierViewerModal({
                     Sealed Timestamp & Authority
                   </span>
                   <span className="text-slate-800 font-sans">
-                    {dossier.sealedAt ? new Date(dossier.sealedAt).toLocaleString() : 'Unsealed Draft'}{' '}
+                    {dossier.sealedAt
+                      ? new Date(dossier.sealedAt).toLocaleString()
+                      : 'Unsealed Draft'}{' '}
                     {dossier.sealedBy ? `· User ${dossier.sealedBy.slice(0, 8)}` : ''}
                   </span>
                 </div>
@@ -217,7 +217,9 @@ export function DossierViewerModal({
               </h3>
               <div className="rounded-lg border border-slate-200 p-4 space-y-2 bg-slate-50/50">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">Prativedan (प्रतिवेदन · Drafter):</span>
+                  <span className="font-semibold text-slate-800">
+                    Prativedan (प्रतिवेदन · Drafter):
+                  </span>
                   <span className="text-slate-600">
                     Compiled working report, audit tables, and evidence references.
                   </span>

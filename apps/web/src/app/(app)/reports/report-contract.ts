@@ -3,7 +3,10 @@ import { z } from 'zod';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const uuid = z
   .string()
-  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, 'Invalid UUID');
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID',
+  );
 const timestamp = z.string().refine((value) => Number.isFinite(Date.parse(value)));
 export const reviewSchema = z.object({
   id: uuid,

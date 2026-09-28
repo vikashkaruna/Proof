@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AxiomLogo } from '@axiom/ui';
 import { SidebarAgentPanel } from './sidebar-agent-panel';
 import { APP_NAV_GROUPS, visibleNavGroups, type NavGroup, type NavItem } from './nav';
@@ -73,6 +73,20 @@ export function AppShell({
 }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentTab = searchParams?.get('tab');
+
+  const isItemActive = (itemRoute: string): boolean => {
+    if (itemRoute.includes('?')) {
+      const [itemPath, itemQuery] = itemRoute.split('?');
+      const params = new URLSearchParams(itemQuery);
+      return pathname === itemPath && currentTab === params.get('tab');
+    }
+    if (itemRoute === '/reports') {
+      return pathname === '/reports' && currentTab !== 'pramaan';
+    }
+    return pathname === itemRoute || (itemRoute !== '/dashboard' && pathname.startsWith(itemRoute));
+  };
   const [killOn, setKillOn] = useState(false);
   const [tenantsOpen, setTenantsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -261,10 +275,7 @@ export function AppShell({
 
   for (const group of navGroups) {
     for (const item of group.items) {
-      if (
-        pathname === item.route ||
-        (item.route !== '/dashboard' && pathname.startsWith(item.route))
-      ) {
+      if (isItemActive(item.route)) {
         activeBreadcrumb = group.label;
         activeTitle = item.en;
         break;
@@ -289,38 +300,75 @@ export function AppShell({
               {group.label}
             </div>
             {group.items.map((item) => {
-              const isActive =
-                pathname === item.route ||
-                (item.route !== '/dashboard' && pathname.startsWith(item.route));
+              const isActive = isItemActive(item.route);
+              const isGold = !!item.gold;
+
+              const activeClasses = isGold
+                ? 'border-l-[3px] border-[#C9A227] bg-[#C9A227]/15 text-white font-semibold shadow-sm'
+                : 'border-l-[3px] border-[#0FB5A5] bg-[#0FB5A5]/10 text-white font-semibold';
+
+              const idleClasses = isGold
+                ? 'border-l-[3px] border-transparent text-[#e6cf8b] hover:bg-[#C9A227]/10'
+                : 'border-l-[3px] border-transparent text-[#c7cfe0] hover:bg-white/5';
+
+              const dotClasses = isActive
+                ? isGold
+                  ? 'bg-[#C9A227]'
+                  : 'bg-[#0FB5A5]'
+                : isGold
+                  ? 'bg-[#C9A227]/60'
+                  : 'bg-[#3d4863]';
+
+              const starColor = isGold ? 'text-[#C9A227]' : 'text-[#0FB5A5]';
+
+              const badgeClasses = isGold
+                ? isActive
+                  ? 'bg-[#C9A227]/30 text-[#F5DE93] border border-[#C9A227]/60 font-bold'
+                  : 'bg-[#C9A227]/15 text-[#C9A227] border border-[#C9A227]/30 font-semibold'
+                : isActive
+                  ? 'bg-white/20 text-white'
+                  : 'bg-white/5 text-[#8a97b8]';
 
               return (
                 <Link
                   key={item.route}
                   href={item.route}
+                  title={item.agentRole ? `${item.en} (${item.agentRole})` : item.en}
                   aria-current={isActive ? 'page' : undefined}
                   onClick={() => mobileNav.current?.close()}
                   className={`flex min-h-11 lg:min-h-0 items-center gap-2.5 px-5 py-1.5 transition-colors ${
-                    isActive
-                      ? 'border-l-[3px] border-[#0FB5A5] bg-[#0FB5A5]/10 text-white font-semibold'
-                      : 'border-l-[3px] border-transparent text-[#c7cfe0] hover:bg-white/5'
+                    isActive ? activeClasses : idleClasses
                   }`}
                 >
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      isActive ? 'bg-[#0FB5A5]' : 'bg-[#3d4863]'
-                    }`}
-                  />
-                  <span className="flex flex-1 items-center gap-1.5 text-[13px] truncate">
-                    <span className={isActive ? 'text-white' : 'text-[#c7cfe0]'}>{item.en}</span>
-                    <span className="font-heading text-[10.5px] text-[#6f7ba0] font-normal">
-                      {item.hi}
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClasses}`} />
+                  <span className="flex flex-1 flex-col min-w-0">
+                    <span className="flex items-center gap-1.5 text-[13px] truncate">
+                      <span
+                        className={
+                          isActive ? 'text-white' : isGold ? 'text-[#f0dfaa]' : 'text-[#c7cfe0]'
+                        }
+                      >
+                        {item.en}
+                      </span>
+                      {item.hi && (
+                        <span
+                          className={`font-heading text-[10.5px] font-normal ${isGold ? 'text-[#bfa460]' : 'text-[#6f7ba0]'}`}
+                        >
+                          {item.hi}
+                        </span>
+                      )}
                     </span>
+                    {item.agentRole && (
+                      <span
+                        className={`text-[10px] truncate ${isGold ? (isActive ? 'text-[#E5C158]' : 'text-[#C9A227]/80') : isActive ? 'text-[#0FB5A5]' : 'text-[#6f7ba0]'}`}
+                      >
+                        {item.agentRole}
+                      </span>
+                    )}
                   </span>
-                  {item.star && <span className="text-[#0FB5A5] text-xs">★</span>}
+                  {item.star && <span className={`${starColor} text-xs font-bold`}>★</span>}
                   <span
-                    className={`text-[8.5px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-[#8a97b8]'
-                    }`}
+                    className={`text-[8.5px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${badgeClasses}`}
                   >
                     {item.phase}
                   </span>

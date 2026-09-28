@@ -200,18 +200,15 @@ describe('Pramaan Closure HTTP Routes', () => {
       return abortableResult(Promise.resolve({ data: null, error: null }));
     }) as never;
 
-    const res = await app(fixture.owner, UserRole.OWNER).request(
-      '/v1/reports/email/dispatch',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          recipientEmail: 'dpo@client.com',
-          dossierId,
-          notes: 'Approved by board on 28-Sep-2026',
-        }),
-      },
-    );
+    const res = await app(fixture.owner, UserRole.OWNER).request('/v1/reports/email/dispatch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        recipientEmail: 'dpo@client.com',
+        dossierId,
+        notes: 'Approved by board on 28-Sep-2026',
+      }),
+    });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;

@@ -167,12 +167,7 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
     writesAxiomState: true,
     inputSchema: z.unknown(),
     outputSchema: z.unknown(),
-    toolScopes: [
-      'plan.read',
-      'batch.read',
-      'reconciliation.write',
-      'ledger.append',
-    ],
+    toolScopes: ['plan.read', 'batch.read', 'reconciliation.write', 'ledger.append'],
     escalationConditions: [
       'out_of_scope_executed',
       'content_digest_drift',

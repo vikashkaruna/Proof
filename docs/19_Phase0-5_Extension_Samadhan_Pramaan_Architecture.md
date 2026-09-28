@@ -5,26 +5,31 @@
 **Status:** Ready for Implementation  
 **Base Line:** Revision 108 Complete (Phase 0–5 W0–W10)  
 **Target Branch:** `codex/revision75-controller-generation-transition`  
-**Target Milestone:** Extension Workstreams W11 – W14  
+**Target Milestone:** Extension Workstreams W11 – W14
 
 ---
 
 ## 1. Executive Summary & Problem Formulation
 
 ### 1.1 The Operational Gap
+
 Following the completion of the Phase 0–5 Gap Closure (W0 through W10, Revision 108), the platform possesses enterprise-grade cryptographic building blocks:
+
 1. **Lekha (Audit Custodian):** An append-only, SHA-256 hash-chained ledger (`public.audit_ledger`).
 2. **Saakshi (Evidence Custodian):** An S3 WORM Object Lock vault in Compliance mode.
 3. **Execution Detail Tables:** Migration 0060–0063 execution batches, rollbacks, verification results, and reconciliations.
 4. **Prativedan (Reporting Agent):** A document generator that turns findings into HTML/markdown tables.
 
 However, **the business and statutory deliverable is not yet completed**:
+
 - A Board of Directors, a Data Protection Board of India (DPB) Adjudicating Officer, or an external ISO 27001/SOC 2 auditor cannot evaluate raw Postgres ledger JSON rows or isolated binary blobs in S3.
 - The **Maker-Checker reconciliation** is currently performed by an anonymous system routine (`axiom/verification.py`) and logged simply as `'agent', 'reconciler'`, leaving the dual-control proof persona unnamed.
 - **Prativedan** in its current form is merely a document drafter; it does not synthesize the ledger, the WORM evidence manifest, and the maker-checker reconciliation into an authoritative, sealed attestation.
 
 ### 1.2 The Two-Agent Architectural Resolution (Option B)
+
 To achieve statutory closure without compromising separation of duties:
+
 1. **Samadhan (समाधान · Maker-Checker & Reconciler):** The independent dual-control arbiter that reconciles **Sudhaar's** remediation plan against **Karya's** executed reality, enforces zero out-of-scope mutation, flags configuration drift, and signs the reconciliation certificate.
 2. **Prativedan (प्रतिवेदन · The Draftsman):** Retained as the L1 document compiler for working registers, gap scan drafts, and internal policy/notice documents.
 3. **Pramaan (प्रमाण · Statutory Closure & Proof Attestation):** Introduced as the **Master Closure Authority**. In the `CLOSURE` phase, Pramaan ingests outputs from all upstream agents, bundles the offline-verifiable evidence manifest, seals the ledger root, and generates the unassailable, auditor-ready **Axiom Pramaan Dossier** bearing the Gold ProofSeal.
@@ -55,6 +60,7 @@ With the addition of **Samadhan** and **Pramaan**, the Axiom Proof agent roster 
 ```
 
 ### Complete End-to-End Chain of Custody
+
 ```
 [Drishti + Vibhaag] ──▶ Personal Data Inventory & RoPA Mapping
          │
@@ -97,12 +103,13 @@ With the addition of **Samadhan** and **Pramaan**, the Axiom Proof agent roster 
 
 - **Purpose:** Independent verifier of the Maker-Checker workflow (BR-1 / W5.6).
 - **Core Guarantees:**
-  1. *Facts are the database's facts:* Computes reality directly from `approval_tokens` and `execution_batches`.
-  2. *Out-of-scope screams:* Any action executed outside the approved token fails with `out_of_scope_executed`.
-  3. *Drift is stated:* Recomputes parameter content digest at settle time; mismatches are flagged as `content_digest_drift`.
-  4. *Cryptographic binding:* Signs the reconciliation statement with HMAC-SHA256 using the batch's `approval_signing_key`.
+  1. _Facts are the database's facts:_ Computes reality directly from `approval_tokens` and `execution_batches`.
+  2. _Out-of-scope screams:_ Any action executed outside the approved token fails with `out_of_scope_executed`.
+  3. _Drift is stated:_ Recomputes parameter content digest at settle time; mismatches are flagged as `content_digest_drift`.
+  4. _Cryptographic binding:_ Signs the reconciliation statement with HMAC-SHA256 using the batch's `approval_signing_key`.
 
 #### TypeScript Contract (`packages/types/src/agents.ts`)
+
 ```typescript
 samadhan: {
   name: 'samadhan',
@@ -147,11 +154,12 @@ samadhan: {
 
 - **Purpose:** Master synthesis agent for the `CLOSURE` engagement phase.
 - **Core Guarantees:**
-  1. *Full Provenance Binding:* Binds Parikshan's findings, Sudhaar's plan, Approver's identity, Karya's execution batches, Samadhan's dual-control certificate, Saakshi's WORM vault manifest, and Lekha's ledger hash.
-  2. *Deterministic Offline Verification:* Generates a `@axiom/report-kit` compliant ZIP pack with embedded `verify_evidence_pack.py` so any third-party auditor can verify hashes offline without cloud access.
-  3. *BR-4 Release Gate:* Operates in `draft` mode until the statutory Founder/DPO gate signs off (`release_report`).
+  1. _Full Provenance Binding:_ Binds Parikshan's findings, Sudhaar's plan, Approver's identity, Karya's execution batches, Samadhan's dual-control certificate, Saakshi's WORM vault manifest, and Lekha's ledger hash.
+  2. _Deterministic Offline Verification:_ Generates a `@axiom/report-kit` compliant ZIP pack with embedded `verify_evidence_pack.py` so any third-party auditor can verify hashes offline without cloud access.
+  3. _BR-4 Release Gate:_ Operates in `draft` mode until the statutory Founder/DPO gate signs off (`release_report`).
 
 #### TypeScript Contract (`packages/types/src/agents.ts`)
+
 ```typescript
 pramaan: {
   name: 'pramaan',
@@ -201,6 +209,7 @@ pramaan: {
 ## 4. Implementation Roadmap (Workstreams W11 – W14)
 
 ### Workstream W11: Contracts, Enums & Database Foundation (Migration 0072)
+
 - [ ] Add `SAMADHAN: 'samadhan'` and `PRAMAAN: 'pramaan'` to `AgentName` in `packages/types/src/enums.ts`.
 - [ ] Add `AgentContract` definitions for both in `packages/types/src/agents.ts`.
 - [ ] Add new ledger action types:
@@ -215,6 +224,7 @@ pramaan: {
   - Create function `public.seal_pramaan_dossier(...)` enforcing non-empty reconciliation and unbroken ledger chain.
 
 ### Workstream W12: Agent Runtime Classes & Executor Integration
+
 - [ ] Create `services/agent-runtime/src/axiom/agents/samadhan.py`:
   - Implements `SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput])`.
   - Encapsulates `reconcile_batch()` and executes post-batch evaluation.
@@ -229,6 +239,7 @@ pramaan: {
   - `services/agent-runtime/tests/test_pramaan.py` (>= 90% coverage).
 
 ### Workstream W13: BFF Gateway Endpoints & Offline Packaging Kit
+
 - [ ] Extend `@axiom/report-kit`:
   - Include `reconciliation_statement.json` and `ledger_chain_receipt.json` inside the deterministic archive.
   - Update `packages/report-kit/python/verify_evidence_pack.py` to verify the dual-control and ledger receipts offline.
@@ -238,12 +249,13 @@ pramaan: {
 - [ ] Unit & integration tests in `services/bff/src/routes/pramaan-closure.test.ts`.
 
 ### Workstream W14: Web Workbench UI, Closure Workflow & Brand Attribution
+
 - [ ] **Execution Console (`apps/web/src/app/(app)/execution/batch-card.tsx`):**
   - Update the reconciliation card to prominently feature **Samadhan · Maker-Checker & Reconciler**.
 - [ ] **Reports & Proof Attestation Center (`apps/web/src/app/(app)/reports`):**
   - Clarify the distinction:
-    - *Prativedan:* Generates and displays "Working Reports & Gap Scan Summaries".
-    - *Pramaan:* Generates and displays "Statutory Closure Dossiers & Sealed Attestations".
+    - _Prativedan:_ Generates and displays "Working Reports & Gap Scan Summaries".
+    - _Pramaan:_ Generates and displays "Statutory Closure Dossiers & Sealed Attestations".
   - Render the interactive Gold [`ProofSeal`](file:///Users/vikash/Axiom%20Proof/apps/web/src/app/%28app%29/execution/batch-card.tsx#L464) upon verified closure.
 - [ ] **Sidebar Agent Drawer (`apps/web/src/app/(app)/sidebar-agent-panel.tsx`):**
   - Add **Samadhan** (linking to `/execution`).
@@ -255,15 +267,15 @@ pramaan: {
 
 ## 5. Acceptance Criteria & Verification Gates
 
-| Gate | Acceptance Requirement | Test Tool |
-| :--- | :--- | :--- |
-| **G1: Contract Integrity** | All 12 agents defined in `enums.ts` and `agents.ts` with 0 type errors. | `pnpm --filter @axiom/types test` |
-| **G2: Database Immutability** | Migration 0072 applied; out-of-scope constraint tested; ledger action registered. | `scripts/test-database.sh` |
-| **G3: Runtime Isolation** | `Sudhaar.can_mutate == False`, `Samadhan.can_mutate == False`, `Karya.can_mutate == True`. | `uv run pytest services/agent-runtime` |
-| **G4: Offline Verification** | `verify_evidence_pack.py` passes 100% on generated Pramaan ZIP packs. | `pnpm --filter @axiom/report-kit test` |
-| **G5: End-to-End Walkthrough** | Complete audit trail from finding to sealed Pramaan dossier passes in E2E. | `pnpm test:e2e` |
+| Gate                           | Acceptance Requirement                                                                     | Test Tool                              |
+| :----------------------------- | :----------------------------------------------------------------------------------------- | :------------------------------------- |
+| **G1: Contract Integrity**     | All 12 agents defined in `enums.ts` and `agents.ts` with 0 type errors.                    | `pnpm --filter @axiom/types test`      |
+| **G2: Database Immutability**  | Migration 0072 applied; out-of-scope constraint tested; ledger action registered.          | `scripts/test-database.sh`             |
+| **G3: Runtime Isolation**      | `Sudhaar.can_mutate == False`, `Samadhan.can_mutate == False`, `Karya.can_mutate == True`. | `uv run pytest services/agent-runtime` |
+| **G4: Offline Verification**   | `verify_evidence_pack.py` passes 100% on generated Pramaan ZIP packs.                      | `pnpm --filter @axiom/report-kit test` |
+| **G5: End-to-End Walkthrough** | Complete audit trail from finding to sealed Pramaan dossier passes in E2E.                 | `pnpm test:e2e`                        |
 
 ---
 
-*Authored for Axiom Proof — Axiom Minds Private Limited.*  
-*"Agents do the work. You approve. The proof is automatic."*
+_Authored for Axiom Proof — Axiom Minds Private Limited._  
+_"Agents do the work. You approve. The proof is automatic."_

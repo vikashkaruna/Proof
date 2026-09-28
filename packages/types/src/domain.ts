@@ -548,7 +548,11 @@ export const PramaanDossierSchema = z.object({
   status: DossierStatusSchema,
   merkleRoot: z.string().regex(/^[0-9a-f]{64}$/),
   manifestHash: z.string().regex(/^[0-9a-f]{64}$/),
-  archiveHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  archiveHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
   archiveBytes: z.number().int().min(1).nullable().optional(),
   proofSealHash: z.string().regex(/^[0-9a-f]{64}$/),
   sealedAt: z.string().datetime().nullable().optional(),
@@ -577,4 +581,3 @@ export const ReportEmailDispatchSchema = z.object({
   dispatchedAt: z.string().datetime(),
 });
 export type ReportEmailDispatch = z.infer<typeof ReportEmailDispatchSchema>;
-

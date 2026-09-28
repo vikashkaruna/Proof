@@ -122,9 +122,9 @@ export function EmailDispatchModal({
             </div>
             <p className="text-[11px] text-teal-800 leading-relaxed">
               Dispatched from <strong>platform@axiomproof.ai</strong> with CC to{' '}
-              <strong>sales@axiomproof.ai</strong> and BCC to{' '}
-              <strong>founder@axiomminds.ai</strong>. Fully branded under Axiom Minds Private Limited
-              and Axiom Proof compliance credentials.
+              <strong>sales@axiomproof.ai</strong> and BCC to <strong>founder@axiomminds.ai</strong>
+              . Fully branded under Axiom Minds Private Limited and Axiom Proof compliance
+              credentials.
             </p>
           </div>
 

@@ -5,7 +5,10 @@ import { EvidenceError, type EvidenceDatabase, receiptSchema } from './evidence-
 export const digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const uuid = z
   .string()
-  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, 'Invalid UUID');
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID',
+  );
 const timestamp = z.string().refine((s) => Number.isFinite(Date.parse(s)));
 export const reportStatus = z.enum(['draft', 'approved', 'rejected', 'published', 'archived']);
 export const reportSchema = z.object({

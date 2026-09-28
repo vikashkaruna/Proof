@@ -133,14 +133,16 @@ export class PramaanClosureService {
 
     const insertWithSignal =
       signal &&
-      typeof (insertQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
-        'function'
-        ? (insertQuery as unknown as { abortSignal: (s: AbortSignal) => typeof insertQuery }).abortSignal(
-            signal,
-          )
+      typeof (insertQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown })
+        .abortSignal === 'function'
+        ? (
+            insertQuery as unknown as { abortSignal: (s: AbortSignal) => typeof insertQuery }
+          ).abortSignal(signal)
         : insertQuery;
 
-    const { error: insertError } = (await (insertWithSignal as unknown as Promise<{ error: unknown }>));
+    const { error: insertError } = await (insertWithSignal as unknown as Promise<{
+      error: unknown;
+    }>);
     if (insertError) {
       throw new EvidenceError('closure_storage_unavailable', 503);
     }
@@ -257,20 +259,23 @@ export class PramaanClosureService {
       signal &&
       typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
         'function'
-        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal)
+        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
+            signal,
+          )
         : query;
 
-    const res = (
+    const res =
       typeof (queryWithSignal as unknown as { maybeSingle?: () => unknown }).maybeSingle ===
       'function'
-        ? await (queryWithSignal as unknown as {
-            maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: unknown }>;
-          }).maybeSingle()
+        ? await (
+            queryWithSignal as unknown as {
+              maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: unknown }>;
+            }
+          ).maybeSingle()
         : await (queryWithSignal as unknown as Promise<{
             data: Record<string, unknown>[] | null;
             error: unknown;
-          }>)
-    );
+          }>);
 
     if (res.error) throw new EvidenceError('closure_storage_unavailable', 503);
     const row = Array.isArray(res.data) ? res.data[0] : res.data;
@@ -326,7 +331,9 @@ export class PramaanClosureService {
       signal &&
       typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
         'function'
-        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal)
+        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
+            signal,
+          )
         : query;
 
     const { data, count, error } = await (queryWithSignal as unknown as Promise<{

@@ -577,12 +577,137 @@ export function PortalClient({
             </div>
           ) : (
             <div
-              className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-slate-500"
+              className="rounded-2xl border border-[#e4e8ee] bg-white p-6 shadow-sm space-y-6"
               data-testid="portal-no-engagement"
             >
-              {assessmentUnavailable
-                ? 'Saved assessment results are unavailable right now. Try again.'
-                : 'No assessment engagement recorded for this organization.'}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f5] pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 border border-teal-200 text-[#0FB5A5] font-bold">
+                    P0
+                  </div>
+                  <div>
+                    <h3 className="font-heading text-sm font-semibold text-[#1E2A4A]">
+                      {assessmentUnavailable
+                        ? 'Saved assessment results are unavailable right now. Try again.'
+                        : 'No assessment engagement recorded for this organization.'}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Compliance posture score, gap telemetry, and statutory citations will appear
+                      once Parikshan executes the first baseline scan.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/assessment"
+                  className="rounded-lg bg-[#0FB5A5] hover:bg-[#0a8d80] text-white text-xs font-semibold px-3.5 py-2 transition-colors"
+                >
+                  Start Assessment (Parikshan) →
+                </Link>
+              </div>
+
+              {/* Statutory Framework Compliance Domains Table Control */}
+              <div className="space-y-3">
+                <div className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+                  <span>Statutory Framework Architecture (DPDPA 2023)</span>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Status: Awaiting First Scan
+                  </span>
+                </div>
+                <div className="rounded-xl border border-[#e4e8ee] overflow-hidden">
+                  <div className="grid grid-cols-[minmax(180px,1fr)_140px_100px_130px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+                    <div>Statutory Domain</div>
+                    <div>DPDPA Reference</div>
+                    <div>Controls Scope</div>
+                    <div className="text-right">Scan Posture</div>
+                  </div>
+                  <div className="divide-y divide-[#eef1f5] text-xs">
+                    {[
+                      {
+                        domain: 'Data Discovery & Digital Personal Data',
+                        ref: 'Section 8(2)',
+                        count: 'Discovery Ready',
+                      },
+                      {
+                        domain: 'Classification & Data Mapping (RoPA)',
+                        ref: 'Section 8(2)',
+                        count: 'Taxonomy Ready',
+                      },
+                      {
+                        domain: 'Reasonable Security Safeguards',
+                        ref: 'Section 8(5)',
+                        count: 'Controls Defined',
+                      },
+                      {
+                        domain: 'Data Principal Rights & DSAR Workflows',
+                        ref: 'Sections 11–14',
+                        count: 'Gateways Online',
+                      },
+                      {
+                        domain: 'Notice, Consent & Withdrawal Architecture',
+                        ref: 'Section 5 & 6',
+                        count: 'Templates Primed',
+                      },
+                      {
+                        domain: 'Data Protection Officer & Statutory Redressal',
+                        ref: 'Section 8(9)',
+                        count: 'Roles Defined',
+                      },
+                    ].map((row, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-[minmax(180px,1fr)_140px_100px_130px] gap-2 items-center px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="font-medium text-[#1E2A4A]">{row.domain}</div>
+                        <div className="font-mono text-slate-500 text-[11px]">{row.ref}</div>
+                        <div className="text-slate-600 text-[11.5px]">{row.count}</div>
+                        <div className="text-right">
+                          <span className="rounded bg-slate-100 text-slate-600 px-2 py-0.5 text-[10px] font-medium">
+                            Pending Scan
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Links inside Engagement */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                <Link
+                  href="/assessment"
+                  className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-[#1E2A4A]">Assessment Pipeline</div>
+                    <div className="text-[11px] text-slate-500">Parikshan gap telemetry</div>
+                  </div>
+                  <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
+                </Link>
+
+                <Link
+                  href="/controls"
+                  className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-[#1E2A4A]">Control Library</div>
+                    <div className="text-[11px] text-slate-500">Published control library</div>
+                  </div>
+                  <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
+                </Link>
+
+                <Link
+                  href="/reports"
+                  className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-[#1E2A4A]">
+                      Executive Report Pack
+                    </div>
+                    <div className="text-[11px] text-slate-500">Board & DPB attestations</div>
+                  </div>
+                  <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
+                </Link>
+              </div>
             </div>
           )}
 
@@ -627,8 +752,35 @@ export function PortalClient({
           </div>
 
           {plans.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-              No pending remediation plans awaiting review.
+            <div className="rounded-2xl border border-[#e4e8ee] bg-white overflow-hidden shadow-sm">
+              <div className="grid grid-cols-[140px_minmax(180px,1fr)_120px_100px_120px_100px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+                <div>Plan ID / Ver</div>
+                <div>Plan Title & Proposing Agent</div>
+                <div>Target Resource</div>
+                <div>Risk Tier</div>
+                <div>Rollback Proof</div>
+                <div className="text-right">Action</div>
+              </div>
+              <div className="p-8 text-center space-y-2.5">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 text-[#0a8d80] text-base">
+                  ✓
+                </div>
+                <div className="text-xs font-semibold text-[#1E2A4A]">
+                  No pending remediation plans awaiting review.
+                </div>
+                <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
+                  All drafted plans have been reconciled or executed. Sudhaar drafts remediation
+                  plans when non-compliant controls are scored by Parikshan.
+                </p>
+                <div className="flex justify-center gap-2 pt-1">
+                  <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-mono text-[#0a8d80] font-semibold">
+                    BR-1 Human Approval Mandatory
+                  </span>
+                  <span className="rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600">
+                    Rollback Scripts Enforced
+                  </span>
+                </div>
+              </div>
             </div>
           ) : (
             plans.map((plan) => (
@@ -742,8 +894,35 @@ export function PortalClient({
           </div>
 
           {evidence.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-              No sealed evidence items on record.
+            <div className="rounded-2xl border border-[#e4e8ee] bg-white overflow-hidden shadow-sm">
+              <div className="grid grid-cols-[160px_130px_minmax(180px,1fr)_160px_120px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+                <div>Artifact ID / Type</div>
+                <div>Sealing Agent</div>
+                <div>Description & Scope</div>
+                <div>Storage Vault URI</div>
+                <div className="text-right">Compliance Mode</div>
+              </div>
+              <div className="p-8 text-center space-y-2.5">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-[#C9A227] text-base font-bold">
+                  ✦
+                </div>
+                <div className="text-xs font-semibold text-[#1E2A4A]">
+                  No sealed evidence items on record.
+                </div>
+                <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
+                  Cryptographic evidence vault is active with AWS S3 Object Lock Compliance Mode in
+                  ap-south-1. Artifacts sealed by Saakshi will appear here with SHA-256 integrity
+                  proofs.
+                </p>
+                <div className="flex justify-center gap-2 pt-1">
+                  <span className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-mono text-[#8a6d10] font-semibold">
+                    S3 Object Lock Compliance Mode
+                  </span>
+                  <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-mono text-[#0a8d80]">
+                    Zero Data Egress (ap-south-1)
+                  </span>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="divide-y divide-[#eef1f5] rounded-2xl border border-[#e4e8ee] bg-white shadow-2xs overflow-hidden">
@@ -847,8 +1026,35 @@ export function PortalClient({
           </div>
 
           {dsars.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-              No data principal requests on record.
+            <div className="rounded-2xl border border-[#e4e8ee] bg-white overflow-hidden shadow-sm">
+              <div className="grid grid-cols-[140px_130px_minmax(180px,1fr)_140px_110px_90px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+                <div>Request ID</div>
+                <div>Principal Name</div>
+                <div>Statutory Right (§11-14)</div>
+                <div>Received Date</div>
+                <div>SLA Target</div>
+                <div className="text-right">Status</div>
+              </div>
+              <div className="p-8 text-center space-y-2.5">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-blue-600 text-base">
+                  🛡️
+                </div>
+                <div className="text-xs font-semibold text-[#1E2A4A]">
+                  No data principal requests on record.
+                </div>
+                <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
+                  Data principal rights requests submitted through the portal or API endpoints will
+                  appear here with automated 15-day statutory SLA tracking.
+                </p>
+                <div className="flex justify-center gap-2 pt-1">
+                  <span className="rounded bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-mono text-blue-700 font-semibold">
+                    DPDPA §11-14 SLA Gateway
+                  </span>
+                  <span className="rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600">
+                    Statutory Window: 15 Days
+                  </span>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="divide-y divide-[#eef1f5] rounded-2xl border border-[#e4e8ee] bg-white shadow-2xs overflow-hidden">
@@ -928,8 +1134,36 @@ export function PortalClient({
           </div>
 
           {ledger.length === 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-              No ledger activity recorded for this tenant.
+            <div className="rounded-2xl border border-[#e4e8ee] bg-white overflow-hidden shadow-sm">
+              <div className="grid grid-cols-[80px_130px_minmax(160px,1fr)_140px_110px_90px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+                <div>Sequence #</div>
+                <div>Actor / Agent</div>
+                <div>Action Type & Target</div>
+                <div>Chain Hash (SHA-256)</div>
+                <div>Result</div>
+                <div className="text-right">Time (IST)</div>
+              </div>
+              <div className="p-8 text-center space-y-2.5">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-[#0FB5A5] text-base">
+                  ⛓️
+                </div>
+                <div className="text-xs font-semibold text-[#1E2A4A]">
+                  No ledger activity recorded for this tenant.
+                </div>
+                <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
+                  The append-only audit ledger is initialized. Every mutation, human approval, and
+                  agent execution will be appended sequentially via PostgreSQL SECURITY DEFINER
+                  function with strict hash chaining.
+                </p>
+                <div className="flex justify-center gap-2 pt-1">
+                  <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-mono text-[#0a8d80] font-semibold">
+                    append_ledger() SECURITY DEFINER
+                  </span>
+                  <span className="rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600">
+                    Cryptographic SHA-256 Chaining
+                  </span>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="divide-y divide-[#eef1f5] rounded-2xl border border-[#e4e8ee] bg-white shadow-2xs overflow-hidden">

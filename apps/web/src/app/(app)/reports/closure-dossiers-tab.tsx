@@ -13,11 +13,7 @@ export interface ClosureDossiersTabProps {
   canPrepare: boolean;
 }
 
-export function ClosureDossiersTab({
-  tenantId,
-  canRelease,
-  canPrepare,
-}: ClosureDossiersTabProps) {
+export function ClosureDossiersTab({ tenantId, canRelease, canPrepare }: ClosureDossiersTabProps) {
   const [dossiers, setDossiers] = useState<PramaanDossier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,8 +72,7 @@ export function ClosureDossiersTab({
       return;
     }
     // Fallback uuid if none entered
-    const targetEngagement =
-      engagementId.trim() || '11111111-1111-4111-8111-111111111111';
+    const targetEngagement = engagementId.trim() || '11111111-1111-4111-8111-111111111111';
 
     setSynthesizing(true);
     setSynthesizeError('');
@@ -142,8 +137,8 @@ export function ClosureDossiersTab({
               </h2>
               <p className="text-xs text-slate-600 mt-1 max-w-2xl">
                 Master synthesis authority for the CLOSURE phase. Aggregates findings, remediation
-                actions, Samadhan maker-checker certificates, Saakshi WORM evidence, and Lekha
-                audit ledger roots into authoritative, offline-verifiable proof packs.
+                actions, Samadhan maker-checker certificates, Saakshi WORM evidence, and Lekha audit
+                ledger roots into authoritative, offline-verifiable proof packs.
               </p>
             </div>
           </div>

@@ -804,8 +804,24 @@ function AgentSvgContent({ agent, state, accent }: SvgContentProps) {
       return (
         <g>
           {/* Vertical mast and stand */}
-          <line x1="16" y1="8" x2="16" y2="26" stroke={accent} strokeWidth="1.75" strokeLinecap="round" />
-          <line x1="10" y1="26" x2="22" y2="26" stroke={accent} strokeWidth="2" strokeLinecap="round" />
+          <line
+            x1="16"
+            y1="8"
+            x2="16"
+            y2="26"
+            stroke={accent}
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+          <line
+            x1="10"
+            y1="26"
+            x2="22"
+            y2="26"
+            stroke={accent}
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
           <circle cx="16" cy="8" r="2" fill={accent} />
           {/* Oscillating balance beam */}
           <g
@@ -818,7 +834,15 @@ function AgentSvgContent({ agent, state, accent }: SvgContentProps) {
                   : undefined,
             }}
           >
-            <line x1="6" y1="11" x2="26" y2="11" stroke={accent} strokeWidth="2" strokeLinecap="round" />
+            <line
+              x1="6"
+              y1="11"
+              x2="26"
+              y2="11"
+              stroke={accent}
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
             {/* Left suspension & pan (Maker / Sudhaar) */}
             <line
               x1="8"
@@ -838,7 +862,12 @@ function AgentSvgContent({ agent, state, accent }: SvgContentProps) {
               strokeWidth="1"
               strokeDasharray={isWorking ? '2 1' : 'none'}
             />
-            <path d="M4 17C4 19 12 19 12 17Z" fill={`${accent}30`} stroke={accent} strokeWidth="1.25" />
+            <path
+              d="M4 17C4 19 12 19 12 17Z"
+              fill={`${accent}30`}
+              stroke={accent}
+              strokeWidth="1.25"
+            />
             <path
               d="M6 16L7.5 17.5L10 15"
               stroke={accent}
@@ -866,7 +895,12 @@ function AgentSvgContent({ agent, state, accent }: SvgContentProps) {
               strokeWidth="1"
               strokeDasharray={isWorking ? '2 1' : 'none'}
             />
-            <path d="M20 17C20 19 28 19 28 17Z" fill={`${accent}30`} stroke={accent} strokeWidth="1.25" />
+            <path
+              d="M20 17C20 19 28 19 28 17Z"
+              fill={`${accent}30`}
+              stroke={accent}
+              strokeWidth="1.25"
+            />
             <path
               d="M22 16L23.5 17.5L26 15"
               stroke={accent}
