@@ -25,7 +25,7 @@ test.describe('Public gap-scan funnel', () => {
     await expect(page.getByText(/Free 5-minute DPDPA gap-scan/i)).toBeVisible();
   });
 
-  test('the agents page lists all 10 named agents', async ({ page }) => {
+  test('the agents page lists all 12 named agents', async ({ page }) => {
     await page.goto(`${marketingUrl}/agents`);
     const agents = [
       'Drishti',
@@ -38,6 +38,8 @@ test.describe('Public gap-scan funnel', () => {
       'Nazar',
       'Prativedan',
       'Sanket',
+      'Samadhan',
+      'Pramaan',
     ];
     for (const name of agents) {
       await expect(page.getByText(name, { exact: false }).first()).toBeVisible();

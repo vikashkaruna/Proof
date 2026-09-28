@@ -31,35 +31,35 @@ insert into public.users(id, email, is_axiom_internal) values
   ('00000000-0000-0000-0000-0000000000c1', 'client@test.invalid', false);
 
 insert into public.tenants(id, slug, name) values
-  ('00000000-0000-0000-0000-0000000000t1', 'tenant-closure', 'Closure Tenant');
+  ('00000000-0000-0000-0000-000000000011', 'tenant-closure', 'Closure Tenant');
 
 insert into public.control_libraries(version, published_at, published_by, change_log, control_count)
   values ('test-closure', now(), 'test', 'test', 0);
 
 insert into public.engagements(id, tenant_id, library_version, title)
-  values ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000t1', 'test-closure', 'Closure Engagement');
+  values ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-000000000011', 'test-closure', 'Closure Engagement');
 
 insert into public.remediation_plans(id, tenant_id, engagement_id, library_version, title)
-  values ('00000000-0000-0000-0000-0000000000p1', '00000000-0000-0000-0000-0000000000t1',
+  values ('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000011',
           '00000000-0000-0000-0000-0000000000e1', 'test-closure', 'Closure Plan');
 
 insert into public.remediation_actions(id, tenant_id, plan_id, sequence, action_type, description, risk_score, parameters, rollback_definition)
 values
-  ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000t1', '00000000-0000-0000-0000-0000000000p1', 1,
+  ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000021', 1,
    'data.mask', 'Mask phone', 10, '{"system": "crm"}'::jsonb, '{}'::jsonb);
 
 insert into public.approval_tokens(id, tenant_id, plan_id, action_ids, approver_id, mode, signature, signed_payload, nonce, expires_at, status)
-values ('00000000-0000-0000-0000-0000000000k1', '00000000-0000-0000-0000-0000000000t1', '00000000-0000-0000-0000-0000000000p1',
+values ('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000021',
         array['00000000-0000-0000-0000-0000000000a1']::uuid[],
         '00000000-0000-0000-0000-0000000000c1', 'batch', 'sig-closure', '{}'::jsonb, 'nonce-c1',
         now() + interval '1 hour', 'consumed');
 
 insert into public.execution_batches(id, tenant_id, plan_id, request_key, correlation_id, approval_token_id,
   content_digest, mode, concurrency, stop_on_failure, status, finished_at)
-values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000t1',
-        '00000000-0000-0000-0000-0000000000p1', 'req-closure-1', gen_random_uuid(),
-        '00000000-0000-0000-0000-0000000000k1',
-        public.action_set_content_digest('00000000-0000-0000-0000-0000000000t1', '00000000-0000-0000-0000-0000000000p1',
+values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-000000000011',
+        '00000000-0000-0000-0000-000000000021', 'req-closure-1', gen_random_uuid(),
+        '00000000-0000-0000-0000-000000000031',
+        public.action_set_content_digest('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000021',
           array['00000000-0000-0000-0000-0000000000a1']::uuid[]),
         'batch', 1, true, 'completed', now());
 
@@ -70,8 +70,8 @@ update public.remediation_actions
 
 -- ─── Test 1: Samadhan Reconciliation Attribution ─────────────────────
 select public.record_plan_reconciliation(
-  '00000000-0000-0000-0000-0000000000t1',
-  '00000000-0000-0000-0000-0000000000p1',
+  '00000000-0000-0000-0000-000000000011',
+  '00000000-0000-0000-0000-000000000021',
   '00000000-0000-0000-0000-0000000000b1',
   gen_random_uuid(),
   'Batch req-closure-1 finished completed. Approved 1 action(s): succeeded=1.',
@@ -100,7 +100,7 @@ insert into public.pramaan_dossiers (
   merkle_root, manifest_hash, archive_hash, archive_bytes, proof_seal_hash
 ) values (
   '00000000-0000-0000-0000-0000000000d1',
-  '00000000-0000-0000-0000-0000000000t1',
+  '00000000-0000-0000-0000-000000000011',
   '00000000-0000-0000-0000-0000000000e1',
   'full_closure',
   'Final Statutory DPDPA Closure Dossier',
@@ -115,7 +115,7 @@ insert into public.pramaan_dossiers (
 -- Client user cannot seal (requires founder authority)
 select pg_temp.assert_eq(
   (select public.seal_pramaan_dossier(
-     '00000000-0000-0000-0000-0000000000t1',
+     '00000000-0000-0000-0000-000000000011',
      '00000000-0000-0000-0000-0000000000d1',
      '00000000-0000-0000-0000-0000000000c1',
      repeat('e', 64),
@@ -127,7 +127,7 @@ select pg_temp.assert_eq(
 -- Founder seals with matching proof seal
 select pg_temp.assert_eq(
   (select public.seal_pramaan_dossier(
-     '00000000-0000-0000-0000-0000000000t1',
+     '00000000-0000-0000-0000-000000000011',
      '00000000-0000-0000-0000-0000000000d1',
      '00000000-0000-0000-0000-0000000000f1',
      repeat('e', 64),
@@ -148,7 +148,7 @@ select pg_temp.assert_true(
 -- ─── Test 3: Report Email Dispatch ───────────────────────────────────
 select pg_temp.assert_eq(
   (select public.record_report_email_dispatch(
-     '00000000-0000-0000-0000-0000000000t1',
+     '00000000-0000-0000-0000-000000000011',
      null,
      '00000000-0000-0000-0000-0000000000d1',
      'auditor@external.invalid',

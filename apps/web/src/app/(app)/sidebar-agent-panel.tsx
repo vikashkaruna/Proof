@@ -351,8 +351,8 @@ export function SidebarAgentPanel({
         </button>
       </div>
 
-      {/* 10 Agent Mini Icons Grid */}
-      <div className="mt-2.5 grid grid-cols-5 gap-1.5">
+      {/* 12 Agent Mini Icons Grid (3 rows x 4) */}
+      <div className="mt-2.5 grid grid-cols-4 gap-1.5">
         {ALL_AGENTS.map((agent) => {
           const state = getAgentState(agent.name);
           const isSelected = selectedAgent?.name === agent.name;

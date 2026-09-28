@@ -69,7 +69,7 @@ test('the estate graph derives agent access from grants and isolates Karya write
   await graph.getByLabel('Estate filter', { exact: true }).selectOption({ label: estateName });
   await expect(graph.locator('[data-edge="read"]')).toHaveCount(1);
   await expect(graph.locator('[data-edge="write"]')).toHaveCount(1);
-  await expect(graph.locator('[data-node="agent"]')).toHaveCount(10);
+  await expect(graph.locator('[data-node="agent"]')).toHaveCount(12);
   await graph.getByRole('button', { name: 'agent Sudhaar' }).click();
   await expect(page.getByTestId('no-relationships')).toContainText('holds no client-system access');
   await graph.getByRole('button', { name: 'Everything Karya can write to' }).click();
