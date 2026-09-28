@@ -48,6 +48,9 @@ logs/
 
 # Coverage & test artifacts
 coverage/
+.coverage
+.coverage.*
+htmlcov/
 .nyc_output/
 playwright-report/
 test-results/
