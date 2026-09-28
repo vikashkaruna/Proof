@@ -32,6 +32,10 @@ This section supersedes conflicting historical handoff instructions below. **All
   - `pnpm test:restore`: 100% passing (RTO=21s vs <= 4h).
   - `pnpm build`: 4/4 apps and services successfully built.
   - `scripts/security-scan.sh`: 0 vulnerabilities, clean.
+- **Staging Release & Merged PR:**
+  - Pull Request [#92](https://github.com/vikashkaruna/Proof/pull/92) merged into `staging` via merge commit `755f669`.
+  - 22 of 22 GitHub Actions CI workflows passed green (100% success).
+  - Branch `origin/staging` is fully synchronized with Revision 108 and W0–W10 deliverables.
 
 ## Session close-out and handoff — Revision 98 (2026-09-27)
 
