@@ -115,7 +115,7 @@ describe('Approval Exports HTTP Routes', () => {
               createdAt: new Date().toISOString(),
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -152,7 +152,7 @@ describe('Approval Exports HTTP Routes', () => {
               createdAt: new Date().toISOString(),
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -178,7 +178,7 @@ describe('Approval Exports HTTP Routes', () => {
               createdAt: new Date().toISOString(),
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -203,7 +203,7 @@ describe('Approval Exports HTTP Routes', () => {
               createdAt: new Date().toISOString(),
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -233,7 +233,7 @@ describe('Approval Exports HTTP Routes', () => {
               createdAt: new Date().toISOString(),
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));

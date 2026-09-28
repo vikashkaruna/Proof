@@ -72,10 +72,12 @@ export function ReportsClient(access: Access) {
   return (
     <div className="min-w-0 space-y-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports & Statutory Compliance Artifacts</h1>
+        <h1 className="text-2xl font-semibold text-[#1E2A4A]">
+          Reports & Statutory Compliance Artifacts
+        </h1>
         <p className="text-sm text-slate-600">
-          Statutory DPDPA reporting engine, evidence packs, and tamper-evident audit registers.
-          All artifacts are cryptographically hashed and sealed with immutable audit ledgering.
+          Statutory DPDPA reporting engine, evidence packs, and tamper-evident audit registers. All
+          artifacts are cryptographically hashed and sealed with immutable audit ledgering.
         </p>
       </header>
 
@@ -83,41 +85,57 @@ export function ReportsClient(access: Access) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">BOARD REPORT</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700">
+              BOARD REPORT
+            </span>
             <span className="text-xs text-slate-500">Prativedan</span>
           </div>
           <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
-          <p className="text-xs text-slate-600 mb-3">Executive posture scores, financial penalty exposure, and domain maturity analysis.</p>
+          <p className="text-xs text-slate-600 mb-3">
+            Executive posture scores, financial penalty exposure, and domain maturity analysis.
+          </p>
           <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">AUDITOR PACK</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+              AUDITOR PACK
+            </span>
             <span className="text-xs text-slate-500">Prativedan / Saakshi</span>
           </div>
           <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
-          <p className="text-xs text-slate-600 mb-3">Itemized control evaluations, linked evidence receipts, and independent attestation.</p>
+          <p className="text-xs text-slate-600 mb-3">
+            Itemized control evaluations, linked evidence receipts, and independent attestation.
+          </p>
           <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700">DPB SUBMISSION</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
+              DPB SUBMISSION
+            </span>
             <span className="text-xs text-slate-500">Prativedan</span>
           </div>
           <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
-          <p className="text-xs text-slate-600 mb-3">Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.</p>
+          <p className="text-xs text-slate-600 mb-3">
+            Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
+          </p>
           <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">TECH REGISTER</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+              TECH REGISTER
+            </span>
             <span className="text-xs text-slate-500">Sudhaar / Karya</span>
           </div>
           <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
-          <p className="text-xs text-slate-600 mb-3">Full sequence of automated mutations, dry-run verified diffs, and rollback validation.</p>
+          <p className="text-xs text-slate-600 mb-3">
+            Full sequence of automated mutations, dry-run verified diffs, and rollback validation.
+          </p>
           <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
         </div>
       </div>
@@ -125,9 +143,12 @@ export function ReportsClient(access: Access) {
       {/* Approval History Export Banner */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">Tenant Approval History Audit Export</h3>
+          <h3 className="text-sm font-semibold text-slate-900">
+            Tenant Approval History Audit Export
+          </h3>
           <p className="text-xs text-slate-600">
-            Export complete, tamper-evident audit history of all human and standing-policy approvals with cryptographic signatures.
+            Export complete, tamper-evident audit history of all human and standing-policy approvals
+            with cryptographic signatures.
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -33,7 +33,8 @@ describe('Board Report Contracts & Renderer', () => {
       medium_gaps: 3,
       low_gaps: 1,
       estimated_exposure_inr: 250000000,
-      narrative: 'Meridian Pay demonstrates strong foundational security controls across authentication and encryption. Immediate remediation is required for cross-border data transfer logging under Section 16 of DPDPA.',
+      narrative:
+        'Meridian Pay demonstrates strong foundational security controls across authentication and encryption. Immediate remediation is required for cross-border data transfer logging under Section 16 of DPDPA.',
     },
     key_findings: [
       {
@@ -42,8 +43,10 @@ describe('Board Report Contracts & Renderer', () => {
         severity: 'critical',
         title: 'Unencrypted Personal Data at Rest in Secondary Data Store',
         score: 0,
-        gap_summary: 'Postgres read replica contains customer identifier hashes without field-level salt.',
-        remediation_recommendation: 'Enable AES-256 GCM encryption on replica storage volumes and salt all HMAC pipelines.',
+        gap_summary:
+          'Postgres read replica contains customer identifier hashes without field-level salt.',
+        remediation_recommendation:
+          'Enable AES-256 GCM encryption on replica storage volumes and salt all HMAC pipelines.',
       },
     ],
     action_plan: [

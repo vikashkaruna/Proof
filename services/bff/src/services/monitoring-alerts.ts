@@ -53,7 +53,7 @@ export class MonitoringAlertsService {
   async listAlerts(
     tenantId: string,
     query: ListAlertsQuery = { limit: 50 },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ alerts: MonitoringAlertRow[]; summary: AlertSummary }> {
     const q = this.db
       .from('monitoring_alerts')
@@ -74,10 +74,10 @@ export class MonitoringAlertsService {
     const alerts = (data ?? []) as MonitoringAlertRow[];
     const unread = alerts.filter((a) => a.status === 'unread' || a.status === 'read').length;
     const critical = alerts.filter(
-      (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'critical'
+      (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'critical',
     ).length;
     const high = alerts.filter(
-      (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'high'
+      (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'high',
     ).length;
 
     return {
@@ -94,7 +94,7 @@ export class MonitoringAlertsService {
   async dispatchAlerts(
     tenantId: string,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{
     dispatchedCount: number;
     totalUnread: number;
@@ -107,7 +107,7 @@ export class MonitoringAlertsService {
         p_tenant_id: tenantId,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error) {
@@ -127,7 +127,7 @@ export class MonitoringAlertsService {
     alertId: string,
     userId: string,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ dismissed: boolean; alertId: string; acknowledgedBy?: string }> {
     const result = await this.rpc(
       'dismiss_monitoring_alert',
@@ -137,7 +137,7 @@ export class MonitoringAlertsService {
         p_user_id: userId,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error) {

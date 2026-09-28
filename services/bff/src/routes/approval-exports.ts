@@ -31,7 +31,7 @@ function invalid(c: Ctx, message?: string) {
 }
 
 export function approvalExportRoutes(
-  dependencies: { db?: EvidenceDatabase; service?: ApprovalExportService } = {}
+  dependencies: { db?: EvidenceDatabase; service?: ApprovalExportService } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
@@ -52,7 +52,7 @@ export function approvalExportRoutes(
         c.get('tenantId'),
         c.get('user').id,
         parsed.data,
-        signal
+        signal,
       );
       return c.json(result, 200);
     } catch (cause) {
@@ -77,7 +77,7 @@ export function approvalExportRoutes(
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
 
       const headers: Record<string, string> = {
@@ -122,7 +122,7 @@ export function approvalExportRoutes(
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
 
       const headers: Record<string, string> = {

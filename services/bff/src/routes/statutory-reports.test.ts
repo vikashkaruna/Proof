@@ -28,16 +28,19 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
 
 describe('Statutory Reports HTTP Routes', () => {
   it('enforces RBAC on statutory report generation — viewer is denied', async () => {
-    const res = await app(fixture.viewer, UserRole.VIEWER).request('/v1/reports/statutory/generate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        kind: 'auditor',
-        engagementId: randomUUID(),
-        title: 'Statutory Auditor Pack',
-        content: {},
-      }),
-    });
+    const res = await app(fixture.viewer, UserRole.VIEWER).request(
+      '/v1/reports/statutory/generate',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'auditor',
+          engagementId: randomUUID(),
+          title: 'Statutory Auditor Pack',
+          content: {},
+        }),
+      },
+    );
     expect(res.status).toBe(403);
   });
 
@@ -67,7 +70,8 @@ describe('Statutory Reports HTTP Routes', () => {
         lead_auditor_name: 'Rajesh Sharma, FCA',
         period_start: '2026-01-01T00:00:00.000Z',
         period_end: '2026-06-30T23:59:59.000Z',
-        scope_description: 'Full statutory assessment of customer personal data pipelines and consent registries.',
+        scope_description:
+          'Full statutory assessment of customer personal data pipelines and consent registries.',
       },
       compliance_metrics: {
         posture_score: 90,
@@ -109,7 +113,8 @@ describe('Statutory Reports HTTP Routes', () => {
           auditor_name: 'Rajesh Sharma',
           firm: 'Deloitte India Risk Advisory',
           designation: 'Lead Privacy Auditor',
-          attestation_statement: 'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
+          attestation_statement:
+            'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
           timestamp: new Date().toISOString(),
         },
         approved_by: null,
@@ -132,7 +137,7 @@ describe('Statutory Reports HTTP Routes', () => {
               htmlHash: 'e'.repeat(64),
             },
             error: null,
-          })
+          }),
         );
       }
       if (name === 'attach_statutory_report_pdf') {
@@ -145,7 +150,7 @@ describe('Statutory Reports HTTP Routes', () => {
               status: 'pdf_attached',
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -277,7 +282,10 @@ describe('Statutory Reports HTTP Routes', () => {
 
     const res = await app().request('/v1/reports/statutory', { method: 'GET' });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { reports: Array<{ id: string; kind: string }>; total: number };
+    const body = (await res.json()) as {
+      reports: Array<{ id: string; kind: string }>;
+      total: number;
+    };
     expect(body.reports.some((r) => r.id === repId)).toBe(true);
   });
 });

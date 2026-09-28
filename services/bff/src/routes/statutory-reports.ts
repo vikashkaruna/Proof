@@ -31,7 +31,7 @@ function invalid(c: Ctx, message?: string) {
 }
 
 export function statutoryReportRoutes(
-  dependencies: { db?: EvidenceDatabase; service?: StatutoryReportService } = {}
+  dependencies: { db?: EvidenceDatabase; service?: StatutoryReportService } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
@@ -54,7 +54,7 @@ export function statutoryReportRoutes(
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {
@@ -72,12 +72,7 @@ export function statutoryReportRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
     try {
-      const result = await service().getReportPdf(
-        c.get('tenantId'),
-        c.get('user').id,
-        id,
-        signal
-      );
+      const result = await service().getReportPdf(c.get('tenantId'), c.get('user').id, id, signal);
 
       return new Response(new Uint8Array(result.pdfBuffer), {
         status: 200,
@@ -104,12 +99,7 @@ export function statutoryReportRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(20_000)]);
     try {
-      const result = await service().getReportHtml(
-        c.get('tenantId'),
-        c.get('user').id,
-        id,
-        signal
-      );
+      const result = await service().getReportHtml(c.get('tenantId'), c.get('user').id, id, signal);
 
       return new Response(result.html, {
         status: 200,
@@ -139,7 +129,7 @@ export function statutoryReportRoutes(
         c.get('tenantId'),
         c.get('user').id,
         parsed.data,
-        signal
+        signal,
       );
       return c.json(result, 200);
     } catch (cause) {

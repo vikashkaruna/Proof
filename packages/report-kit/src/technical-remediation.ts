@@ -78,7 +78,9 @@ export const TechnicalRemediationRegisterContentV1Schema = z.object({
       .default(null),
   }),
 });
-export type TechnicalRemediationRegisterContentV1 = z.infer<typeof TechnicalRemediationRegisterContentV1Schema>;
+export type TechnicalRemediationRegisterContentV1 = z.infer<
+  typeof TechnicalRemediationRegisterContentV1Schema
+>;
 
 function escapeHtml(str: string): string {
   return str

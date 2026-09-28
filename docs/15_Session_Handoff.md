@@ -5,6 +5,7 @@
 This section supersedes conflicting historical handoff instructions below. **All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates across all suites.**
 
 **Revision 108 — W10 Offline Installation & Air-Gapped Packaging (Complete) — is complete locally and verified across tests.**
+
 - **Sovereign Docker Compose Stack (`infra/docker/docker-compose.onprem.yml`):**
   - Fully self-contained on-premises topology overlay with MinIO S3-compatible Object Lock compliance-mode WORM vault, Redis cache, Temporal server, self-hosted Model Gateway, Agent Runtime, BFF, and Web Workbench.
   - Zero outbound cloud egress required.

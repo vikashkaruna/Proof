@@ -231,7 +231,8 @@ export default async function MonitoringPage() {
                       <p className="text-xs font-medium text-slate-800">{a.title}</p>
                       <p className="text-xs text-slate-600">{a.summary}</p>
                       <p className="text-[11px] text-slate-500">
-                        dispatched {formatDateTime(a.dispatched_at)} ({relativeTime(a.dispatched_at)})
+                        dispatched {formatDateTime(a.dispatched_at)} (
+                        {relativeTime(a.dispatched_at)})
                         {a.acknowledged_at
                           ? ` · acknowledged ${formatDateTime(a.acknowledged_at)}`
                           : ''}

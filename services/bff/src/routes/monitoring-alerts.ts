@@ -11,10 +11,7 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
-import {
-  MonitoringAlertsService,
-  listAlertsQuerySchema,
-} from '../services/monitoring-alerts.js';
+import { MonitoringAlertsService, listAlertsQuerySchema } from '../services/monitoring-alerts.js';
 
 type Ctx = Context<{ Variables: Variables }>;
 
@@ -30,12 +27,11 @@ function invalid(c: Ctx, message?: string) {
 }
 
 export function monitoringAlertRoutes(
-  dependencies: { db?: EvidenceDatabase; service?: MonitoringAlertsService } = {}
+  dependencies: { db?: EvidenceDatabase; service?: MonitoringAlertsService } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ??
-    new MonitoringAlertsService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ?? new MonitoringAlertsService(dependencies.db ?? createSupabaseAdmin());
 
   // ─── 1. List Alerts ──────────────────────────────────────────────────
   app.get('/monitoring/alerts', async (c) => {
@@ -62,11 +58,7 @@ export function monitoringAlertRoutes(
     const correlationId = randomUUID();
 
     try {
-      const result = await service().dispatchAlerts(
-        c.get('tenantId'),
-        correlationId,
-        signal
-      );
+      const result = await service().dispatchAlerts(c.get('tenantId'), correlationId, signal);
       return c.json({ data: result });
     } catch (cause) {
       return failure(c, cause);
@@ -92,7 +84,7 @@ export function monitoringAlertRoutes(
         alertId,
         c.get('user').id,
         correlationId,
-        signal
+        signal,
       );
       return c.json({ data: result });
     } catch (cause) {

@@ -97,7 +97,10 @@ describe('GET /v1/monitoring/alerts', () => {
     const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { alerts: Array<{ id: string; severity: string }>; summary: { total: number; unread: number; critical: number } };
+      data: {
+        alerts: Array<{ id: string; severity: string }>;
+        summary: { total: number; unread: number; critical: number };
+      };
     };
     expect(body.data.alerts).toHaveLength(1);
     expect(body.data.alerts[0]!.id).toBe(ALERT_ID);
@@ -109,12 +112,19 @@ describe('GET /v1/monitoring/alerts', () => {
 
 describe('POST /v1/monitoring/alerts/dispatch', () => {
   it('triggers alert scan and dispatch for estate managers', async () => {
-    const res = await (await app(UserRole.ADMIN)).request('/v1/monitoring/alerts/dispatch', {
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/dispatch', {
       method: 'POST',
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { dispatchedCount: number; totalUnread: number; criticalCount: number; highCount: number };
+      data: {
+        dispatchedCount: number;
+        totalUnread: number;
+        criticalCount: number;
+        highCount: number;
+      };
     };
     expect(body.data.dispatchedCount).toBe(3);
     expect(body.data.totalUnread).toBe(3);
@@ -123,7 +133,9 @@ describe('POST /v1/monitoring/alerts/dispatch', () => {
   });
 
   it('refuses users lacking estate manage capability', async () => {
-    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts/dispatch', {
+    const res = await (
+      await app(UserRole.VIEWER)
+    ).request('/v1/monitoring/alerts/dispatch', {
       method: 'POST',
     });
     expect(res.status).toBe(403);
@@ -132,10 +144,9 @@ describe('POST /v1/monitoring/alerts/dispatch', () => {
 
 describe('POST /v1/monitoring/alerts/:id/dismiss', () => {
   it('dismisses an alert for estate managers', async () => {
-    const res = await (await app(UserRole.ADMIN)).request(
-      `/v1/monitoring/alerts/${ALERT_ID}/dismiss`,
-      { method: 'POST' }
-    );
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request(`/v1/monitoring/alerts/${ALERT_ID}/dismiss`, { method: 'POST' });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { dismissed: boolean; alertId: string } };
     expect(body.data.dismissed).toBe(true);
@@ -143,34 +154,34 @@ describe('POST /v1/monitoring/alerts/:id/dismiss', () => {
   });
 
   it('refuses invalid alert UUIDs', async () => {
-    const res = await (await app(UserRole.ADMIN)).request(
-      '/v1/monitoring/alerts/invalid-uuid/dismiss',
-      { method: 'POST' }
-    );
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/invalid-uuid/dismiss', { method: 'POST' });
     expect(res.status).toBe(400);
   });
 
   it('returns 404 for missing alerts', async () => {
-    const res = await (await app(UserRole.ADMIN)).request(
-      '/v1/monitoring/alerts/00000000-0000-4000-8000-000000000404/dismiss',
-      { method: 'POST' }
-    );
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/00000000-0000-4000-8000-000000000404/dismiss', {
+      method: 'POST',
+    });
     expect(res.status).toBe(404);
   });
 
   it('returns 409 for already dismissed alerts', async () => {
-    const res = await (await app(UserRole.ADMIN)).request(
-      '/v1/monitoring/alerts/00000000-0000-4000-8000-000000000409/dismiss',
-      { method: 'POST' }
-    );
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/00000000-0000-4000-8000-000000000409/dismiss', {
+      method: 'POST',
+    });
     expect(res.status).toBe(409);
   });
 
   it('refuses users lacking estate manage capability', async () => {
-    const res = await (await app(UserRole.VIEWER)).request(
-      `/v1/monitoring/alerts/${ALERT_ID}/dismiss`,
-      { method: 'POST' }
-    );
+    const res = await (
+      await app(UserRole.VIEWER)
+    ).request(`/v1/monitoring/alerts/${ALERT_ID}/dismiss`, { method: 'POST' });
     expect(res.status).toBe(403);
   });
 });

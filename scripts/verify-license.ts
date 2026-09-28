@@ -44,7 +44,9 @@ function resolveToken(): string {
   if (process.env.AXIOM_OFFLINE_LICENSE) {
     return process.env.AXIOM_OFFLINE_LICENSE.trim();
   }
-  console.error('[-] Error: No license token provided. Pass as argument, --file <path>, or via AXIOM_OFFLINE_LICENSE env var.');
+  console.error(
+    '[-] Error: No license token provided. Pass as argument, --file <path>, or via AXIOM_OFFLINE_LICENSE env var.',
+  );
   process.exit(1);
 }
 

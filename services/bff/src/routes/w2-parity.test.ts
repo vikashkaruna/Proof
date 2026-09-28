@@ -66,15 +66,16 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
       fixture.db.rpc = ((fn: string, args: Record<string, unknown>) => {
         if (fn === 'create_ropa_record') {
           return {
-            abortSignal: () => Promise.resolve({
-              data: {
-                recordId: expectedRecordId,
-                status: 'active',
-                purposeName: args.p_purpose_name,
-                version: 1,
-              },
-              error: null,
-            }),
+            abortSignal: () =>
+              Promise.resolve({
+                data: {
+                  recordId: expectedRecordId,
+                  status: 'active',
+                  purposeName: args.p_purpose_name,
+                  version: 1,
+                },
+                error: null,
+              }),
             then: (resolve: (v: unknown) => unknown) =>
               resolve({
                 data: {
@@ -145,15 +146,16 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
       fixture.db.rpc = ((fn: string, args: Record<string, unknown>) => {
         if (fn === 'create_policy_draft') {
           return {
-            abortSignal: () => Promise.resolve({
-              data: {
-                draftId,
-                status: 'draft',
-                contentHash: 'a'.repeat(64),
-                version: 1,
-              },
-              error: null,
-            }),
+            abortSignal: () =>
+              Promise.resolve({
+                data: {
+                  draftId,
+                  status: 'draft',
+                  contentHash: 'a'.repeat(64),
+                  version: 1,
+                },
+                error: null,
+              }),
             then: (resolve: (v: unknown) => unknown) =>
               resolve({
                 data: {
@@ -197,7 +199,7 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
             decision: 'approved',
             expectedHash: 'a'.repeat(64),
           }),
-        }
+        },
       );
       expect(res.status).toBe(403);
     });
@@ -208,14 +210,15 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
       fixture.db.rpc = ((fn: string, _args: Record<string, unknown>) => {
         if (fn === 'review_policy_draft') {
           return {
-            abortSignal: () => Promise.resolve({
-              data: {
-                draftId,
-                status: 'approved',
-                reviewedAt: new Date().toISOString(),
-              },
-              error: null,
-            }),
+            abortSignal: () =>
+              Promise.resolve({
+                data: {
+                  draftId,
+                  status: 'approved',
+                  reviewedAt: new Date().toISOString(),
+                },
+                error: null,
+              }),
             then: (resolve: (v: unknown) => unknown) =>
               resolve({
                 data: {
@@ -239,7 +242,7 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
             decision: 'approved',
             expectedHash: 'a'.repeat(64),
           }),
-        }
+        },
       );
 
       expect(res.status).toBe(200);
@@ -286,15 +289,16 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
       fixture.db.rpc = ((fn: string, args: Record<string, unknown>) => {
         if (fn === 'create_playbook_entry') {
           return {
-            abortSignal: () => Promise.resolve({
-              data: {
-                playbookId,
-                status: 'active',
-                title: args.p_title,
-                version: 1,
-              },
-              error: null,
-            }),
+            abortSignal: () =>
+              Promise.resolve({
+                data: {
+                  playbookId,
+                  status: 'active',
+                  title: args.p_title,
+                  version: 1,
+                },
+                error: null,
+              }),
             then: (resolve: (v: unknown) => unknown) =>
               resolve({
                 data: {
@@ -333,22 +337,19 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
   // ─── 4. Classification Reviews ────────────────────────────────────────
   describe('Classification Reviews', () => {
     it('denies viewer from submitting classification review with 403', async () => {
-      const res = await app(fixture.viewer, UserRole.VIEWER).request(
-        '/v1/classification/reviews',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            systemId: 'prod-aurora-db',
-            resourcePath: 'customers.aadhar_vault',
-            sensitivityLevel: 'critical_pii',
-            detectedCategories: ['national_id'],
-            confidenceScore: 95.0,
-            decision: 'confirmed',
-            justification: 'Reviewed and confirmed',
-          }),
-        }
-      );
+      const res = await app(fixture.viewer, UserRole.VIEWER).request('/v1/classification/reviews', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          systemId: 'prod-aurora-db',
+          resourcePath: 'customers.aadhar_vault',
+          sensitivityLevel: 'critical_pii',
+          detectedCategories: ['national_id'],
+          confidenceScore: 95.0,
+          decision: 'confirmed',
+          justification: 'Reviewed and confirmed',
+        }),
+      });
       expect(res.status).toBe(403);
     });
 
@@ -358,14 +359,15 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
       fixture.db.rpc = ((fn: string, _args: Record<string, unknown>) => {
         if (fn === 'submit_classification_review') {
           return {
-            abortSignal: () => Promise.resolve({
-              data: {
-                reviewId,
-                decision: 'confirmed',
-                finalSensitivity: 'critical_pii',
-              },
-              error: null,
-            }),
+            abortSignal: () =>
+              Promise.resolve({
+                data: {
+                  reviewId,
+                  decision: 'confirmed',
+                  finalSensitivity: 'critical_pii',
+                },
+                error: null,
+              }),
             then: (resolve: (v: unknown) => unknown) =>
               resolve({
                 data: {
@@ -380,22 +382,19 @@ describe('W2 Parity HTTP Routes (ROPA, Policies, Playbooks, Classification)', ()
         return oldRpc(fn, _args);
       }) as never;
 
-      const res = await app(fixture.owner, UserRole.OWNER).request(
-        '/v1/classification/reviews',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            systemId: 'prod-aurora-db',
-            resourcePath: 'customers.aadhar_vault',
-            sensitivityLevel: 'critical_pii',
-            detectedCategories: ['national_id'],
-            confidenceScore: 95.0,
-            decision: 'confirmed',
-            justification: 'Reviewed and confirmed',
-          }),
-        }
-      );
+      const res = await app(fixture.owner, UserRole.OWNER).request('/v1/classification/reviews', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          systemId: 'prod-aurora-db',
+          resourcePath: 'customers.aadhar_vault',
+          sensitivityLevel: 'critical_pii',
+          detectedCategories: ['national_id'],
+          confidenceScore: 95.0,
+          decision: 'confirmed',
+          justification: 'Reviewed and confirmed',
+        }),
+      });
 
       expect(res.status).toBe(201);
       const json = (await res.json()) as { reviewId: string; finalSensitivity: string };

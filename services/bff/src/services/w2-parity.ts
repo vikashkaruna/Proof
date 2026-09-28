@@ -93,13 +93,7 @@ export const submitClassificationReviewInputSchema = z
     estateId: z.string().uuid().nullable().optional(),
     systemId: z.string().trim().min(1).max(200),
     resourcePath: z.string().trim().min(1).max(1000),
-    sensitivityLevel: z.enum([
-      'public',
-      'internal',
-      'confidential',
-      'restricted',
-      'critical_pii',
-    ]),
+    sensitivityLevel: z.enum(['public', 'internal', 'confidential', 'restricted', 'critical_pii']),
     detectedCategories: z.array(z.string().trim().min(1)).min(1).max(50),
     confidenceScore: z.number().min(0).max(100),
     decision: z.enum(['confirmed', 'adjusted', 'overridden', 'dismissed']),
@@ -110,9 +104,7 @@ export const submitClassificationReviewInputSchema = z
     justification: z.string().trim().min(1).max(2000),
   })
   .strict();
-export type SubmitClassificationReviewInput = z.infer<
-  typeof submitClassificationReviewInputSchema
->;
+export type SubmitClassificationReviewInput = z.infer<typeof submitClassificationReviewInputSchema>;
 
 export class W2ParityService {
   constructor(private readonly db: EvidenceDatabase) {}
@@ -132,7 +124,7 @@ export class W2ParityService {
     actorId: string,
     input: CreateRopaRecordInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const result = await this.rpc(
       'create_ropa_record',
@@ -153,7 +145,7 @@ export class W2ParityService {
         p_dpia_required: input.dpiaRequired,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error === 'forbidden') {
@@ -190,7 +182,7 @@ export class W2ParityService {
     actorId: string,
     input: CreatePolicyDraftInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const result = await this.rpc(
       'create_policy_draft',
@@ -204,7 +196,7 @@ export class W2ParityService {
         p_citations: input.controlCitations,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error === 'forbidden') {
@@ -222,7 +214,7 @@ export class W2ParityService {
     draftId: string,
     input: ReviewPolicyDraftInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const result = await this.rpc(
       'review_policy_draft',
@@ -234,7 +226,7 @@ export class W2ParityService {
         p_expected_hash: input.expectedHash,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error === 'founder_authority_required') {
@@ -274,7 +266,7 @@ export class W2ParityService {
     actorId: string,
     input: CreatePlaybookEntryInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const result = await this.rpc(
       'create_playbook_entry',
@@ -289,7 +281,7 @@ export class W2ParityService {
         p_requires_approval: input.requiresHumanApproval,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error === 'forbidden') {
@@ -320,7 +312,7 @@ export class W2ParityService {
     actorId: string,
     input: SubmitClassificationReviewInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const result = await this.rpc(
       'submit_classification_review',
@@ -338,7 +330,7 @@ export class W2ParityService {
         p_justification: input.justification,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error === 'forbidden') {

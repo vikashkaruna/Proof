@@ -515,9 +515,11 @@ export const StatutoryReportArtifactSchema = z.object({
   sourceJsonBytes: z.number().int().min(1),
   htmlSha256: z.string().regex(/^[0-9a-f]{64}$/),
   htmlBytes: z.number().int().min(1),
-  pdfSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  pdfSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
   pdfBytes: z.number().int().min(1).nullable(),
   createdAt: z.string().datetime(),
 });
 export type StatutoryReportArtifact = z.infer<typeof StatutoryReportArtifactSchema>;
-

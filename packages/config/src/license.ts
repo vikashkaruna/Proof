@@ -68,10 +68,7 @@ export function canonicalJsonStringify(obj: unknown): string {
 /**
  * Mints an offline license token using Axiom Minds Ed25519 private authority key.
  */
-export function mintOfflineLicense(
-  payload: OfflineLicensePayload,
-  privateKeyPem: string,
-): string {
+export function mintOfflineLicense(payload: OfflineLicensePayload, privateKeyPem: string): string {
   const validated = OfflineLicensePayloadSchema.parse(payload);
   const canonicalBytes = Buffer.from(canonicalJsonStringify(validated), 'utf-8');
   const signature = sign(null, canonicalBytes, privateKeyPem);
@@ -98,7 +95,10 @@ export function verifyOfflineLicense(
 
   const parts = token.trim().split('.');
   if (parts.length !== 3 || parts[0] !== 'v1') {
-    return { valid: false, error: 'Malformed license token format: expected v1.<payload>.<signature>' };
+    return {
+      valid: false,
+      error: 'Malformed license token format: expected v1.<payload>.<signature>',
+    };
   }
 
   const [, payloadB64, signatureB64] = parts;
@@ -118,7 +118,10 @@ export function verifyOfflineLicense(
     const isSignatureValid = verify(null, canonicalBytes, publicKey, signature);
 
     if (!isSignatureValid) {
-      return { valid: false, error: 'Cryptographic signature verification failed: license is invalid or forged' };
+      return {
+        valid: false,
+        error: 'Cryptographic signature verification failed: license is invalid or forged',
+      };
     }
 
     const now = options?.now ?? new Date();
@@ -162,10 +165,7 @@ export function verifyOfflineLicense(
 /**
  * Checks if a verified license enables a specific feature.
  */
-export function hasLicenseFeature(
-  license: OfflineLicensePayload,
-  featureName: string,
-): boolean {
+export function hasLicenseFeature(license: OfflineLicensePayload, featureName: string): boolean {
   if (license.features.includes('*')) {
     return true;
   }

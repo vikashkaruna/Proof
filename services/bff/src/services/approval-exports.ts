@@ -71,7 +71,7 @@ export class ApprovalExportService {
     tenantId: string,
     actorId: string,
     input: ListApprovalHistoryInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const limit = input.limit ?? 50;
     const offset = input.offset ?? 0;
@@ -88,13 +88,21 @@ export class ApprovalExportService {
     if (input.to) query = query.lte('issued_at', input.to);
 
     query = query.order('issued_at', { ascending: false }).range(offset, offset + limit - 1);
-    
+
     const queryWithSignal =
-      signal && typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
-        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal)
+      signal &&
+      typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+        'function'
+        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
+            signal,
+          )
         : query;
 
-    const { data: tokens, error, count } = (await queryWithSignal) as unknown as {
+    const {
+      data: tokens,
+      error,
+      count,
+    } = (await queryWithSignal) as unknown as {
       data: Array<Record<string, unknown>> | null;
       error: unknown;
       count: number | null;
@@ -118,16 +126,18 @@ export class ApprovalExportService {
   private async enrichApprovalRecords(
     tenantId: string,
     tokens: Array<Record<string, unknown>>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ApprovalRecordItem[]> {
     if (tokens.length === 0) return [];
 
     const planIds = Array.from(new Set(tokens.map((t) => t.plan_id as string).filter(Boolean)));
-    const approverIds = Array.from(new Set(tokens.map((t) => t.approver_id as string).filter(Boolean)));
+    const approverIds = Array.from(
+      new Set(tokens.map((t) => t.approver_id as string).filter(Boolean)),
+    );
     const allActionIds = Array.from(
       new Set(
-        tokens.flatMap((t) => (Array.isArray(t.action_ids) ? (t.action_ids as string[]) : []))
-      )
+        tokens.flatMap((t) => (Array.isArray(t.action_ids) ? (t.action_ids as string[]) : [])),
+      ),
     );
 
     // Fetch related plans
@@ -139,7 +149,9 @@ export class ApprovalExportService {
         .eq('tenant_id', tenantId)
         .in('id', planIds);
       const queryWithSignal =
-        signal && typeof (pq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
+        signal &&
+        typeof (pq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+          'function'
           ? (pq as unknown as { abortSignal: (s: AbortSignal) => typeof pq }).abortSignal(signal)
           : pq;
       const { data: plans } = (await queryWithSignal) as unknown as {
@@ -155,7 +167,9 @@ export class ApprovalExportService {
     if (approverIds.length > 0) {
       const uq = this.db.from('users').select('id, full_name, email').in('id', approverIds);
       const queryWithSignal =
-        signal && typeof (uq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
+        signal &&
+        typeof (uq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+          'function'
           ? (uq as unknown as { abortSignal: (s: AbortSignal) => typeof uq }).abortSignal(signal)
           : uq;
       const { data: users } = (await queryWithSignal) as unknown as {
@@ -175,7 +189,9 @@ export class ApprovalExportService {
         .eq('tenant_id', tenantId)
         .in('user_id', approverIds);
       const queryWithSignal =
-        signal && typeof (tuq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
+        signal &&
+        typeof (tuq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+          'function'
           ? (tuq as unknown as { abortSignal: (s: AbortSignal) => typeof tuq }).abortSignal(signal)
           : tuq;
       const { data: roles } = (await queryWithSignal) as unknown as {
@@ -198,7 +214,9 @@ export class ApprovalExportService {
         .eq('tenant_id', tenantId)
         .in('id', allActionIds);
       const queryWithSignal =
-        signal && typeof (aq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
+        signal &&
+        typeof (aq as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+          'function'
           ? (aq as unknown as { abortSignal: (s: AbortSignal) => typeof aq }).abortSignal(signal)
           : aq;
       const { data: actions } = (await queryWithSignal) as unknown as {
@@ -231,8 +249,8 @@ export class ApprovalExportService {
         new Set(
           actionIds
             .map((aid) => actionMap.get(aid)?.action_type ?? 'remediation.action')
-            .filter(Boolean)
-        )
+            .filter(Boolean),
+        ),
       );
 
       const dryRunVerified =
@@ -249,7 +267,8 @@ export class ApprovalExportService {
           : true;
 
       const sig = typeof row.signature === 'string' ? row.signature : '';
-      const signaturePreview = sig.length >= 8 ? sig.slice(0, 32) : '00000000000000000000000000000000';
+      const signaturePreview =
+        sig.length >= 8 ? sig.slice(0, 32) : '00000000000000000000000000000000';
 
       const isStandingPolicy =
         typeof row.reason === 'string' && row.reason.toLowerCase().includes('standing');
@@ -288,18 +307,27 @@ export class ApprovalExportService {
     actorId: string,
     input: ExportApprovalHistoryInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     // 1. Fetch tenant name
     const tQuery = this.db.from('tenants').select('id, name').eq('id', tenantId);
     const queryWithSignal =
-      signal && typeof (tQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
-        ? (tQuery as unknown as { abortSignal: (s: AbortSignal) => typeof tQuery }).abortSignal(signal)
+      signal &&
+      typeof (tQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+        'function'
+        ? (tQuery as unknown as { abortSignal: (s: AbortSignal) => typeof tQuery }).abortSignal(
+            signal,
+          )
         : tQuery;
 
-    const { data: tenantData } = (typeof (queryWithSignal as unknown as { maybeSingle?: () => unknown }).maybeSingle === 'function'
-      ? await (queryWithSignal as unknown as { maybeSingle: () => Promise<{ data: unknown }> }).maybeSingle()
-      : await (queryWithSignal as unknown as Promise<{ data: unknown }>)) as { data: { name?: string } | null };
+    const { data: tenantData } = (
+      typeof (queryWithSignal as unknown as { maybeSingle?: () => unknown }).maybeSingle ===
+      'function'
+        ? await (
+            queryWithSignal as unknown as { maybeSingle: () => Promise<{ data: unknown }> }
+          ).maybeSingle()
+        : await (queryWithSignal as unknown as Promise<{ data: unknown }>)
+    ) as { data: { name?: string } | null };
 
     const tenantName = tenantData?.name ?? 'DPDPA Registered Fiduciary';
 
@@ -315,7 +343,7 @@ export class ApprovalExportService {
         limit,
         offset: 0,
       },
-      signal
+      signal,
     );
 
     const records = listResult.items;
@@ -326,7 +354,8 @@ export class ApprovalExportService {
       active_approvals: records.filter((r) => r.status === 'issued').length,
       consumed_approvals: records.filter((r) => r.status === 'consumed').length,
       revoked_approvals: records.filter((r) => r.status === 'revoked').length,
-      standing_policy_approvals: records.filter((r) => r.approver_role === 'standing_policy').length,
+      standing_policy_approvals: records.filter((r) => r.approver_role === 'standing_policy')
+        .length,
       batch_approvals: records.filter((r) => r.mode === 'batch').length,
       individual_approvals: records.filter((r) => r.mode === 'individual').length,
     };
@@ -415,7 +444,7 @@ export class ApprovalExportService {
               escapeCsvField(r.consumed_at),
               escapeCsvField(r.revoked_at),
               escapeCsvField(r.signature_preview),
-            ].join(',')
+            ].join(','),
           );
         }
         buffer = Buffer.from(lines.join('\n'), 'utf-8');
@@ -446,7 +475,7 @@ export class ApprovalExportService {
         p_artifact_bytes: artifactBytes,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     const exportId = (rpcRes as { exportId?: string })?.exportId ?? exportContent.export_id;

@@ -48,7 +48,7 @@ describe('Axiom Proof — Offline Sovereign Licensing', () => {
     const [version, payloadB64, sigB64] = token.split('.');
 
     // Tamper with payload (change maxTenants from 10 to 999)
-    const rawPayload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
+    const rawPayload = JSON.parse(Buffer.from(payloadB64!, 'base64url').toString('utf-8'));
     rawPayload.maxTenants = 999;
     const tamperedPayloadB64 = Buffer.from(JSON.stringify(rawPayload)).toString('base64url');
 

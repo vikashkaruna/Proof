@@ -69,7 +69,7 @@ describe('Board Reports HTTP Routes', () => {
               replayed: false,
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
@@ -147,7 +147,7 @@ describe('Board Reports HTTP Routes', () => {
               replayed: false,
             },
             error: null,
-          })
+          }),
         );
       }
       if (name === 'attach_board_report_pdf') {
@@ -157,16 +157,19 @@ describe('Board Reports HTTP Routes', () => {
               pdfHash: args.p_pdf_sha256,
             },
             error: null,
-          })
+          }),
         );
       }
       return abortableResult(Promise.resolve({ data: null, error: null }));
     }) as never;
 
-    const res = await app(fixture.founder, UserRole.FOUNDER).request(`/v1/reports/board/${reqId}/generate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-    });
+    const res = await app(fixture.founder, UserRole.FOUNDER).request(
+      `/v1/reports/board/${reqId}/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      },
+    );
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { reportId: string; status: string };
@@ -235,9 +238,12 @@ describe('Board Reports HTTP Routes', () => {
       html_bytes: 1200,
     });
 
-    const res = await app(fixture.viewer, UserRole.VIEWER).request(`/v1/reports/board/${repId}/pdf`, {
-      method: 'GET',
-    });
+    const res = await app(fixture.viewer, UserRole.VIEWER).request(
+      `/v1/reports/board/${repId}/pdf`,
+      {
+        method: 'GET',
+      },
+    );
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/pdf');

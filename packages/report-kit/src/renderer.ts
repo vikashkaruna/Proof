@@ -29,16 +29,28 @@ function findChromiumExecutable(): string | null {
   if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
     return process.env.CHROME_PATH;
   }
-  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH && existsSync(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH)) {
+  if (
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH &&
+    existsSync(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH)
+  ) {
     return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   }
 
   const home = process.env.HOME || '';
   const candidates = [
     // Playwright standard cache paths
-    join(home, 'Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell'),
-    join(home, 'Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell'),
-    join(home, '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux/chrome-headless-shell'),
+    join(
+      home,
+      'Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      'Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux/chrome-headless-shell',
+    ),
     join(home, '.cache/ms-playwright/chromium-1243/chrome-linux/chrome'),
     // System installations
     '/usr/bin/chromium',
@@ -62,7 +74,7 @@ function findChromiumExecutable(): string | null {
  */
 function generateDeterministicPdf(htmlContent: string): Buffer {
   const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
-  const title = (titleMatch && titleMatch[1]) ? titleMatch[1] : 'Axiom Proof Board Report';
+  const title = titleMatch && titleMatch[1] ? titleMatch[1] : 'Axiom Proof Board Report';
 
   // Extract a few visible text lines for PDF stream
   const cleanText = htmlContent
@@ -132,7 +144,7 @@ ET`;
  */
 export async function renderHtmlToPdf(
   htmlContent: string,
-  options: RenderPdfOptions = {}
+  options: RenderPdfOptions = {},
 ): Promise<RenderPdfResult> {
   const timeoutMs = options.timeoutMs ?? 15000;
   const preferChromium = options.preferChromium ?? true;
@@ -158,7 +170,7 @@ export async function renderHtmlToPdf(
           `--print-to-pdf=${outPdfPath}`,
           inHtmlPath,
         ],
-        { timeout: timeoutMs }
+        { timeout: timeoutMs },
       );
 
       const pdfBuffer = await fs.readFile(outPdfPath);

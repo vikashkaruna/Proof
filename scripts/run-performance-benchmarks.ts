@@ -76,7 +76,9 @@ async function benchDiscoveryThroughput() {
     status: passed ? 'PASS' : 'FAIL',
     durationMs: Math.round(durationMs),
   });
-  console.log(`  -> Processed ${processed.toLocaleString()} records in ${Math.round(durationMs)}ms (${ratePerSec.toLocaleString()} rec/s)`);
+  console.log(
+    `  -> Processed ${processed.toLocaleString()} records in ${Math.round(durationMs)}ms (${ratePerSec.toLocaleString()} rec/s)`,
+  );
 }
 
 // ─── Benchmark 2: NFR-8 Statutory Report Generation ───────────────────────────
@@ -112,12 +114,14 @@ async function benchReportGeneration() {
       medium_gaps: 4,
       low_gaps: 2,
       estimated_exposure_inr: 250000000,
-      narrative: 'Comprehensive DPDPA 2023 compliance assessment covering all statutory schedules and multi-regulator frameworks.',
+      narrative:
+        'Comprehensive DPDPA 2023 compliance assessment covering all statutory schedules and multi-regulator frameworks.',
     },
     key_findings: Array.from({ length: 20 }, (_, i) => ({
       control_id: `DPDPA-SEC-0${i + 1}`,
       domain: 'Data Protection & Security',
-      severity: (i % 3 === 0 ? 'high' : i % 3 === 1 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+      severity: (i % 3 === 0 ? 'high' : i % 3 === 1 ? 'medium' : 'low') as
+        'high' | 'medium' | 'low',
       title: `Finding ${i + 1}: Data Store Verification`,
       score: 80,
       gap_summary: `Audit finding ${i + 1} noted for review.`,
@@ -161,7 +165,8 @@ async function benchReportGeneration() {
       lead_auditor_name: 'Lead Privacy Auditor, CISA',
       period_start: '2026-01-01T00:00:00.000Z',
       period_end: '2026-09-28T00:00:00.000Z',
-      scope_description: 'Full statutory assessment of customer personal data pipelines, consent registries, and encryption controls.',
+      scope_description:
+        'Full statutory assessment of customer personal data pipelines, consent registries, and encryption controls.',
     },
     compliance_metrics: {
       posture_score: 91,
@@ -179,7 +184,8 @@ async function benchReportGeneration() {
       statutory_reference: 'DPDPA 2023 Sec 8(5)',
       status: (i % 10 === 0 ? 'non_compliant' : 'compliant') as 'compliant' | 'non_compliant',
       score: i % 10 === 0 ? 40 : 95,
-      auditor_notes: 'AES-256 GCM enforced on primary database storage. Verified key rotation policy.',
+      auditor_notes:
+        'AES-256 GCM enforced on primary database storage. Verified key rotation policy.',
       evidence_references: [
         {
           evidence_id: `00000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`,
@@ -201,7 +207,8 @@ async function benchReportGeneration() {
         auditor_name: 'Lead Privacy Auditor',
         firm: 'Axiom Independent Assurance',
         designation: 'Principal Lead Auditor',
-        attestation_statement: 'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
+        attestation_statement:
+          'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
         timestamp: '2026-09-28T00:30:00.000Z',
       },
       approved_by: null,
@@ -235,15 +242,20 @@ async function benchReportGeneration() {
       estimated_principals_affected: 1250,
       categories_of_personal_data: ['Email Address', 'Phone Number'],
       root_cause_summary: 'Deprecating v1 partner endpoint leaked token validation telemetry.',
-      potential_consequences: 'Low risk of financial fraud due to token masking, but contact info exposed.',
+      potential_consequences:
+        'Low risk of financial fraud due to token masking, but contact info exposed.',
     },
-    statutory_sections_invoked: ['Section 8(6) - Intimation of Personal Data Breach', 'Section 8(5) - Technical Safeguards'],
+    statutory_sections_invoked: [
+      'Section 8(6) - Intimation of Personal Data Breach',
+      'Section 8(5) - Technical Safeguards',
+    ],
     remedial_measures: [
       {
         step: 1,
         measure: 'Revoked and rotated all integration gateway tokens across partner nodes.',
         status: 'completed',
-        verification_evidence_hash: '4444444444444444444444444444444444444444444444444444444444444444',
+        verification_evidence_hash:
+          '4444444444444444444444444444444444444444444444444444444444444444',
       },
     ],
     communication_status: {
@@ -260,7 +272,8 @@ async function benchReportGeneration() {
       dpo_attestation: {
         dpo_name: 'Rajesh Nair',
         dpo_designation: 'Head of Privacy & Data Protection Officer',
-        statement: 'I confirm that the facts stated herein are true and accurate to the best of my knowledge.',
+        statement:
+          'I confirm that the facts stated herein are true and accurate to the best of my knowledge.',
         timestamp: '2026-09-28T00:30:00.000Z',
       },
       authorized_signatory: {
@@ -335,7 +348,9 @@ async function benchReportGeneration() {
     status: passed ? 'PASS' : 'FAIL',
     durationMs: Math.round(durationMs),
   });
-  console.log(`  -> Synthesized Board (${boardHtml.length}B), Auditor (${auditorHtml.length}B), DPB (${dpbHtml.length}B), Technical (${technicalHtml.length}B) + PDF (${pdfResult.byteLength}B) in ${Math.round(durationMs)}ms`);
+  console.log(
+    `  -> Synthesized Board (${boardHtml.length}B), Auditor (${auditorHtml.length}B), DPB (${dpbHtml.length}B), Technical (${technicalHtml.length}B) + PDF (${pdfResult.byteLength}B) in ${Math.round(durationMs)}ms`,
+  );
 }
 
 // ─── Benchmark 3: Lekha Ledger Cryptographic Throughput ───────────────────────
@@ -376,7 +391,9 @@ async function benchLedgerCryptographicThroughput() {
     status: passed ? 'PASS' : 'FAIL',
     durationMs: Math.round(durationMs),
   });
-  console.log(`  -> Chained ${BLOCK_COUNT.toLocaleString()} blocks in ${Math.round(durationMs)}ms (${opsPerSec.toLocaleString()} blocks/s)`);
+  console.log(
+    `  -> Chained ${BLOCK_COUNT.toLocaleString()} blocks in ${Math.round(durationMs)}ms (${opsPerSec.toLocaleString()} blocks/s)`,
+  );
 }
 
 // ─── Benchmark 4: PERF-3 Rate Limiter Algorithmic Performance ────────────────
@@ -443,7 +460,9 @@ async function benchRateLimiterPerformance() {
     status: passed ? 'PASS' : 'FAIL',
     durationMs: Math.round(durationMs),
   });
-  console.log(`  -> Processed ${OPERATIONS.toLocaleString()} checks (${allowedCount} allowed, ${limitedCount} limited) in ${Math.round(durationMs)}ms (${opsPerSec.toLocaleString()} ops/s)`);
+  console.log(
+    `  -> Processed ${OPERATIONS.toLocaleString()} checks (${allowedCount} allowed, ${limitedCount} limited) in ${Math.round(durationMs)}ms (${opsPerSec.toLocaleString()} ops/s)`,
+  );
 }
 
 async function main() {
@@ -462,7 +481,7 @@ async function main() {
       Target: r.target,
       Duration: `${r.durationMs}ms`,
       Status: r.status,
-    }))
+    })),
   );
 
   const allPassed = results.every((r) => r.status === 'PASS');

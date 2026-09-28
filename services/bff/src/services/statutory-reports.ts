@@ -70,7 +70,10 @@ export class StatutoryReportService {
   /**
    * Validates and renders HTML for any of the 4 statutory report formats.
    */
-  validateAndRender(kind: StatutoryReportKind, rawContent: Record<string, unknown>): {
+  validateAndRender(
+    kind: StatutoryReportKind,
+    rawContent: Record<string, unknown>,
+  ): {
     validatedContent: unknown;
     html: string;
   } {
@@ -103,7 +106,7 @@ export class StatutoryReportService {
     actorId: string,
     input: GenerateStatutoryReportInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     // 1. Validate content and render deterministic HTML
     let validatedContent: unknown;
@@ -135,12 +138,13 @@ export class StatutoryReportService {
         p_html_text: html,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (draftRes.error) {
       if (draftRes.error === 'forbidden') throw new EvidenceError('forbidden', 403);
-      if (draftRes.error === 'invalid_report_kind') throw new EvidenceError('invalid_report_kind', 400);
+      if (draftRes.error === 'invalid_report_kind')
+        throw new EvidenceError('invalid_report_kind', 400);
       if (draftRes.error === 'invalid_content') throw new EvidenceError('invalid_content', 400);
       throw new EvidenceError('invalid_request', 400);
     }
@@ -160,7 +164,7 @@ export class StatutoryReportService {
           p_pdf_bytes: pdf.byteLength,
           p_correlation_id: correlationId,
         },
-        signal
+        signal,
       );
     } catch {
       // PDF generation failure does not prevent draft creation
@@ -175,12 +179,7 @@ export class StatutoryReportService {
     };
   }
 
-  async getReportHtml(
-    tenantId: string,
-    actorId: string,
-    reportId: string,
-    signal?: AbortSignal
-  ) {
+  async getReportHtml(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
     const repQuery = this.db
       .from('reports')
       .select('id, title, kind, content_text, content')
@@ -188,22 +187,33 @@ export class StatutoryReportService {
       .eq('id', reportId);
 
     const queryWithSignal =
-      signal && typeof (repQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
-        ? (repQuery as unknown as { abortSignal: (s: AbortSignal) => typeof repQuery }).abortSignal(signal)
+      signal &&
+      typeof (repQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+        'function'
+        ? (repQuery as unknown as { abortSignal: (s: AbortSignal) => typeof repQuery }).abortSignal(
+            signal,
+          )
         : repQuery;
 
-    const repRes = (typeof (queryWithSignal as unknown as { maybeSingle?: () => unknown }).maybeSingle === 'function'
-      ? await (queryWithSignal as unknown as { maybeSingle: () => Promise<{ data: unknown; error: unknown }> }).maybeSingle()
-      : await (queryWithSignal as unknown as Promise<{ data: unknown; error: unknown }>)) as {
-        data: {
-          id: string;
-          title: string;
-          kind: StatutoryReportKind;
-          content_text?: string;
-          content?: Record<string, unknown>;
-        } | null;
-        error: unknown;
-      };
+    const repRes = (
+      typeof (queryWithSignal as unknown as { maybeSingle?: () => unknown }).maybeSingle ===
+      'function'
+        ? await (
+            queryWithSignal as unknown as {
+              maybeSingle: () => Promise<{ data: unknown; error: unknown }>;
+            }
+          ).maybeSingle()
+        : await (queryWithSignal as unknown as Promise<{ data: unknown; error: unknown }>)
+    ) as {
+      data: {
+        id: string;
+        title: string;
+        kind: StatutoryReportKind;
+        content_text?: string;
+        content?: Record<string, unknown>;
+      } | null;
+      error: unknown;
+    };
 
     if (repRes.error || !repRes.data) {
       throw new EvidenceError('report_not_found', 404);
@@ -220,12 +230,7 @@ export class StatutoryReportService {
     };
   }
 
-  async getReportPdf(
-    tenantId: string,
-    actorId: string,
-    reportId: string,
-    signal?: AbortSignal
-  ) {
+  async getReportPdf(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
     const { html, title, kind } = await this.getReportHtml(tenantId, actorId, reportId, signal);
     const pdf = await renderHtmlToPdf(html);
 
@@ -241,7 +246,7 @@ export class StatutoryReportService {
           p_pdf_bytes: pdf.byteLength,
           p_correlation_id: randomUUID(),
         },
-        signal
+        signal,
       );
     } catch {
       // Best-effort
@@ -260,16 +265,19 @@ export class StatutoryReportService {
     tenantId: string,
     actorId: string,
     input: ListStatutoryReportsInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const limit = input.limit ?? 25;
     const offset = input.offset ?? 0;
 
     let query = this.db
       .from('reports')
-      .select('id, tenant_id, engagement_id, kind, title, library_version, generated_by_agent, created_at', {
-        count: 'exact',
-      })
+      .select(
+        'id, tenant_id, engagement_id, kind, title, library_version, generated_by_agent, created_at',
+        {
+          count: 'exact',
+        },
+      )
       .eq('tenant_id', tenantId)
       .in('kind', ['board', 'auditor', 'dpb', 'technical']);
 
@@ -279,8 +287,12 @@ export class StatutoryReportService {
     query = query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
 
     const queryWithSignal =
-      signal && typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal === 'function'
-        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(signal)
+      signal &&
+      typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+        'function'
+        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
+            signal,
+          )
         : query;
 
     const { data, error, count } = (await queryWithSignal) as unknown as {
@@ -295,7 +307,7 @@ export class StatutoryReportService {
 
     return {
       reports: data ?? [],
-      total: count ?? (data?.length ?? 0),
+      total: count ?? data?.length ?? 0,
       limit,
       offset,
     };

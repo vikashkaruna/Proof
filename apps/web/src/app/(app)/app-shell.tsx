@@ -174,7 +174,7 @@ export function AppShell({
               critical: body.data.summary.critical ?? 0,
               high: body.data.summary.high ?? 0,
               alerts: (body.data.alerts ?? []).filter(
-                (a: { status: string }) => a.status === 'unread' || a.status === 'read'
+                (a: { status: string }) => a.status === 'unread' || a.status === 'read',
               ),
             });
           }

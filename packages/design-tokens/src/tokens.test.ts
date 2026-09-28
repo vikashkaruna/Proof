@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { colors, agentAccents, fontFamily, fontSize, fontWeight, spacing, axiomPreset } from './index';
+import {
+  colors,
+  agentAccents,
+  fontFamily,
+  fontSize,
+  fontWeight,
+  spacing,
+  axiomPreset,
+} from './index';
 
 describe('Design tokens', () => {
   it('defines core brand color tokens correctly', () => {

@@ -59,7 +59,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
         lead_auditor_name: 'Ananya Sharma, CISA',
         period_start: '2026-01-01T00:00:00.000Z',
         period_end: '2026-09-28T00:00:00.000Z',
-        scope_description: 'Full statutory assessment of customer personal data pipelines, consent registries, and encryption controls.',
+        scope_description:
+          'Full statutory assessment of customer personal data pipelines, consent registries, and encryption controls.',
       },
       compliance_metrics: {
         posture_score: 91,
@@ -78,7 +79,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
           statutory_reference: 'DPDPA 2023 Sec 8(5)',
           status: 'compliant',
           score: 95,
-          auditor_notes: 'AES-256 GCM enforced on primary database storage. Verified key rotation policy.',
+          auditor_notes:
+            'AES-256 GCM enforced on primary database storage. Verified key rotation policy.',
           evidence_references: [
             {
               evidence_id: '00000000-0000-0000-0000-000000000010',
@@ -101,7 +103,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
           auditor_name: 'Ananya Sharma',
           firm: 'Deloitte & Touche LLP',
           designation: 'Lead Privacy Auditor',
-          attestation_statement: 'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
+          attestation_statement:
+            'I hereby attest that the controls and linked evidence were reviewed in accordance with DPDPA 2023 rules.',
           timestamp: '2026-09-28T00:30:00.000Z',
         },
         approved_by: null,
@@ -149,9 +152,13 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
         estimated_principals_affected: 1250,
         categories_of_personal_data: ['Email Address', 'Phone Number', 'Masked Card Tokens'],
         root_cause_summary: 'Deprecating v1 partner endpoint leaked token validation telemetry.',
-        potential_consequences: 'Low risk of financial fraud due to token masking, but contact info exposed.',
+        potential_consequences:
+          'Low risk of financial fraud due to token masking, but contact info exposed.',
       },
-      statutory_sections_invoked: ['Section 8(6) - Intimation of Personal Data Breach', 'Section 8(5) - Technical Safeguards'],
+      statutory_sections_invoked: [
+        'Section 8(6) - Intimation of Personal Data Breach',
+        'Section 8(5) - Technical Safeguards',
+      ],
       remedial_measures: [
         {
           step: 1,
@@ -180,7 +187,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
         dpo_attestation: {
           dpo_name: 'Rajesh Nair',
           dpo_designation: 'Head of Privacy & Data Protection Officer',
-          statement: 'I confirm that the facts stated herein are true and accurate to the best of my knowledge.',
+          statement:
+            'I confirm that the facts stated herein are true and accurate to the best of my knowledge.',
           timestamp: '2026-09-28T00:30:00.000Z',
         },
         authorized_signatory: {
@@ -303,7 +311,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
           dry_run_verified: true,
           dry_run_status: 'passed',
           rollback_validated: true,
-          reconciliation_statement: 'All 3 remediation actions dispatched and verified via Postgres connection health checks.',
+          reconciliation_statement:
+            'All 3 remediation actions dispatched and verified via Postgres connection health checks.',
           status: 'consumed',
           issued_at: '2026-09-27T10:00:00.000Z',
           expires_at: '2026-09-27T11:00:00.000Z',
@@ -337,7 +346,8 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
       identity_verification_method: 'Aadhaar OTP via DigiLocker / Governed Gateway',
       identity_verified_at: '2026-09-25T10:00:00.000Z',
       status: 'fulfilled',
-      fulfilment_summary: 'All personal data entries held in active and archive databases were exported in portable JSON and delivered via secure portal.',
+      fulfilment_summary:
+        'All personal data entries held in active and archive databases were exported in portable JSON and delivered via secure portal.',
       data_categories_processed: ['Identity Data', 'Transaction Records', 'Login Logs'],
       generated_at: '2026-09-28T00:00:00.000Z',
       branding: {
@@ -380,8 +390,13 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
       discovered_at: '2026-09-26T12:00:00.000Z',
       affected_principals_count: 50,
       data_categories: ['IP Addresses', 'User Agent Strings'],
-      technical_summary: 'Debug logs were briefly emitted to an unencrypted development bucket during cluster migration.',
-      containment_actions: ['Revoked bucket public policy', 'Purged unencrypted debug objects', 'Enforced KMS key check'],
+      technical_summary:
+        'Debug logs were briefly emitted to an unencrypted development bucket during cluster migration.',
+      containment_actions: [
+        'Revoked bucket public policy',
+        'Purged unencrypted debug objects',
+        'Enforced KMS key check',
+      ],
       dpb_notified: true,
       dpb_notified_at: '2026-09-26T18:00:00.000Z',
       generated_at: '2026-09-28T00:00:00.000Z',
@@ -425,14 +440,16 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
           category: 'Consent Notice',
           score: 85,
           findings_count: 1,
-          summary: 'Notice contains all required bilingual details but lacks direct DPO grievance phone number.',
+          summary:
+            'Notice contains all required bilingual details but lacks direct DPO grievance phone number.',
         },
       ],
       critical_findings: [
         {
           domain: 'Grievance Redressal',
           title: 'Missing DPO contact telephone on public notice',
-          recommendation: 'Update public notice to include telephone number as mandated under DPDPA Rule 3(2).',
+          recommendation:
+            'Update public notice to include telephone number as mandated under DPDPA Rule 3(2).',
         },
       ],
     };

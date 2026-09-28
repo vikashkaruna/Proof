@@ -36,7 +36,11 @@ export const DpbSubmissionContentV1Schema = z.object({
   submission_id: uuid.optional(),
   title: z.string().min(1).max(300),
   tenant_id: uuid,
-  submission_type: z.enum(['breach_notification', 'statutory_inquiry_response', 'annual_dpdpa_filing']),
+  submission_type: z.enum([
+    'breach_notification',
+    'statutory_inquiry_response',
+    'annual_dpdpa_filing',
+  ]),
   dpb_reference_number: z.string().min(1).max(100).nullable().default(null),
   generated_at: timestamp,
   branding: z

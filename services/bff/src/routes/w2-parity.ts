@@ -30,9 +30,12 @@ function invalid(c: Ctx, message?: string) {
   return c.json({ error: { code: 'validation_failed', message } }, 400);
 }
 
-export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: W2ParityService } = {}) {
+export function w2ParityRoutes(
+  dependencies: { db?: EvidenceDatabase; service?: W2ParityService } = {},
+) {
   const app = new Hono<{ Variables: Variables }>();
-  const service = () => dependencies.service ?? new W2ParityService(dependencies.db ?? createSupabaseAdmin());
+  const service = () =>
+    dependencies.service ?? new W2ParityService(dependencies.db ?? createSupabaseAdmin());
 
   // ─── 1. ROPA Records ──────────────────────────────────────────────────
   app.post('/ropa', async (c) => {
@@ -51,7 +54,7 @@ export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: 
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {
@@ -89,7 +92,7 @@ export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: 
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {
@@ -115,7 +118,7 @@ export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: 
         draftId,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 200);
     } catch (cause) {
@@ -153,7 +156,7 @@ export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: 
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {
@@ -191,7 +194,7 @@ export function w2ParityRoutes(dependencies: { db?: EvidenceDatabase; service?: 
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {

@@ -90,7 +90,9 @@ describe('UI utils', () => {
     let nowSpy: any;
 
     beforeEach(() => {
-      nowSpy = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-09-28T12:00:00.000Z').getTime());
+      nowSpy = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(new Date('2026-09-28T12:00:00.000Z').getTime());
     });
 
     afterEach(() => {

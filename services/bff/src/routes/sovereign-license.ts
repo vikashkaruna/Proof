@@ -12,7 +12,7 @@ export function sovereignLicenseRoutes(
   dependencies: {
     env?: string;
     licenseToken?: string;
-  } = {}
+  } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
 
@@ -38,7 +38,7 @@ export function sovereignLicenseRoutes(
           licensed: false,
           error: 'No offline license configured. Set AXIOM_OFFLINE_LICENSE in .env.onprem',
         },
-        403
+        403,
       );
     }
 
@@ -51,7 +51,7 @@ export function sovereignLicenseRoutes(
           licensed: false,
           error: verification.error ?? 'Invalid license signature or expired license',
         },
-        403
+        403,
       );
     }
 

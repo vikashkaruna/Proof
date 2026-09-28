@@ -53,7 +53,7 @@ export class BoardReportService {
     actorId: string,
     input: RequestBoardReportInput,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const operationKey = input.operationKey ?? randomUUID();
     const result = await this.rpc(
@@ -67,13 +67,15 @@ export class BoardReportService {
         p_title: input.title,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (result.error) {
       if (result.error === 'forbidden') throw new EvidenceError('forbidden', 403);
-      if (result.error === 'assessment_not_found') throw new EvidenceError('assessment_not_found', 404);
-      if (result.error === 'assessment_not_finalized') throw new EvidenceError('assessment_not_finalized', 409);
+      if (result.error === 'assessment_not_found')
+        throw new EvidenceError('assessment_not_found', 404);
+      if (result.error === 'assessment_not_finalized')
+        throw new EvidenceError('assessment_not_finalized', 409);
       throw new EvidenceError('invalid_request', 400);
     }
 
@@ -85,7 +87,7 @@ export class BoardReportService {
     actorId: string,
     requestId: string,
     correlationId: string = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     // 1. Fetch board report request
     let reqQuery = this.db
@@ -119,20 +121,29 @@ export class BoardReportService {
     const resultObj = (pktRow.result ?? {}) as Record<string, unknown>;
     const findingsRaw = Array.isArray(resultObj.findings) ? resultObj.findings : [];
     const postureScore = typeof resultObj.posture_score === 'number' ? resultObj.posture_score : 75;
-    const exposureInr = typeof resultObj.estimated_exposure_inr === 'number' ? resultObj.estimated_exposure_inr : 50000000;
+    const exposureInr =
+      typeof resultObj.estimated_exposure_inr === 'number'
+        ? resultObj.estimated_exposure_inr
+        : 50000000;
 
     // Map findings
     const findings = findingsRaw.map((f: Record<string, unknown>) => ({
       control_id: String(f.control_id ?? 'DPDPA-01'),
       domain: String(f.domain ?? 'Security & Data Governance'),
-      severity: (f.severity === 'critical' || f.severity === 'high' || f.severity === 'low' || f.severity === 'info'
+      severity: (f.severity === 'critical' ||
+      f.severity === 'high' ||
+      f.severity === 'low' ||
+      f.severity === 'info'
         ? f.severity
         : 'medium') as 'critical' | 'high' | 'medium' | 'low' | 'info',
       title: String(f.title ?? `Finding for ${f.control_id ?? 'control'}`),
       score: typeof f.score === 'number' ? f.score : 0,
-      gap_summary: String(f.rationale ?? f.gap_summary ?? 'Statutory requirement not fully evidenced in production.'),
+      gap_summary: String(
+        f.rationale ?? f.gap_summary ?? 'Statutory requirement not fully evidenced in production.',
+      ),
       remediation_recommendation: String(
-        f.remediation_recommendation ?? 'Implement validated technical safeguard and attach immutable proof.'
+        f.remediation_recommendation ??
+          'Implement validated technical safeguard and attach immutable proof.',
       ),
     }));
 
@@ -212,11 +223,12 @@ export class BoardReportService {
         p_html_text: htmlText,
         p_correlation_id: correlationId,
       },
-      signal
+      signal,
     );
 
     if (draftRes.error) {
-      if (draftRes.error === 'founder_authority_required') throw new EvidenceError('forbidden', 403);
+      if (draftRes.error === 'founder_authority_required')
+        throw new EvidenceError('forbidden', 403);
       if (draftRes.error === 'request_not_found') throw new EvidenceError('request_not_found', 404);
       throw new EvidenceError('invalid_request', 400);
     }
@@ -240,7 +252,7 @@ export class BoardReportService {
           p_storage_version_id: 'v1',
           p_retain_until: new Date(Date.now() + 7 * 365 * 24 * 3600 * 1000).toISOString(),
         },
-        signal
+        signal,
       );
     } catch {
       // PDF rendering failure does not block draft recording
@@ -299,7 +311,7 @@ export class BoardReportService {
     tenantId: string,
     actorId: string,
     options: { limit?: number; offset?: number } = {},
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
@@ -318,7 +330,7 @@ export class BoardReportService {
 
     return {
       requests: data ?? [],
-      total: count ?? (data?.length ?? 0),
+      total: count ?? data?.length ?? 0,
       limit,
       offset,
     };

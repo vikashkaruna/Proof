@@ -11,10 +11,7 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
-import {
-  BoardReportService,
-  requestBoardReportInputSchema,
-} from '../services/board-reports.js';
+import { BoardReportService, requestBoardReportInputSchema } from '../services/board-reports.js';
 
 type Ctx = Context<{ Variables: Variables }>;
 
@@ -29,9 +26,12 @@ function invalid(c: Ctx, message?: string) {
   return c.json({ error: { code: 'validation_failed', message } }, 400);
 }
 
-export function boardReportRoutes(dependencies: { db?: EvidenceDatabase; service?: BoardReportService } = {}) {
+export function boardReportRoutes(
+  dependencies: { db?: EvidenceDatabase; service?: BoardReportService } = {},
+) {
   const app = new Hono<{ Variables: Variables }>();
-  const service = () => dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin());
+  const service = () =>
+    dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin());
 
   // 1. Request Board Report (Manager initiated)
   app.post('/reports/board/request', async (c) => {
@@ -50,7 +50,7 @@ export function boardReportRoutes(dependencies: { db?: EvidenceDatabase; service
         c.get('user').id,
         parsed.data,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 201);
     } catch (cause) {
@@ -74,7 +74,7 @@ export function boardReportRoutes(dependencies: { db?: EvidenceDatabase; service
         c.get('user').id,
         id,
         correlationId,
-        signal
+        signal,
       );
       return c.json(result, 200);
     } catch (cause) {
@@ -92,12 +92,7 @@ export function boardReportRoutes(dependencies: { db?: EvidenceDatabase; service
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
     try {
-      const result = await service().getReportPdf(
-        c.get('tenantId'),
-        c.get('user').id,
-        id,
-        signal
-      );
+      const result = await service().getReportPdf(c.get('tenantId'), c.get('user').id, id, signal);
 
       return new Response(new Uint8Array(result.pdfBuffer), {
         status: 200,
@@ -127,7 +122,7 @@ export function boardReportRoutes(dependencies: { db?: EvidenceDatabase; service
         c.get('tenantId'),
         c.get('user').id,
         { limit, offset },
-        signal
+        signal,
       );
       return c.json(result, 200);
     } catch (cause) {

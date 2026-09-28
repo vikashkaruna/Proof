@@ -112,7 +112,8 @@ function formatInr(amount: number): string {
 export function renderBoardReportHtml(content: BoardReportContentV1): string {
   const validated = BoardReportContentV1Schema.parse(content);
   const es = validated.executive_summary;
-  const scoreColor = es.posture_score >= 80 ? '#0FB5A5' : es.posture_score >= 60 ? '#C9A227' : '#D9534F';
+  const scoreColor =
+    es.posture_score >= 80 ? '#0FB5A5' : es.posture_score >= 60 ? '#C9A227' : '#D9534F';
 
   const findingsHtml = validated.key_findings
     .map((f) => {
@@ -145,7 +146,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
         <td>${escapeHtml(a.owner)}</td>
         <td class="text-center">${a.timeline_days} days</td>
         <td class="text-center"><span class="badge badge-priority">${escapeHtml(a.priority.toUpperCase())}</span></td>
-      </tr>`
+      </tr>`,
     )
     .join('\n');
 
