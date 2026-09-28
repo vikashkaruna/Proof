@@ -101,6 +101,30 @@ const AGENTS: Array<{
     autonomy: 'L1 (internal)',
     scopes: ['http.read.public_sources'],
   },
+  {
+    name: 'samadhan',
+    persona: 'Maker-Checker & Reconciler',
+    one: 'I prove that execution matched your plan and your approval.',
+    long: 'Samadhan enforces dual-control maker-checker integrity over Karya executions. It reconciles post-execution reality against approved scope, detects parameter-level drift, sweeps unexecuted actions back to approved status, and cryptographically signs the reconciliation statement with an approval-keyed HMAC.',
+    autonomy: 'L1',
+    scopes: ['plan.read', 'batch.read', 'reconciliation.write', 'ledger.append'],
+  },
+  {
+    name: 'pramaan',
+    persona: 'Statutory Closure & Proof Attestation',
+    one: 'I turn findings, ledgers, and evidence into unassailable, auditor-ready proof.',
+    long: 'Pramaan is the master synthesis authority for statutory closure. It aggregates findings, remediation tokens, execution batches, Saakshi WORM evidence manifests, and Lekha Merkle root hashes into an authoritative closure pack sealed with the Gold ProofSeal under Founder co-signature.',
+    autonomy: 'L1',
+    scopes: [
+      'findings.read',
+      'plan.read',
+      'reconciliation.read',
+      'evidence.read',
+      'ledger.read',
+      'dossier.write',
+      'pdf.render',
+    ],
+  },
 ] as const;
 
 import { AgentsInteractiveRoster } from './agents-interactive-roster';
@@ -108,7 +132,7 @@ import { AgentsInteractiveRoster } from './agents-interactive-roster';
 export default function AgentsPage() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-      <Badge variant="indigo">10 agents</Badge>
+      <Badge variant="indigo">12 agents</Badge>
       <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight text-indigo-500 sm:text-4xl">
         The {BRAND.name} agent roster
       </h1>

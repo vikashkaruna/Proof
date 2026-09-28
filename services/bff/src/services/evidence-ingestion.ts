@@ -8,9 +8,16 @@ import { EvidenceType } from '@axiom/types';
 export const EVIDENCE_MAX_BYTES = 8 * 1024 * 1024;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const timestamp = z.string().refine((value) => Number.isFinite(Date.parse(value)));
+export const uuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID',
+  );
+
 export const evidenceUploadSchema = z
   .object({
-    operationKey: z.uuid(),
+    operationKey: uuidSchema,
     filename: z
       .string()
       .min(1)
@@ -23,7 +30,7 @@ export const evidenceUploadSchema = z
     evidenceType: z.enum(EvidenceType),
     description: z.string().trim().min(1).max(2000),
     controlIds: z.array(z.string().min(1).max(80)).max(40),
-    engagementId: z.uuid().nullable().optional(),
+    engagementId: uuidSchema.nullable().optional(),
     contentBase64: z
       .string()
       .min(4)
@@ -39,7 +46,7 @@ export const ingestRequestSchema = z.object({
   evidence_type: z.enum(EvidenceType),
   description: z.string().nullable(),
   control_ids: z.array(z.string()),
-  engagement_id: z.uuid().nullable(),
+  engagement_id: uuidSchema.nullable(),
   collected_by_agent: z.string(),
   provider: z.enum(['s3', 's3-compatible']),
   bucket: z.string().min(1),
@@ -48,23 +55,23 @@ export const ingestRequestSchema = z.object({
   legal_hold: z.boolean(),
 });
 export const operationSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  operation_key: z.uuid(),
-  actor_id: z.uuid(),
+  id: uuidSchema,
+  tenant_id: uuidSchema,
+  operation_key: uuidSchema,
+  actor_id: uuidSchema,
   status: z.enum(['pending', 'settled']),
-  evidence_id: z.uuid().nullable(),
+  evidence_id: uuidSchema.nullable(),
   request: ingestRequestSchema,
   retain_until: timestamp,
-  correlation_id: z.uuid(),
+  correlation_id: uuidSchema,
   last_error_code: z.string().nullable(),
   created_at: timestamp,
 });
 export const receiptSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  evidence_id: z.uuid(),
-  ingestion_id: z.uuid(),
+  id: uuidSchema,
+  tenant_id: uuidSchema,
+  evidence_id: uuidSchema,
+  ingestion_id: uuidSchema,
   provider: z.enum(['s3', 's3-compatible']),
   bucket: z.string().min(1),
   object_key: z.string().min(1),
@@ -290,7 +297,7 @@ export class EvidenceIngestionService {
     });
     if (error) throw new EvidenceError('ingestion_begin_unavailable', 503);
     domainError(data);
-    const begun = z.object({ operation_id: z.uuid(), replayed: z.boolean() }).safeParse(data);
+    const begun = z.object({ operation_id: uuidSchema, replayed: z.boolean() }).safeParse(data);
     if (!begun.success) throw new EvidenceError('ingestion_begin_unavailable', 503);
     const operation = await this.operation(tenantId, input.operationKey);
     if (operation.id !== begun.data.operation_id)

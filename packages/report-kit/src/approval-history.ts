@@ -49,11 +49,13 @@ export const ApprovalHistoryExportContentV1Schema = z.object({
       product: z.literal(BRANDING.product),
       company: z.literal(BRANDING.company),
       company_url: z.literal(BRANDING.company_url),
+      product_url: z.string().optional(),
     })
     .default({
       product: BRANDING.product,
       company: BRANDING.company,
       company_url: BRANDING.company_url,
+      product_url: 'https://axiomproof.ai',
     }),
   summary: z.object({
     total_records: z.number().int().min(0),
@@ -151,12 +153,15 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
     .header-banner {
       background: #1E2A4A; color: #FFFFFF; padding: 22px 28px; border-radius: 8px;
       display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;
+      border-bottom: 4px solid #C9A227;
     }
-    .brand-title { font-size: 22px; font-weight: 700; margin: 0 0 4px 0; }
-    .brand-subtitle { font-size: 11px; color: #94A3B8; margin: 0; }
+    .brand-title { font-size: 20px; font-weight: 700; margin: 0 0 4px 0; }
+    .brand-subtitle { font-size: 11px; color: #CBD5E1; margin: 0; }
+    .brand-credentials { margin: 6px 0 0 0; font-size: 10px; color: #94A3B8; }
+    .brand-credentials a { color: #0FB5A5; text-decoration: none; }
     .export-badge {
       background: #0FB5A5; color: #FFFFFF; font-size: 11px; font-weight: 700;
-      padding: 6px 14px; border-radius: 4px; text-transform: uppercase;
+      padding: 6px 14px; border-radius: 4px; text-transform: uppercase; white-space: nowrap;
     }
     .metrics-grid {
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px;
@@ -170,20 +175,25 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
       border: 1px solid #CBD5E1; border-radius: 6px; padding: 14px; margin-bottom: 12px; background: #FFFFFF; page-break-inside: avoid;
     }
     .approval-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .token-id { font-family: monospace; font-weight: 700; color: #1E2A4A; margin-right: 8px; }
-    .plan-info { color: #475569; font-size: 11px; }
-    .status-chip { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+    .token-id { font-family: monospace; font-weight: 700; color: #1E2A4A; margin-right: 8px; word-break: break-all; }
+    .plan-info { color: #475569; font-size: 11px; word-break: break-word; }
+    .status-chip { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
     .status-chip.consumed { background: #D1FAE5; color: #065F46; }
     .status-chip.issued { background: #FEF3C7; color: #92400E; }
     .status-chip.revoked { background: #FEE2E2; color: #991B1B; }
     .status-chip.expired { background: #F1F5F9; color: #64748B; }
-    .approval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; margin-bottom: 6px; }
-    .approval-meta { font-size: 10px; color: #64748B; }
-    .sig-code { font-family: monospace; color: #0284C7; font-size: 10px; }
+    .approval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; margin-bottom: 6px; word-break: break-word; overflow-wrap: anywhere; }
+    .approval-meta { font-size: 10px; color: #64748B; word-break: break-word; }
+    .sig-code { font-family: monospace; color: #0284C7; font-size: 10px; word-break: break-all; overflow-wrap: anywhere; }
     .reconciliation-box {
       margin-top: 8px; padding: 8px 10px; background: #EEF2F6; border-left: 3px solid #0FB5A5; font-size: 11px;
+      word-break: break-word; overflow-wrap: anywhere;
     }
-    .footer { margin-top: 30px; padding-top: 12px; border-top: 1px solid #E2E8F0; display: flex; justify-content: space-between; font-size: 10px; color: #94A3B8; }
+    .footer {
+      margin-top: 30px; padding-top: 12px; border-top: 1px solid #E2E8F0;
+      display: flex; justify-content: space-between; font-size: 10px; color: #64748B;
+    }
+    .footer a { color: #0FB5A5; text-decoration: none; }
   </style>
 </head>
 <body>
@@ -191,6 +201,9 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
     <div>
       <div class="brand-title">${escapeHtml(validated.title)}</div>
       <p class="brand-subtitle">Tenant: ${escapeHtml(validated.tenant_name)} · ${escapeHtml(validated.branding.product)} Approval Audit Ledger</p>
+      <p class="brand-credentials">
+        Issued by <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>) · Platform: <a href="https://axiomproof.ai">https://axiomproof.ai</a>
+      </p>
     </div>
     <div class="export-badge">APPROVAL AUDIT EXPORT</div>
   </div>
@@ -217,7 +230,7 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
   ${recordsHtml}
 
   <div class="footer">
-    <div>Exported from ${escapeHtml(validated.branding.product)} · ${escapeHtml(validated.branding.company)} (${escapeHtml(validated.branding.company_url)})</div>
+    <div>Exported from <strong>${escapeHtml(validated.branding.product)}</strong> (<a href="https://axiomproof.ai">https://axiomproof.ai</a>) · <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>)</div>
     <div>Generated At: ${escapeHtml(validated.generated_at)}</div>
   </div>
 </body>

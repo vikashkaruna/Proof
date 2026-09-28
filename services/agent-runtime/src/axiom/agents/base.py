@@ -59,7 +59,9 @@ class AgentName(str, Enum):
     LEKHA = "lekha"
     NAZAR = "nazar"
     PRATIVEDAN = "prativedan"
+    PRAMAAN = "pramaan"
     SANKET = "sanket"
+    SAMADHAN = "samadhan"
 
 
 @dataclass(frozen=True)
@@ -287,7 +289,9 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
             AgentName.LEKHA: "execution.started",
             AgentName.NAZAR: "report.generated",
             AgentName.PRATIVEDAN: "report.generated",
+            AgentName.PRAMAAN: "closure.pramaan.drafted",
             AgentName.SANKET: "report.generated",
+            AgentName.SAMADHAN: "execution.reconciliation.recorded",
         }
         return mapping.get(self.name, "report.generated")
 

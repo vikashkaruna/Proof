@@ -75,7 +75,7 @@ To maximize horizontal scalability, failure isolation, and independent rollouts,
 | **Web Workbench**    | `axiom-web`              | `http://localhost:3001`  | Core operator UI, plan review, approval console, kill switch (Scales 1–10 on Cloud Run)        |
 | **Marketing Site**   | `axiom-marketing`        | `http://localhost:3000`  | Public funnel & interactive 5-minute DPDPA gap-scan (Scales 1–5 on Cloud Run, or Firebase CDN) |
 | **BFF API Engine**   | `axiom-bff`              | `http://localhost:4000`  | Execution gate, auth, approval token issuance, kill switch (Scales 1–10 on Cloud Run)          |
-| **Agent Runtime**    | `axiom-agent-runtime`    | `http://localhost:8000`  | 10 named compliance agents: Drishti, Sudhaar, etc. (Scales 1–5 on Cloud Run)                   |
+| **Agent Runtime**    | `axiom-agent-runtime`    | `http://localhost:8000`  | 12 named compliance agents: Drishti, Sudhaar, etc. (Scales 1–5 on Cloud Run)                   |
 | **Model Gateway**    | `axiom-model-gateway`    | `http://localhost:8001`  | PII redactor (Presidio + regex) & LLM router (Scales 1–5 on Cloud Run)                         |
 | **Temporal UI**      | `axiom-temporal-ui`      | `http://localhost:8233`  | Durable workflow state machine visualizer                                                      |
 | **Temporal Server**  | `axiom-temporal`         | `localhost:7233`         | gRPC orchestration engine                                                                      |

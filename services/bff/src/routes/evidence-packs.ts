@@ -12,6 +12,7 @@ import {
   publicPack,
   publicReport,
   reportStatus,
+  uuid,
 } from '../services/evidence-pack-records.js';
 
 type Ctx = Context<{ Variables: Variables }>;
@@ -30,7 +31,7 @@ function invalid(c: Ctx) {
   return c.json({ error: { code: 'validation_failed' } }, 400);
 }
 function validId(c: Ctx) {
-  return z.uuid().safeParse(c.req.param('id')).success;
+  return uuid.safeParse(c.req.param('id')).success;
 }
 export function evidencePackRoutes(
   dependencies: { db?: EvidenceDatabase; service?: EvidencePackService } = {},
@@ -136,7 +137,7 @@ export function evidencePackRoutes(
     if (denied) return denied;
     if (!validId(c)) return invalid(c);
     const input = z
-      .object({ operationKey: z.uuid() })
+      .object({ operationKey: uuid })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!input.success) return invalid(c);
@@ -156,7 +157,7 @@ export function evidencePackRoutes(
   app.post('/evidence-packs/:id/builds/:operationKey/reconcile', async (c) => {
     const denied = requireCapability(c, Capability.EVIDENCE_RECORD);
     if (denied) return denied;
-    if (!validId(c) || !z.uuid().safeParse(c.req.param('operationKey')).success) return invalid(c);
+    if (!validId(c) || !uuid.safeParse(c.req.param('operationKey')).success) return invalid(c);
     if (
       !z
         .object({})

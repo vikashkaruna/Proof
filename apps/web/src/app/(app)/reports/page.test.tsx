@@ -2,6 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { UserRole } from '@axiom/types';
 const state = vi.hoisted(() => ({ role: 'admin' as string, internal: false }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async () => ({
     tenantId: '11111111-1111-4111-8111-111111111111',
