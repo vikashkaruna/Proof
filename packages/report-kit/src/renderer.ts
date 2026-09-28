@@ -330,7 +330,7 @@ export async function renderHtmlToPdf(
   htmlContent: string,
   options: RenderPdfOptions = {},
 ): Promise<RenderPdfResult> {
-  const timeoutMs = options.timeoutMs ?? 15000;
+  const timeoutMs = options.timeoutMs ?? 10000;
   const preferChromium = options.preferChromium ?? true;
 
   const chromiumPath = preferChromium ? findChromiumExecutable() : null;
@@ -354,7 +354,7 @@ export async function renderHtmlToPdf(
           `--print-to-pdf=${outPdfPath}`,
           inHtmlPath,
         ],
-        { timeout: timeoutMs },
+        { timeout: timeoutMs, killSignal: 'SIGKILL' },
       );
 
       const pdfBuffer = await fs.readFile(outPdfPath);
