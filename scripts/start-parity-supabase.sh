@@ -17,6 +17,7 @@ config = config.replace('[studio]\nenabled = true', '[studio]\nenabled = false')
 # use restricted postgres; apply via the checksummed runner AFTER Auth starts.
 config += '\n[db.seed]\nenabled = false\n\n[db.migrations]\nenabled = false\n'
 (state / 'supabase/config.toml').write_text(config)
+PY
 started=false
 for attempt in 1 2 3; do
   if supabase start --workdir "$state_dir" --exclude studio,postgres-meta,realtime,logflare,vector,edge-runtime,imgproxy > "$state_dir/start.log" 2>&1; then
@@ -25,6 +26,7 @@ for attempt in 1 2 3; do
   fi
   if [ "$attempt" -lt 3 ]; then
     echo "Supabase start attempt $attempt failed; retrying in $((attempt * 5))s..." >&2
+    supabase stop --workdir "$state_dir" > /dev/null 2>&1 || true
     sleep $((attempt * 5))
   fi
 done
