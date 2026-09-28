@@ -41,11 +41,18 @@ export async function reportRequest(
   return response;
 }
 
+const uuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID',
+  );
+
 const prepareSchema = z.object({
-  operationKey: z.uuid(),
+  operationKey: uuidSchema,
   title: z.string().trim().min(1).max(200),
-  evidenceReceiptIds: z.array(z.uuid()).min(1).max(20),
-  engagementId: z.uuid().nullable(),
+  evidenceReceiptIds: z.array(uuidSchema).min(1).max(20),
+  engagementId: uuidSchema.nullable(),
 });
 
 export function preparePackBody(

@@ -3,34 +3,37 @@ import { UserRole, Capability, can } from '@axiom/types';
 import { EvidenceError, type EvidenceDatabase, receiptSchema } from './evidence-ingestion.js';
 
 export const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const uuid = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, 'Invalid UUID');
 const timestamp = z.string().refine((s) => Number.isFinite(Date.parse(s)));
 export const reportStatus = z.enum(['draft', 'approved', 'rejected', 'published', 'archived']);
 export const reportSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  engagement_id: z.uuid().nullable(),
+  id: uuid,
+  tenant_id: uuid,
+  engagement_id: uuid.nullable(),
   kind: z.string(),
   title: z.string(),
   library_version: z.string(),
   generated_by_agent: z.string(),
   generated_at: timestamp,
-  created_by: z.uuid().nullable(),
+  created_by: uuid.nullable(),
   status: reportStatus,
   content: z.unknown(),
   content_text: z.string().nullable(),
   content_sha256: digest.nullable(),
   reviewed_content_hash: digest.nullable(),
   published_at: timestamp.nullable(),
-  released_by: z.uuid().nullable(),
+  released_by: uuid.nullable(),
   released_archive_hash: digest.nullable(),
 });
 export const reviewSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  report_id: z.uuid(),
+  id: uuid,
+  tenant_id: uuid,
+  report_id: uuid,
   decision: z.enum(['approved', 'rejected']),
   content_sha256: digest,
-  reviewed_by: z.uuid(),
+  reviewed_by: uuid,
   reviewer_name: z.string(),
   reviewed_at: timestamp,
   note: z.string().nullable(),
@@ -38,13 +41,13 @@ export const reviewSchema = z.object({
   review_sha256: digest,
 });
 export const packSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  report_id: z.uuid(),
-  operation_key: z.uuid(),
-  created_by: z.uuid(),
+  id: uuid,
+  tenant_id: uuid,
+  report_id: uuid,
+  operation_key: uuid,
+  created_by: uuid,
   created_at: timestamp,
-  engagement_id: z.uuid().nullable(),
+  engagement_id: uuid.nullable(),
   library_version: z.string(),
   title: z.string(),
   manifest_text: z.string(),
@@ -74,22 +77,22 @@ export const buildRequestSchema = z
   })
   .strict();
 export const buildSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  pack_id: z.uuid(),
-  operation_key: z.uuid(),
-  actor_id: z.uuid(),
+  id: uuid,
+  tenant_id: uuid,
+  pack_id: uuid,
+  operation_key: uuid,
+  actor_id: uuid,
   status: z.enum(['pending', 'settled']),
   request: buildRequestSchema,
   retain_until: timestamp,
-  correlation_id: z.uuid(),
+  correlation_id: uuid,
   last_error_code: z.string().nullable(),
   created_at: timestamp,
   settled_at: timestamp.nullable(),
 });
 export const archiveSchema = receiptSchema.omit({ evidence_id: true, ingestion_id: true }).extend({
-  pack_id: z.uuid(),
-  build_id: z.uuid(),
+  pack_id: uuid,
+  build_id: uuid,
   byte_size: z
     .number()
     .int()

@@ -24,6 +24,7 @@ import {
   archiveSchema,
   publicPack,
   publicReport,
+  uuid,
   type PackAccess,
   type Report,
   type Review,
@@ -32,21 +33,21 @@ import {
 
 export const preparePackSchema = z
   .object({
-    operationKey: z.uuid(),
+    operationKey: uuid,
     title: z.string().trim().min(1).max(200),
     evidenceReceiptIds: z
-      .array(z.uuid())
+      .array(uuid)
       .min(1)
       .max(PACK_LIMITS.members)
       .refine((v) => new Set(v).size === v.length),
-    engagementId: z.uuid().nullable().optional(),
+    engagementId: uuid.nullable().optional(),
   })
   .strict();
 type Storage = { vault: EvidenceVaultApi; config: EvidenceStorageConfig };
 const evidenceSchema = z.object({
-  id: z.uuid(),
-  tenant_id: z.uuid(),
-  engagement_id: z.uuid().nullable(),
+  id: uuid,
+  tenant_id: uuid,
+  engagement_id: uuid.nullable(),
   content_hash: z.string(),
   byte_size: z.number().int(),
   collected_by_agent: z.string(),
@@ -135,7 +136,7 @@ export class EvidencePackService {
     if (engagements.error || libraries.error)
       throw new EvidenceError('report_storage_unavailable', 503);
     const rows = parseRecord(
-      z.array(z.object({ id: z.uuid(), title: z.string(), library_version: z.string() })),
+      z.array(z.object({ id: uuid, title: z.string(), library_version: z.string() })),
       engagements.data,
     );
     const current = parseRecord(
@@ -291,7 +292,7 @@ export class EvidencePackService {
       .maybeSingle();
     if (found.error) throw new EvidenceError('report_storage_unavailable', 503);
     if (!found.data) throw new EvidenceError('pack_not_found', 404);
-    const id = parseRecord(z.object({ report_id: z.uuid() }), found.data).report_id;
+    const id = parseRecord(z.object({ report_id: uuid }), found.data).report_id;
     const report = await this.report(access, id, signal);
     const bundle = (await this.relations(access, [report], signal)).packs.get(id);
     if (!bundle || bundle.pack.id !== packId) throw new EvidenceError('pack_not_found', 404);
@@ -441,7 +442,7 @@ export class EvidencePackService {
         },
         budget.signal,
       );
-      const id = parseRecord(z.object({ pack_id: z.uuid() }), response).pack_id;
+      const id = parseRecord(z.object({ pack_id: uuid }), response).pack_id;
       return this.detail(
         await this.access(access.tenantId, access.actorId, budget.signal),
         id,
@@ -614,7 +615,7 @@ export class EvidencePackService {
         },
         budget.signal,
       );
-      const begun = parseRecord(z.object({ build_id: z.uuid(), replayed: z.boolean() }), response);
+      const begun = parseRecord(z.object({ build_id: uuid, replayed: z.boolean() }), response);
       const current = await this.refresh(access, packId, budget.signal);
       if (current.build?.id !== begun.build_id)
         throw new EvidenceError('report_persistence_unconfirmed', 503);

@@ -17,8 +17,18 @@ config = config.replace('[studio]\nenabled = true', '[studio]\nenabled = false')
 # use restricted postgres; apply via the checksummed runner AFTER Auth starts.
 config += '\n[db.seed]\nenabled = false\n\n[db.migrations]\nenabled = false\n'
 (state / 'supabase/config.toml').write_text(config)
-PY
-if ! supabase start --workdir "$state_dir" --exclude studio,postgres-meta,realtime,logflare,vector,edge-runtime,imgproxy > "$state_dir/start.log" 2>&1; then
+started=false
+for attempt in 1 2 3; do
+  if supabase start --workdir "$state_dir" --exclude studio,postgres-meta,realtime,logflare,vector,edge-runtime,imgproxy > "$state_dir/start.log" 2>&1; then
+    started=true
+    break
+  fi
+  if [ "$attempt" -lt 3 ]; then
+    echo "Supabase start attempt $attempt failed; retrying in $((attempt * 5))s..." >&2
+    sleep $((attempt * 5))
+  fi
+done
+if [ "$started" != true ]; then
   echo "Supabase startup failed. Inspect the protected log at $state_dir/start.log" >&2
   # Logs may contain generated credentials. Emit only fixed diagnostic labels,
   # never raw startup logs or status JSON into CI logs/artifacts.

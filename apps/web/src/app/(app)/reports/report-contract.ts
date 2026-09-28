@@ -1,19 +1,22 @@
 import { z } from 'zod';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+const uuid = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, 'Invalid UUID');
 const timestamp = z.string().refine((value) => Number.isFinite(Date.parse(value)));
 export const reviewSchema = z.object({
-  id: z.uuid(),
+  id: uuid,
   decision: z.enum(['approved', 'rejected']),
-  reviewerId: z.uuid(),
+  reviewerId: uuid,
   reviewerName: z.string(),
   reviewedAt: timestamp,
   note: z.string().nullable(),
   contentHash: hash,
 });
 const buildSchema = z.object({
-  id: z.uuid(),
-  operationKey: z.uuid(),
+  id: uuid,
+  operationKey: uuid,
   status: z.enum(['pending', 'settled']),
   errorCode: z.string().nullable(),
   createdAt: timestamp,
@@ -21,7 +24,7 @@ const buildSchema = z.object({
   retainUntil: timestamp,
 });
 const archiveSchema = z.object({
-  id: z.uuid(),
+  id: uuid,
   versionId: z.string(),
   contentHash: hash,
   byteSize: z
@@ -36,25 +39,25 @@ const archiveSchema = z.object({
   encryption: z.string(),
 });
 export const reportSchema = z.object({
-  id: z.uuid(),
+  id: uuid,
   kind: z.string(),
   title: z.string(),
-  engagementId: z.uuid().nullable(),
+  engagementId: uuid.nullable(),
   libraryVersion: z.string(),
   status: z.enum(['draft', 'approved', 'rejected', 'published', 'archived']),
   generatedAt: timestamp,
   generatedByAgent: z.string(),
-  createdBy: z.uuid().nullable(),
+  createdBy: uuid.nullable(),
   contentHash: hash.nullable(),
   reviewedContentHash: hash.nullable(),
   review: reviewSchema.nullable(),
   publishedAt: timestamp.nullable(),
-  releasedBy: z.uuid().nullable(),
+  releasedBy: uuid.nullable(),
   releasedArchiveHash: hash.nullable(),
   assurance: z.enum(['legacy_unverified', 'digest_bound']),
   pack: z
     .object({
-      id: z.uuid(),
+      id: uuid,
       manifestHash: hash,
       memberCount: z.number().int(),
       totalMemberBytes: z.number().int(),
@@ -79,8 +82,8 @@ export const listSchema = z.object({
 export const manifestPreviewSchema = z.object({
   members: z.array(
     z.object({
-      evidence_id: z.uuid(),
-      receipt_id: z.uuid(),
+      evidence_id: uuid,
+      receipt_id: uuid,
       filename: z.string().nullable(),
       content_hash: hash,
       byte_size: z.number().int(),

@@ -12,11 +12,11 @@ import {
   renderApprovalHistoryHtml,
   renderHtmlToPdf,
 } from '@axiom/report-kit';
-import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
+import { EvidenceError, type EvidenceDatabase, uuidSchema } from './evidence-ingestion.js';
 
 export const listApprovalHistoryInputSchema = z
   .object({
-    planId: z.uuid().optional(),
+    planId: uuidSchema.optional(),
     status: z.enum(['issued', 'consumed', 'revoked', 'expired']).optional(),
     mode: z.enum(['batch', 'individual']).optional(),
     from: z.string().datetime().optional(),
@@ -30,7 +30,7 @@ export type ListApprovalHistoryInput = z.infer<typeof listApprovalHistoryInputSc
 
 export const exportApprovalHistoryInputSchema = z
   .object({
-    planId: z.uuid().optional(),
+    planId: uuidSchema.optional(),
     format: z.enum(['json', 'html', 'pdf', 'csv']).default('json'),
     from: z.string().datetime().optional(),
     to: z.string().datetime().optional(),
