@@ -80,15 +80,19 @@ export function approvalExportRoutes(
         signal
       );
 
+      const headers: Record<string, string> = {
+        'Content-Type': result.mimeType,
+        'Content-Disposition': `attachment; filename="${result.filename}"`,
+        'Content-Length': String(result.bytes),
+        'X-Export-SHA256': result.sha256,
+      };
+      if (result.exportId) {
+        headers['X-Export-ID'] = result.exportId;
+      }
+
       return new Response(new Uint8Array(result.buffer), {
         status: 200,
-        headers: {
-          'Content-Type': result.mimeType,
-          'Content-Disposition': `attachment; filename="${result.filename}"`,
-          'Content-Length': String(result.bytes),
-          'X-Export-ID': result.exportId,
-          'X-Export-SHA256': result.sha256,
-        },
+        headers,
       });
     } catch (cause) {
       return failure(c, cause);
@@ -121,15 +125,19 @@ export function approvalExportRoutes(
         signal
       );
 
+      const headers: Record<string, string> = {
+        'Content-Type': result.mimeType,
+        'Content-Disposition': `attachment; filename="${result.filename}"`,
+        'Content-Length': String(result.bytes),
+        'X-Export-SHA256': result.sha256,
+      };
+      if (result.exportId) {
+        headers['X-Export-ID'] = result.exportId;
+      }
+
       return new Response(new Uint8Array(result.buffer), {
         status: 200,
-        headers: {
-          'Content-Type': result.mimeType,
-          'Content-Disposition': `attachment; filename="${result.filename}"`,
-          'Content-Length': String(result.bytes),
-          'X-Export-ID': result.exportId,
-          'X-Export-SHA256': result.sha256,
-        },
+        headers,
       });
     } catch (cause) {
       return failure(c, cause);
