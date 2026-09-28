@@ -226,10 +226,10 @@ export function AgentWorkbenchClient({
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3 flex items-center justify-between">
             <span className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-[#0FB5A5]" />
-              <span>Autonomous Fleet (12 Named Agents)</span>
+              <span>Agent fleet</span>
             </span>
-            <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10.5px] font-semibold text-[#0a8d80]">
-              Active Fleet · L1/L2 Segregation
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+              Health not monitored here
             </span>
           </div>
           <div className="divide-y divide-[#eef1f5]">
@@ -298,7 +298,7 @@ export function AgentWorkbenchClient({
             <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3 flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#1E2A4A]" />
-                <span>Prompt & Model Gateway Registry</span>
+                <span>Prompt registry</span>
               </span>
               <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                 Not yet available
@@ -451,7 +451,7 @@ export function AgentWorkbenchClient({
                   disabled={isExecuting}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[#0a8d80] transition-colors cursor-pointer"
                 >
-                  ⚡ Run {selectedAgent} Test Now
+                  Execute Selected Agent
                 </button>
               </div>
             ) : (
