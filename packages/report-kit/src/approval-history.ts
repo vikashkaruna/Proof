@@ -95,47 +95,67 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
     }
   };
 
-  const recordsHtml = validated.approvals
-    .map(
-      (appr) => `
-      <div class="approval-card">
-        <div class="approval-top">
-          <div>
-            <span class="token-id">TOKEN: ${escapeHtml(appr.token_id.slice(0, 8))}...</span>
-            <span class="plan-info">Plan: ${escapeHtml(appr.plan_title)} (v${appr.plan_version})</span>
-          </div>
-          <div>${statusBadge(appr.status)}</div>
-        </div>
-        <div class="approval-grid">
-          <div>
-            <strong>Approver:</strong> ${escapeHtml(appr.approver_name)} (${escapeHtml(appr.approver_role)})<br>
-            <strong>Scopes:</strong> ${escapeHtml(appr.approval_scopes.join(', ') || 'Unrestricted')}<br>
-            <strong>Mode:</strong> ${escapeHtml(appr.mode.toUpperCase())} (${appr.action_count} action(s))
-          </div>
-          <div>
-            <strong>Dry Run:</strong> ${appr.dry_run_verified ? '✓ Passed (' + escapeHtml(appr.dry_run_status) + ')' : '✗ Not Verified'}<br>
-            <strong>Rollback:</strong> ${appr.rollback_validated ? '✓ Validated' : '✗ Unvalidated'}<br>
-            <strong>Signature:</strong> <span class="sig-code">${escapeHtml(appr.signature_preview)}</span>
-          </div>
-        </div>
-        <div class="approval-meta">
-          Issued: ${escapeHtml(appr.issued_at)} · Expires: ${escapeHtml(appr.expires_at)}
-          ${appr.consumed_at ? ` · Consumed: ${escapeHtml(appr.consumed_at)}` : ''}
-          ${appr.revoked_at ? ` · Revoked: ${escapeHtml(appr.revoked_at)}` : ''}
-        </div>
-        ${
-          appr.reconciliation_statement
-            ? `
-          <div class="reconciliation-box">
-            <strong>Reconciliation Statement:</strong> ${escapeHtml(appr.reconciliation_statement)}
-          </div>
-        `
-            : ''
-        }
-      </div>
-    `,
-    )
-    .join('\n');
+  const rowsHtml = validated.approvals.length === 0
+    ? `<tr><td colspan="4" class="empty-state">No approval records recorded in ledger.</td></tr>`
+    : validated.approvals
+        .map(
+          (appr) => `
+        <tr class="approval-row">
+          <td class="col-token">
+            <div class="token-id">TOKEN: ${escapeHtml(appr.token_id.slice(0, 8))}...</div>
+            <div class="plan-info"><strong>Plan:</strong> ${escapeHtml(appr.plan_title)} <span class="plan-ver">(v${appr.plan_version})</span></div>
+            <div class="mode-info"><strong>Mode:</strong> ${escapeHtml(appr.mode.toUpperCase())} (${appr.action_count} action(s))</div>
+          </td>
+          <td class="col-approver">
+            <div class="approver-name"><strong>${escapeHtml(appr.approver_name)}</strong></div>
+            <div class="approver-role">${escapeHtml(appr.approver_role)}</div>
+            <div class="scopes-text"><strong>Scopes:</strong> ${escapeHtml(appr.approval_scopes.join(', ') || 'Unrestricted')}</div>
+            ${
+              appr.action_types.length > 0
+                ? `<div class="action-types"><strong>Actions:</strong> ${escapeHtml(appr.action_types.join(', '))}</div>`
+                : ''
+            }
+          </td>
+          <td class="col-verification">
+            <div class="verif-item">
+              <strong>Dry Run:</strong> ${
+                appr.dry_run_verified
+                  ? '<span class="text-success">✓ Passed (' + escapeHtml(appr.dry_run_status) + ')</span>'
+                  : '<span class="text-danger">✗ Not Verified</span>'
+              }
+            </div>
+            <div class="verif-item">
+              <strong>Rollback:</strong> ${
+                appr.rollback_validated
+                  ? '<span class="text-success">✓ Validated</span>'
+                  : '<span class="text-danger">✗ Unvalidated</span>'
+              }
+            </div>
+            <div class="sig-wrapper">
+              <strong>Signature:</strong>
+              <div class="sig-code">${escapeHtml(appr.signature_preview)}</div>
+            </div>
+            ${
+              appr.reconciliation_statement
+                ? `
+              <div class="reconciliation-box">
+                <strong>Reconciliation Statement:</strong> ${escapeHtml(appr.reconciliation_statement)}
+              </div>`
+                : ''
+            }
+          </td>
+          <td class="col-status">
+            <div class="status-wrap">${statusBadge(appr.status)}</div>
+            <div class="timestamp-meta">
+              <div><span class="ts-label">Issued:</span> ${escapeHtml(appr.issued_at)}</div>
+              <div><span class="ts-label">Expires:</span> ${escapeHtml(appr.expires_at)}</div>
+              ${appr.consumed_at ? `<div><span class="ts-label">Consumed:</span> ${escapeHtml(appr.consumed_at)}</div>` : ''}
+              ${appr.revoked_at ? `<div><span class="ts-label">Revoked:</span> ${escapeHtml(appr.revoked_at)}</div>` : ''}
+            </div>
+          </td>
+        </tr>`,
+        )
+        .join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -144,56 +164,240 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(validated.title)} — Approval History Export</title>
   <style>
-    @page { size: A4 portrait; margin: 15mm; }
-    *, *::before, *::after { box-sizing: border-box; }
+    @page {
+      size: A4 portrait;
+      margin: 14mm 16mm;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #1E293B; background: #FFFFFF; margin: 0; padding: 0; font-size: 12px; line-height: 1.5;
+      color: #1E293B;
+      background: #FFFFFF;
+      margin: 0;
+      padding: 0;
+      font-size: 11px;
+      line-height: 1.45;
     }
     .header-banner {
-      background: #1E2A4A; color: #FFFFFF; padding: 22px 28px; border-radius: 8px;
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px;
+      background: #1E2A4A;
+      color: #FFFFFF;
+      padding: 20px 24px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
       border-bottom: 4px solid #C9A227;
     }
-    .brand-title { font-size: 20px; font-weight: 700; margin: 0 0 4px 0; }
-    .brand-subtitle { font-size: 11px; color: #CBD5E1; margin: 0; }
-    .brand-credentials { margin: 6px 0 0 0; font-size: 10px; color: #94A3B8; }
-    .brand-credentials a { color: #0FB5A5; text-decoration: none; }
+    .brand-title {
+      font-size: 19px;
+      font-weight: 700;
+      margin: 0 0 4px 0;
+      letter-spacing: -0.3px;
+    }
+    .brand-subtitle {
+      font-size: 11px;
+      color: #CBD5E1;
+      margin: 0;
+    }
+    .brand-credentials {
+      margin: 5px 0 0 0;
+      font-size: 10px;
+      color: #94A3B8;
+    }
+    .brand-credentials a {
+      color: #0FB5A5;
+      text-decoration: none;
+    }
     .export-badge {
-      background: #0FB5A5; color: #FFFFFF; font-size: 11px; font-weight: 700;
-      padding: 6px 14px; border-radius: 4px; text-transform: uppercase; white-space: nowrap;
+      background: #0FB5A5;
+      color: #FFFFFF;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
     }
     .metrics-grid {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
     }
     .metric-card {
-      border: 1px solid #E2E8F0; border-radius: 6px; padding: 12px; background: #F8FAFC; text-align: center;
+      border: 1px solid #E2E8F0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: #F8FAFC;
+      text-align: center;
     }
-    .metric-val { font-size: 22px; font-weight: 700; color: #1E2A4A; }
-    .metric-sub { font-size: 10px; font-weight: 600; color: #64748B; text-transform: uppercase; margin-top: 2px; }
-    .approval-card {
-      border: 1px solid #CBD5E1; border-radius: 6px; padding: 14px; margin-bottom: 12px; background: #FFFFFF; page-break-inside: avoid;
+    .metric-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1E2A4A;
+      line-height: 1.1;
     }
-    .approval-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .token-id { font-family: monospace; font-weight: 700; color: #1E2A4A; margin-right: 8px; word-break: break-all; }
-    .plan-info { color: #475569; font-size: 11px; word-break: break-word; }
-    .status-chip { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+    .metric-sub {
+      font-size: 9.5px;
+      font-weight: 600;
+      color: #64748B;
+      text-transform: uppercase;
+      margin-top: 3px;
+      letter-spacing: 0.3px;
+    }
+    .table-container {
+      width: 100%;
+      margin-bottom: 24px;
+    }
+    table.audit-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    table.audit-table th {
+      background: #F1F5F9;
+      color: #1E2A4A;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      padding: 9px 10px;
+      text-align: left;
+      border-top: 1px solid #CBD5E1;
+      border-bottom: 2px solid #CBD5E1;
+    }
+    table.audit-table td {
+      padding: 10px;
+      border-bottom: 1px solid #E2E8F0;
+      vertical-align: top;
+      font-size: 10.5px;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    tr.approval-row {
+      page-break-inside: avoid;
+    }
+    tr.approval-row:nth-child(even) {
+      background: #FAFCFF;
+    }
+    .col-token { width: 24%; }
+    .col-approver { width: 25%; }
+    .col-verification { width: 28%; }
+    .col-status { width: 23%; }
+    .token-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 700;
+      color: #1E2A4A;
+      font-size: 10px;
+      margin-bottom: 4px;
+    }
+    .plan-info {
+      color: #334155;
+      font-size: 10.5px;
+      line-height: 1.35;
+      margin-bottom: 4px;
+    }
+    .plan-ver {
+      color: #64748B;
+      font-size: 9.5px;
+    }
+    .mode-info {
+      font-size: 9.5px;
+      color: #64748B;
+    }
+    .approver-name {
+      color: #1E2A4A;
+      font-size: 11px;
+    }
+    .approver-role {
+      color: #64748B;
+      font-size: 10px;
+      margin-bottom: 4px;
+    }
+    .scopes-text, .action-types {
+      font-size: 9.5px;
+      color: #475569;
+      line-height: 1.3;
+      margin-top: 2px;
+    }
+    .verif-item {
+      margin-bottom: 3px;
+      font-size: 10px;
+    }
+    .text-success { color: #0FB5A5; font-weight: 600; }
+    .text-danger { color: #D9534F; font-weight: 600; }
+    .sig-wrapper {
+      margin-top: 4px;
+      font-size: 9.5px;
+    }
+    .sig-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #0369A1;
+      font-size: 9px;
+      background: #F0F9FF;
+      border: 1px solid #BAE6FD;
+      border-radius: 3px;
+      padding: 2px 4px;
+      margin-top: 2px;
+      word-break: break-all;
+    }
+    .reconciliation-box {
+      margin-top: 6px;
+      padding: 6px 8px;
+      background: #F8FAFC;
+      border-left: 3px solid #0FB5A5;
+      border-radius: 2px;
+      font-size: 9.5px;
+      color: #334155;
+      line-height: 1.35;
+    }
+    .status-wrap {
+      margin-bottom: 6px;
+    }
+    .status-chip {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: inline-block;
+      letter-spacing: 0.3px;
+    }
     .status-chip.consumed { background: #D1FAE5; color: #065F46; }
     .status-chip.issued { background: #FEF3C7; color: #92400E; }
     .status-chip.revoked { background: #FEE2E2; color: #991B1B; }
     .status-chip.expired { background: #F1F5F9; color: #64748B; }
-    .approval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; margin-bottom: 6px; word-break: break-word; overflow-wrap: anywhere; }
-    .approval-meta { font-size: 10px; color: #64748B; word-break: break-word; }
-    .sig-code { font-family: monospace; color: #0284C7; font-size: 10px; word-break: break-all; overflow-wrap: anywhere; }
-    .reconciliation-box {
-      margin-top: 8px; padding: 8px 10px; background: #EEF2F6; border-left: 3px solid #0FB5A5; font-size: 11px;
-      word-break: break-word; overflow-wrap: anywhere;
+    .timestamp-meta {
+      font-size: 9px;
+      color: #64748B;
+      line-height: 1.4;
+    }
+    .ts-label {
+      font-weight: 600;
+      color: #475569;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 30px;
+      color: #64748B;
+      font-style: italic;
     }
     .footer {
-      margin-top: 30px; padding-top: 12px; border-top: 1px solid #E2E8F0;
-      display: flex; justify-content: space-between; font-size: 10px; color: #64748B;
+      margin-top: 24px;
+      padding-top: 10px;
+      border-top: 1px solid #CBD5E1;
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #64748B;
     }
-    .footer a { color: #0FB5A5; text-decoration: none; }
+    .footer a {
+      color: #0FB5A5;
+      text-decoration: none;
+    }
   </style>
 </head>
 <body>
@@ -227,11 +431,25 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
     </div>
   </div>
 
-  ${recordsHtml}
+  <div class="table-container">
+    <table class="audit-table">
+      <thead>
+        <tr>
+          <th class="col-token">Token &amp; Plan</th>
+          <th class="col-approver">Approver &amp; Scopes</th>
+          <th class="col-verification">Verification &amp; Proof</th>
+          <th class="col-status">Status &amp; Timestamps</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+  </div>
 
   <div class="footer">
     <div>Exported from <strong>${escapeHtml(validated.branding.product)}</strong> (<a href="https://axiomproof.ai">https://axiomproof.ai</a>) · <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>)</div>
-    <div>Generated At: ${escapeHtml(validated.generated_at)}</div>
+    <div>Generated At: ${escapeHtml(validated.generated_at)} · Sealed Ledger Digest</div>
   </div>
 </body>
 </html>`;

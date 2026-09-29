@@ -322,8 +322,14 @@ export class EvidencePackService {
     if (result.error || typeof result.count !== 'number')
       throw new EvidenceError('report_storage_unavailable', 503);
     const reports = parseRecord(z.array(reportSchema), result.data);
-    if (reports.some((r) => !canReadReport(access, r)))
+    const unreadable = reports.filter((r) => !canReadReport(access, r));
+    if (unreadable.length > 0) {
+      console.warn(
+        `[EvidencePacks] Refusing ${unreadable.length} report(s) unreadable by actor ${access.actorId}:`,
+        unreadable.map((r) => ({ id: r.id, status: r.status, createdBy: r.created_by })),
+      );
       throw new EvidenceError('invalid_report_record', 503);
+    }
     const related = await this.relations(access, reports, signal);
     return {
       data: reports.map((report) => {

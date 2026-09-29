@@ -119,7 +119,10 @@ export const reportColumns =
   'id,tenant_id,engagement_id,kind,title,library_version,generated_by_agent,generated_at,created_by,status,content,content_text,content_sha256,reviewed_content_hash,published_at,released_by,released_archive_hash';
 export function parseRecord<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
-  if (!result.success) throw new EvidenceError('invalid_report_record', 503);
+  if (!result.success) {
+    console.error('[EvidenceRecordParseError]', JSON.stringify(result.error.issues, null, 2));
+    throw new EvidenceError('invalid_report_record', 503);
+  }
   return result.data;
 }
 export async function accessFor(
@@ -165,7 +168,7 @@ export function canReadReport(access: PackAccess, report: Report) {
     report.tenant_id === access.tenantId &&
     (report.status === 'published' ||
       access.founder ||
-      (access.manager && report.created_by === access.actorId))
+      (access.manager && (report.created_by === access.actorId || report.created_by === null)))
   );
 }
 export function canManagePack(access: PackAccess, pack: Pack) {

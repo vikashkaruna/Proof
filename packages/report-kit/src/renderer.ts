@@ -343,19 +343,31 @@ export async function renderHtmlToPdf(
     try {
       await fs.writeFile(inHtmlPath, htmlContent, 'utf-8');
 
-      await execFileAsync(
-        chromiumPath,
-        [
-          '--headless',
-          '--disable-gpu',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--no-pdf-header-footer',
-          `--print-to-pdf=${outPdfPath}`,
-          inHtmlPath,
-        ],
-        { timeout: timeoutMs, killSignal: 'SIGKILL' },
-      );
+      const baseArgs = [
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-software-rasterizer',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--no-pdf-header-footer',
+        `--print-to-pdf=${outPdfPath}`,
+        inHtmlPath,
+      ];
+
+      try {
+        await execFileAsync(
+          chromiumPath,
+          ['--headless=new', ...baseArgs],
+          { timeout: timeoutMs, killSignal: 'SIGKILL' },
+        );
+      } catch {
+        // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
+        await execFileAsync(
+          chromiumPath,
+          ['--headless', ...baseArgs],
+          { timeout: timeoutMs, killSignal: 'SIGKILL' },
+        );
+      }
 
       const pdfBuffer = await fs.readFile(outPdfPath);
       const sha256 = createHash('sha256').update(pdfBuffer).digest('hex');

@@ -31,6 +31,8 @@ const messages: Record<string, string> = {
     'An archive build has already started. Refresh its recorded state and use recovery if it is pending.',
   storage_configuration_changed:
     'The storage configuration has changed. Ask your administrator to check the recorded archive destination.',
+  invalid_report_record:
+    'One or more recorded reports could not be verified against the audit ledger. Refresh to reload the verified ledger.',
 };
 export const failure = (error: unknown) =>
   error instanceof z.ZodError

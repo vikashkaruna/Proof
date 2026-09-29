@@ -538,7 +538,7 @@ export function PortalClient({
               </div>
 
               {/* Quick Links inside Engagement */}
-              <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-[#eef1f5]">
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4 border-t border-[#eef1f5]">
                 <Link
                   href="/assessment"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
@@ -567,11 +567,25 @@ export function PortalClient({
                 >
                   <div>
                     <div className="text-xs font-semibold text-[#1E2A4A]">
-                      Executive Report Pack
+                      Working Reports
                     </div>
-                    <div className="text-[11px] text-slate-500">Board & DPB attestations</div>
+                    <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
+                </Link>
+
+                <Link
+                  href="/reports?tab=pramaan"
+                  className="rounded-xl border border-[#C9A227]/40 bg-[#FBF6E7]/30 p-3 hover:border-[#C9A227] hover:bg-[#FBF6E7]/60 transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-[#776217] flex items-center gap-1">
+                      <span>Proof Dossiers</span>
+                      <span className="text-[#C9A227] text-xs">★</span>
+                    </div>
+                    <div className="text-[11px] text-[#A0821F]">Pramaan · Closure Seal</div>
+                  </div>
+                  <span className="text-[#C9A227] text-xs font-bold">Seal →</span>
                 </Link>
               </div>
             </div>
@@ -672,7 +686,7 @@ export function PortalClient({
               </div>
 
               {/* Quick Links inside Engagement */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
                 <Link
                   href="/assessment"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
@@ -701,11 +715,25 @@ export function PortalClient({
                 >
                   <div>
                     <div className="text-xs font-semibold text-[#1E2A4A]">
-                      Executive Report Pack
+                      Working Reports
                     </div>
-                    <div className="text-[11px] text-slate-500">Board & DPB attestations</div>
+                    <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
+                </Link>
+
+                <Link
+                  href="/reports?tab=pramaan"
+                  className="rounded-xl border border-[#C9A227]/40 bg-[#FBF6E7]/30 p-3 hover:border-[#C9A227] hover:bg-[#FBF6E7]/60 transition-all flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-[#776217] flex items-center gap-1">
+                      <span>Proof Dossiers</span>
+                      <span className="text-[#C9A227] text-xs">★</span>
+                    </div>
+                    <div className="text-[11px] text-[#A0821F]">Pramaan · Closure Seal</div>
+                  </div>
+                  <span className="text-[#C9A227] text-xs font-bold">Seal →</span>
                 </Link>
               </div>
             </div>
