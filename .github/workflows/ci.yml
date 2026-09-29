@@ -359,7 +359,7 @@ jobs:
       # Pinned rather than floating: fmt's own rules can change between
       # Terraform releases, and an unpinned gate would turn an upstream
       # release into a red build on untouched files.
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
