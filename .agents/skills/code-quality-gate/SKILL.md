@@ -81,3 +81,24 @@ pnpm build:controls-json
 
 3. **Strict Parity Testing**:
    - Browser persona journeys test against real GoTrue accounts with real TOTP MFA encryption rings (`AXIOM_MFA_ENCRYPTION_KEY`). Never re-introduce bypass flags or bypass cookies (`AXIOM_E2E_BYPASS_AUTH`).
+
+---
+
+## 4. Linter & Toolchain Version Isolation Invariants
+
+1. **ESLint 9 vs 10 (`eslint-config-next` compatibility)**:
+   - Next.js 16 and `eslint-config-next` depend on ESLint 9 API semantics.
+   - Upgrading `eslint` to v10 causes `TypeError: scopeManager.addGlobals is not a function`.
+   - `eslint` must be pinned to v9 (`9.39.0`) in `@axiom/eslint-config` until Next.js updates `eslint-config-next` for ESLint 10.
+   - Dependabot is configured to ignore `eslint` semver-major updates in `.github/dependabot.yml`.
+
+2. **TypeScript 6 vs 7 (`typescript-eslint` compatibility)**:
+   - Monorepo builds on TypeScript 7.
+   - `typescript-eslint` (v8.70) hard-throws on TypeScript 7 compiler APIs (`Error: typescript-eslint does not support TS 7.0`).
+   - The `@axiom/eslint-config` package implements Microsoft's side-by-side arrangement: it isolates `typescript: 6.0.3` in its own dependency tree so `axiom-lint` executes cleanly while `tsc` and every workspace package build on TS 7.
+   - Never bump `typescript` to 7 inside `packages/eslint-config/package.json`. Dependabot is configured to ignore `typescript` semver-major updates in `.github/dependabot.yml`.
+
+3. **Tailwind CSS 3 vs 4 (`postcss` compatibility)**:
+   - Tailwind CSS v4 dropped direct PostCSS plugin support (requiring `@tailwindcss/postcss`).
+   - Upgrading `tailwindcss` to v4 without migrating `globals.css` and `postcss.config.cjs` causes Turbopack Next.js build failure.
+   - Dependabot is configured to ignore `tailwindcss` semver-major updates in `.github/dependabot.yml`.
