@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "eslint": "9.39.0",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   },
   "bin": {
     "axiom-lint": "./bin/axiom-lint.mjs"
