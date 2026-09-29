@@ -54,7 +54,7 @@ jobs:
           Path('.axiom-runtime/deployed-target.json').write_text(json.dumps(target))
           PY
       - run: ./scripts/run-deployed-acceptance.sh .axiom-runtime/deployed-target.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: deployed-acceptance-${{ matrix.target }}

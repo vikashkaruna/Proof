@@ -42,7 +42,7 @@ jobs:
           bandit -r . --ini .bandit -x '*/tests/*,*/.venv/*,*/node_modules/*' \
             -f sarif -o bandit.sarif || true
       - name: Archive Bandit SARIF report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bandit-sarif
