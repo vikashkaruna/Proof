@@ -28,6 +28,7 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -f /etc/apt/sources.list.d/*.list || true
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -60,7 +61,10 @@ jobs:
           if-no-files-found: error
       - name: Stop isolated Auth stack
         if: always()
-        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+        run: |
+          if [ -d .axiom-runtime/parity ]; then
+            supabase stop --workdir .axiom-runtime/parity --no-backup
+          fi
 
   evidence-storage:
     name: Exact-version evidence storage and human ingestion (W8)
@@ -71,7 +75,10 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -f /etc/apt/sources.list.d/*.list || true
       - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -104,7 +111,10 @@ jobs:
         run: python3 scripts/test-evidence-storage.py --stop
       - name: Stop isolated Auth stack
         if: always()
-        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+        run: |
+          if [ -d .axiom-runtime/parity ]; then
+            supabase stop --workdir .axiom-runtime/parity --no-backup
+          fi
 
   workload-identity:
     name: Isolated SPIRE workload identity (W4.3)
@@ -189,7 +199,10 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -f /etc/apt/sources.list.d/*.list || true
       - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -238,7 +251,10 @@ jobs:
           retention-days: 14
       - name: Stop the isolated parity project
         if: always()
-        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+        run: |
+          if [ -d .axiom-runtime/parity ]; then
+            supabase stop --workdir .axiom-runtime/parity --no-backup
+          fi
 
   # ─── W1 browser persona journeys ─────────────────────────────────
   # Real GoTrue accounts, one per persona, signing in through the real login
@@ -260,7 +276,10 @@ jobs:
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -f /etc/apt/sources.list.d/*.list || true
       - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -287,7 +306,10 @@ jobs:
           retention-days: 7
       - name: Stop the isolated parity project
         if: always()
-        run: supabase stop --workdir .axiom-runtime/parity --no-backup
+        run: |
+          if [ -d .axiom-runtime/parity ]; then
+            supabase stop --workdir .axiom-runtime/parity --no-backup
+          fi
 
   # ─── W0.0 security gate ──────────────────────────────────────────
   # Runs first and gates everything else. The findings it guards against
