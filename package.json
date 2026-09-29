@@ -58,7 +58,7 @@
     "security:scan": "bash scripts/security-scan.sh"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.116.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "5.0.1",
     "husky": "^9.1.6",
