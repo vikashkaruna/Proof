@@ -49,7 +49,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: container-http-acceptance
@@ -96,7 +96,7 @@ jobs:
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: python3 scripts/test-evidence-storage.py --browser
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: evidence-storage-acceptance
@@ -132,14 +132,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: python3 scripts/test-workload-identity.py
       - run: python3 scripts/test-spire-deployment.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: spire-deployment-acceptance
           path: .axiom-runtime/spire-deployment/results.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: workload-identity-acceptance
           path: .axiom-runtime/workload-identity/results.json
@@ -156,7 +156,7 @@ jobs:
       - run: /usr/bin/python3 scripts/test-workload-host.py
       - name: Disposable native systemd and loop-device fixture
         run: sudo -E /usr/bin/python3 scripts/test-workload-host-systemd.py --isolated-ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: workload-host-acceptance
           path: |
@@ -175,7 +175,7 @@ jobs:
       - run: /usr/bin/python3 scripts/test-workload-host.py
       - name: Disposable runner systemd and loop-device fixture
         run: sudo -E /usr/bin/python3 scripts/test-workload-runner-systemd.py --isolated-ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: workload-runner-host-acceptance
           path: .axiom-runtime/workload-runner-systemd/results.json
@@ -225,7 +225,7 @@ jobs:
         working-directory: services/agent-runtime
       - run: uv run --locked python ../../scripts/verify-runtime-audit.py
         working-directory: services/agent-runtime
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: runtime-audit-acceptance
           path: .axiom-runtime/runtime-audit/results.json
@@ -235,14 +235,14 @@ jobs:
       - run: uv sync --locked
         working-directory: services/temporal-workers
       - run: python3 scripts/test-workload-identity.py --assessment
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: workload-assessment-acceptance
           path: .axiom-runtime/workload-assessment/results.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: workload-trust-acceptance
           path: .axiom-runtime/workload-trust/results.json
@@ -299,7 +299,7 @@ jobs:
       - run: pnpm --filter @axiom/e2e exec playwright test
       - name: Persona journey report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: persona-journeys-report
           path: tests/e2e/playwright-report
@@ -668,7 +668,7 @@ jobs:
         working-directory: services/temporal-workers
         env:
           AXIOM_TEMPORAL_ACCEPTANCE_REPORT: ../../.axiom-runtime/temporal/results.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: temporal-orchestration-acceptance

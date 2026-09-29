@@ -43,7 +43,7 @@ jobs:
 
       # Archive SARIF artifact
       - name: Archive Semgrep SARIF report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: semgrep-sarif
           path: semgrep.sarif
