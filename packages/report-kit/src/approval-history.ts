@@ -95,11 +95,12 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
     }
   };
 
-  const rowsHtml = validated.approvals.length === 0
-    ? `<tr><td colspan="4" class="empty-state">No approval records recorded in ledger.</td></tr>`
-    : validated.approvals
-        .map(
-          (appr) => `
+  const rowsHtml =
+    validated.approvals.length === 0
+      ? `<tr><td colspan="4" class="empty-state">No approval records recorded in ledger.</td></tr>`
+      : validated.approvals
+          .map(
+            (appr) => `
         <tr class="approval-row">
           <td class="col-token">
             <div class="token-id">TOKEN: ${escapeHtml(appr.token_id.slice(0, 8))}...</div>
@@ -120,7 +121,9 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
             <div class="verif-item">
               <strong>Dry Run:</strong> ${
                 appr.dry_run_verified
-                  ? '<span class="text-success">✓ Passed (' + escapeHtml(appr.dry_run_status) + ')</span>'
+                  ? '<span class="text-success">✓ Passed (' +
+                    escapeHtml(appr.dry_run_status) +
+                    ')</span>'
                   : '<span class="text-danger">✗ Not Verified</span>'
               }
             </div>
@@ -154,8 +157,8 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
             </div>
           </td>
         </tr>`,
-        )
-        .join('\n');
+          )
+          .join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">

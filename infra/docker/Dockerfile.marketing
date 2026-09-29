@@ -49,7 +49,6 @@ RUN apk add --no-cache tini
 COPY --chown=node:node --from=build /app/apps/marketing/.next/standalone ./
 COPY --chown=node:node --from=build /app/apps/marketing/.next/static ./apps/marketing/.next/static
 COPY --chown=node:node --from=build /app/apps/marketing/public ./apps/marketing/public
-RUN chown -R node:node /app
 EXPOSE 3000
 USER node
 ENTRYPOINT ["/sbin/tini", "--"]

@@ -16,6 +16,9 @@ updates:
         dependency-type: 'development'
     labels:
       - 'dependencies'
+    ignore:
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'pip'
     directory: '/services/agent-runtime'

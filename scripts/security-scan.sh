@@ -45,6 +45,29 @@ fi
 echo "security-scan: eslint"
 pnpm turbo run lint --output-logs=errors-only
 
+echo "security-scan: pnpm audit (production dependencies)"
+pnpm audit --prod --audit-level=high
+
+if command -v uv >/dev/null 2>&1 && command -v uvx >/dev/null 2>&1; then
+  echo "security-scan: pip-audit (Python locked runtime dependencies)"
+  audit_temp=$(mktemp -d)
+  trap 'rm -rf "$audit_temp"' EXIT
+  for service in agent-runtime temporal-workers model-gateway; do
+    uv export --locked --no-dev --no-emit-project --project "services/$service" --output-file "$audit_temp/$service-requirements.txt"
+    uvx --python 3.11 pip-audit==2.10.1 --strict --disable-pip --no-deps -r "$audit_temp/$service-requirements.txt"
+  done
+fi
+
+if command -v trivy >/dev/null 2>&1; then
+  echo "security-scan: trivy (filesystem CRITICAL,HIGH)"
+  trivy fs . --severity CRITICAL,HIGH --exit-code 1
+fi
+
+if command -v semgrep >/dev/null 2>&1; then
+  echo "security-scan: semgrep"
+  semgrep scan --config auto --error --quiet
+fi
+
 if [ -n "${AXIOM_CODEQL:-}" ]; then
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT

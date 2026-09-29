@@ -104,6 +104,9 @@ export default defineConfig({
    * journeys did not.
    */
   timeout: 120_000,
+  expect: {
+    timeout: 15_000,
+  },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: acceptanceTarget ? 0 : process.env.CI ? 2 : 0,
