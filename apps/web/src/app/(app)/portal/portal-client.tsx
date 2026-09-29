@@ -566,9 +566,7 @@ export function PortalClient({
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs font-semibold text-[#1E2A4A]">
-                      Working Reports
-                    </div>
+                    <div className="text-xs font-semibold text-[#1E2A4A]">Working Reports</div>
                     <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
@@ -714,9 +712,7 @@ export function PortalClient({
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs font-semibold text-[#1E2A4A]">
-                      Working Reports
-                    </div>
+                    <div className="text-xs font-semibold text-[#1E2A4A]">Working Reports</div>
                     <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>

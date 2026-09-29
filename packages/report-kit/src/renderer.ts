@@ -355,18 +355,16 @@ export async function renderHtmlToPdf(
       ];
 
       try {
-        await execFileAsync(
-          chromiumPath,
-          ['--headless=new', ...baseArgs],
-          { timeout: timeoutMs, killSignal: 'SIGKILL' },
-        );
+        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], {
+          timeout: timeoutMs,
+          killSignal: 'SIGKILL',
+        });
       } catch {
         // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
-        await execFileAsync(
-          chromiumPath,
-          ['--headless', ...baseArgs],
-          { timeout: timeoutMs, killSignal: 'SIGKILL' },
-        );
+        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], {
+          timeout: timeoutMs,
+          killSignal: 'SIGKILL',
+        });
       }
 
       const pdfBuffer = await fs.readFile(outPdfPath);
