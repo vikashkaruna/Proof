@@ -17,8 +17,8 @@
   },
   "dependencies": {
     "@aws-crypto/crc32c": "^5.2.0",
-    "@aws-sdk/client-kms": "^3.1137.0",
-    "@aws-sdk/rds-signer": "^3.1137.0",
+    "@aws-sdk/client-kms": "^3.1141.0",
+    "@aws-sdk/rds-signer": "^3.1141.0",
     "@axiom/approval-engine": "workspace:*",
     "@axiom/config": "workspace:*",
     "@axiom/control-library": "workspace:*",
@@ -32,12 +32,12 @@
     "@grpc/grpc-js": "1.14.5",
     "@grpc/proto-loader": "0.8.1",
     "@hono/node-server": "^2.1.1",
-    "@supabase/supabase-js": "^2.116.0",
+    "@supabase/supabase-js": "^2.117.2",
     "hono": "^4.13.8",
     "jose": "6.2.12",
     "mysql2": "^3.24.4",
     "pg": "^8.23.0",
-    "yaml": "2.8.3",
+    "yaml": "2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
