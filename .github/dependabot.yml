@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: 'npm'
     directory: '/'
+    target-branch: 'staging'
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 5
@@ -26,6 +27,7 @@ updates:
 
   - package-ecosystem: 'pip'
     directory: '/services/agent-runtime'
+    target-branch: 'staging'
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3
@@ -38,6 +40,7 @@ updates:
 
   - package-ecosystem: 'pip'
     directory: '/services/model-gateway'
+    target-branch: 'staging'
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3
@@ -50,6 +53,7 @@ updates:
 
   - package-ecosystem: 'pip'
     directory: '/services/temporal-workers'
+    target-branch: 'staging'
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3
@@ -62,6 +66,7 @@ updates:
 
   - package-ecosystem: 'github-actions'
     directory: '/'
+    target-branch: 'staging'
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3

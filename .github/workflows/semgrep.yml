@@ -12,10 +12,10 @@ name: Semgrep
 
 on:
   push:
-    branches: ['main']
+    branches: ['main', 'staging']
   pull_request:
     # The branches below must be a subset of the branches above
-    branches: ['main']
+    branches: ['main', 'staging']
   schedule:
     - cron: '24 15 * * 0'
 
@@ -43,7 +43,7 @@ jobs:
 
       # Archive SARIF artifact
       - name: Archive Semgrep SARIF report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -52,7 +52,7 @@ jobs:
 
       # Upload SARIF file generated in previous step
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
           sarif_file: semgrep.sarif
