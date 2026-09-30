@@ -106,6 +106,11 @@ describe('seal verifies the uploaded version', () => {
     expect(metadata?.['axiom-retention-assurance']).toBe('unverified');
     expect(metadata).not.toHaveProperty('AXIOM-RETENTION-ASSURANCE');
   });
+  it('sends a conditional PUT for one-version retained artifacts', async () => {
+    const send = provider();
+    await new EvidenceVault('ap-south-1').seal({ ...input, createOnly: true });
+    expect((send.mock.calls[1]?.[0] as PutObjectCommand).input.IfNoneMatch).toBe('*');
+  });
   it.each([
     {},
     { Mode: 'GOVERNANCE', RetainUntilDate: future },

@@ -1,7 +1,7 @@
 /**
  * Board Report Generation Service.
  * Implements manager-initiated request binding, deterministic draft synthesis,
- * deterministic HTML & PDF generation, and dual-signature verification.
+ * deterministic draft HTML. Retained reviewed PDFs live in board-artifacts.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -372,17 +372,6 @@ export class BoardReportService {
       contentHash: draftRes.contentHash,
       replayed: draftRes.replayed,
     };
-  }
-
-  async getReportPdf(
-    _tenantId: string,
-    _actorId: string,
-    _reportId: string,
-    _signal?: AbortSignal,
-  ): Promise<{ pdfBuffer: Buffer; sha256: string; byteLength: number; title: string }> {
-    // 0075 stored only a PDF digest/location claim. A fresh render can differ
-    // from the reviewed bytes and has no verified Object Lock version.
-    throw new EvidenceError('report_artifact_unverified', 409);
   }
 
   async listRequests(

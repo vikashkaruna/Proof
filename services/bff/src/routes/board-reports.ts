@@ -12,6 +12,7 @@ import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
 import { BoardReportService, requestBoardReportInputSchema } from '../services/board-reports.js';
+import { BoardArtifactService } from '../services/board-artifacts.js';
 
 type Ctx = Context<{ Variables: Variables }>;
 
@@ -27,11 +28,82 @@ function invalid(c: Ctx, message?: string) {
 }
 
 export function boardReportRoutes(
-  dependencies: { db?: EvidenceDatabase; service?: BoardReportService } = {},
+  dependencies: {
+    db?: EvidenceDatabase;
+    service?: BoardReportService;
+    artifacts?: BoardArtifactService;
+  } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
     dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin());
+  const artifacts = () =>
+    dependencies.artifacts ?? new BoardArtifactService(dependencies.db ?? createSupabaseAdmin());
+
+  const operationSchema = z.object({ operationKey: z.uuid() }).strict();
+
+  app.post('/reports/board/:id/artifacts', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    const body = operationSchema.safeParse(await c.req.json().catch(() => null));
+    if (!z.uuid().safeParse(id).success || !body.success) return invalid(c);
+    try {
+      const result = await artifacts().build(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        body.data.operationKey,
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]),
+      );
+      return c.json(result, result.status === 'settled' ? 200 : 202);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.post('/reports/board/:id/artifacts/reconcile', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    const body = operationSchema.safeParse(await c.req.json().catch(() => null));
+    if (!z.uuid().safeParse(id).success || !body.success) return invalid(c);
+    try {
+      const result = await artifacts().reconcile(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        body.data.operationKey,
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]),
+      );
+      return c.json(result, result.status === 'settled' ? 200 : 202);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.post('/reports/board/:id/artifacts/retry-missing', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    const body = operationSchema.safeParse(await c.req.json().catch(() => null));
+    if (!z.uuid().safeParse(id).success || !body.success) return invalid(c);
+    try {
+      const result = await artifacts().retryMissing(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        body.data.operationKey,
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(90_000)]),
+      );
+      return c.json(result, result.status === 'settled' ? 200 : 202);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
 
   // 1. Request Board Report (Manager initiated)
   app.post('/reports/board/request', async (c) => {
@@ -94,7 +166,7 @@ export function boardReportRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
     try {
-      const result = await service().getReportPdf(c.get('tenantId'), c.get('user').id, id, signal);
+      const result = await artifacts().pdf(c.get('tenantId'), c.get('user').id, id, signal);
 
       return new Response(new Uint8Array(result.pdfBuffer), {
         status: 200,

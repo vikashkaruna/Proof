@@ -26,6 +26,8 @@ export interface SealEvidenceInput {
   retentionDays: number;
   retainUntil?: string;
   operationId?: string;
+  /** Fail if any current object exists at the key; protects one-version artifacts. */
+  createOnly?: boolean;
   legalHold?: boolean;
   encryption?: ServerSideEncryption;
   tenantId: string;
@@ -153,6 +155,7 @@ export class EvidenceVault {
         new PutObjectCommand({
           Bucket: input.bucket,
           Key: input.key,
+          ...(input.createOnly ? { IfNoneMatch: '*' } : {}),
           Body: body,
           ContentType: input.contentType,
           ContentMD5: createHash('md5').update(body).digest('base64'),

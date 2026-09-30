@@ -79,6 +79,30 @@ def main() -> int:
         if component not in deployed:
             errors.append(f"component '{component}' is bundled but has no Deployment")
 
+    # Reviewed PDF generation writes a short-lived HTML, PDF and Chromium
+    # profile. A read-only BFF root without a bounded /tmp mount passes schema
+    # validation but fails every artifact build after deployment.
+    for deployment in by_kind.get("Deployment", []):
+        pod = deployment["spec"]["template"]
+        if pod["metadata"].get("labels", {}).get("app.kubernetes.io/component") != "bff":
+            continue
+        volumes = {v["name"]: v for v in pod["spec"].get("volumes") or []}
+        for container in pod["spec"].get("containers") or []:
+            if container.get("name") != "bff":
+                continue
+            mounts = [m for m in container.get("volumeMounts") or [] if m.get("mountPath") == "/tmp"]
+            mount = mounts[0] if len(mounts) == 1 else {}
+            empty_dir = volumes.get(mount.get("name"), {}).get("emptyDir")
+            if container.get("securityContext", {}).get("readOnlyRootFilesystem") is True and (
+                len(mounts) != 1
+                or mount.get("readOnly") is True
+                or not isinstance(empty_dir, dict)
+                or not empty_dir.get("sizeLimit")
+            ):
+                errors.append(
+                    f"Deployment/{deployment['metadata']['name']} has read-only BFF root without bounded writable /tmp"
+                )
+
     # 1. A Service that selects nothing is a published endpoint with no backend.
     for s in by_kind.get("Service", []):
         sel = s["spec"].get("selector") or {}

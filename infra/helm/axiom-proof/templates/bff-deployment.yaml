@@ -125,10 +125,17 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.bff.resources | nindent 12 }}
+          volumeMounts:
+            - name: report-tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: report-tmp
+          emptyDir:
+            sizeLimit: 256Mi
       automountServiceAccountToken: false

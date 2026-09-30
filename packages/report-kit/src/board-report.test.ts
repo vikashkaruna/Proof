@@ -144,6 +144,17 @@ describe('Board Report Contracts & Renderer', () => {
     expect(res.byteLength).toBeGreaterThan(500);
     expect(res.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(res.pdfBuffer.toString('utf-8', 0, 8)).toContain('%PDF-1.4');
+    expect(res.pdfBuffer.toString('utf-8')).toContain('Storage retention is not verified');
+    expect(res.pdfBuffer.toString('utf-8')).not.toContain('Retention locked');
+  });
+
+  it('refuses a text-only fallback for an artifact requiring Chromium', async () => {
+    await expect(
+      renderHtmlToPdf(renderBoardReportHtml(sampleReport), {
+        preferChromium: false,
+        requireChromium: true,
+      }),
+    ).rejects.toThrow('Chromium is required');
   });
 
   it('renders compliant PDF bytes using headless Chromium when available', async () => {

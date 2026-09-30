@@ -15,6 +15,10 @@ const execFileAsync = promisify(execFile);
 export interface RenderPdfOptions {
   timeoutMs?: number;
   preferChromium?: boolean;
+  /** Retained, reviewed artifacts must never silently use the text-only fallback. */
+  requireChromium?: boolean;
+  /** Immutable review time used as the PDF metadata date for reproducible retries. */
+  documentDate?: string;
 }
 
 export interface RenderPdfResult {
@@ -22,6 +26,27 @@ export interface RenderPdfResult {
   sha256: string;
   byteLength: number;
   renderer: 'chromium' | 'deterministic-fallback';
+}
+
+/** Chromium embeds wall-clock creation dates. Replace only fixed-width metadata
+ * values so a founder retry can reproduce the reviewed PDF byte-for-byte. */
+function normalizeChromiumPdfMetadata(bytes: Buffer, documentDate: string): Buffer {
+  const instant = new Date(documentDate);
+  if (!Number.isFinite(instant.getTime())) throw new Error('Invalid immutable PDF document date');
+  const canonical = `D:${instant.toISOString().slice(0, 19).replace(/[-:T]/g, '')}+00'00'`;
+  const raw = bytes.toString('latin1');
+  let dates = 0;
+  const normalized = raw.replace(
+    /\/(CreationDate|ModDate) \(D:\d{14}[+-]\d{2}'\d{2}'\)/g,
+    (_match, field: string) => {
+      dates++;
+      return `/${field} (${canonical})`;
+    },
+  );
+  if (dates !== 2 || normalized.length !== raw.length) {
+    throw new Error('Chromium PDF metadata format is unsupported');
+  }
+  return Buffer.from(normalized, 'latin1');
 }
 
 /** Known locations for headless chromium / chrome-headless-shell */
@@ -178,7 +203,7 @@ function wrapTextToLines(text: string, maxCharsPerLine = 72): string[] {
 
 /**
  * Deterministically generates a compliant, beautifully formatted %PDF-1.4 document buffer from HTML text.
- * Adheres strictly to Axiom Proof design tokens (Indigo #1E2A4A, Gold #C9A227, Teal #0FB5A5)
+ * Uses Indigo and Teal for unsealed report presentation.
  * and guarantees text never overflows printable page margins.
  */
 function generateDeterministicPdf(htmlContent: string): Buffer {
@@ -210,11 +235,11 @@ function generateDeterministicPdf(htmlContent: string): Buffer {
     let stream = '';
 
     if (pageNum === 1) {
-      // Page 1 Header Banner (Indigo #1E2A4A with Gold #C9A227 Accent Line)
+      // Page 1 Header Banner (Indigo with Teal accent; Gold is for sealed proof).
       stream += `0.118 0.165 0.290 rg\n40 758 515.28 48 re f\n`;
-      stream += `0.788 0.635 0.153 rg\n40 754 515.28 4 re f\n`;
+      stream += `0.059 0.710 0.647 rg\n40 754 515.28 4 re f\n`;
       // White banner text
-      stream += `BT\n1 1 1 rg\n/F2 13 Tf\n52 786 Td\n(Axiom Proof | Statutory Compliance & Audit Register) Tj\n`;
+      stream += `BT\n1 1 1 rg\n/F2 13 Tf\n52 786 Td\n(Axiom Proof | Recorded Report) Tj\n`;
       stream += `/F1 8.5 Tf\n0 -18 Td\n(Axiom Minds Private Limited | https://axiomminds.ai | https://axiomproof.ai) Tj\nET\n`;
 
       // Subheader Document Title & Axiom Proof Metadata
@@ -236,8 +261,8 @@ function generateDeterministicPdf(htmlContent: string): Buffer {
     } else {
       // Subsequent Pages Mini Banner
       stream += `0.118 0.165 0.290 rg\n40 788 515.28 24 re f\n`;
-      stream += `0.788 0.635 0.153 rg\n40 785 515.28 3 re f\n`;
-      stream += `BT\n1 1 1 rg\n/F2 9.5 Tf\n52 795 Td\n(Axiom Proof - Statutory Audit Register (Continued)) Tj\nET\n`;
+      stream += `0.059 0.710 0.647 rg\n40 785 515.28 3 re f\n`;
+      stream += `BT\n1 1 1 rg\n/F2 9.5 Tf\n52 795 Td\n(Axiom Proof - Recorded Report (Continued)) Tj\nET\n`;
 
       // Body text lines
       if (lines.length > 0) {
@@ -252,7 +277,7 @@ function generateDeterministicPdf(htmlContent: string): Buffer {
     // Page Footer (Applicable to all pages)
     stream += `0.85 0.85 0.85 RG 0.5 w\n40 50 m 555 50 l S\n`;
     stream += `BT\n0.45 0.45 0.50 rg\n/F1 7.5 Tf\n40 38 Td\n(Axiom Proof | Axiom Minds Private Limited (https://axiomminds.ai) | https://axiomproof.ai | Page ${pageNum} of ${totalPages}) Tj\n`;
-    stream += `/F1 7 Tf\n0 -11 Td\n(Tamper-evident statutory record sealed with SHA-256 ledger digest. Retention locked under ap-south-1.) Tj\nET\n`;
+    stream += `/F1 7 Tf\n0 -11 Td\n(Rendered from supplied report data. Storage retention is not verified by this renderer.) Tj\nET\n`;
 
     streams.push(stream);
   }
@@ -332,42 +357,62 @@ export async function renderHtmlToPdf(
 ): Promise<RenderPdfResult> {
   const timeoutMs = options.timeoutMs ?? 10000;
   const preferChromium = options.preferChromium ?? true;
+  if (options.requireChromium && !preferChromium) {
+    throw new Error('Chromium is required for this PDF');
+  }
+  if (options.requireChromium && !options.documentDate) {
+    throw new Error('Immutable document date is required for this PDF');
+  }
 
   const chromiumPath = preferChromium ? findChromiumExecutable() : null;
+  if (options.requireChromium && !chromiumPath) {
+    throw new Error('Chromium is unavailable for this PDF');
+  }
 
   if (chromiumPath) {
     const tempPrefix = join(tmpdir(), `axiom-report-${Date.now()}-${randomUUID()}`);
     const inHtmlPath = `${tempPrefix}.html`;
     const outPdfPath = `${tempPrefix}.pdf`;
+    const profilePath = `${tempPrefix}-profile`;
 
     try {
-      await fs.writeFile(inHtmlPath, htmlContent, 'utf-8');
+      await fs.writeFile(inHtmlPath, htmlContent, { encoding: 'utf-8', mode: 0o600 });
 
       const baseArgs = [
         '--disable-gpu',
         '--disable-dev-shm-usage',
         '--disable-software-rasterizer',
+        '--disable-background-networking',
+        '--disable-extensions',
+        '--disable-javascript',
+        '--no-first-run',
+        `--user-data-dir=${profilePath}`,
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--no-pdf-header-footer',
         `--print-to-pdf=${outPdfPath}`,
         inHtmlPath,
       ];
+      const childOptions = {
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL' as const,
+        env: { ...process.env, HOME: tmpdir(), XDG_CACHE_HOME: join(tmpdir(), 'chrome-cache') },
+      };
 
       try {
-        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], {
-          timeout: timeoutMs,
-          killSignal: 'SIGKILL',
-        });
+        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
       } catch {
         // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
-        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], {
-          timeout: timeoutMs,
-          killSignal: 'SIGKILL',
-        });
+        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
       }
 
-      const pdfBuffer = await fs.readFile(outPdfPath);
+      const rawPdf = await fs.readFile(outPdfPath);
+      const pdfBuffer = options.documentDate
+        ? normalizeChromiumPdfMetadata(rawPdf, options.documentDate)
+        : rawPdf;
+      if (pdfBuffer.length < 500 || pdfBuffer.toString('ascii', 0, 5) !== '%PDF-') {
+        throw new Error('Chromium produced invalid PDF bytes');
+      }
       const sha256 = createHash('sha256').update(pdfBuffer).digest('hex');
 
       return {
@@ -377,10 +422,12 @@ export async function renderHtmlToPdf(
         renderer: 'chromium',
       };
     } catch {
-      // Fallback cleanly to deterministic generator if headless process fails or is blocked
+      if (options.requireChromium) throw new Error('Chromium PDF rendering failed');
+      // Other callers may use the text-only fallback when Chromium fails.
     } finally {
       await fs.unlink(inHtmlPath).catch(() => {});
       await fs.unlink(outPdfPath).catch(() => {});
+      await fs.rm(profilePath, { recursive: true, force: true }).catch(() => {});
     }
   }
 

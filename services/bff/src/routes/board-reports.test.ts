@@ -1,8 +1,9 @@
-import { beforeEach, describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { createHash, randomUUID } from 'node:crypto';
 import { boardReportRoutes } from './board-reports.js';
+import type { BoardArtifactService } from '../services/board-artifacts.js';
 import { abortableResult } from '../test/abortable-result.js';
 import { packFixture } from '../test/evidence-pack-fixture.js';
 import { tenant } from '../test/evidence-fixture.js';
@@ -63,6 +64,67 @@ function addFrozenSource(requestId: string, runId: string, engagementId: string)
 }
 
 describe('Board Reports HTTP Routes', () => {
+  it('routes founder artifact build, reconcile and explicit retry with bounded operation keys', async () => {
+    const reportId = randomUUID();
+    const operationKey = randomUUID();
+    const build = vi.fn(async () => ({ reportId, operationKey, status: 'pending' }));
+    const reconcile = vi.fn(async () => ({ reportId, operationKey, status: 'pending' }));
+    const retryMissing = vi.fn(async () => ({ reportId, operationKey, status: 'settled' }));
+    const instance = new Hono<{ Variables: Variables }>();
+    instance.use('*', async (c, next) => {
+      c.set('user', { id: fixture.founder } as never);
+      c.set('role', UserRole.FOUNDER);
+      c.set('tenantId', tenant);
+      await next();
+    });
+    instance.route(
+      '/v1',
+      boardReportRoutes({
+        db: fixture.db,
+        artifacts: { build, reconcile, retryMissing } as unknown as BoardArtifactService,
+      }),
+    );
+    for (const [path, status] of [
+      [`/v1/reports/board/${reportId}/artifacts`, 202],
+      [`/v1/reports/board/${reportId}/artifacts/reconcile`, 202],
+      [`/v1/reports/board/${reportId}/artifacts/retry-missing`, 200],
+    ] as const) {
+      const response = await instance.request(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ operationKey }),
+      });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ reportId, operationKey });
+    }
+    expect(build).toHaveBeenCalledWith(
+      tenant,
+      fixture.founder,
+      reportId,
+      operationKey,
+      expect.any(AbortSignal),
+    );
+    expect(reconcile).toHaveBeenCalledWith(
+      tenant,
+      fixture.founder,
+      reportId,
+      operationKey,
+      expect.any(AbortSignal),
+    );
+    expect(retryMissing).toHaveBeenCalledWith(
+      tenant,
+      fixture.founder,
+      reportId,
+      operationKey,
+      expect.any(AbortSignal),
+    );
+    const invalid = await instance.request(`/v1/reports/board/${reportId}/artifacts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ operationKey, unexpected: true }),
+    });
+    expect(invalid.status).toBe(400);
+  });
   it('enforces RBAC on requesting board report — viewer is denied', async () => {
     const res = await app(fixture.viewer, UserRole.VIEWER).request('/v1/reports/board/request', {
       method: 'POST',
@@ -370,8 +432,16 @@ describe('Board Reports HTTP Routes', () => {
     fixture.base.rows('reports').push({
       id: repId,
       tenant_id: tenant,
+      engagement_id: contentPayload.engagement_id,
+      kind: 'board',
       title: 'Q3 Board Report',
+      generated_by_agent: 'board-report-builder',
       content_text: JSON.stringify(contentPayload),
+      content_sha256: createHash('sha256').update(JSON.stringify(contentPayload)).digest('hex'),
+      reviewed_content_hash: createHash('sha256')
+        .update(JSON.stringify(contentPayload))
+        .digest('hex'),
+      released_archive_hash: null,
       status: 'published',
       created_by: fixture.founder,
     });
@@ -407,15 +477,21 @@ describe('Board Reports HTTP Routes', () => {
     fixture.base.rows('reports').push({
       id: repId,
       tenant_id: tenant,
+      engagement_id: randomUUID(),
+      kind: 'board',
       title: 'Private draft',
+      generated_by_agent: 'board-report-builder',
       content_text: '{}',
+      content_sha256: createHash('sha256').update('{}').digest('hex'),
+      reviewed_content_hash: null,
+      released_archive_hash: null,
       status: 'draft',
       created_by: fixture.founder,
     });
     const res = await app(fixture.viewer, UserRole.VIEWER).request(
       `/v1/reports/board/${repId}/pdf`,
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(403);
   });
 
   it('lists only the actor’s board requests through the service-role connection', async () => {
