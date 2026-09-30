@@ -58,7 +58,12 @@ beforeEach(() => {
     vi.fn(() => true),
   );
   // jsdom does not implement dialog.close; the shell calls it after navigation.
-  HTMLDialogElement.prototype.close = vi.fn();
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+    this.open = false;
+  });
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+    this.open = true;
+  });
 });
 afterEach(() => {
   cleanup();
@@ -427,6 +432,44 @@ it('routes the portal to the verified selected tenant', async () => {
   await waitFor(() => expect(state.switchTenant).toHaveBeenCalledWith('beta'));
   expect(state.refresh).not.toHaveBeenCalled();
   await waitFor(() => expect(state.push).toHaveBeenCalledWith('/portal?tenant=beta'));
+});
+
+it('keeps mobile navigation keyboard focus inside its dialog', () => {
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }));
+  const dialog = screen.getByRole('dialog', { name: 'Application navigation', hidden: true });
+  expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalledOnce();
+  expect(
+    screen.getByRole('button', { name: 'Open navigation' }).getAttribute('aria-expanded'),
+  ).toBe('true');
+  const controls = dialog.querySelectorAll<HTMLElement>(
+    'a[href], button:not(:disabled), [tabindex="0"]',
+  );
+  controls[0]!.focus();
+  const reverse = new KeyboardEvent('keydown', {
+    key: 'Tab',
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  dialog.dispatchEvent(reverse);
+  expect(reverse.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(controls[controls.length - 1]);
+  const forward = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  dialog.dispatchEvent(forward);
+  expect(forward.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(controls[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Close navigation', hidden: true }));
+  expect(HTMLDialogElement.prototype.close).toHaveBeenCalled();
+});
+
+it('does not request a tenant switch when the current membership is selected', async () => {
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: /Alpha Org/ }));
+  expect(state.switchTenant).not.toHaveBeenCalled();
+  expect(state.push).not.toHaveBeenCalled();
+  expect(state.refresh).not.toHaveBeenCalled();
 });
 
 it('shows only returned active alerts with their recorded severity and title', async () => {
