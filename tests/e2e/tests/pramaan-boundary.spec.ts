@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import {
+  createMfaAccount,
+  selectTenant,
+  signIn,
+  signInAs,
+  satisfyLoginMfaWithSecret,
+  state,
+} from '../fixtures';
 
 test('source-free dossier and outbound dispatch refuse after real sign-in', async ({ page }) => {
   await signIn(page, 'owner');
@@ -24,8 +31,14 @@ test('source-free dossier and outbound dispatch refuse after real sign-in', asyn
 });
 
 test('founder cannot seal a dossier without exact retained sources', async ({ page }) => {
-  await signIn(page, 'founder');
+  const founder = await createMfaAccount('pramaan-founder', {
+    role: 'founder',
+    isInternal: true,
+    withFactor: true,
+  });
+  await signInAs(page, founder.email, founder.password);
   await selectTenant(page, 'a');
+  await satisfyLoginMfaWithSecret(page, founder.totpSecret!);
   const response = await page.request.post(`/api/bff/v1/dossiers/${crypto.randomUUID()}/seal`, {
     headers: { 'x-tenant-id': state.tenantA.id },
     data: { expectedProofSeal: 'a'.repeat(64) },
