@@ -81,11 +81,19 @@ export function ApprovalActions({
   const [stepUpCode, setStepUpCode] = useState('');
   const [needsEnrolment, setNeedsEnrolment] = useState(false);
 
+  function changeSelection(next: Set<string>) {
+    setSelected(next);
+    // The challenge was signed for the previous action set. A new selection
+    // needs a new challenge, even if the BFF would also refuse a mismatch.
+    setStepUp(null);
+    setStepUpCode('');
+  }
+
   function toggle(id: string) {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setSelected(next);
+    changeSelection(next);
   }
 
   /** Read `{ error: { code, message, details } }` out of a failed response. */
@@ -378,18 +386,41 @@ export function ApprovalActions({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
-          onClick={() => setSelected(new Set(eligible.map((a) => a.id)))}
+          onClick={() => changeSelection(new Set(eligible.map((a) => a.id)))}
           size="sm"
         >
           Select all eligible
         </Button>
-        <Button variant="ghost" onClick={() => setSelected(new Set())} size="sm">
+        <Button variant="ghost" onClick={() => changeSelection(new Set())} size="sm">
           Clear
         </Button>
         <span className="text-sm text-slate-500">
           {selected.size} of {eligible.length} eligible selected
         </span>
       </div>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium text-slate-800">Actions in this plan</legend>
+        {actions.map((action) => {
+          const canSelect = eligible.some((item) => item.id === action.id);
+          return (
+            <label key={action.id} className="flex items-start gap-3 rounded-md border border-slate-200 p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={canSelect && selected.has(action.id)}
+                disabled={!canSelect || Boolean(stepUp)}
+                onChange={() => toggle(action.id)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                <strong className="block text-slate-800">{action.description}</strong>
+                <span className="text-slate-600">{action.action_type} · {action.risk_class} risk</span>
+                {!canSelect && <span className="block text-ember-700">Requires a completed dry-run and validated rollback.</span>}
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="flex flex-col gap-1.5">

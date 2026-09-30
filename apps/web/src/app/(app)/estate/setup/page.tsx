@@ -39,7 +39,8 @@ export default async function EstateSetupPage() {
       .in('agent_name', ['drishti', 'karya']),
   ]);
   const failed =
-    tenant.error || estates.error || systems.error || connectors.error || workloads.error;
+    tenant.error || estates.error || systems.error || connectors.error || workloads.error ||
+    !tenant.data || !estates.data || !systems.data || !connectors.data || !workloads.data;
   const registered = new Set(
     (connectors.data ?? []).filter((c) => c.status !== 'archived').map((c) => c.system_id),
   );

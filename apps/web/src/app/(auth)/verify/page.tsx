@@ -35,24 +35,26 @@ export default async function VerifyPage({ searchParams }: PageProps) {
     target && target.startsWith('/') && !target.startsWith('//') ? target : '/dashboard';
 
   // Someone who reaches this page with no factor cannot satisfy anything here.
-  const { data: factors } = await supabase
+  const { data: factors, error: factorsError } = await supabase
     .from('user_mfa_factors')
     .select('id')
     .eq('factor_type', 'totp')
     .eq('status', 'active')
     .limit(1);
-  if (!factors || factors.length === 0) redirect('/settings/security?enrol=required');
+  if (factorsError || !factors) throw new Error('MFA factor status is unavailable');
+  if (factors.length === 0) redirect('/settings/security?enrol=required');
 
   // The MFA endpoints sit under `/v1/*` and so go through tenant resolution.
   // Pass a tenant the user actually belongs to rather than letting the proxy
   // fall back to its default, which this user may well not be a member of —
   // the BFF would refuse, and the refusal would look like a broken code.
-  const { data: memberships } = await supabase
+  const { data: memberships, error: membershipsError } = await supabase
     .from('tenant_users')
     .select('tenant_id')
     .eq('user_id', user.id)
     .limit(1);
-  const tenantId = memberships?.[0]?.tenant_id as string | undefined;
+  if (membershipsError || !memberships) throw new Error('Tenant membership is unavailable');
+  const tenantId = memberships[0]?.tenant_id as string | undefined;
   if (!tenantId) redirect('/onboarding');
 
   return (

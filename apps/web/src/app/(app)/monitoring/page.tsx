@@ -123,7 +123,7 @@ export default async function MonitoringPage() {
       .limit(50),
   ]);
 
-  if (schedulesRes.error || driftRes.error) {
+  if (schedulesRes.error || driftRes.error || alertsRes.error) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -161,33 +161,33 @@ export default async function MonitoringPage() {
 
       <StatGrid>
         <Stat
-          label="Schedules"
+          label="Schedules shown"
           value={String(schedules.length)}
           hint={`${health.activeSchedules} active · ${schedules.length - health.activeSchedules} paused or retired`}
         />
         <Stat
-          label="Overdue schedules"
+          label="Overdue schedules shown"
           value={String(health.overdueSchedules)}
           hint={
             health.overdueSchedules > 0
               ? 'active with a next run in the past'
-              : 'all active schedules on cadence'
+              : 'none overdue in the loaded page'
           }
         />
         <Stat
-          label="Drift detected (7 days)"
+          label="Drift shown (7 days)"
           value={String(health.drift.detectedLast7Days)}
           hint={Object.entries(health.drift.bySeverity)
             .map(([severity, count]) => `${count} ${severity}`)
             .join(' · ')}
         />
         <Stat
-          label="Active Alerts"
+          label="Active alerts shown"
           value={String(unreadAlerts.length)}
           hint={
             unreadAlerts.length > 0
               ? `${criticalAlerts.length} critical · ${highAlerts.length} high`
-              : 'all alerts acknowledged'
+              : 'none active in the loaded page'
           }
         />
       </StatGrid>
@@ -197,8 +197,8 @@ export default async function MonitoringPage() {
         <CardHeader>
           <CardTitle>Continuous monitoring alerts</CardTitle>
           <p className="text-xs text-slate-500">
-            Real-time alerting for configuration drift, overdue assessment schedules, and statutory
-            DSAR/breach compliance deadlines.
+            Recorded alerts for configuration drift, overdue assessment schedules, and tracked
+            deadlines. This view is bounded to recent records.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -206,8 +206,7 @@ export default async function MonitoringPage() {
             <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
               <p className="text-sm font-medium text-indigo-500">No alerts dispatched</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-                When drift is detected, schedules miss their cadence, or statutory deadlines burn,
-                alerts will appear here and in the alert tray.
+                Alerts recorded for this tenant will appear here and in the alert tray.
               </p>
             </div>
           ) : (

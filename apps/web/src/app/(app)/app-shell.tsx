@@ -580,7 +580,9 @@ export function AppShell({
               {(alertsSummary?.unread ?? 0) > 0 && (
                 <span
                   className={`absolute -top-1.5 -right-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow ${
-                    (alertsSummary?.critical ?? 0) > 0 ? 'bg-[#D9534F]' : 'bg-[#C9A227]'
+                    (alertsSummary?.critical ?? 0) > 0 || (alertsSummary?.high ?? 0) > 0
+                      ? 'bg-[#D9534F]'
+                      : 'bg-[#0FB5A5]'
                   }`}
                 >
                   {alertsSummary?.unread}

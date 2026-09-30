@@ -40,7 +40,7 @@ export default async function OnboardingProposalsPage() {
       <Link href="/estate" className="text-teal-700 underline">
         Back to estate inventory
       </Link>
-      {!data || estates.error ? (
+      {!data || estates.error || !estates.data ? (
         <p role="alert">Onboarding proposals could not be loaded. Refresh to try again.</p>
       ) : (
         <ProposalClient

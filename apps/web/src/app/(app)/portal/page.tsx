@@ -15,7 +15,9 @@ export const dynamic = 'force-dynamic';
 
 function computeSlaDays(dueBy: string | null | undefined): number | null {
   if (!dueBy) return null;
-  return Math.max(0, Math.round((new Date(dueBy).getTime() - Date.now()) / 86_400_000));
+  const dueAt = new Date(dueBy).getTime();
+  if (!Number.isFinite(dueAt)) return null;
+  return Math.max(0, Math.round((dueAt - Date.now()) / 86_400_000));
 }
 
 /**
