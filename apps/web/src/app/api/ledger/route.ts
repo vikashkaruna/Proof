@@ -34,7 +34,10 @@ export async function GET(request: NextRequest) {
     }
 
     const { data: targetTenant } = await supabase
-      .from('tenants').select('id, name, slug').eq('id', tenantId).maybeSingle();
+      .from('tenants')
+      .select('id, name, slug')
+      .eq('id', tenantId)
+      .maybeSingle();
 
     // ─── AUDITOR EXPORT HANDLER ──────────────────────────────────────────────
     if (isExport) {
@@ -85,6 +88,14 @@ export async function GET(request: NextRequest) {
       if (exportError) {
         return NextResponse.json({ error: exportError.message }, { status: 500 });
       }
+      if (
+        !Array.isArray(records) ||
+        typeof availableRecordCount !== 'number' ||
+        !Number.isInteger(availableRecordCount) ||
+        availableRecordCount < 0
+      ) {
+        return NextResponse.json({ error: 'Ledger export source is unavailable' }, { status: 503 });
+      }
 
       // Verify chain integrity for the target tenant
       let chainIntact = true;
@@ -93,7 +104,7 @@ export async function GET(request: NextRequest) {
         p_tenant_id: targetTenant.id,
         p_from_sequence: 1,
       });
-      if (verifyError || !verifyData) {
+      if (verifyError || !Array.isArray(verifyData)) {
         return NextResponse.json({ error: 'Ledger verification is unavailable' }, { status: 503 });
       }
       if (verifyData.length > 0) {
@@ -101,7 +112,7 @@ export async function GET(request: NextRequest) {
         firstBreak = verifyData[0];
       }
 
-      const entriesList = records || [];
+      const entriesList = records;
       const firstExportedRecord = entriesList[0];
       const lastExportedRecord = entriesList[entriesList.length - 1];
 
@@ -124,7 +135,8 @@ export async function GET(request: NextRequest) {
           },
           total_records: entriesList.length,
           total_records_available: availableRecordCount,
-          export_truncated: availableRecordCount === null || availableRecordCount > entriesList.length,
+          export_truncated:
+            availableRecordCount === null || availableRecordCount > entriesList.length,
           first_exported_sequence: firstExportedRecord?.sequence_no ?? null,
           last_exported_sequence: lastExportedRecord?.sequence_no ?? null,
         },
@@ -223,10 +235,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const totalMatching = count ?? (data?.length || 0);
+    if (
+      !Array.isArray(data) ||
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 0
+    ) {
+      return NextResponse.json({ error: 'Ledger records are unavailable' }, { status: 503 });
+    }
+
+    const totalMatching = count;
     const totalPages = Math.max(1, Math.ceil(totalMatching / limit));
 
-    const entries = (data || []).map((e) => ({
+    const entries = data.map((e) => ({
       id: String(e.id),
       seq: e.sequence_no,
       type: e.action_type || 'system.audit',
@@ -245,7 +266,9 @@ export async function GET(request: NextRequest) {
         ? `${e.entry_hash.slice(0, 4)}…${e.entry_hash.slice(-3)}`
         : 'Unavailable',
       fullEntryHash: e.entry_hash || '',
-      prevHash: e.prev_entry_hash ? `${e.prev_entry_hash.slice(0, 4)}…${e.prev_entry_hash.slice(-3)}` : 'Genesis or unavailable',
+      prevHash: e.prev_entry_hash
+        ? `${e.prev_entry_hash.slice(0, 4)}…${e.prev_entry_hash.slice(-3)}`
+        : 'Genesis or unavailable',
       fullPrevHash: e.prev_entry_hash || '',
       result: e.result || 'unknown',
       detail: e.detail,
