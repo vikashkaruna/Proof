@@ -148,9 +148,11 @@ describe('Board Reports HTTP Routes', () => {
     });
 
     const calls: string[] = [];
-    fixture.db.rpc = ((name: string, _args: Record<string, unknown>) => {
+    let recordedContent: string | undefined;
+    fixture.db.rpc = ((name: string, args: Record<string, unknown>) => {
       calls.push(name);
       if (name === 'record_board_report_draft') {
+        recordedContent = args.p_content_text as string;
         return abortableResult(
           Promise.resolve({
             data: {
@@ -181,6 +183,11 @@ describe('Board Reports HTTP Routes', () => {
     expect(body.status).toBe('draft');
     expect(calls).toContain('record_board_report_draft');
     expect(calls).not.toContain('attach_board_report_pdf');
+    expect(JSON.parse(recordedContent ?? '{}').signatures.prepared_by).toEqual({
+      name: 'Axiom Proof board report builder',
+      role: 'Deterministic assessment renderer',
+      agent: 'board-report-builder',
+    });
   });
 
   it('refuses missing assessment metrics before recording a draft', async () => {

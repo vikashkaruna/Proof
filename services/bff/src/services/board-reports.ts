@@ -1,6 +1,6 @@
 /**
  * Board Report Generation Service.
- * Implements manager-initiated request binding, Prativedan draft synthesis,
+ * Implements manager-initiated request binding, deterministic draft synthesis,
  * deterministic HTML & PDF generation, and dual-signature verification.
  */
 import { randomUUID } from 'node:crypto';
@@ -236,9 +236,9 @@ export class BoardReportService {
       action_plan: [],
       signatures: {
         prepared_by: {
-          name: 'Prativedan (Axiom Reporting Agent)',
-          role: 'Autonomous Compliance Synthesizer',
-          agent: 'prativedan',
+          name: 'Axiom Proof board report builder',
+          role: 'Deterministic assessment renderer',
+          agent: 'board-report-builder',
         },
         approved_by: null,
       },
@@ -266,6 +266,8 @@ export class BoardReportService {
       if (draftRes.error === 'founder_authority_required')
         throw new EvidenceError('forbidden', 403);
       if (draftRes.error === 'request_not_found') throw new EvidenceError('request_not_found', 404);
+      if (draftRes.error === 'assessment_not_finalized')
+        throw new EvidenceError('assessment_not_finalized', 409);
       throw new EvidenceError('invalid_request', 400);
     }
 

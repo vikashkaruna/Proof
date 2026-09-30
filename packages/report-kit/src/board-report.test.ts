@@ -86,6 +86,25 @@ describe('Board Report Contracts & Renderer', () => {
     expect(html).toContain('1111111111111111111111111111111111111111111111111111111111111111');
   });
 
+  it('labels a deterministic board draft without claiming agent authority', () => {
+    const report: BoardReportContentV1 = {
+      ...sampleReport,
+      signatures: {
+        prepared_by: {
+          name: 'Axiom Proof board report builder',
+          role: 'Deterministic assessment renderer',
+          agent: 'board-report-builder',
+        },
+        approved_by: null,
+      },
+    };
+    const html = renderBoardReportHtml(report);
+    expect(html).toContain('AUTOMATED DRAFT');
+    expect(html).toContain('Requires founder review before release');
+    expect(html).not.toContain('PREPARED BY AGENT');
+    expect(html).not.toContain('Agent: board-report-builder');
+  });
+
   it('renders approved signature block when approved_by is present', () => {
     const approvedReport: BoardReportContentV1 = {
       ...sampleReport,

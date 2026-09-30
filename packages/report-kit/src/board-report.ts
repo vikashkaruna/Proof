@@ -73,7 +73,7 @@ export const BoardReportContentV1Schema = z.object({
     prepared_by: z.object({
       name: z.string().min(1).max(100),
       role: z.string().min(1).max(100),
-      agent: z.literal('prativedan'),
+      agent: z.enum(['prativedan', 'board-report-builder']),
     }),
     approved_by: z
       .object({
@@ -111,6 +111,7 @@ function formatInr(amount: number): string {
  */
 export function renderBoardReportHtml(content: BoardReportContentV1): string {
   const validated = BoardReportContentV1Schema.parse(content);
+  const preparedByRenderer = validated.signatures.prepared_by.agent === 'board-report-builder';
   const es = validated.executive_summary;
   const scoreColor =
     es.posture_score >= 80 ? '#0FB5A5' : es.posture_score >= 60 ? '#64748B' : '#D9534F';
@@ -450,11 +451,11 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
   <h2>Preparation and Review</h2>
   <div class="signature-section">
     <div class="signature-box approved">
-      <div class="sig-header" style="color: #0FB5A5;">✓ PREPARED BY AGENT</div>
+      <div class="sig-header" style="color: #0FB5A5;">${preparedByRenderer ? 'AUTOMATED DRAFT' : 'PREPARED BY AGENT'}</div>
       <div class="sig-name"><strong>${escapeHtml(validated.signatures.prepared_by.name)}</strong></div>
-      <div class="sig-role">${escapeHtml(validated.signatures.prepared_by.role)} (Agent: ${escapeHtml(validated.signatures.prepared_by.agent)})</div>
-      <div class="sig-meta">Authority: Synthesis &amp; Drafting</div>
-      <div class="sig-meta">Non-Mutating Inspection</div>
+      <div class="sig-role">${escapeHtml(validated.signatures.prepared_by.role)}</div>
+      <div class="sig-meta">${preparedByRenderer ? 'Generated from a recorded assessment' : 'Authority: Synthesis &amp; Drafting'}</div>
+      <div class="sig-meta">${preparedByRenderer ? 'Requires founder review before release' : 'Non-Mutating Inspection'}</div>
     </div>
     ${approvalBlockHtml}
   </div>
