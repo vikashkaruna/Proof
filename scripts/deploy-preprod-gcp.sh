@@ -4,9 +4,9 @@
 # ==============================================================================
 # Progressive, parameterized, and self-healing deployment orchestrator:
 #   Phase 1 (prep)     : Pre-flight prerequisites & Google APIs
-#   Phase 2 (base)     : VPC, Subnet, Peering, VPC Connector, GCS Vault, Artifact Registry, IAM
+#   Phase 2 (base)     : VPC, Subnet, Peering, VPC Connector, Artifact Registry, IAM
 #   Phase 3 (db)       : Cloud SQL PostgreSQL (with automatic state healing) & Secret Manager
-#   Phase 4 (images)   : Build & push container images (intelligent skip if present)
+#   Phase 4 (images)   : Build & push exact-source container images
 #   Phase 5 (services) : Cloud Run v2 microservices (BFF, Web, Runtime, Model Gateway, Temporal)
 #   Phase 6 (migrate)  : Database migrations & statutory control library seeding
 #   Phase 7 (firebase) : Google Firebase static hosting for marketing
@@ -41,6 +41,7 @@ PROJECT_ID="${GCP_PROJECT_ID:-axiom-proof}"
 REGION="${GCP_REGION:-asia-south1}"
 ENV="${ENVIRONMENT:-preprod}"
 IMAGE_TAG="${IMAGE_TAG:-preprod}"
+IMAGE_TAG_EXPLICIT=false
 CLOUD_SQL_TIER=""
 TARGET_PHASE="all"
 FROM_PHASE=""
@@ -71,7 +72,7 @@ Options:
   --env-file <path>   Explicit path to preprod environment configuration file
   --phase <name>      Execute ONLY a specific phase:
                         prep     : Prerequisites and GCP API enablement
-                        base     : Networking (VPC/Peering/Connector), IAM, GCS & Artifact Registry
+                        base     : Networking (VPC/Peering/Connector), IAM & Artifact Registry
                         db       : Cloud SQL PostgreSQL (with self-healing) & Secret Manager
                         images   : Build & push container images
                         services : Cloud Run v2 microservices & IAM
@@ -88,7 +89,7 @@ Options:
   --dry-run           Perform terraform plan without mutating infrastructure
   --heal-state        Force check and prune stale/orphaned Cloud SQL state references
   --tier <tier>       Override Cloud SQL tier (e.g. db-f1-micro, db-custom-2-7680)
-  --tag <tag>         Override Docker image tag (default: ${IMAGE_TAG})
+  --tag <tag>         Must equal release-<exact HEAD SHA>
   --help, -h          Display this help message
 
 Examples:
@@ -152,6 +153,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tag)
       IMAGE_TAG="$2"
+      IMAGE_TAG_EXPLICIT=true
       shift 2
       ;;
     -h|--help)
@@ -195,6 +197,9 @@ load_preprod_env() {
     exit 1
   fi
 
+  AXIOM_ENV_FILE="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$loaded_file")"
+  export AXIOM_ENV_FILE
+
   if [ -n "$loaded_file" ]; then
     info "Loading preprod environment variables from: ${loaded_file}"
     # Read variables safely
@@ -236,6 +241,39 @@ load_preprod_env
 if [ ${#POSITIONAL_ARGS[@]} -ge 1 ]; then PROJECT_ID="${POSITIONAL_ARGS[0]}"; PROJECT_ID_EXPLICIT=true; fi
 if [ ${#POSITIONAL_ARGS[@]} -ge 2 ]; then REGION="${POSITIONAL_ARGS[1]}"; REGION_EXPLICIT=true; fi
 if [ ${#POSITIONAL_ARGS[@]} -ge 3 ]; then ENV="${POSITIONAL_ARGS[2]}"; ENV_EXPLICIT=true; fi
+
+# A cloud rollout is never identified by a reusable tag or a dirty checkout.
+RELEASE_SHA="$(git rev-parse HEAD)"
+if [ "$ENV" != preprod ] || [ "$REGION" != asia-south1 ] || \
+   [ "${AXIOM_RELEASE_SHA:-}" != "$RELEASE_SHA" ] || \
+   [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  fail 'Preprod requires a clean checkout, region asia-south1, and AXIOM_RELEASE_SHA equal to exact HEAD.'
+  exit 1
+fi
+if [ "$IMAGE_TAG_EXPLICIT" = true ] && [ "$IMAGE_TAG" != "release-${RELEASE_SHA}" ]; then
+  fail '--tag must be release-<exact HEAD SHA>; mutable tags cannot identify a deployment.'
+  exit 1
+fi
+IMAGE_TAG="release-${RELEASE_SHA}"
+AXIOM_RELEASE_MANIFEST_FILE="${AXIOM_RELEASE_MANIFEST_FILE:-${REPO_ROOT}/.axiom-runtime/preprod-release-manifest.json}"
+export AXIOM_RELEASE_MANIFEST_FILE
+python3 scripts/verify-preprod-s3.py || {
+  fail 'Approved ap-south-1 S3 Object Lock Compliance readback is required before cloud changes.'
+  exit 1
+}
+if [ -z "${AXIOM_TF_STATE_BUCKET:-}" ]; then
+  fail 'An approved asia-south1 GCS Terraform state bucket is required.'
+  exit 1
+fi
+if [ -e infra/terraform/envs/preprod/terraform.tfstate ] || [ -e infra/terraform/envs/preprod/terraform.tfstate.backup ]; then
+  fail 'Local preprod Terraform state exists; reconcile it before remote backend initialization.'
+  exit 1
+fi
+state_location="$(gcloud storage buckets describe "gs://${AXIOM_TF_STATE_BUCKET}" --format='value(location)' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+if [ "$state_location" != asia-south1 ]; then
+  fail 'Terraform state bucket must exist in asia-south1 and be readable.'
+  exit 1
+fi
 
 # Phase Execution Order Mapping
 PHASES=("prep" "base" "db" "images" "services" "migrate" "firebase" "verify")
@@ -290,6 +328,10 @@ fi
 # by variables.tf so nothing can declare a variable this never fills.
 ./scripts/sync-env.sh "$ENV" terraform
 pass "Configuration verified and propagated to Terraform"
+(
+  cd infra/terraform/envs/preprod
+  terraform init -backend-config="bucket=${AXIOM_TF_STATE_BUCKET}" -backend-config='prefix=terraform/state/preprod'
+)
 
 # Helper for terraform variable arguments
 # Only values a human typed on the command line are passed as -var. Everything
@@ -355,8 +397,8 @@ heal_secret_manager_state_if_needed() {
     "agent_runtime_internal_token"
     "model_gateway_api_key"
     "temporal_api_key"
-    "gcs_hmac_access_key"
-    "gcs_hmac_secret_key"
+    "evidence_s3_access_key"
+    "evidence_s3_secret_key"
   )
 
   if command -v gcloud >/dev/null 2>&1; then
@@ -441,7 +483,7 @@ fi
 if should_run_phase "base"; then
   step_header "2/8" "Foundational Networking, Identity & Storage"
   cd "infra/terraform/envs/preprod"
-  terraform init -upgrade
+  terraform init -upgrade -backend-config="bucket=${AXIOM_TF_STATE_BUCKET}" -backend-config='prefix=terraform/state/preprod'
   if [ ! -f "terraform.tfvars" ] && [ -f "terraform.tfvars.example" ]; then
     warn "terraform.tfvars not found. Creating from terraform.tfvars.example..."
     cp terraform.tfvars.example terraform.tfvars
@@ -460,9 +502,6 @@ if should_run_phase "base"; then
       -target=google_vpc_access_connector.connector \
       -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
-      -target=google_storage_bucket.evidence_vault \
-      -target=google_storage_hmac_key.s3_compat_key \
-      -target=google_storage_bucket_iam_member.storage_admin \
       -target=google_artifact_registry_repository.docker_repo
   else
     info "Applying Base Infrastructure (VPC, Peering, Connector, Storage, Artifact Registry)..."
@@ -475,9 +514,6 @@ if should_run_phase "base"; then
       -target=google_vpc_access_connector.connector \
       -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
-      -target=google_storage_bucket.evidence_vault \
-      -target=google_storage_hmac_key.s3_compat_key \
-      -target=google_storage_bucket_iam_member.storage_admin \
       -target=google_artifact_registry_repository.docker_repo
     pass "Base Networking, Identity & Storage established"
   fi
@@ -494,7 +530,7 @@ if should_run_phase "db"; then
   heal_secret_manager_state_if_needed
 
   cd "infra/terraform/envs/preprod"
-  terraform init
+  terraform init -backend-config="bucket=${AXIOM_TF_STATE_BUCKET}" -backend-config='prefix=terraform/state/preprod'
   TF_VARS=$(get_tf_vars)
 
   if [ "$DRY_RUN" = true ]; then
@@ -580,6 +616,11 @@ fi
 # ─── Phase 5: Compute Layer (Cloud Run v2 Microservices) ───────────────────────
 if should_run_phase "services"; then
   step_header "5/8" "Deploying Cloud Run v2 Microservices"
+  python3 scripts/preprod-release-manifest.py validate \
+    "$AXIOM_RELEASE_MANIFEST_FILE" "$RELEASE_SHA" "$PROJECT_ID" "$REGION" || {
+    fail 'Exact SHA and nine immutable release images are required before Cloud Run changes.'
+    exit 1
+  }
   cd "infra/terraform/envs/preprod"
   TF_VARS=$(get_tf_vars)
 
@@ -591,7 +632,8 @@ if should_run_phase "services"; then
     terraform apply -auto-approve $TF_VARS
     BFF_URL=$(terraform output -raw bff_url 2>/dev/null || echo "")
     WEB_URL=$(terraform output -raw web_url 2>/dev/null || echo "")
-    pass "Cloud Run microservices successfully deployed"
+    python3 scripts/verify-preprod-cloudrun.py "$AXIOM_RELEASE_MANIFEST_FILE" "$RELEASE_SHA" "$PROJECT_ID"
+    pass "Cloud Run microservices successfully deployed at exact release digests"
   fi
   cd "$REPO_ROOT"
 fi
@@ -677,6 +719,10 @@ if should_run_phase "verify"; then
   if [ "$DRY_RUN" = true ]; then
     pass "Dry-run: skipping live health probes"
   else
+    python3 scripts/preprod-release-manifest.py validate \
+      "$AXIOM_RELEASE_MANIFEST_FILE" "$RELEASE_SHA" "$PROJECT_ID" "$REGION"
+    python3 scripts/verify-preprod-cloudrun.py \
+      "$AXIOM_RELEASE_MANIFEST_FILE" "$RELEASE_SHA" "$PROJECT_ID"
     if [ -z "$BFF_URL" ]; then
       fail "No BFF URL in Terraform outputs; the services phase has not completed."
       echo "    Re-run with --from-phase services."
@@ -698,7 +744,11 @@ if should_run_phase "verify"; then
   fi
 
   echo -e "\n${BOLD}${GREEN}=================================================================${NC}"
-  echo -e "${BOLD}${GREEN}  ✓ PREPROD DEPLOYMENT PIPELINE COMPLETE!                        ${NC}"
+  if [ "$DRY_RUN" = true ]; then
+    echo -e "${BOLD}${GREEN}  ✓ PREPROD TERRAFORM PLAN COMPLETE; NO DEPLOYMENT OCCURRED      ${NC}"
+  else
+    echo -e "${BOLD}${GREEN}  ✓ PREPROD INFRASTRUCTURE DEPLOYED; ACCEPTANCE STILL REQUIRED  ${NC}"
+  fi
   echo -e "${BOLD}${GREEN}=================================================================${NC}"
   # No placeholder fallbacks: an address that was never read is reported as
   # unavailable, not as a plausible-looking URL.
@@ -707,5 +757,5 @@ if should_run_phase "verify"; then
   echo -e "  Cloud SQL IP:        ${CYAN}${DB_PUBLIC_IP:-"(not available from Terraform outputs)"}${NC}"
   echo -e "  Marketing Site:      ${CYAN}https://${PROJECT_ID}.web.app${NC}${MARKETING_URL:+ / ${CYAN}${MARKETING_URL}}${NC}\n"
   echo -e "  ${BOLD}Run Live Functional Flow:${NC}"
-  echo -e "  ${CYAN}./scripts/run-preprod-flow.sh \"${BFF_URL}\"${NC}\n"
+  echo -e "  ${CYAN}./scripts/run-preprod-flow.sh <private-target-json>${NC}\n"
 fi

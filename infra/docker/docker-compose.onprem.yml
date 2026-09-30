@@ -35,7 +35,7 @@ services:
     image: ${AXIOM_AUTH_IMAGE:?supply approved GoTrue digest}
     restart: unless-stopped
     depends_on:
-      supabase-db: {condition: service_healthy}
+      supabase-db: { condition: service_healthy }
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: '9999'
@@ -61,7 +61,7 @@ services:
     image: ${AXIOM_POSTGREST_IMAGE:?supply approved PostgREST digest}
     restart: unless-stopped
     depends_on:
-      supabase-db: {condition: service_healthy}
+      supabase-db: { condition: service_healthy }
     environment:
       PGRST_DB_URI: postgresql://authenticator:${POSTGREST_DB_PASSWORD:?set REST login password}@supabase-db:5432/axiom_onprem
       PGRST_DB_SCHEMAS: public
@@ -92,7 +92,7 @@ services:
     image: ${AXIOM_TEMPORAL_IMAGE:?supply approved Temporal digest}
     restart: unless-stopped
     depends_on:
-      temporal-db: {condition: service_healthy}
+      temporal-db: { condition: service_healthy }
     environment:
       DB: postgres12
       DB_PORT: '5432'
@@ -126,7 +126,7 @@ services:
   minio-init:
     image: ${AXIOM_WORM_CLIENT_IMAGE:?supply approved WORM client digest}
     depends_on:
-      minio: {condition: service_started}
+      minio: { condition: service_started }
     entrypoint: ['/bin/sh', '-ec']
     command: |
       attempt=0
@@ -168,9 +168,9 @@ services:
       APPROVAL_SIGNING_KEY: ${APPROVAL_SIGNING_KEY:?set signing key}
       FEATURE_LIVE_CONNECTORS: 'false'
     depends_on:
-      minio-init: {condition: service_completed_successfully}
-      supabase-gateway: {condition: service_started}
-      temporal: {condition: service_started}
+      minio-init: { condition: service_completed_successfully }
+      supabase-gateway: { condition: service_started }
+      temporal: { condition: service_started }
     networks: [sovereign]
   bff:
     image: ${AXIOM_BFF_IMAGE:?supply approved BFF digest}
@@ -194,8 +194,8 @@ services:
       AXIOM_CONTACT_EMAIL_MODE: disabled
       AXIOM_INVITATION_EMAIL_MODE: disabled
     depends_on:
-      minio-init: {condition: service_completed_successfully}
-      agent-runtime: {condition: service_started}
+      minio-init: { condition: service_completed_successfully }
+      agent-runtime: { condition: service_started }
     networks: [sovereign]
   temporal-worker:
     image: ${AXIOM_WORKER_IMAGE:?supply approved worker digest}
@@ -206,8 +206,8 @@ services:
       AGENT_RUNTIME_URL: http://agent-runtime:8000
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
     depends_on:
-      temporal: {condition: service_started}
-      agent-runtime: {condition: service_started}
+      temporal: { condition: service_started }
+      agent-runtime: { condition: service_started }
     networks: [sovereign]
   web:
     image: ${AXIOM_WEB_IMAGE:?supply approved web digest}
@@ -226,7 +226,7 @@ services:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
       AXIOM_E2E_BYPASS_AUTH: 'false'
     depends_on:
-      bff: {condition: service_started}
+      bff: { condition: service_started }
     networks: [sovereign]
 networks:
   sovereign:

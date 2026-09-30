@@ -38,10 +38,60 @@ variable "cloud_sql_instance_version" {
   default     = "v1"
 }
 
-variable "retention_days" {
-  description = "Evidence vault retention duration in days (WORM Compliance lock)"
-  type        = number
-  default     = 7 # 2555 days = 7 years statutory requirement under DPDPA, for testing we can use 7 days
+variable "release_sha" {
+  description = "Exact reviewed Git revision in every released image"
+  type        = string
+  default     = ""
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.release_sha))
+    error_message = "Preprod requires an exact 40-character release SHA."
+  }
+}
+
+variable "release_manifest_file" {
+  description = "Absolute path to the nine-image immutable digest manifest"
+  type        = string
+  default     = ""
+}
+
+variable "evidence_bucket" {
+  description = "Approved ap-south-1 S3 Object Lock Compliance bucket"
+  type        = string
+  default     = ""
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.evidence_bucket))
+    error_message = "An approved S3 evidence bucket is required."
+  }
+}
+
+variable "evidence_endpoint" {
+  description = "Approved Mumbai S3 endpoint"
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.evidence_endpoint == "https://s3.ap-south-1.amazonaws.com"
+    error_message = "Evidence must use the ap-south-1 AWS S3 endpoint."
+  }
+}
+
+variable "evidence_access_key_id" {
+  type      = string
+  default   = ""
+  sensitive = true
+  validation {
+    condition     = length(var.evidence_access_key_id) >= 16
+    error_message = "A scoped evidence S3 access key is required."
+  }
+}
+
+variable "evidence_secret_access_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+  validation {
+    condition     = length(var.evidence_secret_access_key) >= 32
+    error_message = "A scoped evidence S3 secret key is required."
+  }
 }
 
 # Upstash Redis

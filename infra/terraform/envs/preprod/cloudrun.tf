@@ -3,6 +3,7 @@
 # ==============================================================================
 
 locals {
+  release_manifest  = jsondecode(file(var.release_manifest_file))
   image_prefix      = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.name}"
   bff_service_url   = "https://axiom-bff-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
   web_service_url   = "https://axiom-web-${var.environment}-${data.google_project.project.number}.${var.region}.run.app"
@@ -12,6 +13,24 @@ locals {
   # Was a hard-coded hostname that nothing in this Terraform provisioned. It
   # now points at the gateway in supabase.tf, which is a resource that exists.
   supabase_preprod_url = local.supabase_gateway_url
+}
+
+resource "terraform_data" "release_identity" {
+  input = var.release_sha
+  lifecycle {
+    precondition {
+      condition = (
+        try(local.release_manifest.releaseSha, "") == var.release_sha &&
+        try(local.release_manifest.projectId, "") == var.project_id &&
+        try(local.release_manifest.region, "") == var.region &&
+        try(length(local.release_manifest.images), 0) == 9 &&
+        alltrue([for image in try(values(local.release_manifest.images), []) :
+          can(regex("^${var.region}-docker\\.pkg\\.dev/${var.project_id}/axiom-proof-preprod/[a-z-]+@sha256:[0-9a-f]{64}$", image))
+        ])
+      )
+      error_message = "Preprod Cloud Run requires nine immutable image digests tied to the exact release SHA/project/region."
+    }
+  }
 }
 
 # ─── 1. BFF (API Gateway & Execution Gate) ───────────────────────────────────
@@ -34,7 +53,7 @@ resource "google_cloud_run_v2_service" "bff" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-bff:${var.environment}"
+      image = local.release_manifest.images.bff
 
       resources {
         limits = {
@@ -56,12 +75,16 @@ resource "google_cloud_run_v2_service" "bff" {
         value = var.environment
       }
       env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
+      }
+      env {
         name  = "AXIOM_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "AWS_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "BFF_PORT"
@@ -85,19 +108,19 @@ resource "google_cloud_run_v2_service" "bff" {
       }
       env {
         name  = "AXIOM_EVIDENCE_BUCKET"
-        value = google_storage_bucket.evidence_vault.name
+        value = var.evidence_bucket
       }
       env {
         name  = "AXIOM_STORAGE_ENDPOINT"
-        value = "https://storage.googleapis.com"
+        value = var.evidence_endpoint
       }
       env {
         name  = "AWS_S3_EVIDENCE_BUCKET"
-        value = google_storage_bucket.evidence_vault.name
+        value = var.evidence_bucket
       }
       env {
         name  = "AWS_S3_ENDPOINT"
-        value = "https://storage.googleapis.com"
+        value = var.evidence_endpoint
       }
       env {
         name  = "SUPABASE_URL"
@@ -184,7 +207,7 @@ resource "google_cloud_run_v2_service" "bff" {
         name = "AXIOM_STORAGE_ACCESS_KEY_ID"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_access_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_access_key"].secret_id
             version = "latest"
           }
         }
@@ -193,7 +216,7 @@ resource "google_cloud_run_v2_service" "bff" {
         name = "AXIOM_STORAGE_SECRET_ACCESS_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_secret_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_secret_key"].secret_id
             version = "latest"
           }
         }
@@ -202,7 +225,7 @@ resource "google_cloud_run_v2_service" "bff" {
         name = "AWS_ACCESS_KEY_ID"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_access_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_access_key"].secret_id
             version = "latest"
           }
         }
@@ -211,7 +234,7 @@ resource "google_cloud_run_v2_service" "bff" {
         name = "AWS_SECRET_ACCESS_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_secret_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_secret_key"].secret_id
             version = "latest"
           }
         }
@@ -271,6 +294,7 @@ resource "google_cloud_run_v2_service" "bff" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_secret_manager_secret_version.version,
     google_secret_manager_secret_version.mfa_previous_keys,
     google_secret_manager_secret_iam_member.runtime_access,
@@ -293,7 +317,7 @@ resource "google_cloud_run_v2_service" "web" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-web:${var.environment}"
+      image = local.release_manifest.images.web
 
       resources {
         limits = {
@@ -313,6 +337,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "ENVIRONMENT"
         value = var.environment
+      }
+      env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
       }
       env {
         name  = "NEXT_TELEMETRY_DISABLED"
@@ -366,6 +394,7 @@ resource "google_cloud_run_v2_service" "web" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_cloud_run_v2_service.bff,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -389,7 +418,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-agent-runtime:${var.environment}"
+      image = local.release_manifest.images["agent-runtime"]
 
       resources {
         limits = {
@@ -407,16 +436,20 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         value = var.environment
       }
       env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
+      }
+      env {
         name  = "LOG_LEVEL"
         value = "info"
       }
       env {
         name  = "AXIOM_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "AWS_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "MODEL_GATEWAY_URL"
@@ -424,19 +457,19 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
       }
       env {
         name  = "AXIOM_EVIDENCE_BUCKET"
-        value = google_storage_bucket.evidence_vault.name
+        value = var.evidence_bucket
       }
       env {
         name  = "AXIOM_STORAGE_ENDPOINT"
-        value = "https://storage.googleapis.com"
+        value = var.evidence_endpoint
       }
       env {
         name  = "S3_EVIDENCE_BUCKET"
-        value = google_storage_bucket.evidence_vault.name
+        value = var.evidence_bucket
       }
       env {
         name  = "S3_ENDPOINT"
-        value = "https://storage.googleapis.com"
+        value = var.evidence_endpoint
       }
 
       env {
@@ -485,7 +518,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         name = "AXIOM_STORAGE_ACCESS_KEY_ID"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_access_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_access_key"].secret_id
             version = "latest"
           }
         }
@@ -494,7 +527,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         name = "AXIOM_STORAGE_SECRET_ACCESS_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_secret_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_secret_key"].secret_id
             version = "latest"
           }
         }
@@ -503,7 +536,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         name = "AWS_ACCESS_KEY_ID"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_access_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_access_key"].secret_id
             version = "latest"
           }
         }
@@ -512,7 +545,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         name = "AWS_SECRET_ACCESS_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["gcs_hmac_secret_key"].secret_id
+            secret  = google_secret_manager_secret.secret["evidence_s3_secret_key"].secret_id
             version = "latest"
           }
         }
@@ -531,6 +564,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_cloud_run_v2_service.model_gateway,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -554,7 +588,7 @@ resource "google_cloud_run_v2_service" "model_gateway" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-model-gateway:${var.environment}"
+      image = local.release_manifest.images["model-gateway"]
 
       resources {
         limits = {
@@ -572,16 +606,20 @@ resource "google_cloud_run_v2_service" "model_gateway" {
         value = var.environment
       }
       env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
+      }
+      env {
         name  = "LOG_LEVEL"
         value = "info"
       }
       env {
         name  = "AXIOM_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "AWS_REGION"
-        value = var.region
+        value = "ap-south-1"
       }
       env {
         name  = "PII_REDACTION_ENABLED"
@@ -648,6 +686,7 @@ resource "google_cloud_run_v2_service" "model_gateway" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_secret_manager_secret_version.version,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -670,7 +709,7 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-temporal-worker:${var.environment}"
+      image = local.release_manifest.images["temporal-worker"]
 
       resources {
         limits = {
@@ -686,6 +725,10 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
       env {
         name  = "ENVIRONMENT"
         value = var.environment
+      }
+      env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
       }
       env {
         name = "AGENT_RUNTIME_INTERNAL_TOKEN"
@@ -737,6 +780,7 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_cloud_run_v2_service.agent_runtime,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -760,7 +804,7 @@ resource "google_cloud_run_v2_service" "marketing" {
     }
 
     containers {
-      image = "${local.image_prefix}/axiom-marketing:${var.environment}"
+      image = local.release_manifest.images.marketing
 
       resources {
         limits = {
@@ -780,6 +824,10 @@ resource "google_cloud_run_v2_service" "marketing" {
       env {
         name  = "ENVIRONMENT"
         value = var.environment
+      }
+      env {
+        name  = "AXIOM_RELEASE_SHA"
+        value = var.release_sha
       }
       env {
         name  = "NEXT_TELEMETRY_DISABLED"
@@ -840,6 +888,7 @@ resource "google_cloud_run_v2_service" "marketing" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_cloud_run_v2_service.bff,
     google_cloud_run_v2_service.web,
     google_secret_manager_secret_iam_member.runtime_access,
