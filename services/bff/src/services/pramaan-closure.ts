@@ -7,14 +7,15 @@ import { z } from 'zod';
 import { DossierTypeSchema, type DossierType, type PramaanDossier } from '@axiom/types';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 import { accessFor } from './evidence-pack-records.js';
+import { PramaanArtifactService } from './pramaan-artifacts.js';
 
 export const synthesizeDossierInputSchema = z
   .object({
     engagementId: z.string().uuid(),
     dossierType: DossierTypeSchema,
     title: z.string().trim().min(1).max(300),
-    reportId: z.string().uuid().optional(),
-    metadata: z.record(z.string(), z.unknown()).default({}),
+    reportId: z.string().uuid(),
+    operationKey: z.string().uuid(),
   })
   .strict();
 
@@ -54,34 +55,70 @@ export const dispatchReportEmailInputSchema = z
 export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSchema>;
 
 export class PramaanClosureService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  readonly artifacts: PramaanArtifactService;
+  constructor(private readonly db: EvidenceDatabase) {
+    this.artifacts = new PramaanArtifactService(db);
+  }
 
   private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {
     const access = await accessFor(this.db, tenantId, actorId, signal);
     if (!access.founder) throw new EvidenceError('dossier_not_found', 404);
   }
 
-  /** A digest of caller metadata is not proof of evidence or a WORM object. */
-  async synthesizeDossier(
-    _tenantId: string,
-    _actorId: string,
-    _input: SynthesizeDossierInput,
-    _correlationId: string = randomUUID(),
-    _signal?: AbortSignal,
-  ): Promise<PramaanDossier> {
-    throw new EvidenceError('source_bound_dossier_required', 409);
+  async listMyBuilds(tenantId: string, actorId: string, signal?: AbortSignal) {
+    return this.artifacts.mine(tenantId, actorId, signal);
   }
 
-  /** The historical seal RPC has no verified source or archive version. */
-  async sealDossier(
-    _tenantId: string,
-    _actorId: string,
-    _dossierId: string,
-    _input: SealDossierInput,
+  /** Only published, exact-version board evidence currently has a dossier source contract. */
+  async synthesizeDossier(
+    tenantId: string,
+    actorId: string,
+    input: SynthesizeDossierInput,
     _correlationId: string = randomUUID(),
-    _signal?: AbortSignal,
-  ): Promise<{ dossierId: string; status: 'sealed'; sealedAt: string }> {
-    throw new EvidenceError('source_bound_dossier_required', 409);
+    signal?: AbortSignal,
+  ) {
+    return this.artifacts.create(tenantId, actorId, input, signal);
+  }
+
+  /** Historical rows cannot enter this source-bound seal path. */
+  async sealDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    input: SealDossierInput,
+    _correlationId: string = randomUUID(),
+    signal?: AbortSignal,
+  ) {
+    return this.artifacts.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
+  }
+
+  async reconcileDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    operationKey: string,
+    signal?: AbortSignal,
+  ) {
+    return this.artifacts.reconcile(tenantId, actorId, dossierId, operationKey, signal);
+  }
+
+  async retryMissingDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    operationKey: string,
+    signal?: AbortSignal,
+  ) {
+    return this.artifacts.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
+  }
+
+  async getDossierArchive(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    signal?: AbortSignal,
+  ) {
+    return this.artifacts.archive(tenantId, actorId, dossierId, signal);
   }
 
   /**
@@ -93,7 +130,8 @@ export class PramaanClosureService {
     dossierId: string,
     signal?: AbortSignal,
   ): Promise<PramaanDossier> {
-    await this.assertHistoricalReader(tenantId, actorId, signal);
+    const access = await accessFor(this.db, tenantId, actorId, signal);
+    if (!access.manager) throw new EvidenceError('dossier_not_found', 404);
     const query = this.db
       .from('pramaan_dossiers')
       .select('*')
@@ -125,8 +163,7 @@ export class PramaanClosureService {
     if (res.error) throw new EvidenceError('closure_storage_unavailable', 503);
     const row = Array.isArray(res.data) ? res.data[0] : res.data;
     if (!row) throw new EvidenceError('dossier_not_found', 404);
-    await this.assertHistoricalReader(tenantId, actorId, signal);
-
+    const source = await this.artifacts.status(tenantId, actorId, dossierId, signal);
     return {
       id: row.id as string,
       tenantId: row.tenant_id as string,
@@ -145,6 +182,7 @@ export class PramaanClosureService {
       metadata: (row.metadata as Record<string, unknown>) ?? {},
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
+      ...source,
     };
   }
 

@@ -560,6 +560,10 @@ export const PramaanDossierSchema = z.object({
   metadata: z.record(z.string(), z.unknown()),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  sourceBound: z.boolean().optional(),
+  archiveStatus: z.enum(['pending', 'settled']).nullable().optional(),
+  archiveVersionId: z.string().nullable().optional(),
+  operationKey: z.string().uuid().nullable().optional(),
 });
 export type PramaanDossier = z.infer<typeof PramaanDossierSchema>;
 

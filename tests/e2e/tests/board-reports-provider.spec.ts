@@ -250,7 +250,7 @@ test.describe('real-provider board report lifecycle', () => {
     'Run with the retained local Object Lock provider.',
   );
 
-  test('finalized source, manager request, founder review, exact retained versions and released PDF', async ({
+  test('finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions', async ({
     page,
     browser,
   }) => {
@@ -379,10 +379,95 @@ test.describe('real-provider board report lifecycle', () => {
       const publicPdf = await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`);
       expect(publicPdf.status()).toBe(200);
       expect(sha(Buffer.from(await publicPdf.body()))).toBe(pdfVersion.content_hash);
+      for (const dossierType of [
+        'dpb_statutory',
+        'auditor_assurance',
+        'technical_register',
+        'full_closure',
+      ]) {
+        const unsupported = await post(
+          page,
+          `/engagements/${assessment.engagementId}/closure/pramaan`,
+          {
+            dossierType,
+            reportId: draft.reportId,
+            title: `Unsupported ${dossierType}`,
+            operationKey: crypto.randomUUID(),
+          },
+        );
+        expect(unsupported.status()).toBe(409);
+        expect(((await unsupported.json()) as { error: { code: string } }).error.code).toBe(
+          'source_bound_dossier_required',
+        );
+      }
+      const prepared = await post(page, `/engagements/${assessment.engagementId}/closure/pramaan`, {
+        dossierType: 'board_executive',
+        reportId: draft.reportId,
+        title: 'Retained board closure',
+        operationKey: crypto.randomUUID(),
+      });
+      expect(prepared.status(), await prepared.text()).toBe(201);
+      const dossierBuild = (await prepared.json()) as { dossierId: string; status: string };
+      expect(dossierBuild.status).toBe('settled');
+      const dossierResponse = await page.request.get(
+        `/api/bff/v1/dossiers/${dossierBuild.dossierId}`,
+        { headers: { 'x-tenant-id': state.tenantA.id } },
+      );
+      expect(dossierResponse.status()).toBe(200);
+      const dossier = (await dossierResponse.json()) as {
+        proofSealHash: string;
+        archiveHash: string;
+        archiveBytes: number;
+      };
+      expect(dossier.proofSealHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(dossier.archiveHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(dossier.archiveBytes).toBeGreaterThan(0);
+      expect(
+        (
+          await post(page, `/dossiers/${dossierBuild.dossierId}/seal`, {
+            expectedProofSeal: dossier.proofSealHash,
+          })
+        ).status(),
+      ).toBe(403);
+      const sealed = await post(founder, `/dossiers/${dossierBuild.dossierId}/seal`, {
+        expectedProofSeal: dossier.proofSealHash,
+      });
+      expect(sealed.status()).toBe(200);
+      const retained = await founder.request.get(
+        `/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`,
+        { headers: { 'x-tenant-id': state.tenantA.id } },
+      );
+      expect(retained.status()).toBe(200);
+      expect(sha(Buffer.from(await retained.body()))).toBe(dossier.archiveHash);
+      expect(retained.headers()['x-content-sha256']).toBe(dossier.archiveHash);
+      expect(
+        (
+          await viewer.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
+            headers: { 'x-tenant-id': state.tenantA.id },
+          })
+        ).status(),
+      ).toBe(403);
+      const dispatch = await post(page, '/reports/email/dispatch', {
+        dossierId: dossierBuild.dossierId,
+        recipientEmail: 'audit@example.invalid',
+      });
+      expect(dispatch.status()).toBe(409);
+      expect(((await dispatch.json()) as { error: { code: string } }).error.code).toBe(
+        'source_bound_dispatch_required',
+      );
+      await page.goto('/reports?tab=pramaan');
+      await expect(page.getByText('Source-bound closure dossiers')).toBeVisible();
       await providerAction('--pause-provider');
       try {
         expect(
           (await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`)).status(),
+        ).toBe(503);
+        expect(
+          (
+            await founder.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
+              headers: { 'x-tenant-id': state.tenantA.id },
+            })
+          ).status(),
         ).toBe(503);
       } finally {
         await providerAction('--resume-provider');
