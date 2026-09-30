@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
 
@@ -101,4 +101,32 @@ it('rechecks tenant kill status instead of trusting an unscoped browser event', 
   window.dispatchEvent(new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: true } }));
   await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url === '/api/bff/v1/kill-switch/status').length).toBe(2));
   expect(document.body.textContent).not.toContain('KILL SWITCH ENGAGED');
+});
+
+it('retracts a previously clear alert summary when its next poll fails', async () => {
+  let poll: (() => void) | null = null;
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  vi.stubGlobal('setInterval', vi.fn((handler: () => void, interval: number) => {
+    if (interval === 30_000) { poll = handler; return 1; }
+    return realSetInterval(handler, interval);
+  }));
+  vi.stubGlobal('clearInterval', vi.fn((id: number) => { if (id !== 1) realClearInterval(id); }));
+  let alertReads = 0;
+  vi.stubGlobal('fetch', vi.fn((url: string) => {
+    if (url.includes('monitoring/alerts')) {
+      alertReads++;
+      return Promise.resolve(alertReads === 1
+        ? Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })
+        : new Response(null, { status: 503 }));
+    }
+    return Promise.resolve(Response.json({ engaged: false }));
+  }));
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
+  await waitFor(() => expect(screen.getByText('No active unacknowledged alerts')).toBeTruthy());
+  expect(poll).not.toBeNull();
+  await act(async () => { poll?.(); });
+  await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
+  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
 });

@@ -199,10 +199,12 @@ export function AppShell({
                 (a: { status: string }) => a.status === 'unread' || a.status === 'read',
               ),
             });
+            return;
           }
         }
+        if (active) setAlertsSummary(null);
       } catch {
-        // silent
+        if (active) setAlertsSummary(null);
       }
     }
     fetchAlerts();

@@ -90,3 +90,44 @@ it('shows an empty estate without inventing systems or assessments', () => {
   expect(screen.getByRole('button', { name: 'Create estate' })).toBeTruthy();
   expect(document.body.textContent).not.toContain('production-core-postgres');
 });
+
+it('saves an estate edit with its recorded version and tenant-bound request', async () => {
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ data: { id: 'estate-1' } }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<EstateClient tenantId="tenant-1" canManage estates={[{
+    id: 'estate-1', name: 'Actual estate', slug: 'actual', description: 'Recorded scope', status: 'active', version: 4,
+  }]} systems={[]} intakes={[]} />);
+  fireEvent.click(screen.getByText('Edit estate'));
+  fireEvent.change(screen.getByLabelText('Estate name', { selector: 'input[value="Actual estate"]' }), { target: { value: 'Reviewed estate' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  expect(fetcher.mock.calls[0]![0]).toBe('/api/bff/v1/estates/estate-1');
+  expect(fetcher.mock.calls[0]![1]).toMatchObject({ method: 'PATCH', headers: { 'X-Tenant-Id': 'tenant-1' } });
+  expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toMatchObject({ name: 'Reviewed estate', expectedVersion: 4, status: 'active' });
+});
+
+it('requires an explicit scope confirmation before assigning an intake assessment', async () => {
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ data: { id: 'intake-1' } }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<EstateClient tenantId="tenant-1" canManage estates={[{
+    id: 'estate-1', name: 'Actual estate', slug: 'actual', description: '', status: 'active', version: 1,
+  }]} systems={[]} intakes={[{ id: 'intake-1', title: 'Unassigned assessment' }]} />);
+  fireEvent.click(screen.getByText('Assign an unassigned assessment'));
+  const button = screen.getByRole('button', { name: 'Assign assessment' });
+  fireEvent.click(button);
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText(/I confirm that this estate is the intended assessment scope/));
+  fireEvent.click(button);
+  await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  expect(fetcher.mock.calls[0]![0]).toBe('/api/bff/v1/engagements/intake-1/estate');
+  expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toEqual({ estateId: 'estate-1', confirmed: true });
+});
+
+it('does not offer an archived estate new system or assessment mutations', () => {
+  render(<EstateClient tenantId="tenant-1" canManage estates={[{
+    id: 'estate-1', name: 'Archived estate', slug: 'archived', description: '', status: 'archived', version: 2,
+  }]} systems={[]} intakes={[{ id: 'intake-1', title: 'Unassigned assessment' }]} />);
+  expect(screen.queryByText('Add a system')).toBeNull();
+  expect(screen.queryByText('Assign an unassigned assessment')).toBeNull();
+  expect(screen.getByText('Archived estate')).toBeTruthy();
+});

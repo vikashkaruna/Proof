@@ -19,6 +19,24 @@ it('reports unavailable progress as an error instead of guessing a completed run
   expect(screen.queryByText('Start onboarding')).toBeNull();
 });
 
+it('refuses a malformed successful wizard read rather than offering a new run', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({})));
+  render(<SetupWizard {...base} canManage />);
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unavailable'));
+  expect(screen.queryByText('Start onboarding')).toBeNull();
+});
+
+it('refuses an unknown wizard status and incomplete readiness totals', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: { ...wizard, status: 'verified' }, readiness })));
+  const view = render(<SetupWizard {...base} canManage />);
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unavailable'));
+  expect(screen.queryByText('Start re-onboarding')).toBeNull();
+  view.unmount();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: wizard, readiness: { checks: [] } })));
+  render(<SetupWizard {...base} canManage />);
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unavailable'));
+});
+
 it('shows no-run state and exposes start only to a manager', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: null, readiness: null })));
   const view = render(<SetupWizard {...base} />);
@@ -44,4 +62,30 @@ it('renders a completed run as a saved snapshot and does not offer advance contr
   await waitFor(() => expect(screen.getByTestId('setup-complete').textContent).toContain('readiness snapshot'));
   expect(screen.getByText('Recorded drift')).toBeTruthy();
   expect(screen.queryByText('Start re-onboarding')).toBeNull();
+});
+
+it('offers a manual connection path only for the saved estate systems', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: {
+    ...wizard, completed_steps: ['company', 'estate', 'inventory'], manual_system_ids: ['system-1'],
+  }, readiness })));
+  render(<SetupWizard {...base} canManage estates={[{ id: 'estate-1', name: 'Saved estate', status: 'active' }]}
+    systems={[{ id: 'system-1', estateId: 'estate-1', name: 'Payroll', active: true, declaredCategories: ['identity'], hasConnector: false },
+      { id: 'system-2', estateId: 'other-estate', name: 'Other tenant system', active: true, declaredCategories: [], hasConnector: true }]} />);
+  await waitFor(() => expect(screen.getByText('Record connection path')).toBeTruthy());
+  expect(screen.getByText(/Payroll: no connector/)).toBeTruthy();
+  expect(screen.getByLabelText(/Payroll: no connector/).getAttribute('type')).toBe('checkbox');
+  expect((screen.getByLabelText(/Payroll: no connector/) as HTMLInputElement).checked).toBe(true);
+  expect(document.body.textContent).not.toContain('Other tenant system');
+  expect(document.body.textContent).toContain('not evidence of a live connection');
+});
+
+it('shows recorded grant counts but requires a separate human grant review', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: {
+    ...wizard, completed_steps: ['company', 'estate', 'inventory', 'connectors'],
+  }, readiness: { ...readiness, counts: { ...readiness.counts, activeReadGrants: 1, activeWriteGrants: 0 } } })));
+  render(<SetupWizard {...base} canManage />);
+  await waitFor(() => expect(screen.getByText('Record grant review')).toBeTruthy());
+  expect(screen.getByTestId('grant-counts').textContent).toContain('1 read, 0 write');
+  expect(screen.getByLabelText('I have reviewed agent access for this estate').getAttribute('required')).not.toBeNull();
+  expect(document.body.textContent).toContain('This wizard never issues grants');
 });

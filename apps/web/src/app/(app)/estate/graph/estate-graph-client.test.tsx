@@ -42,3 +42,24 @@ it('shows no access relationships in an empty estate', () => {
   expect(container.querySelectorAll('[data-edge="write"]')).toHaveLength(0);
   expect(document.body.textContent).not.toContain('Payroll connector');
 });
+
+it('shows the exact recorded write relationship and expiry for the selected connector', () => {
+  render(<EstateGraph input={input} />);
+  fireEvent.click(screen.getByRole('button', { name: 'connector Payroll connector' }));
+  const detail = screen.getByTestId('graph-detail');
+  expect(detail.textContent).toContain('WRITE Karya → Payroll connector');
+  expect(detail.textContent).toContain('expires');
+  expect(detail.textContent).not.toContain('WRITE Sudhaar');
+});
+
+it('filters to one estate without leaking another estate or its system names', () => {
+  const other = {
+    ...input,
+    estates: [...input.estates, { id: 'estate-2', name: 'Other estate', status: 'active' as const }],
+    systems: [...input.systems, { id: 'system-2', estateId: 'estate-2', name: 'Other payroll', status: 'active' as const, categories: ['identity'] }],
+  };
+  render(<EstateGraph input={other} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Estate filter' }), { target: { value: 'estate-1' } });
+  expect(screen.getByRole('button', { name: 'system Payroll' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'system Other payroll' })).toBeNull();
+});
