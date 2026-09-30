@@ -263,6 +263,7 @@ def main():
                     "exec",
                     "playwright",
                     "test",
+                    "source-bound-formats-provider.spec.ts",
                     "evidence-ingestion.spec.ts",
                     "evidence-vault.spec.ts",
                     "evidence-packs.spec.ts",
@@ -279,16 +280,19 @@ def main():
                 timeout=900,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
+            # All five source-bound report/archive journeys are required in this
+            # ordered integration. Refuse a missing or silently skipped spec.
+            expected_browser_tests = 15
             summary["counts"] = {
                 name: stats.get(name) for name in ["expected", "unexpected", "flaky", "skipped"]
             }
             if (
                 result.returncode
-                or stats.get("expected") != 13
+                or stats.get("expected") != expected_browser_tests
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all thirteen tests without skips or retries"
+                    f"Evidence browser acceptance requires all {expected_browser_tests} tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
@@ -308,6 +312,8 @@ def main():
                 "board-manager-and-founder-browser-request-review-build-preview-and-release",
                 "auditor-finalized-source-founder-review-exact-versions-and-release",
                 "approval-human-signed-reconciliation-exact-version-founder-release-and-owner-download",
+                "technical-recorded-plan-founder-source-review-exact-provider-versions-and-release",
+                "dpb-reviewed-breach-notification-founder-source-review-exact-provider-versions-and-release",
             ]
         finally:
             try:
