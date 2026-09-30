@@ -14,6 +14,7 @@
     "./auditor-pack": "./src/auditor-pack.ts",
     "./auditor-source": "./src/auditor-source.ts",
     "./dpb-submission": "./src/dpb-submission.ts",
+    "./dpb-source": "./src/dpb-source.ts",
     "./technical-remediation": "./src/technical-remediation.ts",
     "./approval-history": "./src/approval-history.ts",
     "./consumer-reports": "./src/consumer-reports.ts",

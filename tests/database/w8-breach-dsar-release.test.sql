@@ -531,7 +531,7 @@ select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f2',
     '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f2'), null, gen_random_uuid()) ->> 'error'),
-  'not_approved', 'a rejected report cannot be released');
+  'source_bound_workflow_required', 'a rejected legacy DPB report cannot enter the new source-bound release path');
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1',

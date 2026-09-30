@@ -355,6 +355,11 @@ export class StatutoryReportService {
     }
 
     const report = repRes.data;
+    // Source-bound DPB packs are served only from the exact retained PDF
+    // version after provider readback. This legacy renderer has no receipt.
+    if (report.kind === 'dpb') {
+      throw new EvidenceError('source_bound_workflow_required', 409);
+    }
     if (report.status !== 'published' && report.created_by !== actorId) {
       throw new EvidenceError('report_not_found', 404);
     }

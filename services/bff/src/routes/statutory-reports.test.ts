@@ -222,4 +222,24 @@ describe('Statutory Reports HTTP Routes', () => {
     expect(body.reports.some((r) => r.id === repId)).toBe(true);
     expect(body.reports.some((r) => r.id === privateId)).toBe(false);
   });
+
+  it('refuses legacy regeneration of a source-bound DPB PDF or HTML', async () => {
+    const reportId = randomUUID();
+    fixture.base.rows('reports').push({
+      id: reportId,
+      tenant_id: tenant,
+      kind: 'dpb',
+      title: 'Recorded breach review',
+      content_text: JSON.stringify({ kind: 'dpb_notification_review_pack' }),
+      status: 'published',
+      created_by: fixture.owner,
+    });
+    for (const format of ['html', 'pdf']) {
+      const response = await app().request(`/v1/reports/statutory/${reportId}/${format}`);
+      expect(response.status).toBe(format === 'html' ? 409 : 404);
+      expect(await response.json()).toEqual({
+        error: { code: format === 'html' ? 'source_bound_workflow_required' : 'report_not_found' },
+      });
+    }
+  });
 });
