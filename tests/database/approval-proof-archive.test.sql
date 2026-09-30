@@ -12,6 +12,19 @@ select pg_temp.assert_true(not has_schema_privilege('service_role','axiom_secret
  and not has_function_privilege('service_role',
    'public.record_plan_reconciliation_unchecked(uuid,uuid,uuid,uuid,text,text)','EXECUTE'),
  'generic service credential cannot read or replace HMAC key or bypass verifier');
+select pg_temp.assert_true(
+ not has_function_privilege('service_role','public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)','EXECUTE')
+ and not has_function_privilege('service_role','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
+ and not has_function_privilege('service_role','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and not has_function_privilege('service_role','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and has_function_privilege('approval_archive_writer','public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)','EXECUTE')
+ and has_function_privilege('approval_archive_writer','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
+ and has_function_privilege('approval_archive_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and not pg_has_role('service_role','approval_archive_writer','MEMBER')
+ and exists (select 1 from pg_roles where rolname='approval_archive_writer'
+   and not rolcanlogin and not rolinherit and not rolbypassrls),
+ 'archive mutation RPCs belong only to independent BFF writer role');
 
 insert into auth.users(id,email) values
  ('10000000-0000-4000-8000-000000000001','archive-founder@example.invalid'),
@@ -168,6 +181,37 @@ select pg_temp.assert_true((select status='pending' and source_bytes=octet_lengt
  and source_sha256=encode(sha256(convert_to(source_text,'UTF8')),'hex')
  from public.approval_proof_archives where token_id='10000000-0000-4000-8000-000000000060'),
  'archive intent freezes exact source before provider PUT');
+set local role service_role;
+do $$ begin
+  begin
+    perform public.settle_approval_proof_archive(
+      '10000000-0000-4000-8000-000000000010',
+      '10000000-0000-4000-8000-000000000001',
+      (select id from public.approval_proof_archives where token_id='10000000-0000-4000-8000-000000000060'),
+      (select jsonb_build_object('provider',provider,'bucket',bucket,'object_key',object_key,
+        'version_id','v-forged','content_hash',source_sha256,'byte_size',source_bytes,
+        'tenant_id',tenant_id,'collected_by_agent','approval-proof-archive','operation_id',id,
+        'retain_until',retain_until+interval '1 day','readback_at',clock_timestamp(),
+        'lock_mode','COMPLIANCE','verified',true,'legal_hold',false,'encryption','AES256')
+       from public.approval_proof_archives where token_id='10000000-0000-4000-8000-000000000060'),
+      gen_random_uuid());
+    raise exception 'ASSERTION FAILED: generic service key settled forged receipt';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select pg_temp.assert_true((select count(*)=0 from public.approval_proof_versions),
+ 'generic service credential could not forge a retained version');
+set local role approval_archive_writer;
+do $$ begin
+  if (public.settle_approval_proof_archive(
+    '10000000-0000-4000-8000-000000000010',
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000099','{}'::jsonb,gen_random_uuid()
+  )->>'error') is distinct from 'archive_not_found' then
+    raise exception 'ASSERTION FAILED: dedicated writer RPC unavailable';
+  end if;
+end $$;
+reset role;
 select pg_temp.assert_eq((select public.release_approval_proof_archive(
  '10000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-000000000001',
  (select id from public.approval_proof_archives where token_id='10000000-0000-4000-8000-000000000060'),

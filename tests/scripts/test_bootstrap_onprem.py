@@ -25,6 +25,7 @@ class BootstrapOnpremTests(unittest.TestCase):
                 "SUPABASE_DB_URL=postgresql://tester:synthetic@localhost/test\n"
                 "SUPABASE_URL=http://localhost:55321\n"
                 "SUPABASE_SERVICE_KEY=synthetic-service-key\n"
+                "APPROVAL_SIGNING_KEY=synthetic-signing-key-with-at-least-32-bytes\n"
             )
             stub = """#!/bin/sh
 printf '%s %s\\n' "${0##*/}" "$*" >> "$STUB_LOG"
@@ -32,6 +33,7 @@ case "${0##*/} $*" in
   "docker info") exit 0 ;;
   "pnpm tsx scripts/verify-license.ts") [ "$STUB_FAIL" != license ]; exit $? ;;
   "python3 scripts/migrate-database.py "*) [ "$STUB_FAIL" != migration ]; exit $? ;;
+  "python3 scripts/provision-reconciliation-key.py "*) [ "$STUB_FAIL" != reconciliation ]; exit $? ;;
   "pnpm seed:controls") [ "$STUB_FAIL" != controls ]; exit $? ;;
   "pnpm seed:users") [ "$STUB_FAIL" != users ]; exit $? ;;
 esac
@@ -81,6 +83,11 @@ exit 99
         self.assertIn("pnpm seed:controls", calls)
         self.assertNotIn("BOOTSTRAP CHECKS PASSED", result.stdout)
 
+    def test_reconciliation_key_failure_stops_before_seeding(self):
+        result, calls = self.run_bootstrap(fail="reconciliation")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any("seed:" in call for call in calls))
+
     def test_demo_seed_failure_stops_bootstrap(self):
         result, calls = self.run_bootstrap(fail="users", demo=True)
         self.assertNotEqual(result.returncode, 0)
@@ -93,6 +100,10 @@ exit 99
         self.assertIn("BOOTSTRAP CHECKS PASSED", result.stdout)
         self.assertNotIn("pnpm seed:users", calls)
         self.assertTrue(any(call.startswith("python3 scripts/migrate-database.py --dsn ") for call in calls))
+        self.assertIn(
+            "python3 scripts/provision-reconciliation-key.py --container axiom-supabase-db",
+            calls,
+        )
 
 
 if __name__ == "__main__":

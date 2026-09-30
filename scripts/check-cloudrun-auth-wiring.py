@@ -41,9 +41,10 @@ def check(source):
         if service == 'bff':
             required['SUPABASE_SERVICE_KEY'] = 'supabase_service_key'
             required['SUPABASE_STATUTORY_PROOF_WRITER_KEY'] = 'supabase_statutory_proof_writer_key'
+            required['SUPABASE_ARCHIVE_WRITER_KEY'] = 'supabase_archive_writer_key'
         else:
             required['NEXT_PUBLIC_SUPABASE_ANON_KEY'] = 'supabase_anon_key'
-            for private in ('SUPABASE_SERVICE_KEY', 'SUPABASE_STATUTORY_PROOF_WRITER_KEY', 'APPROVAL_SIGNING_KEY', 'AXIOM_MFA_ENCRYPTION_KEY', 'AGENT_RUNTIME_INTERNAL_TOKEN'):
+            for private in ('SUPABASE_SERVICE_KEY', 'SUPABASE_STATUTORY_PROOF_WRITER_KEY', 'SUPABASE_ARCHIVE_WRITER_KEY', 'APPROVAL_SIGNING_KEY', 'AXIOM_MFA_ENCRYPTION_KEY', 'AGENT_RUNTIME_INTERNAL_TOKEN'):
                 if private in env:
                     refuse(f'{service}: backend credential {private} must not be injected into SSR')
         for name, secret in required.items():

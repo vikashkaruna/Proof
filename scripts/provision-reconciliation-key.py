@@ -28,13 +28,19 @@ def dsn_environment(dsn: str) -> dict[str, str]:
         env["PGUSER"] = unquote(parsed.username)
     if parsed.password:
         env["PGPASSWORD"] = unquote(parsed.password)
-    env["PGSSLMODE"] = parse_qs(parsed.query).get("sslmode", ["require"])[0]
+    sslmode = parse_qs(parsed.query).get("sslmode", ["require"])[0]
+    if sslmode not in ("require", "verify-ca", "verify-full"):
+        raise ValueError("remote reconciliation key provisioning requires TLS")
+    env["PGSSLMODE"] = sslmode
     return env
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tenant-id", help="Tenant UUID; omit for the shared default key")
+    parser.add_argument("--container",
+                        help="Use the on-prem database container's local socket")
+    parser.add_argument("--database", default="postgres", help="Database in the local container")
     args = parser.parse_args()
     key = os.environ.get("APPROVAL_SIGNING_KEY", "")
     if len(key.encode("utf-8")) < 32 or "\x00" in key:
@@ -44,11 +50,21 @@ def main() -> int:
         print("Invalid tenant UUID.", file=sys.stderr)
         return 2
     scope = f"tenant:{args.tenant_id.lower()}" if args.tenant_id else "global"
-    try:
-        env = dsn_environment(os.environ.get("SUPABASE_DB_URL", ""))
-    except ValueError:
-        print("SUPABASE_DB_URL must be a valid DB-admin PostgreSQL URL.", file=sys.stderr)
-        return 2
+    if args.container:
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", args.container) or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,62}", args.database):
+            print("Invalid local database container or database name.", file=sys.stderr)
+            return 2
+        env = dict(os.environ)
+        command = ["docker", "exec", "-i", "-u", "postgres", args.container,
+                   "psql", "-X", "-q", "-w", "-U", "postgres", "-d", args.database,
+                   "-v", "ON_ERROR_STOP=1"]
+    else:
+        try:
+            env = dsn_environment(os.environ.get("SUPABASE_DB_URL", ""))
+        except ValueError:
+            print("SUPABASE_DB_URL must be a TLS-protected DB-admin PostgreSQL URL.", file=sys.stderr)
+            return 2
+        command = ["psql", "-X", "-q", "-w", "-v", "ON_ERROR_STOP=1"]
     env.pop("APPROVAL_SIGNING_KEY", None)
     env.pop("SUPABASE_DB_URL", None)
     env["PGCONNECT_TIMEOUT"] = "10"
@@ -72,7 +88,7 @@ commit;
 """
     try:
         result = subprocess.run(  # nosec B603 - fixed psql argv, no shell
-            ["psql", "-X", "-q", "-w", "-v", "ON_ERROR_STOP=1"],
+            command,
             input=sql, text=True, capture_output=True, env=env, timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):

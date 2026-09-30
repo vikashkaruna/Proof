@@ -77,6 +77,7 @@ const expiresAt = issuedAt + Math.round(years * 365.25 * 24 * 60 * 60);
 const anonKey = mintKey('anon', jwtSecret, issuedAt, expiresAt);
 const serviceKey = mintKey('service_role', jwtSecret, issuedAt, expiresAt);
 const statutoryProofWriterKey = mintKey('statutory_proof_writer', jwtSecret, issuedAt, expiresAt);
+const archiveWriterKey = mintKey('approval_archive_writer', jwtSecret, issuedAt, expiresAt);
 
 const expiryDate = new Date(expiresAt * 1000).toISOString().slice(0, 10);
 
@@ -96,6 +97,8 @@ console.log(`SUPABASE_ANON_KEY=${anonKey}`);
 console.log(`SUPABASE_SERVICE_KEY=${serviceKey}`);
 console.log(`# BFF only: do not put this writer key in the agent runtime or workers.`);
 console.log(`SUPABASE_STATUTORY_PROOF_WRITER_KEY=${statutoryProofWriterKey}`);
+console.log(`# BFF-only archive mutation role; never give this key to agents or workers.`);
+console.log(`SUPABASE_ARCHIVE_WRITER_KEY=${archiveWriterKey}`);
 console.log('');
 console.log('# The web and marketing apps read the public pair:');
 console.log(`NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}`);

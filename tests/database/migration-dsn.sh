@@ -122,12 +122,16 @@ echo '  ✓ Applies and re-applies cleanly against a live database'
 # Deployed path keeps both the admin URL and HMAC out of process argv. The
 # verifier key is provisioned only through the admin connection after migrate.
 SUPABASE_DB_URL="$dsn" python3 scripts/migrate-database.py --dsn-env --probe >/dev/null
-SUPABASE_DB_URL="$dsn" APPROVAL_SIGNING_KEY='synthetic-dsn-reconciliation-key-0123456789' \
-  ./scripts/migrate-cloudsql.sh --skip-seeds >/dev/null
+if SUPABASE_DB_URL="$dsn" APPROVAL_SIGNING_KEY='synthetic-dsn-reconciliation-key-0123456789' \
+  ./scripts/migrate-cloudsql.sh --skip-seeds >/dev/null 2>&1; then
+  echo 'FAIL: verifier key crossed a plaintext remote DSN'; exit 1
+fi
+APPROVAL_SIGNING_KEY='synthetic-dsn-reconciliation-key-0123456789' \
+  python3 scripts/provision-reconciliation-key.py --container "$container" --database axiom_dsn_test >/dev/null
 key_count="$(docker exec "$container" psql -X -U postgres -d axiom_dsn_test -At \
   -c "select count(*) from axiom_secrets.reconciliation_keys where scope='global';")"
 [ "$key_count" = '1' ] || { echo 'FAIL: admin-only verifier key was not provisioned'; exit 1; }
-echo '  ✓ Environment-only DSN path provisions the protected HMAC key'
+echo '  ✓ Plaintext remote DSN refused; local socket provisions the protected HMAC key'
 
 printf 'create table if not exists axiom_seed_probe(id integer primary key);\n' > "$workdir/seed-probe.sql"
 SUPABASE_DB_URL="$dsn" python3 scripts/migrate-database.py --dsn-env \

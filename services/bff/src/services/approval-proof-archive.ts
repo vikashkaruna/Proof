@@ -98,6 +98,7 @@ export class ApprovalProofArchiveService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly approvalEngine: ApprovalEngine,
+    private readonly writerDb: Pick<EvidenceDatabase, 'rpc'>,
     private readonly storage: () => Storage = evidenceStorage,
   ) {}
 
@@ -119,8 +120,13 @@ export class ApprovalProofArchiveService {
     return parsed.data;
   }
 
-  private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+  private async rpcOn(
+    client: Pick<EvidenceDatabase, 'rpc'>,
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) {
+    let query = client.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('approval_archive_persistence_unconfirmed', 503);
@@ -128,6 +134,14 @@ export class ApprovalProofArchiveService {
     if (!parsed.success) throw new EvidenceError('approval_archive_record_invalid', 503);
     if (typeof parsed.data.error === 'string') throw new EvidenceError(parsed.data.error, 409);
     return parsed.data;
+  }
+
+  private sourceRpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    return this.rpcOn(this.db, name, args, signal);
+  }
+
+  private mutationRpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    return this.rpcOn(this.writerDb, name, args, signal);
   }
 
   private async authority(
@@ -231,7 +245,7 @@ export class ApprovalProofArchiveService {
 
   private async prepared(tenantId: string, tokenId: string, signal?: AbortSignal) {
     const result = preparedSchema.safeParse(
-      await this.rpc(
+      await this.sourceRpc(
         'prepare_approval_proof_source',
         {
           p_tenant_id: tenantId,
@@ -354,7 +368,7 @@ export class ApprovalProofArchiveService {
       },
       readOptions(signal),
     );
-    const result = await this.rpc(
+    const result = await this.mutationRpc(
       'settle_approval_proof_archive',
       {
         p_tenant_id: row.tenant_id,
@@ -397,7 +411,7 @@ export class ApprovalProofArchiveService {
     const source = await this.prepared(tenantId, tokenId, signal);
     const { config, vault } = this.storage();
     const objectKey = `tenants/${tenantId}/approvals/${tokenId}/${operationKey}/${source.sourceSha256}`;
-    const begun = await this.rpc(
+    const begun = await this.mutationRpc(
       'begin_approval_proof_archive',
       {
         p_tenant_id: tenantId,
@@ -540,7 +554,7 @@ export class ApprovalProofArchiveService {
       },
       readOptions(signal),
     );
-    const result = await this.rpc(
+    const result = await this.mutationRpc(
       'release_approval_proof_archive',
       {
         p_tenant_id: tenantId,
@@ -601,7 +615,7 @@ export class ApprovalProofArchiveService {
     const preview = await this.preview(tenantId, actorId, archiveId, signal);
     if (preview.sourceSha256 !== sourceSha256 || preview.versionId !== versionId)
       throw new EvidenceError('approval_archive_version_mismatch', 409);
-    const result = await this.rpc(
+    const result = await this.mutationRpc(
       'review_approval_proof_archive',
       {
         p_tenant_id: tenantId,

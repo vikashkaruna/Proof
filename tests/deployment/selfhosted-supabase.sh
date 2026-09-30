@@ -46,7 +46,7 @@ docker network create "$NET" >/dev/null
 # One secret signs in GoTrue and validates in PostgREST. They were two
 # different hardcoded values once, which meant no token GoTrue issued could
 # ever be accepted; nothing noticed because authentication was bypassed.
-eval "$(node scripts/mint-supabase-keys.mjs --env selfhosted-test | grep -E '^(SUPABASE_JWT_SECRET|SUPABASE_ANON_KEY|SUPABASE_SERVICE_KEY)=')"
+eval "$(node scripts/mint-supabase-keys.mjs --env selfhosted-test | grep -E '^(SUPABASE_JWT_SECRET|SUPABASE_ANON_KEY|SUPABASE_SERVICE_KEY|SUPABASE_ARCHIVE_WRITER_KEY)=')"
 [ -n "${SUPABASE_JWT_SECRET:-}" ] || { echo 'FAIL: no JWT secret minted'; exit 1; }
 [ -n "${SUPABASE_ANON_KEY:-}" ] || { echo 'FAIL: no anon key minted'; exit 1; }
 echo '  ✓ Minted a JWT secret and its anon/service keys'
@@ -210,6 +210,61 @@ SERVICE_ROWS="$(curl -fsS "${BASE}/rest/v1/tenants?select=id" \
   | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')"
 [ "$SERVICE_ROWS" = "1" ] || { echo "FAIL: service role read ${SERVICE_ROWS} rows; expected the known tenant without BYPASSRLS"; exit 1; }
 echo '  ✓ Service role reads known application data without BYPASSRLS'
+
+# The shared agent/service JWT cannot forge an exported ledger receipt. The
+# BFF-only writer JWT reaches the audited RPC (which then rejects the absent
+# tenant). These are real PostgREST role-switch checks, not SQL-owner calls.
+EXPORT_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_plan_id":null,"p_format":"json","p_filter_params":{},"p_summary":{},"p_artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_artifact_bytes":1,"p_correlation_id":"00000000-0000-4000-8000-0000000000fd"}'
+SERVICE_EXPORT_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/rpc/record_approval_export" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+  -H 'Content-Type: application/json' -d "$EXPORT_BODY")"
+[ "$SERVICE_EXPORT_CODE" = "403" ] || [ "$SERVICE_EXPORT_CODE" = "404" ] || {
+  echo "FAIL: shared service key reached approval export recorder (${SERVICE_EXPORT_CODE})"; exit 1;
+}
+WRITER_EXPORT_RESPONSE="$(curl -fsS -X POST "${BASE}/rest/v1/rpc/record_approval_export" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_ARCHIVE_WRITER_KEY}" \
+  -H 'Content-Type: application/json' -d "$EXPORT_BODY")"
+printf '%s' "$WRITER_EXPORT_RESPONSE" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("error") == "tenant_not_found"'
+echo '  ✓ Shared service JWT denied; dedicated archive writer JWT reaches audited recorder'
+ARCHIVE_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_token_id":"00000000-0000-4000-8000-0000000000fd","p_operation_key":"00000000-0000-4000-8000-0000000000fc","p_provider":"s3","p_bucket":"archive-fixture","p_object_key":"invalid","p_source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_source_bytes":1,"p_correlation_id":"00000000-0000-4000-8000-0000000000fb"}'
+SERVICE_ARCHIVE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/rpc/begin_approval_proof_archive" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+  -H 'Content-Type: application/json' -d "$ARCHIVE_BODY")"
+[ "$SERVICE_ARCHIVE_CODE" = "403" ] || [ "$SERVICE_ARCHIVE_CODE" = "404" ] || {
+  echo "FAIL: shared service key reached archive mutation (${SERVICE_ARCHIVE_CODE})"; exit 1;
+}
+WRITER_ARCHIVE_RESPONSE="$(curl -fsS -X POST "${BASE}/rest/v1/rpc/begin_approval_proof_archive" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_ARCHIVE_WRITER_KEY}" \
+  -H 'Content-Type: application/json' -d "$ARCHIVE_BODY")"
+printf '%s' "$WRITER_ARCHIVE_RESPONSE" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("error") == "founder_authority_required"'
+echo '  ✓ Shared service JWT denied; dedicated archive writer JWT reaches founder gate'
+
+# Exercise the same apikey/Authorization split that the BFF's supabase-js
+# client sends through the HTTP gateway, not just hand-crafted curl headers.
+(
+  cd services/bff
+  AXIOM_PROBE_URL="$BASE" AXIOM_PROBE_ANON="$SUPABASE_ANON_KEY" AXIOM_PROBE_WRITER="$SUPABASE_ARCHIVE_WRITER_KEY" \
+    node --input-type=module <<'NODE'
+import { createClient } from '@supabase/supabase-js';
+const client = createClient(process.env.AXIOM_PROBE_URL, process.env.AXIOM_PROBE_ANON, {
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { headers: { Authorization: `Bearer ${process.env.AXIOM_PROBE_WRITER}` } },
+});
+const { data, error } = await client.rpc('record_approval_export', {
+  p_tenant_id: '00000000-0000-4000-8000-0000000000ff',
+  p_actor_id: '00000000-0000-4000-8000-0000000000fe',
+  p_plan_id: null,
+  p_format: 'json',
+  p_filter_params: {},
+  p_summary: {},
+  p_artifact_sha256: 'a'.repeat(64),
+  p_artifact_bytes: 1,
+  p_correlation_id: '00000000-0000-4000-8000-0000000000fd',
+});
+if (error || data?.error !== 'tenant_not_found') throw new Error('Scoped supabase-js writer client did not reach the recorder');
+NODE
+)
+echo '  ✓ BFF-shaped supabase-js client reached recorder through gateway'
 
 SERVICE_WRITE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/tenants" \
   -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \

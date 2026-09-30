@@ -14,7 +14,8 @@ EXPECTED = {
     'bff': {'agent_runtime_internal_token', 'approval_signing_key',
             'gcs_hmac_access_key', 'gcs_hmac_secret_key', 'mfa_encryption_key',
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
-            'supabase_service_key', 'supabase_statutory_proof_writer_key'},
+            'supabase_service_key', 'supabase_statutory_proof_writer_key',
+            'supabase_archive_writer_key'},
     'web': {'supabase_anon_key'},
     'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
     'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',
@@ -63,6 +64,8 @@ def check(files: dict[str, str]) -> None:
         actual = set(re.findall(r'google_secret_manager_secret.secret\["([^"]+)"\]', body))
         if actual != expected:
             refuse(f'{name}: unexpected/missing container secret binding')
+        if name != 'bff' and 'supabase_archive_writer_key' in actual:
+            refuse(f'{name}: archive writer key must be BFF-only')
         match = re.search(r'\b' + name + r'\s*=\s*{', iam)
         if match is None:
             refuse(f'{name}: missing secret policy')

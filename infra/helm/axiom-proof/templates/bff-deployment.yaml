@@ -54,6 +54,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: statutory-proof-writer-key
+            - name: SUPABASE_ARCHIVE_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: archive-writer-key
             - name: AWS_REGION
               value: {{ .Values.config.awsRegion }}
             - name: MODEL_GATEWAY_URL

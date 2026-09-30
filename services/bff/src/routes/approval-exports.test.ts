@@ -23,7 +23,7 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
     c.set('tenantId', tenantId);
     await next();
   });
-  instance.route('/v1', approvalExportRoutes({ db: fixture.db }));
+  instance.route('/v1', approvalExportRoutes({ db: fixture.db, writerDb: fixture.db }));
   return instance;
 }
 

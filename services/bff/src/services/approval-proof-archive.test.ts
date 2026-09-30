@@ -169,13 +169,20 @@ async function setup() {
     contentType: 'application/json',
     versionId,
   } as never);
-  const service = new ApprovalProofArchiveService(f.db, engine, () => ({ vault: f.vault, config }));
-  return { f, service, source, sourceText, sourceSha256, archiveId, tokenId, versionId };
+  const writerDb = {
+    rpc: vi.fn((name: string, args: Record<string, unknown>) => f.db.rpc(name, args)),
+  };
+  const service = new ApprovalProofArchiveService(f.db, engine, writerDb as never, () => ({
+    vault: f.vault,
+    config,
+  }));
+  return { f, service, writerDb, source, sourceText, sourceSha256, archiveId, tokenId, versionId };
 }
 
 describe('approval proof archive', () => {
   it('retains exact source, releases only after provider receipt, and downloads that version', async () => {
-    const { f, service, archiveId, tokenId, sourceSha256, sourceText, versionId } = await setup();
+    const { f, service, writerDb, archiveId, tokenId, sourceSha256, sourceText, versionId } =
+      await setup();
     const started = await service.start(tenant, actor, tokenId, operationKey);
     expect(started).toMatchObject({ archiveId, status: 'settled', sourceSha256, versionId });
     expect(f.vault.seal).toHaveBeenCalledWith(
@@ -209,6 +216,13 @@ describe('approval proof archive', () => {
       status: 'released',
       versionId,
     });
+    expect(writerDb.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'begin_approval_proof_archive',
+      'settle_approval_proof_archive',
+      'release_approval_proof_archive',
+      'review_approval_proof_archive',
+      'release_approval_proof_archive',
+    ]);
   });
 
   it('does not expose a pending archive to an owner before founder release', async () => {

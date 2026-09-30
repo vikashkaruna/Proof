@@ -8,6 +8,7 @@ import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
 import { ApprovalProofArchiveService } from '../services/approval-proof-archive.js';
+import { createApprovalArchiveWriter } from '../services/approval-archive-writer.js';
 
 type Ctx = Context<{ Variables: Variables }>;
 const input = z.object({ operationKey: z.uuid() }).strict();
@@ -36,6 +37,7 @@ export function approvalProofArchiveRoutes(dependencies: {
     new ApprovalProofArchiveService(
       dependencies.db ?? createSupabaseAdmin(),
       dependencies.approvalEngine,
+      createApprovalArchiveWriter(),
     );
   app.post('/approvals/:tokenId/archive', async (c) => {
     const denied = requireCapability(c, Capability.EVIDENCE_EXPORT);

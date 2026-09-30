@@ -1,5 +1,25 @@
 -- Reconciliation statements must describe the database-derived facts they sign.
 -- A caller-supplied prose statement with a 64-character signature was not proof.
+-- Archive mutation is a BFF-only trust boundary. The generic service_role key
+-- is also held by agents and must never be able to forge a provider receipt or
+-- impersonate a founder through a SECURITY DEFINER RPC.
+do $$ begin
+  if not exists (select 1 from pg_catalog.pg_roles where rolname='approval_archive_writer') then
+    create role approval_archive_writer nologin noinherit nobypassrls;
+  end if;
+end $$;
+alter role approval_archive_writer nologin noinherit nobypassrls;
+grant approval_archive_writer to authenticator;
+grant usage on schema public to approval_archive_writer;
+-- 0085 already removed direct export INSERT. Move its remaining audited RPC to
+-- the BFF-only role so an agent cannot impersonate a member and invent a
+-- historical export receipt or approval.exported ledger entry.
+revoke insert, update, delete on public.approval_exports from service_role;
+revoke all on function public.record_approval_export(uuid,uuid,uuid,text,jsonb,jsonb,text,bigint,uuid)
+  from public,anon,authenticated,service_role;
+grant execute on function public.record_approval_export(uuid,uuid,uuid,text,jsonb,jsonb,text,bigint,uuid)
+  to approval_archive_writer;
+
 alter table public.plan_reconciliations
   drop constraint plan_reconciliations_statement_check;
 alter table public.plan_reconciliations
@@ -198,9 +218,9 @@ begin
    'operationKey',a.operation_key,'replayed',false);
 end $$;
 revoke all on function public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)
-  from public,anon,authenticated;
+  from public,anon,authenticated,service_role;
 grant execute on function public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)
-  to service_role;
+  to approval_archive_writer;
 
 -- The source is built from live producer rows, not a caller-authored export.
 -- Historical prose reconciliations fail the exact statement comparison.
@@ -444,8 +464,8 @@ begin
      'version_id',v.version_id,'retain_until',v.retain_until));
  return jsonb_build_object('archiveId',a.id,'status','settled','versionId',v.version_id,'replayed',false);
 end $$;
-revoke all on function public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid) from public,anon,authenticated;
-grant execute on function public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid) to service_role;
+revoke all on function public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid) to approval_archive_writer;
 
 create function public.release_approval_proof_archive(p_tenant_id uuid,p_actor_id uuid,
   p_archive_id uuid,p_source_sha256 text,p_version_id text,p_correlation_id uuid)
@@ -475,8 +495,7 @@ begin
  return jsonb_build_object('archiveId',a.id,'status','released','sourceSha256',a.source_sha256,
    'versionId',v.version_id,'replayed',false);
 end $$;
-revoke all on function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated;
-grant execute on function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid) to service_role;
+revoke all on function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated,service_role;
 
 -- Reconciliation signatures are proof only after the database verifies the
 -- exact statement under a key that the ordinary PostgREST service role cannot
@@ -642,9 +661,9 @@ begin
     'versionId',v.version_id,'reviewedBy',r.reviewed_by,'replayed',false);
 end $$;
 revoke all on function public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)
-  from public,anon,authenticated;
+  from public,anon,authenticated,service_role;
 grant execute on function public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)
-  to service_role;
+  to approval_archive_writer;
 
 alter function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)
   rename to release_approval_proof_archive_without_review_guard;
@@ -677,6 +696,6 @@ begin
     p_tenant_id,p_actor_id,p_archive_id,p_source_sha256,p_version_id,p_correlation_id);
 end $$;
 revoke all on function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)
-  from public,anon,authenticated;
+  from public,anon,authenticated,service_role;
 grant execute on function public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)
-  to service_role;
+  to approval_archive_writer;

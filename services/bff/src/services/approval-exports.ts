@@ -55,7 +55,10 @@ function escapeCsvField(val: unknown): string {
 }
 
 export class ApprovalExportService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writerDb: Pick<EvidenceDatabase, 'rpc'>,
+  ) {}
 
   private async assertLiveAccess(
     tenantId: string,
@@ -82,7 +85,7 @@ export class ApprovalExportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.db.rpc(name, args) as unknown as {
+    const query = this.writerDb.rpc(name, args) as unknown as {
       abortSignal?: (sig: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
     };
     const { data, error } =

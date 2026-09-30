@@ -43,7 +43,7 @@ function personaState(): PersonaState | null {
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
-function localStatutoryWriterKey() {
+function localWriterKey(role: 'statutory_proof_writer' | 'approval_archive_writer') {
   if (!state || acceptanceTarget) return '';
   const statusPath = resolve(
     process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
@@ -54,12 +54,19 @@ function localStatutoryWriterKey() {
     throw new Error('Persona state and local Supabase signing target differ');
   const jwtSecret = status.JWT_SECRET;
   if (!jwtSecret) throw new Error('Local Supabase JWT signing secret is missing');
-  return mintLocalPostgrestRoleKey({
-    role: 'statutory_proof_writer',
-    jwtSecret,
-    serviceKey: state.serviceKey,
-  });
+  return mintLocalPostgrestRoleKey({ role, jwtSecret, serviceKey: state.serviceKey });
 }
+
+function archiveWriterKey() {
+  if (!acceptanceTarget) return localWriterKey('approval_archive_writer');
+  const key = process.env.SUPABASE_ARCHIVE_WRITER_KEY;
+  if (!key)
+    throw new Error('Deployed browser acceptance requires a BFF-only SUPABASE_ARCHIVE_WRITER_KEY');
+  return key;
+}
+
+const bffArchiveWriterKey = archiveWriterKey();
+if (bffArchiveWriterKey) process.env.SUPABASE_ARCHIVE_WRITER_KEY = bffArchiveWriterKey;
 
 const BFF_PORT = '4000';
 
@@ -91,7 +98,9 @@ const bffEnv = {
   // discover a harness misconfiguration.
   AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
-  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localStatutoryWriterKey(),
+  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
+  // Issued separately for this PostgREST target and kept out of browser persona state.
+  SUPABASE_ARCHIVE_WRITER_KEY: bffArchiveWriterKey,
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',

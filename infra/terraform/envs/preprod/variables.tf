@@ -211,6 +211,17 @@ variable "supabase_statutory_proof_writer_key" {
   sensitive   = true
 }
 
+variable "supabase_archive_writer_key" {
+  description = "BFF-only approval_archive_writer JWT signed with supabase_jwt_secret; never distribute to agents or workers."
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition     = length(var.supabase_archive_writer_key) > 0
+    error_message = "A minted BFF-only approval_archive_writer JWT is required."
+  }
+}
+
 
 variable "report_email_mode" {
   type        = string

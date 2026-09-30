@@ -104,6 +104,17 @@ if ! python3 scripts/migrate-database.py --dsn "${SUPABASE_DB_URL}" >/dev/null; 
   exit 1
 fi
 echo "  -> Database migrations applied or verified by checksum."
+APPROVAL_SIGNING_KEY="${APPROVAL_SIGNING_KEY:-$(read_env_value APPROVAL_SIGNING_KEY)}"
+if [ -z "${APPROVAL_SIGNING_KEY}" ]; then
+  echo "[x] Approval signing key is required for the reconciliation verifier." >&2
+  exit 1
+fi
+export APPROVAL_SIGNING_KEY
+if ! python3 scripts/provision-reconciliation-key.py --container axiom-supabase-db >/dev/null; then
+  echo "[x] Reconciliation verifier key provisioning failed." >&2
+  exit 1
+fi
+echo "  -> Reconciliation verifier key confirmed through the local database socket."
 
 # 5. Seeding
 echo "[5/6] Seeding control library..."
