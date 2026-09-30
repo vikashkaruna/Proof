@@ -444,6 +444,7 @@ function ReportInspector({
       setBusy(false);
     }
   }
+  const archiveHash = report?.pack?.archive?.contentHash;
   return (
     <section aria-label="Report detail" className={panel} aria-busy={loading}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -586,7 +587,7 @@ function ReportInspector({
               )}
             {report.status === 'approved' &&
               report.contentHash &&
-              (!report.pack || report.pack.archive) &&
+              archiveHash &&
               access.canRelease && (
                 <div className="space-y-3">
                   <label className="flex gap-2 text-sm">
@@ -605,7 +606,7 @@ function ReportInspector({
                     onClick={() =>
                       act(`/reports/${report.id}/release`, {
                         expectedContentHash: report.contentHash,
-                        expectedArchiveHash: report.pack?.archive?.contentHash ?? null,
+                        expectedArchiveHash: archiveHash,
                       })
                     }
                   >
