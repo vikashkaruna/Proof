@@ -3,6 +3,7 @@ export * from './branding';
 export * from './schema';
 export * from './board-report';
 export * from './auditor-pack';
+export * from './auditor-source';
 export * from './dpb-submission';
 export * from './technical-remediation';
 export * from './approval-history';

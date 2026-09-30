@@ -1,7 +1,7 @@
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
 import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
 import { readFileSync } from 'node:fs';
-import type { Page, Response } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
 import { encryptSecret, generateSecret, generateTotp } from '@axiom/mfa';
 import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } from './personas';
 
@@ -124,7 +124,32 @@ export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void
 }
 
 export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {
-  await page.goto('/verify');
+  // The post-login server-action redirect can still be committing after the
+  // URL changes. If it aborts this navigation, wait for it to settle and
+  // explicitly navigate again; do not treat the abort as an MFA success.
+  try {
+    await page.goto('/verify', { waitUntil: 'domcontentloaded' });
+  } catch (cause) {
+    if (!(cause instanceof Error) || !cause.message.includes('net::ERR_ABORTED')) throw cause;
+    await page.waitForLoadState('domcontentloaded');
+    await page.goto('/verify', { waitUntil: 'domcontentloaded' });
+  }
+  await page
+    .locator('#code')
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .catch(() => {
+      throw new Error(`Login-MFA form did not appear at ${new URL(page.url()).pathname}`);
+    });
+  // A server-rendered input is visible before its React handler is attached.
+  // Wait for the client component to hydrate before sending a one-time code.
+  await page.waitForFunction(
+    () => {
+      const input = document.querySelector('#code');
+      return input && Object.keys(input).some((key) => key.startsWith('__reactProps$'));
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
   // Record status only, never request bodies, codes, cookies or response payloads.
   const statuses: string[] = [];
   const record = (response: Response) => {
@@ -138,8 +163,20 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
     // code after a refusal; never bypass the replay defence.
     for (let attempt = 0; attempt < 2; attempt++) {
       statuses.push(`attempt:${attempt + 1}`);
-      await page.fill('#code', generateTotp(secret));
-      await page.getByRole('button', { name: /^Verify$/ }).click();
+      const verifyButton = page.getByRole('button', { name: /^Verify$/ });
+      // Next can render the input before React hydrates it. A fill made in
+      // that gap leaves the controlled button disabled; explicitly wait for
+      // the state change and refill after hydration if necessary.
+      for (let fillAttempt = 0; fillAttempt < 3; fillAttempt++) {
+        await page.fill('#code', generateTotp(secret));
+        try {
+          await expect(verifyButton).toBeEnabled({ timeout: 5_000 });
+          break;
+        } catch (cause) {
+          if (fillAttempt === 2) throw cause;
+        }
+      }
+      await verifyButton.click({ timeout: 15_000 });
       try {
         await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
         return;

@@ -12,6 +12,7 @@
     "./board-report": "./src/board-report.ts",
     "./board-source": "./src/board-source.ts",
     "./auditor-pack": "./src/auditor-pack.ts",
+    "./auditor-source": "./src/auditor-source.ts",
     "./dpb-submission": "./src/dpb-submission.ts",
     "./technical-remediation": "./src/technical-remediation.ts",
     "./approval-history": "./src/approval-history.ts",

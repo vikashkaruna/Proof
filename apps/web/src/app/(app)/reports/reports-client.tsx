@@ -17,6 +17,7 @@ import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
 import { AgentIcon } from '@axiom/ui';
 import { BoardWorkflow } from './board-workflow';
+import { AuditorWorkflow } from './auditor-workflow';
 
 const date = (value: string) => new Date(value).toLocaleString();
 
@@ -178,10 +179,12 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Planned format. Source-bound evidence receipts and independent review are not yet
-                available here.
+                Assessment-derived review packs use a finalized assessment and retained source/PDF
+                versions. They do not claim independent audit or evidence attestation.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
+              <div className="text-xs text-slate-500 font-medium">
+                Request from finalized assessment below
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -216,6 +219,14 @@ export function ReportsClient(access: Access) {
           </div>
 
           <BoardWorkflow
+            tenantId={tenantId}
+            canRequest={access.canRequestBoard}
+            canManage={access.canManageBoard}
+            onOpenReport={setSelectedId}
+            onChanged={refresh}
+          />
+
+          <AuditorWorkflow
             tenantId={tenantId}
             canRequest={access.canRequestBoard}
             canManage={access.canManageBoard}
