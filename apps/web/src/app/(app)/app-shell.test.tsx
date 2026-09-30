@@ -4,8 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
 
-const state = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), switchTenant: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: state.push, refresh: state.refresh }), usePathname: () => '/dashboard', useSearchParams: () => new URLSearchParams() }));
+const state = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), switchTenant: vi.fn(), pathname: '/dashboard' }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: state.push, refresh: state.refresh }), usePathname: () => state.pathname, useSearchParams: () => new URLSearchParams() }));
 vi.mock('./tenant-actions', () => ({ switchTenantAction: state.switchTenant }));
 vi.mock('./sidebar-agent-panel', () => ({ SidebarAgentPanel: () => null }));
 
@@ -17,6 +17,7 @@ const props = { children: <main>Tenant content</main>, user: { id: 'user-1', ema
 
 beforeEach(() => {
   state.push.mockReset(); state.refresh.mockReset(); state.switchTenant.mockReset();
+  state.pathname = '/dashboard';
   vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url.includes('kill-switch') ? { engaged: false } : { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } }))));
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   vi.stubGlobal('confirm', vi.fn(() => true));
@@ -145,4 +146,59 @@ it('keeps the kill switch engaged when the BFF refuses release', async () => {
   expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy();
   const release = fetcher.mock.calls.find(([url]) => url === '/api/bff/v1/kill-switch/release');
   expect(release?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Tenant-Id': 'tenant-alpha' } });
+});
+
+it('refreshes the dashboard after a verified tenant switch', async () => {
+  state.switchTenant.mockResolvedValue({ ok: true });
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: /Beta Org/ }));
+  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+  expect(state.push).not.toHaveBeenCalled();
+});
+
+it('routes the portal to the verified selected tenant', async () => {
+  state.switchTenant.mockResolvedValue({ ok: true });
+  state.pathname = '/portal';
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: /Beta Org/ }));
+  await waitFor(() => expect(state.switchTenant).toHaveBeenCalledWith('beta'));
+  expect(state.refresh).not.toHaveBeenCalled();
+  await waitFor(() => expect(state.push).toHaveBeenCalledWith('/portal?tenant=beta'));
+});
+
+it('shows only returned active alerts with their recorded severity and title', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) =>
+      Promise.resolve(
+        url.includes('kill-switch')
+          ? Response.json({ engaged: false })
+          : Response.json({
+              data: {
+                summary: { unread: 1, critical: 1, high: 0 },
+                alerts: [
+                  {
+                    id: 'alert-1',
+                    title: 'Recorded critical alert',
+                    summary: 'Evidence-backed drift',
+                    severity: 'critical',
+                    status: 'unread',
+                    alert_type: 'drift',
+                    created_at: '2026-10-01T00:00:00Z',
+                  },
+                ],
+              },
+            }),
+      ),
+    ),
+  );
+  render(<AppShell {...props} />);
+  const button = screen.getByRole('button', { name: 'Continuous monitoring alerts' });
+  await waitFor(() => expect(button.textContent).toContain('1'));
+  fireEvent.click(button);
+  expect(screen.getByText('Recorded critical alert')).toBeTruthy();
+  expect(screen.getByText('Evidence-backed drift')).toBeTruthy();
+  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
 });

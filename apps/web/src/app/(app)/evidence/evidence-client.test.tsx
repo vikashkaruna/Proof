@@ -212,3 +212,46 @@ it('reconciles a pending operation without uploading a second object', async () 
   expect(posts[0]![0]).toBe(`/api/bff/v1/evidence/ingestions/${operationKey}/reconcile`);
   expect(posts[0]![1].headers['x-tenant-id']).toBe('tenant-1');
 });
+
+it('rejects invalid upload metadata before creating a retention operation', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => empty());
+  vi.stubGlobal('fetch', fetcher);
+  render(<EvidenceClient tenantId="tenant-1" canRecord canExport={false} />);
+  await waitFor(() =>
+    expect(screen.getByText('No upload operations recorded on this page.')).toBeTruthy(),
+  );
+  fireEvent.change(screen.getByLabelText('Evidence file (maximum 8 MiB)'), {
+    target: { files: [new File(['a'], 'record.txt', { type: 'text/plain' })] },
+  });
+  fireEvent.change(screen.getByLabelText('Description'), { target: { value: '' } });
+  fireEvent.click(screen.getByLabelText(/I reviewed this file and authorize/));
+  const form = screen.getByRole('button', { name: 'Upload evidence' }).closest('form');
+  fireEvent.submit(form!);
+  await waitFor(() =>
+    expect(screen.getByRole('alert').textContent).toContain('Enter a description'),
+  );
+  expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+});
+
+it('does not offer provider download for a legacy record with no object-version receipt', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ data: [row], meta: { limit: 20, offset: 0, total: 1, hasMore: false } }),
+      ),
+  );
+  render(<EvidenceClient tenantId="tenant-1" canRecord={false} canExport />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /record.txt/ })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: /record.txt/ }));
+  expect(
+    screen.getByRole('button', { name: 'Download exact version' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(
+    screen.getByRole('button', { name: 'Verify provider receipt' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(document.body.textContent).toContain(
+    'Retention and stored-byte integrity are unverified.',
+  );
+});
