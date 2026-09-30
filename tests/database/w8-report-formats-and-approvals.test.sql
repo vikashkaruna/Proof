@@ -2,8 +2,7 @@
 --
 -- Tests:
 -- 1. record_approval_export RPC records export, enforces valid format/size/hash, and writes to audit ledger.
--- 2. record_statutory_report_draft RPC creates draft report and statutory_report_artifacts entry.
--- 3. attach_statutory_report_pdf RPC updates PDF artifact sha256/bytes and writes to ledger.
+-- 2. Unsafe caller-authored statutory draft and unverified PDF paths remain unavailable to the service role.
 
 begin;
 
@@ -15,15 +14,18 @@ begin if actual is distinct from expected then
 
 -- ─── Fixtures ────────────────────────────────────────────────────────
 insert into auth.users(id, email) values
-  ('00000000-0000-0000-0000-0000000000d1', 'approver@w8test.invalid');
+  ('00000000-0000-0000-0000-0000000000d1', 'approver@w8test.invalid'),
+  ('00000000-0000-0000-0000-0000000000d2', 'viewer@w8test.invalid');
 insert into public.users(id, email) values
-  ('00000000-0000-0000-0000-0000000000d1', 'approver@w8test.invalid');
+  ('00000000-0000-0000-0000-0000000000d1', 'approver@w8test.invalid'),
+  ('00000000-0000-0000-0000-0000000000d2', 'viewer@w8test.invalid');
 
 insert into public.tenants(id, slug, name) values
   ('00000000-0000-0000-0000-0000000000a1', 'w8-test-tenant', 'W8 Test Tenant');
 
 insert into public.tenant_users(tenant_id, user_id, role) values
-  ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000d1', 'founder');
+  ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000d1', 'founder'),
+  ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000d2', 'viewer');
 
 insert into public.control_libraries(version, published_at, published_by, change_log, control_count)
   values ('test-w8-lib', now(), 'test', 'test', 0);
@@ -84,60 +86,49 @@ begin
     'approval.exported written to audit ledger');
 end $$;
 
--- ─── 2. Statutory Report Draft Recording ─────────────────────────────
+-- ─── 2. Source-bound statutory report boundary ─────────────────────
 do $$
-declare
-  v_res jsonb;
-  v_content text := '{"schema_version": 1, "kind": "auditor_pack", "title": "Auditor Report"}';
-  v_html text := '<!DOCTYPE html><html><body>Auditor Report</body></html>';
-  v_report_id uuid;
-  v_corr uuid := gen_random_uuid();
-  v_pdf_hash text := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 begin
-  v_res := public.record_statutory_report_draft(
-    '00000000-0000-0000-0000-0000000000a1',
-    '00000000-0000-0000-0000-0000000000d1',
-    '00000000-0000-0000-0000-0000000000a2',
-    'auditor',
-    'Statutory Auditor Pack Q3',
-    'test-w8-lib',
-    v_content,
-    v_html,
-    v_corr
-  );
-
-  perform pg_temp.assert_eq(v_res->>'status', 'draft', 'records statutory report draft');
-  v_report_id := (v_res->>'reportId')::uuid;
-  perform pg_temp.assert_true(v_report_id is not null, 'returns reportId');
-
-  -- Verify statutory_report_artifacts entry
   perform pg_temp.assert_true(
-    (select count(*) = 1 from public.statutory_report_artifacts where report_id = v_report_id),
-    'statutory_report_artifacts entry created');
-
-  -- Attach PDF
-  v_res := public.attach_statutory_report_pdf(
-    '00000000-0000-0000-0000-0000000000a1',
-    '00000000-0000-0000-0000-0000000000d1',
-    v_report_id,
-    v_pdf_hash,
-    85000,
-    v_corr
-  );
-  perform pg_temp.assert_eq(v_res->>'status', 'pdf_attached', 'attaches statutory report PDF');
-
-  -- Verify PDF fields in artifact row
+    not has_function_privilege('service_role',
+      'public.record_statutory_report_draft(uuid,uuid,uuid,text,text,text,text,text,uuid)',
+      'EXECUTE'),
+    'caller-authored statutory draft RPC is unavailable to service role');
   perform pg_temp.assert_true(
-    (select pdf_sha256 = v_pdf_hash and pdf_bytes = 85000
-       from public.statutory_report_artifacts where report_id = v_report_id),
-    'artifact row updated with exact pdf metadata');
-
-  -- Verify ledger entry for report.exported
+    not has_function_privilege('service_role',
+      'public.attach_statutory_report_pdf(uuid,uuid,uuid,text,bigint,uuid)',
+      'EXECUTE'),
+    'unverified statutory PDF attachment RPC is unavailable to service role');
   perform pg_temp.assert_true(
-    (select count(*) = 1 from public.audit_ledger
-      where tenant_id = '00000000-0000-0000-0000-0000000000a1'
-        and action_type = 'report.exported'),
-    'report.exported written to audit ledger');
+    not has_table_privilege('service_role', 'public.statutory_report_artifacts', 'INSERT')
+      and not has_table_privilege('service_role', 'public.statutory_report_artifacts', 'UPDATE'),
+    'service role cannot write unverified statutory artifact metadata directly');
 end $$;
+
+-- The historical function is used only by this superuser fixture to create
+-- an old draft. Runtime service_role no longer has EXECUTE on it.
+create temporary table w8_legacy_draft(id uuid primary key);
+insert into w8_legacy_draft
+select (public.record_statutory_report_draft(
+  '00000000-0000-0000-0000-0000000000a1',
+  '00000000-0000-0000-0000-0000000000d1',
+  '00000000-0000-0000-0000-0000000000a2',
+  'auditor', 'Historical private draft', 'test-w8-lib',
+  '{"schema_version":1,"kind":"auditor_pack"}', '<html></html>', gen_random_uuid()
+)->>'reportId')::uuid;
+grant select on w8_legacy_draft to authenticated;
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000d2","role":"authenticated"}', true);
+select pg_temp.assert_true(
+  (select count(*) = 0 from public.statutory_report_artifacts
+    where report_id in (select id from w8_legacy_draft)),
+  'viewer cannot read unapproved statutory draft metadata');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
+select pg_temp.assert_true(
+  (select count(*) = 1 from public.statutory_report_artifacts
+    where report_id in (select id from w8_legacy_draft)),
+  'draft creator retains read access to historical artifact metadata');
+reset role;
 
 rollback;
