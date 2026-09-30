@@ -97,7 +97,9 @@ export function DossierViewerModal({
           >
             {dossier.sourceBound
               ? dossier.archiveStatus === 'settled'
-                ? 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
+                ? dossier.dossierType === 'auditor_assurance'
+                  ? 'This assessment-derived auditor dossier has an exact retained archive version. It is not an independent audit, auditor attestation, or evidence certification. Confirm the source and digest before founder sealing.'
+                  : 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
                 : 'The archive outcome is pending. Reconcile the exact provider version before founder sealing or download.'
               : 'This historical record does not establish a verified source, retained closure pack, or Object Lock receipt. It is unavailable for sealing, download, or dispatch.'}
           </p>
@@ -108,7 +110,11 @@ export function DossierViewerModal({
             </div>
             <div>
               <dt className="font-medium text-slate-600">Dossier type</dt>
-              <dd className="mt-1 capitalize">{dossier.dossierType.replace(/_/g, ' ')}</dd>
+              <dd className="mt-1 capitalize">
+                {dossier.dossierType === 'auditor_assurance'
+                  ? 'Assessment-derived auditor dossier'
+                  : dossier.dossierType.replace(/_/g, ' ')}
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-slate-600">Created</dt>

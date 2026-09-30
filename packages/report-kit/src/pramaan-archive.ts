@@ -1,4 +1,4 @@
-/** Exact-version derivative archive for a published board report. */
+/** Exact-version derivative archives for published, source-bound reports. */
 import { createHash } from 'node:crypto';
 import { zipSync, type Zippable } from 'fflate';
 import { z } from 'zod';
@@ -16,10 +16,11 @@ const inputSchema = z.object({
   pdf: z.object({ id: uuid, versionId: z.string().min(1).max(1024), sha256: digest }),
 });
 
-export type PramaanBoardArchiveInput = z.infer<typeof inputSchema> & {
+export type PramaanSourceArchiveInput = z.infer<typeof inputSchema> & {
   sourceBytes: Uint8Array;
   pdfBytes: Uint8Array;
 };
+export type PramaanBoardArchiveInput = PramaanSourceArchiveInput;
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -97,6 +98,93 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
   files['manifest.json'] = [manifestBytes, fixed];
   files['source/assessment.json'] = [input.sourceBytes, fixed];
   files['source/board-report.pdf'] = [input.pdfBytes, fixed];
+  const archive = Buffer.from(zipSync(files, { level: 0 }));
+  if (archive.length > 64 * 1024 * 1024) throw new Error('Pramaan archive exceeds byte limit');
+  return {
+    manifest,
+    manifestSha256: sha(manifestBytes),
+    archive,
+    archiveSha256: sha(archive),
+    byteSize: archive.length,
+  };
+}
+
+/** Assessment-derived auditor archive. This does not assert independent audit assurance. */
+export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
+  const parsed = inputSchema.parse(input);
+  if (
+    input.sourceBytes.length < 1 ||
+    input.sourceBytes.length > 4 * 1024 * 1024 ||
+    input.pdfBytes.length < 500 ||
+    input.pdfBytes.length > 32 * 1024 * 1024 ||
+    sha(input.sourceBytes) !== parsed.source.sha256 ||
+    sha(input.pdfBytes) !== parsed.pdf.sha256 ||
+    !Buffer.from(input.pdfBytes.subarray(0, 5)).equals(Buffer.from('%PDF-'))
+  )
+    throw new Error('Pramaan source bytes do not match exact provider versions');
+  const source = z
+    .object({
+      schema_version: z.literal(1),
+      kind: z.literal('statutory_source'),
+      report_kind: z.literal('auditor'),
+      tenant_id: uuid,
+      engagement_id: uuid,
+      request_id: uuid,
+    })
+    .parse(JSON.parse(Buffer.from(input.sourceBytes).toString('utf8')));
+  if (
+    source.tenant_id !== parsed.tenantId ||
+    source.engagement_id !== parsed.engagementId ||
+    source.request_id !== parsed.requestId
+  )
+    throw new Error('Pramaan source belongs to a different tenant, engagement, or auditor request');
+  const manifest = {
+    schema_version: 1,
+    kind: 'pramaan_auditor_assurance_source_archive',
+    title: parsed.title,
+    branding: {
+      product: BRANDING.product,
+      company: BRANDING.company,
+      company_url: BRANDING.company_url,
+    },
+    tenant_id: parsed.tenantId,
+    engagement_id: parsed.engagementId,
+    source_report_id: parsed.reportId,
+    source_request_id: parsed.requestId,
+    source_merkle_root: sha(
+      Buffer.concat([
+        Buffer.from([1]),
+        Buffer.from(parsed.source.sha256, 'hex'),
+        Buffer.from(parsed.pdf.sha256, 'hex'),
+      ]),
+    ),
+    source: {
+      path: 'source/assessment.json',
+      ...parsed.source,
+      byte_size: input.sourceBytes.length,
+    },
+    auditor_pdf: {
+      path: 'source/auditor-review-pack.pdf',
+      ...parsed.pdf,
+      byte_size: input.pdfBytes.length,
+    },
+    limitations: [
+      'This assessment-derived archive is not an independent audit, auditor attestation, or evidence certification.',
+      'Source/version identifiers and hashes support verification; they do not assert statutory completeness.',
+      'Founder sealing is recorded outside this archive and must be checked against the audit ledger.',
+    ],
+  };
+  const manifestBytes = Buffer.from(JSON.stringify(manifest), 'utf8');
+  const fixed = {
+    level: 0 as const,
+    mtime: new Date(1980, 0, 1),
+    os: 3 as const,
+    attrs: 0o100644 << 16,
+  };
+  const files: Zippable = Object.create(null) as Zippable;
+  files['manifest.json'] = [manifestBytes, fixed];
+  files['source/assessment.json'] = [input.sourceBytes, fixed];
+  files['source/auditor-review-pack.pdf'] = [input.pdfBytes, fixed];
   const archive = Buffer.from(zipSync(files, { level: 0 }));
   if (archive.length > 64 * 1024 * 1024) throw new Error('Pramaan archive exceeds byte limit');
   return {

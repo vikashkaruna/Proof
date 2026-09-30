@@ -8,6 +8,7 @@ import { DossierTypeSchema, type DossierType, type PramaanDossier } from '@axiom
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 import { accessFor } from './evidence-pack-records.js';
 import { PramaanArtifactService } from './pramaan-artifacts.js';
+import { PramaanAuditorArtifactService } from './pramaan-auditor-artifacts.js';
 
 export const synthesizeDossierInputSchema = z
   .object({
@@ -56,8 +57,10 @@ export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSc
 
 export class PramaanClosureService {
   readonly artifacts: PramaanArtifactService;
+  readonly auditorArtifacts: PramaanAuditorArtifactService;
   constructor(private readonly db: EvidenceDatabase) {
     this.artifacts = new PramaanArtifactService(db);
+    this.auditorArtifacts = new PramaanAuditorArtifactService(db);
   }
 
   private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -66,10 +69,18 @@ export class PramaanClosureService {
   }
 
   async listMyBuilds(tenantId: string, actorId: string, signal?: AbortSignal) {
-    return this.artifacts.mine(tenantId, actorId, signal);
+    const [board, auditor] = await Promise.all([
+      this.artifacts.mine(tenantId, actorId, signal),
+      this.auditorArtifacts.mine(tenantId, actorId, signal),
+    ]);
+    return {
+      builds: [...board.builds, ...auditor.builds].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      ),
+    };
   }
 
-  /** Only published, exact-version board evidence currently has a dossier source contract. */
+  /** Both supported dossier kinds require published, exact-version source artifacts. */
   async synthesizeDossier(
     tenantId: string,
     actorId: string,
@@ -77,6 +88,8 @@ export class PramaanClosureService {
     _correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ) {
+    if (input.dossierType === 'auditor_assurance')
+      return this.auditorArtifacts.create(tenantId, actorId, input, signal);
     return this.artifacts.create(tenantId, actorId, input, signal);
   }
 
@@ -89,7 +102,8 @@ export class PramaanClosureService {
     _correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ) {
-    return this.artifacts.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
   }
 
   async reconcileDossier(
@@ -99,7 +113,8 @@ export class PramaanClosureService {
     operationKey: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.reconcile(tenantId, actorId, dossierId, operationKey, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.reconcile(tenantId, actorId, dossierId, operationKey, signal);
   }
 
   async retryMissingDossier(
@@ -109,7 +124,8 @@ export class PramaanClosureService {
     operationKey: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
   }
 
   async getDossierArchive(
@@ -118,7 +134,14 @@ export class PramaanClosureService {
     dossierId: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.archive(tenantId, actorId, dossierId, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.archive(tenantId, actorId, dossierId, signal);
+  }
+
+  private async artifactFor(tenantId: string, dossierId: string, signal?: AbortSignal) {
+    return (await this.auditorArtifacts.owns(tenantId, dossierId, signal))
+      ? this.auditorArtifacts
+      : this.artifacts;
   }
 
   /**
@@ -163,7 +186,9 @@ export class PramaanClosureService {
     if (res.error) throw new EvidenceError('closure_storage_unavailable', 503);
     const row = Array.isArray(res.data) ? res.data[0] : res.data;
     if (!row) throw new EvidenceError('dossier_not_found', 404);
-    const source = await this.artifacts.status(tenantId, actorId, dossierId, signal);
+    const source = await (
+      await this.artifactFor(tenantId, dossierId, signal)
+    ).status(tenantId, actorId, dossierId, signal);
     return {
       id: row.id as string,
       tenantId: row.tenant_id as string,

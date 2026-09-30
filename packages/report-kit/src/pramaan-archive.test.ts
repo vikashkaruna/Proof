@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { unzipSync } from 'fflate';
-import { buildPramaanBoardArchive } from './pramaan-archive';
+import { buildPramaanAuditorArchive, buildPramaanBoardArchive } from './pramaan-archive';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -73,5 +73,42 @@ describe('Pramaan exact-version board archive', () => {
         source: { ...input.source, sha256: sha(foreignReportBytes) },
       }),
     ).toThrow('different tenant, engagement, or board request');
+  });
+});
+
+describe('Pramaan assessment-derived auditor archive', () => {
+  it('keeps exact published source and PDF and labels the assurance limit', () => {
+    const board = fixture();
+    const sourceBytes = Buffer.from(
+      JSON.stringify({
+        schema_version: 1,
+        kind: 'statutory_source',
+        report_kind: 'auditor',
+        tenant_id: board.tenantId,
+        engagement_id: board.engagementId,
+        request_id: board.requestId,
+      }),
+    );
+    const input = { ...board, sourceBytes, source: { ...board.source, sha256: sha(sourceBytes) } };
+    const built = buildPramaanAuditorArchive(input);
+    expect(buildPramaanAuditorArchive(input).archiveSha256).toBe(built.archiveSha256);
+    const files = unzipSync(built.archive);
+    expect(Buffer.from(files['source/assessment.json']!)).toEqual(sourceBytes);
+    expect(Buffer.from(files['source/auditor-review-pack.pdf']!)).toEqual(board.pdfBytes);
+    const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString()) as Record<
+      string,
+      unknown
+    >;
+    expect(manifest.kind).toBe('pramaan_auditor_assurance_source_archive');
+    expect(JSON.stringify(manifest)).toContain('not an independent audit');
+    expect(() =>
+      buildPramaanAuditorArchive({
+        ...input,
+        reportId: randomUUID(),
+        pdfBytes: Buffer.from('%PDF-fake'),
+      }),
+    ).toThrow();
+    expect(() => buildPramaanAuditorArchive({ ...input, tenantId: randomUUID() })).toThrow();
+    expect(() => buildPramaanAuditorArchive(board)).toThrow();
   });
 });

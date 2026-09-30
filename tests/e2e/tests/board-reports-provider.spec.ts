@@ -13,6 +13,7 @@ import {
 } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
+import { unzipSync } from 'fflate';
 
 const execFileAsync = promisify(execFile);
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -661,7 +662,7 @@ test.describe('real-provider board report lifecycle', () => {
     }
   });
 
-  test('auditor pack binds frozen findings, human review and retained provider versions', async ({
+  test('auditor pack and Pramaan dossier bind frozen findings, founder review and retained versions', async ({
     page,
     browser,
   }) => {
@@ -796,6 +797,116 @@ test.describe('real-provider board report lifecycle', () => {
       );
       expect(publicPdf.status()).toBe(200);
       expect(sha(Buffer.from(await publicPdf.body()))).toBe(versions[1]!.content_hash);
+      const dossierOperation = crypto.randomUUID();
+      const wrongDossier = await post(
+        page,
+        `/engagements/${assessment.engagementId}/closure/pramaan`,
+        {
+          dossierType: 'auditor_assurance',
+          reportId: crypto.randomUUID(),
+          title: 'Unbound auditor assurance',
+          operationKey: crypto.randomUUID(),
+        },
+      );
+      expect(wrongDossier.status()).toBe(409);
+      const prepared = await post(page, `/engagements/${assessment.engagementId}/closure/pramaan`, {
+        dossierType: 'auditor_assurance',
+        reportId: draft.reportId,
+        title: 'Assessment-derived auditor dossier',
+        operationKey: dossierOperation,
+      });
+      expect(prepared.status(), await prepared.text()).toBe(201);
+      const dossierBuild = (await prepared.json()) as { dossierId: string; status: string };
+      expect(dossierBuild.status).toBe('settled');
+      const detailResponse = await founder.request.get(
+        `/api/bff/v1/dossiers/${dossierBuild.dossierId}`,
+        {
+          headers: { 'x-tenant-id': state.tenantA.id },
+        },
+      );
+      expect(detailResponse.status()).toBe(200);
+      const dossier = (await detailResponse.json()) as {
+        dossierType: string;
+        proofSealHash: string;
+        archiveHash: string;
+        sourceBound: boolean;
+        archiveVersionId: string;
+      };
+      expect(dossier).toMatchObject({ dossierType: 'auditor_assurance', sourceBound: true });
+      expect(dossier.archiveVersionId).toBeTruthy();
+      const managerSeal = await post(page, `/dossiers/${dossierBuild.dossierId}/seal`, {
+        expectedProofSeal: dossier.proofSealHash,
+      });
+      expect(managerSeal.status()).toBe(403);
+      const sealed = await post(founder, `/dossiers/${dossierBuild.dossierId}/seal`, {
+        expectedProofSeal: dossier.proofSealHash,
+      });
+      expect(sealed.status()).toBe(200);
+      const archiveResponse = await founder.request.get(
+        `/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`,
+        {
+          headers: { 'x-tenant-id': state.tenantA.id },
+        },
+      );
+      expect(archiveResponse.status()).toBe(200);
+      const archiveBytes = Buffer.from(await archiveResponse.body());
+      expect(sha(archiveBytes)).toBe(dossier.archiveHash);
+      const archiveRows = (await database(
+        `pramaan_auditor_archives?dossier_id=eq.${dossierBuild.dossierId}&select=*`,
+      )) as Array<{
+        bucket: string;
+        object_key: string;
+        version_id: string;
+        content_hash: string;
+        byte_size: number;
+        retain_until: string;
+        lock_mode: string;
+      }>;
+      expect(archiveRows).toHaveLength(1);
+      expect(archiveRows[0]!.version_id).toBe(dossier.archiveVersionId);
+      expect(archiveRows[0]!.lock_mode).toBe('COMPLIANCE');
+      const archiveVault = new EvidenceVault('ap-south-1', config.endpoint, config);
+      try {
+        const exact = await archiveVault.retrieve(
+          archiveRows[0]!.bucket,
+          archiveRows[0]!.object_key,
+          archiveRows[0]!.version_id,
+          { maxBytes: 64 * 1024 * 1024, timeoutMs: 30_000 },
+        );
+        expect(exact.body.length).toBe(archiveRows[0]!.byte_size);
+        expect(sha(exact.body)).toBe(archiveRows[0]!.content_hash);
+        expect(exact.body).toEqual(archiveBytes);
+        expect(new Date(archiveRows[0]!.retain_until).getTime()).toBeGreaterThan(
+          Date.now() + 6 * 365 * 86400_000,
+        );
+      } finally {
+        archiveVault.close();
+      }
+      const files = unzipSync(archiveBytes);
+      expect(Buffer.from(files['source/assessment.json']!).toString()).toBe(
+        sources[0]!.source_text,
+      );
+      expect(sha(Buffer.from(files['source/auditor-review-pack.pdf']!))).toBe(
+        versions[1]!.content_hash,
+      );
+      const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString()) as {
+        kind: string;
+        limitations: string[];
+      };
+      expect(manifest.kind).toBe('pramaan_auditor_assurance_source_archive');
+      expect(manifest.limitations.join(' ')).toContain('not an independent audit');
+      expect(
+        (
+          await viewer.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
+            headers: { 'x-tenant-id': state.tenantA.id },
+          })
+        ).status(),
+      ).toBe(403);
+      await founder.goto('/reports?tab=pramaan');
+      await expect(founder.getByText('Source-bound closure dossiers')).toBeVisible();
+      await expect(
+        founder.locator('#pramaan-report option').filter({ hasText: requestBody.title }),
+      ).toHaveCount(1);
     } finally {
       await founderContext.close();
       await viewerContext.close();
