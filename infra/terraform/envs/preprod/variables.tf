@@ -204,6 +204,13 @@ variable "supabase_service_key" {
   sensitive   = true
 }
 
+variable "supabase_statutory_proof_writer_key" {
+  description = "BFF-only restricted statutory_proof_writer JWT signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 
 variable "report_email_mode" {
   type        = string

@@ -17,7 +17,8 @@
     "./technical-remediation": "./src/technical-remediation.ts",
     "./approval-history": "./src/approval-history.ts",
     "./consumer-reports": "./src/consumer-reports.ts",
-    "./renderer": "./src/renderer.ts"
+    "./renderer": "./src/renderer.ts",
+    "./pramaan-archive": "./src/pramaan-archive.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

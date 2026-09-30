@@ -68,7 +68,7 @@ select public.complete_workload_assessment(
   '{"library_version":"board-test-lib","posture_score":85,"estimated_exposure_inr":1000000,"findings":[{"control_id":"BOARD-001","score":85,"risk_points":0,"rationale":"Synthetic fixture"}]}'::jsonb,
   clock_timestamp()+interval '5 minutes');
 
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 do $$
 declare
  t uuid:='99750000-0000-4000-8000-000000000010';

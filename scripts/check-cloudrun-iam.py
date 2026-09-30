@@ -14,7 +14,7 @@ EXPECTED = {
     'bff': {'agent_runtime_internal_token', 'approval_signing_key',
             'gcs_hmac_access_key', 'gcs_hmac_secret_key', 'mfa_encryption_key',
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
-            'supabase_service_key'},
+            'supabase_service_key', 'supabase_statutory_proof_writer_key'},
     'web': {'supabase_anon_key'},
     'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
     'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',

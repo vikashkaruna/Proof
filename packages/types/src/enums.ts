@@ -311,6 +311,8 @@ export const LedgerActionType = {
   CLASSIFICATION_REVIEWED: 'classification.reviewed',
   // Extension: Samadhan & Pramaan Closure Architecture
   CLOSURE_PRAMAAN_DRAFTED: 'closure.pramaan.drafted',
+  CLOSURE_PRAMAAN_ARCHIVE_PENDING: 'closure.pramaan.archive_pending',
+  CLOSURE_PRAMAAN_ARCHIVE_SETTLED: 'closure.pramaan.archive_settled',
   CLOSURE_PRAMAAN_SEALED: 'closure.pramaan.sealed',
   REPORT_DISPATCHED_EMAIL: 'report.dispatched.email',
 } as const;

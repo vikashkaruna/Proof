@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -38,7 +38,12 @@ export function evidencePackRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new EvidencePackService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ??
+    new EvidencePackService(
+      dependencies.db ?? createSupabaseAdmin(),
+      undefined,
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
   app.get('/evidence-packs/options/engagements', async (c) => {
     const denied = requireCapability(c, Capability.EVIDENCE_RECORD);
     if (denied) return denied;

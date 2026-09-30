@@ -69,7 +69,7 @@ select public.complete_workload_assessment(
   clock_timestamp()+interval '5 minutes');
 
 -- Test 1: Manager requests board report
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 do $$
 declare
   t uuid := '99750000-0000-4000-8000-000000000010';
@@ -125,7 +125,7 @@ savepoint board_changed_result;
 update public.workload_assessment_packets
   set result=jsonb_set(result, '{posture_score}', '12'::jsonb)
   where run_id=(select run_id from board_issued);
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 select pg_temp.ok(
   public.request_board_report(
     '99750000-0000-4000-8000-000000000010',
@@ -140,7 +140,7 @@ savepoint board_changed_receipt;
 update public.workload_assessment_packets
   set finalized_receipt=completed_receipt
   where run_id=(select run_id from board_issued);
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 select pg_temp.ok(
   public.request_board_report(
     '99750000-0000-4000-8000-000000000010',
@@ -150,7 +150,7 @@ select pg_temp.ok(
   )->>'error'='assessment_not_finalized',
   'substituted finalized receipt refuses a new request');
 rollback to board_changed_receipt;
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 
 -- Test 2: Internal founder records draft
 do $$
@@ -214,7 +214,7 @@ savepoint board_draft_changed_source;
 update public.workload_assessment_packets
   set result=jsonb_set(result, '{posture_score}', '12'::jsonb)
   where run_id=(select run_id from board_issued);
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 select pg_temp.ok(
   public.record_board_report_draft(
     '99750000-0000-4000-8000-000000000010',
@@ -225,7 +225,7 @@ select pg_temp.ok(
   )->>'error'='assessment_not_finalized',
   'changed source refuses draft replay');
 rollback to board_draft_changed_source;
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 
 -- Test 3: Review and release
 do $$

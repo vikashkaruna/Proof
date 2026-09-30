@@ -238,7 +238,7 @@ function setup() {
       throw new Error(`Unexpected RPC ${name}`);
     }) as unknown as EvidenceDatabase['rpc'],
   } as EvidenceDatabase;
-  const service = new BoardArtifactService(db, () => ({ vault, config }), renderPdf);
+  const service = new BoardArtifactService(db, () => ({ vault, config }), renderPdf, db);
   return { fixture, service, vault, calls, renderPdf, pdfBytes };
 }
 

@@ -141,6 +141,7 @@ services:
     environment:
       - NODE_ENV=production
       - ENVIRONMENT=onprem
+      - SUPABASE_STATUTORY_PROOF_WRITER_KEY=${SUPABASE_STATUTORY_PROOF_WRITER_KEY:?Set BFF-only statutory proof writer JWT}
       - AXIOM_AUTH_MODE=strict
       - AXIOM_OFFLINE_LICENSE=${AXIOM_OFFLINE_LICENSE:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}

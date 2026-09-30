@@ -54,7 +54,9 @@ export function ReportsClient(access: Access) {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
   const activeTab: 'pramaan' | 'prativedan' =
-    access.canRelease && tabParam === 'pramaan' ? 'pramaan' : 'prativedan';
+    (access.canRelease || access.canRequestBoard) && tabParam === 'pramaan'
+      ? 'pramaan'
+      : 'prativedan';
 
   const handleSelectTab = (tab: 'pramaan' | 'prativedan') => {
     setSelectedId(null);
@@ -115,7 +117,7 @@ export function ReportsClient(access: Access) {
       </header>
 
       <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
-        {access.canRelease && (
+        {(access.canRelease || access.canRequestBoard) && (
           <button
             type="button"
             onClick={() => handleSelectTab('pramaan')}
@@ -127,7 +129,7 @@ export function ReportsClient(access: Access) {
             }`}
           >
             <AgentIcon agent="pramaan" size="sm" state="idle" />
-            Historical dossiers
+            Closure dossiers
           </button>
         )}
         <button
@@ -146,7 +148,11 @@ export function ReportsClient(access: Access) {
       </div>
 
       {activeTab === 'pramaan' ? (
-        <ClosureDossiersTab tenantId={tenantId} />
+        <ClosureDossiersTab
+          tenantId={tenantId}
+          canGenerate={access.canRequestBoard}
+          canRelease={access.canRelease}
+        />
       ) : (
         <>
           {/* Statutory Formats Grid */}

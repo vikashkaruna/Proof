@@ -7,8 +7,10 @@ import {
 } from './target';
 import type { PersonaState } from './personas';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { HARNESS_MFA_KEY } from './personas';
+import { mintLocalPostgrestRoleKey } from '../../packages/supabase/src/local-proof-writer-key';
 
 /**
  * Browser journeys, run against REAL authentication.
@@ -41,6 +43,24 @@ function personaState(): PersonaState | null {
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
+function localStatutoryWriterKey() {
+  if (!state || acceptanceTarget) return '';
+  const statusPath = resolve(
+    process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
+    'status.json',
+  );
+  const status = JSON.parse(readFileSync(statusPath, 'utf8')) as Record<string, string>;
+  if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
+    throw new Error('Persona state and local Supabase signing target differ');
+  const jwtSecret = status.JWT_SECRET;
+  if (!jwtSecret) throw new Error('Local Supabase JWT signing secret is missing');
+  return mintLocalPostgrestRoleKey({
+    role: 'statutory_proof_writer',
+    jwtSecret,
+    serviceKey: state.serviceKey,
+  });
+}
+
 const BFF_PORT = '4000';
 
 /** Shared by both servers so the ring key and the Supabase target cannot drift. */
@@ -71,6 +91,7 @@ const bffEnv = {
   // discover a harness misconfiguration.
   AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
+  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localStatutoryWriterKey(),
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',

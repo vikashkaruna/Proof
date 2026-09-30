@@ -44,7 +44,7 @@ insert into public.controls(id,library_version,title,obligation,domain,severity,
 
 insert into public.engagements(id,tenant_id,library_version,title) values
  ('99740000-0000-4000-8000-000000000031','99740000-0000-4000-8000-000000000010','test-pack','Other scope');
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 do $$
 declare t uuid:='99740000-0000-4000-8000-000000000010';a uuid:='99740000-0000-4000-8000-000000000001';
  eng uuid:='99740000-0000-4000-8000-000000000030';e uuid;scoped uuid;foreign_e uuid;other_e uuid;bad uuid;k uuid:=gen_random_uuid();x jsonb;payload text:='{ "synthetic": true, "sections": [] }';
@@ -74,7 +74,7 @@ end $$;
 reset role;
 rollback to boundary_cases;
 create temp table pack_test_state(k text primary key,v text);grant all on pack_test_state to service_role,authenticated;
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 do $$
 declare t uuid:='99740000-0000-4000-8000-000000000010';a uuid:='99740000-0000-4000-8000-000000000001';
  f uuid:='99740000-0000-4000-8000-000000000002';eng uuid:='99740000-0000-4000-8000-000000000030';
@@ -132,8 +132,11 @@ begin
  perform pg_temp.ok(public.release_report(t,r.id,f,p.manifest_sha256,repeat('c',64),gen_random_uuid())->>'error'='archive_hash_mismatch','wrong downloaded archive digest refused');
  -- Save IDs before publication for RLS assertions below.
  insert into pack_test_state values('pack',p.id::text),('report',r.id::text),('manifest',p.manifest_sha256),('build',b.id::text);
- perform pg_temp.denied('insert into public.reports(tenant_id,kind,title,storage_uri,content,library_version,generated_by_agent,status) values('''||t||''',''board'',''forged'',null,''{}'',''test-pack'',''fixture'',''published'')');
 end $$;
+reset role;
+set local role service_role;
+select pg_temp.denied($s$insert into public.reports(tenant_id,kind,title,storage_uri,content,library_version,generated_by_agent,status)
+ values('99740000-0000-4000-8000-000000000010','board','forged',null,'{}','test-pack','fixture','published')$s$);
 reset role;
 -- No direct client can read unreleased other-owner content or provider locations.
 set local role authenticated;
@@ -181,7 +184,7 @@ end $$;
 -- Renaming the reviewer cannot rewrite the approval's immutable attribution.
 update public.users set full_name='Changed Profile' where id='99740000-0000-4000-8000-000000000002';
 select pg_temp.ok((select reviewer_name='Reviewed Human' from public.report_reviews where report_id=(select v::uuid from pack_test_state where k='report')),'named attribution survives profile edit');
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 select pg_temp.ok(public.release_report('99740000-0000-4000-8000-000000000010',(select v::uuid from pack_test_state where k='report'),
  '99740000-0000-4000-8000-000000000002',(select v from pack_test_state where k='manifest'),repeat('d',64),gen_random_uuid())->>'status'='published','founder releases exact reviewed archive');
 select pg_temp.ok((public.release_report('99740000-0000-4000-8000-000000000010',(select v::uuid from pack_test_state where k='report'),
@@ -197,7 +200,7 @@ select set_config('request.jwt.claims','{"sub":"99740000-0000-4000-8000-00000000
 select pg_temp.ok((select count(*)=0 from public.evidence_packs),'internal nonmember still cannot read released pack');
 reset role;
 update public.users set is_axiom_internal=false where id='99740000-0000-4000-8000-000000000002';
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 select pg_temp.ok(public.release_report('99740000-0000-4000-8000-000000000010',(select v::uuid from pack_test_state where k='report'),
  '99740000-0000-4000-8000-000000000002',(select v from pack_test_state where k='manifest'),repeat('d',64),gen_random_uuid())->>'error'='founder_authority_required','internal flag revoked blocks even release replay');
 reset role;

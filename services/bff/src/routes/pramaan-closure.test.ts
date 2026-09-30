@@ -54,10 +54,17 @@ function historicalDossier() {
 }
 
 describe('Pramaan closure fail-closed HTTP routes', () => {
-  it('denies a viewer and refuses manager synthesis before any database write', async () => {
+  it('denies a viewer and refuses unsupported dossier types before any mutating RPC', async () => {
     const engagementId = randomUUID();
-    const body = JSON.stringify({ dossierType: 'full_closure', title: 'Source-free dossier' });
-    preventPersistence();
+    const body = JSON.stringify({
+      dossierType: 'full_closure',
+      title: 'Source-free dossier',
+      reportId: randomUUID(),
+      operationKey: randomUUID(),
+    });
+    fixture.db.rpc = (() => {
+      throw new Error('unsupported synthesis tried a mutating RPC');
+    }) as never;
     const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
       `/v1/engagements/${engagementId}/closure/pramaan`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body },
@@ -75,7 +82,9 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
   });
 
   it('refuses founder sealing without source and vault receipts before any RPC', async () => {
-    preventPersistence();
+    fixture.db.rpc = (() => {
+      throw new Error('historical sealing tried a mutating RPC');
+    }) as never;
     const res = await app(fixture.founder, UserRole.FOUNDER).request(
       `/v1/dossiers/${randomUUID()}/seal`,
       {
