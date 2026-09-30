@@ -1,45 +1,33 @@
-# Axiom Proof — Operator completion runbook: W0 → W4
+# Axiom Proof — operator completion runbook
 
-## Active release reassessment — 2026-09-30
+## Current authority and status — 2026-09-30
 
-[Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md) supersedes older completion and deployment claims in this document. Revision 109 safety PR #108 merged to staging at `c8bc9f9`; exact staging CI and security scans passed. Functional closure and production clearance are **not established**: W8 generated reports lack verified retained source/PDF artifacts and deployed E2E; W9 lacks real throughput, coverage-floor and full recovery proof; W10's offline topology/bootstrap is incomplete; remote preprod/production acceptance has not run. Revision 110 is closing additional unsourced statutory report paths before source-bound implementation. Follow the audit's requirement-by-requirement gates before production deployment. Local Docker results are not remote deployment proof.
+This page is the current operator index for the Phase 0–5 closure plan. [Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md) is the requirement-by-requirement release assessment. The completion statement recorded in Revision 108 was withdrawn. Historical sections below remain useful as a chronology, but their “complete,” “next,” branch and deployment instructions have no present authority.
 
-## Active continuation — Revision 108 Complete (2026-09-28; Phase 0–5 Gap Closure W0–W10 Complete)
+Revision 112 / [PR #111](https://github.com/vikashkaruna/Proof/pull/111) merged to `staging` at `dfd27e9`. Its PR validation and exact-staging CI, Bandit, Trivy and Semgrep all passed, including container/browser acceptance on the exact merge commit. Revisions 109–112 are safety increments that refuse unsupported report, dossier and outbound email claims. They are not W8 feature closure. No remote preprod or production deployment/acceptance evidence is recorded. The local Docker parity stack proves only the exercised local code and configuration.
 
-This section supersedes conflicting historical handoff instructions below. **All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates across all workspace packages and services.**
+| Gate                                        | Status   | Evidence still needed                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| W8 reporting, evidence and approval exports | **Open** | Finalized producer/source provenance; exact source and PDF bytes retained and verified by immutable object version; review/release/dispatch bound to those receipts; truthful approval export and complete browser/provider refusal and positive journeys. Historical Pramaan dossiers remain metadata only. |
+| W9 quality, performance and recovery        | **Open** | CI-enforced per-module coverage floors; real 1M-row discovery throughput and report timing at stated thresholds; scheduled-backup RPO, complete DB plus evidence-object restore integrity and bounded RTO. Synthetic benchmark counts and a disposable restore are insufficient.                             |
+| W10 sovereign offline installation          | **Open** | Strict self-contained Auth/PostgREST/Postgres, local model behavior or explicit unavailable state, safe secrets, fail-closed license/WORM/bootstrap, and offline install/upgrade/restore/persona acceptance with egress blocked.                                                                             |
+| Remote release                              | **Open** | Exact revision and migration checks on real targets; Mumbai residency, rotated keys, IAM and Object Lock readback; live scheduler/connector and delivery checks; synthetic-tenant preprod/production API and browser acceptance; recorded rollback and deployment provenance.                                |
 
-**Revision 108 — W10 Offline Installation & Air-Gapped Packaging (Complete) — is complete locally and verified across tests.**
+### Work order and milestone rule
 
-- **Sovereign Docker Compose Stack (`infra/docker/docker-compose.onprem.yml`):**
-  - Fully self-contained on-premises topology overlay with MinIO S3-compatible Object Lock compliance-mode WORM vault, Redis cache, Temporal server, self-hosted Model Gateway, Agent Runtime, BFF, and Web Workbench.
-  - Zero outbound cloud egress required.
-- **Cryptographic Offline Licensing Module (`packages/config/src/license.ts`):**
-  - Asymmetric Ed25519 cryptography with embedded Axiom Minds root public key.
-  - Supports `OfflineLicensePayload` with licensee, tier (`enterprise-airgapped`), expiry dates, node and tenant quotas, and feature flags.
-  - Zero external phone-home or network dependency.
-  - CLI tools: `scripts/mint-license.ts` and `scripts/verify-license.ts`.
-  - Vitest test suite `packages/config/src/license.test.ts` (6 tests) passing 100%.
-- **BFF Sovereign License Route (`services/bff/src/routes/sovereign-license.ts`):**
-  - Mounted at `GET /v1/system/license`.
-  - Reports license status, validity, days remaining, features, and quotas in `onprem` environments with strict 403 enforcement for unlicensed/invalid tokens.
-  - Vitest suite `services/bff/src/routes/sovereign-license.test.ts` (4 tests) passing 100%.
-- **On-Premise Kubernetes Packaging (`infra/helm/axiom-proof/values-onprem.yaml`):**
-  - In-perimeter cluster service endpoints, disabled external cloud egress, self-hosted model gateway configuration, and in-cluster Temporal orchestration.
-- **Automated Sovereign Bootstrap Script (`scripts/bootstrap-onprem.sh`):**
-  - Pre-flight checks, secrets generation, MinIO Object Lock provisioning, database migration runner, and initial tenant/owner seeding.
-- **Deployment Documentation:**
-  - Added Section 5.4 "Sovereign On-Premise & Air-Gapped Deployment (`onprem`)" to `docs/08_DEPLOYMENT_GUIDE.md`.
-- **Quality & Security Gates:**
-  - `pnpm test`: 16/16 workspace tasks passing.
-  - `pnpm test:coverage`: 100% passing across all Python services (>= 80%) and TypeScript packages.
-  - `pnpm bench`: 4/4 passing (NFR-7 discovery throughput, NFR-8 report generation, Lekha ledger throughput, PERF-3 rate limiter).
-  - `pnpm test:restore`: 100% passing (RTO=21s vs <= 4h).
-  - `pnpm build`: 4/4 apps and services successfully built.
-  - `scripts/security-scan.sh`: 0 vulnerabilities, clean.
-- **Staging Release & Merged PR:**
-  - Pull Request [#92](https://github.com/vikashkaruna/Proof/pull/92) merged into `staging` via merge commit `755f669`.
-  - 22 of 22 GitHub Actions CI workflows passed green (100% success).
-  - Branch `origin/staging` is fully synchronized with Revision 108 and W0–W10 deliverables.
+1. Close W8 in requirement order: source-bound report and dossier generation, verified retained source/PDF/archive versions, founder review/release and permitted dispatch, truthful approval exports, then complete positive and refusal E2E/UX/security checks. Do not reopen the unsourced paths merely to make a demo work.
+2. Close W9 with measured coverage, real load and full recovery evidence. Record the exact datasets, thresholds, versions and artifacts.
+3. Close W10 with an isolated, reproducible offline topology and real install/upgrade/restore/persona test.
+4. Reassess W0–W10 requirement coverage and security. For each increment, run relevant local tests and Docker parity, open a staging PR, merge only after its full PR gate passes, then verify CI **and** security on the exact staging merge SHA. Report each green milestone and its limitations. No main promotion or production release is due while a gate remains open.
+5. Once engineering gates are green, use [Doc 18](18_Operator_Deploy_And_Acceptance.md) for target-specific preprod, then production deployment and E2E acceptance. Deployment is within the user's requested scope, but target identity, credentials, network/data residency and release controls must be verified before applying changes. Record real deployed evidence; never substitute local production-profile Docker results.
+
+### Standing invariants
+
+No mutating agent action without a recorded human approval and a signed scope-bound token; approval requires a completed dry-run and validated rollback. Sudhaar has no write credentials. The ledger is append-only through `append_ledger()`. Evidence retention is S3 Object Lock **Compliance** mode. Client personal data remains in `ap-south-1`; model egress is redacted. These are release conditions, not optional test fixtures. See [AGENTS.md](../AGENTS.md), [the plan](11_Phase0-5_Gap_Closure_Plan.md), and [the deployment guide](08_DEPLOYMENT_GUIDE.md).
+
+## Historical implementation chronology (archived)
+
+The remaining Revision 88–108 sections preserve dated decisions and observations. Their status, schema counts, tests, environment instructions and operator-only action lists must be checked against the current gates above before reuse.
 
 ## Session close-out and handoff — Revision 88 (2026-09-25)
 

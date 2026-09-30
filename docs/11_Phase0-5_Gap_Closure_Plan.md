@@ -1,13 +1,14 @@
 # Axiom Proof — Phase 0–5 Gap Closure Plan
 
-## Active release reassessment — 2026-09-30
+## Current release status — 2026-09-30
 
-[Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md) supersedes older completion and deployment claims in this document. Revision 109 safety PR #108 merged to staging at `c8bc9f9`; exact staging CI and security scans passed. Functional closure and production clearance are **not established**: W8 generated reports lack verified retained source/PDF artifacts and deployed E2E; W9 lacks real throughput, coverage-floor and full recovery proof; W10's offline topology/bootstrap is incomplete; remote preprod/production acceptance has not run. Revision 110 is closing additional unsourced statutory report paths before source-bound implementation. Follow the audit's requirement-by-requirement gates before production deployment. Local Docker results are not remote deployment proof.
+**Authoritative operating status:** [Doc 16](16_Operator_Completion_Runbook.md) and [Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md). Revision 112 / [PR #111](https://github.com/vikashkaruna/Proof/pull/111) merged into `staging` at `dfd27e9`; Bandit, Trivy, Semgrep and CI passed on that exact staging merge, including container/browser acceptance. The W8 safety closures prevent unsourced board/statutory/Pramaan publication and report email dispatch; they do **not** deliver the replacement source-bound artifact and dispatch workflows. W8, W9, W10, remote preprod and production acceptance remain open. Local Docker parity is engineering evidence, not a deployment record. Continue in plan order and update this status only from verified results.
 
+> **Historical archive follows.** Dated Revision 88–108 status, commands, test counts, completion claims and next-step lists below describe their original snapshots. They are retained for traceability, not current instructions or release clearance. Use [Doc 16](16_Operator_Completion_Runbook.md) and [Doc 18](18_Operator_Deploy_And_Acceptance.md) for current gates.
 
-## Active continuation — Revision 108 Complete (2026-09-28; Phase 0–5 Gap Closure W0–W10 Complete)
+## Archived Revision 108 completion claim — 2026-09-28 (withdrawn by Audit 91)
 
-This section supersedes conflicting historical handoff instructions below. **All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates across all suites.**
+Historical claim from Revision 108: “All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates.” This claim was withdrawn by Audit 91; the open gates above govern release decisions.
 
 **Revision 108 — W10 Offline Installation & Air-Gapped Packaging (Complete) — is complete locally and verified across tests.**
 - **Sovereign Docker Compose Stack (`infra/docker/docker-compose.onprem.yml`):**

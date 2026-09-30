@@ -38,12 +38,27 @@ insert into public.remediation_plans(id, tenant_id, engagement_id, title, librar
           '00000000-0000-0000-0000-0000000000a2', 'Remediation Plan W8', 'test-w8-lib');
 
 -- ─── 1. Approval Export Recording ────────────────────────────────────
+select pg_temp.assert_true(
+  not has_table_privilege('service_role', 'public.approval_exports', 'INSERT')
+  and has_function_privilege('service_role',
+    'public.record_approval_export(uuid,uuid,uuid,text,jsonb,jsonb,text,bigint,uuid)', 'EXECUTE'),
+  'service role can record through the audited RPC but cannot insert an export receipt directly');
+
 do $$
 declare
   v_res jsonb;
   v_hash text := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   v_corr uuid := gen_random_uuid();
 begin
+  v_res := public.record_approval_export(
+    '00000000-0000-0000-0000-0000000000a1',
+    '00000000-0000-0000-0000-0000000000d2',
+    '00000000-0000-0000-0000-0000000000a3',
+    'pdf', '{}'::jsonb, '{"total_records":1}'::jsonb,
+    v_hash, 1024, v_corr
+  );
+  perform pg_temp.assert_eq(v_res->>'error', 'forbidden', 'viewer cannot record an approval export');
+
   -- Invalid format refusal
   v_res := public.record_approval_export(
     '00000000-0000-0000-0000-0000000000a1',
@@ -85,6 +100,19 @@ begin
         and action_type = 'approval.exported'),
     'approval.exported written to audit ledger');
 end $$;
+
+set local role service_role;
+select pg_temp.assert_eq(
+  public.record_approval_export(
+    '00000000-0000-0000-0000-0000000000a1',
+    '00000000-0000-0000-0000-0000000000d1',
+    '00000000-0000-0000-0000-0000000000a3',
+    'json', '{}'::jsonb, '{"total_records":0}'::jsonb,
+    repeat('b',64), 2, gen_random_uuid()
+  )->>'status',
+  'exported',
+  'SECURITY DEFINER recorder remains available to the service role');
+reset role;
 
 -- ─── 2. Source-bound statutory report boundary ─────────────────────
 do $$

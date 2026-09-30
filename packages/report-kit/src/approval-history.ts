@@ -1,6 +1,7 @@
 /**
  * Approval History Export contracts, schema validation, and deterministic HTML rendering.
- * Provides formal, tamper-evident audit trails for all human and standing-policy approvals (BR-1, BR-2, FR-6).
+ * Presents a bounded view of stored approval tokens. This rendered download is
+ * not itself a sealed evidence object or a verification of token signatures.
  */
 import { z } from 'zod';
 import { BRANDING } from './schema';
@@ -14,25 +15,26 @@ const timestamp = z
 export const ApprovalRecordItemSchema = z.object({
   token_id: uuid,
   plan_id: uuid,
-  plan_title: z.string().min(1).max(300),
-  plan_version: z.number().int().min(1),
+  plan_title: z.string().min(1).max(300).nullable(),
+  plan_version: z.number().int().min(1).nullable(),
   approver_id: uuid,
-  approver_name: z.string().min(1).max(100),
-  approver_role: z.string().min(1).max(100),
-  approval_scopes: z.array(z.string().min(1).max(100)),
+  approver_name: z.string().min(1).max(200).nullable(),
+  approver_role: z.null(),
+  approval_scopes: z.null(),
   mode: z.enum(['batch', 'individual']),
-  action_count: z.number().int().min(1),
+  action_count: z.number().int().min(0),
   action_types: z.array(z.string().min(1).max(100)),
   dry_run_verified: z.boolean(),
-  dry_run_status: z.string().min(1).max(50),
+  dry_run_status: z.string().min(1).max(50).nullable(),
   rollback_validated: z.boolean(),
-  reconciliation_statement: z.string().min(1).max(2000).nullable(),
-  status: z.enum(['issued', 'consumed', 'revoked', 'expired']),
+  reconciliation_statement: z.null(),
+  approval_reason: z.string().max(2000).nullable(),
+  status: z.enum(['issued', 'consumed', 'revoked', 'expired', 'invalid']),
   issued_at: timestamp,
   expires_at: timestamp,
   consumed_at: timestamp.nullable(),
   revoked_at: timestamp.nullable(),
-  signature_preview: z.string().min(8).max(128),
+  signature_preview: z.string().min(1).max(128).nullable(),
 });
 export type ApprovalRecordItem = z.infer<typeof ApprovalRecordItemSchema>;
 
@@ -62,10 +64,19 @@ export const ApprovalHistoryExportContentV1Schema = z.object({
     active_approvals: z.number().int().min(0),
     consumed_approvals: z.number().int().min(0),
     revoked_approvals: z.number().int().min(0),
-    standing_policy_approvals: z.number().int().min(0),
+    standing_policy_approvals: z.null(),
     batch_approvals: z.number().int().min(0),
     individual_approvals: z.number().int().min(0),
   }),
+  source_context: z
+    .object({
+      token_fields: z.literal('stored_token_row'),
+      related_fields: z.literal('current_database_values_at_export'),
+      issuance_role_and_scopes: z.literal('not_retained'),
+      signature_verification: z.literal('not_performed'),
+      vault_seal: z.literal('not_performed'),
+    })
+    .optional(),
   approvals: z.array(ApprovalRecordItemSchema).max(200),
 });
 export type ApprovalHistoryExportContentV1 = z.infer<typeof ApprovalHistoryExportContentV1Schema>;
@@ -90,6 +101,8 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
         return '<span class="status-chip issued">ACTIVE</span>';
       case 'revoked':
         return '<span class="status-chip revoked">REVOKED</span>';
+      case 'invalid':
+        return '<span class="status-chip revoked">INVALID</span>';
       default:
         return '<span class="status-chip expired">EXPIRED</span>';
     }
@@ -97,55 +110,48 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
 
   const rowsHtml =
     validated.approvals.length === 0
-      ? `<tr><td colspan="4" class="empty-state">No approval records recorded in ledger.</td></tr>`
+      ? `<tr><td colspan="4" class="empty-state">No stored approval tokens match these filters.</td></tr>`
       : validated.approvals
           .map(
             (appr) => `
         <tr class="approval-row">
           <td class="col-token">
             <div class="token-id">TOKEN: ${escapeHtml(appr.token_id.slice(0, 8))}...</div>
-            <div class="plan-info"><strong>Plan:</strong> ${escapeHtml(appr.plan_title)} <span class="plan-ver">(v${appr.plan_version})</span></div>
+            <div class="plan-info"><strong>Current plan:</strong> ${appr.plan_title ? escapeHtml(appr.plan_title) : 'Unavailable'} ${appr.plan_version !== null ? `<span class="plan-ver">(current v${appr.plan_version})</span>` : ''}</div>
             <div class="mode-info"><strong>Mode:</strong> ${escapeHtml(appr.mode.toUpperCase())} (${appr.action_count} action(s))</div>
           </td>
           <td class="col-approver">
-            <div class="approver-name"><strong>${escapeHtml(appr.approver_name)}</strong></div>
-            <div class="approver-role">${escapeHtml(appr.approver_role)}</div>
-            <div class="scopes-text"><strong>Scopes:</strong> ${escapeHtml(appr.approval_scopes.join(', ') || 'Unrestricted')}</div>
+            <div class="approver-name"><strong>Current display name: ${appr.approver_name ? escapeHtml(appr.approver_name) : 'Unavailable'}</strong></div>
+            <div class="approver-role">Approver ID: ${escapeHtml(appr.approver_id)}</div>
+            <div class="scopes-text"><strong>Issuance role/scopes:</strong> Not retained in token snapshot</div>
             ${
               appr.action_types.length > 0
-                ? `<div class="action-types"><strong>Actions:</strong> ${escapeHtml(appr.action_types.join(', '))}</div>`
+                ? `<div class="action-types"><strong>Current action types:</strong> ${escapeHtml(appr.action_types.join(', '))}</div>`
                 : ''
             }
           </td>
           <td class="col-verification">
             <div class="verif-item">
-              <strong>Dry Run:</strong> ${
+              <strong>Current action dry-run state:</strong> ${
                 appr.dry_run_verified
-                  ? '<span class="text-success">✓ Passed (' +
-                    escapeHtml(appr.dry_run_status) +
-                    ')</span>'
-                  : '<span class="text-danger">✗ Not Verified</span>'
+                  ? '<span class="text-success">' +
+                    escapeHtml(appr.dry_run_status ?? 'unavailable') +
+                    '</span>'
+                  : '<span class="text-danger">Not complete or unavailable</span>'
               }
             </div>
             <div class="verif-item">
-              <strong>Rollback:</strong> ${
+              <strong>Current action rollback flag:</strong> ${
                 appr.rollback_validated
-                  ? '<span class="text-success">✓ Validated</span>'
-                  : '<span class="text-danger">✗ Unvalidated</span>'
+                  ? '<span class="text-success">Validated</span>'
+                  : '<span class="text-danger">Not validated or unavailable</span>'
               }
             </div>
             <div class="sig-wrapper">
-              <strong>Signature:</strong>
-              <div class="sig-code">${escapeHtml(appr.signature_preview)}</div>
+              <strong>Stored signature prefix (not verified here):</strong>
+              <div class="sig-code">${appr.signature_preview ? escapeHtml(appr.signature_preview) : 'Unavailable'}</div>
             </div>
-            ${
-              appr.reconciliation_statement
-                ? `
-              <div class="reconciliation-box">
-                <strong>Reconciliation Statement:</strong> ${escapeHtml(appr.reconciliation_statement)}
-              </div>`
-                : ''
-            }
+            ${appr.approval_reason ? `<div class="reconciliation-box"><strong>Recorded approval reason:</strong> ${escapeHtml(appr.approval_reason)}</div>` : ''}
           </td>
           <td class="col-status">
             <div class="status-wrap">${statusBadge(appr.status)}</div>
@@ -192,7 +198,7 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
       justify-content: space-between;
       align-items: center;
       margin-bottom: 20px;
-      border-bottom: 4px solid #C9A227;
+      border-bottom: 4px solid #0FB5A5;
     }
     .brand-title {
       font-size: 19px;
@@ -388,6 +394,14 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
       color: #64748B;
       font-style: italic;
     }
+    .source-note {
+      margin: 0 0 16px;
+      padding: 9px 12px;
+      border: 1px solid #CBD5E1;
+      border-radius: 4px;
+      color: #475569;
+      font-size: 10px;
+    }
     .footer {
       margin-top: 24px;
       padding-top: 10px;
@@ -407,30 +421,32 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
   <div class="header-banner">
     <div>
       <div class="brand-title">${escapeHtml(validated.title)}</div>
-      <p class="brand-subtitle">Tenant: ${escapeHtml(validated.tenant_name)} · ${escapeHtml(validated.branding.product)} Approval Audit Ledger</p>
+      <p class="brand-subtitle">Tenant: ${escapeHtml(validated.tenant_name)} · Stored approval token export</p>
       <p class="brand-credentials">
-        Issued by <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>) · Platform: <a href="https://axiomproof.ai">https://axiomproof.ai</a>
+        Generated by <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>) · Platform: <a href="https://axiomproof.ai">https://axiomproof.ai</a>
       </p>
     </div>
-    <div class="export-badge">APPROVAL AUDIT EXPORT</div>
+    <div class="export-badge">STORED TOKEN EXPORT</div>
   </div>
+
+  <div class="source-note">Token IDs, status and dates come from stored token rows. Plan, approver display name and action state are current database values at export time. Issuance role and scopes were not retained. This download does not verify signatures or seal bytes in the evidence vault.</div>
 
   <div class="metrics-grid">
     <div class="metric-card">
       <div class="metric-val">${validated.summary.total_records}</div>
-      <div class="metric-sub">Total Approvals</div>
+      <div class="metric-sub">Stored Tokens</div>
     </div>
     <div class="metric-card">
       <div class="metric-val" style="color: #0FB5A5;">${validated.summary.consumed_approvals}</div>
-      <div class="metric-sub">Executed / Consumed</div>
+      <div class="metric-sub">Consumed Tokens</div>
     </div>
     <div class="metric-card">
-      <div class="metric-val" style="color: #C9A227;">${validated.summary.active_approvals}</div>
-      <div class="metric-sub">Active in Queue</div>
+      <div class="metric-val" style="color: #1E2A4A;">${validated.summary.active_approvals}</div>
+      <div class="metric-sub">Issued Tokens</div>
     </div>
     <div class="metric-card">
       <div class="metric-val" style="color: #D9534F;">${validated.summary.revoked_approvals}</div>
-      <div class="metric-sub">Revoked / Halts</div>
+      <div class="metric-sub">Revoked Tokens</div>
     </div>
   </div>
 
@@ -439,8 +455,8 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
       <thead>
         <tr>
           <th class="col-token">Token &amp; Plan</th>
-          <th class="col-approver">Approver &amp; Scopes</th>
-          <th class="col-verification">Verification &amp; Proof</th>
+          <th class="col-approver">Approver</th>
+          <th class="col-verification">Current State &amp; Stored Signature</th>
           <th class="col-status">Status &amp; Timestamps</th>
         </tr>
       </thead>
@@ -452,7 +468,7 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
 
   <div class="footer">
     <div>Exported from <strong>${escapeHtml(validated.branding.product)}</strong> (<a href="https://axiomproof.ai">https://axiomproof.ai</a>) · <strong>${escapeHtml(validated.branding.company)}</strong> (<a href="${escapeHtml(validated.branding.company_url)}">${escapeHtml(validated.branding.company_url)}</a>)</div>
-    <div>Generated At: ${escapeHtml(validated.generated_at)} · Sealed Ledger Digest</div>
+    <div>Generated At: ${escapeHtml(validated.generated_at)} · Download hash is not a vault seal</div>
   </div>
 </body>
 </html>`;

@@ -287,13 +287,20 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
         company_url: 'https://axiomminds.ai',
       },
       summary: {
-        total_records: 12,
-        active_approvals: 2,
-        consumed_approvals: 9,
-        revoked_approvals: 1,
-        standing_policy_approvals: 4,
-        batch_approvals: 8,
-        individual_approvals: 4,
+        total_records: 1,
+        active_approvals: 0,
+        consumed_approvals: 1,
+        revoked_approvals: 0,
+        standing_policy_approvals: null,
+        batch_approvals: 1,
+        individual_approvals: 0,
+      },
+      source_context: {
+        token_fields: 'stored_token_row',
+        related_fields: 'current_database_values_at_export',
+        issuance_role_and_scopes: 'not_retained',
+        signature_verification: 'not_performed',
+        vault_seal: 'not_performed',
       },
       approvals: [
         {
@@ -303,16 +310,16 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
           plan_version: 2,
           approver_id: '00000000-0000-0000-0000-0000000000aa',
           approver_name: 'Suresh Patel',
-          approver_role: 'Founder / Security Approver',
-          approval_scopes: ['data-deletion', 'schema-alter'],
+          approver_role: null,
+          approval_scopes: null,
           mode: 'batch',
           action_count: 3,
           action_types: ['sql.postgres.alter_column', 'sql.postgres.create_index'],
           dry_run_verified: true,
           dry_run_status: 'passed',
           rollback_validated: true,
-          reconciliation_statement:
-            'All 3 remediation actions dispatched and verified via Postgres connection health checks.',
+          reconciliation_statement: null,
+          approval_reason: 'Reviewed dry-run results before approval.',
           status: 'consumed',
           issued_at: '2026-09-27T10:00:00.000Z',
           expires_at: '2026-09-27T11:00:00.000Z',
@@ -324,14 +331,16 @@ describe('Report Kit — Statutory Formats & Consumer Reports', () => {
     };
 
     const parsed = ApprovalHistoryExportContentV1Schema.parse(approvalExport);
-    expect(parsed.summary.total_records).toBe(12);
+    expect(parsed.summary.total_records).toBe(1);
 
     const html = renderApprovalHistoryHtml(approvalExport);
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('APPROVAL AUDIT EXPORT');
+    expect(html).toContain('STORED TOKEN EXPORT');
     expect(html).toContain('Suresh Patel');
     expect(html).toContain('CONSUMED');
-    expect(html).toContain('Reconciliation Statement:');
+    expect(html).toContain('Recorded approval reason:');
+    expect(html).not.toContain('Sealed Ledger Digest');
+    expect(html).toContain('current database values at export time');
   });
 
   it('validates and renders DSAR, Breach, and Gap-scan consumer reports', () => {
