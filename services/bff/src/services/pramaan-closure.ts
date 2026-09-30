@@ -56,7 +56,10 @@ export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSc
 
 export class PramaanClosureService {
   readonly artifacts: PramaanArtifactService;
-  constructor(private readonly db: EvidenceDatabase, writerDb?: EvidenceDatabase) {
+  constructor(
+    private readonly db: EvidenceDatabase,
+    writerDb?: EvidenceDatabase,
+  ) {
     this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
   }
 

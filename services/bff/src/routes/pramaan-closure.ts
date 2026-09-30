@@ -36,7 +36,11 @@ export function pramaanClosureRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new PramaanClosureService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
+    dependencies.service ??
+    new PramaanClosureService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
 
   // 1. Synthesize Statutory Closure Dossier (Pramaan Agent L1 / Authorized Manager)
   app.post('/engagements/:engagementId/closure/pramaan', async (c) => {

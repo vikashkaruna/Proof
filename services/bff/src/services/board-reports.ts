@@ -32,7 +32,10 @@ export const generateBoardReportDraftInputSchema = z
 export type GenerateBoardReportDraftInput = z.infer<typeof generateBoardReportDraftInputSchema>;
 
 export class BoardReportService {
-  constructor(private readonly db: EvidenceDatabase, private readonly writerDb?: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writerDb?: EvidenceDatabase,
+  ) {}
 
   private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
     let membership = this.db

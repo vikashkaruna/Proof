@@ -38,7 +38,12 @@ export function evidencePackRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new EvidencePackService(dependencies.db ?? createSupabaseAdmin(), undefined, dependencies.db ?? createStatutoryProofWriter());
+    dependencies.service ??
+    new EvidencePackService(
+      dependencies.db ?? createSupabaseAdmin(),
+      undefined,
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
   app.get('/evidence-packs/options/engagements', async (c) => {
     const denied = requireCapability(c, Capability.EVIDENCE_RECORD);
     if (denied) return denied;

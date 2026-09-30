@@ -128,7 +128,6 @@ async function main() {
 
     // Report drafts require a real assessment source and authenticated BFF actor.
     // Seeding synthetic reports would create a false human/agent ledger claim.
-
   }
 }
 
