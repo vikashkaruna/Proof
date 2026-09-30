@@ -373,32 +373,37 @@ export async function renderHtmlToPdf(
     const tempPrefix = join(tmpdir(), `axiom-report-${Date.now()}-${randomUUID()}`);
     const inHtmlPath = `${tempPrefix}.html`;
     const outPdfPath = `${tempPrefix}.pdf`;
+    const profilePath = `${tempPrefix}-profile`;
 
     try {
-      await fs.writeFile(inHtmlPath, htmlContent, 'utf-8');
+      await fs.writeFile(inHtmlPath, htmlContent, { encoding: 'utf-8', mode: 0o600 });
 
       const baseArgs = [
         '--disable-gpu',
         '--disable-dev-shm-usage',
         '--disable-software-rasterizer',
+        '--disable-background-networking',
+        '--disable-extensions',
+        '--disable-javascript',
+        '--no-first-run',
+        `--user-data-dir=${profilePath}`,
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--no-pdf-header-footer',
         `--print-to-pdf=${outPdfPath}`,
         inHtmlPath,
       ];
+      const childOptions = {
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL' as const,
+        env: { ...process.env, HOME: tmpdir(), XDG_CACHE_HOME: join(tmpdir(), 'chrome-cache') },
+      };
 
       try {
-        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], {
-          timeout: timeoutMs,
-          killSignal: 'SIGKILL',
-        });
+        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
       } catch {
         // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
-        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], {
-          timeout: timeoutMs,
-          killSignal: 'SIGKILL',
-        });
+        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
       }
 
       const rawPdf = await fs.readFile(outPdfPath);
@@ -422,6 +427,7 @@ export async function renderHtmlToPdf(
     } finally {
       await fs.unlink(inHtmlPath).catch(() => {});
       await fs.unlink(outPdfPath).catch(() => {});
+      await fs.rm(profilePath, { recursive: true, force: true }).catch(() => {});
     }
   }
 
