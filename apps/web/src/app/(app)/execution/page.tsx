@@ -138,12 +138,20 @@ export default async function ExecutionPage() {
         title="Execution & Rollback"
         description="What Karya actually did: batches with per-action outcomes, halts and rollbacks, Parikshan's post-execution verification, and the signed maker-checker reconciliation. Actions execute only against a signed approval token — this page shows the recorded outcome."
         actions={
-          <Link
-            href="/plans"
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
-          >
-            Remediation plans →
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/execution/technical-reviews"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
+            >
+              Recorded technical registers →
+            </Link>
+            <Link
+              href="/plans"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
+            >
+              Remediation plans →
+            </Link>
+          </div>
         }
       />
 

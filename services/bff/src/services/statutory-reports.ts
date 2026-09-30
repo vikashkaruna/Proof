@@ -363,6 +363,9 @@ export class StatutoryReportService {
     if (report.status !== 'published' && report.created_by !== actorId) {
       throw new EvidenceError('report_not_found', 404);
     }
+    if (report.kind === 'technical') {
+      throw new EvidenceError('source_bound_workflow_required', 409);
+    }
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
     if (
       report.kind === 'auditor' &&

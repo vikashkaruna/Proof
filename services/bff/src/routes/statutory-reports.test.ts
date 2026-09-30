@@ -89,7 +89,7 @@ describe('Statutory Reports HTTP Routes', () => {
     expect(rpcCalled).toBe(false);
   });
 
-  it('keeps historical statutory drafts private and refuses an unretained PDF', async () => {
+  it('refuses legacy technical HTML and PDF without a retained source-bound version', async () => {
     const reportId = randomUUID();
     const engagementId = randomUUID();
 
@@ -165,17 +165,19 @@ describe('Statutory Reports HTTP Routes', () => {
     const htmlRes = await app().request(`/v1/reports/statutory/${reportId}/html`, {
       method: 'GET',
     });
-    expect(htmlRes.status).toBe(200);
-    expect(htmlRes.headers.get('content-type')).toContain('text/html');
-    const html = await htmlRes.text();
-    expect(html).toContain('Technical Remediation Register');
+    expect(htmlRes.status).toBe(409);
+    expect(await htmlRes.json()).toMatchObject({
+      error: { code: 'source_bound_workflow_required' },
+    });
 
     // A legacy content row has no verified retained object version.
     const pdfRes = await app().request(`/v1/reports/statutory/${reportId}/pdf`, {
       method: 'GET',
     });
-    expect(pdfRes.status).not.toBe(200);
-    expect(pdfRes.headers.get('content-type')).not.toContain('application/pdf');
+    expect(pdfRes.status).toBe(409);
+    expect(await pdfRes.json()).toMatchObject({
+      error: { code: 'source_bound_workflow_required' },
+    });
     expect(rpcCalled).toBe(false);
 
     const otherHtml = await app(fixture.viewer, UserRole.VIEWER).request(

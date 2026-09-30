@@ -2,6 +2,7 @@ import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
 import { boardReportRoutes } from './board-reports.js';
 import { dpbReportRoutes } from './dpb-reports.js';
+import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
@@ -205,6 +206,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
   app.route('/', dpbReportRoutes());
+  app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
