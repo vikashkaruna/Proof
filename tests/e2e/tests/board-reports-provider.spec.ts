@@ -306,7 +306,11 @@ test.describe('real-provider board report lifecycle', () => {
       const built = await post(founder, `/reports/board/${draft.reportId}/artifacts`, {
         operationKey,
       });
-      expect(built.status()).toBe(200);
+      const buildError =
+        built.status() === 200
+          ? undefined
+          : ((await built.json()) as { error?: { code?: string } }).error?.code;
+      expect(built.status(), buildError ?? 'board artifact build failed').toBe(200);
       const result = (await built.json()) as { buildId: string; status: string };
       expect(result.status).toBe('settled');
       const rows = (await database(
