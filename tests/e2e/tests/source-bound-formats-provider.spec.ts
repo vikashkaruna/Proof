@@ -3,7 +3,14 @@
  */
 import { createHash } from 'node:crypto';
 import { test, expect, type APIResponse, type Page } from '@playwright/test';
-import { selectTenant, signIn, satisfyLoginMfa, state } from '../fixtures';
+import {
+  createMfaAccount,
+  selectTenant,
+  signIn,
+  signInAs,
+  satisfyLoginMfaWithSecret,
+  state,
+} from '../fixtures';
 import { acceptanceTarget } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
@@ -196,9 +203,14 @@ for (const format of ['technical', 'dpb'] as const) {
       await signIn(owner, 'owner');
       await selectTenant(owner, 'a');
       const founder = await founderContext.newPage();
-      await signIn(founder, 'founder');
+      const founderAccount = await createMfaAccount(`${format}-source-founder`, {
+        role: 'founder',
+        isInternal: true,
+        withFactor: true,
+      });
+      await signInAs(founder, founderAccount.email, founderAccount.password);
       await selectTenant(founder, 'a');
-      await satisfyLoginMfa(founder, 'founder');
+      await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       const input =
         format === 'technical' ? await technicalSource() : await dpbSource(owner, founder);
       if (format === 'technical') {
@@ -347,7 +359,9 @@ for (const format of ['technical', 'dpb'] as const) {
       await expect(card.getByRole('button', { name: 'Download verified PDF' })).toBeVisible();
       await card.getByRole('button', { name: 'Download verified PDF' }).click();
       await expect(
-        card.getByText('The downloaded PDF matches the recorded retained version.'),
+        founder
+          .getByRole('status')
+          .getByText('The downloaded PDF matches the recorded retained version.'),
       ).toBeVisible();
       const released = await viewer.request.get(`/api/bff/v1/reports/${format}/${reportId}/pdf`);
       expect(released.status()).toBe(200);

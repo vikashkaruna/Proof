@@ -7,7 +7,6 @@ import {
   selectTenant,
   signIn,
   signInAs,
-  satisfyLoginMfa,
   satisfyLoginMfaWithSecret,
   state,
 } from '../fixtures';
@@ -268,9 +267,14 @@ test.describe('real-provider board report lifecycle', () => {
     const viewerContext = await browser.newContext();
     try {
       const founder = await founderContext.newPage();
-      await signIn(founder, 'founder');
+      const founderAccount = await createMfaAccount('board-provider-founder', {
+        role: 'founder',
+        isInternal: true,
+        withFactor: true,
+      });
+      await signInAs(founder, founderAccount.email, founderAccount.password);
       await selectTenant(founder, 'a');
-      await satisfyLoginMfa(founder, 'founder');
+      await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       const generated = await post(founder, `/reports/board/${request.requestId}/generate`, {});
       expect(generated.status()).toBe(200);
       const draft = (await generated.json()) as { reportId: string };
@@ -700,9 +704,14 @@ test.describe('real-provider board report lifecycle', () => {
     const viewerContext = await browser.newContext();
     try {
       const founder = await founderContext.newPage();
-      await signIn(founder, 'founder');
+      const founderAccount = await createMfaAccount('auditor-provider-founder', {
+        role: 'founder',
+        isInternal: true,
+        withFactor: true,
+      });
+      await signInAs(founder, founderAccount.email, founderAccount.password);
       await selectTenant(founder, 'a');
-      await satisfyLoginMfa(founder, 'founder');
+      await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       const generated = await post(
         founder,
         `/reports/statutory/auditor/requests/${request.requestId}/draft`,

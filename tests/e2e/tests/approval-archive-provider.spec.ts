@@ -9,7 +9,7 @@ import {
   selectTenant,
   signIn,
   signInAs,
-  satisfyLoginMfa,
+  satisfyLoginMfaWithSecret,
   state,
 } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
@@ -207,9 +207,14 @@ test.describe('real-provider approval proof archive', () => {
     const viewerContext = await browser.newContext();
     try {
       const founder = await founderContext.newPage();
-      await signIn(founder, 'founder');
+      const founderAccount = await createMfaAccount('archive-founder', {
+        role: 'founder',
+        isInternal: true,
+        withFactor: true,
+      });
+      await signInAs(founder, founderAccount.email, founderAccount.password);
       await selectTenant(founder, 'a');
-      await satisfyLoginMfa(founder, 'founder');
+      await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       await founder.goto(`/plans/${plan.id}`);
       await founder.getByRole('button', { name: 'Archive proof' }).click();
       await expect(founder.getByText('Exact retained version verified.')).toBeVisible();
