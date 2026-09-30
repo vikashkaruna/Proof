@@ -128,7 +128,28 @@ export function MfaEnrolment({
         setStepUp(null);
         return;
       }
-      setPending(await res.json());
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('factorId' in body) ||
+        typeof body.factorId !== 'string' ||
+        !body.factorId ||
+        !('secret' in body) ||
+        typeof body.secret !== 'string' ||
+        !body.secret ||
+        !('provisioningUri' in body) ||
+        typeof body.provisioningUri !== 'string' ||
+        !body.provisioningUri.startsWith('otpauth://totp/')
+      ) {
+        setError('Enrolment response is unverified. Refresh before continuing.');
+        return;
+      }
+      setPending({
+        factorId: body.factorId,
+        secret: body.secret,
+        provisioningUri: body.provisioningUri,
+      });
       setStepUp(null);
       setStepUpCode('');
       setCode('');
@@ -177,8 +198,18 @@ export function MfaEnrolment({
         setError(message);
         return;
       }
-      const body = await res.json();
-      setStepUp({ challengeId: body.challengeId as string, purpose, factorId });
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('challengeId' in body) ||
+        typeof body.challengeId !== 'string' ||
+        !body.challengeId
+      ) {
+        setError('Verification challenge is unavailable. Request a new one.');
+        return;
+      }
+      setStepUp({ challengeId: body.challengeId, purpose, factorId });
       setStepUpCode('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start verification');
@@ -211,6 +242,19 @@ export function MfaEnrolment({
         }
         return;
       }
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('satisfied' in body) ||
+        body.satisfied !== true ||
+        !('challengeId' in body) ||
+        body.challengeId !== stepUp.challengeId
+      ) {
+        setError('Verification result is unconfirmed. Request a new challenge.');
+        setStepUp(null);
+        return;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Verification failed');
       return;
@@ -236,6 +280,18 @@ export function MfaEnrolment({
       });
       if (!res.ok) {
         setError((await readError(res, 'Could not revoke authenticator')).message);
+        return;
+      }
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('status' in body) ||
+        body.status !== 'revoked' ||
+        !('factorId' in body) ||
+        body.factorId !== factorId
+      ) {
+        setError('Revocation result is unconfirmed. Refresh your factor status.');
         return;
       }
       setRecoveryCodes(null);
@@ -267,8 +323,21 @@ export function MfaEnrolment({
         if (errorCode === 'replacement_authorization_changed') setPending(null);
         return;
       }
-      const body = await res.json();
-      setRecoveryCodes(body.recoveryCodes as string[]);
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('factorId' in body) ||
+        body.factorId !== pending?.factorId ||
+        !('recoveryCodes' in body) ||
+        !Array.isArray(body.recoveryCodes) ||
+        body.recoveryCodes.length === 0 ||
+        !body.recoveryCodes.every((item) => typeof item === 'string' && item.length > 0)
+      ) {
+        setError('Activation result is unconfirmed. Refresh your factor status.');
+        return;
+      }
+      setRecoveryCodes(body.recoveryCodes);
       setPending(null);
       setCode('');
       await refresh();

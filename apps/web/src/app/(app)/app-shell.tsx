@@ -39,15 +39,17 @@ const alertReadSchema = z.object({
       critical: z.number().int().nonnegative(),
       high: z.number().int().nonnegative(),
     }),
-    alerts: z.array(z.object({
-      id: z.string().min(1),
-      title: z.string(),
-      summary: z.string(),
-      severity: z.string(),
-      status: z.string(),
-      alert_type: z.string(),
-      created_at: z.string().datetime({ offset: true }),
-    })),
+    alerts: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string(),
+        summary: z.string(),
+        severity: z.string(),
+        status: z.string(),
+        alert_type: z.string(),
+        created_at: z.string().datetime({ offset: true }),
+      }),
+    ),
   }),
 });
 
@@ -252,6 +254,7 @@ export function AppShell({
           setKillState(null);
         }
       } catch (err) {
+        setKillState(null);
         console.error('Failed to engage kill switch:', err);
       }
     } else {
@@ -271,6 +274,7 @@ export function AppShell({
           setKillState(null);
         }
       } catch (err) {
+        setKillState(null);
         console.error('Failed to release kill switch:', err);
       }
     }
@@ -609,7 +613,8 @@ export function AppShell({
               {(visibleAlertsSummary?.unread ?? 0) > 0 && (
                 <span
                   className={`absolute -top-1.5 -right-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow ${
-                    (visibleAlertsSummary?.critical ?? 0) > 0 || (visibleAlertsSummary?.high ?? 0) > 0
+                    (visibleAlertsSummary?.critical ?? 0) > 0 ||
+                    (visibleAlertsSummary?.high ?? 0) > 0
                       ? 'bg-[#D9534F]'
                       : 'bg-[#0FB5A5]'
                   }`}
@@ -693,7 +698,12 @@ export function AppShell({
               }`}
               title="Halt autonomous agent execution for this tenant"
             >
-              <span>⏻</span> {killOn === null ? 'Kill switch status unavailable' : killOn ? 'Kill switch active' : 'Kill switch'}
+              <span>⏻</span>{' '}
+              {killOn === null
+                ? 'Kill switch status unavailable'
+                : killOn
+                  ? 'Kill switch active'
+                  : 'Kill switch'}
             </button>
           )}
         </header>
