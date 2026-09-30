@@ -470,17 +470,12 @@ export class DpbArtifactService {
           version_id: verified.versionId,
           content_hash: verified.contentHash,
           byte_size: verified.byteSize,
-          tenant_id: tenantId,
-          engagement_id: engagementId,
-          collected_by_agent: 'dpb-report-builder',
+          mime_type: kind === 'source_json' ? 'application/json' : 'application/pdf',
           retain_until: verified.retainUntil,
           readback_at: verified.readbackAt,
           lock_mode: verified.lockMode,
-          verified: true,
           legal_hold: verified.legalHold,
           encryption: verified.encryption,
-          operation_id: build.id,
-          correlation_id: build.correlation_id,
         },
         p_correlation_id: randomUUID(),
       },
@@ -802,16 +797,47 @@ export class DpbArtifactService {
     if (!build || build.status !== 'settled')
       throw new EvidenceError('report_artifact_unverified', 409);
     const versions = await this.versions(tenantId, build.id, signal);
+    const source = versions.find((v) => v.artifact_kind === 'source_json');
     const pdf = versions.find((v) => v.artifact_kind === 'dpb_pdf');
     if (
+      !source ||
       !pdf ||
       versions.length !== 2 ||
+      build.request.artifacts[0]?.content_hash !== source.content_hash ||
       build.request.artifacts[1]?.content_hash !== pdf.content_hash ||
       (report.status === 'published' && report.released_archive_hash !== pdf.content_hash)
     )
       throw new EvidenceError('report_artifact_unverified', 409);
     const storage = this.storage();
     this.configured(storage, build);
+    await storage.vault.verifyReceipt(
+      {
+        bucket: source.bucket,
+        key: source.object_key,
+        versionId: source.version_id,
+        contentHash: source.content_hash,
+        byteSize: source.byte_size,
+        tenantId,
+        engagementId: report.engagement_id,
+        collectedByAgent: 'dpb-report-builder',
+        operationId: build.id,
+        retainUntil: source.retain_until,
+        legalHold: false,
+        encryption: source.encryption,
+      },
+      opts('source_json', signal),
+    );
+    const sourceReadback = await storage.vault.retrieve(
+      source.bucket,
+      source.object_key,
+      source.version_id,
+      opts('source_json', signal),
+    );
+    if (
+      sourceReadback.body.length !== source.byte_size ||
+      sha(sourceReadback.body) !== source.content_hash
+    )
+      throw new EvidenceError('provider_verification_failed', 503);
     await storage.vault.verifyReceipt(
       {
         bucket: pdf.bucket,

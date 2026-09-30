@@ -55,7 +55,8 @@ describe('DPB retained artifacts', () => {
     const buildId = randomUUID();
     const pdfBytes = Buffer.from('%PDF-1.7\nretained fixture');
     const pdfHash = createHash('sha256').update(pdfBytes).digest('hex');
-    const sourceHash = 'b'.repeat(64);
+    const sourceBytes = Buffer.from('{"source":"retained fixture"}');
+    const sourceHash = createHash('sha256').update(sourceBytes).digest('hex');
     const retainUntil = '2033-10-01T00:00:00.000Z';
     const pdfKey = `reports/dpb/${tenant}/${reportId}/dpb_pdf/${pdfHash}`;
     fixture.rows('tenant_users').push({ tenant_id: tenant, user_id: actor, role: 'owner' });
@@ -89,7 +90,7 @@ describe('DPB retained artifacts', () => {
             kind: 'source_json',
             object_key: `reports/dpb/${tenant}/${reportId}/source_json/${sourceHash}`,
             content_hash: sourceHash,
-            byte_size: 20,
+            byte_size: sourceBytes.length,
           },
           {
             kind: 'dpb_pdf',
@@ -114,23 +115,23 @@ describe('DPB retained artifacts', () => {
             : `reports/dpb/${tenant}/${reportId}/source_json/${sourceHash}`,
         version_id: kind === 'dpb_pdf' ? 'exact-pdf-version' : 'exact-source-version',
         content_hash: kind === 'dpb_pdf' ? pdfHash : sourceHash,
-        byte_size: kind === 'dpb_pdf' ? pdfBytes.length : 20,
+        byte_size: kind === 'dpb_pdf' ? pdfBytes.length : sourceBytes.length,
         retain_until: retainUntil,
         legal_hold: false,
         encryption: 'AES256',
       });
     }
     fixture.vault.verifyReceipt.mockResolvedValue(fixture.verified);
-    fixture.vault.retrieve.mockResolvedValue({
-      body: Buffer.from('%PDF-1.7\nchanged fixture'),
-      contentHash: pdfHash,
+    fixture.vault.retrieve.mockImplementation(async (_bucket, key) => ({
+      body: key === pdfKey ? Buffer.from('%PDF-1.7\nchanged fixture') : sourceBytes,
+      contentHash: key === pdfKey ? pdfHash : sourceHash,
       metadata: {},
-      contentType: 'application/pdf',
+      contentType: key === pdfKey ? 'application/pdf' : 'application/json',
       retainUntil: new Date(retainUntil),
       lockMode: 'COMPLIANCE',
-      versionId: 'exact-pdf-version',
+      versionId: key === pdfKey ? 'exact-pdf-version' : 'exact-source-version',
       encryption: 'AES256',
-    });
+    }));
     const service = new DpbArtifactService(fixture.db, () => ({ config, vault: fixture.vault }));
     await expect(service.pdf(tenant, actor, reportId)).rejects.toMatchObject({
       code: 'provider_verification_failed',
@@ -142,5 +143,24 @@ describe('DPB retained artifacts', () => {
       'exact-pdf-version',
       expect.objectContaining({ maxBytes: 32 * 1024 * 1024 }),
     );
+    fixture.vault.retrieve.mockClear();
+    fixture.vault.verifyReceipt.mockRejectedValueOnce(new Error('exact source unavailable'));
+    await expect(service.pdf(tenant, actor, reportId)).rejects.toThrow('exact source unavailable');
+    expect(fixture.vault.retrieve).not.toHaveBeenCalled();
+    fixture.vault.retrieve.mockImplementationOnce(async () => ({
+      body: Buffer.from('{"source":"changed"}'),
+      contentHash: sourceHash,
+      metadata: {},
+      contentType: 'application/json',
+      retainUntil: new Date(retainUntil),
+      lockMode: 'COMPLIANCE',
+      versionId: 'exact-source-version',
+      encryption: 'AES256',
+    }));
+    await expect(service.pdf(tenant, actor, reportId)).rejects.toMatchObject({
+      code: 'provider_verification_failed',
+      status: 503,
+    });
+    expect(fixture.vault.retrieve).toHaveBeenCalledTimes(1);
   });
 });
