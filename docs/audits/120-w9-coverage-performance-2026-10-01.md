@@ -8,22 +8,22 @@ W9 is **open**. This change enforces the existing 80% source-line coverage rule 
 
 Command: `./scripts/check-coverage-floors.sh --typescript`, after `pnpm install --frozen-lockfile` at W9 base `32f4d32`. The command exits 1. Coverage includes all `src/**/*.{ts,tsx}` files in each module, including unimported files. The gate verifies the source-module inventory so newly added modules cannot silently escape measurement.
 
-| Module          | Source-line coverage | 80% floor |
-| --------------- | -------------------: | --------- |
-| approval-engine |               90.47% | pass      |
-| types           |               53.57% | fail      |
-| report-kit      |               87.89% | pass      |
-| mfa             |                 100% | pass      |
-| control-library |               86.11% | pass      |
-| ledger          |               32.69% | fail      |
-| evidence        |               54.70% | fail      |
-| config          |               87.43% | pass      |
-| supabase        |                7.50% | fail      |
-| ui              |               55.69% | fail      |
-| design-tokens   |                 100% | pass      |
-| bff             |               86.08% | pass      |
-| web             |               16.68% | fail      |
-| marketing       | invalid (TSX parse exclusions) | fail |
+| Module          |           Source-line coverage | 80% floor |
+| --------------- | -----------------------------: | --------- |
+| approval-engine |                         90.47% | pass      |
+| types           |                         53.57% | fail      |
+| report-kit      |                         87.89% | pass      |
+| mfa             |                           100% | pass      |
+| control-library |                         86.11% | pass      |
+| ledger          |                         32.69% | fail      |
+| evidence        |                         54.70% | fail      |
+| config          |                         87.43% | pass      |
+| supabase        |                          7.50% | fail      |
+| ui              |                         55.69% | fail      |
+| design-tokens   |                           100% | pass      |
+| bff             |                         86.08% | pass      |
+| web             |                         16.68% | fail      |
+| marketing       | invalid (TSX parse exclusions) | fail      |
 
 The seven failing modules require meaningful tests of their real behavior; the CI gate is deliberately red until then. The marketing baseline printed 21.29%, but Vitest also logged `Failed to parse ... Excluding it from coverage` for untested TSX files. That percentage was invalid. Adding `apps/marketing/vitest.config.ts` with the JSX transform includes all 27 production TS/TSX files; the corrected baseline was **7.69%** lines. The three Python CI jobs now use `--cov-fail-under=80`. Local runs after `uv sync --extra dev` pass: agent runtime 339 tests / 83.69%, temporal workers 149 / 90.03%, and model gateway 27 / 89.43%. No coverage denominator was reduced or source excluded for a pass.
 
@@ -72,6 +72,8 @@ Estate inventory, graph and setup pages were still treating a null-success Postg
 Onboarding proposals now refuse null-success intake/proposal lists at the BFF, with tenant isolation and refusal route tests. The web reviewer also validates the source-bound intake and proposal fields it displays and signs against, and refuses malformed successful payloads or a null-success active-estate list. Full web coverage passes **447 tests across 76 files at 73.36% lines (`2498/3405`)**. Browser maker/checker acceptance for these changes remains pending; source-line coverage and NFR gates are still **OPEN**.
 
 Policy and connector pages now reject null-success list reads rather than reporting zero policies, evaluations, connectors or systems. Focused tests cover each source. The latest full web run passes **451 tests across 76 files at 73.36% lines (`2498/3405`)**; the tests strengthen already-executed refusal branches, so the line percentage remains below 80%. W9 is paused at this clean local checkpoint while the higher-priority statutory writer boundary is repaired. NFR-7/8/9 and integrated browser acceptance remain **OPEN**.
+
+After that security checkpoint, the plan-detail kill-switch control was found to trust an unscoped browser event, treat unreadable status as disengaged, and accept HTTP 200 without an explicit transition result. It now disables action until tenant-bound status is verified, rereads after browser events, and treats ambiguous mutation outcomes as unknown. Six user-behavior/refusal tests pass. Full web coverage is **74.71% lines (`2553/3417`) across 457 tests and 77 files**, up from 73.36%; the 80% gate, integrated browser acceptance and NFR-7/8/9 remain **OPEN**.
 
 ## Real local component probe
 
