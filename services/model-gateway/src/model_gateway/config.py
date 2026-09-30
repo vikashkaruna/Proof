@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     service_name: str = "axiom-model-gateway"
-    environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
+    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = "development"
     # Containers must listen on all interfaces; exposure is controlled by the
     # platform ingress/network policy, never by this bind address.
     http_host: str = "0.0.0.0"  # nosec B104
@@ -91,14 +91,23 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str | None = None
 
     @model_validator(mode="after")
-    def validate_production_security(self) -> "Settings":
-        if self.environment in ("production", "preprod"):
+    def validate_production_security(self) -> Settings:
+        if self.environment in ("production", "preprod", "onprem"):
             if self.aws_region not in ("ap-south-1", "asia-south1"):
                 raise ValueError("Production/Preprod model gateway must run in Mumbai (ap-south-1 or asia-south1)")
-            if self.environment == "production" and not self.api_key:
+            if self.environment in ("production", "onprem") and not self.api_key:
                 raise ValueError("API_KEY is required in production")
             if not self.pii_redaction_enabled:
                 raise ValueError("PII redaction cannot be disabled in production/preprod")
+        if self.environment == "onprem":
+            from urllib.parse import urlparse
+
+            if any((self.anthropic_api_key, self.openai_api_key, self.gemini_api_key)):
+                raise ValueError("Hosted model keys are prohibited in onprem mode")
+            if self.self_hosted_base_url:
+                parsed = urlparse(self.self_hosted_base_url)
+                if parsed.scheme != "http" or parsed.hostname not in ("local-model", "127.0.0.1", "localhost"):
+                    raise ValueError("Onprem model URL must name the local-model service")
         return self
 
 

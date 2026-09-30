@@ -21,6 +21,7 @@ import { createMfaService } from './services/mfa.js';
 import { workloadToolsRoutes } from './routes/workload-tools.js';
 import type { AssessmentTools } from './workloads/assessment-tools.js';
 import { startRealtimeChannel } from './services/realtime.js';
+import { offlineLicenseGate } from './middleware/offline-license.js';
 
 /**
  * Builds the BFF application.
@@ -61,6 +62,7 @@ export function createApp(
     }),
   );
   app.use('*', errorHandler());
+  app.use('*', offlineLicenseGate(env.ENVIRONMENT, process.env.AXIOM_OFFLINE_LICENSE));
 
   // ─── Services (constructed once, attached to the app) ───────────────
   const approvalEngine = createApprovalEngine(env);

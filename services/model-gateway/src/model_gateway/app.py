@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request
@@ -15,7 +15,6 @@ from pydantic import BaseModel
 from .config import Settings, get_settings
 from .redaction import redact, redact_variables
 from .router import TaskKind, decide_route
-
 
 # ─── Request / response shapes ───────────────────────────────────────
 
@@ -187,6 +186,9 @@ async def complete(req: CompleteRequest, request: Request):
             log,
         )
     except Exception as e:
+        if settings.environment == "onprem":
+            log.error("model_gateway.local_model_unavailable", error_type=type(e).__name__)
+            raise HTTPException(status_code=503, detail="local_model_unavailable") from None
         log.error("model_gateway.dispatched_error", err=str(e))
         raise HTTPException(status_code=502, detail=f"provider_error: {e}") from e
 
@@ -220,7 +222,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     # Auth check if configured
     if settings.api_key:
         provided = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        if provided and provided != settings.api_key:
+        if provided != settings.api_key:
             raise HTTPException(status_code=401, detail="invalid api key")
 
     # Extract user prompt from messages
@@ -247,7 +249,23 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         id=completion_id,
     )
 
-    if req.model.startswith("stub"):
+    if settings.environment == "onprem":
+        completion = CompleteRequest(
+            model=req.model,
+            prompt=redacted_prompt,
+            task=req.task,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            pii_redact=False,
+        )
+        try:
+            content, in_tokens, out_tokens = await _dispatch(
+                redacted_prompt, decision, completion, settings, log
+            )
+        except Exception:  # noqa: BLE001 - every local provider failure is an unavailable result
+            log.error("model_gateway.local_model_unavailable")
+            raise HTTPException(status_code=503, detail="local_model_unavailable") from None
+    elif req.model.startswith("stub"):
         content = f"Model Gateway received prompt with PII redacted: {redacted_prompt}"
     else:
         content = (
@@ -255,8 +273,9 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             f"Processed prompt with PII redacted: {redacted_prompt}"
         )
 
-    in_tokens = max(1, len(raw_prompt) // 4)
-    out_tokens = max(1, len(content) // 4)
+    if settings.environment != "onprem":
+        in_tokens = max(1, len(raw_prompt) // 4)
+        out_tokens = max(1, len(content) // 4)
 
     return ChatCompletionResponse(
         id=completion_id,
@@ -292,6 +311,33 @@ async def _dispatch(
     3. Gemini (Fallback 2)
     4. Deterministic synthetic stub (Offline / test resilience)
     """
+    if settings.environment == "onprem":
+        if not settings.self_hosted_base_url:
+            raise RuntimeError("local_model_unavailable")
+        import httpx
+
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            response = await client.post(
+                f"{settings.self_hosted_base_url.rstrip('/')}/v1/chat/completions",
+                json={
+                    "model": settings.self_hosted_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": req.temperature,
+                    "max_tokens": req.max_tokens,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content:
+            raise RuntimeError("local_model_unavailable")
+        usage = payload.get("usage") or {}
+        return (
+            content,
+            int(usage.get("prompt_tokens", max(1, len(prompt) // 4))),
+            int(usage.get("completion_tokens", max(1, len(content) // 4))),
+        )
+
     # Build candidate list based on decision fallback_chain or settings
     candidates: list[tuple[str, str, str | None]] = []
 
@@ -355,7 +401,7 @@ async def _dispatch(
                     out_tokens=out_tokens,
                 )
                 return text, in_tokens, out_tokens
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - hosted-provider fallback is existing behavior
                 log.warning(
                     "model_gateway.provider_failover",
                     failed_provider=provider_name,
