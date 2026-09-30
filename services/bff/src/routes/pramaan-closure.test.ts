@@ -54,6 +54,35 @@ function historicalDossier() {
 }
 
 describe('Pramaan closure fail-closed HTTP routes', () => {
+  it('keeps the DPB creation route tenant-scoped and rejects invented engagement binding', async () => {
+    const base = {
+      dossierType: 'dpb_statutory',
+      title: 'Recorded breach derivative',
+      reportId: randomUUID(),
+      operationKey: randomUUID(),
+    };
+    const options = (body: unknown) => ({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const invented = await app().request(
+      '/v1/closure/pramaan/dpb',
+      options({ ...base, engagementId: randomUUID() }),
+    );
+    expect(invented.status).toBe(400);
+    const wrongKind = await app().request(
+      '/v1/closure/pramaan/dpb',
+      options({ ...base, dossierType: 'full_closure' }),
+    );
+    expect(wrongKind.status).toBe(400);
+    const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
+      '/v1/closure/pramaan/dpb',
+      options(base),
+    );
+    expect(viewer.status).toBe(403);
+  });
+
   it('denies a viewer and refuses unsupported dossier types before any mutating RPC', async () => {
     const engagementId = randomUUID();
     const body = JSON.stringify({

@@ -98,8 +98,8 @@ begin
    'source_sha256',encode(sha256(convert_to(source_text,'UTF8')),'hex')));
  return jsonb_build_object('requestId',r.id,'reportId',null,'status','requested','replayed',false);
 end $$;
-revoke all on function public.request_dpb_report(uuid,uuid,uuid,uuid,uuid,text,uuid) from public,anon,authenticated;
-grant execute on function public.request_dpb_report(uuid,uuid,uuid,uuid,uuid,text,uuid) to service_role;
+revoke all on function public.request_dpb_report(uuid,uuid,uuid,uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.request_dpb_report(uuid,uuid,uuid,uuid,uuid,text,uuid) to statutory_proof_writer;
 
 create function public.record_dpb_report_draft(p_tenant_id uuid,p_actor_id uuid,p_request_id uuid,
  p_content_text text,p_correlation_id uuid) returns jsonb language plpgsql security definer set search_path='' as $$
@@ -144,5 +144,5 @@ begin
   jsonb_build_object('request_id',req.id,'source_sha256',src.source_sha256,'content_sha256',v_hash));
  return jsonb_build_object('requestId',req.id,'reportId',r.id,'status','draft','contentHash',v_hash,'replayed',false);
 end $$;
-revoke all on function public.record_dpb_report_draft(uuid,uuid,uuid,text,uuid) from public,anon,authenticated;
-grant execute on function public.record_dpb_report_draft(uuid,uuid,uuid,text,uuid) to service_role;
+revoke all on function public.record_dpb_report_draft(uuid,uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.record_dpb_report_draft(uuid,uuid,uuid,text,uuid) to statutory_proof_writer;

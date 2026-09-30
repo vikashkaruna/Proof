@@ -1,3 +1,4 @@
+import { createStatutoryProofWriter } from '@axiom/supabase';
 /** Exact-version, reviewed DPB notification pack publication. Unknown provider state stays pending. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -98,6 +99,7 @@ export class DpbArtifactService {
       html: string,
       options: RenderPdfOptions,
     ) => Promise<RenderPdfResult> = renderHtmlToPdf,
+    private readonly writer: () => Pick<EvidenceDatabase, 'rpc'> = createStatutoryProofWriter,
   ) {}
 
   /** A metadata-only projection. No object key, bucket or provider receipt crosses this boundary. */
@@ -294,7 +296,7 @@ export class DpbArtifactService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+    let query = this.writer().rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('report_persistence_unconfirmed', 503);

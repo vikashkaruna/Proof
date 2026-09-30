@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { unzipSync } from 'fflate';
-import { buildPramaanAuditorArchive, buildPramaanBoardArchive } from './pramaan-archive';
+import {
+  buildPramaanAuditorArchive,
+  buildPramaanBoardArchive,
+  buildPramaanDpbArchive,
+  buildPramaanTechnicalArchive,
+} from './pramaan-archive';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -73,6 +78,57 @@ describe('Pramaan exact-version board archive', () => {
         source: { ...input.source, sha256: sha(foreignReportBytes) },
       }),
     ).toThrow('different tenant, engagement, or board request');
+  });
+});
+
+describe('Pramaan released DPB and technical derivatives', () => {
+  it('preserves exact recorded-plan source/PDF and refuses a foreign engagement', () => {
+    const base = fixture();
+    const sourceBytes = Buffer.from(
+      JSON.stringify({
+        schema_version: 1,
+        kind: 'technical_plan_source',
+        tenant_id: base.tenantId,
+        request_id: base.requestId,
+        plan: { engagement_id: base.engagementId },
+      }),
+    );
+    const input = { ...base, sourceBytes, source: { ...base.source, sha256: sha(sourceBytes) } };
+    const built = buildPramaanTechnicalArchive(input);
+    const files = unzipSync(built.archive);
+    expect(Buffer.from(files['source/recorded-plan.json']!)).toEqual(sourceBytes);
+    expect(Buffer.from(files['source/technical-review-pack.pdf']!)).toEqual(base.pdfBytes);
+    expect(JSON.stringify(built.manifest)).toContain('does not independently certify execution');
+    expect(buildPramaanTechnicalArchive(input).archiveSha256).toBe(built.archiveSha256);
+    expect(() => buildPramaanTechnicalArchive({ ...input, engagementId: randomUUID() })).toThrow();
+  });
+
+  it('keeps the DPB dossier tenant-level and never claims regulator receipt', () => {
+    const base = fixture();
+    const sourceBytes = Buffer.from(
+      JSON.stringify({
+        schema_version: 1,
+        kind: 'dpb_breach_source',
+        tenant_id: base.tenantId,
+        request_id: base.requestId,
+        breach: { id: randomUUID() },
+        notification: { id: randomUUID() },
+      }),
+    );
+    const input = {
+      ...base,
+      engagementId: null,
+      sourceBytes,
+      source: { ...base.source, sha256: sha(sourceBytes) },
+    };
+    const built = buildPramaanDpbArchive(input);
+    const files = unzipSync(built.archive);
+    expect(Buffer.from(files['source/recorded-breach-notification.json']!)).toEqual(sourceBytes);
+    expect(Buffer.from(files['source/dpb-review-pack.pdf']!)).toEqual(base.pdfBytes);
+    expect(built.manifest.engagement_id).toBeNull();
+    expect(JSON.stringify(built.manifest)).toContain('does not verify regulator receipt');
+    expect(() => buildPramaanDpbArchive({ ...input, tenantId: randomUUID() })).toThrow();
+    expect(() => buildPramaanDpbArchive({ ...input, sourceBytes: Buffer.from('{}') })).toThrow();
   });
 });
 

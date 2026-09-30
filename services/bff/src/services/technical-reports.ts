@@ -1,3 +1,4 @@
+import { createStatutoryProofWriter } from '@axiom/supabase';
 /** Technical registers are deterministic manifests over recorded, frozen plan data. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -25,7 +26,10 @@ const requestSchema = z.object({
 const sourceSchema = z.object({ source_text: z.string().min(1), source_sha256: hash });
 
 export class TechnicalReportService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writer: () => Pick<EvidenceDatabase, 'rpc'> = createStatutoryProofWriter,
+  ) {}
 
   async listRequests(
     tenantId: string,
@@ -248,7 +252,7 @@ export class TechnicalReportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+    let query = this.writer().rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('report_persistence_unconfirmed', 503);

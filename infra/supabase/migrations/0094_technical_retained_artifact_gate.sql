@@ -113,8 +113,8 @@ begin
   jsonb_build_object('build_id',b.id,'source_sha256',src.source_sha256,'review_id',rev.id));
  return jsonb_build_object('buildId',b.id,'reportId',b.report_id,'status','pending','replayed',false);
 end $$;
-revoke all on function public.begin_technical_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid) from public,anon,authenticated;
-grant execute on function public.begin_technical_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid) to service_role;
+revoke all on function public.begin_technical_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.begin_technical_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid) to statutory_proof_writer;
 
 create function public.settle_technical_artifact_version(p_tenant_id uuid,p_actor_id uuid,p_build_id uuid,
  p_artifact_kind text,p_receipt jsonb,p_correlation_id uuid) returns jsonb
@@ -167,8 +167,8 @@ begin
    'content_hash',p_receipt->>'content_hash','version_id',p_receipt->>'version_id'));
  return jsonb_build_object('buildId',b.id,'reportId',b.report_id,'artifactId',v_id,'status',v_status,'replayed',false);
 end $$;
-revoke all on function public.settle_technical_artifact_version(uuid,uuid,uuid,text,jsonb,uuid) from public,anon,authenticated;
-grant execute on function public.settle_technical_artifact_version(uuid,uuid,uuid,text,jsonb,uuid) to service_role;
+revoke all on function public.settle_technical_artifact_version(uuid,uuid,uuid,text,jsonb,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.settle_technical_artifact_version(uuid,uuid,uuid,text,jsonb,uuid) to statutory_proof_writer;
 
 create function public.note_technical_artifact_failure(p_tenant_id uuid,p_actor_id uuid,p_build_id uuid,
  p_error_code text,p_correlation_id uuid) returns jsonb
@@ -189,8 +189,8 @@ begin
  return jsonb_build_object('buildId',b.id,'reportId',b.report_id,'status',b.status,
   'lastErrorCode',case when b.status='pending' then p_error_code else null end);
 end $$;
-revoke all on function public.note_technical_artifact_failure(uuid,uuid,uuid,text,uuid) from public,anon,authenticated;
-grant execute on function public.note_technical_artifact_failure(uuid,uuid,uuid,text,uuid) to service_role;
+revoke all on function public.note_technical_artifact_failure(uuid,uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.note_technical_artifact_failure(uuid,uuid,uuid,text,uuid) to statutory_proof_writer;
 
 create function public.release_technical_report(p_tenant_id uuid,p_report_id uuid,p_actor_id uuid,
  p_expected_content_hash text,p_expected_pdf_hash text,p_correlation_id uuid) returns jsonb
@@ -239,8 +239,8 @@ begin
    'review_id',rev.id,'source_version_id',s.version_id,'pdf_version_id',pdf.version_id));
  return jsonb_build_object('reportId',r.id,'status','published','replayed',false);
 end $$;
-revoke all on function public.release_technical_report(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated;
-grant execute on function public.release_technical_report(uuid,uuid,uuid,text,text,uuid) to service_role;
+revoke all on function public.release_technical_report(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.release_technical_report(uuid,uuid,uuid,text,text,uuid) to statutory_proof_writer;
 
 -- The generic release RPC predates this subtype. A row-level guard makes it
 -- impossible to publish a Technical builder report by bypassing the dedicated gate.
@@ -281,5 +281,5 @@ begin
  return public.release_report_pre_technical(p_tenant_id,p_report_id,p_released_by,
   p_expected_content_hash,p_expected_archive_hash,p_correlation_id);
 end $$;
-revoke all on function public.release_report(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated;
-grant execute on function public.release_report(uuid,uuid,uuid,text,text,uuid) to service_role;
+revoke all on function public.release_report(uuid,uuid,uuid,text,text,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.release_report(uuid,uuid,uuid,text,text,uuid) to statutory_proof_writer;

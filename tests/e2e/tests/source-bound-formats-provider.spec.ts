@@ -6,6 +6,7 @@ import { test, expect, type APIResponse, type Page } from '@playwright/test';
 import { selectTenant, signIn, satisfyLoginMfa, state } from '../fixtures';
 import { acceptanceTarget } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
+import { unzipSync } from 'fflate';
 
 type Format = 'dpb' | 'technical';
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -185,7 +186,7 @@ for (const format of ['technical', 'dpb'] as const) {
   test(`real-provider ${format} source, founder UI review, retained versions and guarded release`, async ({
     browser,
   }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(420_000);
     localFixture();
     const ownerContext = await browser.newContext();
     const founderContext = await browser.newContext();
@@ -352,6 +353,141 @@ for (const format of ['technical', 'dpb'] as const) {
       expect(released.status()).toBe(200);
       expect(released.headers()['x-report-sha256']).toBe(pdf.content_hash);
       expect(sha(Buffer.from(await released.body()))).toBe(pdf.content_hash);
+      // Pramaan is a derivative of this already released pack, never a new
+      // execution/filing attestation. The DPB report has no engagement.
+      const dossierType = format === 'dpb' ? 'dpb_statutory' : 'technical_register';
+      const preparePath =
+        format === 'dpb'
+          ? '/closure/pramaan/dpb'
+          : `/engagements/${state.engagementA}/closure/pramaan`;
+      const unsupported = await post(owner, preparePath, {
+        dossierType,
+        reportId: crypto.randomUUID(),
+        title: 'Foreign source',
+        operationKey: crypto.randomUUID(),
+      });
+      expect(unsupported.status()).toBe(409);
+      const prepared = await successful(
+        await post(owner, preparePath, {
+          dossierType,
+          reportId,
+          title: `${format} retained derivative`,
+          operationKey: crypto.randomUUID(),
+        }),
+        201,
+      );
+      expect(prepared.status).toBe('settled');
+      const dossierId = prepared.dossierId as string;
+      const detail = await successful(
+        await founder.request.get(`/api/bff/v1/dossiers/${dossierId}`, {
+          headers: { 'x-tenant-id': state.tenantA.id },
+        }),
+        200,
+      );
+      expect(detail.dossierType).toBe(dossierType);
+      expect(detail.engagementId).toBe(format === 'dpb' ? null : state.engagementA);
+      expect(detail.sourceBound).toBe(true);
+      expect(detail.archiveVersionId).toBeTruthy();
+      expect(
+        (
+          await post(owner, `/dossiers/${dossierId}/seal`, {
+            expectedProofSeal: detail.proofSealHash,
+          })
+        ).status(),
+      ).toBe(403);
+      await successful(
+        await post(founder, `/dossiers/${dossierId}/seal`, {
+          expectedProofSeal: detail.proofSealHash,
+        }),
+        200,
+      );
+      const archiveResponse = await founder.request.get(
+        `/api/bff/v1/dossiers/${dossierId}/archive`,
+        {
+          headers: { 'x-tenant-id': state.tenantA.id },
+        },
+      );
+      expect(archiveResponse.status()).toBe(200);
+      const archiveBytes = Buffer.from(await archiveResponse.body());
+      expect(sha(archiveBytes)).toBe(detail.archiveHash);
+      const files = unzipSync(archiveBytes);
+      const sourcePath =
+        format === 'dpb' ? 'source/recorded-breach-notification.json' : 'source/recorded-plan.json';
+      const pdfPath =
+        format === 'dpb' ? 'source/dpb-review-pack.pdf' : 'source/technical-review-pack.pdf';
+      expect(Buffer.from(files[sourcePath]!).toString('utf8')).toBe(source.source_text);
+      expect(sha(Buffer.from(files[pdfPath]!))).toBe(pdf.content_hash);
+      const archiveManifest = JSON.parse(
+        Buffer.from(files['archiveManifest.json']!).toString('utf8'),
+      ) as {
+        kind: string;
+        engagement_id: string | null;
+        limitations: string[];
+        source: { versionId: string };
+        [key: string]: unknown;
+      };
+      expect(archiveManifest.kind).toBe(
+        format === 'dpb'
+          ? 'pramaan_dpb_recorded_notification_source_archive'
+          : 'pramaan_technical_register_source_archive',
+      );
+      expect(archiveManifest.engagement_id).toBe(format === 'dpb' ? null : state.engagementA);
+      expect(archiveManifest.limitations.join(' ')).toContain(
+        format === 'dpb'
+          ? 'does not verify regulator receipt'
+          : 'does not independently certify execution',
+      );
+      const archiveRows = (await database(
+        `pramaan_${format}_archives?dossier_id=eq.${dossierId}&select=bucket,object_key,version_id,content_hash,lock_mode`,
+      )) as Array<{
+        bucket: string;
+        object_key: string;
+        version_id: string;
+        content_hash: string;
+        lock_mode: string;
+      }>;
+      expect(archiveRows).toHaveLength(1);
+      expect(archiveRows[0]!.version_id).toBe(detail.archiveVersionId);
+      expect(archiveRows[0]!.lock_mode).toBe('COMPLIANCE');
+      const vaultConfig = localFixture();
+      const archiveVault = new EvidenceVault('ap-south-1', vaultConfig.endpoint, vaultConfig);
+      try {
+        const exact = await archiveVault.retrieve(
+          archiveRows[0]!.bucket,
+          archiveRows[0]!.object_key,
+          archiveRows[0]!.version_id,
+          { maxBytes: 64 * 1024 * 1024, timeoutMs: 30_000 },
+        );
+        expect(exact.body).toEqual(archiveBytes);
+        expect(sha(exact.body)).toBe(archiveRows[0]!.content_hash);
+      } finally {
+        archiveVault.close();
+      }
+      await founder.goto('/reports?tab=pramaan');
+      await expect(founder.getByText('Source-bound closure dossiers')).toBeVisible();
+      await expect(
+        founder.locator('#pramaan-report option').filter({ hasText: input.title }),
+      ).toHaveCount(1);
+      const dossierRow = founder.locator('li').filter({ hasText: `${format} retained derivative` });
+      await expect(dossierRow).toBeVisible();
+      await dossierRow.getByRole('button', { name: 'View record' }).click();
+      await expect(
+        founder.getByText(
+          format === 'dpb'
+            ? /does not verify regulator receipt, acceptance, or statutory filing/
+            : /does not independently certify execution, rollback, verification, or closure/,
+        ),
+      ).toBeVisible();
+      if (format === 'dpb')
+        await expect(founder.getByText('Tenant-level breach record')).toBeVisible();
+      expect(
+        (
+          await post(owner, '/reports/email/dispatch', {
+            dossierId,
+            recipientEmail: 'audit@example.invalid',
+          })
+        ).status(),
+      ).toBe(409);
     } finally {
       await Promise.all([ownerContext.close(), founderContext.close(), viewerContext.close()]);
     }

@@ -31,7 +31,7 @@ insert into public.remediation_actions(id,tenant_id,plan_id,sequence,action_type
  ('99430000-0000-4000-8000-000000000070','99430000-0000-4000-8000-000000000010',
   '99430000-0000-4000-8000-000000000060',1,'config.mfa_enforce','Enable MFA',45,
   '{"secret":"do-not-render"}'::jsonb,'{"revert":true}'::jsonb);
-set local role service_role;
+set local role postgres;
 do $$
 declare t uuid:='99430000-0000-4000-8000-000000000010';
  admin uuid:='99430000-0000-4000-8000-000000000001';
@@ -42,6 +42,7 @@ declare t uuid:='99430000-0000-4000-8000-000000000010';
  req public.technical_report_requests;src public.technical_request_sources;r public.reports;
  x jsonb;content text;op uuid:=gen_random_uuid();build_key uuid:=gen_random_uuid();
  q jsonb;b public.technical_artifact_builds;source_receipt jsonb;pdf_receipt jsonb;pdf_hash text:=repeat('d',64);
+ dossier_request jsonb;dossier_receipt jsonb;dossier_id uuid;dossier_build uuid;proof text;dossier_key uuid:=gen_random_uuid();
 begin
  perform pg_temp.ok(public.request_technical_report(t,viewer,gen_random_uuid(),plan,'Register',gen_random_uuid())->>'error'='forbidden','viewer cannot request');
  perform pg_temp.ok(public.request_technical_report(t,admin,gen_random_uuid(),gen_random_uuid(),'Register',gen_random_uuid())->>'error'='plan_not_found','foreign plan refused');
@@ -106,6 +107,34 @@ begin
  x:=public.release_technical_report(t,r.id,founder,r.content_sha256,pdf_hash,gen_random_uuid());
  perform pg_temp.ok(x->>'status'='published','exact reviewed report released');
  perform pg_temp.ok((public.release_technical_report(t,r.id,founder,r.content_sha256,pdf_hash,gen_random_uuid())->>'replayed')::boolean,'release replay stable');
+ dossier_request:=jsonb_build_object('provider','s3-compatible','bucket','technical-test',
+  'source_sha256',src.source_sha256,'pdf_sha256',pdf_hash,
+  'source_version_id',(select id::text from public.technical_artifact_versions where build_id=b.id and artifact_kind='source_json'),
+  'pdf_version_id',(select id::text from public.technical_artifact_versions where build_id=b.id and artifact_kind='technical_pdf'),
+  'manifest_sha256',repeat('a',64),'archive_sha256',repeat('b',64),'archive_bytes',2000,
+  'object_key','tenants/'||t||'/pramaan/technical/'||r.id||'/'||dossier_key||'/'||repeat('b',64));
+ perform pg_temp.ok(public.begin_technical_pramaan(t,viewer,r.id,dossier_key,'Plan derivative',dossier_request,gen_random_uuid())->>'error'='manager_authority_required','viewer cannot create technical dossier');
+ perform pg_temp.ok(public.begin_technical_pramaan(t,admin,r.id,dossier_key,'Plan derivative',jsonb_set(dossier_request,'{pdf_sha256}',to_jsonb(repeat('e',64))),gen_random_uuid())->>'error'='source_version_conflict','wrong technical PDF refused');
+ perform pg_temp.ok(public.begin_technical_pramaan(t,admin,r.id,dossier_key,'Plan derivative',jsonb_set(dossier_request,'{source_version_id}',to_jsonb(gen_random_uuid()::text)),gen_random_uuid())->>'error'='source_version_conflict','substituted technical source version refused');
+ x:=public.begin_technical_pramaan(t,admin,r.id,dossier_key,'Plan derivative',dossier_request,gen_random_uuid());
+ perform pg_temp.ok(x->>'status'='pending','released technical report creates pending dossier');
+ dossier_id:=(x->>'dossierId')::uuid;dossier_build:=(x->>'buildId')::uuid;
+ proof:=(select proof_seal_hash from public.pramaan_dossiers where id=dossier_id);
+ perform pg_temp.ok(public.seal_technical_pramaan(t,founder,dossier_id,proof,gen_random_uuid())->>'error'='archive_unverified','unsettled technical archive cannot seal');
+ dossier_receipt:=jsonb_build_object('provider','s3-compatible','bucket','technical-test',
+  'object_key',dossier_request->>'object_key','version_id','technical-dossier-v1','content_hash',repeat('b',64),
+  'byte_size',2000,'tenant_id',t,'engagement_id','99430000-0000-4000-8000-000000000030',
+  'collected_by_agent','pramaan','retain_until',(select retain_until from public.pramaan_technical_builds where id=dossier_build)+interval '1 second',
+  'readback_at',clock_timestamp(),'lock_mode','COMPLIANCE','verified',true,'legal_hold',false,
+  'encryption','AES256','operation_id',dossier_build,
+  'correlation_id',(select correlation_id from public.pramaan_technical_builds where id=dossier_build));
+ perform pg_temp.ok(public.settle_technical_pramaan(t,admin,dossier_build,dossier_receipt||'{"lock_mode":"GOVERNANCE"}'::jsonb,gen_random_uuid())->>'error'='receipt_mismatch','technical governance lock refused');
+ perform pg_temp.ok(public.settle_technical_pramaan(t,admin,dossier_build,dossier_receipt,gen_random_uuid())->>'status'='settled','technical exact receipt settles');
+ perform pg_temp.ok(public.settle_technical_pramaan(t,admin,dossier_build,dossier_receipt||'{"version_id":"different-version"}'::jsonb,gen_random_uuid())->>'error'='receipt_conflict','settled technical archive version immutable');
+ perform pg_temp.ok(public.seal_technical_pramaan(t,admin,dossier_id,proof,gen_random_uuid())->>'error'='founder_authority_required','admin cannot seal technical dossier');
+ perform pg_temp.ok(public.seal_technical_pramaan(t,founder,dossier_id,repeat('0',64),gen_random_uuid())->>'error'='proof_seal_mismatch','changed technical proof hash refused');
+ perform pg_temp.ok(public.seal_technical_pramaan(t,founder,dossier_id,proof,gen_random_uuid())->>'status'='sealed','founder seals technical derivative');
+ perform pg_temp.ok(not has_table_privilege('service_role','public.pramaan_technical_builds','INSERT') and not has_table_privilege('service_role','public.pramaan_technical_archives','INSERT') and not has_function_privilege('authenticated','public.begin_technical_pramaan(uuid,uuid,uuid,uuid,text,jsonb,uuid)','EXECUTE'),'technical dossier RPC-only boundary');
  perform pg_temp.ok(not has_table_privilege('service_role','public.technical_request_sources','INSERT') and
   not has_table_privilege('service_role','public.technical_artifact_versions','INSERT') and
   not has_function_privilege('service_role','public.release_report_pre_technical(uuid,uuid,uuid,text,text,uuid)','EXECUTE'),'no direct or hidden generic write');
@@ -118,7 +147,7 @@ insert into public.dry_runs(id,tenant_id,action_id,plan_id,status,refusal_reason
   'refused','fixture_refusal',false,repeat('a',64),repeat('b',64),gen_random_uuid());
 update public.remediation_actions set latest_dry_run_id='99430000-0000-4000-8000-000000000080'
  where id='99430000-0000-4000-8000-000000000070';
-set local role service_role;
+set local role postgres;
 do $$
 declare before_count integer;
 begin
@@ -178,7 +207,7 @@ update public.remediation_actions set
  latest_rollback_execution_id='99430000-0000-4000-8000-000000000084',
  latest_verification_result_id='99430000-0000-4000-8000-000000000085'
  where id='99430000-0000-4000-8000-000000000070';
-set local role service_role;
+set local role postgres;
 do $$
 declare x jsonb;source jsonb;facts jsonb;
 begin
@@ -197,5 +226,30 @@ begin
  perform pg_temp.ok((facts#>>'{reconciliation,unexecuted_count}')::integer=0,'reconciliation recorded');
  perform pg_temp.ok(source::text !~ 'do-not-render','raw action parameters never leave source boundary');
 end $$;
+reset role;
+select pg_temp.ok(not has_function_privilege('service_role',
+ 'public.request_technical_report(uuid,uuid,uuid,uuid,text,uuid)','EXECUTE')
+ and not has_function_privilege('service_role',
+ 'public.begin_technical_pramaan(uuid,uuid,uuid,uuid,text,jsonb,uuid)','EXECUTE')
+ and has_function_privilege('statutory_proof_writer',
+ 'public.request_technical_report(uuid,uuid,uuid,uuid,text,uuid)','EXECUTE'),
+ 'statutory writer owns technical mutation entry points');
+set local role service_role;
+do $$ begin
+  begin
+    perform public.request_technical_report(
+      '99430000-0000-4000-8000-000000000010',
+      '99430000-0000-4000-8000-000000000001',gen_random_uuid(),
+      '99430000-0000-4000-8000-000000000060','Forged',gen_random_uuid());
+    raise exception 'service_role unexpectedly invoked request_technical_report';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set local role statutory_proof_writer;
+select pg_temp.ok(public.request_technical_report(
+ '99430000-0000-4000-8000-000000000010',
+ '99430000-0000-4000-8000-000000000001',gen_random_uuid(),
+ gen_random_uuid(),'Invalid plan',gen_random_uuid())->>'error'='plan_not_found',
+ 'statutory writer invokes checked technical source RPC');
 reset role;
 rollback;

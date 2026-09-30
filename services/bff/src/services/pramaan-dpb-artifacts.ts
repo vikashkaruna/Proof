@@ -1,8 +1,8 @@
 import { createStatutoryProofWriter } from '@axiom/supabase';
-/** Assessment-derived Pramaan auditor dossier. Provider uncertainty remains a durable pending build. */
+/** Source-bound recorded-plan Pramaan dpb dossier. Provider uncertainty remains pending. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { buildPramaanAuditorArchive } from '@axiom/report-kit/pramaan-archive';
+import { buildPramaanDpbArchive } from '@axiom/report-kit/pramaan-archive';
 import {
   EvidenceError,
   evidenceStorage,
@@ -17,9 +17,9 @@ const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const reportSchema = z.object({
   id: uuid,
   tenant_id: uuid,
-  engagement_id: uuid,
-  kind: z.literal('auditor'),
-  generated_by_agent: z.literal('statutory-report-builder'),
+  engagement_id: z.null(),
+  kind: z.literal('dpb'),
+  generated_by_agent: z.literal('dpb-report-builder'),
   status: z.enum(['draft', 'approved', 'rejected', 'published', 'archived']),
   title: z.string().min(1),
   content: z.object({ source_sha256: digest }).passthrough(),
@@ -38,7 +38,7 @@ const versionSchema = z.object({
   tenant_id: uuid,
   report_id: uuid,
   build_id: uuid,
-  artifact_kind: z.enum(['source_json', 'statutory_pdf']),
+  artifact_kind: z.enum(['source_json', 'dpb_pdf']),
   provider: z.enum(['s3', 's3-compatible']),
   bucket: z.string().min(3),
   object_key: z.string().min(1),
@@ -97,7 +97,7 @@ const readOptions = (maxBytes: number, signal?: AbortSignal) => ({
   signal,
 });
 
-export class PramaanAuditorArtifactService {
+export class PramaanDpbArtifactService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly storage: () => Storage = evidenceStorage,
@@ -149,7 +149,7 @@ export class PramaanAuditorArtifactService {
     if (!report || report.status !== 'published')
       throw new EvidenceError('source_report_not_released', 409);
     const request = await this.row(
-      'statutory_report_requests',
+      'dpb_report_requests',
       tenantId,
       'report_id',
       reportId,
@@ -157,20 +157,14 @@ export class PramaanAuditorArtifactService {
         id: uuid,
         tenant_id: uuid,
         report_id: uuid,
-        engagement_id: uuid,
-        kind: z.literal('auditor'),
-        status: z.enum(['drafted', 'reviewed', 'released']),
+        status: z.literal('released'),
       }),
       signal,
     );
-    if (
-      !request ||
-      request.report_id !== reportId ||
-      request.engagement_id !== report.engagement_id
-    )
+    if (!request || request.report_id !== reportId)
       throw new EvidenceError('source_version_conflict', 409);
     const frozen = await this.row(
-      'statutory_request_sources',
+      'dpb_request_sources',
       tenantId,
       'request_id',
       request.id,
@@ -180,7 +174,7 @@ export class PramaanAuditorArtifactService {
     if (!frozen || frozen.source_sha256 !== report.content.source_sha256)
       throw new EvidenceError('source_version_conflict', 409);
     const build = await this.row(
-      'statutory_artifact_builds',
+      'dpb_artifact_builds',
       tenantId,
       'report_id',
       reportId,
@@ -189,7 +183,7 @@ export class PramaanAuditorArtifactService {
     );
     if (!build) throw new EvidenceError('source_version_conflict', 409);
     let query = this.db
-      .from('statutory_artifact_versions')
+      .from('dpb_artifact_versions')
       .select('*')
       .eq('tenant_id', tenantId)
       .eq('build_id', build.id);
@@ -199,14 +193,15 @@ export class PramaanAuditorArtifactService {
     const parsed = z.array(versionSchema).length(2).safeParse(data);
     if (!parsed.success) throw new EvidenceError('source_version_conflict', 409);
     const source = parsed.data.find((v) => v.artifact_kind === 'source_json');
-    const pdf = parsed.data.find((v) => v.artifact_kind === 'statutory_pdf');
+    const pdf = parsed.data.find((v) => v.artifact_kind === 'dpb_pdf');
     if (
       !source ||
       !pdf ||
       parsed.data.some((v) => v.report_id !== reportId || v.build_id !== build.id) ||
       build.source_sha256 !== frozen.source_sha256 ||
       source.content_hash !== frozen.source_sha256 ||
-      report.released_archive_hash !== pdf.content_hash
+      report.released_archive_hash !== pdf.content_hash ||
+      report.engagement_id !== null
     )
       throw new EvidenceError('source_version_conflict', 409);
     return { report, request, build, source, pdf };
@@ -214,7 +209,7 @@ export class PramaanAuditorArtifactService {
 
   private async exactSourceBytes(
     tenantId: string,
-    context: Awaited<ReturnType<PramaanAuditorArtifactService['source']>>,
+    context: Awaited<ReturnType<PramaanDpbArtifactService['source']>>,
     storage: Storage,
     signal?: AbortSignal,
   ) {
@@ -237,7 +232,7 @@ export class PramaanAuditorArtifactService {
           byteSize: version.byte_size,
           tenantId,
           engagementId: report.engagement_id,
-          collectedByAgent: 'statutory-report-builder',
+          collectedByAgent: 'dpb-report-builder',
           operationId: build.id,
           retainUntil: version.retain_until,
           legalHold: false,
@@ -261,19 +256,12 @@ export class PramaanAuditorArtifactService {
   }
 
   private async buildRow(tenantId: string, dossierId: string, signal?: AbortSignal) {
-    return this.row(
-      'pramaan_auditor_builds',
-      tenantId,
-      'dossier_id',
-      dossierId,
-      buildSchema,
-      signal,
-    );
+    return this.row('pramaan_dpb_builds', tenantId, 'dossier_id', dossierId, buildSchema, signal);
   }
 
   private async archiveRow(tenantId: string, dossierId: string, signal?: AbortSignal) {
     return this.row(
-      'pramaan_auditor_archives',
+      'pramaan_dpb_archives',
       tenantId,
       'dossier_id',
       dossierId,
@@ -312,7 +300,7 @@ export class PramaanAuditorArtifactService {
   async mine(tenantId: string, actorId: string, signal?: AbortSignal) {
     await this.manager(tenantId, actorId, signal);
     let query = this.db
-      .from('pramaan_auditor_builds')
+      .from('pramaan_dpb_builds')
       .select('dossier_id,report_id,status,operation_key,created_at')
       .eq('tenant_id', tenantId)
       .eq('requested_by', actorId)
@@ -349,7 +337,7 @@ export class PramaanAuditorArtifactService {
     tenantId: string,
     actorId: string,
     build: Build,
-    engagementId: string,
+    engagementId: string | null,
     versionId: string,
     storage: Storage,
     signal?: AbortSignal,
@@ -372,7 +360,7 @@ export class PramaanAuditorArtifactService {
       readOptions(64 * 1024 * 1024, signal),
     );
     await this.rpc(
-      'settle_auditor_pramaan',
+      'settle_dpb_pramaan',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -405,7 +393,7 @@ export class PramaanAuditorArtifactService {
   private async pending(tenantId: string, actorId: string, build: Build) {
     try {
       await this.rpc(
-        'note_auditor_pramaan_failure',
+        'note_dpb_pramaan_failure',
         {
           p_tenant_id: tenantId,
           p_actor_id: actorId,
@@ -430,7 +418,7 @@ export class PramaanAuditorArtifactService {
     tenantId: string,
     actorId: string,
     input: {
-      engagementId: string;
+      engagementId: string | null;
       reportId: string;
       dossierType: string;
       title: string;
@@ -439,17 +427,16 @@ export class PramaanAuditorArtifactService {
     signal?: AbortSignal,
   ) {
     await this.manager(tenantId, actorId, signal);
-    if (input.dossierType !== 'auditor_assurance')
+    if (input.dossierType !== 'dpb_statutory')
       throw new EvidenceError('source_bound_dossier_required', 409);
     const title = input.title.trim();
     const context = await this.source(tenantId, input.reportId, signal);
-    if (context.report.engagement_id !== input.engagementId)
-      throw new EvidenceError('source_version_conflict', 409);
+    if (input.engagementId !== null) throw new EvidenceError('source_version_conflict', 409);
     const storage = this.storage();
     const bytes = await this.exactSourceBytes(tenantId, context, storage, signal);
-    let archive: ReturnType<typeof buildPramaanAuditorArchive>;
+    let archive: ReturnType<typeof buildPramaanDpbArchive>;
     try {
-      archive = buildPramaanAuditorArchive({
+      archive = buildPramaanDpbArchive({
         tenantId,
         engagementId: input.engagementId,
         reportId: input.reportId,
@@ -470,9 +457,9 @@ export class PramaanAuditorArtifactService {
     } catch {
       throw new EvidenceError('source_version_conflict', 409);
     }
-    const objectKey = `tenants/${tenantId}/pramaan/auditor/${input.reportId}/${input.operationKey}/${archive.archiveSha256}`;
+    const objectKey = `tenants/${tenantId}/pramaan/dpb/${input.reportId}/${input.operationKey}/${archive.archiveSha256}`;
     const begun = await this.rpc(
-      'begin_auditor_pramaan',
+      'begin_dpb_pramaan',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -664,9 +651,9 @@ export class PramaanAuditorArtifactService {
     );
     if (!dossier) throw new EvidenceError('dossier_not_found', 404);
     const bytes = await this.exactSourceBytes(tenantId, context, storage, signal);
-    let rebuilt: ReturnType<typeof buildPramaanAuditorArchive>;
+    let rebuilt: ReturnType<typeof buildPramaanDpbArchive>;
     try {
-      rebuilt = buildPramaanAuditorArchive({
+      rebuilt = buildPramaanDpbArchive({
         tenantId,
         engagementId: context.report.engagement_id,
         reportId: build.report_id,
@@ -768,7 +755,7 @@ export class PramaanAuditorArtifactService {
       readOptions(64 * 1024 * 1024, signal),
     );
     return this.rpc(
-      'seal_auditor_pramaan',
+      'seal_dpb_pramaan',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
