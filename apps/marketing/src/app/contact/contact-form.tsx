@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { BRAND } from '@axiom/config';
+import { BRAND } from '@axiom/config/brand';
 import { Button, Input, Label, Textarea } from '@axiom/ui';
 import { CheckCircle2, AlertCircle, Loader2, Send } from 'lucide-react';
 
