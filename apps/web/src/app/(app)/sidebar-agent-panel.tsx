@@ -210,7 +210,7 @@ export function SidebarAgentPanel({
   showSystemMessage = true,
 }: SidebarAgentPanelProps = {}) {
   const router = useRouter();
-  const [activeAgentNames, setActiveAgentNames] = useState<Set<string>>(new Set());
+  const [activeAgentNames, setActiveAgentNames] = useState<Set<string> | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentActionMeta | null>(null);
 
   // Execution state tracking
@@ -244,17 +244,24 @@ export function SidebarAgentPanel({
     async function fetchActive() {
       try {
         const res = await fetch('/api/bff/v1/agents/runs/active');
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (isMounted) setActiveAgentNames(null);
+          return;
+        }
         const data = await res.json();
-        if (isMounted && data?.active_runs) {
+        if (isMounted && Array.isArray(data?.active_runs) &&
+          data.active_runs.every((run: unknown) => run && typeof run === 'object' &&
+            'agent_name' in run && typeof run.agent_name === 'string')) {
           const names = new Set<string>();
           for (const run of data.active_runs) {
-            if (run.agent_name) names.add(run.agent_name.toLowerCase());
+            names.add(run.agent_name.toLowerCase());
           }
           setActiveAgentNames(names);
+        } else if (isMounted) {
+          setActiveAgentNames(null);
         }
       } catch {
-        // Silently tolerate network/offline blip
+        if (isMounted) setActiveAgentNames(null);
       }
     }
 
@@ -267,7 +274,7 @@ export function SidebarAgentPanel({
   }, []);
 
   const getAgentState = (name: string): AgentIconState => {
-    return activeAgentNames.has(name) ? 'working' : 'idle';
+    return activeAgentNames?.has(name) ? 'working' : 'idle';
   };
 
   // Run agent action via BFF API
@@ -300,10 +307,12 @@ export function SidebarAgentPanel({
     }
   };
 
-  const activeCount = activeAgentNames.size;
+  const activeCount = activeAgentNames?.size ?? 0;
   const currentBroadcast =
     systemMessage ||
-    (activeCount > 0
+    (activeAgentNames === null
+      ? 'Agent-run status unavailable'
+      : activeCount > 0
       ? `${activeCount} agent run(s) reported active`
       : 'No active agent runs reported');
 
@@ -340,7 +349,7 @@ export function SidebarAgentPanel({
                 setSelectedAgent(isSelected ? null : agent);
                 setLastRunResult(null);
               }}
-              title={`${agent.name} (${agent.persona}) · Status: ${state}`}
+              title={`${agent.name} (${agent.persona}) · Status: ${activeAgentNames === null ? 'unavailable' : state}`}
               className={`group relative flex flex-col items-center justify-center rounded-lg p-1 transition-all cursor-pointer ${
                 isSelected
                   ? 'bg-slate-200/90 ring-1 ring-slate-400 shadow-2xs'
@@ -425,7 +434,7 @@ export function SidebarAgentPanel({
                     : 'text-slate-600'
                 }
               >
-                {getAgentState(selectedAgent.name)}
+                {activeAgentNames === null ? 'unavailable' : getAgentState(selectedAgent.name)}
               </strong>
             </span>
           </div>

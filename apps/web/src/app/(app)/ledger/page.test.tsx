@@ -4,8 +4,9 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import LedgerPage from './page';
 
 const state = vi.hoisted(() => ({
-  ledger: { data: [] as Record<string, unknown>[], count: 0, error: null as Error | null },
+  ledger: { data: [] as Record<string, unknown>[] | null, count: 0 as number | null, error: null as Error | null },
   total: { count: 0, error: null as Error | null },
+  active: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   verification: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   context: vi.fn(),
 }));
@@ -40,13 +41,14 @@ function makeQuery(value: () => unknown) {
 beforeEach(() => {
   state.ledger = { data: [], count: 0, error: null };
   state.total = { count: 0, error: null };
+  state.active = { data: [], error: null };
   state.verification = { data: [], error: null };
   state.context.mockReset();
   state.context.mockImplementation(async () => ({
     userId: 'auditor-1', tenantId: 'tenant-1', tenantName: 'Actual tenant', tenantSlug: 'actual',
     supabase: {
       from: (table: string) => table === 'users' ? makeQuery(() => ({}))
-        : table === 'agent_runs' ? makeQuery(() => ({ data: [] }))
+        : table === 'agent_runs' ? makeQuery(() => state.active)
           : makeQuery(() => state.ledger),
       rpc: async () => state.verification,
     },
@@ -89,6 +91,16 @@ it('refuses an unavailable requested tenant instead of silently displaying anoth
 
 it('refuses to turn a ledger query error into an empty verified audit', async () => {
   state.ledger = { data: [], count: 0, error: new Error('read failed') };
+  await expect(renderPage()).rejects.toThrow('Ledger records are unavailable');
+});
+
+it('refuses missing ledger rows, counts, or running-agent sources', async () => {
+  state.ledger = { data: null, count: 0, error: null };
+  await expect(renderPage()).rejects.toThrow('Ledger records are unavailable');
+  state.ledger = { data: [], count: null, error: null };
+  await expect(renderPage()).rejects.toThrow('Ledger records are unavailable');
+  state.ledger = { data: [], count: 0, error: null };
+  state.active = { data: null, error: null };
   await expect(renderPage()).rejects.toThrow('Ledger records are unavailable');
 });
 

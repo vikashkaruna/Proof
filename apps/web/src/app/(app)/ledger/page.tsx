@@ -143,14 +143,17 @@ export default async function LedgerPage({
       .eq('tenant_id', tenantId),
   ]);
 
-  if (ledgerRes.error || totalCountRes.error) {
+  if (activeRunsRes.error || ledgerRes.error || totalCountRes.error ||
+    !Array.isArray(activeRunsRes.data) || !Array.isArray(ledgerRes.data) ||
+    typeof ledgerRes.count !== 'number' || !Number.isSafeInteger(ledgerRes.count) || ledgerRes.count < 0 ||
+    typeof totalCountRes.count !== 'number' || !Number.isSafeInteger(totalCountRes.count) || totalCountRes.count < 0) {
     throw new Error('Ledger records are unavailable. No audit status can be inferred.');
   }
 
-  const activeAgentRuns = activeRunsRes.data ?? [];
-  const entries = ledgerRes.data ?? [];
-  const filteredCount = ledgerRes.count ?? entries.length;
-  const totalCount = totalCountRes.count ?? filteredCount;
+  const activeAgentRuns = activeRunsRes.data;
+  const entries = ledgerRes.data;
+  const filteredCount = ledgerRes.count;
+  const totalCount = totalCountRes.count;
   const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
 
   const streamEntries: LedgerStreamEntry[] = entries.map((e) => ({

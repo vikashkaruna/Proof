@@ -38,3 +38,23 @@ it('routes source-bound and approval-gated agents to dedicated workflows', async
   }
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it('marks unreadable agent-run status unavailable instead of claiming no active runs', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+  render(<SidebarAgentPanel />);
+  await waitFor(() => expect(screen.getByText('Agent-run status unavailable')).toBeTruthy());
+  expect(document.body.textContent).not.toContain('No active agent runs reported');
+  fireEvent.click(screen.getByRole('button', { name: /drishti/i }));
+  expect(document.body.textContent).toContain('State: unavailable');
+});
+
+it('accepts active state only from a well-formed run list', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [{ agent_name: 'DRISHTI' }] })));
+  const view = render(<SidebarAgentPanel />);
+  await waitFor(() => expect(screen.getByText('1 agent run(s) reported active')).toBeTruthy());
+  expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: working');
+  view.unmount();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: null })));
+  render(<SidebarAgentPanel />);
+  await waitFor(() => expect(screen.getByText('Agent-run status unavailable')).toBeTruthy());
+});

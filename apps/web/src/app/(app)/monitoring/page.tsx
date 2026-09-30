@@ -123,7 +123,8 @@ export default async function MonitoringPage() {
       .limit(50),
   ]);
 
-  if (schedulesRes.error || driftRes.error || alertsRes.error) {
+  if (schedulesRes.error || driftRes.error || alertsRes.error ||
+    !schedulesRes.data || !driftRes.data || !alertsRes.data) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -140,9 +141,9 @@ export default async function MonitoringPage() {
     );
   }
 
-  const schedules = (schedulesRes.data ?? []) as unknown as ScheduleRow[];
-  const driftEvents = (driftRes.data ?? []) as unknown as DriftRow[];
-  const alerts = (alertsRes.data ?? []) as unknown as AlertRow[];
+  const schedules = schedulesRes.data as unknown as ScheduleRow[];
+  const driftEvents = driftRes.data as unknown as DriftRow[];
+  const alerts = alertsRes.data as unknown as AlertRow[];
 
   const health = computeMonitoringHealth(schedules, driftEvents);
   const unreadAlerts = alerts.filter((a) => a.status === 'unread' || a.status === 'read');
@@ -204,7 +205,7 @@ export default async function MonitoringPage() {
         <CardContent className="flex flex-col gap-2">
           {alerts.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No alerts dispatched</p>
+              <p className="text-sm font-medium text-indigo-500">No alerts in the loaded page</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
                 Alerts recorded for this tenant will appear here and in the alert tray.
               </p>
@@ -266,7 +267,7 @@ export default async function MonitoringPage() {
         <CardContent className="flex flex-col gap-2">
           {schedules.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No schedules registered</p>
+              <p className="text-sm font-medium text-indigo-500">No schedules in the loaded page</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
                 An estate manager registers re-discovery, re-assessment or drift-check schedules per
                 estate. Nothing is sampled here until a schedule exists.
@@ -354,7 +355,7 @@ export default async function MonitoringPage() {
         <CardContent className="flex flex-col gap-2">
           {driftEvents.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No drift detected</p>
+              <p className="text-sm font-medium text-indigo-500">No drift events in the loaded page</p>
               <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
                 When a drift check finds the estate has moved — a new system, a lost connection, a
                 control that no longer holds — the detection is recorded here and stays open until
@@ -388,7 +389,7 @@ export default async function MonitoringPage() {
           )}
           {health.unacknowledgedTotal > 0 && (
             <p className="rounded-md border border-ember-500 bg-ember-50 p-3 text-xs text-ember-700">
-              {health.unacknowledgedTotal} detection(s) still lack a human acknowledgement.
+              {health.unacknowledgedTotal} loaded detection(s) lack a human acknowledgement.
               Acknowledging records who judged the detection and when — it is the close of the
               monitoring loop.
             </p>

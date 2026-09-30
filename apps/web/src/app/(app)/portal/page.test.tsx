@@ -15,7 +15,7 @@ vi.mock('@/lib/tenant-context', () => ({ requireTenantContext: async (requested?
   return {
     tenantId: 'tenant-1', tenantName: 'Actual tenant', tenantSlug: 'actual',
     supabase: { from: (table: string) => {
-      const result = () => ({ data: state.data[table] ?? [], error: state.errors[table] ?? null });
+      const result = () => ({ data: Object.hasOwn(state.data, table) ? state.data[table] : [], error: state.errors[table] ?? null });
       const query = {
         select: () => query,
         eq: (key: string, value: unknown) => { state.calls.push([table, key, value]); return query; },
@@ -51,6 +51,21 @@ it('marks partial source failure and does not convert missing dates into SLA val
   expect(view).toContain('&quot;loadError&quot;:true');
   expect(view).toContain('&quot;slaDays&quot;:null');
   expect(view).not.toContain('NaN');
+});
+
+it('marks successful responses with missing list bodies unavailable rather than empty', async () => {
+  state.data.audit_ledger = null;
+  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  expect(view).toContain('&quot;loadError&quot;:true');
+  expect(view).toContain('&quot;ledger&quot;:[]');
+});
+
+it('marks missing plan action readback unavailable rather than claiming no actions', async () => {
+  state.data.remediation_plans = [{ id: 'plan-1', title: 'Saved plan', status: 'review', version: 1, created_at: '2026-10-01' }];
+  state.data.remediation_actions = null;
+  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  expect(view).toContain('&quot;loadError&quot;:true');
+  expect(view).not.toContain('Saved plan');
 });
 
 it('reads the exact saved engagement within the tenant and preserves its source figures', async () => {
