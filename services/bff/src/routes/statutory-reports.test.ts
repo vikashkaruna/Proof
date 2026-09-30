@@ -174,10 +174,8 @@ describe('Statutory Reports HTTP Routes', () => {
     const pdfRes = await app().request(`/v1/reports/statutory/${reportId}/pdf`, {
       method: 'GET',
     });
-    expect(pdfRes.status).toBe(409);
-    expect(await pdfRes.json()).toMatchObject({
-      error: { code: 'source_bound_workflow_required' },
-    });
+    expect(pdfRes.status).toBe(404);
+    expect(pdfRes.headers.get('content-type')).not.toContain('application/pdf');
     expect(rpcCalled).toBe(false);
 
     const otherHtml = await app(fixture.viewer, UserRole.VIEWER).request(

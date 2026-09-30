@@ -302,6 +302,8 @@ export const LedgerActionType = {
   REPORT_REQUESTED: 'report.requested',
   REPORT_DPB_REQUESTED: 'report.dpb.requested',
   REPORT_DPB_DRAFTED: 'report.dpb.drafted',
+  REPORT_TECHNICAL_REQUESTED: 'report.technical.requested',
+  REPORT_TECHNICAL_DRAFTED: 'report.technical.drafted',
   REPORT_DRAFTED: 'report.drafted',
   REPORT_GENERATED: 'report.generated',
   REPORT_EXPORTED: 'report.exported',
