@@ -431,9 +431,7 @@ for (const format of ['technical', 'dpb'] as const) {
         format === 'dpb' ? 'source/dpb-review-pack.pdf' : 'source/technical-review-pack.pdf';
       expect(Buffer.from(files[sourcePath]!).toString('utf8')).toBe(source.source_text);
       expect(sha(Buffer.from(files[pdfPath]!))).toBe(pdf.content_hash);
-      const archiveManifest = JSON.parse(
-        Buffer.from(files['archiveManifest.json']!).toString('utf8'),
-      ) as {
+      const archiveManifest = JSON.parse(Buffer.from(files['manifest.json']!).toString('utf8')) as {
         kind: string;
         engagement_id: string | null;
         limitations: string[];
