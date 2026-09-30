@@ -381,11 +381,12 @@ for (const format of ['technical', 'dpb'] as const) {
         operationKey: crypto.randomUUID(),
       });
       expect(unsupported.status()).toBe(409);
+      const dossierTitle = `${format} retained derivative ${crypto.randomUUID()}`;
       const prepared = await successful(
         await post(owner, preparePath, {
           dossierType,
           reportId,
-          title: `${format} retained derivative`,
+          title: dossierTitle,
           operationKey: crypto.randomUUID(),
         }),
         201,
@@ -480,7 +481,7 @@ for (const format of ['technical', 'dpb'] as const) {
       await expect(
         founder.locator('#pramaan-report option').filter({ hasText: input.title }),
       ).toHaveCount(1);
-      const dossierRow = founder.locator('li').filter({ hasText: `${format} retained derivative` });
+      const dossierRow = founder.getByRole('listitem').filter({ hasText: dossierTitle });
       await expect(dossierRow).toBeVisible();
       await dossierRow.getByRole('button', { name: 'View record' }).click();
       await expect(
