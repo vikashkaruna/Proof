@@ -1,6 +1,6 @@
 /**
  * Statutory Reports API Routes.
- * Implements draft generation, HTML streaming, PDF downloading,
+ * Exposes guarded draft generation, HTML streaming, PDF downloading,
  * and listing across Board, Auditor, DPB, and Technical reports (W8 / FR-8 / Revision 106).
  */
 import { randomUUID } from 'node:crypto';
@@ -82,6 +82,7 @@ export function statutoryReportRoutes(
           'Content-Length': String(result.byteLength),
           'X-Report-Kind': result.kind,
           'X-Report-SHA256': result.sha256,
+          'Cache-Control': 'private, no-store',
         },
       });
     } catch (cause) {
@@ -107,6 +108,7 @@ export function statutoryReportRoutes(
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Disposition': `inline; filename="${result.kind}-report-${id}.html"`,
           'X-Report-Kind': result.kind,
+          'Cache-Control': 'private, no-store',
         },
       });
     } catch (cause) {
