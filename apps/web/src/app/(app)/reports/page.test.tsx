@@ -15,6 +15,7 @@ vi.mock('@/lib/tenant-context', () => ({
 }));
 import ReportsPage from './page';
 import { ReportProof } from './reports-client';
+import { DossierViewerModal } from './dossier-viewer-modal';
 import { detailSchema } from './report-contract';
 beforeEach(() => {
   state.role = UserRole.ADMIN;
@@ -30,6 +31,12 @@ it('refuses an agent and presents no mutation or fake output to a viewer', async
   expect(html).not.toContain('No reports recorded');
   expect(html).not.toContain('cryptographicSignature');
   expect(html).not.toContain('74');
+  expect(html).not.toContain('Historical dossiers');
+});
+it('shows historical dossier inspection only to an internal founder', async () => {
+  state.role = UserRole.FOUNDER;
+  state.internal = true;
+  expect(renderToStaticMarkup(await ReportsPage())).toContain('Historical dossiers');
 });
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
@@ -120,4 +127,40 @@ it('shows named immutable review attribution and distinct content/archive hashes
   expect(html).toContain(`Released archive SHA-256: ${'b'.repeat(64)}`);
   expect(html).toContain('Exact version: actual-version');
   expect(html).not.toContain('signature');
+});
+
+it('shows legacy dossier metadata without an unsupported proof or action', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const dossier = {
+    id,
+    tenantId: id,
+    engagementId: id,
+    reportId: null,
+    dossierType: 'board_executive' as const,
+    title: 'Historical board dossier',
+    status: 'sealed' as const,
+    merkleRoot: 'a'.repeat(64),
+    manifestHash: 'b'.repeat(64),
+    archiveHash: null,
+    archiveBytes: null,
+    proofSealHash: 'c'.repeat(64),
+    sealedAt: '2026-09-27T00:00:00Z',
+    sealedBy: id,
+    metadata: {},
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+  };
+  const html = renderToStaticMarkup(
+    <DossierViewerModal dossier={dossier} isOpen onClose={() => undefined} />,
+  );
+  expect(html).toContain('Historical dossier record');
+  expect(html).toContain('Recorded status');
+  expect(html).toContain('does not establish a verified source');
+  expect(html).not.toContain('Gold ProofSeal');
+  expect(html).not.toContain('WORM SEALED');
+  expect(html).not.toContain('92 / 100');
+  expect(html).not.toContain('Synthesize');
+  expect(html).not.toContain('Affix');
+  expect(html).not.toContain('Download');
+  expect(html).not.toContain('Send via Email');
 });

@@ -1,305 +1,122 @@
 'use client';
 
-import React, { useState } from 'react';
-import { AgentIcon, Badge, ProofSeal } from '@axiom/ui';
+import React, { useEffect, useRef } from 'react';
 import type { PramaanDossier } from '@axiom/types';
-import { EmailDispatchModal } from './email-dispatch-modal';
 
 export interface DossierViewerModalProps {
-  tenantId: string;
   dossier: PramaanDossier | null;
   isOpen: boolean;
   onClose: () => void;
-  canRelease?: boolean;
-  onSeal?: (dossierId: string, proofSeal: string) => Promise<void>;
 }
 
-export function DossierViewerModal({
-  tenantId,
-  dossier,
-  isOpen,
-  onClose,
-  canRelease = false,
-  onSeal,
-}: DossierViewerModalProps) {
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [sealing, setSealing] = useState(false);
-  const [sealError, setSealError] = useState('');
+const date = (value: string) => new Date(value).toLocaleString();
+
+export function DossierViewerModal({ dossier, isOpen, onClose }: DossierViewerModalProps) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Tab') return;
+      const buttons = dialog.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+      if (!buttons?.length) return;
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus();
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen || !dossier) return null;
 
-  async function handleSeal() {
-    if (!onSeal || !dossier) return;
-    setSealing(true);
-    setSealError('');
-    try {
-      await onSeal(dossier.id, dossier.proofSealHash);
-    } catch (err: unknown) {
-      setSealError(err instanceof Error ? err.message : 'Sealing failed');
-    } finally {
-      setSealing(false);
-    }
-  }
-
-  const isSealed = dossier.status === 'sealed';
-
   return (
-    <>
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 sm:p-6 overflow-y-auto">
-        <div
-          className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden"
-          role="dialog"
-          aria-modal="true"
-        >
-          {/* Header */}
-          <div className="bg-[#1E2A4A] p-5 text-white flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <AgentIcon agent="pramaan" size="md" state={isSealed ? 'idle' : 'thinking'} />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-teal-300">
-                    Axiom Proof · Statutory Closure Dossier
-                  </span>
-                  <Badge variant={isSealed ? 'proof' : 'warning'}>
-                    {isSealed ? 'WORM SEALED' : 'DRAFT DOSSIER'}
-                  </Badge>
-                </div>
-                <h2 className="text-lg font-bold text-white mt-0.5">{dossier.title}</h2>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-slate-300 hover:text-white p-1 font-bold text-lg"
-              aria-label="Close"
-            >
-              ✕
-            </button>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 p-4 sm:p-6">
+      <section
+        ref={dialog}
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dossier-title"
+        aria-describedby="dossier-limitations"
+      >
+        <div className="flex items-start justify-between gap-4 bg-[#1E2A4A] p-5 text-white">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-teal-200">
+              Historical dossier record
+            </p>
+            <h2 id="dossier-title" className="mt-1 break-words text-lg font-semibold">
+              {dossier.title}
+            </h2>
           </div>
-
-          {/* Body */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 text-slate-800 text-xs">
-            {/* Branding Banner */}
-            <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-4 text-slate-500">
-              <div>
-                <span className="font-semibold text-slate-700">Platform:</span> Axiom Proof (
-                <a
-                  href="https://axiomproof.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-teal-600 underline"
-                >
-                  https://axiomproof.ai
-                </a>
-                )
-              </div>
-              <div>
-                <span className="font-semibold text-slate-700">Issued By:</span> Axiom Minds Private
-                Limited (
-                <a
-                  href="https://axiomminds.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-teal-600 underline"
-                >
-                  https://axiomminds.ai
-                </a>
-                )
-              </div>
-              <div>
-                <span className="font-semibold text-slate-700">Tagline:</span> Agents do the work.
-                You approve. The proof is automatic.
-              </div>
-            </div>
-
-            {/* Cryptographic Proof Seal Card */}
-            <div
-              className={`rounded-xl border p-5 ${
-                isSealed
-                  ? 'border-[#C9A227] bg-[#FBF6E7]/50 shadow-xs'
-                  : 'border-amber-300 bg-amber-50/40'
-              }`}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[#A0821F]">
-                      {isSealed ? '★ SOVEREIGN GOLD PROOF SEAL' : '⚠ PENDING FOUNDER PROOF SEAL'}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Type: {dossier.dossierType.replace(/_/g, ' ').toUpperCase()}
-                    </span>
-                  </div>
-                  <p className="text-slate-600 text-[11px] mt-1">
-                    Multi-agent synthesized cryptographic proof bound to immutable audit ledger and
-                    WORM Object Lock vault.
-                  </p>
-                </div>
-
-                {!isSealed && canRelease && (
-                  <div>
-                    {sealError && <p className="text-xs text-red-600 mb-1">{sealError}</p>}
-                    <button
-                      type="button"
-                      disabled={sealing}
-                      onClick={handleSeal}
-                      className="rounded-lg bg-[#C9A227] hover:bg-[#B38F1E] px-4 py-2 text-xs font-bold text-white shadow-sm disabled:opacity-50"
-                    >
-                      {sealing ? 'Sealing...' : 'Affix Founder ProofSeal'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-[#C9A227]/30 text-[11px] font-mono">
-                <div>
-                  <span className="text-slate-500 font-sans block text-[10px] uppercase tracking-wider font-semibold">
-                    Proof Seal SHA-256
-                  </span>
-                  <span className="text-amber-900 break-all font-semibold">
-                    {dossier.proofSealHash}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-sans block text-[10px] uppercase tracking-wider font-semibold">
-                    Merkle Root Hash
-                  </span>
-                  <span className="text-slate-800 break-all">{dossier.merkleRoot}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-sans block text-[10px] uppercase tracking-wider font-semibold">
-                    Manifest SHA-256
-                  </span>
-                  <span className="text-slate-800 break-all">{dossier.manifestHash}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-sans block text-[10px] uppercase tracking-wider font-semibold">
-                    Sealed Timestamp & Authority
-                  </span>
-                  <span className="text-slate-800 font-sans">
-                    {dossier.sealedAt
-                      ? new Date(dossier.sealedAt).toLocaleString()
-                      : 'Unsealed Draft'}{' '}
-                    {dossier.sealedBy ? `· User ${dossier.sealedBy.slice(0, 8)}` : ''}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Statutory Overview */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Statutory Assessment & Legal Exposure
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-[11px] text-slate-500 uppercase">Statutory Maximum</div>
-                  <div className="text-base font-bold text-slate-900">₹250 Crore</div>
-                  <div className="text-[10px] text-slate-500">DPDPA 2023 Schedule 1</div>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-[11px] text-slate-500 uppercase">Evaluated Posture</div>
-                  <div className="text-base font-bold text-teal-700">92 / 100</div>
-                  <div className="text-[10px] text-slate-500">Parikshan Assessment Engine</div>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-[11px] text-slate-500 uppercase">Data Residency</div>
-                  <div className="text-base font-bold text-slate-900">ap-south-1</div>
-                  <div className="text-[10px] text-slate-500">Mumbai Strict Residency</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Multi-Agent Provenance Pipeline */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Autonomous Proof Lineage (12 Agent Collaboration)
-              </h3>
-              <div className="rounded-lg border border-slate-200 p-4 space-y-2 bg-slate-50/50">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">
-                    Prativedan (प्रतिवेदन · Drafter):
-                  </span>
-                  <span className="text-slate-600">
-                    Compiled working report, audit tables, and evidence references.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">
-                    Samadhan (समाधान · Maker-Checker):
-                  </span>
-                  <span className="text-slate-600">
-                    Verified dual-control parameter drift and signed execution reconciliation.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">Saakshi (साक्षी · Evidence):</span>
-                  <span className="text-slate-600">
-                    WORM Object Lock vaulting with cryptographic SHA-256 receipts.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">Lekha (लेखा · Ledger):</span>
-                  <span className="text-slate-600">
-                    Unbroken append-only hash chain recorded in PostgreSQL ledger.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-amber-900">
-                    Pramaan (प्रमाण · Master Seal Authority):
-                  </span>
-                  <span className="text-amber-900 font-medium">
-                    Synthesized authoritative closure pack and calculated sovereign Gold ProofSeal.
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer Actions */}
-          <div className="border-t border-slate-200 p-4 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-[11px] text-slate-500">
-              Workbench: <span className="font-mono">https://app.axiomproof.ai</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEmailModalOpen(true)}
-                className="rounded-md border border-teal-600 bg-teal-50 px-3.5 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100"
-              >
-                ✉ Send via Email
-              </button>
-              <a
-                href={`/api/bff/v1/dossiers/${dossier.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-md bg-indigo-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800"
-              >
-                Download Closure Pack
-              </a>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+          <button
+            ref={closeButton}
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-white hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300"
+            aria-label="Close dossier details"
+          >
+            ✕
+          </button>
         </div>
-      </div>
-
-      <EmailDispatchModal
-        tenantId={tenantId}
-        isOpen={emailModalOpen}
-        onClose={() => setEmailModalOpen(false)}
-        target={{
-          dossierId: dossier.id,
-          title: dossier.title,
-          kind: dossier.dossierType,
-          proofSealHash: dossier.proofSealHash,
-        }}
-      />
-    </>
+        <div className="space-y-5 overflow-y-auto p-5 text-sm text-slate-800">
+          <p
+            id="dossier-limitations"
+            className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700"
+          >
+            This historical record does not establish a verified source, retained closure pack, or
+            Object Lock receipt. It is unavailable for sealing, download, or dispatch.
+          </p>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <dt className="font-medium text-slate-600">Recorded status</dt>
+              <dd className="mt-1 capitalize">{dossier.status}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-600">Dossier type</dt>
+              <dd className="mt-1 capitalize">{dossier.dossierType.replace(/_/g, ' ')}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-600">Created</dt>
+              <dd className="mt-1">{date(dossier.createdAt)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-600">Engagement ID</dt>
+              <dd className="mt-1 break-all font-mono text-xs">{dossier.engagementId}</dd>
+            </div>
+            {dossier.reportId && (
+              <div className="sm:col-span-2">
+                <dt className="font-medium text-slate-600">Linked report ID</dt>
+                <dd className="mt-1 break-all font-mono text-xs">{dossier.reportId}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+        <div className="flex justify-end border-t border-slate-200 bg-slate-50 p-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+          >
+            Close
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
