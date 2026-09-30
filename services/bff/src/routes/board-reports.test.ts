@@ -494,25 +494,86 @@ describe('Board Reports HTTP Routes', () => {
     expect(res.status).toBe(403);
   });
 
-  it('lists only the actor’s board requests through the service-role connection', async () => {
+  it('scopes board requests to a live manager and gives the internal founder a tenant-wide view', async () => {
+    const now = new Date().toISOString();
     fixture.base.rows('board_report_requests').push(
       {
         id: randomUUID(),
+        engagement_id: randomUUID(),
+        assessment_run_id: randomUUID(),
+        report_id: null,
+        title: 'Owner request',
+        status: 'requested',
+        updated_at: now,
         tenant_id: tenant,
         requested_by: fixture.owner,
-        created_at: new Date().toISOString(),
+        created_at: now,
       },
       {
         id: randomUUID(),
+        engagement_id: randomUUID(),
+        assessment_run_id: randomUUID(),
+        report_id: null,
+        title: 'Viewer request',
+        status: 'requested',
+        updated_at: now,
         tenant_id: tenant,
         requested_by: fixture.viewer,
-        created_at: new Date().toISOString(),
+        created_at: now,
       },
     );
     const res = await app(fixture.owner, UserRole.OWNER).request('/v1/reports/board/requests');
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { requests: Array<{ requested_by: string }> };
+    const body = (await res.json()) as { requests: Array<{ title: string }> };
     expect(body.requests).toHaveLength(1);
-    expect(body.requests[0]?.requested_by).toBe(fixture.owner);
+    expect(body.requests[0]?.title).toBe('Owner request');
+    expect(Object.keys(body.requests[0]!)).not.toContain('requested_by');
+    const founder = await app(fixture.founder, UserRole.FOUNDER).request(
+      '/v1/reports/board/requests',
+    );
+    expect(founder.status).toBe(200);
+    expect(((await founder.json()) as { requests: unknown[] }).requests).toHaveLength(2);
+    fixture.base.rows('tenant_users').splice(
+      fixture.base
+        .rows('tenant_users')
+        .findIndex((row) => row.user_id === fixture.owner && row.tenant_id === tenant),
+      1,
+    );
+    const revoked = await app(fixture.owner, UserRole.OWNER).request('/v1/reports/board/requests');
+    expect(revoked.status).toBe(403);
+  });
+
+  it('lists bounded finalized assessment options and rejects unbounded pagination', async () => {
+    const engagementId = randomUUID();
+    const runId = randomUUID();
+    const now = new Date().toISOString();
+    fixture.base
+      .rows('engagements')
+      .push({ id: engagementId, tenant_id: tenant, title: 'Q3 scope' });
+    fixture.base.rows('workload_assessment_packets').push({
+      run_id: runId,
+      tenant_id: tenant,
+      engagement_id: engagementId,
+      library_version: '2023.1',
+      finalized_at: now,
+      finalized_receipt: 3,
+    });
+    const res = await app(fixture.owner, UserRole.OWNER).request(
+      '/v1/reports/board/assessment-options',
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { assessments: unknown[] }).assessments).toEqual([
+      {
+        assessmentRunId: runId,
+        engagementId,
+        engagementTitle: 'Q3 scope',
+        finalizedAt: now,
+        libraryVersion: '2023.1',
+      },
+    ]);
+    expect((await app().request('/v1/reports/board/assessment-options?limit=1000')).status).toBe(
+      400,
+    );
+    expect((await app().request('/v1/reports/board/requests?offset=-1')).status).toBe(400);
   });
 });

@@ -27,6 +27,21 @@ function invalid(c: Ctx, message?: string) {
   return c.json({ error: { code: 'validation_failed', message } }, 400);
 }
 
+const paginationSchema = z.object({
+  limit: z
+    .string()
+    .regex(/^[1-9][0-9]*$/)
+    .default('25')
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(50)),
+  offset: z
+    .string()
+    .regex(/^(0|[1-9][0-9]*)$/)
+    .default('0')
+    .transform(Number)
+    .pipe(z.number().int().min(0).max(10_000)),
+});
+
 export function boardReportRoutes(
   dependencies: {
     db?: EvidenceDatabase;
@@ -41,6 +56,49 @@ export function boardReportRoutes(
     dependencies.artifacts ?? new BoardArtifactService(dependencies.db ?? createSupabaseAdmin());
 
   const operationSchema = z.object({ operationKey: z.uuid() }).strict();
+
+  app.get('/reports/board/assessment-options', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const page = paginationSchema.safeParse({
+      limit: c.req.query('limit'),
+      offset: c.req.query('offset'),
+    });
+    if (!page.success) return invalid(c);
+    try {
+      return c.json(
+        await service().listAssessmentOptions(
+          c.get('tenantId'),
+          c.get('user').id,
+          page.data,
+          AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]),
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.get('/reports/board/:id/artifacts/status', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_READ);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.uuid().safeParse(id).success) return invalid(c);
+    try {
+      return c.json(
+        await artifacts().status(
+          c.get('tenantId'),
+          c.get('user').id,
+          id,
+          AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]),
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
 
   app.post('/reports/board/:id/artifacts', async (c) => {
     c.header('Cache-Control', 'private, no-store');
@@ -190,15 +248,18 @@ export function boardReportRoutes(
     const denied = requireCapability(c, Capability.REPORT_READ);
     if (denied) return denied;
 
-    const limit = Number(c.req.query('limit')) || 25;
-    const offset = Number(c.req.query('offset')) || 0;
+    const page = paginationSchema.safeParse({
+      limit: c.req.query('limit'),
+      offset: c.req.query('offset'),
+    });
+    if (!page.success) return invalid(c);
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
     try {
       const result = await service().listRequests(
         c.get('tenantId'),
         c.get('user').id,
-        { limit, offset },
+        page.data,
         signal,
       );
       return c.json(result, 200);

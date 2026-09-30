@@ -94,6 +94,7 @@ export default defineConfig({
           '**/evidence-ingestion.spec.ts',
           '**/evidence-packs.spec.ts',
           '**/evidence-packs-access.spec.ts',
+          '**/board-reports-provider.spec.ts',
         ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**

@@ -267,6 +267,7 @@ def main():
                     "evidence-vault.spec.ts",
                     "evidence-packs.spec.ts",
                     "evidence-packs-access.spec.ts",
+                    "board-reports-provider.spec.ts",
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
@@ -282,11 +283,11 @@ def main():
             }
             if (
                 result.returncode
-                or stats.get("expected") != 8
+                or stats.get("expected") != 11
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all eight tests without skips or retries"
+                    "Evidence browser acceptance requires all eleven tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
@@ -301,6 +302,9 @@ def main():
                 "pack-prepare-replay-and-honest-read-failure-rejection",
                 "pack-post-upload-settlement-recovery-and-begin-only-pending",
                 "pack-live-membership-internal-authority-and-export-revocation",
+                "board-finalized-assessment-founder-review-exact-provider-versions-and-release",
+                "board-provider-interruption-pending-build-and-founder-recovery",
+                "board-manager-and-founder-browser-request-review-build-preview-and-release",
             ]
         finally:
             try:
