@@ -44,6 +44,16 @@ it('renders a source error rather than treating it as a valid empty policy state
   expect(view).not.toContain('No standing policies');
 });
 
+it.each(['policies', 'evaluations'] as const)(
+  'refuses a null-success %s source instead of showing zero policy decisions', async (source) => {
+    state[source] = { data: null, error: null };
+    const view = renderToStaticMarkup(await PoliciesPage());
+    expect(view).toContain('Policy records could not be loaded');
+    expect(view).not.toContain('No standing policies');
+    expect(view).not.toContain('No evaluations recorded');
+  },
+);
+
 it('shows only recorded scope and approval identities', async () => {
   state.policies = { data: [{
     id: 'policy-1', name: 'Limited backup action', version: 2, scope: { action_types: ['backup.create'], environment: 'staging' }, status: 'active',
