@@ -6,7 +6,7 @@ This is a **partial W8.4 milestone**. Only `board_executive` has an authoritativ
 
 `dpb_statutory`, `auditor_assurance`, `technical_register`, and `full_closure` still return `source_bound_dossier_required`; outbound email dispatch remains closed with `source_bound_dispatch_required`. Historical dossiers remain unverified and cannot enter the source-bound seal path. No production provider or statutory submission is claimed.
 
-The integration branch `codex/revision120-pramaan-source-bound` starts at auditor revision `df6af38` and adds migration 0089 after 0088. The report-kit export map and reports-client/page tests merged without textual conflict; both auditor and Pramaan workflows remain present. A full workspace test exposed two 0089 ledger enum additions missing from the TypeScript decoder; those are now declared. The source packet has a `request_id`, not a `report_id` because it is frozen before report creation; the selected report's request row supplies the authoritative report-to-request link.
+The integration branch `codex/revision120-pramaan-source-bound` starts at the exact auditor staging merge `56dfba9178fc96ddf69f9e38c072ca921937d5c9` and adds migration 0089 after 0088. The report-kit export map and reports-client/page tests merged without textual conflict; both auditor and Pramaan workflows remain present. A full workspace test exposed two 0089 ledger enum additions missing from the TypeScript decoder; those are now declared. The source packet has a `request_id`, not a `report_id` because it is frozen before report creation; the selected report's request row supplies the authoritative report-to-request link.
 
 ## Local validation
 
@@ -15,6 +15,7 @@ The integration branch `codex/revision120-pramaan-source-bound` starts at audito
 - The focused real-provider Chromium journey passed 1/1 with zero retries (`/tmp/axiom-w84-pramaan-provider-browser3.log`). It used real GoTrue sessions and the owned loopback Object Lock provider; it covered published board source/PDF, unsupported dossier refusals, retained dossier ZIP, founder seal, manager/viewer denial, closed dispatch, visible Pramaan UI, and provider-outage refusal.
 - The complete owned-provider Chromium suite passed **12/12 with zero retries in 7.6 minutes** (`/tmp/axiom-w84-integrated-provider-full.log`), including the Pramaan journey and existing auditor, board, evidence-pack, ingestion and vault regressions. The fixture owner metadata remains at `/private/tmp/axiom-w85-provider/private-fixture.json`; credentials are confined to that private fixture directory.
 - The ZIP timestamp uses a fixed 1980 local calendar date because fflate encodes DOS date fields with local getters. Identical ZIP SHA-256 was measured with `TZ=UTC`, `TZ=Asia/Kolkata`, and `TZ=America/Los_Angeles`; a single UTC instant would encode different local calendar fields.
+- Auditor [PR #118](https://github.com/vikashkaruna/Proof/pull/118) merged at `56dfba9178fc96ddf69f9e38c072ca921937d5c9`. Exact-merge [CI run 36781339878](https://github.com/vikashkaruna/Proof/actions/runs/36781339878), Bandit, Trivy and Semgrep completed successfully, including container/browser and provider acceptance. This is the prerequisite staging gate for the board dossier PR, not approval of that PR.
 
 ## Remaining release work
 
