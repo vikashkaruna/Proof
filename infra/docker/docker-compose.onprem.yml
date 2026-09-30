@@ -122,18 +122,19 @@ services:
       MINIO_ROOT_PASSWORD: ${AXIOM_STORAGE_SECRET_ACCESS_KEY:?set storage secret}
       MINIO_REGION_NAME: ap-south-1
     volumes: [minio-data:/data]
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 10s
-      retries: 10
     networks: [sovereign]
   minio-init:
     image: ${AXIOM_WORM_CLIENT_IMAGE:?supply approved WORM client digest}
     depends_on:
-      minio: {condition: service_healthy}
+      minio: {condition: service_started}
     entrypoint: ['/bin/sh', '-ec']
     command: |
-      mc alias set local http://minio:9000 "$${AXIOM_STORAGE_ACCESS_KEY_ID}" "$${AXIOM_STORAGE_SECRET_ACCESS_KEY}"
+      attempt=0
+      until mc alias set local http://minio:9000 "$${AXIOM_STORAGE_ACCESS_KEY_ID}" "$${AXIOM_STORAGE_SECRET_ACCESS_KEY}" && mc ready local; do
+        attempt=$$((attempt + 1))
+        [ "$$attempt" -lt 30 ] || exit 1
+        sleep 2
+      done
       if ! mc stat "local/$${AXIOM_EVIDENCE_BUCKET}" >/dev/null 2>&1; then mc mb --with-lock "local/$${AXIOM_EVIDENCE_BUCKET}"; fi
       mc retention set --default COMPLIANCE 7y "local/$${AXIOM_EVIDENCE_BUCKET}"
       retention="$$(mc retention info --default "local/$${AXIOM_EVIDENCE_BUCKET}")"
