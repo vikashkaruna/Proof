@@ -23,7 +23,7 @@ it('renders only active grants and exposes a selected node through keyboard acce
   expect(screen.getByTestId('graph-summary').textContent).toContain('1 write grants');
   expect(container.querySelectorAll('[data-edge="write"]')).toHaveLength(1);
   fireEvent.keyDown(screen.getByRole('button', { name: 'agent Sudhaar' }), { key: 'Enter' });
-  expect(screen.getByTestId('no-relationships').textContent).toContain('no client-system access');
+  expect(screen.getByTestId('no-relationships').textContent).toContain('None in this view');
 });
 
 it('filters to the selected agent and access type without inventing write authority', () => {
@@ -62,4 +62,20 @@ it('filters to one estate without leaking another estate or its system names', (
   fireEvent.change(screen.getByRole('combobox', { name: 'Estate filter' }), { target: { value: 'estate-1' } });
   expect(screen.getByRole('button', { name: 'system Payroll' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'system Other payroll' })).toBeNull();
+});
+
+it('does not claim global absence of access when another estate has a valid grant', () => {
+  const other: GraphInput = {
+    ...input,
+    estates: [...input.estates, { id: 'estate-2', name: 'Second estate', status: 'active' as const }],
+    systems: [...input.systems, { id: 'system-2', estateId: 'estate-2', name: 'Second payroll', status: 'active' as const, categories: ['identity'] }],
+    connectors: [...input.connectors, { id: 'connector-2', systemId: 'system-2', name: 'Second connector', status: 'active' as const, assurance: 'registered' as const }],
+    grants: [...input.grants, { id: 'grant-3', connectorId: 'connector-2', agentName: 'sudhaar', scope: 'connector.read', expiresAt: '2026-11-01T00:00:00Z', revokedAt: null }],
+  };
+  render(<EstateGraph input={other} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Estate filter' }), { target: { value: 'estate-1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'agent Sudhaar' }));
+  expect(screen.getByTestId('no-relationships').textContent).toContain('None in this view');
+  expect(document.body.textContent).not.toContain('holds no client-system access');
+  expect(screen.getByTestId('graph-summary').textContent).toContain('Other estates or filters may have additional grants.');
 });

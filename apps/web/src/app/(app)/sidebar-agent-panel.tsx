@@ -211,6 +211,7 @@ export function SidebarAgentPanel({
 }: SidebarAgentPanelProps = {}) {
   const router = useRouter();
   const [activeAgentNames, setActiveAgentNames] = useState<Set<string> | null>(null);
+  const [activeRunCount, setActiveRunCount] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState<AgentActionMeta | null>(null);
 
   // Execution state tracking
@@ -245,7 +246,10 @@ export function SidebarAgentPanel({
       try {
         const res = await fetch('/api/bff/v1/agents/runs/active');
         if (!res.ok) {
-          if (isMounted) setActiveAgentNames(null);
+          if (isMounted) {
+            setActiveAgentNames(null);
+            setActiveRunCount(0);
+          }
           return;
         }
         const data = await res.json();
@@ -257,11 +261,16 @@ export function SidebarAgentPanel({
             names.add(run.agent_name.toLowerCase());
           }
           setActiveAgentNames(names);
+          setActiveRunCount(data.active_runs.length);
         } else if (isMounted) {
           setActiveAgentNames(null);
+          setActiveRunCount(0);
         }
       } catch {
-        if (isMounted) setActiveAgentNames(null);
+        if (isMounted) {
+          setActiveAgentNames(null);
+          setActiveRunCount(0);
+        }
       }
     }
 
@@ -307,7 +316,7 @@ export function SidebarAgentPanel({
     }
   };
 
-  const activeCount = activeAgentNames?.size ?? 0;
+  const activeCount = activeAgentNames === null ? 0 : activeRunCount;
   const currentBroadcast =
     systemMessage ||
     (activeAgentNames === null
