@@ -68,7 +68,7 @@ select public.complete_workload_assessment(
   '{"library_version":"statutory-test-lib","posture_score":85,"estimated_exposure_inr":1000000,"findings":[{"control_id":"AUDITOR-001","score":85,"risk_points":0,"rationale":"Synthetic fixture"}]}'::jsonb,
   clock_timestamp()+interval '5 minutes');
 
-set local role service_role;
+reset role; -- privileged lifecycle fixture; restricted writer and shared-key denial are tested separately
 do $$
 declare
  t uuid:='99880000-0000-4000-8000-000000000010';

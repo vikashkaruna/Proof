@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   env: {
     SUPABASE_URL: 'https://example.invalid',
+    SUPABASE_ANON_KEY: 'anon-key',
     SUPABASE_SERVICE_KEY: 'service-key',
     SUPABASE_STATUTORY_PROOF_WRITER_KEY: '',
   },
@@ -37,8 +38,9 @@ describe('statutory proof writer credential', () => {
     const writerKey = token('statutory_proof_writer');
     mocks.env.SUPABASE_STATUTORY_PROOF_WRITER_KEY = writerKey;
     createStatutoryProofWriter();
-    expect(mocks.createClient).toHaveBeenCalledWith('https://example.invalid', writerKey, {
+    expect(mocks.createClient).toHaveBeenCalledWith('https://example.invalid', 'anon-key', {
       auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${writerKey}` } },
     });
   });
 });

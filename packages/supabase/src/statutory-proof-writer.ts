@@ -32,8 +32,12 @@ export function createStatutoryProofWriter(): SupabaseClient {
   // This local structural check is only configuration validation. PostgREST
   // authenticates the HS256 signature and assumes the restricted DB role.
   if (cached) return cached;
-  cached = createClient(env.SUPABASE_URL, key, {
+  // Supabase's API gateway accepts the public anon key in `apikey`; PostgREST
+  // evaluates the separate scoped Bearer token. A custom JWT is not itself a
+  // registered gateway API key on every self-hosted/deployed topology.
+  cached = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${key}` } },
   });
   return cached;
 }
