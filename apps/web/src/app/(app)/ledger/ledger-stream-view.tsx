@@ -93,12 +93,15 @@ export function LedgerStreamView({
     }
   };
 
-  const copyToClipboard = (text: string, fieldName: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(fieldName);
-    setTimeout(() => setCopiedField(null), 2000);
+  const copyToClipboard = async (text: string, fieldName: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      setCopiedField(null);
+    }
   };
-
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] gap-4 items-start">
@@ -180,7 +183,8 @@ export function LedgerStreamView({
                             : 'text-[#8a6d10]'
                       }`}
                     >
-                      {l.result === 'success' ? '✓ ' : l.result === 'failure' ? '✕ ' : ''}{l.result}
+                      {l.result === 'success' ? '✓ ' : l.result === 'failure' ? '✕ ' : ''}
+                      {l.result}
                     </span>
                   </div>
                 </button>
@@ -199,7 +203,10 @@ export function LedgerStreamView({
 
         {/* Lazy Load More Button */}
         {loadError && (
-          <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800">
+          <p
+            role="alert"
+            className="border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800"
+          >
             More ledger entries could not be loaded. Retry the same page.
           </p>
         )}
@@ -243,9 +250,7 @@ export function LedgerStreamView({
               </span>
             )}
           </div>
-          <h2 className="font-heading text-base font-semibold text-white mt-1">
-            Recorded entry
-          </h2>
+          <h2 className="font-heading text-base font-semibold text-white mt-1">Recorded entry</h2>
           <div className="text-[11px] text-[#a9b3ce] mt-0.5">
             Only recorded fields are shown; this entry does not prove a complete lifecycle.
           </div>
@@ -293,7 +298,7 @@ export function LedgerStreamView({
                 <button
                   type="button"
                   onClick={() => setShowRawJson(!showRawJson)}
-                  className="text-[10px] text-[#C9A227] hover:underline cursor-pointer flex items-center gap-1"
+                  className="text-[10px] text-[#0FB5A5] hover:underline cursor-pointer flex items-center gap-1"
                 >
                   <span>{showRawJson ? '▼ Hide raw payload JSON' : '▶ View raw payload JSON'}</span>
                 </button>
@@ -306,8 +311,6 @@ export function LedgerStreamView({
             )}
           </div>
         )}
-
-
       </div>
     </div>
   );
