@@ -33,6 +33,10 @@ select pg_temp.ok(not pg_has_role('service_role','statutory_proof_writer','membe
  'shared service role cannot assume proof writer');
 
 set local role service_role;
+select pg_temp.denied($s$select public.prepare_evidence_pack(
+  '99890100-0000-4000-8000-000000000010',
+  '99890100-0000-4000-8000-000000000001',
+  gen_random_uuid(), 'forged pack', null, null, array[]::uuid[], gen_random_uuid())$s$);
 select pg_temp.denied($s$select public.review_report(
  '99890100-0000-4000-8000-000000000010','99890100-0000-4000-8000-000000000020',
  'approved',null,'99890100-0000-4000-8000-000000000001',repeat('a',64),gen_random_uuid())$s$);

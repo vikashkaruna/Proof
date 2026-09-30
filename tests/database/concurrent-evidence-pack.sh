@@ -30,15 +30,15 @@ do \$\$ declare x jsonb;r public.evidence_ingestions;k uuid:=gen_random_uuid();h
 end \$\$;
 SQL
 race() {
- local label="$1" first="$2" second="$3" role_name="${4:-service_role}"
- sql -c "set application_name='$label-first'; begin; set local role $role_name; $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
+ local label="$1" first="$2" second="$3" first_role="${4:-statutory_proof_writer}" second_role="${5:-statutory_proof_writer}"
+ sql -c "set application_name='$label-first'; begin; set local role $first_role; $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
  local first_pid=$! ready=false blocked=false
  for attempt in $(seq 1 60); do
   [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
   sleep 0.05
  done
  [ "$ready" = true ] || { cat "$result_dir/$label-first"; exit 1; }
- sql -c "set application_name='$label-second'; set role service_role; $second;" > "$result_dir/$label-second" 2>&1 &
+ sql -c "set application_name='$label-second'; set role $second_role; $second;" > "$result_dir/$label-second" 2>&1 &
  local second_pid=$!
  for attempt in $(seq 1 40); do
   [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
@@ -80,7 +80,8 @@ sql -c "update public.tenant_users set role='founder' where tenant_id='$tenant' 
 race pack-internal-revocation "update public.users set is_axiom_internal=false where id='$founder'" "$release" postgres
 grep -q 'founder_authority_required' "$result_dir/pack-internal-revocation-second"
 sql -c "update public.users set is_axiom_internal=true where id='$founder'"
-fresh=$(sql -c "set role service_role; select public.record_report_draft('$tenant','$owner',gen_random_uuid(),'board','Fresh review race','$engagement',null,'{\"synthetic\":true}','fixture',gen_random_uuid())->>'reportId'")
+# The deprecated draft RPC is superuser fixture-only; service_role and the writer are denied.
+fresh=$(sql -c "select public.record_report_draft('$tenant','$owner',gen_random_uuid(),'board','Fresh review race','$engagement',null,'{\"synthetic\":true}','fixture',gen_random_uuid())->>'reportId'")
 fresh_hash=$(sql -c "select content_sha256 from public.reports where id='$fresh'")
 fresh_review="select public.review_report('$tenant','$fresh','approved',null,'$founder','$fresh_hash',gen_random_uuid())"
 race pack-fresh-review-demotion "update public.tenant_users set role='owner' where tenant_id='$tenant' and user_id='$founder'" "$fresh_review" postgres
