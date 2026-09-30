@@ -162,6 +162,36 @@ it('keeps the kill switch engaged when the BFF refuses release', async () => {
   expect(release?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Tenant-Id': 'tenant-alpha' } });
 });
 
+it('does not claim kill-switch engagement from an unconfirmed HTTP success', async () => {
+  const fetcher = vi.fn((url: string) => Promise.resolve(url.includes('kill-switch/status')
+    ? Response.json({ engaged: false })
+    : url.includes('kill-switch/engage')
+      ? Response.json({ accepted: true })
+      : Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /^⏻ Kill switch$/ }).hasAttribute('disabled')).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: /^⏻ Kill switch$/ }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/engage')).toBe(true));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Kill switch status unavailable/i })).toBeTruthy());
+  expect(document.body.textContent).not.toContain('KILL SWITCH ENGAGED');
+});
+
+it('does not claim kill-switch release from an unconfirmed HTTP success', async () => {
+  const fetcher = vi.fn((url: string) => Promise.resolve(url.includes('kill-switch/status')
+    ? Response.json({ engaged: true })
+    : url.includes('kill-switch/release')
+      ? Response.json({ accepted: true })
+      : Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/release')).toBe(true));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Kill switch status unavailable/i })).toBeTruthy());
+  expect(document.body.textContent).not.toContain('KILL SWITCH ENGAGED');
+});
+
 it('refreshes the dashboard after a verified tenant switch', async () => {
   state.switchTenant.mockResolvedValue({ ok: true });
   render(<AppShell {...props} />);

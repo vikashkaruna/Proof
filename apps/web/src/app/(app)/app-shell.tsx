@@ -243,11 +243,13 @@ export function AppShell({
           headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
           body: JSON.stringify({ scope: 'tenant', reason: 'Engaged from navigation bar' }),
         });
-        if (res.ok) {
+        if (res.ok && (await res.json().catch(() => null))?.engaged === true) {
           setKillState({ tenantId: selectedTenantId, engaged: true });
           window.dispatchEvent(
             new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: true } }),
           );
+        } else if (res.ok) {
+          setKillState(null);
         }
       } catch (err) {
         console.error('Failed to engage kill switch:', err);
@@ -260,11 +262,13 @@ export function AppShell({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
         });
-        if (res.ok) {
+        if (res.ok && (await res.json().catch(() => null))?.engaged === false) {
           setKillState({ tenantId: selectedTenantId, engaged: false });
           window.dispatchEvent(
             new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: false } }),
           );
+        } else if (res.ok) {
+          setKillState(null);
         }
       } catch (err) {
         console.error('Failed to release kill switch:', err);
