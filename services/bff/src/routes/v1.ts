@@ -1249,20 +1249,32 @@ export function v1Routes(deps: Deps) {
     if (rejectRefusal) return rejectRefusal;
 
     const admin = createSupabaseAdmin();
-    const { error } = await admin
+    const { data: cancelledPlan, error } = await admin
       .from('remediation_plans')
       .update({ status: 'cancelled' })
       .eq('id', planId)
-      .eq('tenant_id', tenantId);
+      .eq('tenant_id', tenantId)
+      .in('status', ['draft', 'review', 'approved'])
+      .select('id')
+      .maybeSingle();
     if (error) {
       return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
     }
-    await admin
+    if (!cancelledPlan) {
+      return c.json(
+        { error: { code: 'plan_not_rejectable', message: 'Plan is not rejectable' } },
+        409,
+      );
+    }
+    const { error: actionError } = await admin
       .from('remediation_actions')
       .update({ approval_status: 'skipped', final_outcome: 'skipped' })
       .eq('plan_id', planId)
       .eq('tenant_id', tenantId)
       .in('approval_status', ['draft', 'awaiting_approval', 'approved']);
+    if (actionError) {
+      return c.json({ error: { code: 'update_failed', message: actionError.message } }, 500);
+    }
 
     await deps.ledger.append({
       tenantId,
