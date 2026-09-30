@@ -44,8 +44,9 @@ test('owner declares, edits and archives an estate and system', async ({ page })
     .locator('form')
     .filter({ has: page.getByRole('button', { name: 'Save system', exact: true }) });
   await edit.getByLabel('Status', { exact: true }).selectOption('archived');
-  const savedSystem = page.waitForResponse((res) =>
-    res.url().includes('/api/bff/v1/estate-systems/') && res.request().method() === 'PATCH',
+  const savedSystem = page.waitForResponse(
+    (res) =>
+      res.url().includes('/api/bff/v1/estate-systems/') && res.request().method() === 'PATCH',
   );
   await edit.getByRole('button', { name: 'Save system', exact: true }).click();
   expect((await savedSystem).status()).toBe(200);

@@ -253,7 +253,9 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     ).toBeVisible();
     const persisted = await get(page, '/purposes');
     expect(persisted.status()).toBe(200);
-    const { data: purposes } = (await persisted.json()) as { data: Array<{ id: string; purpose_key: string; notice_version: number }> };
+    const { data: purposes } = (await persisted.json()) as {
+      data: Array<{ id: string; purpose_key: string; notice_version: number }>;
+    };
     const purpose = purposes.find((row) => row.purpose_key === `form-${which}-${suffix}`);
     expect(purpose?.notice_version).toBe(1);
     return { id: purpose!.id, name, noticeEn, noticeHi };
@@ -307,8 +309,12 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
   await expect(recordCard).toContainText('Notice snapshot SHA-256:');
   const recorded = await get(page, '/records');
   expect(recorded.status()).toBe(200);
-  const { data: records } = (await recorded.json()) as { data: Array<{ id: string; purpose_id: string; principal_ref: string }> };
-  const record = records.find((row) => row.purpose_id === first.id && row.principal_ref === principal);
+  const { data: records } = (await recorded.json()) as {
+    data: Array<{ id: string; purpose_id: string; principal_ref: string }>;
+  };
+  const record = records.find(
+    (row) => row.purpose_id === first.id && row.principal_ref === principal,
+  );
   expect(record).toBeDefined();
   await recordCard.getByRole('button', { name: 'Withdraw consent', exact: true }).click();
   await recordCard.getByLabel('Withdrawal language', { exact: true }).selectOption('hi');
@@ -335,8 +341,12 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
   ).toHaveCount(0);
   const withdrawalReadback = await get(page, '/withdrawals');
   expect(withdrawalReadback.status()).toBe(200);
-  const { data: withdrawals } = (await withdrawalReadback.json()) as { data: Array<{ id: string; consent_record_id: string; principal_ref: string }> };
-  const withdrawn = withdrawals.find((row) => row.consent_record_id === record!.id && row.principal_ref === principal);
+  const { data: withdrawals } = (await withdrawalReadback.json()) as {
+    data: Array<{ id: string; consent_record_id: string; principal_ref: string }>;
+  };
+  const withdrawn = withdrawals.find(
+    (row) => row.consent_record_id === record!.id && row.principal_ref === principal,
+  );
   expect(withdrawn).toBeDefined();
   const followUp = page
     .locator('section')
