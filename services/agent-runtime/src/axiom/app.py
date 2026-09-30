@@ -8,6 +8,7 @@ processes) drive the orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -92,7 +93,7 @@ async def lifespan(app: FastAPI):
         )
         log.info("scheduler.started", poll_seconds=settings.scheduler_poll_seconds)
 
-    log.info("agent_runtime.ready", agents=[a.value for a in app.state.agents.keys()])
+    log.info("agent_runtime.ready", agents=[a.value for a in app.state.agents])
     try:
         yield
     finally:
@@ -187,7 +188,12 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
     try:
         agent_enum = AgentName(agent_name)
     except ValueError:
-        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}")
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}") from None
+
+    # The legacy generic invocation has no report source, review, or publication
+    # boundary. Board reports enter through the BFF's persisted workflow only.
+    if agent_enum is AgentName.PRATIVEDAN:
+        raise HTTPException(status_code=403, detail="board_report_workflow_required")
 
     agent = app.state.agents.get(agent_enum)
     if not agent:

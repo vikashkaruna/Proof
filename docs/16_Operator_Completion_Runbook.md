@@ -1,5 +1,9 @@
 # Axiom Proof — Operator completion runbook: W0 → W4
 
+## Active release reassessment — 2026-09-30
+
+[Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md) supersedes older completion and deployment claims in this document. Source control now has Revisions 102–108 and `origin/staging` equals `origin/main` at `3492ffa`, with green exact-commit CI and security scans. Functional closure and production clearance are **not established**: W8 generated reports lack verified retained source/PDF artifacts and deployed E2E; W9 lacks real throughput, coverage-floor and full recovery proof; W10's offline topology/bootstrap is incomplete; remote preprod/production acceptance has not run. Revision 109 safety and test corrections are in progress on `codex/revision75-controller-generation-transition`. Follow the audit's requirement-by-requirement gates before production deployment. Local Docker results are not remote deployment proof.
+
 ## Active continuation — Revision 108 Complete (2026-09-28; Phase 0–5 Gap Closure W0–W10 Complete)
 
 This section supersedes conflicting historical handoff instructions below. **All Phase 0–5 workstreams (W0 through W10) are fully implemented, tested, and verified with 100% pass rates across all workspace packages and services.**

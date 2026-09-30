@@ -67,7 +67,7 @@ export const BoardReportContentV1Schema = z.object({
     estimated_exposure_inr: z.number().min(0),
     narrative: z.string().min(10).max(10000),
   }),
-  key_findings: z.array(BoardReportFindingSchema).max(50),
+  key_findings: z.array(BoardReportFindingSchema).max(500),
   action_plan: z.array(BoardReportActionItemSchema).max(50),
   signatures: z.object({
     prepared_by: z.object({
@@ -113,7 +113,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
   const validated = BoardReportContentV1Schema.parse(content);
   const es = validated.executive_summary;
   const scoreColor =
-    es.posture_score >= 80 ? '#0FB5A5' : es.posture_score >= 60 ? '#C9A227' : '#D9534F';
+    es.posture_score >= 80 ? '#0FB5A5' : es.posture_score >= 60 ? '#64748B' : '#D9534F';
 
   const findingsHtml = validated.key_findings
     .map((f) => {
@@ -153,16 +153,16 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
   const approvalBlockHtml = validated.signatures.approved_by
     ? `
       <div class="signature-box approved">
-        <div class="sig-header" style="color: #0FB5A5;">✓ APPROVED &amp; RELEASED</div>
+        <div class="sig-header" style="color: #0FB5A5;">✓ REVIEWER APPROVAL RECORDED</div>
         <div class="sig-name"><strong>${escapeHtml(validated.signatures.approved_by.name)}</strong></div>
         <div class="sig-role">${escapeHtml(validated.signatures.approved_by.role)}</div>
         <div class="sig-meta">User ID: ${escapeHtml(validated.signatures.approved_by.user_id)}</div>
         <div class="sig-meta">Timestamp: ${escapeHtml(validated.signatures.approved_by.timestamp)}</div>
-        <div class="seal-badge">SEALED PROOF</div>
+        <div class="review-badge">REVIEWED</div>
       </div>`
     : `
       <div class="signature-box pending">
-        <div class="sig-header" style="color: #C9A227;">⚠ DRAFT · PENDING FOUNDER APPROVAL</div>
+        <div class="sig-header" style="color: #64748B;">⚠ DRAFT · PENDING FOUNDER APPROVAL</div>
         <div class="sig-role">Requires review and sign-off by an Axiom-internal Founder before formal release.</div>
         <div class="sig-meta">Status: Unreleased Draft</div>
       </div>`;
@@ -212,7 +212,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
       margin: 0;
     }
     .report-badge {
-      background: #C9A227;
+      background: #0FB5A5;
       color: #1E2A4A;
       font-size: 11px;
       font-weight: 700;
@@ -326,7 +326,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
       background: #F0FDF4;
     }
     .signature-box.pending {
-      border-color: #C9A227;
+      border-color: #64748B;
       background: #FEFCE8;
     }
     .sig-header {
@@ -338,12 +338,12 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
     .sig-name { font-size: 14px; margin-bottom: 2px; }
     .sig-role { font-size: 12px; color: #475569; margin-bottom: 8px; }
     .sig-meta { font-size: 10px; color: #64748B; font-family: monospace; }
-    .seal-badge {
+    .review-badge {
       position: absolute;
       top: 14px;
       right: 14px;
-      background: #C9A227;
-      color: #1E2A4A;
+      background: #0FB5A5;
+      color: #FFFFFF;
       font-size: 9px;
       font-weight: 800;
       padding: 4px 8px;
@@ -356,10 +356,11 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
       padding-top: 12px;
       font-size: 10px;
       color: #94A3B8;
-      display: flex;
-      justify-content: space-between;
+      display: block;
       page-break-inside: avoid;
     }
+    .audit-footer div { margin-bottom: 4px; }
+    .audit-footer .code-col { overflow-wrap: anywhere; word-break: break-all; }
     @media print {
       body { font-size: 11pt; }
       .header-banner { margin-bottom: 12pt; padding: 16pt; }
@@ -375,7 +376,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
       <p class="brand-subtitle">${escapeHtml(validated.branding.product)} · ${escapeHtml(validated.branding.company)} · Generated ${escapeHtml(validated.generated_at)}</p>
     </div>
     <div>
-      <span class="report-badge">Executive Proof</span>
+      <span class="report-badge">Board Draft</span>
     </div>
   </div>
 
@@ -383,12 +384,12 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
     <div class="metric-card">
       <div class="metric-title">Posture Score</div>
       <div class="metric-value" style="color: ${scoreColor};">${es.posture_score}%</div>
-      <div class="metric-sub">${es.passed_controls} / ${es.total_controls} Controls Compliant</div>
+      <div class="metric-sub">${es.passed_controls} / ${es.total_controls} controls scoring at least 80</div>
     </div>
     <div class="metric-card">
       <div class="metric-title">Estimated Exposure</div>
       <div class="metric-value" style="color: #D9534F;">${formatInr(es.estimated_exposure_inr)}</div>
-      <div class="metric-sub">Max DPDPA Statutory Risk</div>
+      <div class="metric-sub">Recorded heuristic estimate</div>
     </div>
     <div class="metric-card">
       <div class="metric-title">Critical & High Gaps</div>
@@ -400,7 +401,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
     <div class="metric-card">
       <div class="metric-title">Control Library</div>
       <div class="metric-value" style="font-size: 18px; color: #1E2A4A;">${escapeHtml(validated.library_version)}</div>
-      <div class="metric-sub">DPDPA 2023 Statutory Baseline</div>
+      <div class="metric-sub">Frozen assessment library version</div>
     </div>
   </div>
 
@@ -427,7 +428,10 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
   </table>
 
   <h2>Remediation Action Plan</h2>
-  <table>
+  ${
+    validated.action_plan.length === 0
+      ? '<p class="text-muted">No reviewed action plan is attached to this assessment.</p>'
+      : `<table>
     <thead>
       <tr>
         <th style="width: 50px;" class="text-center">Step</th>
@@ -440,9 +444,10 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
     <tbody>
       ${actionPlanHtml}
     </tbody>
-  </table>
+  </table>`
+  }
 
-  <h2>Dual Attestation &amp; Approvals</h2>
+  <h2>Preparation and Review</h2>
   <div class="signature-section">
     <div class="signature-box approved">
       <div class="sig-header" style="color: #0FB5A5;">✓ PREPARED BY AGENT</div>

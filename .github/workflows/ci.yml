@@ -189,6 +189,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/test-database.sh
+      - run: bash tests/scripts/test-backup-restore.sh
 
   strict-auth-parity:
     name: Real Auth/PostgREST strict topology parity
@@ -479,6 +480,7 @@ jobs:
             python3 scripts/check-rendered-manifests.py \
               --expect-components web,marketing,bff,agent-runtime,model-gateway,temporal-worker \
               < /tmp/rendered.yaml
+            python3 infra/helm/axiom-proof/ci/assert-secret-scoping.py < /tmp/rendered.yaml
             echo "::endgroup::"
           done
 

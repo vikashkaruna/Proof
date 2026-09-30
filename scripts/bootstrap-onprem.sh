@@ -4,16 +4,17 @@
 #
 # Axiom Proof — Sovereign On-Premise & Air-Gapped Bootstrap Automation (W10)
 #
-# Automates:
-#   1. Pre-flight verification (Docker, Compose, ports, storage)
+# Checks:
+#   1. Pre-flight verification (Docker daemon)
 #   2. Sovereign environment configuration (.env.onprem)
-#   3. Offline Cryptographic License Generation and Validation
-#   4. Database bootstrap and append-only migrations (0000-0079)
-#   5. Default multi-tenant identity and control library seeding
-#   6. MinIO Object Lock WORM evidence bucket provisioning
+#   3. Pre-issued offline license validation
+#   4. Checksummed append-only database migrations
+#   5. Control-library seeding; demo identities only by explicit opt-in
+# This does not provision or validate the full on-premises stack.
 # ==============================================================================
 
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
@@ -66,63 +67,66 @@ fi
 
 # 3. Cryptographic Offline License Token
 echo "[3/6] Verifying offline cryptographic sovereign license..."
-if ! grep -q "^AXIOM_OFFLINE_LICENSE=v1\." "${ENV_FILE}" 2>/dev/null; then
-  if [ -n "${AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY:-}" ] || [ -f ".axiom-authority-key.pem" ]; then
-    LICENSE_TOKEN=$(pnpm tsx scripts/mint-license.ts \
-      --licensee "Sovereign Enterprise Customer" \
-      --tier enterprise-airgapped \
-      --days 365 \
-      --max-tenants 10 \
-      --max-nodes 50 | grep "^v1\." || true)
-
-    if [ -n "${LICENSE_TOKEN}" ]; then
-      echo "AXIOM_OFFLINE_LICENSE=${LICENSE_TOKEN}" >> "${ENV_FILE}"
-      echo "  -> Offline license appended to ${ENV_FILE}."
-    fi
-  else
-    echo "  -> Note: No authority private key configured in environment."
-    echo "     Set AXIOM_OFFLINE_LICENSE in ${ENV_FILE} using token provided by Axiom Minds."
+read_env_value() {
+  local name="$1"
+  local matches
+  matches=$(grep -c "^${name}=" "${ENV_FILE}" || true)
+  if [ "${matches}" -ne 1 ]; then
+    echo "[x] ${name} must occur exactly once in ${ENV_FILE}." >&2
+    exit 1
   fi
-fi
+  sed -n "s/^${name}=//p" "${ENV_FILE}"
+}
 
-# Verify the license token
-CURRENT_LICENSE=$(grep "^AXIOM_OFFLINE_LICENSE=" "${ENV_FILE}" | cut -d= -f2- || true)
-if [ -n "${CURRENT_LICENSE}" ]; then
-  pnpm tsx scripts/verify-license.ts "${CURRENT_LICENSE}" >/dev/null 2>&1 && {
-    echo "  -> Cryptographic license token verified: ACTIVE & GENUINE."
-  } || {
-    echo "[!] Warning: License token verification reported issues."
-  }
+CURRENT_LICENSE=$(read_env_value AXIOM_OFFLINE_LICENSE)
+if [ -z "${CURRENT_LICENSE}" ]; then
+  echo "[x] A pre-issued offline license is required." >&2
+  exit 1
 fi
-
-# 4. Database Migrations & Bootstrap
-echo "[4/6] Verifying database schema & append-only migrations..."
-if [ -f "scripts/test-database.sh" ]; then
-  echo "  -> Verifying migrations 0000-0079 on active database..."
-  ./scripts/test-database.sh >/dev/null 2>&1 && {
-    echo "  -> Database schema verified (all 80 migrations applied cleanly)."
-  } || {
-    echo "[!] Note: Database container already has active migrations."
-  }
+if ! AXIOM_OFFLINE_LICENSE="${CURRENT_LICENSE}" pnpm tsx scripts/verify-license.ts >/dev/null 2>&1; then
+  echo "[x] Offline license verification failed." >&2
+  exit 1
 fi
+echo "  -> Offline license verified."
 
-# 5. Seeding Default Identity & Tenancy
-echo "[5/6] Seeding sovereign identities and control library..."
-pnpm seed:controls >/dev/null 2>&1 || true
-echo "  -> Control library seeded (DPDPA baseline + 3 sector packs)."
-pnpm seed:users >/dev/null 2>&1 || true
-echo "  -> Multi-tenant users and roles provisioned."
+# 4. Database migrations
+echo "[4/6] Applying checksummed database migrations..."
+SUPABASE_DB_URL="${SUPABASE_DB_URL:-$(read_env_value SUPABASE_DB_URL)}"
+SUPABASE_URL="${SUPABASE_URL:-$(read_env_value SUPABASE_URL)}"
+SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-$(read_env_value SUPABASE_SERVICE_KEY)}"
+if [ -z "${SUPABASE_DB_URL}" ] || [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_SERVICE_KEY}" ]; then
+  echo "[x] Database URL, Supabase URL and service key are required." >&2
+  exit 1
+fi
+export SUPABASE_DB_URL SUPABASE_URL SUPABASE_SERVICE_KEY
+if ! python3 scripts/migrate-database.py --dsn "${SUPABASE_DB_URL}" >/dev/null; then
+  echo "[x] Database migration failed." >&2
+  exit 1
+fi
+echo "  -> Database migrations applied or verified by checksum."
+
+# 5. Seeding
+echo "[5/6] Seeding control library..."
+if ! pnpm seed:controls >/dev/null; then
+  echo "[x] Control-library seed failed." >&2
+  exit 1
+fi
+echo "  -> Control-library seed completed."
+
+# The shared seed:users command installs known demo passwords and resets them
+# when rerun. It must never run as an implicit production bootstrap step.
+if [ "${AXIOM_ONPREM_SEED_DEMO_USERS:-0}" = "1" ]; then
+  if ! pnpm seed:users >/dev/null; then
+    echo "[x] Demo-user seed failed." >&2
+    exit 1
+  fi
+  echo "  -> Demo-user seed completed; rotate its credentials before use."
+fi
 
 # 6. Summary
 echo "[6/6] Sovereign Bootstrap Assessment..."
 echo "----------------------------------------------------------------------"
-echo " [✓] SOVEREIGN ON-PREMISE BOOTSTRAP READY"
-echo " Environment:         onprem (Strict Authentication Mode)"
-echo " MinIO Evidence WORM: axiom-proof-evidence-onprem (Object Lock Compliance)"
-echo " Model Gateway:       Self-Hosted LLM (Zero Outbound Cloud Egress)"
-echo " Auth / MFA:          Air-gapped Self-Managed TOTP"
-echo " Offline License:     Cryptographically Signed Ed25519"
-echo " Default Admin:       founder@axiomminds.ai (Password: Admin@12345678)"
-echo " Web Workbench:       http://localhost:3001 (or :3000)"
-echo " BFF API Gateway:     http://localhost:4000"
+echo " [✓] BOOTSTRAP CHECKS PASSED"
+echo " License, migrations and requested seed commands completed."
+echo " Verify the deployment, Object Lock and service health separately."
 echo "======================================================================"

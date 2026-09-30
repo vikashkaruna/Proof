@@ -7,7 +7,6 @@ updates:
       interval: 'weekly'
     open-pull-requests-limit: 5
     rebase-strategy: 'auto'
-    delete-branch-after-merge: true
     commit-message:
       prefix: 'deps'
     groups:
@@ -32,7 +31,6 @@ updates:
       interval: 'weekly'
     open-pull-requests-limit: 3
     rebase-strategy: 'auto'
-    delete-branch-after-merge: true
     commit-message:
       prefix: 'deps'
     labels:
@@ -45,7 +43,6 @@ updates:
       interval: 'weekly'
     open-pull-requests-limit: 3
     rebase-strategy: 'auto'
-    delete-branch-after-merge: true
     commit-message:
       prefix: 'deps'
     labels:
@@ -58,7 +55,6 @@ updates:
       interval: 'weekly'
     open-pull-requests-limit: 3
     rebase-strategy: 'auto'
-    delete-branch-after-merge: true
     commit-message:
       prefix: 'deps'
     labels:
@@ -71,7 +67,6 @@ updates:
       interval: 'weekly'
     open-pull-requests-limit: 3
     rebase-strategy: 'auto'
-    delete-branch-after-merge: true
     commit-message:
       prefix: 'ci'
     labels:

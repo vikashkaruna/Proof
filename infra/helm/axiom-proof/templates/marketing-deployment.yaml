@@ -64,11 +64,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: anon-key
-            - name: SUPABASE_SERVICE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "axiom-proof.fullname" . }}-supabase
-                  key: service-key
           livenessProbe:
             httpGet:
               path: /
