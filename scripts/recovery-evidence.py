@@ -208,6 +208,19 @@ def restore_evidence(path: Path, root: Path, s3=None, now: datetime | None = Non
     if (s3.list_objects_v2(Bucket=bucket, MaxKeys=1).get("KeyCount", 0) != 0
             or existing_versions.get("Versions") or existing_versions.get("DeleteMarkers")):
         raise ValueError("Evidence restore bucket must start empty")
+    sample = data["evidence"][0]
+    try:
+        source_read = s3.get_object(Bucket=data["sourceBucket"], Key=sample["key"],
+                                    VersionId=sample["sourceVersionId"])
+    except Exception as exc:
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code != "AccessDenied":
+            raise ValueError("Source bucket denial proof is unavailable") from exc
+    else:
+        body = source_read.get("Body")
+        if body is not None:
+            body.close()
+        raise ValueError("Recovery credential can read the protected source bucket")
     for item in data["evidence"]:
         content = artifact(root, item["path"]).read_bytes()
         if hashlib.sha256(content).hexdigest() != item["sha256"] or len(content) != item["byteSize"]:

@@ -25,6 +25,7 @@ class S3Fixture:
     def __init__(self):
         self.objects = {}
         self.lock_mode = "COMPLIANCE"
+        self.allow_source_read = False
 
     def get_bucket_location(self, **_):
         return {"LocationConstraint": "ap-south-1"}
@@ -59,7 +60,15 @@ class S3Fixture:
         return {"LegalHold": {"Status": request["ObjectLockLegalHoldStatus"]}}
 
     def get_object(self, **reference):
+        if reference["Bucket"] == "original-evidence":
+            if self.allow_source_read:
+                return {"Body": io.BytesIO(b"source object must remain unreadable")}
+            raise SourceDenied()
         return {"Body": io.BytesIO(self.objects[reference["VersionId"]]["Body"])}
+
+
+class SourceDenied(Exception):
+    response = {"Error": {"Code": "AccessDenied"}}
 
 
 class RecoveryEvidenceTests(unittest.TestCase):
@@ -191,6 +200,13 @@ class RecoveryEvidenceTests(unittest.TestCase):
         s3.get_object_legal_hold = lambda **_: {"LegalHold": {"Status": "OFF"}}
         with self.assertRaisesRegex(ValueError, "failed readback"):
             MODULE.restore_evidence(self.manifest, self.evidence_root, s3=s3, now=NOW)
+
+    def test_rejects_recovery_key_with_source_bucket_read_access(self):
+        s3 = S3Fixture()
+        s3.allow_source_read = True
+        with self.assertRaisesRegex(ValueError, "can read the protected source bucket"):
+            MODULE.restore_evidence(self.manifest, self.evidence_root, s3=s3, now=NOW)
+        self.assertEqual(s3.objects, {})
 
     def test_recovery_credential_is_private_and_distinct(self):
         environment = self.root / ".env.onprem"
