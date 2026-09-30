@@ -145,9 +145,10 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Executive posture scores, financial penalty exposure, and domain maturity analysis.
+                Automated drafts can use finalized assessment results. Source and PDF retention are
+                required before release.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+              <div className="text-xs text-slate-500 font-medium">Draft preview only</div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -159,9 +160,10 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Itemized control evaluations, linked evidence receipts, and independent attestation.
+                Planned format. Source-bound evidence receipts and independent review are not yet
+                available here.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -173,9 +175,10 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
+                Planned submission format. Verified sources and an approved release workflow are
+                still required.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
+              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -187,10 +190,10 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Full sequence of automated mutations, dry-run verified diffs, and rollback
-                validation.
+                Planned register. Mutation, dry-run and rollback records must be bound to their
+                original receipts before export.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
+              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
           </div>
 
@@ -201,8 +204,9 @@ export function ReportsClient(access: Access) {
                 Tenant Approval History Audit Export
               </h3>
               <p className="text-xs text-slate-600">
-                Export a bounded snapshot of recorded approval history. Verify completeness and
-                source evidence before relying on it for an audit.
+                Download stored approval tokens for this tenant. Exports over 200 records are
+                refused; use a plan-specific export to narrow the history. This download is not a
+                sealed evidence package or a verification of token signatures.
               </p>
             </div>
             <div className="flex items-center gap-2">

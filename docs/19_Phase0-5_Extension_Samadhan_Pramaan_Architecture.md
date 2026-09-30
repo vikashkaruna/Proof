@@ -2,8 +2,8 @@
 
 **Document ID:** `DOC-EXT-01` / `docs/19_Phase0-5_Extension_Samadhan_Pramaan_Architecture.md`  
 **Classification:** Architecture & Engineering Implementation Specification  
-**Status:** Ready for Implementation  
-**Base Line:** Revision 108 Complete (Phase 0–5 W0–W10)  
+**Status:** Proposed architecture; implementation and acceptance incomplete
+**Base Line:** Revision 108 implementation snapshot; its W0–W10 completion claim was withdrawn by Audit 91
 **Target Branch:** `codex/revision75-controller-generation-transition`  
 **Target Milestone:** Extension Workstreams W11 – W14
 
@@ -13,7 +13,7 @@
 
 ### 1.1 The Operational Gap
 
-Following the completion of the Phase 0–5 Gap Closure (W0 through W10, Revision 108), the platform possesses enterprise-grade cryptographic building blocks:
+Revision 108 introduced several cryptographic building blocks, but Phase 0–5 remains open under [the current operator runbook](16_Operator_Completion_Runbook.md) and [Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md). The following describes architectural components and intended roles, not deployed or end-to-end verified guarantees:
 
 1. **Lekha (Audit Custodian):** An append-only, SHA-256 hash-chained ledger (`public.audit_ledger`).
 2. **Saakshi (Evidence Custodian):** An S3 WORM Object Lock vault in Compliance mode.
@@ -26,19 +26,19 @@ However, **the business and statutory deliverable is not yet completed**:
 - The **Maker-Checker reconciliation** is currently performed by an anonymous system routine (`axiom/verification.py`) and logged simply as `'agent', 'reconciler'`, leaving the dual-control proof persona unnamed.
 - **Prativedan** in its current form is merely a document drafter; it does not synthesize the ledger, the WORM evidence manifest, and the maker-checker reconciliation into an authoritative, sealed attestation.
 
-### 1.2 The Two-Agent Architectural Resolution (Option B)
+### 1.2 Proposed two-agent architectural resolution (Option B)
 
-To achieve statutory closure without compromising separation of duties:
+The proposed design for statutory closure, subject to source-bound implementation and independent verification, is:
 
 1. **Samadhan (समाधान · Maker-Checker & Reconciler):** The independent dual-control arbiter that reconciles **Sudhaar's** remediation plan against **Karya's** executed reality, enforces zero out-of-scope mutation, flags configuration drift, and signs the reconciliation certificate.
 2. **Prativedan (प्रतिवेदन · The Draftsman):** Retained as the L1 document compiler for working registers, gap scan drafts, and internal policy/notice documents.
-3. **Pramaan (प्रमाण · Statutory Closure & Proof Attestation):** Introduced as the **Master Closure Authority**. In the `CLOSURE` phase, Pramaan ingests outputs from all upstream agents, bundles the offline-verifiable evidence manifest, seals the ledger root, and generates the unassailable, auditor-ready **Axiom Pramaan Dossier** bearing the Gold ProofSeal.
+3. **Pramaan (प्रमाण · Statutory Closure & Proof Attestation):** Proposed as a closure compiler. A future `CLOSURE` phase must validate upstream sources, retain an offline-verifiable evidence manifest and ledger anchor, and only then prepare an Axiom Pramaan Dossier for founder/DPO review. No Gold ProofSeal or statutory attestation may be claimed before exact source/archive object versions and review are independently verified.
 
 ---
 
 ## 2. The 12-Agent Roster & Separation of Duties
 
-With the addition of **Samadhan** and **Pramaan**, the Axiom Proof agent roster expands from 10 to 12 specialized agents, maintaining strict architectural separation:
+The target design adds **Samadhan** and **Pramaan** to the ten-agent roster. This diagram is a target responsibility map, not evidence that both agents or their production chain are implemented:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -59,7 +59,7 @@ With the addition of **Samadhan** and **Pramaan**, the Axiom Proof agent roster 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Complete End-to-End Chain of Custody
+### Target end-to-end chain of custody (not yet accepted)
 
 ```
 [Drishti + Vibhaag] ──▶ Personal Data Inventory & RoPA Mapping
@@ -89,7 +89,7 @@ With the addition of **Samadhan** and **Pramaan**, the Axiom Proof agent roster 
    [Prativedan] ──────▶ Technical Registers & Executive Drafts (Drafter)
          │
          ▼
-    [Pramaan] ────────▶ Master Synthesis + Deterministic Offline Pack + Gold Seal
+    [Pramaan] ────────▶ Proposed source-bound synthesis and verified offline pack
          │
          ▼
  [Founder / DPO] ─────▶ Statutory Review & Release Gate (BR-4) ──▶ CLIENT & REGULATOR

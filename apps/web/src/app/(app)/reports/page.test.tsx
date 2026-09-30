@@ -164,3 +164,11 @@ it('shows legacy dossier metadata without an unsupported proof or action', () =>
   expect(html).not.toContain('Download');
   expect(html).not.toContain('Send via Email');
 });
+
+it('marks unreleased statutory formats as planned work', async () => {
+  const html = renderToStaticMarkup(await ReportsPage());
+  expect(html).toContain('Draft preview only');
+  expect(html).toContain('Release unavailable');
+  expect(html).not.toContain('independent attestation');
+  expect(html).not.toContain('Full sequence of automated mutations');
+});
