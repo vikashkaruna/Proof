@@ -10,4 +10,4 @@ Both `uv.lock` files now resolve `urllib3 2.8.0` with the publisher's package ha
 
 - `uv run --locked pytest -q`: agent-runtime **339 passed**; model-gateway **27 passed**. Each emitted one existing Starlette/httpx deprecation warning.
 - Fresh `pnpm security:scan` passed Bandit, ESLint, production pnpm audit and the Python locked-dependency `pip-audit` checks with no known vulnerabilities. The local lock diff changes only `urllib3 2.7.0` to `2.8.0` in the two affected services.
-- PR validation and exact-staging CI/security for this corrective revision remain required. No preprod or production deployment is claimed.
+- [PR #116](https://github.com/vikashkaruna/Proof/pull/116) passed its full gate and merged to staging at `0b1f57adff20a13e7f08245b9cd4505e210720ff`. Its exact-staging feature/container/browser/provider jobs and separate Bandit, Trivy and Semgrep workflows passed, and the `urllib3` advisory finding was cleared. Exact-staging CI nevertheless failed on a newly reported `PyJWT 2.14.0` advisory; [audit 96](96-pyjwt-security-lock-2026-09-30.md) records the next correction. No preprod or production deployment is claimed.
