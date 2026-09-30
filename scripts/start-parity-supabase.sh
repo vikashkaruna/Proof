@@ -51,6 +51,18 @@ PYDIAG
   exit 1
 fi
 python3 scripts/migrate-database.py --container supabase_db_axiom-w0-parity
+# Synthetic browser personas use one fixed test-only HMAC key. Provision it
+# through the DB administration role, never through the PostgREST service key.
+docker exec -i supabase_db_axiom-w0-parity psql -X -U supabase_admin -d postgres \
+  -v ON_ERROR_STOP=1 -q >/dev/null <<'SQL'
+insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
+values('global',convert_to('axiom-e2e-persona-harness-approval-signing-key','UTF8'))
+on conflict(scope) do update set key_bytes=excluded.key_bytes
+where axiom_secrets.reconciliation_keys.key_bytes=excluded.key_bytes;
+select 1 / case when (select key_bytes=convert_to(
+  'axiom-e2e-persona-harness-approval-signing-key','UTF8')
+  from axiom_secrets.reconciliation_keys where scope='global') then 1 else 0 end;
+SQL
 # Reload API schema only after the whole migration series succeeds.
 docker exec supabase_db_axiom-w0-parity psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -q -c "notify pgrst, 'reload schema';"
 supabase status --workdir "$state_dir" -o json > "$state_dir/status.json" 2> "$state_dir/status.log"

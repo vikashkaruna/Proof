@@ -10,6 +10,9 @@ offline-verifiable closure pack.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from html import escape
@@ -142,6 +145,37 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
     async def _run(
         self, *, correlation_id: str, input: PramaanInput, **deps: Any
     ) -> PramaanOutput:
+        # An arbitrary row id or hex-looking signature is not a maker-checker
+        # attestation. Old records may have been persisted before the database
+        # enforced HMAC verification, so prove each supplied statement here.
+        if input.reconciliation_ids and not input.reconciliation_statements:
+            raise ValueError("reconciliation_statements_required")
+        if input.reconciliation_statements:
+            signing_key = self.settings.approval_signing_key
+            if not signing_key:
+                raise ValueError("reconciliation_verification_key_unavailable")
+            for stmt in input.reconciliation_statements:
+                statement = stmt.get("statement")
+                signature = stmt.get("statement_signature") or stmt.get("signature")
+                if (not isinstance(statement, str) or not isinstance(signature, str)
+                        or not statement or len(statement.encode("utf-8")) > 262144
+                        or len(signature) != 64 or any(c not in "0123456789abcdef" for c in signature)):
+                    raise ValueError("reconciliation_signature_unverified")
+                expected = hmac.new(signing_key.encode("utf-8"), statement.encode("utf-8"), hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(expected, signature):
+                    raise ValueError("reconciliation_signature_unverified")
+                try:
+                    facts = json.loads(statement)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("reconciliation_source_invalid") from exc
+                if not isinstance(facts, dict) or facts.get("schema_version") != 2 or facts.get("tenant_id") != input.tenant_id or facts.get("batch_id") != stmt.get("batch_id"):
+                    raise ValueError("reconciliation_source_invalid")
+            # A valid signature proves authorship, not that this diagnostic was
+            # atomically recorded with its ledger event. This legacy synthesis
+            # path has no trusted persisted-source reader, so it cannot attest
+            # supplied reconciliation statements. Released archive exports use
+            # the database's separately verified source-bound workflow.
+            raise ValueError("reconciliation_record_verification_unavailable")
         dossier_id = input.metadata.get("dossier_id") or str(uuid4())
         created_at = input.created_at or input.metadata.get("created_at") or datetime.now(timezone.utc).isoformat()
         dtype_str = (
@@ -186,10 +220,8 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
             text_body = stmt.get("statement") or ""
             recon_hash = sig or sha256_hex(text_body.encode("utf-8"))
             recon_leaf_hashes.append(str(recon_hash))
-        for rid in input.reconciliation_ids:
-            recon_leaf_hashes.append(sha256_hex(f"reconciliation:{rid}".encode("utf-8")))
         if not recon_leaf_hashes:
-            recon_leaf_hashes.append(sha256_hex(b"samadhan:dual_control:empty"))
+            recon_leaf_hashes.append(sha256_hex(b"samadhan:unverified:empty"))
         maker_checker_root = _compute_merkle_root(recon_leaf_hashes)
 
         # 5. Offline Evidence Pack Manifest Digest
@@ -384,8 +416,8 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
                 f"Statutory posture evaluation score: {posture:.1f}/100 ({verdict}). "
                 f"Maximum estimated statutory exposure under DPDPA 2023 Section 33: ₹{exposure_cr:.2f} Cr. "
                 f"Evaluated {len(input.findings)} statutory control findings across Control Library v{input.library_version}. "
-                f"Dual-control remediation reconciliation confirmed across {len(input.plan_ids)} remediation plans "
-                f"and {len(input.execution_batches)} execution batches."
+                f"{len(input.plan_ids)} remediation plan IDs and {len(input.execution_batches)} execution "
+                "batches were supplied. This synthesis does not establish a recorded maker-checker reconciliation."
             ),
             "posture_score": posture,
             "verdict": verdict,
@@ -393,13 +425,13 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
         })
 
         # 2. Maker-Checker Dual-Control Verification (Sudhaar ➔ Karya ➔ Samadhan)
-        recon_count = len(input.reconciliation_statements) + len(input.reconciliation_ids)
+        recon_count = len(input.reconciliation_statements)
         sections.append({
             "type": "maker_checker_attestation",
-            "title": "Maker-Checker Dual-Control Attestation (Samadhan)",
+            "title": ("Maker-Checker Dual-Control Attestation (Samadhan)"
+                      if recon_count else "Maker-Checker Status (Unverified)"),
             "body": (
-                f"Dual-control verification established across {recon_count} reconciliation statements. "
-                f"Sudhaar remediation plans reconciled against Karya execution batches with zero out-of-scope mutations. "
+                "No recorded maker-checker reconciliation was independently verified. "
                 f"Maker-Checker Merkle Root: {maker_checker_root}."
             ),
             "maker_checker_root": maker_checker_root,
@@ -449,7 +481,7 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
                 "body": (
                     f"Fiduciary advisory for the Board of Directors: Current compliance posture is {verdict} "
                     f"with residual statutory risk exposure contained to ₹{exposure_cr:.2f} Cr. "
-                    "Dual-control execution guarantees that no unapproved configuration alterations were committed."
+                    + "No maker-checker execution attestation was verified."
                 ),
             })
         elif dossier_type == DossierType.DPB_STATUTORY.value:

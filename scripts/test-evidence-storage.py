@@ -268,6 +268,7 @@ def main():
                     "evidence-packs.spec.ts",
                     "evidence-packs-access.spec.ts",
                     "board-reports-provider.spec.ts",
+                    "approval-archive-provider.spec.ts",
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
@@ -306,6 +307,7 @@ def main():
                 "board-provider-interruption-pending-build-and-founder-recovery",
                 "board-manager-and-founder-browser-request-review-build-preview-and-release",
                 "auditor-finalized-source-founder-review-exact-versions-and-release",
+                "approval-human-signed-reconciliation-exact-version-founder-release-and-owner-download",
             ]
         finally:
             try:

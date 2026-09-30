@@ -8,6 +8,8 @@
 -- ─────────────────────────────────────────────────────────────────────
 
 begin;
+insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
+values('global',convert_to('test-reconciliation-signing-key-0123456789','UTF8'));
 
 create function pg_temp.assert_true(value boolean, message text) returns void language plpgsql as $$
 begin if value is distinct from true then raise exception 'ASSERTION FAILED: %', message; end if; end $$;
@@ -67,6 +69,15 @@ values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000
           array['00000000-0000-0000-0000-0000000000a1']::uuid[]),
         'batch', 1, true, 'completed', now());
 
+-- Revision 0090 requires the persisted signed scope and the database's
+-- prepared statement; caller prose is no longer accepted as a reconciliation.
+update public.approval_tokens set signed_payload=jsonb_build_object(
+  'planId',plan_id,'actionIds',to_jsonb(action_ids),
+  'mode',mode,'concurrency',concurrency,'stopOnFailure',stop_on_failure,
+  'contentDigest',(select content_digest from public.execution_batches
+    where id='00000000-0000-0000-0000-0000000000b1'))
+where id='00000000-0000-0000-0000-000000000031';
+
 update public.remediation_actions
    set execution_batch_id = '00000000-0000-0000-0000-0000000000b1',
        execution_status = 'succeeded', final_outcome = 'succeeded'
@@ -78,8 +89,15 @@ select public.record_plan_reconciliation(
   '00000000-0000-0000-0000-000000000021',
   '00000000-0000-0000-0000-0000000000b1',
   gen_random_uuid(),
-  'Batch req-closure-1 finished completed. Approved 1 action(s): succeeded=1.',
-  repeat('1', 64)
+  (public.prepare_plan_reconciliation(
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000021',
+    '00000000-0000-0000-0000-0000000000b1')->>'statement'),
+  encode(hmac(convert_to((public.prepare_plan_reconciliation(
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000021',
+    '00000000-0000-0000-0000-0000000000b1')->>'statement'),'UTF8'),
+    convert_to('test-reconciliation-signing-key-0123456789','UTF8'),'sha256'),'hex')
 );
 
 select pg_temp.assert_true(

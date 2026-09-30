@@ -95,6 +95,7 @@ export default defineConfig({
           '**/evidence-packs.spec.ts',
           '**/evidence-packs-access.spec.ts',
           '**/board-reports-provider.spec.ts',
+          '**/approval-archive-provider.spec.ts',
         ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**

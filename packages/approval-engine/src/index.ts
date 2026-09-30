@@ -153,6 +153,15 @@ export class ApprovalEngine {
     return createHmac('sha256', secret).update(payload).digest('hex');
   }
 
+  /** Check a persisted Samadhan statement without expiry/replay semantics. */
+  verifyDetachedStatement(tenantId: string, statement: string, signature: string): boolean {
+    if (!/^[0-9a-f]{64}$/.test(signature) || !statement) return false;
+    const expected = createHmac('sha256', this.getSecret(tenantId))
+      .update(statement, 'utf8')
+      .digest();
+    return timingSafeEqual(expected, Buffer.from(signature, 'hex'));
+  }
+
   /**
    * Verify a token + its claimed spec. The signature must match; the
    * expiry must not have passed; the nonce must not have been used

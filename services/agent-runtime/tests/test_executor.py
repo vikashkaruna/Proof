@@ -11,6 +11,7 @@ refusal instead of guessing past it.
 from __future__ import annotations
 
 import hashlib
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -46,8 +47,19 @@ class FakeDb:
             return {"ok": True}
         if name == "record_verification_result":
             return {"verification": {"id": "v-1", "outcome": args.get("p_outcome")}}
+        if name == "prepare_plan_reconciliation":
+            settled = {
+                str(call["p_action_id"]): call["p_outcome"]
+                for fn, call in self.rpc_calls if fn == "settle_execution_action"
+            }
+            finishes = [call for fn, call in self.rpc_calls if fn == "finish_execution_batch"]
+            return {"statement": json.dumps({
+                "schema_version": 2,
+                "batch_status": finishes[-1]["p_status"] if finishes else "completed",
+                "action_outcomes": settled,
+            }, sort_keys=True)}
         if name == "record_plan_reconciliation":
-            return {"reconciliation": {"unexecuted": 0, "content_digest_drift": False}}
+            return {"reconciliation": {"id": "r-1", "unexecuted": 0, "content_digest_drift": False}}
         if name == "finish_execution_batch":
             # Echo the requested status: the database's terminal status is
             # what the executor reports.
@@ -602,10 +614,9 @@ async def test_reconciliation_statement_accounts_for_every_action() -> None:
     recs = reconciliation_records(db)
     assert len(recs) == 1
     statement = recs[0]["p_statement"]
-    assert "partial_failure" in statement
-    assert "2 action(s)" in statement
-    assert "succeeded=1" in statement
-    assert "failed=1" in statement
+    facts = json.loads(statement)
+    assert facts["batch_status"] == "partial_failure"
+    assert sorted(facts["action_outcomes"].values()) == ["failed", "succeeded"]
 
 
 @pytest.mark.asyncio
@@ -656,7 +667,8 @@ async def test_every_executed_action_opens_and_closes_a_karya_run() -> None:
     assert result.status == "completed"
     starts = karya_run_starts(db)
     finishes = karya_run_finishes(db)
-    assert len(starts) == 2 and len(finishes) == 2
+    assert len(starts) == 2
+    assert len(finishes) == 2
     # The pre-record carries a hash of the executed parameters, never them.
     assert starts[0]["p_input_redacted_hash"] == hashlib.sha256(
         b'{"system":"crm"}'

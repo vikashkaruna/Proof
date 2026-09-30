@@ -14,6 +14,9 @@ Validates:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import re
 from typing import Any
 from unittest.mock import AsyncMock
@@ -24,8 +27,8 @@ from axiom.agents.base import AgentName, AutonomyLevel
 from axiom.agents.pramaan import (
     COMPANY_NAME,
     COMPANY_WEBSITE,
-    PRODUCT_NAME,
     PRODUCT_DOMAIN,
+    PRODUCT_NAME,
     TAGLINE,
     WORKBENCH_URL,
     DossierStatus,
@@ -59,6 +62,7 @@ def pramaan_agent(fake_ledger: FakeLedger) -> PramaanAgent:
         postgres_url="postgresql://fake:fake@localhost:5432/fake",
         model_gateway_url="http://localhost:9999",
         axiom_deployment="dev",
+        approval_signing_key="test-pramaan-reconciliation-key-0123456789",
     )
     return PramaanAgent(settings=settings, ledger=fake_ledger)
 
@@ -99,20 +103,25 @@ def sample_findings() -> list[dict[str, Any]]:
 
 @pytest.fixture
 def sample_reconciliation() -> list[dict[str, Any]]:
-    return [
-        {
-            "batch_id": "00000000-0000-0000-0000-000000000001",
+    records = []
+    for suffix in ("1", "2"):
+        batch_id = f"00000000-0000-0000-0000-00000000000{suffix}"
+        statement = json.dumps({
+            "schema_version": 2,
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "batch_id": batch_id,
+            "approved_content_digest": "a" * 64,
+        }, sort_keys=True)
+        records.append({
+            "batch_id": batch_id,
             "verdict": "clean",
-            "statement": "Execution strictly matched approved token. Zero out-of-scope mutations.",
-            "statement_signature": "a" * 64,
-        },
-        {
-            "batch_id": "00000000-0000-0000-0000-000000000002",
-            "verdict": "clean",
-            "statement": "Parameter diffs recomputed clean. No drift detected.",
-            "statement_signature": "b" * 64,
-        },
-    ]
+            "statement": statement,
+            "statement_signature": hmac.new(
+                b"test-pramaan-reconciliation-key-0123456789",
+                statement.encode("utf-8"), hashlib.sha256,
+            ).hexdigest(),
+        })
+    return records
 
 
 @pytest.fixture
@@ -170,7 +179,6 @@ def test_pramaan_agent_metadata_and_non_mutating_guarantee():
 async def test_synthesis_of_all_five_dossier_types(
     pramaan_agent: PramaanAgent,
     sample_findings: list[dict[str, Any]],
-    sample_reconciliation: list[dict[str, Any]],
     sample_ledger_entries: list[dict[str, Any]],
     dossier_type: DossierType,
     expected_section_type: str,
@@ -183,8 +191,6 @@ async def test_synthesis_of_all_five_dossier_types(
         title=f"Test {dossier_type.value} Pack",
         findings=sample_findings,
         plan_ids=["plan-001", "plan-002"],
-        reconciliation_ids=["rec-001"],
-        reconciliation_statements=sample_reconciliation,
         ledger_entries=sample_ledger_entries,
         evidence_ids=["ev-extra-001"],
     )
@@ -272,13 +278,12 @@ async def test_inclusion_of_maker_checker_and_ledger_roots_in_proof_seal(
     sample_reconciliation: list[dict[str, Any]],
     sample_ledger_entries: list[dict[str, Any]],
 ):
-    """Proves that changing reconciliations or ledger entries alters the proof seal."""
+    """Proves deterministic seal inputs while reconciliation stays unverified."""
     base_input = PramaanInput(
         tenant_id="11111111-1111-1111-1111-111111111111",
         engagement_id="22222222-2222-2222-2222-222222222222",
         dossier_type=DossierType.FULL_CLOSURE,
         findings=sample_findings,
-        reconciliation_statements=sample_reconciliation,
         ledger_entries=sample_ledger_entries,
         metadata={"dossier_id": "dossier-fixed-id-1234"},
         created_at="2026-09-28T00:00:00.000Z",
@@ -292,16 +297,20 @@ async def test_inclusion_of_maker_checker_and_ledger_roots_in_proof_seal(
     assert identical_output.ledger_root == base_output.ledger_root
     assert identical_output.maker_checker_root == base_output.maker_checker_root
 
-    # 2. Modify Maker-Checker statement -> maker_checker_root AND proof_seal_hash MUST change
+    # 2. Even a correctly signed statement is not proof that the record and
+    # ledger entry were durably written; this legacy synthesis path refuses it.
     tampered_recon = list(sample_reconciliation)
     tampered_recon[0] = {
         **tampered_recon[0],
         "statement_signature": "f" * 64,
     }
     recon_input = base_input.model_copy(update={"reconciliation_statements": tampered_recon})
-    recon_output = await pramaan_agent._run(correlation_id="corr-recon", input=recon_input)
-    assert recon_output.maker_checker_root != base_output.maker_checker_root
-    assert recon_output.proof_seal_hash != base_output.proof_seal_hash
+    with pytest.raises(ValueError, match="reconciliation_signature_unverified"):
+        await pramaan_agent._run(correlation_id="corr-recon", input=recon_input)
+
+    signed_input = base_input.model_copy(update={"reconciliation_statements": sample_reconciliation})
+    with pytest.raises(ValueError, match="reconciliation_record_verification_unavailable"):
+        await pramaan_agent._run(correlation_id="signed-unrecorded", input=signed_input)
 
     # 3. Modify Ledger entry -> ledger_root AND proof_seal_hash MUST change
     tampered_ledger = list(sample_ledger_entries)
@@ -320,6 +329,40 @@ async def test_inclusion_of_maker_checker_and_ledger_roots_in_proof_seal(
     findings_output = await pramaan_agent._run(correlation_id="corr-findings", input=findings_input)
     assert findings_output.merkle_root != base_output.merkle_root
     assert findings_output.proof_seal_hash != base_output.proof_seal_hash
+
+
+@pytest.mark.asyncio
+async def test_pre_boundary_forged_reconciliation_cannot_be_attested(
+    pramaan_agent: PramaanAgent,
+):
+    statement = json.dumps({
+        "schema_version": 2,
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "batch_id": "00000000-0000-0000-0000-000000000001",
+    })
+    forged = PramaanInput(
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        reconciliation_statements=[{
+            "batch_id": "00000000-0000-0000-0000-000000000001",
+            "statement": statement,
+            "statement_signature": "a" * 64,
+        }],
+    )
+    with pytest.raises(ValueError, match="reconciliation_signature_unverified"):
+        await pramaan_agent._run(correlation_id="forged", input=forged)
+    with pytest.raises(ValueError, match="reconciliation_statements_required"):
+        await pramaan_agent._run(
+            correlation_id="id-only",
+            input=PramaanInput(reconciliation_ids=["unverified-historical-row"]),
+        )
+    unverified = await pramaan_agent._run(
+        correlation_id="no-reconciliation",
+        input=PramaanInput(dossier_type=DossierType.BOARD_EXECUTIVE),
+    )
+    maker_checker = next(s for s in unverified.sections if s["type"] == "maker_checker_attestation")
+    board = next(s for s in unverified.sections if s["type"] == "board_risk_summary")
+    assert "Unverified" in maker_checker["title"]
+    assert "No maker-checker execution attestation" in board["body"]
 
 
 # ─── 5. Exposure Capping and HTML Escaping ─────────────────────────────
