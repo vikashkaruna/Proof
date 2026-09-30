@@ -198,7 +198,7 @@ function setup() {
       throw new Error(`Unexpected RPC ${name}`);
     }) as unknown as EvidenceDatabase['rpc'],
   } as EvidenceDatabase;
-  const service = new PramaanArtifactService(db, () => ({ vault: fixture.vault, config }));
+  const service = new PramaanArtifactService(db, () => ({ vault: fixture.vault, config }), db);
   return {
     fixture,
     service,

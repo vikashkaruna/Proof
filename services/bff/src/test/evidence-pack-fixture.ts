@@ -257,7 +257,7 @@ export async function packFixture() {
   base.vault.findEvidenceVersion.mockResolvedValue({ versionId: 'archive-version' });
   base.vault.seal.mockClear();
   base.vault.verifyReceipt.mockClear();
-  const service = new EvidencePackService(db, () => ({ vault: base.vault, config }));
+  const service = new EvidencePackService(db, () => ({ vault: base.vault, config }), db);
   const input = {
     operationKey: randomUUID(),
     title: 'Fixture pack',

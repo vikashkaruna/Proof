@@ -331,6 +331,9 @@ grant execute on function public.request_statutory_report(uuid,uuid,uuid,uuid,uu
 -- Superseded metadata-only PDF RPCs have no provider verification and no live
 -- application callers. They must not remain forgeable with the worker key.
 revoke all on function public.attach_board_report_pdf(uuid,uuid,uuid,text,bigint,text,text,text,text,timestamptz),
+ public.record_report_draft(uuid,uuid,uuid,text,text,uuid,text,text,text,uuid),
  public.record_statutory_report_draft(uuid,uuid,uuid,text,text,text,text,text,uuid),
  public.attach_statutory_report_pdf(uuid,uuid,uuid,text,bigint,uuid)
  from public,anon,authenticated,service_role;
+-- 0079 left a direct metadata write path as well as its obsolete RPCs.
+revoke insert,update,delete,truncate on public.statutory_report_artifacts from service_role;

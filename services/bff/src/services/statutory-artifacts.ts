@@ -98,7 +98,7 @@ export class StatutoryArtifactService {
       html: string,
       options: RenderPdfOptions,
     ) => Promise<RenderPdfResult> = renderHtmlToPdf,
-    readonly writerDb: EvidenceDatabase = db,
+    readonly writerDb?: EvidenceDatabase,
   ) {}
 
   /** A metadata-only projection. No object key, bucket or provider receipt crosses this boundary. */
@@ -282,6 +282,7 @@ export class StatutoryArtifactService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    if (!this.writerDb) throw new EvidenceError('report_persistence_unconfirmed', 503);
     let query = this.writerDb.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;

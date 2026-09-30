@@ -59,7 +59,7 @@ insert into public.board_artifact_versions(id,tenant_id,report_id,build_id,artif
   1000,'application/pdf',clock_timestamp()+interval '7 years',clock_timestamp(),'COMPLIANCE',false,
   'AES256','{}','99890000-0000-4000-8000-000000000002');
 
-set local role service_role;
+reset role; -- privileged fixture exercises lifecycle; restricted writer is tested separately
 do $$
 declare t uuid:='99890000-0000-4000-8000-000000000010';
  m uuid:='99890000-0000-4000-8000-000000000001';
