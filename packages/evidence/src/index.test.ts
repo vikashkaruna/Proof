@@ -111,6 +111,15 @@ describe('seal verifies the uploaded version', () => {
     await new EvidenceVault('ap-south-1').seal({ ...input, createOnly: true });
     expect((send.mock.calls[1]?.[0] as PutObjectCommand).input.IfNoneMatch).toBe('*');
   });
+  it('requests retention beyond a frozen microsecond-precision deadline', async () => {
+    const send = provider();
+    const required = '2098-12-30T23:59:59.999999Z';
+    await new EvidenceVault('ap-south-1').seal({ ...input, retainUntil: required });
+    const requested = (send.mock.calls[1]?.[0] as PutObjectCommand).input.ObjectLockRetainUntilDate;
+    expect(requested).toBeInstanceOf(Date);
+    expect(requested!.getTime()).toBeGreaterThan(Date.parse(required));
+    expect(requested!.toISOString()).toBe('2098-12-31T00:00:00.999Z');
+  });
   it.each([
     {},
     { Mode: 'GOVERNANCE', RetainUntilDate: future },
