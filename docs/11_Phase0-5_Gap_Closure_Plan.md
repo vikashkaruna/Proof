@@ -2643,6 +2643,8 @@ Expected: **46 → ~65 controls**. New domains: `NTC` (notice), `PWD` (persons w
 
 ## W8 · Reporting, evidence, branding — **P1** · size L
 
+**User-added scope, 2026-09-30:** The operator's additional W11 and W12 items are tracked here as **W8.4 Pramaan dossiers** and **W8.5 reconciliation-backed approval proof**. This preserves the original W0–W10 numbering and makes both extensions release-blocking. W8.4 requires each dossier type to bind its own authoritative released source, exact retained archive version, founder seal/release and permitted dispatch; unsupported source types remain closed. W8.5 requires a database-derived maker-checker statement verified against the signed approval and complete dry-run/rollback/execution/verification chain, then an independently retained, access-controlled approval archive. Passing a hash-only historical export or metadata-only dossier does not close either extension. See the live status in [Doc 16](16_Operator_Completion_Runbook.md).
+
 *Your brief items 10, 11, 12.*
 
 - **Branding by default (your item 11).** Today branding lives only in `reports-client.tsx`. Move it into a shared `@axiom/report-kit` — Axiom Proof lockup, "Axiom Minds Private Limited", `https://axiomminds.ai`, agent attribution and named human approver (FR-11.4) — applied to **every** generated artifact: Prativedan output, evidence packs, DSAR responses, breach notifications, the gap-scan report. Tenant/partner white-label becomes an *override* of this default, never a replacement of the Axiom Minds attribution.

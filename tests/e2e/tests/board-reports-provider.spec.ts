@@ -571,4 +571,145 @@ test.describe('real-provider board report lifecycle', () => {
       await founderContext.close();
     }
   });
+
+  test('auditor pack binds frozen findings, human review and retained provider versions', async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(300_000);
+    const manager = await createMfaAccount('auditor-manager', { role: 'admin' });
+    await signInAs(page, manager.email, manager.password);
+    await selectTenant(page, 'a');
+    const assessment = await finalizedAssessment(manager.id);
+    const requestBody = {
+      engagementId: assessment.engagementId,
+      assessmentRunId: assessment.runId,
+      title: `Assessment review ${crypto.randomUUID()}`,
+      operationKey: crypto.randomUUID(),
+    };
+    expect(
+      (
+        await post(page, '/reports/statutory/auditor/requests', {
+          ...requestBody,
+          content: { auditor_attestation: 'invented' },
+        })
+      ).status(),
+    ).toBe(400);
+    const requested = await post(page, '/reports/statutory/auditor/requests', requestBody);
+    expect(requested.status()).toBe(201);
+    const request = (await requested.json()) as { requestId: string; replayed: boolean };
+    expect(request.replayed).toBe(false);
+    const replay = await post(page, '/reports/statutory/auditor/requests', requestBody);
+    expect(((await replay.json()) as { requestId: string }).requestId).toBe(request.requestId);
+    expect(
+      (
+        await post(page, `/reports/statutory/auditor/requests/${request.requestId}/draft`, {})
+      ).status(),
+    ).toBe(403);
+    const founderContext = await browser.newContext();
+    const viewerContext = await browser.newContext();
+    try {
+      const founder = await founderContext.newPage();
+      await signIn(founder, 'founder');
+      await selectTenant(founder, 'a');
+      await satisfyLoginMfa(founder, 'founder');
+      const generated = await post(
+        founder,
+        `/reports/statutory/auditor/requests/${request.requestId}/draft`,
+        {},
+      );
+      expect(generated.status()).toBe(201);
+      const draft = (await generated.json()) as { reportId: string };
+      const row = await reportRow(draft.reportId);
+      expect(sha(row.content_text)).toBe(row.content_sha256);
+      const content = JSON.parse(row.content_text) as {
+        schema_version: number;
+        source_kind: string;
+        findings: Array<{ risk_points: number }>;
+        limitations: string;
+      };
+      expect(content.schema_version).toBe(2);
+      expect(content.source_kind).toBe('finalized_assessment');
+      expect(content.findings).toHaveLength(1);
+      expect(content.findings[0]?.risk_points).toBe(10);
+      expect(content.limitations).toContain('No independent audit');
+      expect(row.content_text).not.toContain('auditor_attestation');
+      expect(
+        (await founder.request.get(`/api/bff/v1/reports/statutory/${draft.reportId}/pdf`)).status(),
+      ).toBe(409);
+      const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
+        decision: 'approved',
+        expectedContentHash: row.content_sha256,
+      });
+      expect(reviewed.status()).toBe(200);
+      const built = await post(founder, `/reports/statutory/${draft.reportId}/artifacts`, {
+        operationKey: crypto.randomUUID(),
+      });
+      expect(built.status()).toBe(200);
+      const build = (await built.json()) as { buildId: string; status: string };
+      expect(build.status).toBe('settled');
+      const versions = (await database(
+        `statutory_artifact_versions?build_id=eq.${build.buildId}&select=*&order=artifact_kind.asc`,
+      )) as Array<{
+        artifact_kind: string;
+        bucket: string;
+        object_key: string;
+        version_id: string;
+        content_hash: string;
+        byte_size: number;
+        retain_until: string;
+      }>;
+      expect(versions.map((item) => item.artifact_kind)).toEqual(['source_json', 'statutory_pdf']);
+      const sources = (await database(
+        `statutory_request_sources?request_id=eq.${request.requestId}&select=source_text,source_sha256`,
+      )) as Array<{ source_text: string; source_sha256: string }>;
+      expect(versions[0]?.content_hash).toBe(sources[0]?.source_sha256);
+      const config = localFixture();
+      const vault = new EvidenceVault('ap-south-1', config.endpoint, config);
+      try {
+        for (const version of versions) {
+          const exact = await vault.retrieve(
+            version.bucket,
+            version.object_key,
+            version.version_id,
+            { maxBytes: 32 * 1024 * 1024, timeoutMs: 30_000 },
+          );
+          expect(exact.body.length).toBe(version.byte_size);
+          expect(sha(exact.body)).toBe(version.content_hash);
+          if (version.artifact_kind === 'source_json')
+            expect(exact.body.toString('utf8')).toBe(sources[0]?.source_text);
+          else expect(exact.body.subarray(0, 5).toString()).toBe('%PDF-');
+          expect(new Date(version.retain_until).getTime()).toBeGreaterThan(
+            Date.now() + 6 * 365 * 86400_000,
+          );
+        }
+      } finally {
+        vault.close();
+      }
+      const viewer = await viewerContext.newPage();
+      await signIn(viewer, 'viewer');
+      await selectTenant(viewer, 'a');
+      expect(
+        (await viewer.request.get(`/api/bff/v1/reports/statutory/${draft.reportId}/pdf`)).status(),
+      ).toBe(403);
+      const wrong = await post(founder, `/reports/${draft.reportId}/release`, {
+        expectedContentHash: row.content_sha256,
+        expectedArchiveHash: 'f'.repeat(64),
+      });
+      expect(wrong.status()).toBe(409);
+      const released = await post(founder, `/reports/${draft.reportId}/release`, {
+        expectedContentHash: row.content_sha256,
+        expectedArchiveHash: versions[1]!.content_hash,
+      });
+      expect(released.status()).toBe(200);
+      const publicPdf = await viewer.request.get(
+        `/api/bff/v1/reports/statutory/${draft.reportId}/pdf`,
+      );
+      expect(publicPdf.status()).toBe(200);
+      expect(sha(Buffer.from(await publicPdf.body()))).toBe(versions[1]!.content_hash);
+    } finally {
+      await founderContext.close();
+      await viewerContext.close();
+    }
+  });
 });

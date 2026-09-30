@@ -44,6 +44,8 @@ it('gives managers a real evidence selector and explicit preparation acknowledge
   expect(html).toContain('Loading available evidence');
   expect(html).toContain('Request from a finalized assessment');
   expect(html).toContain('Loading board requests');
+  expect(html).toContain('Assessment-derived auditor review packs');
+  expect(html).toContain('Loading auditor requests');
   expect(html).toContain('authorize preparing this immutable pack');
   expect(html).not.toContain('Approve reviewed content');
   expect(html).not.toContain('Release reviewed report');
@@ -194,9 +196,10 @@ it('shows legacy dossier metadata without an unsupported proof or action', () =>
   expect(html).not.toContain('Send via Email');
 });
 
-it('marks unreleased statutory formats as planned work', async () => {
+it('offers an honest assessment-derived auditor pack while keeping unsupported formats unavailable', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Request from finalized assessment below');
+  expect(html).toContain('not an independent audit or evidence attestation');
   expect(html).toContain('Release unavailable');
   expect(html).not.toContain('independent attestation');
   expect(html).not.toContain('Full sequence of automated mutations');

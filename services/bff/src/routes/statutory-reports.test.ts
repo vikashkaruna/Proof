@@ -27,6 +27,28 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
 }
 
 describe('Statutory Reports HTTP Routes', () => {
+  it('accepts only bounded source identifiers and refuses viewer auditor requests', async () => {
+    const body = {
+      engagementId: randomUUID(),
+      assessmentRunId: randomUUID(),
+      title: 'Recorded assessment review',
+    };
+    const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
+      '/v1/reports/statutory/auditor/requests',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    expect(viewer.status).toBe(403);
+    const unsourced = await app().request('/v1/reports/statutory/auditor/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, content: { auditor_attestation: 'invented' } }),
+    });
+    expect(unsourced.status).toBe(400);
+  });
   it('enforces RBAC on statutory report generation — viewer is denied', async () => {
     const res = await app(fixture.viewer, UserRole.VIEWER).request(
       '/v1/reports/statutory/generate',
@@ -67,7 +89,7 @@ describe('Statutory Reports HTTP Routes', () => {
     expect(rpcCalled).toBe(false);
   });
 
-  it('renders and streams a statutory report HTML and PDF', async () => {
+  it('keeps historical statutory drafts private and refuses an unretained PDF', async () => {
     const reportId = randomUUID();
     const engagementId = randomUUID();
 
@@ -148,15 +170,12 @@ describe('Statutory Reports HTTP Routes', () => {
     const html = await htmlRes.text();
     expect(html).toContain('Technical Remediation Register');
 
-    // 2. Test PDF endpoint
+    // A legacy content row has no verified retained object version.
     const pdfRes = await app().request(`/v1/reports/statutory/${reportId}/pdf`, {
       method: 'GET',
     });
-    expect(pdfRes.status).toBe(200);
-    expect(pdfRes.headers.get('content-type')).toBe('application/pdf');
-    const pdfBytes = await pdfRes.arrayBuffer();
-    const pdfHeader = Buffer.from(pdfBytes).subarray(0, 5).toString('ascii');
-    expect(pdfHeader).toBe('%PDF-');
+    expect(pdfRes.status).not.toBe(200);
+    expect(pdfRes.headers.get('content-type')).not.toContain('application/pdf');
     expect(rpcCalled).toBe(false);
 
     const otherHtml = await app(fixture.viewer, UserRole.VIEWER).request(

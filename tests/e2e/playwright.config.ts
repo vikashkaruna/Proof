@@ -127,15 +127,17 @@ export default defineConfig({
     video: acceptanceTarget ? 'off' : 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Every local run must own its servers so persona keys and provider env
+  // cannot be inherited from an earlier run or another worktree.
   webServer: acceptanceTarget
     ? undefined
     : [
         {
-          command: 'pnpm --filter @axiom/web dev',
+          command: 'pnpm --filter @axiom/web exec next dev --webpack --port 3001',
           port: 3001,
           cwd: repoRoot,
           env: webEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
         {
@@ -146,7 +148,7 @@ export default defineConfig({
           port: Number(BFF_PORT),
           cwd: repoRoot,
           env: bffEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
         {
@@ -154,11 +156,11 @@ export default defineConfig({
           // public-surface specs do, and dropping it from here turned four
           // dormant specs into ECONNREFUSED the moment the suite could run at
           // all.
-          command: 'pnpm --filter @axiom/marketing dev',
+          command: 'pnpm --filter @axiom/marketing exec next dev --webpack --port 3000',
           port: 3000,
           cwd: repoRoot,
           env: webEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
       ],
