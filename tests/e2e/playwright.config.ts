@@ -52,9 +52,11 @@ function localStatutoryWriterKey() {
   const status = JSON.parse(readFileSync(statusPath, 'utf8')) as Record<string, string>;
   if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
     throw new Error('Persona state and local Supabase signing target differ');
+  const jwtSecret = status.JWT_SECRET;
+  if (!jwtSecret) throw new Error('Local Supabase JWT signing secret is missing');
   return mintLocalPostgrestRoleKey({
     role: 'statutory_proof_writer',
-    jwtSecret: status.JWT_SECRET,
+    jwtSecret,
     serviceKey: state.serviceKey,
   });
 }
