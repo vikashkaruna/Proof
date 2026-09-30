@@ -40,6 +40,8 @@ export const BoardReportContentV1Schema = z.object({
   tenant_id: uuid,
   engagement_id: uuid,
   assessment_run_id: uuid,
+  /** Exact database-frozen source snapshot used for this generated draft. */
+  source_sha256: hash.optional(),
   assessment_result_digest: hash,
   library_version: z.string().min(1).max(100),
   library_digest: hash,

@@ -90,10 +90,28 @@ begin
   res := public.request_board_report(t, m, op, eng, run, 'Q3 Board Report', gen_random_uuid());
   perform pg_temp.ok(res->>'status' = 'requested', 'request_board_report returns requested status');
   req_id := (res->>'requestId')::uuid;
+  perform pg_temp.ok(exists (
+    select 1 from public.board_request_sources s
+    join public.workload_assessment_packets p on p.tenant_id=s.tenant_id
+      and p.run_id=run
+    where s.tenant_id=t and s.request_id=req_id
+      and s.source_sha256=encode(sha256(convert_to(s.source_text,'UTF8')),'hex')
+      and s.controls_sha256=p.library_digest
+      and s.result_sha256=p.result_digest
+      and s.source_text::jsonb->>'controls_text'=p.controls::text
+      and s.source_text::jsonb->>'result_text'=p.result::text
+  ), 'request freezes exact finalized controls and result text');
+  perform pg_temp.ok(
+    not has_table_privilege('service_role','public.board_request_sources','INSERT')
+    and not has_table_privilege('service_role','public.board_request_sources','UPDATE')
+    and not has_table_privilege('authenticated','public.board_request_sources','SELECT'),
+    'frozen source has no direct client read or service write path');
 
   -- Replay with same op key is idempotent
   res := public.request_board_report(t, m, op, eng, run, 'Q3 Board Report', gen_random_uuid());
   perform pg_temp.ok(res->>'replayed' = 'true', 'idempotent request replays clean');
+  perform pg_temp.ok((select count(*)=1 from public.board_request_sources where request_id=req_id),
+    'replay does not replace or duplicate source snapshot');
 
   -- Viewer cannot request
   res := public.request_board_report(t, '99750000-0000-4000-8000-000000000004'::uuid, gen_random_uuid(), eng, run, 'Unauthorized', gen_random_uuid());
@@ -147,10 +165,28 @@ declare
   html text := '<html><body><h1>Q3 Board Report</h1></body></html>';
 begin
   select id into req_id from public.board_report_requests where tenant_id = t;
+  content := (content::jsonb || jsonb_build_object(
+    'source_sha256', (select source_sha256 from public.board_request_sources where request_id=req_id),
+    'assessment_run_id', (select assessment_run_id from public.board_report_requests where id=req_id),
+    'assessment_result_digest', (select assessment_result_digest from public.board_report_requests where id=req_id),
+    'library_digest', (select library_digest from public.board_report_requests where id=req_id)
+  ))::text;
 
   -- External founder denied
   res := public.record_board_report_draft(t, f_external, req_id, content, html, gen_random_uuid());
   perform pg_temp.ok(res->>'error' = 'founder_authority_required', 'external founder cannot record draft');
+
+  begin
+    perform public.record_board_report_draft(
+      t, f_internal, req_id,
+      (content::jsonb || jsonb_build_object('source_sha256', repeat('0',64)))::text,
+      html, gen_random_uuid());
+    raise exception 'ASSERTION FAILED: mismatched source digest was accepted';
+  exception when others then
+    if sqlerrm <> 'board draft source binding mismatch' then raise; end if;
+  end;
+  perform pg_temp.ok((select count(*)=0 from public.reports where tenant_id=t and kind='board'),
+    'mismatched source leaves no draft behind');
 
   -- Internal founder succeeds
   res := public.record_board_report_draft(t, f_internal, req_id, content, html, gen_random_uuid());
@@ -165,8 +201,12 @@ begin
 
   -- Artifacts attached
   perform pg_temp.ok(exists (
-    select 1 from public.board_report_artifacts where tenant_id = t and report_id = rep_id
-  ), 'artifacts row created');
+    select 1 from public.board_report_artifacts a
+    join public.board_request_sources s on s.tenant_id=a.tenant_id and s.request_id=req_id
+    where a.tenant_id = t and a.report_id = rep_id
+      and a.source_json_sha256=s.source_sha256
+      and a.source_json_bytes=octet_length(s.source_text)
+  ), 'draft metadata binds the exact frozen source, without claiming a vault receipt');
 end $$;
 
 reset role;

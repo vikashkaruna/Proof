@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { boardReportRoutes } from './board-reports.js';
 import { abortableResult } from '../test/abortable-result.js';
 import { packFixture } from '../test/evidence-pack-fixture.js';
@@ -24,6 +24,42 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
   });
   instance.route('/v1', boardReportRoutes({ db: fixture.db }));
   return instance;
+}
+
+function addFrozenSource(requestId: string, runId: string, engagementId: string) {
+  const packet = fixture.base.rows('workload_assessment_packets').at(-1)!;
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+  const controlsText = JSON.stringify(packet.controls);
+  const resultText = JSON.stringify(packet.result);
+  const controlsSha = hash(controlsText);
+  const resultSha = hash(resultText);
+  const request = fixture.base.rows('board_report_requests').at(-1)!;
+  request.library_digest = controlsSha;
+  request.assessment_result_digest = resultSha;
+  const sourceText = JSON.stringify({
+    schema_version: 1,
+    serialization: 'postgres-jsonb-text-v1',
+    kind: 'board_source',
+    request_id: requestId,
+    tenant_id: tenant,
+    engagement_id: engagementId,
+    assessment_run_id: runId,
+    library_version: '2023.1',
+    controls_text: controlsText,
+    controls_sha256: controlsSha,
+    result_text: resultText,
+    result_sha256: resultSha,
+    finalized_at: new Date().toISOString(),
+    receipts: { finalized: { id: '3' } },
+  });
+  fixture.base.rows('board_request_sources').push({
+    tenant_id: tenant,
+    request_id: requestId,
+    source_text: sourceText,
+    source_sha256: hash(sourceText),
+    controls_sha256: controlsSha,
+    result_sha256: resultSha,
+  });
 }
 
 describe('Board Reports HTTP Routes', () => {
@@ -146,6 +182,7 @@ describe('Board Reports HTTP Routes', () => {
       finalized_at: new Date().toISOString(),
       finalized_receipt: '3',
     });
+    addFrozenSource(reqId, runId, engId);
 
     const calls: string[] = [];
     let recordedContent: string | undefined;
@@ -190,6 +227,22 @@ describe('Board Reports HTTP Routes', () => {
     });
   });
 
+  it('denies a non-founder before reading the frozen source', async () => {
+    const reqId = randomUUID();
+    let sourceRead = false;
+    const originalFrom = fixture.db.from.bind(fixture.db);
+    fixture.db.from = ((table: string) => {
+      if (table === 'board_request_sources') sourceRead = true;
+      return originalFrom(table);
+    }) as never;
+    const res = await app(fixture.owner, UserRole.OWNER).request(
+      `/v1/reports/board/${reqId}/generate`,
+      { method: 'POST' },
+    );
+    expect(res.status).toBe(403);
+    expect(sourceRead).toBe(false);
+  });
+
   it('refuses missing assessment metrics before recording a draft', async () => {
     const reqId = randomUUID();
     const runId = randomUUID();
@@ -217,6 +270,11 @@ describe('Board Reports HTTP Routes', () => {
         findings: [{ control_id: 'DPDPA-SEC-01', score: 20, rationale: 'Gap' }],
       },
     });
+    addFrozenSource(
+      reqId,
+      runId,
+      fixture.base.rows('board_report_requests').at(-1)!.engagement_id as string,
+    );
     let recorded = false;
     fixture.db.rpc = ((name: string) => {
       if (name === 'record_board_report_draft') recorded = true;
@@ -233,7 +291,41 @@ describe('Board Reports HTTP Routes', () => {
     expect(recorded).toBe(false);
   });
 
-  it('streams PDF for authorized reader', async () => {
+  it('refuses a changed frozen source before recording a draft', async () => {
+    const reqId = randomUUID();
+    const runId = randomUUID();
+    const engId = randomUUID();
+    fixture.base.rows('board_report_requests').push({
+      id: reqId,
+      tenant_id: tenant,
+      engagement_id: engId,
+      assessment_run_id: runId,
+      title: 'Board report',
+      library_version: '2023.1',
+    });
+    fixture.base.rows('board_request_sources').push({
+      request_id: reqId,
+      tenant_id: tenant,
+      source_text: '{"kind":"board_source","changed":true}',
+      source_sha256: '0'.repeat(64),
+      controls_sha256: '1'.repeat(64),
+      result_sha256: '2'.repeat(64),
+    });
+    let recorded = false;
+    fixture.db.rpc = ((name: string) => {
+      if (name === 'record_board_report_draft') recorded = true;
+      return abortableResult(Promise.resolve({ data: null, error: null }));
+    }) as never;
+    const res = await app(fixture.founder, UserRole.FOUNDER).request(
+      `/v1/reports/board/${reqId}/generate`,
+      { method: 'POST' },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: { code: 'assessment_source_conflict' } });
+    expect(recorded).toBe(false);
+  });
+
+  it('refuses regenerated PDF when no verified exact object version exists', async () => {
     const repId = randomUUID();
     const contentPayload = {
       schema_version: 1,
@@ -301,16 +393,8 @@ describe('Board Reports HTTP Routes', () => {
       },
     );
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toBe('application/pdf');
-    expect(res.headers.get('x-report-sha256')).toMatch(/^[0-9a-f]{64}$/);
-    expect(res.headers.get('cache-control')).toBe('private, no-store');
-    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-
-    const arrayBuffer = await res.arrayBuffer();
-    expect(arrayBuffer.byteLength).toBeGreaterThan(500);
-    const header = Buffer.from(arrayBuffer).toString('utf-8', 0, 8);
-    expect(header).toContain('%PDF');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: { code: 'report_artifact_unverified' } });
   });
 
   it('does not stream an unpublished board draft to another tenant member', async () => {
@@ -331,7 +415,7 @@ describe('Board Reports HTTP Routes', () => {
     const res = await app(fixture.viewer, UserRole.VIEWER).request(
       `/v1/reports/board/${repId}/pdf`,
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(409);
   });
 
   it('lists only the actor’s board requests through the service-role connection', async () => {
