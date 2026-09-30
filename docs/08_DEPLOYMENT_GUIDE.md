@@ -450,8 +450,10 @@ that development file contains public ports and default passwords. Bootstrap
 starts Auth on an empty schema before the checksummed application migrations.
 It does not install demo users or mint a local model. Without an approved local
 model service, model requests return `503 local_model_unavailable`.
-The BFF re-verifies the signed license and its expiry for each on-prem request;
-an expired or missing license blocks application and internal workload calls.
+The BFF, agent runtime, and model gateway re-verify the signed license and its
+expiry for each on-prem request. Temporal workers refuse boot without a valid
+license and stop polling within one second after expiry. Operations already in
+flight require their separate action authorization checks.
 The internal Compose network blocks container egress. On Docker Desktop it
 also suppressed host-published ports during rehearsal, so an intranet ingress
 with its own egress-deny policy and a browser/persona drill remain release gates.

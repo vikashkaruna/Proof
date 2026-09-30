@@ -1,5 +1,7 @@
 """Tests for the Model Gateway FastAPI application endpoints."""
 
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -193,7 +195,9 @@ def test_onprem_rejects_hosted_keys_and_external_model_urls():
     with pytest.raises(ValueError, match="Hosted model keys"):
         Settings(environment="onprem", api_key="private", anthropic_api_key="hosted")
     with pytest.raises(ValueError, match="local-model"):
-        Settings(environment="onprem", api_key="private", self_hosted_base_url="https://example.com")
+        Settings(
+            environment="onprem", api_key="private", self_hosted_base_url="https://example.com"
+        )
 
 
 def test_onprem_model_unavailable_is_explicit_and_auth_required(client):
@@ -205,14 +209,31 @@ def test_onprem_model_unavailable_is_explicit_and_auth_required(client):
         decision = decide_route("reasoning", "openai/gpt-4o", app.state.settings)
         assert decision.provider == "self_hosted"
         assert decision.fallback_chain == ()
-        unauthorized = client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hello"}]})
+        unauthorized = client.post(
+            "/v1/chat/completions", json={"messages": [{"role": "user", "content": "hello"}]}
+        )
         assert unauthorized.status_code == 401
         headers = {"Authorization": "Bearer private"}
-        complete = client.post("/v1/complete", headers=headers, json={"prompt": "hello", "model": "openai/gpt-4o"})
-        chat = client.post("/v1/chat/completions", headers=headers, json={"messages": [{"role": "user", "content": "hello"}]})
+        complete = client.post(
+            "/v1/complete", headers=headers, json={"prompt": "hello", "model": "openai/gpt-4o"}
+        )
+        chat = client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
         assert complete.status_code == 503
         assert complete.json()["detail"] == "local_model_unavailable"
         assert chat.status_code == 503
         assert chat.json()["detail"] == "local_model_unavailable"
     finally:
         app.state.settings = original
+
+
+def test_onprem_license_expiry_blocks_local_inference(client):
+    with patch.dict("os.environ", {"ENVIRONMENT": "onprem", "AXIOM_OFFLINE_LICENSE": "expired"}):
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 503
+        response = client.post("/v1/complete", json={"prompt": "hello"})
+        assert response.status_code == 403
+        assert response.json() == {"error": "offline_license_invalid"}

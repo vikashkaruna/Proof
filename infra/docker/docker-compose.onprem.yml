@@ -149,6 +149,7 @@ services:
     restart: unless-stopped
     environment:
       ENVIRONMENT: onprem
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
       API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
       SELF_HOSTED_MODEL: ${SELF_HOSTED_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}
       SELF_HOSTED_BASE_URL: ${SELF_HOSTED_BASE_URL:-}
@@ -159,6 +160,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *common
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
       MODEL_GATEWAY_URL: http://model-gateway:8001
       MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
@@ -199,6 +201,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *common
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
       AGENT_RUNTIME_URL: http://agent-runtime:8000
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
     depends_on:

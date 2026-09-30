@@ -9,7 +9,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
+from axiom_offline_license import verify_offline_license
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .config import Settings, get_settings
@@ -109,6 +111,18 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def require_onprem_license(request: Request, call_next):
+    if (
+        os.environ.get("ENVIRONMENT") == "onprem"
+        and request.url.path != "/health"
+        and not verify_offline_license(os.environ.get("AXIOM_OFFLINE_LICENSE"))
+    ):
+        status = 503 if request.url.path == "/ready" else 403
+        return JSONResponse({"error": "offline_license_invalid"}, status_code=status)
+    return await call_next(request)
 
 
 @app.get("/health")

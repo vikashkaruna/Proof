@@ -14,10 +14,11 @@ RUN pip install uv
 
 COPY services/temporal-workers/pyproject.toml ./services/temporal-workers/
 COPY services/temporal-workers/src ./services/temporal-workers/src
+COPY packages/offline-license-python ./packages/offline-license-python
 WORKDIR /app/services/temporal-workers
 RUN uv pip install --system -e .
 
-ENV PYTHONPATH="/app/services/temporal-workers/src"
+ENV PYTHONPATH="/app/services/temporal-workers/src:/app/packages/offline-license-python"
 WORKDIR /app/services/temporal-workers
 
 RUN useradd --create-home --shell /bin/bash axiom
