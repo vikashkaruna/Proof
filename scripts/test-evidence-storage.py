@@ -284,11 +284,11 @@ def main():
             }
             if (
                 result.returncode
-                or stats.get("expected") != 12
+                or stats.get("expected") != 13
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all twelve tests without skips or retries"
+                    "Evidence browser acceptance requires all thirteen tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
