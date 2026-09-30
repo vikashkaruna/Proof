@@ -6,6 +6,7 @@ import importlib.util
 import json
 import secrets
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -15,9 +16,10 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def jwt(role, secret):
+def jwt(role, secret, *, alg='HS256', exp=None):
     enc = lambda x: base64.urlsafe_b64encode(json.dumps(x).encode()).decode().rstrip('=')
-    body = enc({'alg': 'HS256', 'typ': 'JWT'}) + '.' + enc({'role': role})
+    now = int(time.time())
+    body = enc({'alg': alg, 'typ': 'JWT'}) + '.' + enc({'role': role, 'iat': now, 'exp': exp if exp is not None else now + 3600})
     signature = base64.urlsafe_b64encode(hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
     return body + '.' + signature
 
@@ -93,6 +95,27 @@ class OnpremPreflightTests(unittest.TestCase):
     def test_mutable_application_image_fails(self):
         self.values['AXIOM_BFF_IMAGE'] = 'axiom-bff:latest'
         with self.assertRaisesRegex(ValueError, 'immutable image digest'):
+            self.check()
+
+    def test_refuses_external_or_credentialed_origins_and_unapproved_cors(self):
+        for candidate in ('http://public.example.com:3001', 'http://evil:3001',
+                          'http://user:password@127.0.0.1:3001', 'http://127.0.0.1:3001/path'):
+            with self.subTest(candidate=candidate):
+                self.values['NEXT_PUBLIC_APP_URL'] = candidate
+                with self.assertRaises(ValueError):
+                    self.check()
+        self.values['NEXT_PUBLIC_APP_URL'] = 'http://127.0.0.1:3001'
+        self.values['BFF_CORS_ORIGINS'] = 'http://127.0.0.1:3001,http://evil.internal:3001'
+        with self.assertRaisesRegex(ValueError, 'BFF_CORS_ORIGINS'):
+            self.check()
+
+    def test_refuses_wrong_jwt_algorithm_and_expiry(self):
+        secret = self.values['SUPABASE_JWT_SECRET']
+        self.values['SUPABASE_ANON_KEY'] = jwt('anon', secret, alg='none')
+        with self.assertRaisesRegex(ValueError, 'HS256'):
+            self.check()
+        self.values['SUPABASE_ANON_KEY'] = jwt('anon', secret, exp=int(time.time()) - 1)
+        with self.assertRaisesRegex(ValueError, 'expired'):
             self.check()
 
 

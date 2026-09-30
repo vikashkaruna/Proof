@@ -27,6 +27,22 @@ while IFS= read -r image; do
   docker image inspect "$image" >/dev/null || { echo "Offline image missing: $image" >&2; exit 1; }
 done < <("${COMPOSE[@]}" config --images)
 
+# This is first installation, never an implicit upgrade or restore. Starting
+# over an existing volume could migrate a live database before its backup is
+# verified, and `up` would silently replace images in a running appliance.
+if [ -n "${COMPOSE_PROJECT_NAME:-}" ] && [ "$COMPOSE_PROJECT_NAME" != axiom-proof-onprem ]; then
+  echo 'Unexpected Compose project identity' >&2; exit 1
+fi
+if [ -n "$("${COMPOSE[@]}" ps -aq)" ]; then
+  echo 'Existing on-prem containers require a reviewed upgrade or restore procedure' >&2; exit 1
+fi
+for volume in supabase-db-data temporal-db-data redis-data minio-data; do
+  if docker volume inspect "axiom-proof-onprem_${volume}" >/dev/null 2>&1; then
+    echo "Existing on-prem state volume (${volume}) requires a reviewed upgrade or restore procedure" >&2
+    exit 1
+  fi
+done
+
 # GoTrue must own auth schema. Only roles/bootstrap SQL runs before it.
 "${COMPOSE[@]}" up -d --no-deps --wait supabase-db
 # An application database starts from template0; Auth owns its schema before

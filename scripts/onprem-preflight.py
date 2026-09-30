@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import ipaddress
+import json
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -71,16 +74,29 @@ def read_env(path: Path) -> dict[str, str]:
         raise ValueError('AXIOM_BIND_ADDRESS must be a private intranet IP')
     for name in ('NEXT_PUBLIC_APP_URL', 'NEXT_PUBLIC_BFF_URL', 'NEXT_PUBLIC_SUPABASE_URL'):
         parsed = urlparse(values[name])
-        if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+        if (parsed.scheme not in {'http', 'https'} or not parsed.hostname or
+                parsed.username or parsed.password or parsed.query or parsed.fragment or
+                parsed.path not in {'', '/'}):
             raise ValueError(f'{name} must be an absolute intranet URL')
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f'{name} has an invalid port') from exc
+        if port is None:
+            raise ValueError(f'{name} must specify an intranet port')
         try:
             address = ipaddress.ip_address(parsed.hostname)
         except ValueError:
-            if '.' in parsed.hostname and not parsed.hostname.endswith(('.local', '.internal')):
+            if parsed.hostname != 'localhost' and not parsed.hostname.endswith(('.local', '.internal')):
                 raise ValueError(f'{name} must use an intranet hostname')
         else:
             if not address.is_private:
                 raise ValueError(f'{name} must use an intranet IP')
+    cors = [origin.strip() for origin in values['BFF_CORS_ORIGINS'].split(',')]
+    if (not cors or any(not origin or origin not in {
+            values['NEXT_PUBLIC_APP_URL'].rstrip('/')
+        } for origin in cors) or values['NEXT_PUBLIC_APP_URL'].rstrip('/') not in cors):
+        raise ValueError('BFF_CORS_ORIGINS must contain only the approved app origin')
     model_url = values.get('SELF_HOSTED_BASE_URL', '')
     if model_url:
         parsed = urlparse(model_url)
@@ -100,10 +116,19 @@ def read_env(path: Path) -> dict[str, str]:
         ).decode().rstrip('=')
         if not hmac.compare_digest(signature, parts[2]):
             raise ValueError(f'{name} is not signed by SUPABASE_JWT_SECRET')
-        import json
-        payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
-        if payload.get('role') != role:
+        try:
+            header = json.loads(base64.urlsafe_b64decode(parts[0] + '=' * (-len(parts[0]) % 4)))
+            payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+        except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+            raise ValueError(f'{name} has invalid JWT encoding') from exc
+        if header != {'alg': 'HS256', 'typ': 'JWT'}:
+            raise ValueError(f'{name} must use HS256 JWT')
+        if not isinstance(payload, dict) or payload.get('role') != role:
             raise ValueError(f'{name} has the wrong role')
+        now = int(time.time())
+        if (not isinstance(payload.get('iat'), int) or payload['iat'] > now or
+                not isinstance(payload.get('exp'), int) or payload['exp'] <= now):
+            raise ValueError(f'{name} is expired or not yet issued')
     return values
 
 

@@ -20,6 +20,7 @@ x-common: &common
 services:
   supabase-db:
     image: ${AXIOM_POSTGRES_IMAGE:?supply approved PostgreSQL digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -33,6 +34,7 @@ services:
     networks: [sovereign]
   supabase-auth:
     image: ${AXIOM_AUTH_IMAGE:?supply approved GoTrue digest}
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       supabase-db: { condition: service_healthy }
@@ -59,6 +61,7 @@ services:
     networks: [sovereign]
   supabase-rest:
     image: ${AXIOM_POSTGREST_IMAGE:?supply approved PostgREST digest}
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       supabase-db: { condition: service_healthy }
@@ -70,6 +73,7 @@ services:
     networks: [sovereign]
   supabase-gateway:
     image: ${AXIOM_INGRESS_IMAGE:?supply approved ingress digest}
+    pull_policy: never
     restart: unless-stopped
     ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${SUPABASE_API_PORT:-55321}:80']
     volumes: ['./onprem-supabase-gateway.conf:/etc/nginx/conf.d/default.conf:ro']
@@ -77,6 +81,7 @@ services:
     networks: [sovereign]
   temporal-db:
     image: ${AXIOM_TEMPORAL_POSTGRES_IMAGE:?supply approved Temporal PostgreSQL digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -90,6 +95,7 @@ services:
     networks: [sovereign]
   temporal:
     image: ${AXIOM_TEMPORAL_IMAGE:?supply approved Temporal digest}
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       temporal-db: { condition: service_healthy }
@@ -109,12 +115,14 @@ services:
     networks: [sovereign]
   redis:
     image: ${AXIOM_REDIS_IMAGE:?supply approved Redis digest}
+    pull_policy: never
     restart: unless-stopped
     command: ['redis-server', '--appendonly', 'yes']
     volumes: [redis-data:/data]
     networks: [sovereign]
   minio:
     image: ${AXIOM_WORM_SERVER_IMAGE:?supply approved WORM server digest}
+    pull_policy: never
     restart: unless-stopped
     command: server /data --console-address ':9001'
     environment:
@@ -125,6 +133,7 @@ services:
     networks: [sovereign]
   minio-init:
     image: ${AXIOM_WORM_CLIENT_IMAGE:?supply approved WORM client digest}
+    pull_policy: never
     depends_on:
       minio: { condition: service_started }
     entrypoint: ['/bin/sh', '-ec']
@@ -147,6 +156,7 @@ services:
     networks: [sovereign]
   model-gateway:
     image: ${AXIOM_MODEL_GATEWAY_IMAGE:?supply approved model gateway digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       ENVIRONMENT: onprem
@@ -158,6 +168,7 @@ services:
     networks: [sovereign]
   agent-runtime:
     image: ${AXIOM_AGENT_RUNTIME_IMAGE:?supply approved runtime digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       <<: *common
@@ -174,6 +185,7 @@ services:
     networks: [sovereign]
   bff:
     image: ${AXIOM_BFF_IMAGE:?supply approved BFF digest}
+    pull_policy: never
     restart: unless-stopped
     ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${BFF_PORT:-4000}:4000']
     environment:
@@ -199,6 +211,7 @@ services:
     networks: [sovereign]
   temporal-worker:
     image: ${AXIOM_WORKER_IMAGE:?supply approved worker digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       <<: *common
@@ -211,6 +224,7 @@ services:
     networks: [sovereign]
   web:
     image: ${AXIOM_WEB_IMAGE:?supply approved web digest}
+    pull_policy: never
     restart: unless-stopped
     ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${WEB_PORT:-3001}:3001']
     environment:
@@ -221,7 +235,6 @@ services:
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set web origin}
       SUPABASE_URL: http://supabase-gateway:80
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
-      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:?mint keys}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set Auth origin}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
       AXIOM_E2E_BYPASS_AUTH: 'false'
