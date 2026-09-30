@@ -51,9 +51,19 @@ export function boardReportRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
+    dependencies.service ??
+    new BoardReportService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
   const artifacts = () =>
-    dependencies.artifacts ?? new BoardArtifactService(dependencies.db ?? createSupabaseAdmin(), undefined, undefined, dependencies.db ?? createStatutoryProofWriter());
+    dependencies.artifacts ??
+    new BoardArtifactService(
+      dependencies.db ?? createSupabaseAdmin(),
+      undefined,
+      undefined,
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
 
   const operationSchema = z.object({ operationKey: z.uuid() }).strict();
 

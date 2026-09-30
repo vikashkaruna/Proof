@@ -41,10 +41,19 @@ export function statutoryReportRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new StatutoryReportService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
+    dependencies.service ??
+    new StatutoryReportService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
   const artifacts = () =>
     dependencies.artifacts ??
-    new StatutoryArtifactService(dependencies.db ?? createSupabaseAdmin(), undefined, undefined, dependencies.db ?? createStatutoryProofWriter());
+    new StatutoryArtifactService(
+      dependencies.db ?? createSupabaseAdmin(),
+      undefined,
+      undefined,
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
   const operationSchema = z.object({ operationKey: z.uuid() }).strict();
 
   app.get('/reports/statutory/:id/artifacts/status', async (c) => {

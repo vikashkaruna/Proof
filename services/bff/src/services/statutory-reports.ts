@@ -63,7 +63,10 @@ export const listStatutoryReportsInputSchema = z
 export type ListStatutoryReportsInput = z.infer<typeof listStatutoryReportsInputSchema>;
 
 export class StatutoryReportService {
-  constructor(private readonly db: EvidenceDatabase, private readonly writerDb?: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writerDb?: EvidenceDatabase,
+  ) {}
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
     let membership = this.db
