@@ -97,6 +97,7 @@ export class PramaanArtifactService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly storage: () => Storage = evidenceStorage,
+    private readonly writerDb: EvidenceDatabase = db,
   ) {}
 
   private async row<T>(
@@ -118,7 +119,7 @@ export class PramaanArtifactService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+    let query = this.writerDb.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('dossier_persistence_unconfirmed', 503);

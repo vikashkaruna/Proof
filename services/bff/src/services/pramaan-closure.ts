@@ -62,11 +62,14 @@ export class PramaanClosureService {
   readonly auditorArtifacts: PramaanAuditorArtifactService;
   readonly technicalArtifacts: PramaanTechnicalArtifactService;
   readonly dpbArtifacts: PramaanDpbArtifactService;
-  constructor(private readonly db: EvidenceDatabase) {
-    this.artifacts = new PramaanArtifactService(db);
-    this.auditorArtifacts = new PramaanAuditorArtifactService(db);
-    this.technicalArtifacts = new PramaanTechnicalArtifactService(db);
-    this.dpbArtifacts = new PramaanDpbArtifactService(db);
+  constructor(
+    private readonly db: EvidenceDatabase,
+    writerDb: EvidenceDatabase = db,
+  ) {
+    this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
+    this.auditorArtifacts = new PramaanAuditorArtifactService(db, undefined, () => writerDb);
+    this.technicalArtifacts = new PramaanTechnicalArtifactService(db, undefined, () => writerDb);
+    this.dpbArtifacts = new PramaanDpbArtifactService(db, undefined, () => writerDb);
   }
 
   private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {

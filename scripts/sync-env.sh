@@ -162,6 +162,7 @@ do_verify() {
     "SUPABASE_URL:Database & Auth"
     "SUPABASE_ANON_KEY:Database & Auth"
     "SUPABASE_SERVICE_KEY:Database & Auth"
+    "SUPABASE_STATUTORY_PROOF_WRITER_KEY:Database & Auth"
     "NEXT_PUBLIC_APP_URL:Client URLs"
     "NEXT_PUBLIC_BFF_URL:Client URLs"
     "BFF_URL:Inter-service"
@@ -375,6 +376,7 @@ tfvar_value() {
     supabase_jwt_secret)          get_val "SUPABASE_JWT_SECRET" ;;
     supabase_anon_key)            get_val "SUPABASE_ANON_KEY" ;;
     supabase_service_key)         get_val "SUPABASE_SERVICE_KEY" ;;
+    supabase_statutory_proof_writer_key) get_val "SUPABASE_STATUTORY_PROOF_WRITER_KEY" ;;
 
     # ── Email ──
     resend_api_key)             get_val "RESEND_API_KEY" ;;

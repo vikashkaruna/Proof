@@ -272,3 +272,65 @@ grant execute on function public.begin_source_bound_pramaan(uuid,uuid,uuid,uuid,
  public.settle_source_bound_pramaan(uuid,uuid,uuid,jsonb,uuid),
  public.note_source_bound_pramaan_failure(uuid,uuid,uuid,text,uuid),
  public.seal_source_bound_pramaan(uuid,uuid,uuid,text,uuid) to service_role;
+
+-- The agent/worker service key must never be able to assert a founder identity or
+-- fabricate an object-store receipt. Only the BFF receives a JWT for this
+-- PostgREST role; it authenticates the human and verifies the provider first.
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'statutory_proof_writer') then
+    create role statutory_proof_writer nologin noinherit nobypassrls;
+  end if;
+end $$;
+alter role statutory_proof_writer nologin noinherit nobypassrls;
+grant statutory_proof_writer to authenticator;
+grant usage on schema public to statutory_proof_writer;
+
+revoke all on function public.request_statutory_report(uuid,uuid,uuid,uuid,uuid,text,text,uuid),
+ public.record_source_bound_statutory_draft(uuid,uuid,uuid,text,text,uuid),
+ public.begin_statutory_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_statutory_artifact_version(uuid,uuid,uuid,text,jsonb,uuid),
+ public.note_statutory_artifact_failure(uuid,uuid,uuid,text,uuid),
+ public.request_board_report(uuid,uuid,uuid,uuid,uuid,text,uuid),
+ public.record_board_report_draft(uuid,uuid,uuid,text,text,uuid),
+ public.begin_board_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_board_artifact_version(uuid,uuid,uuid,text,jsonb,uuid),
+ public.note_board_artifact_failure(uuid,uuid,uuid,text,uuid),
+ public.prepare_evidence_pack(uuid,uuid,uuid,text,uuid,text,uuid[],uuid),
+ public.begin_evidence_pack_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_evidence_pack_build(uuid,uuid,uuid,jsonb,uuid),
+ public.note_evidence_pack_build_failure(uuid,uuid,uuid,text,uuid),
+ public.review_report(uuid,uuid,text,text,uuid,text,uuid),
+ public.release_report(uuid,uuid,uuid,text,text,uuid),
+ public.begin_source_bound_pramaan(uuid,uuid,uuid,uuid,text,jsonb,uuid),
+ public.settle_source_bound_pramaan(uuid,uuid,uuid,jsonb,uuid),
+ public.note_source_bound_pramaan_failure(uuid,uuid,uuid,text,uuid),
+ public.seal_source_bound_pramaan(uuid,uuid,uuid,text,uuid)
+ from public,anon,authenticated,service_role;
+grant execute on function public.request_statutory_report(uuid,uuid,uuid,uuid,uuid,text,text,uuid),
+ public.record_source_bound_statutory_draft(uuid,uuid,uuid,text,text,uuid),
+ public.begin_statutory_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_statutory_artifact_version(uuid,uuid,uuid,text,jsonb,uuid),
+ public.note_statutory_artifact_failure(uuid,uuid,uuid,text,uuid),
+ public.request_board_report(uuid,uuid,uuid,uuid,uuid,text,uuid),
+ public.record_board_report_draft(uuid,uuid,uuid,text,text,uuid),
+ public.begin_board_artifact_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_board_artifact_version(uuid,uuid,uuid,text,jsonb,uuid),
+ public.note_board_artifact_failure(uuid,uuid,uuid,text,uuid),
+ public.prepare_evidence_pack(uuid,uuid,uuid,text,uuid,text,uuid[],uuid),
+ public.begin_evidence_pack_build(uuid,uuid,uuid,uuid,jsonb,uuid),
+ public.settle_evidence_pack_build(uuid,uuid,uuid,jsonb,uuid),
+ public.note_evidence_pack_build_failure(uuid,uuid,uuid,text,uuid),
+ public.review_report(uuid,uuid,text,text,uuid,text,uuid),
+ public.release_report(uuid,uuid,uuid,text,text,uuid),
+ public.begin_source_bound_pramaan(uuid,uuid,uuid,uuid,text,jsonb,uuid),
+ public.settle_source_bound_pramaan(uuid,uuid,uuid,jsonb,uuid),
+ public.note_source_bound_pramaan_failure(uuid,uuid,uuid,text,uuid),
+ public.seal_source_bound_pramaan(uuid,uuid,uuid,text,uuid)
+ to statutory_proof_writer;
+
+-- Superseded metadata-only PDF RPCs have no provider verification and no live
+-- application callers. They must not remain forgeable with the worker key.
+revoke all on function public.attach_board_report_pdf(uuid,uuid,uuid,text,bigint,text,text,text,text,timestamptz),
+ public.record_statutory_report_draft(uuid,uuid,uuid,text,text,text,text,text,uuid),
+ public.attach_statutory_report_pdf(uuid,uuid,uuid,text,bigint,uuid)
+ from public,anon,authenticated,service_role;

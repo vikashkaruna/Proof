@@ -105,6 +105,7 @@ export class EvidencePackService {
   constructor(
     readonly db: EvidenceDatabase,
     readonly storage: () => Storage = evidenceStorage,
+    readonly writerDb: EvidenceDatabase = db,
   ) {}
   async access(tenantId: string, actorId: string, signal?: AbortSignal) {
     return accessFor(this.db, tenantId, actorId, signal);
@@ -163,7 +164,8 @@ export class EvidencePackService {
     signal: AbortSignal = AbortSignal.timeout(15_000),
   ) {
     if (signal.aborted) throw new EvidenceError('pack_deadline_exceeded', 503);
-    const { data, error } = await this.db.rpc(name, args).abortSignal(signal);
+    const client = this.writerDb;
+    const { data, error } = await client.rpc(name, args).abortSignal(signal);
     if (error) throw new EvidenceError('report_persistence_unconfirmed', 503);
     const refusal = z.object({ error: z.string() }).safeParse(data);
     if (refusal.success) throw new EvidenceError(refusal.data.error, 409);

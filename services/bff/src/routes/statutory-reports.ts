@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -41,10 +41,10 @@ export function statutoryReportRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new StatutoryReportService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ?? new StatutoryReportService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
   const artifacts = () =>
     dependencies.artifacts ??
-    new StatutoryArtifactService(dependencies.db ?? createSupabaseAdmin());
+    new StatutoryArtifactService(dependencies.db ?? createSupabaseAdmin(), undefined, undefined, dependencies.db ?? createStatutoryProofWriter());
   const operationSchema = z.object({ operationKey: z.uuid() }).strict();
 
   app.get('/reports/statutory/:id/artifacts/status', async (c) => {
