@@ -30,9 +30,11 @@ function localProofWriterToken() {
   >;
   if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
     throw new Error('Local proof writer target differs from seeded personas');
+  const jwtSecret = status.JWT_SECRET;
+  if (!jwtSecret) throw new Error('Local proof writer JWT secret is missing');
   return mintLocalPostgrestRoleKey({
     role: 'statutory_proof_writer',
-    jwtSecret: status.JWT_SECRET,
+    jwtSecret,
     serviceKey: state.serviceKey,
   });
 }
