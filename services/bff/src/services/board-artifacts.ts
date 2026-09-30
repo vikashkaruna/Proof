@@ -100,6 +100,138 @@ export class BoardArtifactService {
     ) => Promise<RenderPdfResult> = renderHtmlToPdf,
   ) {}
 
+  /** A metadata-only projection. No object key, bucket or provider receipt crosses this boundary. */
+  async status(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
+    const member = await this.row(
+      'tenant_users',
+      tenantId,
+      'user_id',
+      actorId,
+      z.object({ role: z.string() }),
+      signal,
+    );
+    if (!member || !['founder', 'owner', 'admin'].includes(member.role))
+      throw new EvidenceError('forbidden', 403);
+    const founder = member.role === 'founder';
+    if (founder) {
+      let userQuery = this.db.from('users').select('is_axiom_internal').eq('id', actorId);
+      if (signal) userQuery = userQuery.abortSignal(signal);
+      const user = await userQuery.maybeSingle();
+      if (user.error) throw new EvidenceError('report_storage_unavailable', 503);
+      if (user.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
+    }
+    const report = await this.row(
+      'reports',
+      tenantId,
+      'id',
+      reportId,
+      z.object({
+        id: uuid,
+        kind: z.literal('board'),
+        generated_by_agent: z.literal('board-report-builder'),
+        status: z.enum(['draft', 'approved', 'rejected', 'published', 'archived']),
+      }),
+      signal,
+    );
+    if (!report) throw new EvidenceError('report_not_found', 404);
+    const request = await this.row(
+      'board_report_requests',
+      tenantId,
+      'report_id',
+      reportId,
+      z.object({ requested_by: uuid }),
+      signal,
+    );
+    if (!request) throw new EvidenceError('report_not_found', 404);
+    if (!founder && request.requested_by !== actorId)
+      throw new EvidenceError('report_not_found', 404);
+
+    const build = await this.row(
+      'board_artifact_builds',
+      tenantId,
+      'report_id',
+      reportId,
+      z.object({
+        id: uuid,
+        operation_key: uuid,
+        status: z.enum(['pending', 'settled']),
+        retain_until: z.string().datetime({ offset: true }),
+        last_error_code: z.string().nullable(),
+      }),
+      signal,
+    );
+    if (!build)
+      return {
+        reportId,
+        reportStatus: report.status,
+        status: 'not_started' as const,
+        buildId: null,
+        operationKey: null,
+        retainUntil: null,
+        lastErrorCode: null,
+        source: null,
+        pdf: null,
+      };
+    let query = this.db
+      .from('board_artifact_versions')
+      .select('id,report_id,build_id,artifact_kind,version_id,content_hash,byte_size,retain_until')
+      .eq('tenant_id', tenantId)
+      .eq('report_id', reportId)
+      .eq('build_id', build.id)
+      .range(0, 2);
+    if (signal) query = query.abortSignal(signal);
+    const result = await query;
+    if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
+    const parsed = z
+      .array(
+        z.object({
+          id: uuid,
+          report_id: uuid,
+          build_id: uuid,
+          artifact_kind: z.enum(['source_json', 'board_pdf']),
+          version_id: z.string().min(1),
+          content_hash: hash,
+          byte_size: z.number().int().positive(),
+          retain_until: z.string().datetime({ offset: true }),
+        }),
+      )
+      .max(2)
+      .safeParse(result.data ?? []);
+    if (
+      !parsed.success ||
+      parsed.data.some((row) => row.report_id !== reportId || row.build_id !== build.id)
+    )
+      throw new EvidenceError('invalid_report_record', 503);
+    if (new Set(parsed.data.map((row) => row.artifact_kind)).size !== parsed.data.length)
+      throw new EvidenceError('invalid_report_record', 503);
+    if (build.status === 'settled' && parsed.data.length !== 2)
+      throw new EvidenceError('invalid_report_record', 503);
+    const visibleVersions = founder || report.status === 'published';
+    const artifact = (kind: 'source_json' | 'board_pdf') => {
+      if (!visibleVersions) return null;
+      const row = parsed.data.find((value) => value.artifact_kind === kind);
+      return row
+        ? {
+            sha256: row.content_hash,
+            versionId: row.version_id,
+            byteSize: row.byte_size,
+            retainUntil: row.retain_until,
+          }
+        : null;
+    };
+    return {
+      reportId,
+      reportStatus: report.status,
+      status: build.status,
+      buildId: build.id,
+      operationKey: founder ? build.operation_key : null,
+      retainUntil: build.retain_until,
+      lastErrorCode: founder ? build.last_error_code : null,
+      source: artifact('source_json'),
+      pdf: artifact('board_pdf'),
+    };
+  }
+
   private async row<T>(
     table: string,
     tenantId: string,

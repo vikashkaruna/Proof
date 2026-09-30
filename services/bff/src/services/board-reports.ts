@@ -34,6 +34,100 @@ export type GenerateBoardReportDraftInput = z.infer<typeof generateBoardReportDr
 export class BoardReportService {
   constructor(private readonly db: EvidenceDatabase) {}
 
+  private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
+    let membership = this.db
+      .from('tenant_users')
+      .select('role')
+      .eq('tenant_id', tenantId)
+      .eq('user_id', actorId);
+    if (signal) membership = membership.abortSignal(signal);
+    const result = await membership.maybeSingle();
+    if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
+    const role = result.data?.role;
+    if (role !== 'founder' && role !== 'owner' && role !== 'admin')
+      throw new EvidenceError('forbidden', 403);
+    if (role === 'founder') {
+      let user = this.db.from('users').select('is_axiom_internal').eq('id', actorId);
+      if (signal) user = user.abortSignal(signal);
+      const userResult = await user.maybeSingle();
+      if (userResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+      if (userResult.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
+    }
+    return role;
+  }
+
+  async listAssessmentOptions(
+    tenantId: string,
+    actorId: string,
+    options: { limit: number; offset: number },
+    signal?: AbortSignal,
+  ) {
+    await this.readRole(tenantId, actorId, signal);
+    const { limit, offset } = options;
+    let query = this.db
+      .from('workload_assessment_packets')
+      .select('run_id,engagement_id,library_version,finalized_at,finalized_receipt', {
+        count: 'exact',
+      })
+      .eq('tenant_id', tenantId)
+      .gte('finalized_at', '1970-01-01T00:00:00Z')
+      .order('finalized_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (signal) query = query.abortSignal(signal);
+    const result = await query;
+    if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
+    const parsed = z
+      .array(
+        z.object({
+          run_id: z.uuid(),
+          engagement_id: z.uuid(),
+          library_version: z.string().min(1),
+          finalized_at: z.string().datetime({ offset: true }),
+          finalized_receipt: z.union([
+            z.number().int().positive(),
+            z.string().regex(/^[1-9][0-9]*$/),
+          ]),
+        }),
+      )
+      .max(limit)
+      .safeParse(result.data ?? []);
+    if (!parsed.success) throw new EvidenceError('invalid_report_record', 503);
+    const engagementIds = [...new Set(parsed.data.map((row) => row.engagement_id))];
+    let engagements: Array<{ id: string; title: string }> = [];
+    if (engagementIds.length) {
+      let titles = this.db
+        .from('engagements')
+        .select('id,title')
+        .eq('tenant_id', tenantId)
+        .in('id', engagementIds)
+        .range(0, limit - 1);
+      if (signal) titles = titles.abortSignal(signal);
+      const titleResult = await titles;
+      if (titleResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+      const titleRows = z
+        .array(z.object({ id: z.uuid(), title: z.string() }))
+        .max(limit)
+        .safeParse(titleResult.data ?? []);
+      if (!titleRows.success) throw new EvidenceError('invalid_report_record', 503);
+      engagements = titleRows.data;
+    }
+    const titleById = new Map(engagements.map((row) => [row.id, row.title]));
+    if (parsed.data.some((row) => !titleById.has(row.engagement_id)))
+      throw new EvidenceError('invalid_report_record', 503);
+    return {
+      assessments: parsed.data.map((row) => ({
+        assessmentRunId: row.run_id,
+        engagementId: row.engagement_id,
+        engagementTitle: titleById.get(row.engagement_id)!,
+        finalizedAt: row.finalized_at,
+        libraryVersion: row.library_version,
+      })),
+      total: result.count ?? 0,
+      limit,
+      offset,
+    };
+  }
+
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
     let membership = this.db
       .from('tenant_users')
@@ -377,28 +471,55 @@ export class BoardReportService {
   async listRequests(
     tenantId: string,
     actorId: string,
-    options: { limit?: number; offset?: number } = {},
+    options: { limit: number; offset: number },
     signal?: AbortSignal,
   ) {
-    const limit = options.limit ?? 25;
-    const offset = options.offset ?? 0;
+    const role = await this.readRole(tenantId, actorId, signal);
+    const { limit, offset } = options;
 
     const query = this.db
       .from('board_report_requests')
-      .select('*', { count: 'exact' })
+      .select('id,engagement_id,assessment_run_id,report_id,title,status,created_at,updated_at', {
+        count: 'exact',
+      })
       .eq('tenant_id', tenantId)
-      .eq('requested_by', actorId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
+    if (role !== 'founder') query.eq('requested_by', actorId);
 
     const { data, error, count } = signal ? await query.abortSignal(signal) : await query;
     if (error) {
       throw new EvidenceError('report_storage_unavailable', 503);
     }
 
+    const rows = z
+      .array(
+        z.object({
+          id: z.uuid(),
+          engagement_id: z.uuid(),
+          assessment_run_id: z.uuid(),
+          report_id: z.uuid().nullable(),
+          title: z.string(),
+          status: z.enum(['requested', 'drafted', 'reviewed', 'released', 'rejected']),
+          created_at: z.string().datetime({ offset: true }),
+          updated_at: z.string().datetime({ offset: true }),
+        }),
+      )
+      .max(limit)
+      .safeParse(data ?? []);
+    if (!rows.success) throw new EvidenceError('invalid_report_record', 503);
     return {
-      requests: data ?? [],
-      total: count ?? data?.length ?? 0,
+      requests: rows.data.map((row) => ({
+        id: row.id,
+        engagementId: row.engagement_id,
+        assessmentRunId: row.assessment_run_id,
+        reportId: row.report_id,
+        title: row.title,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      total: count ?? 0,
       limit,
       offset,
     };

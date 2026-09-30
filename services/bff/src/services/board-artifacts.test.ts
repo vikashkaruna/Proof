@@ -243,6 +243,55 @@ function setup() {
 }
 
 describe('board artifact provider boundary', () => {
+  it('projects exact version metadata to the founder without leaking storage coordinates', async () => {
+    const { fixture, service } = setup();
+    const managerId = randomUUID();
+    fixture.rows('tenant_users').push({ tenant_id: tenant, user_id: managerId, role: 'owner' });
+    fixture.rows('board_report_requests')[0]!.requested_by = managerId;
+    const buildId = randomUUID();
+    fixture.rows('board_artifact_builds').push({
+      id: buildId,
+      tenant_id: tenant,
+      report_id: reportId,
+      operation_key: operationKey,
+      status: 'pending',
+      retain_until: '2033-09-30T12:00:00.000Z',
+      last_error_code: null,
+    });
+    fixture.rows('board_artifact_versions').push({
+      id: randomUUID(),
+      tenant_id: tenant,
+      report_id: reportId,
+      build_id: buildId,
+      artifact_kind: 'source_json',
+      version_id: 'exact-source-version',
+      content_hash: 'a'.repeat(64),
+      byte_size: 100,
+      retain_until: '2033-09-30T12:00:00.000Z',
+      bucket: 'private-bucket',
+      object_key: 'private/source/key',
+      provider: 's3',
+    });
+    const founder = await service.status(tenant, actorId, reportId);
+    expect(founder).toMatchObject({
+      reportStatus: 'approved',
+      status: 'pending',
+      operationKey,
+      source: { sha256: 'a'.repeat(64), versionId: 'exact-source-version' },
+      pdf: null,
+    });
+    expect(JSON.stringify(founder)).not.toMatch(/private-bucket|private\/source\/key|provider/);
+    const manager = await service.status(tenant, managerId, reportId);
+    expect(manager).toMatchObject({ reportStatus: 'approved', source: null, operationKey: null });
+    fixture.rows('reports')[0]!.status = 'published';
+    expect(await service.status(tenant, managerId, reportId)).toMatchObject({
+      reportStatus: 'published',
+      source: { versionId: 'exact-source-version' },
+    });
+    await expect(service.status(tenant, randomUUID(), reportId)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+  });
   it('stores and read-verifies both exact versions, then serves only the published PDF bytes', async () => {
     const { fixture, service, vault, calls, renderPdf, pdfBytes } = setup();
     expect(await service.build(tenant, actorId, reportId, operationKey)).toMatchObject({

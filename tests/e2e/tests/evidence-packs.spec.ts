@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import {
   createMfaAccount,
   selectTenant,
@@ -68,6 +68,27 @@ async function founder(page: Page, label: string) {
   await signInAs(page, account.email, account.password);
   await selectTenant(page, 'a');
   await satisfyLoginMfaWithSecret(page, account.totpSecret!);
+}
+
+/** Board acceptance adds real engagements. Find the seeded one through the
+ * same bounded picker a human uses instead of assuming it remains on page 1. */
+async function selectEngagement(form: Locator, id: string) {
+  const select = form.getByLabel('Engagement scope');
+  const next = form.getByRole('button', { name: 'Next engagements' });
+  for (let page = 0; page < 100; page++) {
+    await expect(select).toBeEnabled();
+    if (await select.locator(`option[value="${id}"]`).count()) {
+      await select.selectOption(id);
+      return;
+    }
+    if (!(await next.isEnabled())) break;
+    const before = (await select.locator('option').allTextContents()).join('|');
+    await next.click();
+    await expect
+      .poll(async () => (await select.locator('option').allTextContents()).join('|'))
+      .not.toBe(before);
+  }
+  throw new Error('Seeded engagement is absent from every displayed engagement page');
 }
 
 /** Real crash boundary: sanctioned build intent + optional real provider PUT,
@@ -261,13 +282,13 @@ test.describe('retained evidence pack acceptance', () => {
     await page.getByLabel('Available evidence versions').getByRole('checkbox').check();
     const form = page.getByRole('form', { name: 'Prepare pack', exact: true });
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     // Metadata edits revoke approval of the selection before any write.
     await form.getByLabel('Pack title', { exact: true }).fill(`${title} revised`);
     await expect(form.getByRole('checkbox')).not.toBeChecked();
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     const prepareResponse = page.waitForResponse(
       (r) =>
@@ -441,7 +462,7 @@ test.describe('retained evidence pack acceptance', () => {
     await page.getByLabel('Available evidence versions').getByRole('checkbox').check();
     const form = page.getByRole('form', { name: 'Prepare pack', exact: true });
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     // The real server commits; only its response is deliberately lost.
     await page.route(

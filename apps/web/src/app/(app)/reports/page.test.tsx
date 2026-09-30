@@ -14,7 +14,7 @@ vi.mock('@/lib/tenant-context', () => ({
   }),
 }));
 import ReportsPage from './page';
-import { ReportProof } from './reports-client';
+import { ReportProof, canOfferRelease } from './reports-client';
 import { DossierViewerModal } from './dossier-viewer-modal';
 import { detailSchema } from './report-contract';
 beforeEach(() => {
@@ -28,6 +28,7 @@ it('refuses an agent and presents no mutation or fake output to a viewer', async
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading recorded reports');
   expect(html).not.toContain('Prepare pack for review');
+  expect(html).not.toContain('Request board draft');
   expect(html).not.toContain('No reports recorded');
   expect(html).not.toContain('cryptographicSignature');
   expect(html).not.toContain('74');
@@ -41,6 +42,8 @@ it('shows historical dossier inspection only to an internal founder', async () =
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading available evidence');
+  expect(html).toContain('Request from a finalized assessment');
+  expect(html).toContain('Loading board requests');
   expect(html).toContain('authorize preparing this immutable pack');
   expect(html).not.toContain('Approve reviewed content');
   expect(html).not.toContain('Release reviewed report');
@@ -129,6 +132,32 @@ it('shows named immutable review attribution and distinct content/archive hashes
   expect(html).not.toContain('signature');
 });
 
+it('preserves custom release while refusing board release without a retained PDF', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const reviewed = detailSchema.parse({
+    id,
+    kind: 'board',
+    title: 'Reviewed board report',
+    engagementId: id,
+    libraryVersion: 'v1',
+    status: 'approved',
+    generatedAt: '2026-09-30T00:00:00Z',
+    generatedByAgent: 'board-report-builder',
+    createdBy: id,
+    contentHash: 'a'.repeat(64),
+    reviewedContentHash: 'a'.repeat(64),
+    review: null,
+    publishedAt: null,
+    releasedBy: null,
+    releasedArchiveHash: null,
+    assurance: 'digest_bound',
+    pack: null,
+    contentText: '{}',
+  });
+  expect(canOfferRelease(reviewed)).toBe(false);
+  expect(canOfferRelease({ ...reviewed, kind: 'custom' })).toBe(true);
+});
+
 it('shows legacy dossier metadata without an unsupported proof or action', () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const dossier = {
@@ -167,7 +196,7 @@ it('shows legacy dossier metadata without an unsupported proof or action', () =>
 
 it('marks unreleased statutory formats as planned work', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
-  expect(html).toContain('Draft preview only');
+  expect(html).toContain('Request from finalized assessment below');
   expect(html).toContain('Release unavailable');
   expect(html).not.toContain('independent attestation');
   expect(html).not.toContain('Full sequence of automated mutations');

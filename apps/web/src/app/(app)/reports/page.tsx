@@ -1,4 +1,4 @@
-import { Capability, can } from '@axiom/types';
+import { Capability, UserRole, can } from '@axiom/types';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { ReportsClient } from './reports-client';
 
@@ -16,6 +16,13 @@ export default async function ReportsPage() {
       canReview={isAxiomInternal && can(Capability.REPORT_REVIEW, { role })}
       canRelease={isAxiomInternal && can(Capability.REPORT_RELEASE, { role })}
       canExport={can(Capability.EVIDENCE_EXPORT, { role })}
+      canRequestBoard={
+        can(Capability.REPORT_GENERATE, { role }) &&
+        ((role === UserRole.FOUNDER && isAxiomInternal) ||
+          role === UserRole.OWNER ||
+          role === UserRole.ADMIN)
+      }
+      canManageBoard={isAxiomInternal && role === UserRole.FOUNDER}
     />
   );
 }

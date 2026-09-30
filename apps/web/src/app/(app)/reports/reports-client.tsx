@@ -16,8 +16,17 @@ import {
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
 import { AgentIcon } from '@axiom/ui';
+import { BoardWorkflow } from './board-workflow';
 
 const date = (value: string) => new Date(value).toLocaleString();
+
+export function canOfferRelease(report: ReportDetail): boolean {
+  return (
+    report.status === 'approved' &&
+    !!report.contentHash &&
+    (report.kind === 'custom' || !!report.pack?.archive)
+  );
+}
 
 type Access = {
   tenantId: string;
@@ -25,6 +34,8 @@ type Access = {
   canReview: boolean;
   canRelease: boolean;
   canExport: boolean;
+  canRequestBoard: boolean;
+  canManageBoard: boolean;
 };
 
 export function ReportsClient(access: Access) {
@@ -88,15 +99,18 @@ export function ReportsClient(access: Access) {
   }
   return (
     <div className="min-w-0 space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence</h1>
-        <p className="text-sm text-slate-600">
-          Review recorded reports and evidence packs. A content hash alone does not establish a
-          retained PDF, source provenance, or a released proof artifact.
-        </p>
-        <p className="text-sm text-slate-600">
-          Report email dispatch is unavailable while source-bound delivery is being rebuilt.
-        </p>
+      <header className="flex items-start gap-3">
+        <AgentIcon agent="prativedan" size="sm" state="idle" />
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence</h1>
+          <p className="text-sm text-slate-600">
+            Review recorded reports and evidence packs. A content hash alone does not establish a
+            retained PDF, source provenance, or a released proof artifact.
+          </p>
+          <p className="text-sm text-slate-600">
+            Report email dispatch is unavailable while source-bound delivery is being rebuilt.
+          </p>
+        </div>
       </header>
 
       <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
@@ -148,7 +162,11 @@ export function ReportsClient(access: Access) {
                 Automated drafts can use finalized assessment results. Source and PDF retention are
                 required before release.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Draft preview only</div>
+              <div className="text-xs text-slate-500 font-medium">
+                {access.canRequestBoard
+                  ? 'Request from finalized assessment below'
+                  : 'Source-bound workflow'}
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -196,6 +214,14 @@ export function ReportsClient(access: Access) {
               <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
           </div>
+
+          <BoardWorkflow
+            tenantId={tenantId}
+            canRequest={access.canRequestBoard}
+            canManage={access.canManageBoard}
+            onOpenReport={setSelectedId}
+            onChanged={refresh}
+          />
 
           {/* Approval History Export Banner */}
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -585,35 +611,32 @@ function ReportInspector({
                   )}
                 </div>
               )}
-            {report.status === 'approved' &&
-              report.contentHash &&
-              (report.kind === 'custom' || archiveHash) &&
-              access.canRelease && (
-                <div className="space-y-3">
-                  <label className="flex gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      disabled={busy}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    I reviewed this content and its recorded artifact hash and authorize release to
-                    this tenant.
-                  </label>
-                  <button
-                    className={button}
-                    disabled={busy || !confirmed}
-                    onClick={() =>
-                      act(`/reports/${report.id}/release`, {
-                        expectedContentHash: report.contentHash,
-                        expectedArchiveHash: archiveHash ?? null,
-                      })
-                    }
-                  >
-                    Release reviewed report
-                  </button>
-                </div>
-              )}
+            {canOfferRelease(report) && access.canRelease && (
+              <div className="space-y-3">
+                <label className="flex gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    disabled={busy}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                  />
+                  I reviewed this content and its recorded artifact hash and authorize release to
+                  this tenant.
+                </label>
+                <button
+                  className={button}
+                  disabled={busy || !confirmed}
+                  onClick={() =>
+                    act(`/reports/${report.id}/release`, {
+                      expectedContentHash: report.contentHash,
+                      expectedArchiveHash: archiveHash ?? null,
+                    })
+                  }
+                >
+                  Release reviewed report
+                </button>
+              </div>
+            )}
             {report.status === 'published' &&
               report.pack?.archive &&
               report.releasedArchiveHash &&
