@@ -89,6 +89,10 @@ test('real structured report review and release preserves exact content and hone
   await expect(ownDetail.locator('pre')).toContainText('<img src=x onerror=alert(1)>');
   await expect(ownDetail.locator('img')).toHaveCount(0);
   await expect(ownDetail.getByRole('button', { name: 'Approve reviewed content' })).toHaveCount(0);
+  await expect(ownDetail.getByRole('button', { name: /Email/ })).toHaveCount(0);
+  await expect(
+    page.getByRole('region', { name: 'Recorded reports' }).getByRole('button', { name: /Email/ }),
+  ).toHaveCount(0);
   const reviewerContext = await browser.newContext();
   const viewerContext = await browser.newContext();
   try {
@@ -102,6 +106,7 @@ test('real structured report review and release preserves exact content and hone
     await satisfyLoginMfaWithSecret(reviewer, founder.totpSecret!);
     const detail = await open(reviewer, report.title);
     await expect(detail).toContainText(`Content SHA-256: ${report.contentHash}`);
+    await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
     await detail
       .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
       .check();
@@ -116,6 +121,7 @@ test('real structured report review and release preserves exact content and hone
     await expect(detail).toContainText('Structured report release only.');
     await expect(detail).toContainText('does not establish a retained PDF or ZIP');
     await expect(detail.getByRole('button', { name: 'Download released pack' })).toHaveCount(0);
+    await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
     const content = await page.request.get(`/api/bff/v1/reports/${report.reportId}/content`);
     expect(content.status()).toBe(200);
     expect(content.headers()['content-type']).toContain('application/json');

@@ -1,7 +1,6 @@
 /**
  * Pramaan Statutory Closure & Dispatch API Routes.
- * Implements dossier synthesis, Founder sealing, history querying,
- * and verified email dispatch (W12 / W14 / Option B).
+ * Historical dossier inspection and fail-closed source/dispatch boundaries.
  */
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
@@ -100,7 +99,8 @@ export function pramaanClosureRoutes(
 
   // 3. List Dossiers
   app.get('/dossiers', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
     if (denied) return denied;
 
     const query = c.req.query();
@@ -109,7 +109,12 @@ export function pramaanClosureRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
     try {
-      const result = await service().listDossiers(c.get('tenantId'), parsed.data, signal);
+      const result = await service().listDossiers(
+        c.get('tenantId'),
+        c.get('user').id,
+        parsed.data,
+        signal,
+      );
       return c.json(result, 200);
     } catch (cause) {
       return failure(c, cause);
@@ -118,7 +123,8 @@ export function pramaanClosureRoutes(
 
   // 4. Get Dossier by ID
   app.get('/dossiers/:id', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
     if (denied) return denied;
 
     const id = c.req.param('id');
@@ -126,7 +132,7 @@ export function pramaanClosureRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
     try {
-      const result = await service().getDossier(c.get('tenantId'), id, signal);
+      const result = await service().getDossier(c.get('tenantId'), c.get('user').id, id, signal);
       return c.json(result, 200);
     } catch (cause) {
       return failure(c, cause);
@@ -135,7 +141,7 @@ export function pramaanClosureRoutes(
 
   // 5. Dispatch Report or Dossier via Email
   app.post('/reports/email/dispatch', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
     const body = await c.req.json().catch(() => null);
