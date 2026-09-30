@@ -97,6 +97,78 @@ export function pramaanClosureRoutes(
     }
   });
 
+  // An ambiguous provider response never creates a second object. This route
+  // looks up only the fixed object key and settles an independently verified version.
+  app.post('/dossiers/:id/archive/reconcile', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const body = await c.req.json().catch(() => null);
+    const parsed = z.object({ operationKey: z.string().uuid() }).strict().safeParse(body);
+    if (!parsed.success) return invalid(c, 'Invalid reconciliation payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().reconcileDossier(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        parsed.data.operationKey,
+        signal,
+      );
+      return c.json(result, 200);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.post('/dossiers/:id/archive/retry-missing', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const body = await c.req.json().catch(() => null);
+    const parsed = z.object({ operationKey: z.string().uuid() }).strict().safeParse(body);
+    if (!parsed.success) return invalid(c, 'Invalid retry payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      return c.json(
+        await service().retryMissingDossier(
+          c.get('tenantId'),
+          c.get('user').id,
+          id,
+          parsed.data.operationKey,
+          signal,
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.get('/dossiers/:id/archive', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().getDossierArchive(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        signal,
+      );
+      c.header('Content-Type', 'application/zip');
+      c.header('X-Content-SHA256', result.sha256);
+      c.header('Content-Disposition', `attachment; filename="pramaan-${id}.zip"`);
+      return c.body(new Uint8Array(result.body));
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
   // 3. List Dossiers
   app.get('/dossiers', async (c) => {
     c.header('Cache-Control', 'private, no-store');
@@ -121,10 +193,22 @@ export function pramaanClosureRoutes(
     }
   });
 
+  app.get('/dossiers/mine', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
+    try {
+      return c.json(await service().listMyBuilds(c.get('tenantId'), c.get('user').id, signal));
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
   // 4. Get Dossier by ID
   app.get('/dossiers/:id', async (c) => {
     c.header('Cache-Control', 'private, no-store');
-    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
     const id = c.req.param('id');

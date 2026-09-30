@@ -34,10 +34,10 @@ it('refuses an agent and presents no mutation or fake output to a viewer', async
   expect(html).not.toContain('74');
   expect(html).not.toContain('Historical dossiers');
 });
-it('shows historical dossier inspection only to an internal founder', async () => {
+it('shows closure dossiers to reporting managers and founder release to internal founders', async () => {
   state.role = UserRole.FOUNDER;
   state.internal = true;
-  expect(renderToStaticMarkup(await ReportsPage())).toContain('Historical dossiers');
+  expect(renderToStaticMarkup(await ReportsPage())).toContain('Closure dossiers');
 });
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
@@ -182,7 +182,17 @@ it('shows legacy dossier metadata without an unsupported proof or action', () =>
     updatedAt: '2026-09-27T00:00:00Z',
   };
   const html = renderToStaticMarkup(
-    <DossierViewerModal dossier={dossier} isOpen onClose={() => undefined} />,
+    <DossierViewerModal
+      dossier={dossier}
+      isOpen
+      onClose={() => undefined}
+      canRelease
+      busy={false}
+      onSeal={() => undefined}
+      onDownload={() => undefined}
+      onReconcile={() => undefined}
+      onRetryMissing={() => undefined}
+    />,
   );
   expect(html).toContain('Historical dossier record');
   expect(html).toContain('Recorded status');
