@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import {
@@ -15,7 +16,26 @@ import {
 } from '../fixtures';
 import { repoRoot, acceptanceTarget } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
+import { mintLocalPostgrestRoleKey } from '../../../packages/supabase/src/local-proof-writer-key';
 const execFileAsync = promisify(execFile);
+function localProofWriterToken() {
+  if (acceptanceTarget)
+    throw new Error('Direct local proof intent is not a deployed acceptance path');
+  const parityState = resolve(
+    process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
+  );
+  const status = JSON.parse(readFileSync(join(parityState, 'status.json'), 'utf8')) as Record<
+    string,
+    string
+  >;
+  if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
+    throw new Error('Local proof writer target differs from seeded personas');
+  return mintLocalPostgrestRoleKey({
+    role: 'statutory_proof_writer',
+    jwtSecret: status.JWT_SECRET,
+    serviceKey: state.serviceKey,
+  });
+}
 async function providerAction(action: '--pause-provider' | '--resume-provider') {
   const directory = process.env.AXIOM_EVIDENCE_FIXTURE_DIRECTORY;
   if (!directory) throw new Error('Owned evidence fixture required');
@@ -163,7 +183,7 @@ async function pendingArchive(
     signal: AbortSignal.timeout(30_000),
     headers: {
       apikey: state.publishableKey,
-      authorization: `Bearer ${state.serviceKey}`,
+      authorization: `Bearer ${localProofWriterToken()}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
