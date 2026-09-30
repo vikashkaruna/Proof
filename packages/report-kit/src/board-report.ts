@@ -80,9 +80,10 @@ export const BoardReportContentV1Schema = z.object({
     approved_by: z
       .object({
         user_id: uuid,
-        name: z.string().min(1).max(100),
+        name: z.string().min(1).max(200),
         role: z.string().min(1).max(100),
         timestamp: timestamp,
+        review_sha256: hash.optional(),
       })
       .nullable()
       .default(null),
@@ -161,6 +162,7 @@ export function renderBoardReportHtml(content: BoardReportContentV1): string {
         <div class="sig-role">${escapeHtml(validated.signatures.approved_by.role)}</div>
         <div class="sig-meta">User ID: ${escapeHtml(validated.signatures.approved_by.user_id)}</div>
         <div class="sig-meta">Timestamp: ${escapeHtml(validated.signatures.approved_by.timestamp)}</div>
+        ${validated.signatures.approved_by.review_sha256 ? `<div class="sig-meta">Recorded review SHA-256: ${escapeHtml(validated.signatures.approved_by.review_sha256)}</div>` : ''}
         <div class="review-badge">REVIEWED</div>
       </div>`
     : `

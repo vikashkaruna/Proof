@@ -10,7 +10,7 @@ Migration 0086 captures the finalized packet's exact PostgreSQL `controls::text`
 
 - Fresh disposable Postgres: 87 migrations, direct-client security assertions, concurrency and populated upgrade, and DSN runner passed. Board-specific SQL asserts exact frozen text, no direct read/write grant, idempotent replay, and refusal of a forged source digest without a draft.
 - BFF board route tests: 10/10 passed, including non-founder pre-read denial, tampered snapshot refusal, and PDF refusal.
-- Full monorepo tests, typecheck, lint, formatting and build passed; BFF ran 1,451 passing tests. The dependency/security scan was clean. The existing Docker parity stack was upgraded in place to migration 0086. The full strict-auth Playwright regression passed 89/89. Revision 114 is under review in PR #113; its PR and exact-staging validation remain to be recorded.
+- Full monorepo tests, typecheck, lint, formatting and build passed; BFF ran 1,451 passing tests. The dependency/security scan was clean. The existing Docker parity stack was upgraded in place to migration 0086. The full strict-auth Playwright regression passed 89/89. [PR #113](https://github.com/vikashkaruna/Proof/pull/113) merged at `5f87871` after its full PR gate passed. Exact-staging CI (including container/browser acceptance), Bandit, Trivy and Semgrep all passed on that merge SHA.
 
 ## Remaining W8 release gate
 
