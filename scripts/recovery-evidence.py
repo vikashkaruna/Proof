@@ -36,7 +36,7 @@ def timestamp(value: str) -> datetime:
 def private_file(path: Path) -> None:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-        raise ValueError("Recovery manifest must be a private regular file")
+        raise ValueError("Protected recovery input must be a private regular file")
 
 
 def digest_file(path: Path) -> tuple[str, int]:
@@ -84,6 +84,31 @@ def load_manifest(path: Path) -> dict:
     if not isinstance(data["sourceBucket"], str) or not data["sourceBucket"]:
         raise ValueError("Manifest source bucket is missing")
     return data
+
+
+def validate_recovery_credentials(path: Path) -> None:
+    private_file(path)
+    required = {"AXIOM_STORAGE_ACCESS_KEY_ID", "AXIOM_STORAGE_SECRET_ACCESS_KEY",
+                "AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID", "AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY"}
+    values: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        if name in values or not separator:
+            raise ValueError("Recovery environment has duplicate or malformed entries")
+        if name in required:
+            values[name] = value
+    if (set(values) != required
+            or any(not re.fullmatch(r"[A-Za-z0-9/+_=.-]+", value) for value in values.values())
+            or len(values["AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID"]) < 16
+            or len(values["AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY"]) < 32):
+        raise ValueError("A distinct scoped recovery storage credential is required")
+    if (hmac.compare_digest(values["AXIOM_STORAGE_ACCESS_KEY_ID"],
+                            values["AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID"])
+            or hmac.compare_digest(values["AXIOM_STORAGE_SECRET_ACCESS_KEY"],
+                                   values["AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY"])):
+        raise ValueError("Recovery storage credential must differ from the application root credential")
 
 
 def validate(path: Path, dump: Path, root: Path, source_db: str, incident_at: str,
@@ -170,8 +195,8 @@ def restore_evidence(path: Path, root: Path, s3=None, now: datetime | None = Non
     if s3 is None:
         import boto3  # locked agent-runtime dependency; no network install here
         s3 = boto3.client("s3", region_name="ap-south-1", endpoint_url=endpoint,
-                          aws_access_key_id=os.environ["AXIOM_STORAGE_ACCESS_KEY_ID"],
-                          aws_secret_access_key=os.environ["AXIOM_STORAGE_SECRET_ACCESS_KEY"])
+                          aws_access_key_id=os.environ["AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID"],
+                          aws_secret_access_key=os.environ["AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY"])
     if s3.get_bucket_location(Bucket=bucket).get("LocationConstraint") != "ap-south-1":
         raise ValueError("Evidence restore bucket is outside ap-south-1")
     lock = s3.get_object_lock_configuration(Bucket=bucket)["ObjectLockConfiguration"]
@@ -227,6 +252,8 @@ def main() -> None:
     elif sys.argv[1] == "inventory" and len(sys.argv) == 4:
         print(json.dumps({"matchedEvidenceObjects": check_inventory(
             Path(sys.argv[2]), Path(sys.argv[3]))}))
+    elif sys.argv[1] == "credentials" and len(sys.argv) == 3:
+        validate_recovery_credentials(Path(sys.argv[2]))
     else:
         raise ValueError("Use validate MANIFEST DUMP EVIDENCE_ROOT DATABASE INCIDENT_AT or restore MANIFEST EVIDENCE_ROOT")
 

@@ -109,6 +109,8 @@ if [ "$MODE" = scheduled ]; then
   RECOVERY_EXPECTED="$(python3 scripts/recovery-evidence.py validate "$AXIOM_RECOVERY_MANIFEST" \
     "$AXIOM_SCHEDULED_DB_DUMP" "$AXIOM_EVIDENCE_BACKUP_ROOT" \
     "$SOURCE_DB" "$AXIOM_RECOVERY_INCIDENT_AT")"
+  ENV_FILE="${AXIOM_ONPREM_ENV_FILE:-infra/docker/environments/.env.onprem}"
+  python3 scripts/recovery-evidence.py credentials "$ENV_FILE"
   SOURCE_TABLES="$(printf '%s' "$RECOVERY_EXPECTED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tableCount"])')"
   SOURCE_RLS="$(printf '%s' "$RECOVERY_EXPECTED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rlsCount"])')"
   SOURCE_LEDGER="$(printf '%s' "$RECOVERY_EXPECTED" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ledgerFingerprint"])')"
@@ -174,20 +176,19 @@ if [ "$MODE" = scheduled ]; then
   python3 scripts/recovery-evidence.py inventory "$AXIOM_RECOVERY_MANIFEST" "$TMP_INVENTORY" >/dev/null || {
     echo 'Scheduled evidence inventory does not match restored database references.' >&2; exit 1;
   }
-  ENV_FILE="${AXIOM_ONPREM_ENV_FILE:-infra/docker/environments/.env.onprem}"
-  [ -f "$ENV_FILE" ] || { echo 'Protected on-prem environment file is required for evidence restore.' >&2; exit 1; }
   MANIFEST_ABS="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$AXIOM_RECOVERY_MANIFEST")"
   EVIDENCE_ABS="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$AXIOM_EVIDENCE_BACKUP_ROOT")"
   SCRIPT_ABS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/recovery-evidence.py"
   export AXIOM_RECOVERY_MANIFEST_KEY AXIOM_RESTORE_S3_BUCKET
   docker compose --env-file "$ENV_FILE" -f infra/docker/docker-compose.onprem.yml \
+    --profile recovery \
     run --rm --no-deps --user "$(id -u):$(id -g)" \
     -v "$MANIFEST_ABS:/recovery/manifest.json:ro" \
     -v "$EVIDENCE_ABS:/recovery/evidence:ro" \
     -v "$SCRIPT_ABS:/recovery/recovery-evidence.py:ro" \
     -e AXIOM_RECOVERY_MANIFEST_KEY -e AXIOM_RESTORE_S3_BUCKET \
     -e AXIOM_RESTORE_S3_ENDPOINT=http://minio:9000 \
-    --entrypoint python agent-runtime /recovery/recovery-evidence.py restore \
+    --entrypoint python recovery /recovery/recovery-evidence.py restore \
       /recovery/manifest.json /recovery/evidence >/dev/null || {
     echo 'Evidence-object restore/readback failed.' >&2; exit 1;
   }

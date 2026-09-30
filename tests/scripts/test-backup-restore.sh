@@ -88,7 +88,13 @@ grep -q 'AXIOM_RECOVERY_MANIFEST is required' "$TMP/output"
 mkdir -p "$TMP/evidence/tenant"
 printf 'retained fixture' > "$TMP/evidence/tenant/object.bin"
 awk 'BEGIN { for (i=0; i<60000; i++) printf "x" }' > "$TMP/scheduled.sql"
-touch "$TMP/.env"
+cat > "$TMP/.env" <<'ENV'
+AXIOM_STORAGE_ACCESS_KEY_ID=synthetic-root-access-key
+AXIOM_STORAGE_SECRET_ACCESS_KEY=synthetic-root-secret-key-0123456789
+AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID=synthetic-restore-access-key
+AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY=synthetic-restore-secret-key-0123456789
+ENV
+chmod 600 "$TMP/.env"
 AXIOM_RECOVERY_MANIFEST_KEY="$(printf 'ab%.0s' {1..32})"
 export AXIOM_RECOVERY_MANIFEST_KEY
 export RECOVERY_TEST_ROOT="$TMP"
@@ -129,7 +135,7 @@ MOCK_CASE=success AXIOM_RESTORE_SOURCE_DB=axiom_onprem \
   cat "$TMP/output" >&2; exit 1;
 }
 grep -q 'Scheduled database and evidence restore passed: RPO=' "$TMP/output"
-grep -q 'compose --env-file' "$TMP/calls"
+grep -q 'compose --env-file.*--profile recovery.*--entrypoint python recovery' "$TMP/calls"
 MOCK_CASE=wrong_owner AXIOM_RESTORE_SOURCE_DB=axiom_onprem \
   AXIOM_RESTORE_DB_CONTAINER=axiom-restore-fixture-db AXIOM_RESTORE_MODE=scheduled \
   MOCK_LOG="$TMP/calls" PATH="$TMP/bin:$PATH" \

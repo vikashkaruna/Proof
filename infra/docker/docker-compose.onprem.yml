@@ -154,6 +154,16 @@ services:
       AXIOM_STORAGE_SECRET_ACCESS_KEY: ${AXIOM_STORAGE_SECRET_ACCESS_KEY:?set storage secret}
       AXIOM_EVIDENCE_BUCKET: ${AXIOM_EVIDENCE_BUCKET:?set bucket}
     networks: [sovereign]
+  recovery:
+    image: ${AXIOM_AGENT_RUNTIME_IMAGE:?supply approved runtime digest}
+    pull_policy: never
+    profiles: [recovery]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID: ${AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID:-}
+      AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY: ${AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY:-}
+    networks: [sovereign]
   model-gateway:
     image: ${AXIOM_MODEL_GATEWAY_IMAGE:?supply approved model gateway digest}
     pull_policy: never

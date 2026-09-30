@@ -21,9 +21,19 @@ class BootstrapOnpremTests(unittest.TestCase):
         compose = (ROOT / 'infra/docker/docker-compose.onprem.yml').read_text()
         image_lines = [line for line in compose.splitlines() if line.startswith('    image: ')]
         pull_lines = [line for line in compose.splitlines() if line == '    pull_policy: never']
-        self.assertEqual(len(image_lines), 14)
+        self.assertEqual(len(image_lines), 15)
         self.assertEqual(len(pull_lines), len(image_lines))
         self.assertNotIn('pull_policy: always', compose)
+
+    def test_recovery_profile_has_no_application_credentials(self):
+        compose = (ROOT / 'infra/docker/docker-compose.onprem.yml').read_text()
+        recovery = compose.split('\n  recovery:\n', 1)[1].split('\n  model-gateway:\n', 1)[0]
+        self.assertIn('profiles: [recovery]', recovery)
+        self.assertIn('read_only: true', recovery)
+        self.assertIn('AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID:', recovery)
+        for forbidden in ('SUPABASE_SERVICE_KEY:', 'APPROVAL_SIGNING_KEY:',
+                          'AXIOM_STORAGE_ACCESS_KEY_ID:', 'AXIOM_STORAGE_SECRET_ACCESS_KEY:'):
+            self.assertNotIn(forbidden, recovery)
 
     def run_bootstrap(self, fail=''):
         with tempfile.TemporaryDirectory(prefix='axiom-onprem-bootstrap-') as directory:

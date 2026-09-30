@@ -192,6 +192,23 @@ class RecoveryEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "failed readback"):
             MODULE.restore_evidence(self.manifest, self.evidence_root, s3=s3, now=NOW)
 
+    def test_recovery_credential_is_private_and_distinct(self):
+        environment = self.root / ".env.onprem"
+        original = ("AXIOM_STORAGE_ACCESS_KEY_ID=synthetic-root-access-key\n"
+                    "AXIOM_STORAGE_SECRET_ACCESS_KEY=synthetic-root-secret-key-0123456789\n"
+                    "AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID=synthetic-restore-access-key\n"
+                    "AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY=synthetic-restore-secret-key-0123456789\n")
+        environment.write_text(original)
+        environment.chmod(0o600)
+        MODULE.validate_recovery_credentials(environment)
+        environment.write_text(original.replace("synthetic-restore-access-key", "synthetic-root-access-key"))
+        with self.assertRaisesRegex(ValueError, "must differ"):
+            MODULE.validate_recovery_credentials(environment)
+        environment.write_text(original)
+        environment.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "private regular file"):
+            MODULE.validate_recovery_credentials(environment)
+
 
 if __name__ == "__main__":
     unittest.main()
