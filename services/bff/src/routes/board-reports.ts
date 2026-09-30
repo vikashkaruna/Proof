@@ -1,7 +1,7 @@
 /**
  * Board Reports API Routes.
- * Implements manager-initiated board report generation, founder draft synthesis,
- * and immutable PDF streaming.
+ * Implements manager-initiated board report requests, deterministic founder
+ * draft generation, and private PDF previews.
  */
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
@@ -35,6 +35,7 @@ export function boardReportRoutes(
 
   // 1. Request Board Report (Manager initiated)
   app.post('/reports/board/request', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
     const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
@@ -58,8 +59,9 @@ export function boardReportRoutes(
     }
   });
 
-  // 2. Generate Draft (Founder only / Prativedan synthesis)
+  // 2. Generate Draft (Founder only / deterministic renderer)
   app.post('/reports/board/:id/generate', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
     const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
@@ -101,6 +103,8 @@ export function boardReportRoutes(
           'Content-Disposition': `inline; filename="board-report-${id}.pdf"`,
           'Content-Length': String(result.byteLength),
           'X-Report-SHA256': result.sha256,
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     } catch (cause) {
@@ -110,6 +114,7 @@ export function boardReportRoutes(
 
   // 4. List Board Report Requests
   app.get('/reports/board/requests', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
     const denied = requireCapability(c, Capability.REPORT_READ);
     if (denied) return denied;
 

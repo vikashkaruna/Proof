@@ -304,6 +304,8 @@ describe('Board Reports HTTP Routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(res.headers.get('x-report-sha256')).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
 
     const arrayBuffer = await res.arrayBuffer();
     expect(arrayBuffer.byteLength).toBeGreaterThan(500);
