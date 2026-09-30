@@ -59,6 +59,21 @@ it('treats an idempotency conflict as uncertain rather than issuing a new mutati
   expect(refresh).not.toHaveBeenCalled();
 });
 
+it('keeps an HTTP success without a saved identity uncertain and retries the same operation', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ data: {} }))
+    .mockResolvedValueOnce(Response.json({ data: { id: 'estate-1' } }));
+  vi.stubGlobal('fetch', fetcher);
+  show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  await waitFor(() => expect(screen.getByText(/did not identify the saved record/)).toBeTruthy());
+  expect(onSuccess).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+  await waitFor(() => expect(screen.getByText('Saved.')).toBeTruthy());
+  expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).toBe(fetcher.mock.calls[1]![1].headers['Idempotency-Key']);
+  expect(fetcher.mock.calls[0]![1].body).toBe(fetcher.mock.calls[1]![1].body);
+});
+
 it('shows a viewer only recorded estate systems and distinguishes declared from observed categories', () => {
   render(<EstateClient tenantId="tenant-1" canManage={false} intakes={[]} estates={[{ id: 'estate-1', name: 'Production estate', slug: 'production', description: 'Verified client boundary', status: 'active', version: 1 }]} systems={[{ id: 'system-1', estate_id: 'estate-1', name: 'Payroll', system_kind: 'postgres', description: 'Client declared database', external_ref: null, status: 'active', version: 1, system_data_categories: [{ category_key: 'identity', source: 'declared' }, { category_key: 'financial', source: 'observed' }] }]} />);
   expect(document.body.textContent).toContain('Production estate');

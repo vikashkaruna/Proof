@@ -46,7 +46,11 @@ it('switches tenant only after the server action verifies membership', async () 
 });
 
 it('requires a confirmed capability-bearing request to engage the kill switch', async () => {
-  const fetcher = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(Response.json(url.includes('kill-switch/status') ? { engaged: false } : url.includes('monitoring/alerts') ? { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } } : { engaged: true })));
+  let engaged = false;
+  const fetcher = vi.fn((url: string, _init?: RequestInit) => {
+    if (url.includes('kill-switch/engage')) engaged = true;
+    return Promise.resolve(Response.json(url.includes('kill-switch/status') ? { engaged } : url.includes('monitoring/alerts') ? { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } } : { engaged }));
+  });
   vi.stubGlobal('fetch', fetcher);
   render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/bff/v1/kill-switch/status', expect.anything()));
@@ -62,4 +66,39 @@ it('signals high-severity unread alerts with the risk color rather than proof go
   const alertsButton = screen.getByRole('button', { name: 'Continuous monitoring alerts' });
   await waitFor(() => expect(alertsButton.textContent).toContain('2'));
   expect([...alertsButton.querySelectorAll('span')].some((span) => span.className.includes('bg-[#D9534F]'))).toBe(true);
+});
+
+it('refuses kill-switch mutation when live status is unreadable', async () => {
+  const fetcher = vi.fn((url: string) => Promise.resolve(url.includes('kill-switch/status')
+    ? new Response(null, { status: 503 })
+    : Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  const control = screen.getByRole('button', { name: /Kill switch status unavailable/i });
+  expect(control.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(control);
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/bff/v1/kill-switch/status', expect.anything()));
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/engage')).toBe(false);
+});
+
+it('does not claim there are no alerts when the tenant alert source fails', async () => {
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(url.includes('monitoring/alerts')
+    ? Response.json({ data: { summary: { unread: 0 }, alerts: [] } })
+    : Response.json({ engaged: false }))));
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
+  await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
+  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
+});
+
+it('rechecks tenant kill status instead of trusting an unscoped browser event', async () => {
+  const fetcher = vi.fn((url: string) => Promise.resolve(Response.json(url.includes('kill-switch/status')
+    ? { engaged: false }
+    : { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /^⏻ Kill switch$/ }).hasAttribute('disabled')).toBe(false));
+  window.dispatchEvent(new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: true } }));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => url === '/api/bff/v1/kill-switch/status').length).toBe(2));
+  expect(document.body.textContent).not.toContain('KILL SWITCH ENGAGED');
 });

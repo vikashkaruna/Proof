@@ -77,6 +77,26 @@ it('shows provider assurance only for the selected evidence identity', async () 
   expect(document.body.textContent).not.toContain('Stored-byte integrity and provider retention verified at');
 });
 
+it('rejects a verification receipt for a different stored object version', async () => {
+  const withVersion = { ...row, assurance: 'verified_at_ingest', object_version: {
+    id: '44444444-4444-4444-8444-444444444444', provider: 's3', version_id: 'version-1',
+    lock_mode: 'COMPLIANCE', retain_until: '2033-10-01T00:00:00Z', readback_at: '2026-10-01T01:00:00Z',
+    legal_hold: false, encryption: 'AES256',
+  } };
+  const fetcher = vi.fn().mockImplementation(async (url: string) => url.endsWith('/verify')
+    ? Response.json({ data: { evidenceId: row.id, integrity: 'verified', retention: 'verified',
+      verifiedAt: '2026-10-01T02:00:00Z', versionId: 'other-version', retainUntil: '2033-10-01T00:00:00Z',
+      legalHold: false, encryption: 'AES256' } })
+    : Response.json({ data: [withVersion], meta: { limit: 20, offset: 0, total: 1, hasMore: false } }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<EvidenceClient tenantId="tenant-1" canRecord={false} canExport={false} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /record.txt/ })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: /record.txt/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Verify provider receipt' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('did not match the selected evidence version'));
+  expect(document.body.textContent).not.toContain('Stored-byte integrity and provider retention verified at');
+});
+
 it('retries an ambiguous upload with the same operation key in body and header', async () => {
   let mutationCount = 0;
   const fetcher = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
@@ -108,4 +128,39 @@ it('retries an ambiguous upload with the same operation key in body and header',
   expect(mutations[1]![1].headers['idempotency-key']).toBe(operationKey);
   expect(mutations[0]![1].body).toBe(mutations[1]![1].body);
   expect(JSON.parse(mutations[1]![1].body)).toMatchObject({ operationKey, filename: 'record.txt' });
+});
+
+it('keeps evidence search and pagination tenant-scoped, and resets to the first page on a new filter', async () => {
+  const fetcher = vi.fn().mockImplementation(async (_url: string) => Response.json({
+    data: [row], meta: { limit: 20, offset: 0, total: 21, hasMore: true },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<EvidenceClient tenantId="tenant-1" canRecord={false} canExport={false} />);
+  await waitFor(() => expect(screen.getByText('21 matching records')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Next records' }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes('offset=20'))).toBe(true));
+  fireEvent.change(screen.getByLabelText('Search description or evidence ID'), { target: { value: ' saved file ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes('offset=0&q=saved+file'))).toBe(true));
+  expect(fetcher.mock.calls.every(([, init]) => init.headers['x-tenant-id'] === 'tenant-1')).toBe(true);
+});
+
+it('keeps failed upload-operation reads unavailable until the operator retries', async () => {
+  let operations = 0;
+  const fetcher = vi.fn().mockImplementation(async (url: string) => {
+    if (url.includes('/ingestions')) {
+      operations++;
+      return operations === 1
+        ? new Response(null, { status: 503 })
+        : Response.json({ data: [], meta: { limit: 20, offset: 0, total: 0, hasMore: false } });
+    }
+    return empty();
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<EvidenceClient tenantId="tenant-1" canRecord canExport={false} />);
+  await waitFor(() => expect(screen.getByText('Unable to load upload operations. Retry to check their current status.')).toBeTruthy());
+  expect(document.body.textContent).not.toContain('No upload operations recorded on this page.');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry upload operations' }));
+  await waitFor(() => expect(screen.getByText('No upload operations recorded on this page.')).toBeTruthy());
+  expect(operations).toBe(2);
 });
