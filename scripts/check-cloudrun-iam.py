@@ -12,13 +12,13 @@ block_at = runpy.run_path(str(Path(__file__).with_name('check-cloudrun-auth-wiri
 # Reviewed runtime needs, not copied automatically from container declarations.
 EXPECTED = {
     'bff': {'agent_runtime_internal_token', 'approval_signing_key',
-            'gcs_hmac_access_key', 'gcs_hmac_secret_key', 'mfa_encryption_key',
+            'evidence_s3_access_key', 'evidence_s3_secret_key', 'mfa_encryption_key',
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
             'supabase_service_key'},
     'web': {'supabase_anon_key'},
     'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
     'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',
-                      'gcs_hmac_access_key', 'gcs_hmac_secret_key',
+                      'evidence_s3_access_key', 'evidence_s3_secret_key',
                       'model_gateway_api_key', 'supabase_service_key'},
     'model_gateway': {'model_gateway_api_key', 'anthropic_api_key', 'openai_api_key',
                       'gemini_api_key', 'upstash_redis_url'},

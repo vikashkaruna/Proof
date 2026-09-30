@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "releaseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "projectId": "axiom-iam-fixture",
+  "region": "asia-south1",
+  "images": {
+    "bff": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-bff@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "web": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "agent-runtime": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-agent-runtime@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "model-gateway": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-model-gateway@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "temporal-worker": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-temporal-worker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "marketing": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-marketing@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "supabase-gateway": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/axiom-supabase-gateway@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "gotrue": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/gotrue@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "postgrest": "asia-south1-docker.pkg.dev/axiom-iam-fixture/axiom-proof-preprod/postgrest@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
