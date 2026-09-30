@@ -51,7 +51,7 @@ it('marks unreadable agent-run status unavailable instead of claiming no active 
 });
 
 it('accepts active state only from a well-formed run list', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [{ agent_name: 'DRISHTI' }] })));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })));
   const view = render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('1 agent run(s) reported active')).toBeTruthy());
   expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: working');
@@ -63,7 +63,7 @@ it('accepts active state only from a well-formed run list', async () => {
 
 it('counts recorded runs separately from distinct agent names', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [
-    { agent_name: 'drishti' }, { agent_name: 'drishti' }, { agent_name: 'vibhaag' },
+    { agent: 'drishti', status: 'running' }, { agent: 'drishti', status: 'queued' }, { agent: 'vibhaag', status: 'running' },
   ] })));
   render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('3 agent run(s) reported active')).toBeTruthy());
@@ -85,7 +85,7 @@ it('retracts a previously active run when the next status poll is unreadable', a
   vi.stubGlobal('fetch', vi.fn(async () => {
     reads++;
     return reads === 1
-      ? Response.json({ active_runs: [{ agent_name: 'drishti' }] })
+      ? Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })
       : new Response(null, { status: 503 });
   }));
   render(<SidebarAgentPanel />);
@@ -95,6 +95,15 @@ it('retracts a previously active run when the next status poll is unreadable', a
   await waitFor(() => expect(screen.getByText('Agent-run status unavailable')).toBeTruthy());
   expect(document.body.textContent).not.toContain('1 agent run(s) reported active');
   expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: unavailable');
+});
+
+it.each([
+  { agent_name: 'drishti', status: 'running' },
+  { agent: 'drishti', status: 'succeeded' },
+])('refuses a nonempty response outside the persisted active-run contract (%j)', async (row) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [row] })));
+  render(<SidebarAgentPanel />);
+  await waitFor(() => expect(screen.getByText('Agent-run status unavailable')).toBeTruthy());
 });
 
 it('shows ledger proof only after a confirmed direct invocation', async () => {

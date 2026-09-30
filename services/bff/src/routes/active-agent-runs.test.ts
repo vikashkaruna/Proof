@@ -53,32 +53,40 @@ describe('GET /v1/agents/runs/active', () => {
     fake.seed('agent_runs', {
       id: 'own-running',
       tenant_id: TENANT,
+      agent: 'drishti',
       status: 'running',
       started_at: '2026-10-01T02:00:00Z',
     });
     fake.seed('agent_runs', {
       id: 'own-queued',
       tenant_id: TENANT,
+      agent: 'vibhaag',
       status: 'queued',
       started_at: '2026-10-01T01:00:00Z',
     });
     fake.seed('agent_runs', {
       id: 'own-complete',
       tenant_id: TENANT,
+      agent: 'drishti',
       status: 'succeeded',
       started_at: '2026-10-01T00:00:00Z',
     });
     fake.seed('agent_runs', {
       id: 'foreign-running',
       tenant_id: FOREIGN_TENANT,
+      agent: 'lekha',
       status: 'running',
       started_at: '2026-10-01T03:00:00Z',
     });
 
     const response = await request();
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { active_runs: Array<{ id: string }> };
+    const body = (await response.json()) as { active_runs: Array<{ id: string; agent: string; status: string }> };
     expect(body.active_runs.map((run) => run.id)).toEqual(['own-running', 'own-queued']);
+    expect(body.active_runs.map((run) => ({ agent: run.agent, status: run.status }))).toEqual([
+      { agent: 'drishti', status: 'running' },
+      { agent: 'vibhaag', status: 'queued' },
+    ]);
   });
 
   it('treats a database error as unavailable rather than reporting no active work', async () => {

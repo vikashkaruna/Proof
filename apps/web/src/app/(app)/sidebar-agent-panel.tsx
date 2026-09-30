@@ -255,10 +255,11 @@ export function SidebarAgentPanel({
         const data = await res.json();
         if (isMounted && Array.isArray(data?.active_runs) &&
           data.active_runs.every((run: unknown) => run && typeof run === 'object' &&
-            'agent_name' in run && typeof run.agent_name === 'string')) {
+            'agent' in run && typeof run.agent === 'string' && run.agent.length > 0 &&
+            'status' in run && (run.status === 'running' || run.status === 'queued'))) {
           const names = new Set<string>();
           for (const run of data.active_runs) {
-            names.add(run.agent_name.toLowerCase());
+            names.add(run.agent.toLowerCase());
           }
           setActiveAgentNames(names);
           setActiveRunCount(data.active_runs.length);
