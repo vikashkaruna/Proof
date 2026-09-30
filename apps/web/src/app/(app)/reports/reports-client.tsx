@@ -587,7 +587,7 @@ function ReportInspector({
               )}
             {report.status === 'approved' &&
               report.contentHash &&
-              archiveHash &&
+              (report.kind === 'custom' || archiveHash) &&
               access.canRelease && (
                 <div className="space-y-3">
                   <label className="flex gap-2 text-sm">
@@ -606,7 +606,7 @@ function ReportInspector({
                     onClick={() =>
                       act(`/reports/${report.id}/release`, {
                         expectedContentHash: report.contentHash,
-                        expectedArchiveHash: archiveHash,
+                        expectedArchiveHash: archiveHash ?? null,
                       })
                     }
                   >
