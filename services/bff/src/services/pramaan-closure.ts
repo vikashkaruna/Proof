@@ -56,8 +56,8 @@ export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSc
 
 export class PramaanClosureService {
   readonly artifacts: PramaanArtifactService;
-  constructor(private readonly db: EvidenceDatabase) {
-    this.artifacts = new PramaanArtifactService(db);
+  constructor(private readonly db: EvidenceDatabase, writerDb: EvidenceDatabase = db) {
+    this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
   }
 
   private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {

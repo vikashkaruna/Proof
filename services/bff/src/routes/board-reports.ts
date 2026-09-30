@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -51,9 +51,9 @@ export function boardReportRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ?? new BoardReportService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
   const artifacts = () =>
-    dependencies.artifacts ?? new BoardArtifactService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.artifacts ?? new BoardArtifactService(dependencies.db ?? createSupabaseAdmin(), undefined, undefined, dependencies.db ?? createStatutoryProofWriter());
 
   const operationSchema = z.object({ operationKey: z.uuid() }).strict();
 

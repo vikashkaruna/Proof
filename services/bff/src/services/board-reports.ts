@@ -32,7 +32,7 @@ export const generateBoardReportDraftInputSchema = z
 export type GenerateBoardReportDraftInput = z.infer<typeof generateBoardReportDraftInputSchema>;
 
 export class BoardReportService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(private readonly db: EvidenceDatabase, private readonly writerDb: EvidenceDatabase = db) {}
 
   private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
     let membership = this.db
@@ -147,7 +147,7 @@ export class BoardReportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.db.rpc(name, args);
+    const query = this.writerDb.rpc(name, args);
     const { data, error } = signal ? await query.abortSignal(signal) : await query;
     if (error) {
       throw new EvidenceError('report_storage_unavailable', 503);

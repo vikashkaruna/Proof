@@ -63,7 +63,7 @@ export const listStatutoryReportsInputSchema = z
 export type ListStatutoryReportsInput = z.infer<typeof listStatutoryReportsInputSchema>;
 
 export class StatutoryReportService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(private readonly db: EvidenceDatabase, private readonly writerDb: EvidenceDatabase = db) {}
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
     let membership = this.db
@@ -83,7 +83,7 @@ export class StatutoryReportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+    let query = this.writerDb.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('report_persistence_unconfirmed', 503);

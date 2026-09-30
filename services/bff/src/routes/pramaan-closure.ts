@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -36,7 +36,7 @@ export function pramaanClosureRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new PramaanClosureService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ?? new PramaanClosureService(dependencies.db ?? createSupabaseAdmin(), dependencies.db ?? createStatutoryProofWriter());
 
   // 1. Synthesize Statutory Closure Dossier (Pramaan Agent L1 / Authorized Manager)
   app.post('/engagements/:engagementId/closure/pramaan', async (c) => {
