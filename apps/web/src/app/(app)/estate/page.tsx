@@ -45,7 +45,8 @@ export default async function EstatePage() {
           Review onboarding proposals
         </Link>
       </div>
-      {estates.error || systems.error || intakes.error ? (
+      {estates.error || systems.error || intakes.error ||
+        !Array.isArray(estates.data) || !Array.isArray(systems.data) || !Array.isArray(intakes.data) ? (
         <p role="alert">Estate inventory could not be loaded. Refresh to try again.</p>
       ) : (
         <EstateClient

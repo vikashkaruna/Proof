@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/tenant-context', () => ({ requireCapabilityContext: async () => ({
   tenantId: 'tenant-1', role: 'viewer', supabase: { from: (table: string) => {
-    const result = () => ({ data: state.data[table] ?? [], error: state.errors[table] ?? null });
+    const result = () => ({ data: Object.hasOwn(state.data, table) ? state.data[table] : [], error: state.errors[table] ?? null });
     const query = {
       select: () => query,
       eq: (key: string, value: unknown) => { state.calls.push([table, key, value]); return query; },
@@ -46,6 +46,24 @@ it('refuses partial inventory and graph projections on query errors', async () =
   expect(inventory).not.toContain('data-testid="estate-client"');
   expect(graph).not.toContain('data-testid="estate-graph"');
 });
+
+it.each(['estates', 'estate_systems', 'engagements'])(
+  'refuses a null-success %s estate inventory read', async (table) => {
+    state.data[table] = null;
+    const inventory = renderToStaticMarkup(await EstatePage());
+    expect(inventory).toContain('Estate inventory could not be loaded');
+    expect(inventory).not.toContain('data-testid="estate-client"');
+  },
+);
+
+it.each(['estates', 'estate_systems', 'connectors', 'connector_grants'])(
+  'refuses a null-success %s estate graph read', async (table) => {
+    state.data[table] = null;
+    const graph = renderToStaticMarkup(await EstateGraphPage());
+    expect(graph).toContain('estate graph could not be loaded');
+    expect(graph).not.toContain('data-testid="estate-graph"');
+  },
+);
 
 it('derives graph categories and access only from tenant rows', async () => {
   state.data.estates = [{ id: 'estate-1', name: 'Registered estate', status: 'active' }];

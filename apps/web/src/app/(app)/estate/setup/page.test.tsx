@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/tenant-context', () => ({ requireCapabilityContext: async () => ({
   tenantId: 'tenant-1', role: 'viewer', supabase: { from: (table: string) => {
-    const result = () => ({ data: state.rows[table] ?? (table === 'tenants' ? { is_sdf: false } : []), error: state.errors[table] ?? null });
+    const result = () => ({ data: Object.hasOwn(state.rows, table) ? state.rows[table] : (table === 'tenants' ? { is_sdf: false } : []), error: state.errors[table] ?? null });
     const query = {
       select: () => query,
       eq: (key: string, value: unknown) => { state.calls.push([table, key, value]); return query; },
@@ -53,3 +53,14 @@ it('refuses a partial setup read instead of displaying empty verified inventory'
   expect(view).not.toContain('data-testid="wizard"');
   expect(view).not.toContain('data-testid="grants"');
 });
+
+it.each(['estates', 'estate_systems', 'connectors', 'workload_identities'])(
+  'refuses a null-success %s setup read', async (table) => {
+    state.rows[table] = null;
+    const view = renderToStaticMarkup(await EstateSetupPage());
+    expect(view).toContain('Onboarding data could not be loaded');
+    expect(view).not.toContain('data-testid="wizard"');
+    expect(view).not.toContain('data-testid="grants"');
+    expect(view).not.toContain('data-testid="tools"');
+  },
+);

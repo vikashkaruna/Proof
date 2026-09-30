@@ -40,7 +40,8 @@ export default async function EstateSetupPage() {
   ]);
   const failed =
     tenant.error || estates.error || systems.error || connectors.error || workloads.error ||
-    !tenant.data || !estates.data || !systems.data || !connectors.data || !workloads.data;
+    !tenant.data || !Array.isArray(estates.data) || !Array.isArray(systems.data) ||
+    !Array.isArray(connectors.data) || !Array.isArray(workloads.data);
   const registered = new Set(
     (connectors.data ?? []).filter((c) => c.status !== 'archived').map((c) => c.system_id),
   );
