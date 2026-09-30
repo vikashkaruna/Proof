@@ -297,6 +297,11 @@ describe('Pramaan source-bound provider workflow', () => {
     await expect(
       f.service.create(tenant, f.manager, { ...input, dossierType: 'auditor_assurance' }),
     ).rejects.toMatchObject({ code: 'source_bound_dossier_required' });
+    f.fixture.rows('reports')[0]!.kind = 'board';
+    await expect(
+      f.service.create(tenant, f.manager, { ...input, dossierType: 'dpb_statutory' }),
+    ).rejects.toMatchObject({ code: 'source_bound_dossier_required', status: 409 });
+    f.fixture.rows('reports')[0]!.kind = 'dpb';
     f.fixture.rows('reports')[0]!.status = 'approved';
     await expect(
       f.service.create(tenant, f.manager, { ...input, dossierType: 'dpb_statutory' }),

@@ -83,7 +83,7 @@ export function ClosureDossiersTab({
   useEffect(() => {
     if (!canGenerate) return;
     const controller = new AbortController();
-    void reportRequest(tenantId, `/reports?limit=100&offset=${reportOffset}&status=published`, {
+    void reportRequest(tenantId, `/reports?limit=50&offset=${reportOffset}&status=published`, {
       signal: controller.signal,
     })
       .then((response) => response.json())

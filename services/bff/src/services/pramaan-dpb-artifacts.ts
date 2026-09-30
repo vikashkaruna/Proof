@@ -145,6 +145,16 @@ export class PramaanDpbArtifactService {
   }
 
   private async source(tenantId: string, reportId: string, signal?: AbortSignal) {
+    const identity = await this.row(
+      'reports',
+      tenantId,
+      'id',
+      reportId,
+      z.object({ kind: z.string() }),
+      signal,
+    );
+    if (identity && identity.kind !== 'dpb')
+      throw new EvidenceError('source_bound_dossier_required', 409);
     const report = await this.row('reports', tenantId, 'id', reportId, reportSchema, signal);
     if (!report || report.status !== 'published')
       throw new EvidenceError('source_report_not_released', 409);
