@@ -114,11 +114,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container', help='Existing provisioned Supabase DB container')
     parser.add_argument('--dsn', help='postgres:// URL for a deployed database')
+    parser.add_argument('--dsn-env', action='store_true', help='Read deployed DB URL from SUPABASE_DB_URL')
+    parser.add_argument('--probe', action='store_true', help='Only check DB connectivity')
+    parser.add_argument('--sql-file', type=Path, help='Run a seed SQL file without exposing the DSN in psql argv')
     parser.add_argument('--user', default='supabase_admin', help='Database migration role')
     parser.add_argument('--database', default='postgres')
     parser.add_argument('--migrations', type=Path, default=ROOT / 'infra/supabase/migrations')
     args = parser.parse_args()
-    if args.dsn and args.container:
+    if args.probe and args.sql_file:
+        print('Pass only one SQL operation.', file=sys.stderr)
+        return 2
+    if args.dsn and args.dsn_env:
+        print('Pass only one DSN source.', file=sys.stderr)
+        return 2
+    dsn = os.environ.get('SUPABASE_DB_URL', '') if args.dsn_env else args.dsn
+    if args.dsn_env and not dsn:
+        print('SUPABASE_DB_URL is required with --dsn-env.', file=sys.stderr)
+        return 2
+    if dsn and args.container:
         print('--dsn and --container name different databases; pass one.', file=sys.stderr)
         return 2
     # Operator CLI input reaches argv below; pin both to their reviewed grammars
@@ -131,22 +144,45 @@ def main() -> int:
         return 2
 
     env = None
-    if args.dsn:
+    if dsn:
         try:
-            env = dsn_environment(args.dsn)
+            env = dsn_environment(dsn)
         except ValueError as exc:
             # The message names the defect, never the value.
             print(f'Invalid --dsn: {exc}', file=sys.stderr)
             return 2
+        env.pop('SUPABASE_DB_URL', None)
         # Connection comes from PG* in the environment, so no -U/-d here.
         cmd = ['psql', '-X', '-q', '-w', '-v', 'ON_ERROR_STOP=1']
     else:
         cmd = ['psql', '-X', '-q', '-w', '-v', 'ON_ERROR_STOP=1', '-U', args.user, '-d', args.database]
         if args.container:
             cmd = ['docker', 'exec', '-i', args.container] + cmd
+    if args.probe:
+        try:
+            result = subprocess.run(  # nosec B603 - validated fixed psql/docker argv, no shell
+                cmd + ['-At', '-c', 'select 1'], capture_output=True, env=env, timeout=15
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return 1
+        return 0 if result.returncode == 0 and result.stdout.strip() == b'1' else 1
+    if args.sql_file:
+        try:
+            program = args.sql_file.read_text(encoding='utf-8')
+        except OSError:
+            print('SQL file could not be read.', file=sys.stderr)
+            return 2
+    else:
+        program = migration_program(args.migrations)
     result = subprocess.run(  # nosec B603 - argv is a fixed psql/docker layout with container and role validated above, no shell
-        cmd, input=migration_program(args.migrations), text=True, capture_output=True, env=env
+        cmd, input=program, text=True, capture_output=True, env=env
     )
+    if args.sql_file:
+        if result.returncode:
+            print(result.stderr, file=sys.stderr)
+            return result.returncode
+        print('SQL file applied.')
+        return 0
     # Only progress or SQL errors; no connection strings, environment or rows.
     for line in result.stdout.splitlines():
         if line.startswith(('Applying:', 'Already applied:')):

@@ -28,6 +28,17 @@ export const ApprovalRecordItemSchema = z.object({
   dry_run_status: z.string().min(1).max(50).nullable(),
   rollback_validated: z.boolean(),
   reconciliation_statement: z.null(),
+  /** Released, separately retained proof; this historical view does not reverify it. */
+  archived_proof: z
+    .object({
+      archive_id: uuid,
+      reconciliation_id: uuid,
+      source_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+      version_id: z.string().min(1).max(1024),
+      retain_until: timestamp,
+    })
+    .nullable()
+    .optional(),
   approval_reason: z.string().max(2000).nullable(),
   status: z.enum(['issued', 'consumed', 'revoked', 'expired', 'invalid']),
   issued_at: timestamp,
@@ -152,6 +163,7 @@ export function renderApprovalHistoryHtml(content: ApprovalHistoryExportContentV
               <div class="sig-code">${appr.signature_preview ? escapeHtml(appr.signature_preview) : 'Unavailable'}</div>
             </div>
             ${appr.approval_reason ? `<div class="reconciliation-box"><strong>Recorded approval reason:</strong> ${escapeHtml(appr.approval_reason)}</div>` : ''}
+            ${appr.archived_proof ? `<div class="reconciliation-box"><strong>Separate released proof archive:</strong> ${escapeHtml(appr.archived_proof.archive_id)}<br><strong>Reconciliation:</strong> ${escapeHtml(appr.archived_proof.reconciliation_id)}<br><strong>Exact version:</strong> ${escapeHtml(appr.archived_proof.version_id)}<br><strong>SHA-256:</strong> ${escapeHtml(appr.archived_proof.source_sha256)}</div>` : ''}
           </td>
           <td class="col-status">
             <div class="status-wrap">${statusBadge(appr.status)}</div>

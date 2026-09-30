@@ -48,8 +48,8 @@ if [ -z "$DB_URL" ]; then
 fi
 
 # Never echo the URL: it carries the database password.
-DB_HOST="$(python3 -c 'import sys,urllib.parse as u; p=u.urlparse(sys.argv[1]); print(p.hostname or "")' "$DB_URL")"
-DB_NAME="$(python3 -c 'import sys,urllib.parse as u; p=u.urlparse(sys.argv[1]); print((p.path or "").lstrip("/"))' "$DB_URL")"
+DB_HOST="$(SUPABASE_DB_URL="$DB_URL" python3 -c 'import os,urllib.parse as u; p=u.urlparse(os.environ["SUPABASE_DB_URL"]); print(p.hostname or "")')"
+DB_NAME="$(SUPABASE_DB_URL="$DB_URL" python3 -c 'import os,urllib.parse as u; p=u.urlparse(os.environ["SUPABASE_DB_URL"]); print((p.path or "").lstrip("/"))')"
 if [ -z "$DB_HOST" ] || [ -z "$DB_NAME" ]; then
   echo "Error: connection URL must name a host and a database." >&2
   exit 1
@@ -70,7 +70,7 @@ CONNECTED=0
 WAIT_ATTEMPTS="${AXIOM_DB_WAIT_ATTEMPTS:-30}"
 WAIT_SECONDS="${AXIOM_DB_WAIT_SECONDS:-5}"
 for attempt in $(seq 1 "$WAIT_ATTEMPTS"); do
-  if psql -w "$DB_URL" -c 'select 1' >/dev/null 2>&1; then CONNECTED=1; break; fi
+  if SUPABASE_DB_URL="$DB_URL" python3 scripts/migrate-database.py --dsn-env --probe >/dev/null 2>&1; then CONNECTED=1; break; fi
   [ "$attempt" = 1 ] && echo "  (not yet accepting connections; retrying)"
   sleep "$WAIT_SECONDS"
 done
@@ -83,8 +83,21 @@ echo "  ✓ Database is accepting connections"
 
 # ─── 2. Migrations, checksummed and fatal ────────────────────────────
 echo "▶ Applying the migration series..."
-python3 scripts/migrate-database.py --dsn "$DB_URL"
+SUPABASE_DB_URL="$DB_URL" python3 scripts/migrate-database.py --dsn-env
 echo "  ✓ Migration series applied"
+
+# The reconciliation RPC fails closed until its verifier has the same key as
+# Samadhan/BFF. Provision through the admin connection, never service_role.
+if [ -n "${APPROVAL_SIGNING_KEY:-}" ]; then
+  echo "▶ Confirming the reconciliation verifier key..."
+  SUPABASE_DB_URL="$DB_URL" python3 scripts/provision-reconciliation-key.py
+  echo "  ✓ Reconciliation verifier key confirmed"
+elif [ "${ENVIRONMENT:-}" = "production" ] || [ "${ENVIRONMENT:-}" = "preprod" ]; then
+  echo "  ✗ APPROVAL_SIGNING_KEY is required to provision the reconciliation verifier." >&2
+  exit 1
+else
+  echo "  ! Reconciliation verifier key absent; reconciliation remains fail-closed."
+fi
 
 if [ "$SKIP_SEEDS" = true ]; then
   echo "▶ Seeds skipped (--skip-seeds)"
@@ -128,7 +141,8 @@ if [ "${ENVIRONMENT:-}" = "production" ]; then
 fi
 
 echo "▶ Seeding representative tenants and persona logins..."
-psql -w "$DB_URL" -v ON_ERROR_STOP=1 -q -f infra/supabase/seed-users.sql
+SUPABASE_DB_URL="$DB_URL" python3 scripts/migrate-database.py --dsn-env \
+  --sql-file infra/supabase/seed-users.sql
 SUPABASE_DB_URL="$DB_URL" pnpm seed:users
 SUPABASE_DB_URL="$DB_URL" pnpm tsx scripts/seed-platform-baseline.ts
 echo "  ✓ Representative identities seeded"

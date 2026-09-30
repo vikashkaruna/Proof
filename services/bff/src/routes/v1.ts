@@ -12,6 +12,7 @@ import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { monitoringAlertRoutes } from './monitoring-alerts.js';
 import { approvalExportRoutes } from './approval-exports.js';
+import { approvalProofArchiveRoutes } from './approval-proof-archive.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
@@ -211,6 +212,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', sustenanceRoutes());
   app.route('/', monitoringAlertRoutes());
   app.route('/', approvalExportRoutes());
+  app.route('/', approvalProofArchiveRoutes({ approvalEngine: deps.approvalEngine }));
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
   app.route('/', sovereignLicenseRoutes());
@@ -1132,6 +1134,7 @@ export function v1Routes(deps: Deps) {
       stopOnFailure: input.stopOnFailure,
       expiresAt,
       contentDigest: expectedDigest,
+      ...(input.conditions ? { conditions: input.conditions } : {}),
     });
 
     // ── One transaction, or nothing (migration 0026) ──────────────────

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -29,7 +30,7 @@ from axiom.agents.samadhan import (
     normalize_action_outcomes,
 )
 from axiom.config import Settings
-from axiom.executor import ActionOutcome, ExecutorDb, ExecutorRefused
+from axiom.executor import ActionOutcome, ExecutorRefused
 from axiom.verification import reconcile_batch
 
 
@@ -45,8 +46,10 @@ class FakeDb:
         self.rpc_calls.append((name, args))
         if name in self.rpc_script:
             return self.rpc_script[name]
+        if name == "prepare_plan_reconciliation":
+            return {"statement": '{"schema_version":2,"batch_status":"completed"}'}
         if name == "record_plan_reconciliation":
-            return {"reconciliation": {"unexecuted": 0, "content_digest_drift": False}}
+            return {"reconciliation": {"id": "r-1", "unexecuted": 0, "content_digest_drift": False}}
         return {"ok": True}
 
 
@@ -329,8 +332,8 @@ async def test_refusal_of_out_of_scope_execution_verdict(
 
 
 @pytest.mark.asyncio
-async def test_db_refusal_surfaces_as_out_of_scope(samadhan_agent: SamadhanAgent) -> None:
-    """Database RPC refusal 'out_of_scope_executed' is caught and reported by Samadhan."""
+async def test_db_refusal_cannot_become_signed_caller_prose(samadhan_agent: SamadhanAgent) -> None:
+    """A source refusal never becomes a signed, caller-composed attestation."""
     fake_db = FakeDb()
     fake_db.script("record_plan_reconciliation", {"error": "out_of_scope_executed"})
 
@@ -342,8 +345,56 @@ async def test_db_refusal_surfaces_as_out_of_scope(samadhan_agent: SamadhanAgent
         raise_on_out_of_scope=False,
     )
 
-    output = await samadhan_agent.reconcile(inp, db=fake_db)
-    assert output.verdict == "out_of_scope"
+    with pytest.raises(ExecutorRefused) as exc_info:
+        await samadhan_agent.reconcile(inp, db=fake_db)
+    assert exc_info.value.reason == "out_of_scope_executed"
+
+
+@pytest.mark.asyncio
+async def test_db_facts_override_caller_verdict(samadhan_agent: SamadhanAgent) -> None:
+    """The returned verdict follows the signed database statement, not input assertions."""
+    fake_db = FakeDb()
+    facts = {
+        "schema_version": 2,
+        "batch_status": "partial_failure",
+        "action_outcomes": {"act-1": "failed"},
+        "unexecuted": [],
+        "verification_results": [],
+        "content_digest_drift": False,
+    }
+    fake_db.script("prepare_plan_reconciliation", {"statement": json.dumps(facts)})
+    input_data = SamadhanInput(
+        plan_id="11111111-1111-1111-1111-111111111111",
+        batch_id="batch-real-failure",
+        action_ids=["act-1"],
+        outcomes=[{"action_id": "act-1", "outcome": "succeeded"}],
+        batch_status="completed",
+    )
+    result = await samadhan_agent.reconcile(input_data, db=fake_db)
+    assert result.verdict == "partial_execution"
+    assert result.details["counts"] == {"failed": 1}
+    assert result.details["batch_status"] == "partial_failure"
+    assert result.details["source_bound"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_verification_prevents_clean_db_verdict(samadhan_agent: SamadhanAgent) -> None:
+    fake_db = FakeDb()
+    fake_db.script("prepare_plan_reconciliation", {"statement": json.dumps({
+        "schema_version": 2,
+        "batch_status": "completed",
+        "action_outcomes": {"act-1": "succeeded"},
+        "unexecuted": [],
+        "verification_results": [{"action_id": "act-1", "outcome": "failed"}],
+        "content_digest_drift": False,
+    })})
+    result = await samadhan_agent.reconcile(SamadhanInput(
+        plan_id="11111111-1111-1111-1111-111111111111",
+        batch_id="batch-failed-verification", action_ids=["act-1"],
+        outcomes=[{"action_id": "act-1", "outcome": "succeeded"}],
+    ), db=fake_db)
+    assert result.verdict == "partial_execution"
+    assert result.details["verification_failed"] is True
 
 
 # ─── 6. HMAC Statement Signing with approval_signing_key ──────────────
@@ -452,16 +503,15 @@ async def test_reconcile_batch_in_verification_attributes_to_samadhan() -> None:
         ledger=ledger,
     )
 
-    assert rec == {"reconciliation": {"unexecuted": 0, "content_digest_drift": False}}
-    assert len(fake_db.rpc_calls) == 1
-    rpc_name, rpc_args = fake_db.rpc_calls[0]
+    assert rec["reconciliation"] == {"id": "r-1", "unexecuted": 0, "content_digest_drift": False}
+    assert rec["statement"] == '{"schema_version":2,"batch_status":"completed"}'
+    assert len(fake_db.rpc_calls) == 2
+    assert fake_db.rpc_calls[0][0] == "prepare_plan_reconciliation"
+    rpc_name, rpc_args = fake_db.rpc_calls[1]
     assert rpc_name == "record_plan_reconciliation"
     assert rpc_args["p_batch_id"] == "b-direct"
     assert len(rpc_args["p_statement_signature"]) == 64
 
-    # Ledger attribution
-    assert len(ledger.appended) == 1
-    ledger_entry = ledger.appended[0]
-    assert ledger_entry.actor_id == "samadhan"
-    assert ledger_entry.action_type == "execution.reconciliation.recorded"
-    assert ledger_entry.detail["reconciled_by_agent"] == "samadhan"
+    # The recorder appends the ledger atomically; the runtime must not append
+    # a second best-effort copy after the database confirms the write.
+    assert ledger.appended == []
