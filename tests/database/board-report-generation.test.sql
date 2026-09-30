@@ -150,13 +150,16 @@ begin
   res := public.review_report(t, rep_id, 'approved', 'Board report approved by founder', f_internal, h, gen_random_uuid());
   perform pg_temp.ok(res->>'status' = 'approved', 'review_report succeeds');
 
-  -- Attach PDF hash
-  res := public.attach_board_report_pdf(t, f_internal, rep_id, h, 29631, 's3-compatible', 'vault', 'key', 'v1', now() + interval '7 years');
-  perform pg_temp.ok(res->>'pdfHash' = h, 'attach_board_report_pdf succeeds');
+  -- A fabricated object key/version is no longer a permitted service write.
+  perform pg_temp.ok(
+    not has_function_privilege('service_role',
+      'public.attach_board_report_pdf(uuid,uuid,uuid,text,bigint,text,text,text,text,timestamptz)',
+      'EXECUTE'),
+    'unverified PDF attachment function is unavailable to the service role');
 
   -- Release report
   res := public.release_report(t, rep_id, f_internal, h, null, gen_random_uuid());
-  perform pg_temp.ok(res->>'status' = 'published', 'release_report publishes board report');
+  perform pg_temp.ok(res->>'error' = 'report_artifact_unverified', 'unverified board PDF metadata cannot publish a report');
 end $$;
 
 rollback;

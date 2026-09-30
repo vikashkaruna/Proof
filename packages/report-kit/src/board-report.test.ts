@@ -100,9 +100,22 @@ describe('Board Report Contracts & Renderer', () => {
       },
     };
     const html = renderBoardReportHtml(approvedReport);
-    expect(html).toContain('APPROVED &amp; RELEASED');
+    expect(html).toContain('REVIEWER APPROVAL RECORDED');
     expect(html).toContain('Axiom Founder');
-    expect(html).toContain('SEALED PROOF');
+    expect(html).toContain('REVIEWED');
+  });
+
+  it('retains findings beyond the previous 50-control ceiling', () => {
+    const report: BoardReportContentV1 = {
+      ...sampleReport,
+      key_findings: Array.from({ length: 51 }, (_, index) => ({
+        ...sampleReport.key_findings[0]!,
+        control_id: `CONTROL-${index + 1}`,
+      })),
+    };
+    const html = renderBoardReportHtml(report);
+    expect(html).toContain('CONTROL-51');
+    expect(BoardReportContentV1Schema.parse(report).key_findings).toHaveLength(51);
   });
 
   it('renders compliant PDF bytes using deterministic engine', async () => {

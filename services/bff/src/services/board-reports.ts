@@ -118,38 +118,89 @@ export class BoardReportService {
     }
 
     const pktRow = pktRes.data;
-    const resultObj = (pktRow.result ?? {}) as Record<string, unknown>;
-    const findingsRaw = Array.isArray(resultObj.findings) ? resultObj.findings : [];
-    const postureScore = typeof resultObj.posture_score === 'number' ? resultObj.posture_score : 75;
-    const exposureInr =
-      typeof resultObj.estimated_exposure_inr === 'number'
-        ? resultObj.estimated_exposure_inr
-        : 50000000;
+    const source = z
+      .object({
+        run_id: z.uuid(),
+        engagement_id: z.uuid(),
+        finalized_at: z.string().datetime(),
+        finalized_receipt: z.union([
+          z.number().int().positive(),
+          z.string().regex(/^[1-9][0-9]*$/),
+        ]),
+        result_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        library_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        library_version: z.string().min(1),
+        controls: z
+          .array(
+            z.object({
+              id: z.string().min(1),
+              title: z.string().min(1),
+              domain: z.string().min(1),
+              severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
+              remediation_patterns: z.array(z.string()).optional(),
+            }),
+          )
+          .min(1)
+          .max(500),
+        result: z.object({
+          library_version: z.string().min(1),
+          posture_score: z.number().finite().min(0).max(100),
+          estimated_exposure_inr: z.number().int().safe().nonnegative(),
+          findings: z
+            .array(
+              z.object({
+                control_id: z.string().min(1),
+                score: z.number().finite().min(0).max(100),
+                rationale: z.string().min(1),
+              }),
+            )
+            .min(1)
+            .max(500),
+        }),
+      })
+      .safeParse(pktRow);
+    if (!source.success) throw new EvidenceError('assessment_source_incomplete', 409);
+    const packet = source.data;
+    if (
+      packet.run_id !== requestRow.assessment_run_id ||
+      packet.engagement_id !== requestRow.engagement_id ||
+      packet.result_digest !== requestRow.assessment_result_digest ||
+      packet.library_digest !== requestRow.library_digest ||
+      packet.library_version !== requestRow.library_version ||
+      packet.result.library_version !== packet.library_version ||
+      packet.controls.length !== packet.result.findings.length
+    ) {
+      throw new EvidenceError('assessment_source_conflict', 409);
+    }
+    const controls = new Map(packet.controls.map((control) => [control.id, control]));
+    const findingIds = new Set(packet.result.findings.map((finding) => finding.control_id));
+    if (
+      controls.size !== packet.controls.length ||
+      findingIds.size !== controls.size ||
+      [...findingIds].some((id) => !controls.has(id))
+    ) {
+      throw new EvidenceError('assessment_source_conflict', 409);
+    }
+    const postureScore = packet.result.posture_score;
+    const exposureInr = packet.result.estimated_exposure_inr;
+    const findings = packet.result.findings.map((finding) => {
+      const control = controls.get(finding.control_id)!;
+      return {
+        control_id: finding.control_id,
+        domain: control.domain,
+        severity: control.severity,
+        title: control.title,
+        score: finding.score,
+        gap_summary: finding.rationale,
+        remediation_recommendation:
+          control.remediation_patterns?.[0] ||
+          'No remediation pattern is recorded in the frozen control library.',
+      };
+    });
 
-    // Map findings
-    const findings = findingsRaw.map((f: Record<string, unknown>) => ({
-      control_id: String(f.control_id ?? 'DPDPA-01'),
-      domain: String(f.domain ?? 'Security & Data Governance'),
-      severity: (f.severity === 'critical' ||
-      f.severity === 'high' ||
-      f.severity === 'low' ||
-      f.severity === 'info'
-        ? f.severity
-        : 'medium') as 'critical' | 'high' | 'medium' | 'low' | 'info',
-      title: String(f.title ?? `Finding for ${f.control_id ?? 'control'}`),
-      score: typeof f.score === 'number' ? f.score : 0,
-      gap_summary: String(
-        f.rationale ?? f.gap_summary ?? 'Statutory requirement not fully evidenced in production.',
-      ),
-      remediation_recommendation: String(
-        f.remediation_recommendation ??
-          'Implement validated technical safeguard and attach immutable proof.',
-      ),
-    }));
-
-    const criticalCount = findings.filter((f) => f.severity === 'critical').length;
-    const highCount = findings.filter((f) => f.severity === 'high').length;
-    const totalControls = Math.max(findings.length, 10);
+    const criticalCount = findings.filter((f) => f.score < 80 && f.severity === 'critical').length;
+    const highCount = findings.filter((f) => f.score < 80 && f.severity === 'high').length;
+    const totalControls = packet.controls.length;
     const passedControls = findings.filter((f) => f.score >= 80).length;
 
     // Construct BoardReportContentV1 payload
@@ -176,28 +227,13 @@ export class BoardReportService {
         failed_controls: totalControls - passedControls,
         critical_gaps: criticalCount,
         high_gaps: highCount,
-        medium_gaps: findings.filter((f) => f.severity === 'medium').length,
-        low_gaps: findings.filter((f) => f.severity === 'low').length,
+        medium_gaps: findings.filter((f) => f.score < 80 && f.severity === 'medium').length,
+        low_gaps: findings.filter((f) => f.score < 80 && f.severity === 'low').length,
         estimated_exposure_inr: exposureInr,
-        narrative: `Executive evaluation for ${requestRow.title}. Current statutory compliance stands at ${postureScore}%. Remediation focus is directed toward ${criticalCount} critical and ${highCount} high gaps under DPDPA obligations.`,
+        narrative: `This report summarizes the recorded assessment for ${requestRow.title}. The computed posture score is ${postureScore}%. Evidence requirements in the control library do not establish that evidence was collected or independently verified.`,
       },
-      key_findings: findings.slice(0, 20),
-      action_plan: [
-        {
-          step: 1,
-          title: 'Remediate critical infrastructure and access control findings',
-          owner: 'Information Security & Data Protection Team',
-          timeline_days: 14,
-          priority: 'p0',
-        },
-        {
-          step: 2,
-          title: 'Validate and seal updated compliance evidence',
-          owner: 'Compliance Operations',
-          timeline_days: 30,
-          priority: 'p1',
-        },
-      ],
+      key_findings: findings,
+      action_plan: [],
       signatures: {
         prepared_by: {
           name: 'Prativedan (Axiom Reporting Agent)',
@@ -235,29 +271,6 @@ export class BoardReportService {
 
     const reportId = String(draftRes.reportId);
 
-    // Render PDF and attach
-    try {
-      const pdf = await renderHtmlToPdf(htmlText);
-      await this.rpc(
-        'attach_board_report_pdf',
-        {
-          p_tenant_id: tenantId,
-          p_actor_id: actorId,
-          p_report_id: reportId,
-          p_pdf_sha256: pdf.sha256,
-          p_pdf_bytes: pdf.byteLength,
-          p_storage_provider: 's3-compatible',
-          p_storage_bucket: 'evidence-vault',
-          p_storage_key: `reports/board/${tenantId}/${reportId}.pdf`,
-          p_storage_version_id: 'v1',
-          p_retain_until: new Date(Date.now() + 7 * 365 * 24 * 3600 * 1000).toISOString(),
-        },
-        signal,
-      );
-    } catch {
-      // PDF rendering failure does not block draft recording
-    }
-
     return {
       reportId,
       requestId,
@@ -284,13 +297,19 @@ export class BoardReportService {
     // 2. Fetch report row for content_text
     let repQuery = this.db
       .from('reports')
-      .select('title, content_text')
+      .select('title, content_text, status, created_by')
       .eq('tenant_id', tenantId)
       .eq('id', reportId);
     if (signal) repQuery = repQuery.abortSignal(signal);
     const repRes = await repQuery.maybeSingle();
 
     if (repRes.error || !repRes.data) {
+      throw new EvidenceError('report_not_found', 404);
+    }
+
+    // Service-role reads bypass table RLS. Reapply the draft boundary before
+    // rendering any bytes; only the draft creator may preview an unpublished PDF.
+    if (repRes.data.status !== 'published' && repRes.data.created_by !== actorId) {
       throw new EvidenceError('report_not_found', 404);
     }
 
@@ -320,6 +339,7 @@ export class BoardReportService {
       .from('board_report_requests')
       .select('*', { count: 'exact' })
       .eq('tenant_id', tenantId)
+      .eq('requested_by', actorId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 

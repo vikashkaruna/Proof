@@ -1,5 +1,9 @@
 # Continuing implementation — Revision 88
 
+## Active release reassessment — 2026-09-30
+
+[Audit 91](audits/91-release-readiness-reassessment-2026-09-30.md) supersedes older completion and deployment claims in this document. Source control now has Revisions 102–108 and `origin/staging` equals `origin/main` at `3492ffa`, with green exact-commit CI and security scans. Functional closure and production clearance are **not established**: W8 generated reports lack verified retained source/PDF artifacts and deployed E2E; W9 lacks real throughput, coverage-floor and full recovery proof; W10's offline topology/bootstrap is incomplete; remote preprod/production acceptance has not run. Revision 109 safety and test corrections are in progress on `codex/revision75-controller-generation-transition`. Follow the audit's requirement-by-requirement gates before production deployment. Local Docker results are not remote deployment proof.
+
 ## Active continuation — Revision 102 (2026-09-27; Revision 101 staging accepted)
 
 This section supersedes conflicting historical handoff instructions below. **W9 and W10 remain in scope. The latest user instruction adds production deployment and deployed end-to-end acceptance after the entire plan passes engineering clearance.** Continue on `codex/revision75-controller-generation-transition`: implementation, appropriate tests, documentation, PR into staging, merge commit after green source checks, then verify exact staging CI and advance. Never reset a branch with active changes. Use existing isolated Docker services for current engineering acceptance. No production deployment or main promotion is due at this milestone. The final release must reconcile deployment targets, credentials, residency, operational prerequisites and the earlier operator-owned main-promotion workflow; the new production instruction is conditional on full-plan clearance, not permission to bypass those gates.
