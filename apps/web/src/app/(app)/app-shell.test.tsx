@@ -62,11 +62,15 @@ it('requires a confirmed capability-bearing request to engage the kill switch', 
 });
 
 it('signals high-severity unread alerts with the risk color rather than proof gold', async () => {
-  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url.includes('kill-switch') ? { engaged: false } : { data: { summary: { unread: 2, critical: 0, high: 1 }, alerts: [] } }))));
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url.includes('kill-switch') ? { engaged: false } : { data: { summary: { unread: 2, critical: 0, high: 1 }, alerts: [{ id: 'alert-high', title: 'Recorded high risk', summary: 'Review required', severity: 'high', status: 'unread', alert_type: 'drift', created_at: '2026-10-01T00:00:00Z' }] } }))));
   render(<AppShell {...props} />);
   const alertsButton = screen.getByRole('button', { name: 'Continuous monitoring alerts' });
   await waitFor(() => expect(alertsButton.textContent).toContain('2'));
   expect([...alertsButton.querySelectorAll('span')].some((span) => span.className.includes('bg-[#D9534F]'))).toBe(true);
+  fireEvent.click(alertsButton);
+  const badge = screen.getByText('high');
+  expect(badge.className).toContain('bg-[#D9534F]');
+  expect(badge.className).not.toContain('#C9A227');
 });
 
 it('refuses kill-switch mutation when live status is unreadable', async () => {
@@ -89,7 +93,17 @@ it('does not claim there are no alerts when the tenant alert source fails', asyn
   render(<AppShell {...props} />);
   fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
   await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
-  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
+  expect(document.body.textContent).not.toContain('No alerts in this loaded page.');
+});
+
+it('refuses a malformed alert row rather than showing a false empty or crashing the tray', async () => {
+  vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(url.includes('kill-switch')
+    ? { engaged: false }
+    : { data: { summary: { unread: 1, critical: 1, high: 0 }, alerts: [null] } }))));
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
+  await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
+  expect(document.body.textContent).not.toContain('No alerts in this loaded page.');
 });
 
 it('rechecks tenant kill status instead of trusting an unscoped browser event', async () => {
@@ -125,11 +139,11 @@ it('retracts a previously clear alert summary when its next poll fails', async (
   }));
   render(<AppShell {...props} />);
   fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
-  await waitFor(() => expect(screen.getByText('No active unacknowledged alerts')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText('No alerts in this loaded page.')).toBeTruthy());
   expect(poll).not.toBeNull();
   await act(async () => { poll?.(); });
   await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
-  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
+  expect(document.body.textContent).not.toContain('No alerts in this loaded page.');
 });
 
 it('keeps the kill switch engaged when the BFF refuses release', async () => {
@@ -200,5 +214,5 @@ it('shows only returned active alerts with their recorded severity and title', a
   fireEvent.click(button);
   expect(screen.getByText('Recorded critical alert')).toBeTruthy();
   expect(screen.getByText('Evidence-backed drift')).toBeTruthy();
-  expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
+  expect(document.body.textContent).not.toContain('No alerts in this loaded page.');
 });

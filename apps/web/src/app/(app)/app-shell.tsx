@@ -7,6 +7,7 @@ import { AxiomLogo } from '@axiom/ui';
 import { SidebarAgentPanel } from './sidebar-agent-panel';
 import { APP_NAV_GROUPS, visibleNavGroups, type NavGroup, type NavItem } from './nav';
 import { switchTenantAction } from './tenant-actions';
+import { z } from 'zod';
 
 export { APP_NAV_GROUPS };
 export type { NavGroup, NavItem };
@@ -31,6 +32,24 @@ export interface TenantOption {
 }
 
 const TENANT_COLORS = ['#1E2A4A', '#0FB5A5', '#475569', '#5B6BA8', '#7A5C9E', '#3F7D6B'];
+const alertReadSchema = z.object({
+  data: z.object({
+    summary: z.object({
+      unread: z.number().int().nonnegative(),
+      critical: z.number().int().nonnegative(),
+      high: z.number().int().nonnegative(),
+    }),
+    alerts: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string(),
+      summary: z.string(),
+      severity: z.string(),
+      status: z.string(),
+      alert_type: z.string(),
+      created_at: z.string().datetime({ offset: true }),
+    })),
+  }),
+});
 
 /** Stable per tenant, so the same client keeps the same chip between visits. */
 function tenantColor(id: string): string {
@@ -185,19 +204,15 @@ export function AppShell({
         });
         if (res.ok) {
           const body = await res.json();
-          const summary = body?.data?.summary;
-          if (active && summary && Number.isSafeInteger(summary.unread) && summary.unread >= 0 &&
-            Number.isSafeInteger(summary.critical) && summary.critical >= 0 &&
-            Number.isSafeInteger(summary.high) && summary.high >= 0 &&
-            Array.isArray(body.data.alerts)) {
+          const parsed = alertReadSchema.safeParse(body);
+          if (active && parsed.success) {
+            const { summary, alerts } = parsed.data.data;
             setAlertsSummary({
               tenantId: selectedTenantId,
               unread: summary.unread,
               critical: summary.critical,
               high: summary.high,
-              alerts: body.data.alerts.filter(
-                (a: { status: string }) => a.status === 'unread' || a.status === 'read',
-              ),
+              alerts: alerts.filter((a) => a.status === 'unread' || a.status === 'read'),
             });
             return;
           }
@@ -619,7 +634,7 @@ export function AppShell({
                     </div>
                   ) : visibleAlertsSummary.alerts.length === 0 ? (
                     <div className="py-4 text-center text-xs text-slate-500">
-                      No active unacknowledged alerts
+                      No alerts in this loaded page.
                     </div>
                   ) : (
                     visibleAlertsSummary.alerts.map((alert) => (
@@ -630,11 +645,9 @@ export function AppShell({
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span
                             className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white ${
-                              alert.severity === 'critical'
+                              alert.severity === 'critical' || alert.severity === 'high'
                                 ? 'bg-[#D9534F]'
-                                : alert.severity === 'high'
-                                  ? 'bg-[#C9A227]'
-                                  : 'bg-slate-500'
+                                : 'bg-slate-500'
                             }`}
                           >
                             {alert.severity}
