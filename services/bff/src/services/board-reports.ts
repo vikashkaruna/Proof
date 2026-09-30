@@ -3,14 +3,9 @@
  * Implements manager-initiated request binding, deterministic draft synthesis,
  * deterministic HTML & PDF generation, and dual-signature verification.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import {
-  BoardReportContentV1,
-  BoardReportContentV1Schema,
-  renderBoardReportHtml,
-} from '@axiom/report-kit/board-report';
-import { renderHtmlToPdf } from '@axiom/report-kit/renderer';
+import { BoardReportContentV1, renderBoardReportHtml } from '@axiom/report-kit/board-report';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 
 export interface BoardReportServiceDependencies {
@@ -38,6 +33,24 @@ export type GenerateBoardReportDraftInput = z.infer<typeof generateBoardReportDr
 
 export class BoardReportService {
   constructor(private readonly db: EvidenceDatabase) {}
+
+  private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
+    let membership = this.db
+      .from('tenant_users')
+      .select('role')
+      .eq('tenant_id', tenantId)
+      .eq('user_id', actorId);
+    if (signal) membership = membership.abortSignal(signal);
+    const memberResult = await membership.maybeSingle();
+    if (memberResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+    if (memberResult.data?.role !== 'founder') throw new EvidenceError('forbidden', 403);
+
+    let user = this.db.from('users').select('is_axiom_internal').eq('id', actorId);
+    if (signal) user = user.abortSignal(signal);
+    const userResult = await user.maybeSingle();
+    if (userResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+    if (userResult.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
+  }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
     const query = this.db.rpc(name, args);
@@ -89,6 +102,7 @@ export class BoardReportService {
     correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ) {
+    await this.assertLiveFounder(tenantId, actorId, signal);
     // 1. Fetch board report request
     let reqQuery = this.db
       .from('board_report_requests')
@@ -104,20 +118,96 @@ export class BoardReportService {
 
     const requestRow = reqRes.data;
 
-    // 2. Fetch finalized assessment packet
+    // 2. Render only the exact source frozen with the manager's request.
+    // Legacy requests without this snapshot must be requested again.
     let pktQuery = this.db
-      .from('workload_assessment_packets')
-      .select('*')
+      .from('board_request_sources')
+      .select('source_text, source_sha256, controls_sha256, result_sha256')
       .eq('tenant_id', tenantId)
-      .eq('run_id', requestRow.assessment_run_id);
+      .eq('request_id', requestId);
     if (signal) pktQuery = pktQuery.abortSignal(signal);
     const pktRes = await pktQuery.maybeSingle();
 
-    if (pktRes.error || !pktRes.data) {
-      throw new EvidenceError('assessment_not_found', 404);
+    if (pktRes.error) throw new EvidenceError('report_storage_unavailable', 503);
+    if (!pktRes.data) {
+      throw new EvidenceError('assessment_source_incomplete', 409);
     }
 
-    const pktRow = pktRes.data;
+    const snapshot = z
+      .object({
+        source_text: z
+          .string()
+          .min(1)
+          .max(4 * 1024 * 1024),
+        source_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        controls_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        result_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+      })
+      .safeParse(pktRes.data);
+    if (!snapshot.success) throw new EvidenceError('assessment_source_incomplete', 409);
+    const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+    if (digest(snapshot.data.source_text) !== snapshot.data.source_sha256) {
+      throw new EvidenceError('assessment_source_conflict', 409);
+    }
+    let frozenJson: unknown;
+    try {
+      frozenJson = JSON.parse(snapshot.data.source_text);
+    } catch {
+      throw new EvidenceError('assessment_source_incomplete', 409);
+    }
+    const frozen = z
+      .object({
+        schema_version: z.literal(1),
+        serialization: z.literal('postgres-jsonb-text-v1'),
+        kind: z.literal('board_source'),
+        request_id: z.uuid(),
+        tenant_id: z.uuid(),
+        engagement_id: z.uuid(),
+        assessment_run_id: z.uuid(),
+        library_version: z.string().min(1),
+        controls_text: z.string().min(1),
+        controls_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        result_text: z.string().min(1),
+        result_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        finalized_at: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+        receipts: z.object({
+          finalized: z.object({ id: z.string().regex(/^[1-9][0-9]*$/) }),
+        }),
+      })
+      .safeParse(frozenJson);
+    if (!frozen.success) throw new EvidenceError('assessment_source_incomplete', 409);
+    if (
+      frozen.data.request_id !== requestId ||
+      frozen.data.tenant_id !== tenantId ||
+      frozen.data.engagement_id !== requestRow.engagement_id ||
+      frozen.data.assessment_run_id !== requestRow.assessment_run_id ||
+      frozen.data.library_version !== requestRow.library_version ||
+      frozen.data.controls_sha256 !== snapshot.data.controls_sha256 ||
+      frozen.data.result_sha256 !== snapshot.data.result_sha256 ||
+      digest(frozen.data.controls_text) !== frozen.data.controls_sha256 ||
+      digest(frozen.data.result_text) !== frozen.data.result_sha256
+    ) {
+      throw new EvidenceError('assessment_source_conflict', 409);
+    }
+    let frozenControls: unknown;
+    let result: unknown;
+    try {
+      frozenControls = JSON.parse(frozen.data.controls_text);
+      result = JSON.parse(frozen.data.result_text);
+    } catch {
+      throw new EvidenceError('assessment_source_incomplete', 409);
+    }
+    const pktRow = {
+      run_id: frozen.data.assessment_run_id,
+      engagement_id: frozen.data.engagement_id,
+      finalized_at: new Date(frozen.data.finalized_at).toISOString(),
+      finalized_receipt: frozen.data.receipts.finalized.id,
+      result_digest: frozen.data.result_sha256,
+      library_digest: frozen.data.controls_sha256,
+      library_version: frozen.data.library_version,
+      controls: frozenControls,
+      result,
+    };
     const source = z
       .object({
         run_id: z.uuid(),
@@ -211,6 +301,7 @@ export class BoardReportService {
       tenant_id: tenantId,
       engagement_id: requestRow.engagement_id,
       assessment_run_id: requestRow.assessment_run_id,
+      source_sha256: snapshot.data.source_sha256,
       assessment_result_digest: requestRow.assessment_result_digest,
       library_version: requestRow.library_version,
       library_digest: requestRow.library_digest,
@@ -249,6 +340,7 @@ export class BoardReportService {
     const contentText = JSON.stringify(contentPayload);
 
     // Call RPC record_board_report_draft
+    await this.assertLiveFounder(tenantId, actorId, signal);
     const draftRes = await this.rpc(
       'record_board_report_draft',
       {
@@ -282,50 +374,15 @@ export class BoardReportService {
     };
   }
 
-  async getReportPdf(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
-    // 1. Fetch artifacts row
-    let artQuery = this.db
-      .from('board_report_artifacts')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('report_id', reportId);
-    if (signal) artQuery = artQuery.abortSignal(signal);
-    const artRes = await artQuery.maybeSingle();
-
-    if (artRes.error || !artRes.data) {
-      throw new EvidenceError('report_not_found', 404);
-    }
-
-    // 2. Fetch report row for content_text
-    let repQuery = this.db
-      .from('reports')
-      .select('title, content_text, status, created_by')
-      .eq('tenant_id', tenantId)
-      .eq('id', reportId);
-    if (signal) repQuery = repQuery.abortSignal(signal);
-    const repRes = await repQuery.maybeSingle();
-
-    if (repRes.error || !repRes.data) {
-      throw new EvidenceError('report_not_found', 404);
-    }
-
-    // Service-role reads bypass table RLS. Reapply the draft boundary before
-    // rendering any bytes; only the draft creator may preview an unpublished PDF.
-    if (repRes.data.status !== 'published' && repRes.data.created_by !== actorId) {
-      throw new EvidenceError('report_not_found', 404);
-    }
-
-    // Render PDF from content or cached HTML
-    const content = BoardReportContentV1Schema.parse(JSON.parse(repRes.data.content_text));
-    const html = renderBoardReportHtml(content);
-    const pdf = await renderHtmlToPdf(html);
-
-    return {
-      pdfBuffer: pdf.pdfBuffer,
-      sha256: pdf.sha256,
-      byteLength: pdf.byteLength,
-      title: repRes.data.title,
-    };
+  async getReportPdf(
+    _tenantId: string,
+    _actorId: string,
+    _reportId: string,
+    _signal?: AbortSignal,
+  ): Promise<{ pdfBuffer: Buffer; sha256: string; byteLength: number; title: string }> {
+    // 0075 stored only a PDF digest/location claim. A fresh render can differ
+    // from the reviewed bytes and has no verified Object Lock version.
+    throw new EvidenceError('report_artifact_unverified', 409);
   }
 
   async listRequests(
