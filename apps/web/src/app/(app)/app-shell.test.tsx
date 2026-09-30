@@ -130,3 +130,19 @@ it('retracts a previously clear alert summary when its next poll fails', async (
   await waitFor(() => expect(screen.getByText('Alert status is unavailable.')).toBeTruthy());
   expect(document.body.textContent).not.toContain('No active unacknowledged alerts');
 });
+
+it('keeps the kill switch engaged when the BFF refuses release', async () => {
+  const fetcher = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(url.includes('kill-switch/status')
+    ? Response.json({ engaged: true })
+    : url.includes('kill-switch/release')
+      ? Response.json({ error: { code: 'denied' } }, { status: 403 })
+      : Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } })));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/release')).toBe(true));
+  expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy();
+  const release = fetcher.mock.calls.find(([url]) => url === '/api/bff/v1/kill-switch/release');
+  expect(release?.[1]).toMatchObject({ method: 'POST', headers: { 'X-Tenant-Id': 'tenant-alpha' } });
+});

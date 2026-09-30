@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EvidenceClient } from './evidence-client';
 
-const workflow = vi.hoisted(() => ({ upload: vi.fn() }));
-vi.mock('./evidence-workflow', () => ({ evidenceUploadBytes: workflow.upload, verifyLocalFile: vi.fn() }));
+const workflow = vi.hoisted(() => ({ upload: vi.fn(), verify: vi.fn() }));
+vi.mock('./evidence-workflow', () => ({ evidenceUploadBytes: workflow.upload, verifyLocalFile: workflow.verify }));
 vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 
 const operationKey = '11111111-1111-4111-8111-111111111111';
@@ -18,6 +18,7 @@ const row = {
 };
 beforeEach(() => {
   workflow.upload.mockReset().mockResolvedValue({ fingerprint: 'digest-1', contentBase64: 'YQ==' });
+  workflow.verify.mockReset();
   vi.stubGlobal('crypto', { randomUUID: () => operationKey });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -97,6 +98,31 @@ it('rejects a verification receipt for a different stored object version', async
   expect(document.body.textContent).not.toContain('Stored-byte integrity and provider retention verified at');
 });
 
+it('shows exact-version provider proof separately from a local hash mismatch', async () => {
+  const withVersion = { ...row, assurance: 'verified_at_ingest', object_version: {
+    id: '44444444-4444-4444-8444-444444444444', provider: 's3', version_id: 'version-1',
+    lock_mode: 'COMPLIANCE', retain_until: '2033-10-01T00:00:00Z', readback_at: '2026-10-01T01:00:00Z',
+    legal_hold: false, encryption: 'AES256',
+  } };
+  const fetcher = vi.fn().mockImplementation(async (url: string) => url.endsWith('/verify')
+    ? Response.json({ data: { evidenceId: row.id, integrity: 'verified', retention: 'verified',
+      verifiedAt: '2026-10-01T02:00:00Z', versionId: 'version-1', retainUntil: '2033-10-01T00:00:00Z',
+      legalHold: false, encryption: 'AES256' } })
+    : Response.json({ data: [withVersion], meta: { limit: 20, offset: 0, total: 1, hasMore: false } }));
+  vi.stubGlobal('fetch', fetcher);
+  workflow.verify.mockResolvedValue({ computedHash: 'b'.repeat(64), hashMatches: false, byteSize: 2, sizeMatches: false });
+  render(<EvidenceClient tenantId="tenant-1" canRecord={false} canExport={false} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /record.txt/ })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: /record.txt/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Verify provider receipt' }));
+  await waitFor(() => expect(document.body.textContent).toContain('Stored-byte integrity and provider retention verified at'));
+  expect(document.body.textContent).toContain('for version version-1');
+  fireEvent.change(screen.getByLabelText('Local file to verify'), { target: { files: [new File(['b'], 'local.txt')] } });
+  await waitFor(() => expect(document.body.textContent).toContain('Hash mismatch: this file differs from the recorded digest.'));
+  expect(workflow.verify).toHaveBeenCalledWith(expect.any(File), row.content_hash, row.byte_size);
+  expect(document.body.textContent).toContain('Size mismatch');
+});
+
 it('retries an ambiguous upload with the same operation key in body and header', async () => {
   let mutationCount = 0;
   const fetcher = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
@@ -163,4 +189,26 @@ it('keeps failed upload-operation reads unavailable until the operator retries',
   fireEvent.click(screen.getByRole('button', { name: 'Retry upload operations' }));
   await waitFor(() => expect(screen.getByText('No upload operations recorded on this page.')).toBeTruthy());
   expect(operations).toBe(2);
+});
+
+it('reconciles a pending operation without uploading a second object', async () => {
+  const pending = { operationId: '22222222-2222-4222-8222-222222222222', operationKey,
+    status: 'pending', evidenceId: null, errorCode: 'object_version_not_found',
+    createdAt: '2026-10-01T00:00:00Z', retainUntil: '2033-10-01T00:00:00Z' };
+  const fetcher = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/reconcile')) return Response.json({ data: pending });
+    if (url.includes('/ingestions')) return Response.json({ data: [pending], meta: { limit: 20, offset: 0, total: 1, hasMore: false } });
+    if (init.method === 'GET') return empty();
+    throw new Error('unexpected upload');
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<EvidenceClient tenantId="tenant-1" canRecord canExport={false} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Reconcile upload' })).toBeTruthy());
+  expect(document.body.textContent).toContain('No matching uploaded object was found');
+  fireEvent.click(screen.getByRole('button', { name: 'Reconcile upload' }));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Still pending: object_version_not_found'));
+  const posts = fetcher.mock.calls.filter(([, init]) => init.method === 'POST');
+  expect(posts).toHaveLength(1);
+  expect(posts[0]![0]).toBe(`/api/bff/v1/evidence/ingestions/${operationKey}/reconcile`);
+  expect(posts[0]![1].headers['x-tenant-id']).toBe('tenant-1');
 });
