@@ -30,13 +30,20 @@ export function EngagementPicker({
   onReady: (ready: boolean) => void;
 }) {
   const [choices, setChoices] = useState<Choice[]>([]);
-  const [selected, setSelected] = useState<Choice | null>(null);
+  const [selection, setSelection] = useState<{ tenantId: string; choice: Choice } | null>(null);
   const [currentLibrary, setCurrentLibrary] = useState<string | null>(null);
-  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState({ tenantId, offset: 0 });
   const [more, setMore] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [requestLoading, setRequestLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sourceTenant, setSourceTenant] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const offset = page.tenantId === tenantId ? page.offset : 0;
+  const loading = requestLoading || sourceTenant !== tenantId;
+  const visibleError = sourceTenant === tenantId ? error : '';
+  const visibleChoices = sourceTenant === tenantId ? choices : [];
+  const visibleLibrary = sourceTenant === tenantId ? currentLibrary : null;
+  const selected = selection?.tenantId === tenantId ? selection.choice : null;
   useEffect(() => {
     const controller = new AbortController();
     void reportRequest(tenantId, `/evidence-packs/options/engagements?limit=20&offset=${offset}`, {
@@ -49,27 +56,33 @@ export function EngagementPicker({
         setChoices(result.data);
         setMore(result.meta.hasMore);
         setCurrentLibrary(result.currentLibraryVersion);
+        setSourceTenant(tenantId);
       })
       .catch((err: unknown) => {
-        if (!controller.signal.aborted) setError(failure(err));
+        if (!controller.signal.aborted) {
+          setError(failure(err));
+          setSourceTenant(tenantId);
+        }
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setRequestLoading(false);
       });
     return () => controller.abort();
   }, [tenantId, offset, revision]);
   useEffect(() => {
-    onReady(!loading && !error && (!!selected || !!currentLibrary));
-  }, [loading, error, selected, currentLibrary, onReady]);
+    onReady(!loading && !visibleError && (!!selected || !!visibleLibrary));
+  }, [loading, visibleError, selected, visibleLibrary, onReady]);
   function reload(next: number) {
-    setOffset(next);
-    setLoading(true);
+    setPage({ tenantId, offset: next });
+    setRequestLoading(true);
     setError('');
     setChoices([]);
     setRevision((v) => v + 1);
   }
   const options =
-    selected && !choices.some((c) => c.id === selected.id) ? [selected, ...choices] : choices;
+    selected && !visibleChoices.some((c) => c.id === selected.id)
+      ? [selected, ...visibleChoices]
+      : visibleChoices;
   return (
     <div className="space-y-2">
       <label className="block text-sm">
@@ -78,15 +91,16 @@ export function EngagementPicker({
           name="engagementId"
           className={`${field} mt-1`}
           value={selected?.id ?? ''}
-          disabled={disabled || loading || !!error}
+          disabled={disabled || loading || !!visibleError}
           onChange={(event) => {
-            setSelected(options.find((c) => c.id === event.target.value) ?? null);
+            const choice = options.find((c) => c.id === event.target.value);
+            setSelection(choice ? { tenantId, choice } : null);
             onChanged();
           }}
         >
-          <option value="" disabled={!currentLibrary}>
-            {currentLibrary
-              ? `No engagement — current library ${currentLibrary}`
+          <option value="" disabled={!visibleLibrary}>
+            {visibleLibrary
+              ? `No engagement — current library ${visibleLibrary}`
               : 'Choose an engagement'}
           </option>
           {options.map((choice) => (
@@ -100,11 +114,11 @@ export function EngagementPicker({
         <p role="status" className="text-sm">
           Loading engagement choices…
         </p>
-      ) : error ? (
+      ) : visibleError ? (
         <p role="alert" className="text-sm text-[#D9534F]">
-          {error}
+          {visibleError}
         </p>
-      ) : !currentLibrary ? (
+      ) : !visibleLibrary ? (
         <p className="text-xs text-slate-600">
           No current control library is published. Choose an engagement to use its recorded library.
         </p>
@@ -126,7 +140,7 @@ export function EngagementPicker({
         <button
           type="button"
           className={button}
-          disabled={disabled || loading || !!error || !more}
+          disabled={disabled || loading || !!visibleError || !more}
           onClick={() => reload(offset + 20)}
         >
           Next engagements

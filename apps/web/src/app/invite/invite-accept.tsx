@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useSyncExternalStore } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button, Card } from '@axiom/ui';
 
 const STORAGE_KEY = 'axiom_invitation_token';
@@ -35,6 +36,7 @@ function captureToken(): string | null {
 const subscribe = () => () => {};
 
 export function InviteAccept() {
+  const router = useRouter();
   // undefined while server rendering; the token is read only in the browser.
   const token = useSyncExternalStore(subscribe, captureToken, () => undefined);
   const ready = token !== undefined;
@@ -56,7 +58,7 @@ export function InviteAccept() {
         redirect: 'manual',
       });
       if (res.status === 401 || res.type === 'opaqueredirect') {
-        window.location.assign('/login?redirect=/invite');
+        router.push('/login?redirect=/invite');
         return;
       }
       const body = (await res.json().catch(() => ({}))) as {
@@ -76,7 +78,7 @@ export function InviteAccept() {
       }
       // Membership is verified server-side on every request; this only selects it.
       document.cookie = `axiom_active_tenant=${body.data.tenantId}; path=/; max-age=31536000; SameSite=Lax`;
-      window.location.assign('/dashboard');
+      router.push('/dashboard');
     } catch {
       setMessage('The result is unknown. Select Accept again; it is safe to retry.');
     } finally {

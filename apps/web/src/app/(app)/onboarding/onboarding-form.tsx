@@ -22,9 +22,6 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
     processes_children_data: false,
     dpo_name: userFullName || 'Compliance Officer',
     dpo_email: userEmail || 'dpo@enterprise.co.in',
-    primary_db_name: 'production-core-postgres',
-    primary_db_type: 'postgres',
-    s3_vault_name: 'analytics-customer-vault-s3',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -46,24 +43,6 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
         processes_children_data: formData.processes_children_data,
         dpo_name: formData.dpo_name,
         dpo_email: formData.dpo_email,
-        systems: [
-          {
-            name: formData.primary_db_name,
-            type: formData.primary_db_type,
-            description: 'Core customer transactional database in ap-south-1',
-            hosts_personal_data: true,
-            region: 'ap-south-1',
-            data_categories: ['identity', 'contact', 'financial', 'government_id'],
-          },
-          {
-            name: formData.s3_vault_name,
-            type: 's3',
-            description: 'Customer KYC documents and event log telemetry',
-            hosts_personal_data: true,
-            region: 'ap-south-1',
-            data_categories: ['contact', 'identity'],
-          },
-        ],
       };
 
       const res = await fetch('/api/bff/v1/organizations/onboard', {
@@ -85,8 +64,8 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
       // Force refresh and redirect to dashboard
       router.push('/dashboard');
       router.refresh();
-    } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred during onboarding.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred during onboarding.');
       setLoading(false);
     }
   };
@@ -112,10 +91,11 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label htmlFor="organization-name" className="block text-xs font-medium text-[#2F3542] mb-1">
               Organization Legal Name *
             </label>
             <input
+              id="organization-name"
               type="text"
               required
               placeholder="e.g. Zenith Financial Technologies Pvt Ltd"
@@ -126,10 +106,11 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label htmlFor="organization-slug" className="block text-xs font-medium text-[#2F3542] mb-1">
               Tenant Slug (Optional)
             </label>
             <input
+              id="organization-slug"
               type="text"
               placeholder="e.g. zenith-fin (auto-generated if blank)"
               value={formData.slug}
@@ -139,10 +120,11 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label htmlFor="organization-tier" className="block text-xs font-medium text-[#2F3542] mb-1">
               Subscription Tier
             </label>
             <select
+              id="organization-tier"
               value={formData.tier}
               onChange={(e) => setFormData({ ...formData, tier: e.target.value })}
               className="w-full rounded-lg border border-[#d8dfe7] px-3 py-2 text-xs text-[#1E2A4A] focus:border-[#0FB5A5] focus:outline-none"
@@ -154,13 +136,14 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label htmlFor="organization-residency" className="block text-xs font-medium text-[#2F3542] mb-1">
               Data Residency Boundary
             </label>
             <input
+              id="organization-residency"
               type="text"
               disabled
-              value="ap-south-1 (Mumbai, India) — 100% Domestic Sovereign"
+              value="Deployment region must be verified from the active environment"
               className="w-full rounded-lg border border-[#eef1f5] bg-[#F4F6F8] px-3 py-2 text-xs text-[#5b6270]"
             />
           </div>
@@ -235,8 +218,9 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">DPO Full Name</label>
+            <label htmlFor="organization-dpo-name" className="block text-xs font-medium text-[#2F3542] mb-1">DPO Full Name</label>
             <input
+              id="organization-dpo-name"
               type="text"
               required
               value={formData.dpo_name}
@@ -246,54 +230,15 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label htmlFor="organization-dpo-email" className="block text-xs font-medium text-[#2F3542] mb-1">
               DPO Official Email
             </label>
             <input
+              id="organization-dpo-email"
               type="email"
               required
               value={formData.dpo_email}
               onChange={(e) => setFormData({ ...formData, dpo_email: e.target.value })}
-              className="w-full rounded-lg border border-[#d8dfe7] px-3 py-2 text-xs text-[#1E2A4A] focus:border-[#0FB5A5] focus:outline-none"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Initial Systems to Inventory Card */}
-      <div className="rounded-2xl border border-[#e4e8ee] bg-white p-6 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 border-b border-[#eef1f5] pb-3">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#C9A227] text-xs font-bold text-white">
-            3
-          </span>
-          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
-            Initial Data Systems for Drishti Discovery Scan
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
-              Primary Database / Datastore
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.primary_db_name}
-              onChange={(e) => setFormData({ ...formData, primary_db_name: e.target.value })}
-              className="w-full rounded-lg border border-[#d8dfe7] px-3 py-2 text-xs text-[#1E2A4A] focus:border-[#0FB5A5] focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-[#2F3542] mb-1">
-              Object Store / Evidence Vault
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.s3_vault_name}
-              onChange={(e) => setFormData({ ...formData, s3_vault_name: e.target.value })}
               className="w-full rounded-lg border border-[#d8dfe7] px-3 py-2 text-xs text-[#1E2A4A] focus:border-[#0FB5A5] focus:outline-none"
             />
           </div>
@@ -317,10 +262,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           {loading ? (
             <>
               <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              <span>Onboarding Organization & Initializing Ledger...</span>
+              <span>Creating organization...</span>
             </>
           ) : (
-            <span>Complete Onboarding & Initialize Assessment →</span>
+            <span>Complete organization setup →</span>
           )}
         </button>
       </div>

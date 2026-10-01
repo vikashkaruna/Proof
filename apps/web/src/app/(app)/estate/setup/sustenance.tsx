@@ -1,38 +1,60 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import { Card, CardContent, CardHeader, CardTitle } from '@axiom/ui';
 import type { EstateDrift, GrantReviewItem } from '@axiom/types';
 import { MutationForm } from '../estate-client';
 
 type Load<T> = { state: 'loading' } | { state: 'error' } | { state: 'ready'; data: T };
 
-async function get<T>(tenantId: string, path: string): Promise<Load<T>> {
+async function get<T>(tenantId: string, path: string, parse: (value: unknown) => T): Promise<Load<T>> {
   try {
     const res = await fetch(`/api/bff/v1${path}`, {
       headers: { 'X-Tenant-Id': tenantId },
       cache: 'no-store',
     });
     if (!res.ok) return { state: 'error' };
-    return { state: 'ready', data: ((await res.json()) as { data: T }).data };
+    return { state: 'ready', data: parse(await res.json()) };
   } catch {
     return { state: 'error' };
   }
 }
 
-function useBff<T>(tenantId: string, path: string, revision: number): Load<T> {
-  const [loaded, setLoaded] = useState<Load<T>>({ state: 'loading' });
+function useBff<T>(tenantId: string, path: string, revision: number, parse: (value: unknown) => T): Load<T> {
+  const source = `${tenantId}\u0000${path}\u0000${revision}`;
+  const [loaded, setLoaded] = useState<{ source: string; result: Load<T> } | null>(null);
   useEffect(() => {
     if (!path) return;
     let active = true;
-    void get<T>(tenantId, path).then((result) => {
-      if (active) setLoaded(result);
+    void get<T>(tenantId, path, parse).then((result) => {
+      if (active) setLoaded({ source, result });
     });
     return () => {
       active = false;
     };
-  }, [tenantId, path, revision]);
-  return loaded;
+  }, [tenantId, path, revision, parse, source]);
+  return loaded?.source === source ? loaded.result : { state: 'loading' };
 }
+
+const driftItem = z.object({ id: z.string(), name: z.string() });
+const driftResponse = z.object({ data: z.object({
+  status: z.enum(['not_onboarded', 'no_baseline', 'current', 'drifted']),
+  added: z.array(driftItem).optional(), removed: z.array(driftItem).optional(),
+  changed: z.array(driftItem).optional(), connectionLost: z.array(driftItem).optional(),
+}) });
+const grantResponse = z.object({ data: z.array(z.object({
+  id: z.string(), connectorName: z.string(), agentName: z.string(),
+  scope: z.enum(['connector.read', 'connector.write']), dueAt: z.string(),
+  expiresAt: z.string(), overdue: z.boolean(),
+})) });
+const toolResponse = z.object({ data: z.array(z.object({
+  id: z.string(), tool_name: z.string(), tool_version: z.string(),
+  operation_class: z.enum(['read', 'write']), description_sha256: z.string(),
+})) });
+type ReviewRow = Pick<GrantReviewItem, 'id' | 'connectorName' | 'agentName' | 'scope' | 'dueAt' | 'expiresAt' | 'overdue'>;
+const parseDrift = (value: unknown): EstateDrift => driftResponse.parse(value).data;
+const parseGrants = (value: unknown): ReviewRow[] => grantResponse.parse(value).data;
+const parseTools = (value: unknown): RegisteredTool[] => toolResponse.parse(value).data;
 
 const DRIFT_GROUPS = [
   ['added', 'Systems added since onboarding'],
@@ -43,7 +65,7 @@ const DRIFT_GROUPS = [
 
 /** Drift of an estate against its last completed onboarding (C-W3-6). */
 export function DriftCard({ tenantId, estateId }: { tenantId: string; estateId: string }) {
-  const drift = useBff<EstateDrift>(tenantId, `/estates/${estateId}/drift`, 0);
+  const drift = useBff(tenantId, `/estates/${estateId}/drift`, 0, parseDrift);
   return (
     <Card data-testid="estate-drift">
       <CardHeader>
@@ -102,7 +124,7 @@ export function GrantReview({
   targets: GrantTargets;
 }) {
   const [revision, setRevision] = useState(0);
-  const queue = useBff<GrantReviewItem[]>(tenantId, '/connector-grants/review', revision);
+  const queue = useBff(tenantId, '/connector-grants/review', revision, parseGrants);
   return (
     <Card data-testid="grant-review">
       <CardHeader>
@@ -231,7 +253,6 @@ type RegisteredTool = {
   tool_version: string;
   operation_class: 'read' | 'write';
   description_sha256: string;
-  created_at: string;
 };
 
 /** W4.5 internal tool registry: registered tools per connector and an
@@ -247,10 +268,13 @@ export function ToolRegistry({
 }) {
   const [connectorId, setConnectorId] = useState(connectors[0]?.id ?? '');
   const [revision, setRevision] = useState(0);
-  const tools = useBff<RegisteredTool[]>(
+  const selectedConnectorId = connectors.some((connector) => connector.id === connectorId)
+    ? connectorId : connectors[0]?.id ?? '';
+  const tools = useBff(
     tenantId,
-    connectorId ? `/connectors/${connectorId}/tools` : '',
+    selectedConnectorId ? `/connectors/${selectedConnectorId}/tools` : '',
     revision,
+    parseTools,
   );
   return (
     <Card data-testid="tool-registry">
@@ -266,7 +290,7 @@ export function ToolRegistry({
               Connector
               <select
                 aria-label="Tool connector"
-                value={connectorId}
+                value={selectedConnectorId}
                 onChange={(e) => setConnectorId(e.target.value)}
                 className={fieldClass}
               >
@@ -301,7 +325,7 @@ export function ToolRegistry({
                 <summary>Register a tool version</summary>
                 <MutationForm
                   tenantId={tenantId}
-                  path={`/connectors/${connectorId}/tools`}
+                  path={`/connectors/${selectedConnectorId}/tools`}
                   method="POST"
                   label="Register tool"
                   onSuccess={() => setRevision((n) => n + 1)}

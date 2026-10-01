@@ -3,20 +3,20 @@
 import React, { useState } from 'react';
 
 interface ExportLedgerButtonProps {
-  tenantId?: string;
+  tenantId: string;
   tenantName?: string;
   tenantSlug?: string;
-  totalCount?: number;
 }
 
 export function ExportLedgerButton({
   tenantId,
   tenantName,
-  tenantSlug = 'meridian',
-  totalCount = 0,
+  tenantSlug,
 }: ExportLedgerButtonProps) {
   const [status, setStatus] = useState<'idle' | 'exporting' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [exportedCount, setExportedCount] = useState<number | null>(null);
+  const [truncated, setTruncated] = useState(false);
 
   const handleExport = async () => {
     if (status === 'exporting') return;
@@ -27,9 +27,7 @@ export function ExportLedgerButton({
       const params = new URLSearchParams({
         export: 'true',
       });
-      if (tenantId) {
-        params.set('tenantId', tenantId);
-      }
+      params.set('tenantId', tenantId);
 
       const res = await fetch(`/api/ledger?${params.toString()}`);
       if (!res.ok) {
@@ -38,6 +36,15 @@ export function ExportLedgerButton({
       }
 
       const data = await res.json();
+      const exported = data?.export_metadata?.total_records;
+      if (
+        !Array.isArray(data?.records) || typeof exported !== 'number' ||
+        !Number.isSafeInteger(exported) || exported < 0 || exported !== data.records.length ||
+        data?.export_metadata?.tenant?.id !== tenantId ||
+        typeof data?.export_metadata?.export_truncated !== 'boolean'
+      ) {
+        throw new Error('Ledger export response could not be verified. No file was downloaded.');
+      }
       const jsonBlob = new Blob([JSON.stringify(data, null, 2)], {
         type: 'application/json',
       });
@@ -45,19 +52,22 @@ export function ExportLedgerButton({
       const downloadAnchor = document.createElement('a');
       downloadAnchor.href = downloadUrl;
       const dateStr = new Date().toISOString().slice(0, 10);
-      downloadAnchor.download = `axiom-ledger-audit-${tenantSlug}-${dateStr}.json`;
+      const safeSlug = (tenantSlug ?? 'tenant').replace(/[^a-zA-Z0-9_-]/g, '-');
+      downloadAnchor.download = `axiom-ledger-audit-${safeSlug}-${dateStr}.json`;
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       document.body.removeChild(downloadAnchor);
       URL.revokeObjectURL(downloadUrl);
 
+      setExportedCount(exported);
+      setTruncated(data.export_metadata.export_truncated);
       setStatus('success');
       setTimeout(() => {
         setStatus('idle');
       }, 3500);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Ledger export error:', err);
-      setErrorMessage(err.message || 'Export failed');
+      setErrorMessage(err instanceof Error ? err.message : 'Export failed');
       setStatus('error');
       setTimeout(() => {
         setStatus('idle');
@@ -83,20 +93,20 @@ export function ExportLedgerButton({
         }`}
         title={
           status === 'exporting'
-            ? 'Generating cryptographic audit bundle...'
-            : `Export verified statutory audit trail for ${tenantName || 'auditor'}`
+            ? 'Preparing recorded audit entries...'
+            : `Export recorded audit entries for ${tenantName || 'selected tenant'}`
         }
       >
         {status === 'exporting' && (
           <>
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
-            <span>Generating audit bundle...</span>
+            <span>Preparing audit export...</span>
           </>
         )}
         {status === 'success' && (
           <>
             <span className="text-teal-600 font-bold">✓</span>
-            <span>Export downloaded ({totalCount} records)</span>
+            <span>Export downloaded ({exportedCount} records{truncated ? '; truncated' : ''})</span>
           </>
         )}
         {status === 'error' && (
@@ -108,7 +118,7 @@ export function ExportLedgerButton({
         {status === 'idle' && (
           <>
             <span>⬇</span>
-            <span>Export ledger for auditor</span>
+            <span>Export recorded ledger entries</span>
           </>
         )}
       </button>

@@ -39,10 +39,11 @@ export function onboardingProposalRoutes() {
         .eq('tenant_id', tenant)
         .order('created_at', { ascending: false }),
     ]);
-    if (intake.error || proposals.error)
+    if (intake.error || proposals.error ||
+      !Array.isArray(intake.data) || !Array.isArray(proposals.data))
       return c.json({ error: { code: 'proposal_unavailable' } }, 503);
     return c.json({
-      data: { intake: intake.data ?? [], proposals: proposals.data ?? [] },
+      data: { intake: intake.data, proposals: proposals.data },
     });
   });
   app.post('/onboarding/proposals', async (c) => {

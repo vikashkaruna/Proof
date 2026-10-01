@@ -70,7 +70,7 @@ export function EvidenceClient({
   const uploadKeys = useRef(new Map<string, string>());
   const headers = useCallback(() => ({ 'x-tenant-id': tenantId }), [tenantId]);
   const request = useCallback(
-    async (path: string, body?: unknown, signal?: AbortSignal) => {
+    async (path: string, body?: unknown, signal?: AbortSignal, idempotencyKey?: string) => {
       const response = await fetch(`/api/bff/v1/evidence${path}`, {
         method: body === undefined ? 'GET' : 'POST',
         cache: 'no-store',
@@ -79,7 +79,7 @@ export function EvidenceClient({
           ...headers(),
           ...(body === undefined
             ? {}
-            : { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }),
+            : { 'content-type': 'application/json', 'idempotency-key': idempotencyKey ?? crypto.randomUUID() }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
@@ -106,7 +106,13 @@ export function EvidenceClient({
         setMeta(result.meta);
       })
       .catch((err) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          setRows([]);
+          setMeta({ limit: 20, offset, total: 0, hasMore: false });
+          selection.current = null;
+          setSelected(null);
+          setLocalResult(null);
+          setProviderResult(null);
           setRecordsError(
             err instanceof z.ZodError
               ? 'The server returned unreadable evidence records. Refresh to try again.'
@@ -114,6 +120,7 @@ export function EvidenceClient({
                 ? err.message
                 : 'Unable to load evidence.',
           );
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -132,10 +139,13 @@ export function EvidenceClient({
         setOperationMore(result.meta.hasMore);
       })
       .catch(() => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          setOperations([]);
+          setOperationMore(false);
           setOperationsError(
             'Unable to load upload operations. Retry to check their current status.',
           );
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setOperationsLoading(false);
@@ -269,7 +279,7 @@ export function EvidenceClient({
             operationKey,
             ...metadata,
             contentBase64: encoded.contentBase64,
-          })
+          }, undefined, operationKey)
         ).json(),
       ).data;
       setMessage(
@@ -440,8 +450,9 @@ export function EvidenceClient({
                     const result = providerResponse.parse(
                       await (await request(`/${row.id}/verify`, {})).json(),
                     ).data;
-                    if (selection.current === row.id && result.evidenceId === row.id)
-                      setProviderResult(result);
+                    if (result.evidenceId !== row.id || result.versionId !== row.object_version?.version_id)
+                      throw new Error('Provider verification did not match the selected evidence version.');
+                    if (selection.current === row.id) setProviderResult(result);
                   })
                 }
               >

@@ -21,7 +21,7 @@ export default async function OnboardingPage() {
             P0
           </span>
           <span className="text-[11px] text-[#0FB5A5] font-medium">Enterprise Onboarding</span>
-          <span className="text-[11px] text-[#8a97b8]">Sovereign Indian Boundary · ap-south-1</span>
+          <span className="text-[11px] text-[#8a97b8]">Deployment region requires verification</span>
         </div>
         <div className="flex flex-wrap items-baseline gap-3">
           <h1 className="font-heading text-2xl sm:text-[26px] font-bold text-white tracking-tight">
@@ -32,9 +32,8 @@ export default async function OnboardingPage() {
           </span>
         </div>
         <p className="mt-2 text-[13px] text-[#c7cfe0] max-w-2xl leading-relaxed">
-          Configure a new Data Fiduciary realm under India’s Digital Personal Data Protection Act
-          (DPDPA 2023). Enforces isolated database RLS tenancy, cryptographically seals onboarding
-          to the audit ledger, and initializes statutory assessment baseline across 46 controls.
+          Record an organization for DPDPA assessment. Verify tenant membership, audit records,
+          deployment location and assessment results in their dedicated workspaces after creation.
         </p>
       </div>
 

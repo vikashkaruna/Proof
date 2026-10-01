@@ -35,7 +35,10 @@ export function DispatchAlertsButton({
         throw new Error(body?.error?.message ?? body?.error?.code ?? 'Dispatch failed');
       }
 
-      const count = body?.data?.dispatchedCount ?? 0;
+      const count: unknown = body?.data?.dispatchedCount;
+      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+        throw new Error('Could not confirm alert dispatch. Review the alert list before retrying.');
+      }
       setMessage(`Scan complete: ${count} alert(s) dispatched / refreshed.`);
       router.refresh();
     } catch (err: unknown) {
@@ -98,6 +101,9 @@ export function DismissAlertButton({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(body?.error?.message ?? body?.error?.code ?? 'Dismissal failed');
+      }
+      if (body?.data?.dismissed !== true || body?.data?.alertId !== alertId) {
+        throw new Error('Could not confirm alert acknowledgement. Review the alert before retrying.');
       }
 
       router.refresh();

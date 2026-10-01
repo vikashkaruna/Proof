@@ -33,7 +33,9 @@ export default async function EstateGraphPage() {
       .eq('tenant_id', tenant)
       .is('revoked_at', null),
   ]);
-  const failed = estates.error || systems.error || connectors.error || grants.error;
+  const failed = estates.error || systems.error || connectors.error || grants.error ||
+    !Array.isArray(estates.data) || !Array.isArray(systems.data) ||
+    !Array.isArray(connectors.data) || !Array.isArray(grants.data);
   const input: GraphInput = {
     agents: Object.values(AGENT_CONTRACTS).map((a) => ({
       name: a.name,
@@ -68,7 +70,7 @@ export default async function EstateGraphPage() {
     <div className="mx-auto flex max-w-[1200px] flex-col gap-6">
       <PageHeader
         title="Estate graph"
-        description="Estates, systems, connector registrations and data categories, with agent access drawn only from active grants. No edge means no access."
+        description="Estates, systems, connector registrations and data categories, with agent access drawn only from active grants in this view. Other estates or filters may have additional grants."
       />
       <Link href="/estate" className="text-teal-700 underline">
         Back to estate inventory

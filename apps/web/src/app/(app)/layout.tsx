@@ -19,10 +19,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect('/login');
 
   // Tenant membership + role
-  const { data: memberships } = await supabase
+  const { data: memberships, error: membershipsError } = await supabase
     .from('tenant_users')
     .select('tenant_id, role, tenants:tenant_id(slug, name)')
     .eq('user_id', user.id);
+  if (membershipsError || !memberships) {
+    throw new Error('Tenant memberships are unavailable');
+  }
 
   const tenants = [...(memberships ?? [])]
     .sort((a, b) => a.tenant_id.localeCompare(b.tenant_id))

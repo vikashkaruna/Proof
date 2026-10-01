@@ -18,7 +18,7 @@ export async function loginAction(formData: FormData) {
   const cookieStore = await cookies();
   cookieStore.delete('axiom_e2e_logged_out');
 
-  let authenticatedUser: any = null;
+  let authenticatedUser: { id: string } | null = null;
   let authError: string | null = null;
 
   try {
@@ -29,9 +29,10 @@ export async function loginAction(formData: FormData) {
     } else if (error) {
       authError = error.message;
     }
-  } catch (err: any) {
-    console.warn('[loginAction] Supabase auth attempt notice:', err?.message || err);
-    authError = err?.message || 'fetch failed';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'fetch failed';
+    console.warn('[loginAction] Supabase auth attempt notice:', message);
+    authError = message;
   }
 
   // Handle authentication failure.
@@ -102,7 +103,7 @@ export async function signupAction(formData: FormData) {
   const cookieStore = await cookies();
   cookieStore.delete('axiom_e2e_logged_out');
 
-  let signupUser: any = null;
+  let signupUser: { id: string } | null = null;
   let signupError: string | null = null;
   let hasSession = false;
 
@@ -122,9 +123,10 @@ export async function signupAction(formData: FormData) {
     } else if (error) {
       signupError = error.message;
     }
-  } catch (err: any) {
-    console.warn('[signupAction] Supabase signup notice:', err?.message || err);
-    signupError = err?.message || 'fetch failed';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'fetch failed';
+    console.warn('[signupAction] Supabase signup notice:', message);
+    signupError = message;
   }
 
   if (!signupUser) {

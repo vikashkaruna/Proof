@@ -31,11 +31,12 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
   // It also keeps the client component free of a mount-time effect that sets
   // state, which is both a cascading-render hazard and a flash of "not
   // enrolled" for a user who is.
-  const { data: factorRows } = await ctx.supabase
+  const { data: factorRows, error: factorError } = await ctx.supabase
     .from('user_mfa_factors')
     .select('id, factor_type, status, label, activated_at, last_used_at, consumed_at');
+  if (factorError || !factorRows) throw new Error('MFA factor status is unavailable');
 
-  const rows = factorRows ?? [];
+  const rows = factorRows;
   const initialStatus = {
     enrolled: rows.some((r) => r.factor_type === 'totp' && r.status === 'active'),
     recoveryCodesRemaining: rows.filter(

@@ -6,6 +6,7 @@ import { MySqlReadConnector } from './mysql-read.js';
 import {
   PostgresReadConnector,
   SqlConnectorRefused,
+  type RedactedScanResult,
   type SqlSessionFactory,
 } from './postgres-read.js';
 
@@ -72,10 +73,10 @@ export class SqlDiscoveryGate {
   }
 
   /** Runs one operation and returns the result with the grant it ran under. */
-  async discover(
+  private async run<T>(
     request: SqlDiscoveryRequest,
-    work: (connector: SqlReadConnector, context: ConnectorInvocation) => Promise<ConnectorResult>,
-  ): Promise<{ result: ConnectorResult; grant: SqlGrant }> {
+    work: (connector: SqlReadConnector, context: ConnectorInvocation) => Promise<T>,
+  ): Promise<{ result: T; grant: SqlGrant }> {
     const now = (this.deps.now ?? Date.now)();
     let workload;
     try {
@@ -112,6 +113,29 @@ export class SqlDiscoveryGate {
     )
       throw new SqlConnectorRefused('grant_changed');
     return { result, grant };
+  }
+
+  discover(
+    request: SqlDiscoveryRequest,
+    work: (connector: SqlReadConnector, context: ConnectorInvocation) => Promise<ConnectorResult>,
+  ): Promise<{ result: ConnectorResult; grant: SqlGrant }> {
+    return this.run(request, work);
+  }
+
+  /** Internal SQL processing gate. A caller must persist a validated scan run
+   * before it exposes the aggregate, so this is not a public discovery op. */
+  async scanRedacted(
+    request: SqlDiscoveryRequest,
+    resource: string,
+    maxRows: number,
+    pageSize: number,
+  ): Promise<{ result: RedactedScanResult; grant: SqlGrant }> {
+    if (this.deps.engine === 'mysql') throw new SqlConnectorRefused('engine_unsupported');
+    return this.run(request, (connector, context) => {
+      if (!(connector instanceof PostgresReadConnector))
+        throw new SqlConnectorRefused('engine_unsupported');
+      return connector.scanRedacted(context, resource, maxRows, pageSize);
+    });
   }
 
   enumerate(request: SqlDiscoveryRequest, cursor?: string): Promise<ConnectorResult> {

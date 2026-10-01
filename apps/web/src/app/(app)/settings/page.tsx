@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { requireTenantContext } from '@/lib/tenant-context';
-import { BRAND } from '@axiom/config';
 import Link from 'next/link';
 import { Capability, can } from '@axiom/types';
 
@@ -43,11 +42,11 @@ export default async function SettingsPage() {
           </span>
         </div>
         <p className="mt-2 text-[13px] text-[#c7cfe0] max-w-3xl leading-relaxed">
-          Account security, tenant membership, cryptographic verification keys, and sovereign data
-          residency preferences strictly constrained to ap-south-1.
+          Review account identity and tenant membership. Deployment, gateway and storage assurances
+          require separate operational verification.
         </p>
         <div className="mt-3.5 inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-1 text-[11px] text-slate-200">
-          <span className="text-[#C9A227]">◆</span> Sold standalone or bundled · module M0.1
+          <span>Module M0.1</span>
         </div>
       </div>
 
@@ -68,7 +67,7 @@ export default async function SettingsPage() {
               <span className="font-medium text-[12.5px] text-[#1E2A4A]">
                 {typeof user.user_metadata?.full_name === 'string'
                   ? user.user_metadata.full_name
-                  : 'Compliance Lead'}
+                  : 'Not provided'}
               </span>
             </div>
             <div className="flex items-center justify-between py-2.5">
@@ -80,7 +79,7 @@ export default async function SettingsPage() {
               <span className="text-[11.5px] text-[#1E2A4A]">
                 {user.last_sign_in_at
                   ? new Date(user.last_sign_in_at).toLocaleDateString('en-IN')
-                  : 'Active session'}
+                  : 'Unavailable'}
               </span>
             </div>
           </div>
@@ -89,31 +88,31 @@ export default async function SettingsPage() {
         {/* Security & Sovereignty Card */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3">
-            Security & Domestic Residency (ap-south-1)
+            Operational assurance
           </div>
           <div className="divide-y divide-[#eef1f5]">
             <div className="flex items-center justify-between py-2.5">
               <span className="text-[12.5px] text-[#5b6270]">Data Residency Region</span>
               <span className="rounded bg-teal-50 px-2 py-0.5 font-mono text-[11.5px] font-semibold text-teal-700">
-                {BRAND.dataResidencyRegion} (Mumbai)
+                Verify in deployment records
               </span>
             </div>
             <div className="flex items-center justify-between py-2.5">
               <span className="text-[12.5px] text-[#5b6270]">Cross-Border Egress</span>
               <span className="font-medium text-[12.5px] text-teal-700">
-                Disabled (0 non-domestic hops)
+                Unverified in this view
               </span>
             </div>
             <div className="flex items-center justify-between py-2.5">
               <span className="text-[12.5px] text-[#5b6270]">Model Gateway Redaction</span>
               <span className="font-medium text-[12.5px] text-teal-700">
-                Enforced before LLM egress
+                Unverified in this view
               </span>
             </div>
             <div className="flex items-center justify-between py-2.5">
               <span className="text-[12.5px] text-[#5b6270]">Evidence Retention WORM</span>
-              <span className="font-medium text-[12.5px] text-[#C9A227]">
-                AWS S3 Object Lock Compliance
+              <span className="font-medium text-[12.5px] text-slate-700">
+                Verify with the exact stored object version
               </span>
             </div>
           </div>

@@ -13,7 +13,7 @@ resource "random_password" "internal_service_key" {
 locals {
   managed_secrets = {
     db_password = random_password.db_password.result
-    db_url      = "postgresql://${google_sql_user.axiom_user.name}:${random_password.db_password.result}@${google_sql_database_instance.postgres.public_ip_address}:5432/${google_sql_database.axiom_db.name}?sslmode=require"
+    db_url      = "postgresql://${google_sql_user.axiom_user.name}:${random_password.db_password.result}@${google_sql_database_instance.postgres.private_ip_address}:5432/${google_sql_database.axiom_db.name}?sslmode=require"
     # GoTrue needs the same database with `search_path=auth`, because its MFA
     # migration creates the `factor_type` and `factor_status` enums
     # UNQUALIFIED. Without it they are created in `public` and a later
@@ -21,7 +21,7 @@ locals {
     # already created sixteen tables — a failure that reads like a schema
     # conflict rather than a search_path one. Proved against real GoTrue in
     # tests/deployment/selfhosted-supabase.sh.
-    gotrue_db_url                = "postgresql://${google_sql_user.axiom_user.name}:${random_password.db_password.result}@${google_sql_database_instance.postgres.public_ip_address}:5432/${google_sql_database.axiom_db.name}?search_path=auth&sslmode=require"
+    gotrue_db_url                = "postgresql://${google_sql_user.axiom_user.name}:${random_password.db_password.result}@${google_sql_database_instance.postgres.private_ip_address}:5432/${google_sql_database.axiom_db.name}?search_path=auth&sslmode=require"
     upstash_redis_url            = var.upstash_redis_url != "" ? var.upstash_redis_url : "redis://default:placeholder@mock-upstash:6379"
     anthropic_api_key            = var.anthropic_api_key != "" ? var.anthropic_api_key : "placeholder-anthropic-key"
     openai_api_key               = var.openai_api_key != "" ? var.openai_api_key : "placeholder-openai-key"

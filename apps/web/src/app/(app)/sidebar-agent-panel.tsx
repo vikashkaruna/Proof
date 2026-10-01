@@ -28,11 +28,11 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     persona: 'Discovery',
     indic: 'दृष्टि · Data Discovery',
     autonomy: 'L1 Autonomous',
-    phase: 'Phase 1 · DPDPA §16',
+    phase: 'Phase 1 · Discovery',
     description:
-      'Scans systems, databases, and buckets for personal data, classifying data flows and validating Indian data residency.',
+      'Inspects registered systems through authorized discovery connectors and records observed findings.',
     statutoryBoundary:
-      'Strict domestic residency (ap-south-1). Automatically flags and alerts on non-Indian regions.',
+      'Deployment region and data flows must be verified from the connected estate.',
     modulePath: '/discovery',
     moduleLabel: 'Data Discovery',
     actionLabel: 'Run Discovery Scan',
@@ -42,11 +42,11 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     persona: 'Classification',
     indic: 'विभाग · Classification',
     autonomy: 'L1 Autonomous',
-    phase: 'Phase 1 · DPDPA §4-10',
+    phase: 'Phase 1 · Classification',
     description:
-      'Categorizes personal data fields across 9 statutory categories (Aadhaar, PAN, health, children) and assesses sensitivity.',
+      'Classifies observed personal-data fields using configured patterns and records review needs.',
     statutoryBoundary:
-      'Applies Indian DPDPA classification patterns and prepares data mapping for RoPA documentation.',
+      'A classification is a recorded finding; legal interpretation requires human review.',
     modulePath: '/classification',
     moduleLabel: 'Data Classification',
     actionLabel: 'Run Classification',
@@ -58,9 +58,9 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 0 · 46 Controls',
     description:
-      'Evaluates posture against all 46 versioned statutory DPDPA controls and calculates exposure penalties up to ₹250 cr.',
+      'Evaluates recorded assessment inputs against the versioned control library.',
     statutoryBoundary:
-      'Deterministic scoring against published controls with statutory citations and gap rationales.',
+      'Review scoring inputs, source controls, and gap rationales before relying on the result.',
     modulePath: '/assessment',
     moduleLabel: 'Control Assessment',
     actionLabel: 'Run 46-Control Assessment',
@@ -129,12 +129,12 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 2 · RegWatch',
     description:
-      'Surveillance of MeitY gazette notifications, DPB adjudications, and statutory compliance drift.',
+      'Regulatory Watch source feeds are unavailable until authoritative publications and retained citations are connected.',
     statutoryBoundary:
-      'Tracks enforcement countdowns (13 May 2027) and statutory rule updates for operational alignment.',
+      'Do not rely on an unverified countdown or notification as legal intelligence.',
     modulePath: '/regwatch',
     moduleLabel: 'Regulatory Watch',
-    actionLabel: 'Scan Regulatory Feeds',
+    actionLabel: 'Open Regulatory Watch',
   },
   {
     name: 'prativedan',
@@ -194,6 +194,8 @@ export const ALL_AGENTS: AgentActionMeta[] = [
   },
 ];
 
+const DIRECT_AGENT_NAMES = new Set<AgentName>(['drishti', 'vibhaag', 'lekha']);
+
 export interface SidebarAgentPanelProps {
   transparent?: boolean;
   systemMessage?: string;
@@ -208,8 +210,8 @@ export function SidebarAgentPanel({
   showSystemMessage = true,
 }: SidebarAgentPanelProps = {}) {
   const router = useRouter();
-  const [activeAgentNames, setActiveAgentNames] = useState<Set<string>>(new Set());
-  const [demoMode, setDemoMode] = useState<'live' | 'thinking' | 'working'>('live');
+  const [activeAgentNames, setActiveAgentNames] = useState<Set<string> | null>(null);
+  const [activeRunCount, setActiveRunCount] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState<AgentActionMeta | null>(null);
 
   // Execution state tracking
@@ -243,17 +245,33 @@ export function SidebarAgentPanel({
     async function fetchActive() {
       try {
         const res = await fetch('/api/bff/v1/agents/runs/active');
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (isMounted) {
+            setActiveAgentNames(null);
+            setActiveRunCount(0);
+          }
+          return;
+        }
         const data = await res.json();
-        if (isMounted && data?.active_runs) {
+        if (isMounted && Array.isArray(data?.active_runs) &&
+          data.active_runs.every((run: unknown) => run && typeof run === 'object' &&
+            'agent' in run && typeof run.agent === 'string' && run.agent.length > 0 &&
+            'status' in run && (run.status === 'running' || run.status === 'queued'))) {
           const names = new Set<string>();
           for (const run of data.active_runs) {
-            if (run.agent_name) names.add(run.agent_name.toLowerCase());
+            names.add(run.agent.toLowerCase());
           }
           setActiveAgentNames(names);
+          setActiveRunCount(data.active_runs.length);
+        } else if (isMounted) {
+          setActiveAgentNames(null);
+          setActiveRunCount(0);
         }
       } catch {
-        // Silently tolerate network/offline blip
+        if (isMounted) {
+          setActiveAgentNames(null);
+          setActiveRunCount(0);
+        }
       }
     }
 
@@ -266,21 +284,12 @@ export function SidebarAgentPanel({
   }, []);
 
   const getAgentState = (name: string): AgentIconState => {
-    if (demoMode !== 'live') return demoMode;
-    return activeAgentNames.has(name) ? 'working' : 'idle';
-  };
-
-  const cycleDemoMode = () => {
-    setDemoMode((curr) => {
-      if (curr === 'live') return 'thinking';
-      if (curr === 'thinking') return 'working';
-      return 'live';
-    });
+    return activeAgentNames?.has(name) ? 'working' : 'idle';
   };
 
   // Run agent action via BFF API
   const handleRunAgent = async (agent: AgentActionMeta) => {
-    if (isExecuting) return;
+    if (isExecuting || !DIRECT_AGENT_NAMES.has(agent.name)) return;
     setIsExecuting(true);
     setLastRunResult(null);
 
@@ -308,16 +317,14 @@ export function SidebarAgentPanel({
     }
   };
 
-  const activeCount = activeAgentNames.size;
+  const activeCount = activeAgentNames === null ? 0 : activeRunCount;
   const currentBroadcast =
     systemMessage ||
-    (demoMode === 'working'
-      ? 'All agents executing in parallel · ap-south-1'
-      : demoMode === 'thinking'
-        ? 'Agents deliberating statutory controls…'
-        : activeCount > 0
-          ? `${activeCount} agent(s) active on task · live`
-          : 'Agents standing by · ap-south-1');
+    (activeAgentNames === null
+      ? 'Agent-run status unavailable'
+      : activeCount > 0
+      ? `${activeCount} agent run(s) reported active`
+      : 'No active agent runs reported');
 
   return (
     <div
@@ -331,24 +338,10 @@ export function SidebarAgentPanel({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Agents ({ALL_AGENTS.length})
           </p>
-          {(activeCount > 0 || demoMode !== 'live') && (
+          {activeCount > 0 && (
             <span className="flex h-1.5 w-1.5 rounded-full bg-[#0FB5A5] animate-ping" />
           )}
         </div>
-
-        {/* Demo Animation Switcher Button */}
-        <button
-          type="button"
-          onClick={cycleDemoMode}
-          title="Click to cycle animation preview modes (Live / Thinking / Working)"
-          className={`rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors border cursor-pointer ${
-            demoMode !== 'live'
-              ? 'border-teal-400 bg-teal-50 text-teal-700 font-semibold'
-              : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200'
-          }`}
-        >
-          {demoMode === 'live' ? 'Preview' : demoMode === 'thinking' ? 'Thinking ⟳' : 'Working ⟳'}
-        </button>
       </div>
 
       {/* 12 Agent Mini Icons Grid (3 rows x 4) */}
@@ -366,7 +359,7 @@ export function SidebarAgentPanel({
                 setSelectedAgent(isSelected ? null : agent);
                 setLastRunResult(null);
               }}
-              title={`${agent.name} (${agent.persona}) · Status: ${state}`}
+              title={`${agent.name} (${agent.persona}) · Status: ${activeAgentNames === null ? 'unavailable' : state}`}
               className={`group relative flex flex-col items-center justify-center rounded-lg p-1 transition-all cursor-pointer ${
                 isSelected
                   ? 'bg-slate-200/90 ring-1 ring-slate-400 shadow-2xs'
@@ -398,7 +391,7 @@ export function SidebarAgentPanel({
         <div className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100/90 px-2 py-1 text-[9px] text-slate-700 font-mono">
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-              activeCount > 0 || demoMode !== 'live' ? 'bg-teal-500 animate-pulse' : 'bg-[#C9A227]'
+              activeCount > 0 ? 'bg-teal-500 animate-pulse' : 'bg-slate-400'
             }`}
           />
           <span className="truncate font-mono tracking-tight text-slate-600">
@@ -451,7 +444,7 @@ export function SidebarAgentPanel({
                     : 'text-slate-600'
                 }
               >
-                {getAgentState(selectedAgent.name)}
+                {activeAgentNames === null ? 'unavailable' : getAgentState(selectedAgent.name)}
               </strong>
             </span>
           </div>
@@ -505,12 +498,12 @@ export function SidebarAgentPanel({
 
           {/* Action Buttons Suite */}
           <div className="mt-2.5 flex flex-col gap-1.5 pt-2 border-t border-slate-100">
-            {selectedAgent.name === 'karya' ? (
+            {!DIRECT_AGENT_NAMES.has(selectedAgent.name) ? (
               <Link
-                href="/approval"
+                href={selectedAgent.modulePath}
                 className="w-full rounded-md bg-[#1E2A4A] hover:bg-[#151e35] text-white text-[11px] font-semibold py-1.5 px-2.5 flex items-center justify-center gap-1 shadow-2xs transition-colors text-center"
               >
-                <span>Review & Approve in Console →</span>
+                <span>{selectedAgent.actionLabel} →</span>
               </Link>
             ) : (
               <button

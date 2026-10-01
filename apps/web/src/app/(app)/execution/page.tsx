@@ -92,7 +92,7 @@ export default async function ExecutionPage() {
       : Promise.resolve(emptyOk),
   ]);
 
-  if (batchesRes.error) {
+  if (batchesRes.error || actionsRes.error || rollbacksRes.error || verificationsRes.error || reconciliationsRes.error) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -103,7 +103,7 @@ export default async function ExecutionPage() {
           role="alert"
           className="rounded-md border border-ember-500 bg-ember-50 p-4 text-sm text-ember-700"
         >
-          Execution records could not be loaded. Refresh to try again.
+          Execution records or their outcome details could not be loaded. Refresh to try again.
         </p>
       </div>
     );
@@ -157,9 +157,9 @@ export default async function ExecutionPage() {
 
       <StatGrid>
         <Stat
-          label="Recent batches"
+          label="Recent batches shown"
           value={String(batches.length)}
-          hint={open > 0 ? `${open} still in flight` : 'none in flight'}
+          hint={open > 0 ? `${open} in flight on this page` : 'none in flight on this page'}
         />
         <Stat
           label="Need review"
