@@ -19,6 +19,14 @@ export class SqlConnectorRefused extends Error {
   }
 }
 
+export interface RedactedScanResult {
+  resource: string;
+  processedRows: number;
+  pages: number;
+  complete: boolean;
+  fields: ReturnType<typeof profileField>[];
+}
+
 const MAX_TABLES = 500;
 const MAX_SAMPLE = 200;
 const MAX_SCAN_ROWS = 1_000_000;
@@ -180,13 +188,7 @@ export class PostgresReadConnector implements ReadConnector {
     resource: string,
     maxRows: number,
     pageSize: number,
-  ): Promise<{
-    resource: string;
-    processedRows: number;
-    pages: number;
-    complete: boolean;
-    fields: ReturnType<typeof profileField>[];
-  }> {
+  ): Promise<RedactedScanResult> {
     const match = RESOURCE.exec(resource);
     if (!match) throw new SqlConnectorRefused('resource');
     if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > MAX_SCAN_ROWS)
