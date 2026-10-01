@@ -92,8 +92,18 @@ class LedgerClient:
     SQL canonicalization. Strict environments always use the real RPC.
     """
 
-    def __init__(self, client: Client | None = None, *, in_memory: bool = False):
+    def __init__(
+        self,
+        client: Client | None = None,
+        *,
+        read_client: Client | None = None,
+        in_memory: bool = False,
+    ):
+        # `client` carries the append-only agent-writer credential and can only
+        # execute append_agent_ledger. Verification and queries are reads that
+        # the writer deliberately cannot perform, so they use `read_client`.
         self._client = client
+        self._read_client = read_client
         self._in_memory = in_memory
         self._mem: list[dict] = []
         self._mem_chains: dict[str, dict[str, str | int]] = {}
@@ -130,7 +140,13 @@ class LedgerClient:
                 anon_key,
                 options=SyncClientOptions(headers={"Authorization": f"Bearer {writer_key}"}),
             )
-            return cls(client)
+            # Reads (verify_ledger, audit_ledger queries) use the service key the
+            # runtime already holds; it is never used to append.
+            service_key = getattr(s, "supabase_service_key", None)
+            if not service_key:
+                raise ValueError("unavailable")
+            read_client = create_client(s.supabase_url, service_key)
+            return cls(client, read_client=read_client)
         except Exception:
             raise RuntimeError("Audit ledger configuration was refused") from None
 
@@ -272,8 +288,12 @@ class LedgerClient:
             raise RuntimeError("Audit ledger append was not confirmed")
         return AppendResult(id=str(receipt), occurred_at=datetime.now(timezone.utc))
 
+    @property
+    def _reader(self) -> Client | None:
+        return self._read_client or self._client
+
     async def verify(self, tenant_id: str, from_sequence: int = 1) -> dict[str, Any]:
-        rpc = self._client.rpc(
+        rpc = self._reader.rpc(
             "verify_ledger",
             {"p_tenant_id": tenant_id, "p_from_sequence": from_sequence},
         )
@@ -307,7 +327,7 @@ class LedgerClient:
         offset: int = 0,
     ) -> list[dict]:
         q = (
-            self._client.table("audit_ledger")
+            self._reader.table("audit_ledger")
             .select("*")
             .eq("tenant_id", tenant_id)
             .order("sequence_no", desc=True)

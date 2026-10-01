@@ -188,14 +188,19 @@ def test_strict_environment_never_selects_memory_for_loopback_or_client_failure(
     create = Mock(return_value=client)
     monkeypatch.setattr("axiom.ledger_client.create_client", create)
     assert LedgerClient.from_settings(settings).in_memory_mode is False
-    # Public apikey, with the scoped writer as the Bearer identity; the shared
-    # service-role key is never presented.
-    assert create.call_args.args == (settings.supabase_url, "synthetic-anon")
-    options = create.call_args.kwargs["options"]
+    writer_call, read_call = create.call_args_list
+    # Appends: public apikey, with the scoped writer as the Bearer identity; the
+    # shared service-role key is never presented on the append client.
+    assert writer_call.args == (settings.supabase_url, "synthetic-anon")
+    options = writer_call.kwargs["options"]
     assert options.headers == {
         "Authorization": f"Bearer {settings.supabase_agent_ledger_writer_key}"
     }
-    assert settings.supabase_service_key not in str(create.call_args)
+    assert settings.supabase_service_key not in str(writer_call)
+    # Reads (verify_ledger, audit_ledger queries) are a separate client; the
+    # writer role cannot execute them and the writer JWT is not sent with them.
+    assert read_call.args == (settings.supabase_url, settings.supabase_service_key)
+    assert settings.supabase_agent_ledger_writer_key not in str(read_call)
     create.side_effect = RuntimeError(PRIVATE)
     with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
@@ -304,3 +309,57 @@ async def test_confirmed_remote_receipt_uses_append_function_only(receipt):
     assert result.id == str(receipt)
     assert db.rpc.call_args.args[0] == "append_agent_ledger"
     db.table.assert_not_called()
+
+
+def _append_input() -> AppendInput:
+    return AppendInput(
+        tenant_id="11111111-1111-4111-8111-111111111111",
+        correlation_id="22222222-2222-4222-8222-222222222222",
+        actor_type="system",
+        actor_id="lekha",
+        action_type="discovery.started",
+        result="success",
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_and_query_use_the_read_client_and_appends_use_only_the_writer():
+    writer, reader = Mock(), Mock()
+    reader.rpc.return_value.execute.return_value.data = []
+    reader.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [  # noqa: E501
+        {"sequence_no": 1}
+    ]
+    writer.rpc.return_value.execute.return_value.data = 7
+    ledger = LedgerClient(writer, read_client=reader)
+
+    assert (await ledger.verify("t1")) == {"intact": True}
+    reader.rpc.assert_called_once_with(
+        "verify_ledger", {"p_tenant_id": "t1", "p_from_sequence": 1}
+    )
+    assert await ledger.query(tenant_id="t1") == [{"sequence_no": 1}]
+    reader.table.assert_called_once_with("audit_ledger")
+    # The writer credential cannot verify or read; it must never be asked to.
+    writer.rpc.assert_not_called()
+    writer.table.assert_not_called()
+
+    await ledger.append(_append_input())
+    assert writer.rpc.call_args.args[0] == "append_agent_ledger"
+    # ...and the read client (service key) must never append.
+    assert [call.args[0] for call in reader.rpc.call_args_list] == ["verify_ledger"]
+
+
+@pytest.mark.asyncio
+async def test_without_a_read_client_reads_fall_back_to_the_only_client():
+    only = Mock()
+    only.rpc.return_value.execute.return_value.data = []
+    assert (await LedgerClient(only).verify("t1")) == {"intact": True}
+    only.rpc.assert_called_once()
+
+
+@pytest.mark.parametrize("environment", ["staging", "preprod", "production"])
+def test_strict_environment_without_a_service_key_for_reads_fails_closed(monkeypatch, environment):
+    settings = _strict_settings(environment, supabase_service_key=None)
+    create = Mock()
+    monkeypatch.setattr("axiom.ledger_client.create_client", create)
+    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+        LedgerClient.from_settings(settings)

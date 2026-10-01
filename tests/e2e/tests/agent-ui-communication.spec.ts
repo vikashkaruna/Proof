@@ -43,7 +43,8 @@ test.describe('Agent ↔ UI communication', () => {
   test('the workbench renders the autonomy badges', async ({ page }) => {
     await page.goto('/workbench');
     await expect(page.getByText(/Autonomy/i).first()).toBeVisible();
-    await expect(page.getByText(/Env: \S+ · ap-south-1/)).toBeVisible();
+    // The badge states a configured target, not a verified residency (W9).
+    await expect(page.getByText(/Env: \S+ · configured region target: ap-south-1/)).toBeVisible();
     await expect(page.getByText(/ap-south-1/i).first()).toBeVisible();
   });
 });
@@ -72,7 +73,7 @@ test('workbench refuses absent/failed statuses and shows only confirmed success'
     });
   });
   await page.goto('/workbench');
-  const run = page.getByRole('button', { name: '⚡ Run drishti', exact: true });
+  const run = page.getByRole('button', { name: 'Run drishti', exact: true });
   await run.click();
   await expect(page.getByRole('main').getByRole('alert')).toContainText('could not be confirmed');
   await expect(page.getByText(/Execution completed/)).toHaveCount(0);

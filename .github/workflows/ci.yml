@@ -192,6 +192,7 @@ jobs:
       - run: bash tests/scripts/test-backup-restore.sh
       - run: bash tests/scripts/test-dev-docker-lifecycle.sh
       - run: python3 scripts/check-compose-writer-scoping.py
+      - run: python3 -m unittest discover -s tests/scripts -p 'test_*.py'
 
   strict-auth-parity:
     name: Real Auth/PostgREST strict topology parity

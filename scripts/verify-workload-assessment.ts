@@ -132,7 +132,8 @@ async function main() {
   check(
     await db.from('tenant_users').insert({ tenant_id: tenantId, user_id: actorId, role: 'owner' }),
   );
-  const lifecycle = new WorkloadRegistrationLifecycle(db);
+  // manage_workload_identity appends a human ledger event (0098/0099).
+  const lifecycle = new WorkloadRegistrationLifecycle(humanWriter);
   const registrationVersions = new Map<string, number>();
   const manageRegistration = async (
     tenant: string,
