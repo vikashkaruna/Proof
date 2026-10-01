@@ -5,6 +5,12 @@
 -- 2. Unsafe caller-authored statutory draft and unverified PDF paths remain unavailable to the service role.
 
 begin;
+create function pg_temp.denied(statement text) returns void language plpgsql as $$
+begin
+  begin execute statement;
+  exception when insufficient_privilege then return; end;
+  raise exception 'Statement was not denied: %', statement;
+end $$;
 
 create function pg_temp.assert_true(value boolean, message text) returns void language plpgsql as $$
 begin if value is distinct from true then raise exception 'ASSERTION FAILED: %', message; end if; end $$;
@@ -40,9 +46,11 @@ insert into public.remediation_plans(id, tenant_id, engagement_id, title, librar
 -- ─── 1. Approval Export Recording ────────────────────────────────────
 select pg_temp.assert_true(
   not has_table_privilege('service_role', 'public.approval_exports', 'INSERT')
-  and has_function_privilege('service_role',
+  and not has_function_privilege('service_role',
+    'public.record_approval_export(uuid,uuid,uuid,text,jsonb,jsonb,text,bigint,uuid)', 'EXECUTE')
+  and has_function_privilege('human_action_writer',
     'public.record_approval_export(uuid,uuid,uuid,text,jsonb,jsonb,text,bigint,uuid)', 'EXECUTE'),
-  'service role can record through the audited RPC but cannot insert an export receipt directly');
+  'only the human action writer can record through the audited RPC; service role can neither call it nor insert an export receipt directly');
 
 do $$
 declare
@@ -101,7 +109,7 @@ begin
     'approval.exported written to audit ledger');
 end $$;
 
-set local role service_role;
+set local role human_action_writer;
 select pg_temp.assert_eq(
   public.record_approval_export(
     '00000000-0000-0000-0000-0000000000a1',
@@ -111,7 +119,14 @@ select pg_temp.assert_eq(
     repeat('b',64), 2, gen_random_uuid()
   )->>'status',
   'exported',
-  'SECURITY DEFINER recorder remains available to the service role');
+  'SECURITY DEFINER recorder is available to the human action writer');
+reset role;
+set local role service_role;
+select pg_temp.denied($q$select public.record_approval_export(
+    '00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000d1',
+    '00000000-0000-0000-0000-0000000000a3','json','{}'::jsonb,'{"total_records":0}'::jsonb,
+    repeat('c',64),2,gen_random_uuid())$q$);
+select pg_temp.denied($q$insert into public.approval_exports select * from public.approval_exports$q$);
 reset role;
 
 -- ─── 2. Source-bound statutory report boundary ─────────────────────

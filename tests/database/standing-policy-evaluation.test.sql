@@ -496,14 +496,22 @@ select pg_temp.denied($q$insert into public.standing_approval_policies(
           now() + interval '30 days')$q$);
 select pg_temp.denied($q$update public.standing_approval_policies set status = 'revoked'$q$);
 select pg_temp.denied($q$delete from public.policy_evaluations$q$);
--- execute stays with the BFF service role:
+-- execute on the write path is held by the human proof writer, not the
+-- shared service role:
+select pg_temp.denied($q$select public.create_standing_policy(
+  '00000000-0000-0000-0000-0000000000c1', 'Nope',
+  '{"action_types": []}'::jsonb, now() + interval '30 days',
+  '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2',
+  gen_random_uuid())$q$);
+reset role;
+set local role human_action_writer;
 select pg_temp.assert_eq(
   (select public.create_standing_policy(
      '00000000-0000-0000-0000-0000000000c1', 'Nope',
      '{"action_types": []}'::jsonb, now() + interval '30 days',
      '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2',
      gen_random_uuid()) ->> 'error'),
-  'invalid_request', 'the BFF service role can call the write path');
+  'invalid_request', 'the human proof writer can call the write path');
 reset role;
 
 rollback;

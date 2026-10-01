@@ -19,15 +19,32 @@ insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values
  (pg_temp.id(43),pg_temp.id(11),'lekha','spiffe://test/agent/lekha'),
  (pg_temp.id(44),pg_temp.id(11),'karya','spiffe://test/agent/karya');
 update public.workload_identities set status='active' where tenant_id in (pg_temp.id(11),pg_temp.id(12));
-create function pg_temp.issue(o jsonb default '{}') returns jsonb language sql as $$
- select public.delegate_workload_task(
+create function pg_temp.issue(o jsonb default '{}') returns jsonb language plpgsql as $$
+declare r jsonb; prior text := current_user;
+begin
+ set local role human_action_writer;
+ begin
+ r := public.delegate_workload_task(
  coalesce((o->>'tenant')::uuid,pg_temp.id(11)),coalesce((o->>'actor')::uuid,pg_temp.id(1)),
  coalesce((o->>'workload')::uuid,pg_temp.id(41)),coalesce(o->>'agent','drishti'),
  coalesce((o->>'estate')::uuid,pg_temp.id(21)),coalesce((o->>'engagement')::uuid,pg_temp.id(31)),
  pg_temp.id(51),repeat('b',64),coalesce(o->>'proof',repeat('a',64)),
  case when o?'scopes' then array(select jsonb_array_elements_text(o->'scopes')) else array['connector.read'] end,
- coalesce((o->>'expires')::timestamptz,clock_timestamp()+interval '5 minutes'))
-$$;
+ coalesce((o->>'expires')::timestamptz,clock_timestamp()+interval '5 minutes'));
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior);
+ return r;
+end $$;
+create function pg_temp.revoke_task(t uuid,a uuid,r uuid,k uuid) returns jsonb language plpgsql as $$
+declare o jsonb; prior text := current_user;
+begin
+ set local role human_action_writer;
+ begin
+ o := public.revoke_workload_task(t,a,r,k);
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior);
+ return o;
+end $$;
 create temp table issued(run_id uuid);
 grant all on issued to service_role;
 set local role service_role;
@@ -108,18 +125,18 @@ create function pg_temp.fail_task_audit() returns trigger language plpgsql as $$
 create trigger task_audit_failure before insert on public.audit_ledger for each row execute function pg_temp.fail_task_audit();
 set local role service_role;
 select pg_temp.reject($q$select pg_temp.issue('{"proof":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}')$q$,'P0001');
-select pg_temp.reject('select public.revoke_workload_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))','P0001');
+select pg_temp.reject('select pg_temp.revoke_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))','P0001');
 select pg_temp.ok((select count(*)=1 from public.agent_runs where tenant_id=pg_temp.id(11)),'failed audit leaves no orphan run');
 select pg_temp.ok((select count(*)=1 from public.workload_task_delegations),'failed audit leaves no delegation');
 select pg_temp.ok(pg_temp.read_task() is not null,'failed revocation audit rolled back');
 reset role;
 drop trigger task_audit_failure on public.audit_ledger;
 set local role service_role;
-select pg_temp.ok(public.revoke_workload_task(pg_temp.id(11),pg_temp.id(5),(select run_id from issued),pg_temp.id(51))->>'error'='forbidden','viewer cannot revoke');
-select pg_temp.ok(public.revoke_workload_task(pg_temp.id(11),pg_temp.id(3),(select run_id from issued),pg_temp.id(51))->>'error'='forbidden','analyst cannot revoke someone else task');
-select pg_temp.ok(public.revoke_workload_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))->>'revoked'='true','tenant admin can revoke');
+select pg_temp.ok(pg_temp.revoke_task(pg_temp.id(11),pg_temp.id(5),(select run_id from issued),pg_temp.id(51))->>'error'='forbidden','viewer cannot revoke');
+select pg_temp.ok(pg_temp.revoke_task(pg_temp.id(11),pg_temp.id(3),(select run_id from issued),pg_temp.id(51))->>'error'='forbidden','analyst cannot revoke someone else task');
+select pg_temp.ok(pg_temp.revoke_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))->>'revoked'='true','tenant admin can revoke');
 select pg_temp.ok(pg_temp.read_task() is null,'revoked proof cannot be reused');
-select pg_temp.ok(public.revoke_workload_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))->>'revoked'='true','revocation idempotent');
+select pg_temp.ok(pg_temp.revoke_task(pg_temp.id(11),pg_temp.id(2),(select run_id from issued),pg_temp.id(51))->>'revoked'='true','revocation idempotent');
 select pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='workload.task_revoked'),'no duplicate revocation audit');
 reset role;
 savepoint additional_issuers;
@@ -133,12 +150,12 @@ rollback to additional_issuers;
 -- Browser roles cannot read hashes, call any task RPC, or directly change state.
 set local role authenticated;
 select pg_temp.reject('select * from public.workload_task_delegations','42501');
-select pg_temp.reject('select pg_temp.issue()','42501');
+select pg_temp.reject('select public.delegate_workload_task(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),''drishti'',pg_temp.id(21),pg_temp.id(31),pg_temp.id(51),repeat(''b'',64),repeat(''a'',64),array[''connector.read''],clock_timestamp()+interval ''5 minutes'')','42501');
 select pg_temp.reject('select public.read_workload_task(pg_temp.id(11),pg_temp.id(51),pg_temp.id(41),''drishti'',repeat(''a'',64),''connector.read'')','42501');
 select pg_temp.reject('select public.revoke_workload_task(pg_temp.id(11),pg_temp.id(2),pg_temp.id(51),pg_temp.id(51))','42501');
 reset role;
 set local role anon;
 select pg_temp.reject('select * from public.workload_task_delegations','42501');
-select pg_temp.reject('select pg_temp.issue()','42501');
+select pg_temp.reject('select public.delegate_workload_task(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),''drishti'',pg_temp.id(21),pg_temp.id(31),pg_temp.id(51),repeat(''b'',64),repeat(''a'',64),array[''connector.read''],clock_timestamp()+interval ''5 minutes'')','42501');
 reset role;
 rollback;
