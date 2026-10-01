@@ -3,14 +3,67 @@
  * Uses local headless Chromium / chrome-headless-shell when available,
  * with deterministic standard conforming %PDF-1.4 fallback engine.
  */
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+/**
+ * Run the browser to completion. The exit event is authoritative: Chromium can leave
+ * helper processes holding its stderr pipe after the PDF is written, and waiting for
+ * the pipes to close (as execFile does) then costs a whole timeout per render. The
+ * browser gets its own process group so a timeout or a lingering helper is reaped.
+ * Failures keep the shape describeChromiumFailure reads (killed, signal, code, stderr).
+ */
+function runChromium(
+  executable: string,
+  args: string[],
+  options: { timeout: number; env: NodeJS.ProcessEnv },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      env: options.env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: true,
+    });
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-2000);
+    });
+    let timedOut = false;
+    const killGroup = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The group is already gone.
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, options.timeout);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(Object.assign(error, { stderr }));
+    });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      child.stderr?.destroy();
+      killGroup();
+      if (code === 0 && !timedOut) resolve();
+      else
+        reject(
+          Object.assign(new Error('Chromium did not complete'), {
+            killed: timedOut,
+            signal,
+            code,
+            stderr,
+          }),
+        );
+    });
+  });
+}
 
 export interface RenderPdfOptions {
   timeoutMs?: number;
@@ -418,7 +471,6 @@ export async function renderHtmlToPdf(
       ];
       const childOptions = {
         timeout: timeoutMs,
-        killSignal: 'SIGKILL' as const,
         env: { ...process.env, HOME: tmpdir(), XDG_CACHE_HOME: join(tmpdir(), 'chrome-cache') },
       };
 
@@ -426,11 +478,11 @@ export async function renderHtmlToPdf(
       // 'new' mode) and by current Chrome. On CI runners the '--headless=new' attempt
       // consumed a whole timeout before the fallback succeeded, so it goes second.
       try {
-        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
+        await runChromium(chromiumPath, ['--headless', ...baseArgs], childOptions);
       } catch (first) {
         firstFailure = describeChromiumFailure('headless', first);
         try {
-          await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
+          await runChromium(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
           console.warn(
             '[report-kit] classic --headless failed, --headless=new succeeded:',
             firstFailure,

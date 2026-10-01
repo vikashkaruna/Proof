@@ -24,6 +24,32 @@ printf '\\n%%%%EOF\\n' >> "$out"
   return { bin, calls: () => readFileSync(log, 'utf8').trim().split('\n') };
 }
 
+describe('renderHtmlToPdf waits for the browser, not for helpers holding its pipes', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('returns as soon as the browser exits even if a helper keeps stderr open', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fake-chrome-'));
+    const bin = join(dir, 'chrome');
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+for a in "$@"; do case "$a" in --print-to-pdf=*) out="\${a#--print-to-pdf=}";; esac; done
+printf '%%PDF-1.4\n' > "$out"
+head -c 600 /dev/zero | tr '\0' ' ' >> "$out"
+printf '\n%%%%EOF\n' >> "$out"
+( sleep 8 ) &
+exit 0
+`,
+    );
+    chmodSync(bin, 0o755);
+    vi.stubEnv('CHROME_PATH', bin);
+    const started = Date.now();
+    const result = await renderHtmlToPdf('<p>x</p>', { timeoutMs: 20_000 });
+    expect(result.renderer).toBe('chromium');
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+});
+
 describe('renderHtmlToPdf headless mode order', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
