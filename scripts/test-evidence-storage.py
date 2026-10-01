@@ -244,6 +244,16 @@ def main():
                 line.split("=", 1) for line in (directory / "runtime.env").read_text().splitlines()
             )
         )
+        # Cold headless Chromium can exceed the renderer's 30 s budget on a fresh
+        # runner; take that cold start (and any missing-binary failure) here, with
+        # the renderer's own explanation, instead of inside the first PDF journey.
+        subprocess.run(
+            ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
+            cwd=ROOT,
+            env=env,
+            timeout=300,
+            check=True,
+        )
         env["AXIOM_EVIDENCE_STORAGE_ACCEPTANCE"] = "true"
         env["AXIOM_EVIDENCE_FIXTURE_DIRECTORY"] = str(directory)
         raw_report = directory / "private-playwright.json"
@@ -263,10 +273,13 @@ def main():
                     "exec",
                     "playwright",
                     "test",
+                    "source-bound-formats-provider.spec.ts",
                     "evidence-ingestion.spec.ts",
                     "evidence-vault.spec.ts",
                     "evidence-packs.spec.ts",
                     "evidence-packs-access.spec.ts",
+                    "board-reports-provider.spec.ts",
+                    "approval-archive-provider.spec.ts",
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
@@ -274,19 +287,23 @@ def main():
                 ],
                 cwd=ROOT,
                 env=env,
-                timeout=900,
+                timeout=1800,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
+            # Sum of every test() in the seven specs above (ingestion 1, vault 3,
+            # packs 3, pack-access 1, board 5, approval archive 1, technical+DPB
+            # source-bound formats 2). Refuse a missing or silently skipped spec.
+            expected_browser_tests = 16
             summary["counts"] = {
                 name: stats.get(name) for name in ["expected", "unexpected", "flaky", "skipped"]
             }
             if (
                 result.returncode
-                or stats.get("expected") != 8
+                or stats.get("expected") != expected_browser_tests
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all eight tests without skips or retries"
+                    f"Evidence browser acceptance requires all {expected_browser_tests} tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
@@ -301,6 +318,14 @@ def main():
                 "pack-prepare-replay-and-honest-read-failure-rejection",
                 "pack-post-upload-settlement-recovery-and-begin-only-pending",
                 "pack-live-membership-internal-authority-and-export-revocation",
+                "board-finalized-assessment-founder-review-exact-provider-versions-and-release",
+                "board-provider-interruption-pending-build-and-founder-recovery",
+                "board-manager-and-founder-browser-request-review-build-preview-and-release",
+                "board-live-authority-revocation-refuses-cached-review-and-private-reads",
+                "auditor-finalized-source-founder-review-exact-versions-and-release",
+                "approval-human-signed-reconciliation-exact-version-founder-release-and-owner-download",
+                "technical-recorded-plan-founder-source-review-exact-provider-versions-and-release",
+                "dpb-reviewed-breach-notification-founder-source-review-exact-provider-versions-and-release",
             ]
         finally:
             try:

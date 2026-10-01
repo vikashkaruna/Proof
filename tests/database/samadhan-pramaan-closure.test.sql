@@ -3,11 +3,13 @@
 --
 -- Test suite for Migration 0080:
 -- 1. Samadhan agent attribution on plan_reconciliations and ledger
--- 2. Pramaan dossiers table, constraints, and seal_pramaan_dossier RPC
--- 3. Report email dispatches table and record_report_email_dispatch RPC
+-- 2. Historical dossier metadata visibility and unavailable seal RPC
+-- 3. Unavailable external email-dispatch write path
 -- ─────────────────────────────────────────────────────────────────────
 
 begin;
+insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
+values('global',convert_to('test-reconciliation-signing-key-0123456789','UTF8'));
 
 create function pg_temp.assert_true(value boolean, message text) returns void language plpgsql as $$
 begin if value is distinct from true then raise exception 'ASSERTION FAILED: %', message; end if; end $$;
@@ -32,6 +34,10 @@ insert into public.users(id, email, is_axiom_internal) values
 
 insert into public.tenants(id, slug, name) values
   ('00000000-0000-0000-0000-000000000011', 'tenant-closure', 'Closure Tenant');
+
+insert into public.tenant_users(tenant_id, user_id, role) values
+  ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-0000000000f1', 'founder'),
+  ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-0000000000c1', 'viewer');
 
 insert into public.control_libraries(version, published_at, published_by, change_log, control_count)
   values ('test-closure', now(), 'test', 'test', 0);
@@ -63,6 +69,15 @@ values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000
           array['00000000-0000-0000-0000-0000000000a1']::uuid[]),
         'batch', 1, true, 'completed', now());
 
+-- Revision 0090 requires the persisted signed scope and the database's
+-- prepared statement; caller prose is no longer accepted as a reconciliation.
+update public.approval_tokens set signed_payload=jsonb_build_object(
+  'planId',plan_id,'actionIds',to_jsonb(action_ids),
+  'mode',mode,'concurrency',concurrency,'stopOnFailure',stop_on_failure,
+  'contentDigest',(select content_digest from public.execution_batches
+    where id='00000000-0000-0000-0000-0000000000b1'))
+where id='00000000-0000-0000-0000-000000000031';
+
 update public.remediation_actions
    set execution_batch_id = '00000000-0000-0000-0000-0000000000b1',
        execution_status = 'succeeded', final_outcome = 'succeeded'
@@ -74,8 +89,15 @@ select public.record_plan_reconciliation(
   '00000000-0000-0000-0000-000000000021',
   '00000000-0000-0000-0000-0000000000b1',
   gen_random_uuid(),
-  'Batch req-closure-1 finished completed. Approved 1 action(s): succeeded=1.',
-  repeat('1', 64)
+  (public.prepare_plan_reconciliation(
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000021',
+    '00000000-0000-0000-0000-0000000000b1')->>'statement'),
+  encode(hmac(convert_to((public.prepare_plan_reconciliation(
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000021',
+    '00000000-0000-0000-0000-0000000000b1')->>'statement'),'UTF8'),
+    convert_to('test-reconciliation-signing-key-0123456789','UTF8'),'sha256'),'hex')
 );
 
 select pg_temp.assert_true(
@@ -112,60 +134,43 @@ insert into public.pramaan_dossiers (
   repeat('e', 64)
 );
 
--- Client user cannot seal (requires founder authority)
-select pg_temp.assert_eq(
-  (select public.seal_pramaan_dossier(
-     '00000000-0000-0000-0000-000000000011',
-     '00000000-0000-0000-0000-0000000000d1',
-     '00000000-0000-0000-0000-0000000000c1',
-     repeat('e', 64),
-     gen_random_uuid()) ->> 'error'),
-  'founder_authority_required',
-  'non-founder cannot seal pramaan dossier'
+select pg_temp.assert_true(
+  not has_function_privilege('service_role',
+    'public.seal_pramaan_dossier(uuid,uuid,uuid,text,uuid)', 'EXECUTE')
+  and not has_table_privilege('service_role', 'public.pramaan_dossiers', 'INSERT')
+  and not has_table_privilege('service_role', 'public.pramaan_dossiers', 'UPDATE'),
+  'service role cannot seal or create source-free dossiers'
 );
 
--- Founder seals with matching proof seal
-select pg_temp.assert_eq(
-  (select public.seal_pramaan_dossier(
-     '00000000-0000-0000-0000-000000000011',
-     '00000000-0000-0000-0000-0000000000d1',
-     '00000000-0000-0000-0000-0000000000f1',
-     repeat('e', 64),
-     gen_random_uuid()) ->> 'status'),
-  'sealed',
-  'founder can seal pramaan dossier'
+-- ─── Test 3: Report Email Dispatch & Direct Read Privacy ────────────
+insert into public.report_email_dispatches(
+  tenant_id, dossier_id, recipient_email, subject, delivery_status, dispatched_by
+) values (
+  '00000000-0000-0000-0000-000000000011',
+  '00000000-0000-0000-0000-0000000000d1',
+  'historical@example.invalid', 'Historical dispatch', 'sent',
+  '00000000-0000-0000-0000-0000000000f1'
 );
 
 select pg_temp.assert_true(
-  (select count(*) = 1
-     from public.audit_ledger
-    where action_type = 'closure.pramaan.sealed'
-      and actor_type = 'agent'
-      and actor_id = 'pramaan'),
-  'ledger records closure.pramaan.sealed by pramaan agent'
+  not has_function_privilege('service_role',
+    'public.record_report_email_dispatch(uuid,uuid,uuid,text,text,text,uuid,uuid)', 'EXECUTE')
+  and not has_table_privilege('service_role', 'public.report_email_dispatches', 'INSERT')
+  and not has_table_privilege('service_role', 'public.report_email_dispatches', 'UPDATE'),
+  'service role cannot fabricate or record external dispatch'
 );
 
--- ─── Test 3: Report Email Dispatch ───────────────────────────────────
-select pg_temp.assert_eq(
-  (select public.record_report_email_dispatch(
-     '00000000-0000-0000-0000-000000000011',
-     null,
-     '00000000-0000-0000-0000-0000000000d1',
-     'auditor@external.invalid',
-     'Statutory Closure Pack Delivery',
-     'resend_msg_123',
-     '00000000-0000-0000-0000-0000000000f1',
-     gen_random_uuid()) ->> 'status'),
-  'sent',
-  'record_report_email_dispatch succeeds and records delivery'
-);
-
-select pg_temp.assert_true(
-  (select count(*) = 1
-     from public.audit_ledger
-    where action_type = 'report.dispatched.email'
-      and actor_type = 'human'),
-  'ledger records report.dispatched.email'
-);
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', true);
+select pg_temp.assert_true((select count(*)=0 from public.pramaan_dossiers),
+  'viewer cannot read unverified dossier metadata');
+select pg_temp.assert_true((select count(*)=0 from public.report_email_dispatches),
+  'viewer cannot read historical dispatch recipient');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000f1","role":"authenticated"}', true);
+select pg_temp.assert_true((select count(*)=1 from public.pramaan_dossiers),
+  'internal founder can inspect historical dossier metadata');
+select pg_temp.assert_true((select count(*)=1 from public.report_email_dispatches),
+  'internal founder can inspect historical dispatch metadata');
+reset role;
 
 rollback;

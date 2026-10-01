@@ -139,8 +139,8 @@ export function EstateGraph({ input }: { input: GraphInput }) {
       </div>
       <p className="text-sm" data-testid="graph-summary">
         {graph.edges.filter((e) => e.kind === 'read').length} read grants ·{' '}
-        {graph.edges.filter((e) => e.kind === 'write').length} write grants · agents without an edge
-        hold no client-system access.
+        {graph.edges.filter((e) => e.kind === 'write').length} write grants in this view. Other
+        estates or filters may have additional grants.
       </p>
       <div className="flex flex-col gap-4 lg:flex-row">
         <div className="overflow-x-auto rounded-md border">
@@ -259,7 +259,7 @@ function NodeDetail({
       <p className="font-semibold">Relationships</p>
       {related.length === 0 ? (
         <p data-testid="no-relationships">
-          None{node.kind === 'agent' ? ' — this agent holds no client-system access.' : '.'}
+          None in this view. Other estates or filters may have relationships.
         </p>
       ) : (
         <ul>

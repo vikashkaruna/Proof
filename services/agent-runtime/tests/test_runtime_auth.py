@@ -72,3 +72,25 @@ def test_authentication_precedes_agent_lookup(monkeypatch):
     monkeypatch.setattr(app.state, "settings", SimpleNamespace(internal_token=None), raising=False)
     client = TestClient(app)
     assert client.post("/agents/unknown/invoke", json={"input": {}}).status_code == 401
+
+
+def test_generic_prativedan_cannot_bypass_report_workflow(monkeypatch):
+    invoke = AsyncMock()
+    monkeypatch.setattr(
+        app.state, "settings", SimpleNamespace(internal_token="canonical-fixture-token"), raising=False
+    )
+    monkeypatch.setattr(
+        app.state,
+        "agents",
+        {AgentName.PRATIVEDAN: SimpleNamespace(invoke=invoke)},
+        raising=False,
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/agents/prativedan/invoke",
+        json={"input": {"tenant_id": "caller-supplied", "posture_score": 100}},
+        headers={"X-Internal-Token": "canonical-fixture-token"},
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "board_report_workflow_required"}
+    invoke.assert_not_called()

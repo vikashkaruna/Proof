@@ -3,7 +3,6 @@ import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { randomUUID } from 'node:crypto';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
-import { abortableResult } from '../test/abortable-result.js';
 import { packFixture } from '../test/evidence-pack-fixture.js';
 import { tenant } from '../test/evidence-fixture.js';
 import type { Variables } from '../types.js';
@@ -26,193 +25,146 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
   return instance;
 }
 
-describe('Pramaan Closure HTTP Routes', () => {
-  it('enforces RBAC on dossier synthesis — viewer is denied', async () => {
-    const engagementId = randomUUID();
-    const res = await app(fixture.viewer, UserRole.VIEWER).request(
-      `/v1/engagements/${engagementId}/closure/pramaan`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          dossierType: 'full_closure',
-          title: 'Final Statutory Proof Dossier',
-        }),
-      },
-    );
-    expect(res.status).toBe(403);
+function preventPersistence() {
+  fixture.db.from = (() => {
+    throw new Error('closed endpoint tried to access persistence');
+  }) as never;
+  fixture.db.rpc = (() => {
+    throw new Error('closed endpoint tried to call a mutating RPC');
+  }) as never;
+}
+
+function historicalDossier() {
+  const id = randomUUID();
+  fixture.base.rows('pramaan_dossiers').push({
+    id,
+    tenant_id: tenant,
+    engagement_id: randomUUID(),
+    dossier_type: 'full_closure',
+    title: 'Historical unverified dossier',
+    status: 'sealed',
+    merkle_root: 'c'.repeat(64),
+    manifest_hash: 'd'.repeat(64),
+    proof_seal_hash: 'e'.repeat(64),
+    metadata: {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   });
+  return id;
+}
 
-  it('synthesizes a draft closure dossier under Owner/Manager role', async () => {
-    const engagementId = randomUUID();
-
-    fixture.db.from = ((table: string) => {
-      if (table === 'pramaan_dossiers') {
-        return {
-          insert: () => abortableResult(Promise.resolve({ error: null })),
-        } as never;
-      }
-      return {
-        select: () => ({
-          eq: () => ({
-            maybeSingle: () => abortableResult(Promise.resolve({ data: null, error: null })),
-          }),
-        }),
-      } as never;
-    }) as never;
-
-    fixture.db.rpc = ((name: string) => {
-      if (name === 'append_ledger') {
-        return abortableResult(Promise.resolve({ data: { success: true }, error: null }));
-      }
-      return abortableResult(Promise.resolve({ data: null, error: null }));
-    }) as never;
-
-    const res = await app(fixture.owner, UserRole.OWNER).request(
-      `/v1/engagements/${engagementId}/closure/pramaan`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          dossierType: 'board_executive',
-          title: 'Board Statutory Closure Dossier',
-          metadata: { engagementScope: 'full_audit' },
-        }),
-      },
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe('draft');
-    expect(body.dossierType).toBe('board_executive');
-    expect(body.title).toBe('Board Statutory Closure Dossier');
-    expect(typeof body.merkleRoot).toBe('string');
-    expect(body.merkleRoot).toMatch(/^[0-9a-f]{64}$/);
-    expect(typeof body.proofSealHash).toBe('string');
-    expect(body.proofSealHash).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('enforces RBAC on dossier sealing — member without release capability is denied', async () => {
-    const dossierId = randomUUID();
-    const res = await app(fixture.viewer, UserRole.VIEWER).request(
-      `/v1/dossiers/${dossierId}/seal`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          expectedProofSeal: 'a'.repeat(64),
-        }),
-      },
-    );
-    expect(res.status).toBe(403);
-  });
-
-  it('seals a dossier under Founder Authority', async () => {
-    const dossierId = randomUUID();
-    const proofSeal = 'b'.repeat(64);
-
-    fixture.db.rpc = ((name: string) => {
-      if (name === 'seal_pramaan_dossier') {
-        return abortableResult(
-          Promise.resolve({
-            data: {
-              dossierId,
-              status: 'sealed',
-              sealedAt: '2026-09-28T12:00:00.000Z',
-            },
-            error: null,
-          }),
-        );
-      }
-      return abortableResult(Promise.resolve({ data: null, error: null }));
-    }) as never;
-
-    const res = await app(fixture.founder, UserRole.FOUNDER).request(
-      `/v1/dossiers/${dossierId}/seal`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          expectedProofSeal: proofSeal,
-        }),
-      },
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe('sealed');
-    expect(body.dossierId).toBe(dossierId);
-  });
-
-  it('dispatches report/dossier email and records audit log', async () => {
-    const dossierId = randomUUID();
-    const dispatchId = randomUUID();
-
-    fixture.db.from = ((table: string) => {
-      if (table === 'pramaan_dossiers') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: () =>
-                  abortableResult(
-                    Promise.resolve({
-                      data: {
-                        id: dossierId,
-                        tenant_id: tenant,
-                        engagement_id: randomUUID(),
-                        dossier_type: 'full_closure',
-                        title: 'Statutory Proof Dossier',
-                        status: 'sealed',
-                        merkle_root: 'c'.repeat(64),
-                        manifest_hash: 'd'.repeat(64),
-                        proof_seal_hash: 'e'.repeat(64),
-                        metadata: {},
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString(),
-                      },
-                      error: null,
-                    }),
-                  ),
-              }),
-            }),
-          }),
-        } as never;
-      }
-      return {
-        select: () => ({
-          eq: () => ({
-            maybeSingle: () => abortableResult(Promise.resolve({ data: null, error: null })),
-          }),
-        }),
-      } as never;
-    }) as never;
-
-    fixture.db.rpc = ((name: string) => {
-      if (name === 'record_report_email_dispatch') {
-        return abortableResult(
-          Promise.resolve({
-            data: { dispatchId, status: 'sent' },
-            error: null,
-          }),
-        );
-      }
-      return abortableResult(Promise.resolve({ data: null, error: null }));
-    }) as never;
-
-    const res = await app(fixture.owner, UserRole.OWNER).request('/v1/reports/email/dispatch', {
+describe('Pramaan closure fail-closed HTTP routes', () => {
+  it('keeps the DPB creation route tenant-scoped and rejects invented engagement binding', async () => {
+    const base = {
+      dossierType: 'dpb_statutory',
+      title: 'Recorded breach derivative',
+      reportId: randomUUID(),
+      operationKey: randomUUID(),
+    };
+    const options = (body: unknown) => ({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        recipientEmail: 'dpo@client.com',
-        dossierId,
-        notes: 'Approved by board on 28-Sep-2026',
-      }),
+      body: JSON.stringify(body),
     });
+    const invented = await app().request(
+      '/v1/closure/pramaan/dpb',
+      options({ ...base, engagementId: randomUUID() }),
+    );
+    expect(invented.status).toBe(400);
+    const wrongKind = await app().request(
+      '/v1/closure/pramaan/dpb',
+      options({ ...base, dossierType: 'full_closure' }),
+    );
+    expect(wrongKind.status).toBe(400);
+    const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
+      '/v1/closure/pramaan/dpb',
+      options(base),
+    );
+    expect(viewer.status).toBe(403);
+  });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe('simulated');
-    expect(body.dispatchId).toBe(dispatchId);
+  it('denies a viewer and refuses unsupported dossier types before any mutating RPC', async () => {
+    const engagementId = randomUUID();
+    const body = JSON.stringify({
+      dossierType: 'full_closure',
+      title: 'Source-free dossier',
+      reportId: randomUUID(),
+      operationKey: randomUUID(),
+    });
+    fixture.db.rpc = (() => {
+      throw new Error('unsupported synthesis tried a mutating RPC');
+    }) as never;
+    const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
+      `/v1/engagements/${engagementId}/closure/pramaan`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body },
+    );
+    expect(viewer.status).toBe(403);
+    const manager = await app().request(`/v1/engagements/${engagementId}/closure/pramaan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+    expect(manager.status).toBe(409);
+    expect(((await manager.json()) as { error: { code: string } }).error.code).toBe(
+      'source_bound_dossier_required',
+    );
+  });
+
+  it('refuses founder sealing without source and vault receipts before any RPC', async () => {
+    fixture.db.rpc = (() => {
+      throw new Error('historical sealing tried a mutating RPC');
+    }) as never;
+    const res = await app(fixture.founder, UserRole.FOUNDER).request(
+      `/v1/dossiers/${randomUUID()}/seal`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedProofSeal: 'b'.repeat(64) }),
+      },
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+      'source_bound_dossier_required',
+    );
+  });
+
+  it('refuses report and dossier email before any external dispatch or audit write', async () => {
+    preventPersistence();
+    for (const target of [{ reportId: randomUUID() }, { dossierId: randomUUID() }]) {
+      const res = await app().request('/v1/reports/email/dispatch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ recipientEmail: 'auditor@example.invalid', ...target }),
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+        'source_bound_dispatch_required',
+      );
+    }
+  });
+
+  it('limits historical dossier inspection to a live internal tenant founder', async () => {
+    const id = historicalDossier();
+    const viewer = await app(fixture.viewer, UserRole.VIEWER).request(`/v1/dossiers/${id}`);
+    expect(viewer.status).toBe(403);
+    const owner = await app().request('/v1/dossiers');
+    expect(owner.status).toBe(403);
+
+    const founderList = await app(fixture.founder, UserRole.FOUNDER).request('/v1/dossiers');
+    expect(founderList.status).toBe(200);
+    expect(founderList.headers.get('cache-control')).toBe('private, no-store');
+    expect(((await founderList.json()) as { dossiers: unknown[] }).dossiers).toHaveLength(1);
+    const founderDetail = await app(fixture.founder, UserRole.FOUNDER).request(
+      `/v1/dossiers/${id}`,
+    );
+    expect(founderDetail.status).toBe(200);
+    expect(founderDetail.headers.get('cache-control')).toBe('private, no-store');
+
+    const membership = fixture.base
+      .rows('tenant_users')
+      .find((row) => row.tenant_id === tenant && row.user_id === fixture.founder)!;
+    membership.role = UserRole.VIEWER;
+    const revoked = await app(fixture.founder, UserRole.FOUNDER).request(`/v1/dossiers/${id}`);
+    expect(revoked.status).toBe(404);
   });
 });

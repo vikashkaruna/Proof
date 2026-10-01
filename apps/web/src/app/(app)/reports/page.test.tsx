@@ -14,7 +14,8 @@ vi.mock('@/lib/tenant-context', () => ({
   }),
 }));
 import ReportsPage from './page';
-import { ReportProof } from './reports-client';
+import { ReportProof, canOfferRelease } from './reports-client';
+import { DossierViewerModal } from './dossier-viewer-modal';
 import { detailSchema } from './report-contract';
 beforeEach(() => {
   state.role = UserRole.ADMIN;
@@ -27,13 +28,24 @@ it('refuses an agent and presents no mutation or fake output to a viewer', async
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading recorded reports');
   expect(html).not.toContain('Prepare pack for review');
+  expect(html).not.toContain('Request board draft');
   expect(html).not.toContain('No reports recorded');
   expect(html).not.toContain('cryptographicSignature');
   expect(html).not.toContain('74');
+  expect(html).not.toContain('Historical dossiers');
+});
+it('shows closure dossiers to reporting managers and founder release to internal founders', async () => {
+  state.role = UserRole.FOUNDER;
+  state.internal = true;
+  expect(renderToStaticMarkup(await ReportsPage())).toContain('Closure dossiers');
 });
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading available evidence');
+  expect(html).toContain('Request from a finalized assessment');
+  expect(html).toContain('Loading board requests');
+  expect(html).toContain('Assessment-derived auditor review packs');
+  expect(html).toContain('Loading auditor requests');
   expect(html).toContain('authorize preparing this immutable pack');
   expect(html).not.toContain('Approve reviewed content');
   expect(html).not.toContain('Release reviewed report');
@@ -120,4 +132,85 @@ it('shows named immutable review attribution and distinct content/archive hashes
   expect(html).toContain(`Released archive SHA-256: ${'b'.repeat(64)}`);
   expect(html).toContain('Exact version: actual-version');
   expect(html).not.toContain('signature');
+});
+
+it('preserves custom release while refusing board release without a retained PDF', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const reviewed = detailSchema.parse({
+    id,
+    kind: 'board',
+    title: 'Reviewed board report',
+    engagementId: id,
+    libraryVersion: 'v1',
+    status: 'approved',
+    generatedAt: '2026-09-30T00:00:00Z',
+    generatedByAgent: 'board-report-builder',
+    createdBy: id,
+    contentHash: 'a'.repeat(64),
+    reviewedContentHash: 'a'.repeat(64),
+    review: null,
+    publishedAt: null,
+    releasedBy: null,
+    releasedArchiveHash: null,
+    assurance: 'digest_bound',
+    pack: null,
+    contentText: '{}',
+  });
+  expect(canOfferRelease(reviewed)).toBe(false);
+  expect(canOfferRelease({ ...reviewed, kind: 'custom' })).toBe(true);
+});
+
+it('shows legacy dossier metadata without an unsupported proof or action', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const dossier = {
+    id,
+    tenantId: id,
+    engagementId: id,
+    reportId: null,
+    dossierType: 'board_executive' as const,
+    title: 'Historical board dossier',
+    status: 'sealed' as const,
+    merkleRoot: 'a'.repeat(64),
+    manifestHash: 'b'.repeat(64),
+    archiveHash: null,
+    archiveBytes: null,
+    proofSealHash: 'c'.repeat(64),
+    sealedAt: '2026-09-27T00:00:00Z',
+    sealedBy: id,
+    metadata: {},
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+  };
+  const html = renderToStaticMarkup(
+    <DossierViewerModal
+      dossier={dossier}
+      isOpen
+      onClose={() => undefined}
+      canRelease
+      busy={false}
+      onSeal={() => undefined}
+      onDownload={() => undefined}
+      onReconcile={() => undefined}
+      onRetryMissing={() => undefined}
+    />,
+  );
+  expect(html).toContain('Historical dossier record');
+  expect(html).toContain('Recorded status');
+  expect(html).toContain('does not establish a verified source');
+  expect(html).not.toContain('Gold ProofSeal');
+  expect(html).not.toContain('WORM SEALED');
+  expect(html).not.toContain('92 / 100');
+  expect(html).not.toContain('Synthesize');
+  expect(html).not.toContain('Affix');
+  expect(html).not.toContain('Download');
+  expect(html).not.toContain('Send via Email');
+});
+
+it('offers an honest assessment-derived auditor pack while keeping unsupported formats unavailable', async () => {
+  const html = renderToStaticMarkup(await ReportsPage());
+  expect(html).toContain('Request from finalized assessment below');
+  expect(html).toContain('not an independent audit or evidence attestation');
+  expect(html).toContain('Release unavailable');
+  expect(html).not.toContain('independent attestation');
+  expect(html).not.toContain('Full sequence of automated mutations');
 });

@@ -14,7 +14,7 @@ insert into public.engagements(id,tenant_id,library_version,title) values
 create function pg_temp.manage(op text, id uuid, body jsonb) returns jsonb language sql as $$
  select public.manage_estate('00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000001',op,id,body,gen_random_uuid());
 $$;
-set local role service_role;
+reset role; -- fixture inspects tables directly; 0098 suite proves writer grants
 do $$
 declare estate uuid; system uuid; response jsonb; events bigint;
 begin
@@ -66,7 +66,7 @@ begin
 end $$;
 reset role;
 update public.tenant_users set role='axiom_analyst';
-set local role service_role;
+set local role human_action_writer;
 select pg_temp.ok(pg_temp.manage('estate.create',null,'{"slug":"forbidden","name":"No"}')->>'error'='forbidden','analyst cannot modify live estate');
 reset role;
 select pg_temp.ok(not has_function_privilege('authenticated','public.manage_estate(uuid,uuid,text,uuid,jsonb,uuid)','execute'),'browser cannot bypass BFF');

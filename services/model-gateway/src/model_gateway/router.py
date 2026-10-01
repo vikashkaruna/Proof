@@ -40,6 +40,14 @@ def decide_route(task: TaskKind, requested_model: str, settings: Settings) -> Ro
     """Pick the provider + model for a given task, configuring the
     Anthropic -> OpenAI -> Gemini fallback chain.
     """
+    if settings.environment == "onprem":
+        # A caller cannot turn an offline deployment into a hosted-model client.
+        return RouteDecision(
+            provider="self_hosted",
+            model=settings.self_hosted_model,
+            reason="onprem_local_model_only",
+        )
+
     default_chain = (
         ("anthropic", settings.anthropic_model),
         ("openai", settings.openai_model),

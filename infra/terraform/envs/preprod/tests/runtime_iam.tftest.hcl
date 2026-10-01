@@ -11,10 +11,17 @@ mock_provider "google-beta" {}
 mock_provider "random" {}
 
 variables {
-  project_id           = "axiom-iam-fixture"
-  supabase_jwt_secret  = "synthetic-jwt-signing-key-for-offline-tests-only"
-  supabase_anon_key    = "synthetic-public-anon-fixture"
-  supabase_service_key = "synthetic-service-role-fixture"
+  project_id                  = "axiom-iam-fixture"
+  supabase_jwt_secret         = "synthetic-jwt-signing-key-for-offline-tests-only"
+  supabase_anon_key           = "synthetic-public-anon-fixture"
+  supabase_service_key        = "synthetic-service-role-fixture"
+  release_sha                 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_manifest_file       = "tests/runtime_iam_release.fixture.json"
+  evidence_bucket             = "axiom-offline-fixture-evidence"
+  evidence_endpoint           = "https://s3.ap-south-1.amazonaws.com"
+  evidence_access_key_id      = "synthetic-access-key-for-tests"
+  evidence_secret_access_key  = "synthetic-secret-key-for-offline-tests-only"
+  supabase_archive_writer_key = "synthetic-archive-writer-fixture"
 }
 
 run "separate_runtime_identities" {
@@ -50,6 +57,11 @@ run "separate_runtime_identities" {
   assert {
     condition     = length(google_secret_manager_secret_iam_member.runtime_access) == length(local.runtime_secret_access)
     error_message = "Every declared secret binding needs exactly one scoped grant."
+  }
+  assert {
+    condition = toset([for key, grant in local.runtime_secret_access : grant.service
+    if grant.secret == "supabase_archive_writer_key"]) == toset(["bff"])
+    error_message = "The approval archive writer credential must be BFF-only."
   }
   assert {
     condition = (toset([for key, grant in local.runtime_secret_access : grant.secret if grant.service == "web"]) == toset(["supabase_anon_key"]) &&

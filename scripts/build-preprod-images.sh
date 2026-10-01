@@ -5,9 +5,7 @@
 # Usage:
 #   ./scripts/build-preprod-images.sh [GCP_PROJECT_ID] [REGION] [TAG]
 #
-# Examples:
-#   ./scripts/build-preprod-images.sh
-#   ./scripts/build-preprod-images.sh my-gcp-project asia-south1 preprod
+# Example: ./scripts/build-preprod-images.sh axiom-proof asia-south1 release-<exact-git-sha>
 # ==============================================================================
 set -euo pipefail
 
@@ -16,10 +14,16 @@ cd "$REPO_ROOT"
 
 PROJECT_ID="${1:-${GCP_PROJECT_ID:-axiom-proof}}"
 REGION="${2:-${GCP_REGION:-asia-south1}}"
-TAG="${3:-${IMAGE_TAG:-preprod}}"
+SOURCE_SHA="$(git rev-parse HEAD)"
+TAG="${3:-${IMAGE_TAG:-release-${SOURCE_SHA}}}"
 REPO_NAME="axiom-proof-preprod"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
-
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  echo 'Refusing preprod image build from an uncommitted worktree.' >&2; exit 1
+fi
+if [ "$REGION" != asia-south1 ] || [ "$TAG" != "release-${SOURCE_SHA}" ]; then
+  echo 'Preprod images require asia-south1 and a release-<exact HEAD SHA> tag.' >&2; exit 1
+fi
 # Auto-load preprod environment if available
 if [ -f "${REPO_ROOT}/infra/docker/environments/.env.preprod" ]; then
   while IFS='=' read -r key val || [ -n "$key" ]; do
@@ -28,6 +32,19 @@ if [ -f "${REPO_ROOT}/infra/docker/environments/.env.preprod" ]; then
     val="$(echo "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
     if [ -z "${!key:-}" ]; then export "$key"="$val"; fi
   done < "${REPO_ROOT}/infra/docker/environments/.env.preprod"
+fi
+
+for name in UPSTREAM_GOTRUE_IMAGE UPSTREAM_POSTGREST_IMAGE; do
+  value="${!name:-}"
+  if [[ ! "$value" =~ ^[a-zA-Z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "${name} must be a reviewed immutable upstream digest." >&2; exit 1
+  fi
+done
+if [ "${PUSH_IMAGES:-false}" != true ] && [ -z "${1:-}" ]; then
+  echo 'Preprod release builder requires explicit push intent and registry project.' >&2; exit 1
+fi
+if [ "${4:-${TARGET_SERVICE:-all}}" != all ]; then
+  echo 'Preprod release requires all nine images in one exact-SHA build.' >&2; exit 1
 fi
 
 echo "================================================================="
@@ -77,8 +94,8 @@ SERVICES=(
 # Registry or Container Registry only, not Docker Hub. Versions match
 # docker-compose.supabase.yml so local and preprod run the same builds.
 MIRRORED_IMAGES=(
-  "gotrue:v2.169.0:supabase/gotrue:v2.169.0"
-  "postgrest:v12.2.8:postgrest/postgrest:v12.2.8"
+  "gotrue:${UPSTREAM_GOTRUE_IMAGE}"
+  "postgrest:${UPSTREAM_POSTGREST_IMAGE}"
 )
 
 TARGET_SERVICE="${4:-${TARGET_SERVICE:-all}}"
@@ -94,18 +111,7 @@ for entry in "${SERVICES[@]}"; do
     continue
   fi
 
-  # Check if image already exists in Artifact Registry when force-build is not set
-  if [ "$FORCE_BUILD" != "true" ] && command -v gcloud >/dev/null 2>&1; then
-    if gcloud artifacts docker images describe "${IMAGE_URI}" >/dev/null 2>&1; then
-      echo "  ✓ Image ${IMAGE_URI} already exists in Artifact Registry (skipping build; set FORCE_BUILD=true to rebuild)"
-      continue
-    fi
-  fi
-
-  BUILD_ARGS=()
-  if [[ "$SVC_NAME" =~ ^(bff|web|marketing)$ ]] && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
-    BUILD_ARGS+=(--build-arg "AXIOM_RELEASE_SHA=$(git rev-parse HEAD)")
-  fi
+  BUILD_ARGS=(--build-arg "AXIOM_RELEASE_SHA=${SOURCE_SHA}" --label "org.opencontainers.image.revision=${SOURCE_SHA}")
   if [ "$SVC_NAME" = "marketing" ] || [ "$SVC_NAME" = "web" ]; then
     local_proj_num="${GCP_PROJECT_NUMBER:-}"
     if [ -z "$local_proj_num" ] && command -v gcloud >/dev/null 2>&1; then
@@ -124,10 +130,8 @@ for entry in "${SERVICES[@]}"; do
   echo -e "\n▶ Building [${SVC_NAME}] using ${DOCKERFILE} (platform: linux/amd64)..."
   docker build --platform linux/amd64 --provenance=false ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f "${DOCKERFILE}" -t "${LOCAL_TAG}" -t "${IMAGE_URI}" .
 
-  if [ "${PUSH_IMAGES:-false}" = "true" ] || [ "${1:-}" != "" ]; then
-    echo "  Pushing ${IMAGE_URI}..."
-    docker push "${IMAGE_URI}"
-  fi
+  echo "  Pushing ${IMAGE_URI}..."
+  docker push "${IMAGE_URI}"
   echo "  ✓ Successfully built and pushed ${LOCAL_TAG}"
 done
 
@@ -135,28 +139,22 @@ done
 if [ "$TARGET_SERVICE" = "all" ] || [ "$TARGET_SERVICE" = "supabase" ]; then
   for entry in "${MIRRORED_IMAGES[@]}"; do
     MIRROR_NAME="${entry%%:*}"
-    rest="${entry#*:}"
-    MIRROR_TAG="${rest%%:*}"
-    UPSTREAM="${rest#*:}"
-    MIRROR_URI="${REGISTRY}/${MIRROR_NAME}:${MIRROR_TAG}"
-
-    if [ "$FORCE_BUILD" != "true" ] && command -v gcloud >/dev/null 2>&1; then
-      if gcloud artifacts docker images describe "${MIRROR_URI}" >/dev/null 2>&1; then
-        echo "  ✓ ${MIRROR_URI} already mirrored (set FORCE_BUILD=true to refresh)"
-        continue
-      fi
-    fi
+    UPSTREAM="${entry#*:}"
+    MIRROR_URI="${REGISTRY}/${MIRROR_NAME}:${TAG}"
 
     echo -e "\n▶ Mirroring ${UPSTREAM} -> ${MIRROR_URI}..."
     docker pull --platform linux/amd64 "${UPSTREAM}"
     docker tag "${UPSTREAM}" "${MIRROR_URI}"
-    if [ "${PUSH_IMAGES:-false}" = "true" ] || [ "${1:-}" != "" ]; then
-      docker push "${MIRROR_URI}"
-    fi
-    echo "  ✓ Mirrored ${MIRROR_NAME}:${MIRROR_TAG}"
+    docker push "${MIRROR_URI}"
+    echo "  ✓ Mirrored ${MIRROR_NAME}:${TAG}"
   done
 fi
 
 echo -e "\n================================================================="
 echo "  ✓ Axiom Proof preprod images built and Supabase images mirrored"
 echo "================================================================="
+if [ "$TARGET_SERVICE" = all ]; then
+  python3 scripts/preprod-release-manifest.py build \
+    "${AXIOM_RELEASE_MANIFEST_FILE:-${REPO_ROOT}/.axiom-runtime/preprod-release-manifest.json}" \
+    "$SOURCE_SHA" "$PROJECT_ID" "$REGION"
+fi

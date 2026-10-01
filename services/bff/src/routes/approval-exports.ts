@@ -31,11 +31,16 @@ function invalid(c: Ctx, message?: string) {
 }
 
 export function approvalExportRoutes(
-  dependencies: { db?: EvidenceDatabase; service?: ApprovalExportService } = {},
+  dependencies: {
+    db?: EvidenceDatabase;
+    writer?: () => EvidenceDatabase;
+    service?: ApprovalExportService;
+  } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new ApprovalExportService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ??
+    new ApprovalExportService(dependencies.db ?? createSupabaseAdmin(), dependencies.writer);
 
   // 1. List Approval History
   app.get('/approvals/history', async (c) => {
@@ -54,6 +59,8 @@ export function approvalExportRoutes(
         parsed.data,
         signal,
       );
+      c.header('Cache-Control', 'private, no-store');
+      c.header('X-Content-Type-Options', 'nosniff');
       return c.json(result, 200);
     } catch (cause) {
       return failure(c, cause);
@@ -62,7 +69,7 @@ export function approvalExportRoutes(
 
   // 2. Export Approval History (tenant-wide or filtered)
   app.get('/approvals/export', async (c) => {
-    const denied = requireCapability(c, Capability.PLAN_READ);
+    const denied = requireCapability(c, Capability.EVIDENCE_EXPORT);
     if (denied) return denied;
 
     const query = c.req.query();
@@ -85,6 +92,8 @@ export function approvalExportRoutes(
         'Content-Disposition': `attachment; filename="${result.filename}"`,
         'Content-Length': String(result.bytes),
         'X-Export-SHA256': result.sha256,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       };
       if (result.exportId) {
         headers['X-Export-ID'] = result.exportId;
@@ -101,7 +110,7 @@ export function approvalExportRoutes(
 
   // 3. Plan-specific Approval Export
   app.get('/plans/:id/approval-export', async (c) => {
-    const denied = requireCapability(c, Capability.PLAN_READ);
+    const denied = requireCapability(c, Capability.EVIDENCE_EXPORT);
     if (denied) return denied;
 
     const id = c.req.param('id');
@@ -130,6 +139,8 @@ export function approvalExportRoutes(
         'Content-Disposition': `attachment; filename="${result.filename}"`,
         'Content-Length': String(result.bytes),
         'X-Export-SHA256': result.sha256,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
       };
       if (result.exportId) {
         headers['X-Export-ID'] = result.exportId;

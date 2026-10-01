@@ -15,10 +15,19 @@ import {
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
-import { EmailDispatchModal } from './email-dispatch-modal';
 import { AgentIcon } from '@axiom/ui';
+import { BoardWorkflow } from './board-workflow';
+import { AuditorWorkflow } from './auditor-workflow';
 
 const date = (value: string) => new Date(value).toLocaleString();
+
+export function canOfferRelease(report: ReportDetail): boolean {
+  return (
+    report.status === 'approved' &&
+    !!report.contentHash &&
+    (report.kind === 'custom' || !!report.pack?.archive)
+  );
+}
 
 type Access = {
   tenantId: string;
@@ -26,9 +35,18 @@ type Access = {
   canReview: boolean;
   canRelease: boolean;
   canExport: boolean;
+  canRequestBoard: boolean;
+  canManageBoard: boolean;
 };
 
 export function ReportsClient(access: Access) {
+  // All list, pagination and detail state belongs to one tenant. A server
+  // navigation may reuse this component instance with a different tenant prop;
+  // remount before painting so no previous tenant's report survives that hop.
+  return <TenantReportsClient key={access.tenantId} {...access} />;
+}
+
+function TenantReportsClient(access: Access) {
   const { tenantId, canPrepare } = access;
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [offset, setOffset] = useState(0);
@@ -42,7 +60,10 @@ export function ReportsClient(access: Access) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const activeTab: 'pramaan' | 'prativedan' = tabParam === 'pramaan' ? 'pramaan' : 'prativedan';
+  const activeTab: 'pramaan' | 'prativedan' =
+    (access.canRelease || access.canRequestBoard) && tabParam === 'pramaan'
+      ? 'pramaan'
+      : 'prativedan';
 
   const handleSelectTab = (tab: 'pramaan' | 'prativedan') => {
     setSelectedId(null);
@@ -52,7 +73,6 @@ export function ReportsClient(access: Access) {
       router.replace('/reports');
     }
   };
-  const [reportEmailTarget, setReportEmailTarget] = useState<ReportSummary | null>(null);
   const preparation = useRef<HTMLDetailsElement>(null);
   const refresh = useCallback(() => {
     setLoading(true);
@@ -89,33 +109,40 @@ export function ReportsClient(access: Access) {
   }
   return (
     <div className="min-w-0 space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[#1E2A4A]">
-          Reports & Statutory Compliance Artifacts
-        </h1>
-        <p className="text-sm text-slate-600">
-          Statutory DPDPA reporting engine, evidence packs, and tamper-evident audit registers. All
-          artifacts are cryptographically hashed and sealed with immutable audit ledgering.
-        </p>
+      <header className="flex items-start gap-3">
+        <AgentIcon agent="prativedan" size="sm" state="idle" />
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence</h1>
+          <p className="text-sm text-slate-600">
+            Review recorded reports and evidence packs. A content hash alone does not establish a
+            retained PDF, source provenance, or a released proof artifact.
+          </p>
+          <p className="text-sm text-slate-600">
+            Report email dispatch is unavailable while source-bound delivery is being rebuilt.
+          </p>
+        </div>
       </header>
 
-      {/* Role-Segregated Navigation Tabs: Pramaan (Closure Authority) vs Prativedan (Clerical Drafter) */}
-      <div className="flex border-b border-slate-200 gap-2">
-        <button
-          type="button"
-          onClick={() => handleSelectTab('pramaan')}
-          className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
-            activeTab === 'pramaan'
-              ? 'border-[#C9A227] text-slate-900'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <AgentIcon agent="pramaan" size="sm" state="idle" />
-          Statutory Proof Dossiers (Pramaan · Closure Seal)
-        </button>
+      <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
+        {(access.canRelease || access.canRequestBoard) && (
+          <button
+            type="button"
+            onClick={() => handleSelectTab('pramaan')}
+            aria-current={activeTab === 'pramaan' ? 'page' : undefined}
+            className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+              activeTab === 'pramaan'
+                ? 'border-teal-600 text-slate-900'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <AgentIcon agent="pramaan" size="sm" state="idle" />
+            Closure dossiers
+          </button>
+        )}
         <button
           type="button"
           onClick={() => handleSelectTab('prativedan')}
+          aria-current={activeTab === 'prativedan' ? 'page' : undefined}
           className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
             activeTab === 'prativedan'
               ? 'border-indigo-600 text-slate-900'
@@ -123,15 +150,15 @@ export function ReportsClient(access: Access) {
           }`}
         >
           <AgentIcon agent="prativedan" size="sm" state="idle" />
-          Working Reports & Registers (Prativedan · Clerical Drafter)
+          Working reports and registers
         </button>
       </div>
 
       {activeTab === 'pramaan' ? (
         <ClosureDossiersTab
           tenantId={tenantId}
+          canGenerate={access.canRequestBoard}
           canRelease={access.canRelease}
-          canPrepare={access.canPrepare}
         />
       ) : (
         <>
@@ -146,9 +173,14 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Executive Board Summary</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Executive posture scores, financial penalty exposure, and domain maturity analysis.
+                Automated drafts can use finalized assessment results. Source and PDF retention are
+                required before release.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+              <div className="text-xs text-slate-500 font-medium">
+                {access.canRequestBoard
+                  ? 'Request from finalized assessment below'
+                  : 'Source-bound workflow'}
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -160,9 +192,12 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Statutory Auditor Pack</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Itemized control evaluations, linked evidence receipts, and independent attestation.
+                Assessment-derived review packs use a finalized assessment and retained source/PDF
+                versions. They do not claim independent audit or evidence attestation.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: PDF / HTML</div>
+              <div className="text-xs text-slate-500 font-medium">
+                Request from finalized assessment below
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -174,9 +209,10 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Data Protection Board</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Formal breach notification, inquiry response, and annual DPDPA Section 8(5) filings.
+                Planned submission format. Verified sources and an approved release workflow are
+                still required.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: Statutory Form</div>
+              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -188,12 +224,28 @@ export function ReportsClient(access: Access) {
               </div>
               <h3 className="text-sm font-semibold text-slate-900 mb-1">Technical Remediation</h3>
               <p className="text-xs text-slate-600 mb-3">
-                Full sequence of automated mutations, dry-run verified diffs, and rollback
-                validation.
+                Planned register. Mutation, dry-run and rollback records must be bound to their
+                original receipts before export.
               </p>
-              <div className="text-xs text-slate-500 font-medium">Format: Technical Ledger</div>
+              <div className="text-xs text-slate-500 font-medium">Release unavailable</div>
             </div>
           </div>
+
+          <BoardWorkflow
+            tenantId={tenantId}
+            canRequest={access.canRequestBoard}
+            canManage={access.canManageBoard}
+            onOpenReport={setSelectedId}
+            onChanged={refresh}
+          />
+
+          <AuditorWorkflow
+            tenantId={tenantId}
+            canRequest={access.canRequestBoard}
+            canManage={access.canManageBoard}
+            onOpenReport={setSelectedId}
+            onChanged={refresh}
+          />
 
           {/* Approval History Export Banner */}
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -202,8 +254,9 @@ export function ReportsClient(access: Access) {
                 Tenant Approval History Audit Export
               </h3>
               <p className="text-xs text-slate-600">
-                Export complete, tamper-evident audit history of all human and standing-policy
-                approvals with cryptographic signatures.
+                Download stored approval tokens for this tenant. Exports over 200 records are
+                refused; use a plan-specific export to narrow the history. This download is not a
+                sealed evidence package or a verification of token signatures.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -309,13 +362,6 @@ export function ReportsClient(access: Access) {
                             </span>
                           )}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setReportEmailTarget(report)}
-                          className="rounded border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shrink-0"
-                        >
-                          ✉ Email
-                        </button>
                       </li>
                     ))}
                   </ul>
@@ -345,24 +391,10 @@ export function ReportsClient(access: Access) {
               {...access}
               reportId={selectedId}
               onChanged={refresh}
-              onSendEmail={(rep) => setReportEmailTarget(rep)}
             />
           )}
         </>
       )}
-
-      {/* Report Email Dispatch Modal */}
-      <EmailDispatchModal
-        tenantId={tenantId}
-        isOpen={Boolean(reportEmailTarget)}
-        onClose={() => setReportEmailTarget(null)}
-        target={{
-          reportId: reportEmailTarget?.id,
-          title: reportEmailTarget?.title || '',
-          kind: reportEmailTarget?.kind || '',
-          proofSealHash: reportEmailTarget?.contentHash || undefined,
-        }}
-      />
     </div>
   );
 }
@@ -370,12 +402,10 @@ export function ReportsClient(access: Access) {
 function ReportInspector({
   reportId,
   onChanged,
-  onSendEmail,
   ...access
 }: Access & {
   reportId: string;
   onChanged: () => void;
-  onSendEmail?: (report: ReportDetail) => void;
 }) {
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -464,6 +494,7 @@ function ReportInspector({
       setBusy(false);
     }
   }
+  const archiveHash = report?.pack?.archive?.contentHash;
   return (
     <section aria-label="Report detail" className={panel} aria-busy={loading}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -471,16 +502,6 @@ function ReportInspector({
           Report detail
         </h2>
         <div className="flex items-center gap-2">
-          {report && onSendEmail && (
-            <button
-              type="button"
-              className="rounded border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 shadow-xs"
-              onClick={() => onSendEmail(report)}
-              disabled={busy}
-            >
-              ✉ Send via Email
-            </button>
-          )}
           <button className={button} disabled={busy || loading} onClick={refresh}>
             Refresh report detail
           </button>
@@ -614,35 +635,32 @@ function ReportInspector({
                   )}
                 </div>
               )}
-            {report.status === 'approved' &&
-              report.contentHash &&
-              (!report.pack || report.pack.archive) &&
-              access.canRelease && (
-                <div className="space-y-3">
-                  <label className="flex gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      disabled={busy}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    I reviewed this content and its recorded artifact hash and authorize release to
-                    this tenant.
-                  </label>
-                  <button
-                    className={button}
-                    disabled={busy || !confirmed}
-                    onClick={() =>
-                      act(`/reports/${report.id}/release`, {
-                        expectedContentHash: report.contentHash,
-                        expectedArchiveHash: report.pack?.archive?.contentHash ?? null,
-                      })
-                    }
-                  >
-                    Release reviewed report
-                  </button>
-                </div>
-              )}
+            {canOfferRelease(report) && access.canRelease && (
+              <div className="space-y-3">
+                <label className="flex gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    disabled={busy}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                  />
+                  I reviewed this content and its recorded artifact hash and authorize release to
+                  this tenant.
+                </label>
+                <button
+                  className={button}
+                  disabled={busy || !confirmed}
+                  onClick={() =>
+                    act(`/reports/${report.id}/release`, {
+                      expectedContentHash: report.contentHash,
+                      expectedArchiveHash: archiveHash ?? null,
+                    })
+                  }
+                >
+                  Release reviewed report
+                </button>
+              </div>
+            )}
             {report.status === 'published' &&
               report.pack?.archive &&
               report.releasedArchiveHash &&

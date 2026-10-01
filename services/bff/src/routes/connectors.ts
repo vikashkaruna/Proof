@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   Capability,
   CreateConnectorRequestSchema,
@@ -84,7 +84,7 @@ export function connectorRoutes() {
     }
     const descriptor = connectorRegistry.get(descriptorId);
     if (creating && !descriptor) return c.json({ error: { code: 'unknown_descriptor' } }, 400);
-    const { data, error } = await db.rpc('manage_connector', {
+    const { data, error } = await createHumanActionWriter().rpc('manage_connector', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_operation: 'operation' in payload ? payload.operation : 'create',

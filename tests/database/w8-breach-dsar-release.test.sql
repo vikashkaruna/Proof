@@ -531,7 +531,7 @@ select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f2',
     '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f2'), null, gen_random_uuid()) ->> 'error'),
-  'not_approved', 'a rejected report cannot be released');
+  'source_bound_workflow_required', 'a rejected legacy DPB report cannot enter the new source-bound release path');
 select pg_temp.assert_eq(
   (public.release_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f1',
@@ -575,11 +575,15 @@ select pg_temp.denied($q$insert into public.breaches (tenant_id, title, descript
   values ('00000000-0000-0000-0000-0000000000c1', 'service door', 'x', 'low', now())$q$);
 select pg_temp.denied($q$update public.reports set status = 'published'$q$);
 select pg_temp.denied($q$delete from public.breach_notifications where true$q$);
+select pg_temp.denied($q$select public.review_report('00000000-0000-0000-0000-0000000000c1',
+ '00000000-0000-0000-0000-0000000000f3','approved','Forged founder decision',
+ '00000000-0000-0000-0000-0000000000a3',repeat('a',64),gen_random_uuid())$q$);
+reset role;
 select pg_temp.assert_eq(
   (public.review_report('00000000-0000-0000-0000-0000000000c1',
     '00000000-0000-0000-0000-0000000000f3', 'approved', 'Foundry pass',
     '00000000-0000-0000-0000-0000000000a3', (select content_sha256 from public.reports where id='00000000-0000-0000-0000-0000000000f3'), gen_random_uuid()) ->> 'status'),
-  'approved', 'the BFF service role can call the review path');
+  'approved', 'the privileged lifecycle fixture can call the review path');
 reset role;
 
 rollback;

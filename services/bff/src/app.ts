@@ -21,6 +21,7 @@ import { createMfaService } from './services/mfa.js';
 import { workloadToolsRoutes } from './routes/workload-tools.js';
 import type { AssessmentTools } from './workloads/assessment-tools.js';
 import { startRealtimeChannel } from './services/realtime.js';
+import { offlineLicenseGate } from './middleware/offline-license.js';
 
 /**
  * Builds the BFF application.
@@ -35,7 +36,11 @@ import { startRealtimeChannel } from './services/realtime.js';
  * before the two middlewares that set them.
  */
 export function createApp(
-  options: { assessmentTools?: AssessmentTools; discovery?: Pick<DiscoveryService, 'run'> } = {},
+  options: {
+    assessmentTools?: AssessmentTools;
+    discovery?: Pick<DiscoveryService, 'run'>;
+    licensePublicKeyPem?: string;
+  } = {},
 ) {
   const env = loadEnv();
   const app = new Hono();
@@ -61,6 +66,14 @@ export function createApp(
     }),
   );
   app.use('*', errorHandler());
+  app.use(
+    '*',
+    offlineLicenseGate(
+      env.ENVIRONMENT,
+      process.env.AXIOM_OFFLINE_LICENSE,
+      options.licensePublicKeyPem,
+    ),
+  );
 
   // ─── Services (constructed once, attached to the app) ───────────────
   const approvalEngine = createApprovalEngine(env);

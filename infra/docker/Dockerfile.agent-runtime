@@ -20,10 +20,11 @@ RUN pip install uv
 # Python deps first (better layer caching)
 COPY services/agent-runtime/pyproject.toml services/agent-runtime/README.md ./services/agent-runtime/
 COPY services/agent-runtime/src ./services/agent-runtime/src
+COPY packages/offline-license-python ./packages/offline-license-python
 WORKDIR /app/services/agent-runtime
 RUN uv pip install --system -e .
 
-ENV PYTHONPATH="/app/services/agent-runtime/src"
+ENV PYTHONPATH="/app/services/agent-runtime/src:/app/packages/offline-license-python"
 WORKDIR /app/services/agent-runtime
 EXPOSE 8000
 

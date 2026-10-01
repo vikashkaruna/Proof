@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
 import { selectTenant, signIn, state } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
+import { localRoleBearer } from '../local-writer';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 
 const execFileAsync = promisify(execFile);
@@ -49,7 +50,7 @@ async function pendingEvidence(sealObject: boolean) {
     signal: AbortSignal.timeout(30_000),
     headers: {
       apikey: state.publishableKey,
-      authorization: `Bearer ${state.serviceKey}`,
+      authorization: `Bearer ${localRoleBearer('evidence_ingestion_writer', state)}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({

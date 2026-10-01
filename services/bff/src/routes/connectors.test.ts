@@ -8,7 +8,10 @@ const FOREIGN = '22222222-2222-4222-8222-222222222222';
 const USER = '00000000-0000-4000-8000-000000000001';
 const DESCRIPTOR = '41410000-0000-4000-8000-000000000001';
 const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => db.current!.client }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => db.current!.client,
+  createHumanActionWriter: () => db.current!.client,
+}));
 import { connectorRoutes } from './connectors.js';
 let fake: FakeDb;
 let calls: Record<string, unknown>[];

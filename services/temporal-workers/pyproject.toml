@@ -12,6 +12,7 @@ dependencies = [
   "pydantic-settings>=2.5.0",
   "structlog>=24.4.0",
   "supabase>=2.8.0",
+  "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +33,7 @@ packages = ["src/temporal_workers"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "../../packages/offline-license-python"]
 addopts = "-v --tb=short --strict-markers"
 
 [tool.coverage.run]

@@ -2,10 +2,13 @@ import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-t
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { insertLocalFixtureRows, updateLocalFixtureRow } from './lib/local-fixture-db.js';
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { mintOfflineLicense } from '../packages/config/src/license.js';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
+import { mintLocalPostgrestRoleKey } from '../packages/supabase/src/local-proof-writer-key.js';
 
 async function main() {
   const target = loadAcceptanceTarget();
@@ -37,6 +40,21 @@ async function main() {
     .find((n) => n?.family === 'IPv4' && !n.internal)?.address;
   if (!target) assert(address, 'A Docker-reachable network interface is required');
   const api = new URL(status.API_URL!);
+  // Human-labelled proof RPCs (0098/0099) are executable only by the BFF's
+  // human action writer, never by the generic service key.
+  const writerRole = (
+    role: 'human_action_writer' | 'evidence_ingestion_writer' | 'agent_ledger_writer',
+  ) =>
+    target || !status.JWT_SECRET
+      ? ''
+      : mintLocalPostgrestRoleKey({
+          role,
+          jwtSecret: status.JWT_SECRET,
+          serviceKey: status.SERVICE_ROLE_KEY!,
+        });
+  const humanWriterKey = target
+    ? (process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY ?? '')
+    : writerRole('human_action_writer');
   if (!target) api.hostname = address!;
   if (!target)
     Object.assign(process.env, {
@@ -46,6 +64,9 @@ async function main() {
       SUPABASE_URL: api.origin,
       SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY,
       SUPABASE_SERVICE_KEY: status.SECRET_KEY,
+      SUPABASE_HUMAN_ACTION_WRITER_KEY: humanWriterKey,
+      SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: writerRole('evidence_ingestion_writer'),
+      SUPABASE_AGENT_LEDGER_WRITER_KEY: writerRole('agent_ledger_writer'),
       APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
       AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
       AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
@@ -247,16 +268,21 @@ async function main() {
       [0, 'disabled'],
       [1, 'active'],
     ] as const) {
-      const response = await apiRequest('/rest/v1/rpc/manage_workload_identity', 'POST', {
-        p_tenant_id: tenantId,
-        p_actor_id: actorId,
-        p_correlation_id: randomUUID(),
-        p_workload_id: workloadId,
-        p_expected_version: version,
-        p_agent: agent,
-        p_spiffe_id: binding.spiffe_id,
-        p_status: registrationStatus,
-      });
+      const response = await apiRequest(
+        '/rest/v1/rpc/manage_workload_identity',
+        'POST',
+        {
+          p_tenant_id: tenantId,
+          p_actor_id: actorId,
+          p_correlation_id: randomUUID(),
+          p_workload_id: workloadId,
+          p_expected_version: version,
+          p_agent: agent,
+          p_spiffe_id: binding.spiffe_id,
+          p_status: registrationStatus,
+        },
+        humanWriterKey,
+      );
       assert.equal(response.status, 200, 'Reviewed fixture registration');
       const receipt = (await response.json()) as Record<string, unknown>;
       assert.equal(receipt.tenant_id, tenantId, 'Registration tenant binding');
@@ -351,7 +377,32 @@ async function main() {
         signal: AbortSignal.timeout(30_000),
       });
   else {
-    const app = (await import('../services/bff/src/app.js')).createApp();
+    // The on-prem licence gate verifies against the Axiom root key, whose private half
+    // never leaves the licensing authority. The harness therefore signs a short-lived
+    // licence with its own throwaway authority and injects that trust root in-process.
+    let licensePublicKeyPem: string | undefined;
+    if (environment === 'onprem') {
+      const authority = generateKeyPairSync('ed25519', {
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      });
+      licensePublicKeyPem = authority.publicKey;
+      process.env.AXIOM_OFFLINE_LICENSE = mintOfflineLicense(
+        {
+          licenseId: 'PARITY-ACCEPTANCE',
+          licensee: 'strict-parity-harness',
+          environment: 'onprem',
+          tier: 'enterprise-airgapped',
+          issuedAt: new Date(Date.now() - 60_000).toISOString(),
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          maxTenants: 1,
+          maxNodes: 1,
+          features: [],
+        },
+        authority.privateKey,
+      );
+    }
+    const app = (await import('../services/bff/src/app.js')).createApp({ licensePublicKeyPem });
     request = (path, options) => Promise.resolve(app.request(path, options));
   }
   const outcomes: Record<string, number | boolean> = {};
@@ -916,13 +967,18 @@ async function main() {
     ).status,
     201,
   );
-  const prepared = await apiRequest('/rest/v1/rpc/prepare_onboarding_proposal', 'POST', {
-    p_tenant_id: tenantB,
-    p_actor_id: preparer.id,
-    p_estate_id: estateB,
-    p_systems: [{ name: 'Reviewed CRM', systemKind: 'saas', dataCategories: ['contact'] }],
-    p_correlation_id: randomUUID(),
-  });
+  const prepared = await apiRequest(
+    '/rest/v1/rpc/prepare_onboarding_proposal',
+    'POST',
+    {
+      p_tenant_id: tenantB,
+      p_actor_id: preparer.id,
+      p_estate_id: estateB,
+      p_systems: [{ name: 'Reviewed CRM', systemKind: 'saas', dataCategories: ['contact'] }],
+      p_correlation_id: randomUUID(),
+    },
+    humanWriterKey,
+  );
   assert.equal(prepared.status, 200);
   const proposal = ((await prepared.json()) as { data: { id: string; content_sha256: string } })
     .data;
@@ -1003,38 +1059,41 @@ async function main() {
 
   const planId = randomUUID();
   const actionId = randomUUID();
-  assert.equal(
-    (
-      await apiRequest('/rest/v1/remediation_plans', 'POST', {
-        id: planId,
-        tenant_id: tenantB,
-        engagement_id: engagementB,
-        library_version: library,
-        title: 'Parity approval only — no execution',
-        status: 'review',
-        version: 1,
-      })
-    ).status,
-    201,
+  // Plans and actions are not writable through the service credential (0099), so
+  // these synthetic rows are written as the local database owner. A local-docker
+  // target shares the loopback parity database; a remote target has no such
+  // connection.
+  assert(
+    !target || target.topology === 'local-docker',
+    'Plan fixtures cannot be written to a remote target (migration 0099)',
   );
-  assert.equal(
-    (
-      await apiRequest('/rest/v1/remediation_actions', 'POST', {
-        id: actionId,
-        tenant_id: tenantB,
-        plan_id: planId,
-        sequence: 1,
-        action_type: 'data.mask',
-        description: 'Synthetic approval fixture',
-        risk_score: 10,
-        rollback_definition: { fixture: true },
-        rollback_validated: true,
-        dry_run_status: 'dry_run_complete',
-        dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-      })
-    ).status,
-    201,
-  );
+  const fixtureTarget = { repoRoot: process.cwd(), stateDir };
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
+    {
+      id: planId,
+      tenant_id: tenantB,
+      engagement_id: engagementB,
+      library_version: library,
+      title: 'Parity approval only — no execution',
+      status: 'review',
+      version: 1,
+    },
+  ]);
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_actions', [
+    {
+      id: actionId,
+      tenant_id: tenantB,
+      plan_id: planId,
+      sequence: 1,
+      action_type: 'data.mask',
+      description: 'Synthetic approval fixture',
+      risk_score: 10,
+      rollback_definition: { fixture: true },
+      rollback_validated: true,
+      dry_run_status: 'dry_run_complete',
+      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    },
+  ]);
   const approval = { planId, actionIds: [actionId], mode: 'batch' };
   await check(
     'session_mfa_does_not_replace_approval_step_up',
@@ -1047,11 +1106,7 @@ async function main() {
     { ...approval, purpose: 'approval_issuance' },
     recoveryCodes[1]!,
   );
-  assert.equal(
-    (await apiRequest(`/rest/v1/remediation_plans?id=eq.${planId}`, 'PATCH', { version: 2 }))
-      .status,
-    200,
-  );
+  await updateLocalFixtureRow(fixtureTarget, 'remediation_plans', planId, { version: 2 });
   await check(
     'changed_plan_invalidates_step_up',
     '/v1/plans/approve',
@@ -1063,14 +1118,9 @@ async function main() {
     { ...approval, purpose: 'approval_issuance' },
     recoveryCodes[2]!,
   );
-  assert.equal(
-    (
-      await apiRequest(`/rest/v1/remediation_actions?id=eq.${actionId}`, 'PATCH', {
-        parameters: { changedAfterStepUp: true },
-      })
-    ).status,
-    200,
-  );
+  await updateLocalFixtureRow(fixtureTarget, 'remediation_actions', actionId, {
+    parameters: { changedAfterStepUp: true },
+  });
   await check(
     'changed_action_content_invalidates_step_up',
     '/v1/plans/approve',

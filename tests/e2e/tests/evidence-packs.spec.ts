@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import {
   createMfaAccount,
   selectTenant,
@@ -15,7 +16,28 @@ import {
 } from '../fixtures';
 import { repoRoot, acceptanceTarget } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
+import { mintLocalPostgrestRoleKey } from '../../../packages/supabase/src/local-proof-writer-key';
 const execFileAsync = promisify(execFile);
+function localProofWriterToken() {
+  if (acceptanceTarget)
+    throw new Error('Direct local proof intent is not a deployed acceptance path');
+  const parityState = resolve(
+    process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
+  );
+  const status = JSON.parse(readFileSync(join(parityState, 'status.json'), 'utf8')) as Record<
+    string,
+    string
+  >;
+  if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
+    throw new Error('Local proof writer target differs from seeded personas');
+  const jwtSecret = status.JWT_SECRET;
+  if (!jwtSecret) throw new Error('Local proof writer JWT secret is missing');
+  return mintLocalPostgrestRoleKey({
+    role: 'statutory_proof_writer',
+    jwtSecret,
+    serviceKey: state.serviceKey,
+  });
+}
 async function providerAction(action: '--pause-provider' | '--resume-provider') {
   const directory = process.env.AXIOM_EVIDENCE_FIXTURE_DIRECTORY;
   if (!directory) throw new Error('Owned evidence fixture required');
@@ -68,6 +90,27 @@ async function founder(page: Page, label: string) {
   await signInAs(page, account.email, account.password);
   await selectTenant(page, 'a');
   await satisfyLoginMfaWithSecret(page, account.totpSecret!);
+}
+
+/** Board acceptance adds real engagements. Find the seeded one through the
+ * same bounded picker a human uses instead of assuming it remains on page 1. */
+async function selectEngagement(form: Locator, id: string) {
+  const select = form.getByLabel('Engagement scope');
+  const next = form.getByRole('button', { name: 'Next engagements' });
+  for (let page = 0; page < 100; page++) {
+    await expect(select).toBeEnabled();
+    if (await select.locator(`option[value="${id}"]`).count()) {
+      await select.selectOption(id);
+      return;
+    }
+    if (!(await next.isEnabled())) break;
+    const before = (await select.locator('option').allTextContents()).join('|');
+    await next.click();
+    await expect
+      .poll(async () => (await select.locator('option').allTextContents()).join('|'))
+      .not.toBe(before);
+  }
+  throw new Error('Seeded engagement is absent from every displayed engagement page');
 }
 
 /** Real crash boundary: sanctioned build intent + optional real provider PUT,
@@ -142,7 +185,7 @@ async function pendingArchive(
     signal: AbortSignal.timeout(30_000),
     headers: {
       apikey: state.publishableKey,
-      authorization: `Bearer ${state.serviceKey}`,
+      authorization: `Bearer ${localProofWriterToken()}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
@@ -261,13 +304,13 @@ test.describe('retained evidence pack acceptance', () => {
     await page.getByLabel('Available evidence versions').getByRole('checkbox').check();
     const form = page.getByRole('form', { name: 'Prepare pack', exact: true });
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     // Metadata edits revoke approval of the selection before any write.
     await form.getByLabel('Pack title', { exact: true }).fill(`${title} revised`);
     await expect(form.getByRole('checkbox')).not.toBeChecked();
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     const prepareResponse = page.waitForResponse(
       (r) =>
@@ -441,7 +484,7 @@ test.describe('retained evidence pack acceptance', () => {
     await page.getByLabel('Available evidence versions').getByRole('checkbox').check();
     const form = page.getByRole('form', { name: 'Prepare pack', exact: true });
     await form.getByLabel('Pack title', { exact: true }).fill(title);
-    await form.getByLabel('Engagement scope').selectOption(state.engagementA);
+    await selectEngagement(form, state.engagementA);
     await form.getByRole('checkbox').check();
     // The real server commits; only its response is deliberately lost.
     await page.route(

@@ -1,6 +1,8 @@
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
 import { boardReportRoutes } from './board-reports.js';
+import { dpbReportRoutes } from './dpb-reports.js';
+import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
@@ -12,6 +14,7 @@ import { onboardingWizardRoutes } from './onboarding-wizard.js';
 import { sustenanceRoutes } from './sustenance.js';
 import { monitoringAlertRoutes } from './monitoring-alerts.js';
 import { approvalExportRoutes } from './approval-exports.js';
+import { approvalProofArchiveRoutes } from './approval-proof-archive.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
@@ -41,7 +44,7 @@ import { ACTION_CONTENT_COLUMNS, actionSetDigestSha256 } from '../services/actio
 import { clientAddressKey, trustedClientAddress } from '../services/client-address.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
@@ -202,6 +205,8 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
+  app.route('/', dpbReportRoutes());
+  app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
@@ -211,6 +216,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', sustenanceRoutes());
   app.route('/', monitoringAlertRoutes());
   app.route('/', approvalExportRoutes());
+  app.route('/', approvalProofArchiveRoutes({ approvalEngine: deps.approvalEngine }));
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
   app.route('/', sovereignLicenseRoutes());
@@ -1132,6 +1138,7 @@ export function v1Routes(deps: Deps) {
       stopOnFailure: input.stopOnFailure,
       expiresAt,
       contentDigest: expectedDigest,
+      ...(input.conditions ? { conditions: input.conditions } : {}),
     });
 
     // ── One transaction, or nothing (migration 0026) ──────────────────
@@ -1240,39 +1247,42 @@ export function v1Routes(deps: Deps) {
     const planId = c.req.param('id');
     const tenantId = c.get('tenantId');
     const user = c.get('user');
-    const role = c.get('role');
 
     const rejectRefusal = requireCapability(c, Capability.PLAN_REJECT);
     if (rejectRefusal) return rejectRefusal;
-
-    const admin = createSupabaseAdmin();
-    const { error } = await admin
-      .from('remediation_plans')
-      .update({ status: 'cancelled' })
-      .eq('id', planId)
-      .eq('tenant_id', tenantId);
-    if (error) {
-      return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+    if (!z.uuid().safeParse(planId).success) {
+      return c.json({ error: { code: 'validation_failed' } }, 400);
     }
-    await admin
-      .from('remediation_actions')
-      .update({ approval_status: 'skipped', final_outcome: 'skipped' })
-      .eq('plan_id', planId)
-      .eq('tenant_id', tenantId)
-      .in('approval_status', ['draft', 'awaiting_approval', 'approved']);
-
-    await deps.ledger.append({
-      tenantId,
-      correlationId: randomUUID(),
-      actorType: 'human',
-      actorId: user.id,
-      actionType: 'approval.token.invalid',
-      targetRef: planId,
-      result: 'success',
-      detail: { reason: 'plan rejected by approver' },
+    const { data, error } = await createHumanActionWriter().rpc('reject_remediation_plan', {
+      p_tenant_id: tenantId,
+      p_plan_id: planId,
+      p_actor_id: user.id,
+      p_correlation_id: randomUUID(),
     });
-
-    return c.json({ ok: true });
+    if (error) return c.json({ error: { code: 'update_failed' } }, 503);
+    const result = z
+      .object({
+        status: z.literal('cancelled'),
+        skippedActions: z.number().int().nonnegative(),
+        revokedTokens: z.number().int().nonnegative(),
+      })
+      .safeParse(data);
+    if (!result.success) {
+      const refusal = z.object({ error: z.string() }).safeParse(data);
+      if (refusal.success) {
+        const status =
+          refusal.data.error === 'forbidden'
+            ? 403
+            : refusal.data.error === 'invalid_request'
+              ? 400
+              : refusal.data.error === 'plan_not_found'
+                ? 404
+                : 409;
+        return c.json({ error: { code: refusal.data.error } }, status);
+      }
+      return c.json({ error: { code: 'update_failed' } }, 503);
+    }
+    return c.json({ ok: true, ...result.data });
   });
 
   // ─── W5 · M3.2 — the dry-run engine ────────────────────────────────
@@ -1459,7 +1469,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('register_monitoring_schedule', {
+    const { data, error } = await createHumanActionWriter().rpc('register_monitoring_schedule', {
       p_tenant_id: tenantId,
       p_estate_id: parsed.data.estateId,
       p_name: parsed.data.name,
@@ -1515,7 +1525,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid event id' } }, 400);
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('acknowledge_drift_event', {
+    const { data, error } = await createHumanActionWriter().rpc('acknowledge_drift_event', {
       p_tenant_id: tenantId,
       p_event_id: eventId,
       p_acknowledged_by: user.id,
@@ -1643,7 +1653,7 @@ export function v1Routes(deps: Deps) {
       scope.environments = parsed.data.scope.environments;
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('create_standing_policy', {
+    const { data, error } = await createHumanActionWriter().rpc('create_standing_policy', {
       p_tenant_id: tenantId,
       p_name: parsed.data.name,
       p_scope: scope,
@@ -1698,7 +1708,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid policy id' } }, 400);
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('revoke_standing_policy', {
+    const { data, error } = await createHumanActionWriter().rpc('revoke_standing_policy', {
       p_tenant_id: tenantId,
       p_policy_id: policyId,
       p_revoked_by: user.id,
@@ -2090,7 +2100,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('record_dsar', {
+    const { data, error } = await createHumanActionWriter().rpc('record_dsar', {
       p_tenant_id: tenantId,
       p_kind: input.kind,
       p_principal_name: input.principalName ?? null,
@@ -2155,7 +2165,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('verify_dsar_identity', {
+    const { data, error } = await createHumanActionWriter().rpc('verify_dsar_identity', {
       p_tenant_id: tenantId,
       p_dsar_id: dsarId,
       p_method: method,
@@ -2208,7 +2218,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('advance_dsar', {
+    const { data, error } = await createHumanActionWriter().rpc('advance_dsar', {
       p_tenant_id: tenantId,
       p_dsar_id: dsarId,
       p_to_status: statusParsed.data,
@@ -2247,7 +2257,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('record_breach', {
+    const { data, error } = await createHumanActionWriter().rpc('record_breach', {
       p_tenant_id: tenantId,
       p_title: input.title,
       p_description: input.description,
@@ -2325,7 +2335,7 @@ export function v1Routes(deps: Deps) {
     }
     const note = typeof body?.note === 'string' ? body.note : undefined;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('advance_breach', {
+    const { data, error } = await createHumanActionWriter().rpc('advance_breach', {
       p_tenant_id: tenantId,
       p_breach_id: breachId,
       p_to_status: statusParsed.data,
@@ -2367,7 +2377,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('draft_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('draft_breach_notification', {
       p_tenant_id: tenantId,
       p_breach_id: breachId,
       p_kind: input.kind,
@@ -2432,7 +2442,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('review_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('review_breach_notification', {
       p_tenant_id: tenantId,
       p_notification_id: notificationId,
       p_reviewed_by: user.id,
@@ -2476,7 +2486,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('send_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('send_breach_notification', {
       p_tenant_id: tenantId,
       p_notification_id: notificationId,
       p_outcome: input.outcome,
@@ -3347,7 +3357,7 @@ export function v1Routes(deps: Deps) {
     const tenantId = c.get('tenantId');
     const user = c.get('user');
 
-    const { data, error } = await createSupabaseAdmin().rpc('reconcile_execution_dispatch', {
+    const { data, error } = await createHumanActionWriter().rpc('reconcile_execution_dispatch', {
       p_tenant_id: tenantId,
       p_plan_id: input.planId,
       p_request_key: input.requestKey,
@@ -3732,7 +3742,7 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 45) || 'organization';
-    const { data, error } = await admin.rpc('onboard_organization', {
+    const { data, error } = await createHumanActionWriter().rpc('onboard_organization', {
       p_user_id: user.id,
       p_slug: `${baseSlug}-${randomUUID()}`,
       p_name: input.name,
@@ -3823,10 +3833,13 @@ export function v1Routes(deps: Deps) {
       .in('status', ['running', 'queued'])
       .order('started_at', { ascending: false });
 
-    if (error) {
-      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    if (error || !Array.isArray(data)) {
+      return c.json(
+        { error: { code: 'query_failed', message: 'Unable to read active agent runs.' } },
+        503,
+      );
     }
-    return c.json({ active_runs: data ?? [] });
+    return c.json({ active_runs: data });
   });
 
   app.post('/agents/:name/run', async (c) => {

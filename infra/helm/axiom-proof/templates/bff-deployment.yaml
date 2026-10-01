@@ -49,6 +49,36 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: service-key
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: anon-key
+            - name: SUPABASE_STATUTORY_PROOF_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: statutory-proof-writer-key
+            - name: SUPABASE_ARCHIVE_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: archive-writer-key
+            - name: SUPABASE_HUMAN_ACTION_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: human-action-writer-key
+            - name: SUPABASE_EVIDENCE_INGESTION_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: evidence-ingestion-writer-key
+            - name: SUPABASE_AGENT_LEDGER_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: agent-ledger-writer-key
             - name: AWS_REGION
               value: {{ .Values.config.awsRegion }}
             - name: MODEL_GATEWAY_URL
@@ -125,10 +155,17 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.bff.resources | nindent 12 }}
+          volumeMounts:
+            - name: report-tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: report-tmp
+          emptyDir:
+            sizeLimit: 256Mi
       automountServiceAccountToken: false

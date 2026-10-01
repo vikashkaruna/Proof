@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
@@ -31,6 +32,10 @@ vi.hoisted(() => {
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseAdmin: () => {
+    if (!db.current) throw new Error('fake db not installed');
+    return refuseMovedProofRpcs(db.current.client);
+  },
+  createHumanActionWriter: () => {
     if (!db.current) throw new Error('fake db not installed');
     return db.current.client;
   },

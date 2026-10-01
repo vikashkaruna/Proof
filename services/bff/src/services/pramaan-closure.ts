@@ -1,22 +1,24 @@
 /**
- * Pramaan Statutory Closure & Proof Attestation Service.
- * Implements closure dossier synthesis, founder sealing with Gold ProofSeal,
- * dossier retrieval, and email dispatch audit log (W12 / W14 / Option B).
+ * Pramaan dossier router. Supported report kinds require exact released source
+ * and PDF versions; historical source-free rows and outbound dispatch stay closed.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BRAND } from '@axiom/config';
 import { DossierTypeSchema, type DossierType, type PramaanDossier } from '@axiom/types';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
-import { sendReportDispatchEmail } from './report-dispatch-email.js';
+import { accessFor } from './evidence-pack-records.js';
+import { PramaanArtifactService } from './pramaan-artifacts.js';
+import { PramaanAuditorArtifactService } from './pramaan-auditor-artifacts.js';
+import { PramaanTechnicalArtifactService } from './pramaan-technical-artifacts.js';
+import { PramaanDpbArtifactService } from './pramaan-dpb-artifacts.js';
 
 export const synthesizeDossierInputSchema = z
   .object({
-    engagementId: z.string().uuid(),
+    engagementId: z.string().uuid().nullable(),
     dossierType: DossierTypeSchema,
     title: z.string().trim().min(1).max(300),
-    reportId: z.string().uuid().optional(),
-    metadata: z.record(z.string(), z.unknown()).default({}),
+    reportId: z.string().uuid(),
+    operationKey: z.string().uuid(),
   })
   .strict();
 
@@ -56,189 +58,135 @@ export const dispatchReportEmailInputSchema = z
 export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSchema>;
 
 export class PramaanClosureService {
-  constructor(private readonly db: EvidenceDatabase) {}
-
-  private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.db.rpc(name, args) as unknown as {
-      abortSignal?: (sig: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
-    };
-    const { data, error } =
-      signal && typeof query?.abortSignal === 'function'
-        ? await query.abortSignal(signal)
-        : await (query as unknown as Promise<{ data: unknown; error: unknown }>);
-
-    if (error) {
-      throw new EvidenceError('closure_storage_unavailable', 503);
-    }
-    return data as Record<string, unknown>;
+  readonly artifacts: PramaanArtifactService;
+  readonly auditorArtifacts: PramaanAuditorArtifactService;
+  readonly technicalArtifacts: PramaanTechnicalArtifactService;
+  readonly dpbArtifacts: PramaanDpbArtifactService;
+  constructor(
+    private readonly db: EvidenceDatabase,
+    writerDb?: EvidenceDatabase,
+  ) {
+    this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
+    this.auditorArtifacts = new PramaanAuditorArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
+    this.technicalArtifacts = new PramaanTechnicalArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
+    this.dpbArtifacts = new PramaanDpbArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
   }
 
-  /**
-   * Synthesizes a statutory closure dossier in DRAFT status.
-   * Calculates cryptographic Merkle root, manifest hash, and Gold ProofSeal hash.
-   */
+  private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {
+    const access = await accessFor(this.db, tenantId, actorId, signal);
+    if (!access.founder) throw new EvidenceError('dossier_not_found', 404);
+  }
+
+  async listMyBuilds(tenantId: string, actorId: string, signal?: AbortSignal) {
+    const [board, auditor, technical, dpb] = await Promise.all([
+      this.artifacts.mine(tenantId, actorId, signal),
+      this.auditorArtifacts.mine(tenantId, actorId, signal),
+      this.technicalArtifacts.mine(tenantId, actorId, signal),
+      this.dpbArtifacts.mine(tenantId, actorId, signal),
+    ]);
+    return {
+      builds: [...board.builds, ...auditor.builds, ...technical.builds, ...dpb.builds].sort(
+        (a, b) => b.createdAt.localeCompare(a.createdAt),
+      ),
+    };
+  }
+
+  /** Each supported dossier kind requires published, exact-version source artifacts. */
   async synthesizeDossier(
     tenantId: string,
     actorId: string,
     input: SynthesizeDossierInput,
-    correlationId: string = randomUUID(),
+    _correlationId: string = randomUUID(),
     signal?: AbortSignal,
-  ): Promise<PramaanDossier> {
-    const timestamp = new Date().toISOString();
-
-    // Deterministic cryptographic hash generation
-    const manifestPayload = JSON.stringify({
-      tenantId,
-      engagementId: input.engagementId,
-      reportId: input.reportId ?? null,
-      dossierType: input.dossierType,
-      title: input.title,
-      synthesizedAt: timestamp,
-      synthesizedByAgent: 'pramaan',
-      metadata: input.metadata,
-      branding: {
-        company: BRAND.company,
-        website: BRAND.companyDomain,
-        product: BRAND.name,
-        domain: `https://${BRAND.primaryDomain}`,
-        tagline: BRAND.tagline,
-      },
-    });
-
-    const manifestHash = createHash('sha256').update(manifestPayload, 'utf8').digest('hex');
-    const merkleRoot = createHash('sha256')
-      .update(`${manifestHash}:${input.engagementId}:${input.dossierType}`, 'utf8')
-      .digest('hex');
-    const proofSealHash = createHash('sha256')
-      .update(`proof_seal:${tenantId}:${merkleRoot}:${manifestHash}`, 'utf8')
-      .digest('hex');
-
-    const dossierId = randomUUID();
-
-    const insertQuery = this.db.from('pramaan_dossiers').insert({
-      id: dossierId,
-      tenant_id: tenantId,
-      engagement_id: input.engagementId,
-      report_id: input.reportId ?? null,
-      dossier_type: input.dossierType,
-      title: input.title,
-      status: 'draft',
-      merkle_root: merkleRoot,
-      manifest_hash: manifestHash,
-      proof_seal_hash: proofSealHash,
-      metadata: input.metadata,
-      created_at: timestamp,
-      updated_at: timestamp,
-    });
-
-    const insertWithSignal =
-      signal &&
-      typeof (insertQuery as unknown as { abortSignal?: (s: AbortSignal) => unknown })
-        .abortSignal === 'function'
-        ? (
-            insertQuery as unknown as { abortSignal: (s: AbortSignal) => typeof insertQuery }
-          ).abortSignal(signal)
-        : insertQuery;
-
-    const { error: insertError } = await (insertWithSignal as unknown as Promise<{
-      error: unknown;
-    }>);
-    if (insertError) {
-      throw new EvidenceError('closure_storage_unavailable', 503);
-    }
-
-    // Append draft action to immutable ledger
-    try {
-      await this.rpc(
-        'append_ledger',
-        {
-          p_tenant_id: tenantId,
-          p_correlation_id: correlationId,
-          p_actor_type: 'agent',
-          p_actor_id: 'pramaan',
-          p_action_type: 'closure.pramaan.drafted',
-          p_target_id: dossierId,
-          p_result: 'success',
-          p_payload: {
-            dossier_id: dossierId,
-            engagement_id: input.engagementId,
-            dossier_type: input.dossierType,
-            title: input.title,
-            merkle_root: merkleRoot,
-            proof_seal_hash: proofSealHash,
-          },
-        },
+  ) {
+    if (input.dossierType === 'dpb_statutory')
+      return this.dpbArtifacts.create(tenantId, actorId, input, signal);
+    if (input.engagementId === null) throw new EvidenceError('source_bound_dossier_required', 409);
+    if (input.dossierType === 'auditor_assurance')
+      return this.auditorArtifacts.create(
+        tenantId,
+        actorId,
+        { ...input, engagementId: input.engagementId },
         signal,
       );
-    } catch {
-      // Non-blocking if append_ledger rpc wrapper handled in database
-    }
-
-    return {
-      id: dossierId,
+    if (input.dossierType === 'technical_register')
+      return this.technicalArtifacts.create(
+        tenantId,
+        actorId,
+        { ...input, engagementId: input.engagementId },
+        signal,
+      );
+    return this.artifacts.create(
       tenantId,
-      engagementId: input.engagementId,
-      reportId: input.reportId ?? null,
-      dossierType: input.dossierType,
-      title: input.title,
-      status: 'draft',
-      merkleRoot,
-      manifestHash,
-      archiveHash: null,
-      archiveBytes: null,
-      proofSealHash,
-      sealedAt: null,
-      sealedBy: null,
-      metadata: input.metadata,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+      actorId,
+      { ...input, engagementId: input.engagementId },
+      signal,
+    );
   }
 
-  /**
-   * Seals a dossier under Founder Authority using seal_pramaan_dossier RPC.
-   */
+  /** Historical rows cannot enter this source-bound seal path. */
   async sealDossier(
     tenantId: string,
     actorId: string,
     dossierId: string,
     input: SealDossierInput,
-    correlationId: string = randomUUID(),
+    _correlationId: string = randomUUID(),
     signal?: AbortSignal,
-  ): Promise<{ dossierId: string; status: 'sealed'; sealedAt: string }> {
-    const sealRes = await this.rpc(
-      'seal_pramaan_dossier',
-      {
-        p_tenant_id: tenantId,
-        p_dossier_id: dossierId,
-        p_sealed_by: actorId,
-        p_expected_proof_seal: input.expectedProofSeal,
-        p_correlation_id: correlationId,
-      },
-      signal,
-    );
+  ) {
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
+  }
 
-    if (sealRes.error) {
-      if (sealRes.error === 'founder_authority_required') {
-        throw new EvidenceError('founder_authority_required', 403);
-      }
-      if (sealRes.error === 'dossier_not_found') {
-        throw new EvidenceError('dossier_not_found', 404);
-      }
-      if (sealRes.error === 'already_sealed') {
-        throw new EvidenceError('already_sealed', 409);
-      }
-      if (sealRes.error === 'proof_seal_mismatch') {
-        throw new EvidenceError('proof_seal_mismatch', 400);
-      }
-      throw new EvidenceError('invalid_request', 400);
-    }
+  async reconcileDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    operationKey: string,
+    signal?: AbortSignal,
+  ) {
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.reconcile(tenantId, actorId, dossierId, operationKey, signal);
+  }
 
-    return {
-      dossierId,
-      status: 'sealed',
-      sealedAt: (sealRes.sealedAt as string) || new Date().toISOString(),
-    };
+  async retryMissingDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    operationKey: string,
+    signal?: AbortSignal,
+  ) {
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
+  }
+
+  async getDossierArchive(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    signal?: AbortSignal,
+  ) {
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.archive(tenantId, actorId, dossierId, signal);
+  }
+
+  private async artifactFor(tenantId: string, dossierId: string, signal?: AbortSignal) {
+    if (await this.auditorArtifacts.owns(tenantId, dossierId, signal)) return this.auditorArtifacts;
+    if (await this.technicalArtifacts.owns(tenantId, dossierId, signal))
+      return this.technicalArtifacts;
+    if (await this.dpbArtifacts.owns(tenantId, dossierId, signal)) return this.dpbArtifacts;
+    return this.artifacts;
   }
 
   /**
@@ -246,9 +194,12 @@ export class PramaanClosureService {
    */
   async getDossier(
     tenantId: string,
+    actorId: string,
     dossierId: string,
     signal?: AbortSignal,
   ): Promise<PramaanDossier> {
+    const access = await accessFor(this.db, tenantId, actorId, signal);
+    if (!access.manager) throw new EvidenceError('dossier_not_found', 404);
     const query = this.db
       .from('pramaan_dossiers')
       .select('*')
@@ -280,11 +231,13 @@ export class PramaanClosureService {
     if (res.error) throw new EvidenceError('closure_storage_unavailable', 503);
     const row = Array.isArray(res.data) ? res.data[0] : res.data;
     if (!row) throw new EvidenceError('dossier_not_found', 404);
-
+    const source = await (
+      await this.artifactFor(tenantId, dossierId, signal)
+    ).status(tenantId, actorId, dossierId, signal);
     return {
       id: row.id as string,
       tenantId: row.tenant_id as string,
-      engagementId: row.engagement_id as string,
+      engagementId: (row.engagement_id as string) ?? null,
       reportId: (row.report_id as string) ?? null,
       dossierType: row.dossier_type as DossierType,
       title: row.title as string,
@@ -299,6 +252,7 @@ export class PramaanClosureService {
       metadata: (row.metadata as Record<string, unknown>) ?? {},
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
+      ...source,
     };
   }
 
@@ -307,9 +261,11 @@ export class PramaanClosureService {
    */
   async listDossiers(
     tenantId: string,
+    actorId: string,
     input: ListDossiersInput,
     signal?: AbortSignal,
   ): Promise<{ dossiers: PramaanDossier[]; total: number }> {
+    await this.assertHistoricalReader(tenantId, actorId, signal);
     let query = this.db
       .from('pramaan_dossiers')
       .select('*', { count: 'exact' })
@@ -343,11 +299,12 @@ export class PramaanClosureService {
     }>);
 
     if (error) throw new EvidenceError('closure_storage_unavailable', 503);
+    await this.assertHistoricalReader(tenantId, actorId, signal);
 
     const dossiers: PramaanDossier[] = (data ?? []).map((row) => ({
       id: row.id as string,
       tenantId: row.tenant_id as string,
-      engagementId: row.engagement_id as string,
+      engagementId: (row.engagement_id as string) ?? null,
       reportId: (row.report_id as string) ?? null,
       dossierType: row.dossier_type as DossierType,
       title: row.title as string,
@@ -367,94 +324,14 @@ export class PramaanClosureService {
     return { dossiers, total: count ?? dossiers.length };
   }
 
-  /**
-   * Dispatches a compliance report or statutory closure dossier via email
-   * and records immutable audit ledger entry.
-   */
+  /** External dispatch is closed until the selected artifact is source-bound and retained. */
   async dispatchReportEmail(
-    tenantId: string,
-    actorId: string,
-    input: DispatchReportEmailInput,
-    correlationId: string = randomUUID(),
-    signal?: AbortSignal,
+    _tenantId: string,
+    _actorId: string,
+    _input: DispatchReportEmailInput,
+    _correlationId: string = randomUUID(),
+    _signal?: AbortSignal,
   ): Promise<{ dispatchId: string; status: 'sent' | 'simulated'; providerMessageId?: string }> {
-    let title = 'Axiom Proof Compliance Report';
-    let kind = 'compliance_report';
-    let summary = 'Attached is the official compliance report issued under DPDPA framework.';
-    let proofSealHash: string | undefined;
-    let merkleRoot: string | undefined;
-    let reportUrl = 'https://app.axiomproof.ai/reports';
-
-    if (input.dossierId) {
-      const dossier = await this.getDossier(tenantId, input.dossierId, signal);
-      title = dossier.title;
-      kind = `statutory_dossier_${dossier.dossierType}`;
-      summary = `Authoritative DPDPA Statutory Closure Dossier (${dossier.dossierType.replace(/_/g, ' ')}). Status: ${dossier.status.toUpperCase()}.`;
-      proofSealHash = dossier.proofSealHash;
-      merkleRoot = dossier.merkleRoot;
-      reportUrl = `https://app.axiomproof.ai/reports?dossierId=${dossier.id}`;
-    } else if (input.reportId) {
-      const repQuery = this.db
-        .from('reports')
-        .select('id, title, kind')
-        .eq('tenant_id', tenantId)
-        .eq('id', input.reportId);
-
-      const res = await (repQuery as unknown as Promise<{
-        data: { id: string; title: string; kind: string }[] | null;
-        error: unknown;
-      }>);
-
-      if (!res.error && res.data && res.data[0]) {
-        title = res.data[0].title;
-        kind = res.data[0].kind;
-        summary = `DPDPA Statutory Compliance Report (${kind.toUpperCase()}).`;
-        reportUrl = `https://app.axiomproof.ai/reports?reportId=${input.reportId}`;
-      }
-    }
-
-    // Dispatch via server-side Resend service with strict brand origin
-    const emailResult = await sendReportDispatchEmail({
-      recipientEmail: input.recipientEmail,
-      title,
-      kind,
-      summary,
-      reportId: input.reportId,
-      dossierId: input.dossierId,
-      reportUrl,
-      proofSealHash,
-      merkleRoot,
-      notes: input.notes,
-    });
-
-    if (emailResult.status === 'failed') {
-      throw new EvidenceError(emailResult.error || 'email_dispatch_failed', 503);
-    }
-
-    // Record audit dispatch row via RPC
-    const recordRes = await this.rpc(
-      'record_report_email_dispatch',
-      {
-        p_tenant_id: tenantId,
-        p_report_id: input.reportId ?? null,
-        p_dossier_id: input.dossierId ?? null,
-        p_recipient_email: input.recipientEmail,
-        p_subject: `[Axiom Proof] ${proofSealHash ? 'Sealed Statutory Closure Dossier' : 'Compliance Report'}: ${title}`,
-        p_external_id: emailResult.providerMessageId ?? 'simulated',
-        p_dispatched_by: actorId,
-        p_correlation_id: correlationId,
-      },
-      signal,
-    );
-
-    if (recordRes.error) {
-      throw new EvidenceError('dispatch_audit_failed', 500);
-    }
-
-    return {
-      dispatchId: (recordRes.dispatchId as string) || randomUUID(),
-      status: emailResult.status,
-      providerMessageId: emailResult.providerMessageId,
-    };
+    throw new EvidenceError('source_bound_dispatch_required', 409);
   }
 }

@@ -86,6 +86,25 @@ describe('Board Report Contracts & Renderer', () => {
     expect(html).toContain('1111111111111111111111111111111111111111111111111111111111111111');
   });
 
+  it('labels a deterministic board draft without claiming agent authority', () => {
+    const report: BoardReportContentV1 = {
+      ...sampleReport,
+      signatures: {
+        prepared_by: {
+          name: 'Axiom Proof board report builder',
+          role: 'Deterministic assessment renderer',
+          agent: 'board-report-builder',
+        },
+        approved_by: null,
+      },
+    };
+    const html = renderBoardReportHtml(report);
+    expect(html).toContain('AUTOMATED DRAFT');
+    expect(html).toContain('Requires founder review before release');
+    expect(html).not.toContain('PREPARED BY AGENT');
+    expect(html).not.toContain('Agent: board-report-builder');
+  });
+
   it('renders approved signature block when approved_by is present', () => {
     const approvedReport: BoardReportContentV1 = {
       ...sampleReport,
@@ -100,9 +119,22 @@ describe('Board Report Contracts & Renderer', () => {
       },
     };
     const html = renderBoardReportHtml(approvedReport);
-    expect(html).toContain('APPROVED &amp; RELEASED');
+    expect(html).toContain('REVIEWER APPROVAL RECORDED');
     expect(html).toContain('Axiom Founder');
-    expect(html).toContain('SEALED PROOF');
+    expect(html).toContain('REVIEWED');
+  });
+
+  it('retains findings beyond the previous 50-control ceiling', () => {
+    const report: BoardReportContentV1 = {
+      ...sampleReport,
+      key_findings: Array.from({ length: 51 }, (_, index) => ({
+        ...sampleReport.key_findings[0]!,
+        control_id: `CONTROL-${index + 1}`,
+      })),
+    };
+    const html = renderBoardReportHtml(report);
+    expect(html).toContain('CONTROL-51');
+    expect(BoardReportContentV1Schema.parse(report).key_findings).toHaveLength(51);
   });
 
   it('renders compliant PDF bytes using deterministic engine', async () => {
@@ -112,6 +144,17 @@ describe('Board Report Contracts & Renderer', () => {
     expect(res.byteLength).toBeGreaterThan(500);
     expect(res.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(res.pdfBuffer.toString('utf-8', 0, 8)).toContain('%PDF-1.4');
+    expect(res.pdfBuffer.toString('utf-8')).toContain('Storage retention is not verified');
+    expect(res.pdfBuffer.toString('utf-8')).not.toContain('Retention locked');
+  });
+
+  it('refuses a text-only fallback for an artifact requiring Chromium', async () => {
+    await expect(
+      renderHtmlToPdf(renderBoardReportHtml(sampleReport), {
+        preferChromium: false,
+        requireChromium: true,
+      }),
+    ).rejects.toThrow('Chromium is required');
   });
 
   it('renders compliant PDF bytes using headless Chromium when available', async () => {

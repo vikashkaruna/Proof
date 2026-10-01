@@ -77,6 +77,14 @@ const EnvFields = z.object({
     .default(
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU',
     ),
+  // BFF-only PostgREST credential for exact statutory proof RPCs. Never share
+  // this role with agent-runtime or workers holding the generic service key.
+  SUPABASE_STATUTORY_PROOF_WRITER_KEY: z.string().optional(),
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: z.string().optional(),
+  SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: z.string().optional(),
+  // Scoped to public.append_agent_ledger (agent/system events only). Held by
+  // the agent runtime and by the BFF for connector-broker agent events.
+  SUPABASE_AGENT_LEDGER_WRITER_KEY: z.string().optional(),
   SUPABASE_DB_URL: z.string().url().optional(),
 
   // Cloud-Agnostic Storage & Evidence Vault (GCS / AWS S3 / MinIO / On-Prem)
@@ -672,24 +680,6 @@ export function isAuthBypassEnabled(source: NodeJS.ProcessEnv = process.env): bo
   return resolveAuthMode(source) === 'e2e-bypass';
 }
 
-/** Brand constants — the single source of truth. */
-export const BRAND = {
-  name: 'Axiom Proof',
-  fullName: 'Axiom Proof — by Axiom Minds',
-  tagline: 'Agents do the work. You approve. The proof is automatic.',
-  company: 'Axiom Minds Private Limited',
-  website: 'https://axiomminds.ai',
-  primaryDomain: 'axiomproof.ai',
-  productDomain: 'app.axiomproof.ai',
-  companyDomain: 'axiomminds.ai',
-  contactEmail: 'hello@axiomminds.ai',
-  salesEmail: 'sales@axiomproof.ai',
-  founderEmail: 'founder@axiomminds.ai',
-  platformEmail: 'platform@axiomproof.ai',
-  privacyEmail: 'privacy@axiomminds.ai',
-  copyright: `© ${new Date().getFullYear()} Axiom Minds Private Limited. All rights reserved.`,
-  jurisdiction: 'India',
-  dataResidencyRegion: 'ap-south-1',
-} as const;
+export { BRAND } from './brand';
 
 export * from './license';

@@ -19,8 +19,19 @@ export class SqlConnectorRefused extends Error {
   }
 }
 
+export interface RedactedScanResult {
+  resource: string;
+  processedRows: number;
+  pages: number;
+  complete: boolean;
+  fields: ReturnType<typeof profileField>[];
+}
+
 const MAX_TABLES = 500;
 const MAX_SAMPLE = 200;
+const MAX_SCAN_ROWS = 1_000_000;
+const MAX_SCAN_PAGE = 1_000;
+const MAX_SCAN_COLUMNS = 32;
 const STATEMENT_TIMEOUT_MS = 5000;
 const RESOURCE = /^([a-z_][a-z0-9_$]{0,62})\.([a-z_][a-z0-9_$]{0,62})$/;
 // A catalogue cursor is the last "schema.table" returned, never SQL.
@@ -165,6 +176,108 @@ export class PostgresReadConnector implements ReadConnector {
         return { column: field, ...profile };
       });
       return { records };
+    });
+  }
+
+  /** Process a bounded PostgreSQL relation inside one least-privilege read-only
+   * transaction. Only aggregate value-shape counts leave this adapter: neither
+   * source rows nor the internal primary-key cursor are returned. This is an
+   * internal processing primitive, not the public raw `read` capability. */
+  async scanRedacted(
+    context: ConnectorInvocation,
+    resource: string,
+    maxRows: number,
+    pageSize: number,
+  ): Promise<RedactedScanResult> {
+    const match = RESOURCE.exec(resource);
+    if (!match) throw new SqlConnectorRefused('resource');
+    if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > MAX_SCAN_ROWS)
+      throw new SqlConnectorRefused('max_rows');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_SCAN_PAGE)
+      throw new SqlConnectorRefused('page_size');
+    const [, schema, table] = match as unknown as [string, string, string];
+    return this.withReadOnly(context, async (session) => {
+      const { rows: keys } = await session.query(
+        `select a.attname as name from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+         join pg_index i on i.indrelid = c.oid and i.indisprimary and i.indisvalid
+           and i.indnkeyatts = 1
+         join pg_attribute a on a.attrelid = c.oid and a.attnum = i.indkey[0]
+         where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+           and a.atttypid in ('int2'::regtype, 'int4'::regtype, 'int8'::regtype)
+           and has_schema_privilege(n.oid, 'USAGE')
+           and has_column_privilege(c.oid, a.attnum, 'SELECT')`,
+        [schema, table],
+      );
+      if (keys.length !== 1 || typeof keys[0]?.name !== 'string')
+        throw new SqlConnectorRefused('scan_key');
+      const key = keys[0].name;
+      const { rows: columns } = await session.query(
+        `select a.attname as name,
+           t.typnamespace = 'pg_catalog'::regnamespace
+             and (t.typcategory in ('S','N','D','B','I') or t.oid = 'uuid'::regtype)
+             as supported
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+         join pg_type t on t.oid = a.atttypid
+         where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+           and has_schema_privilege(n.oid, 'USAGE')
+           and has_column_privilege(c.oid, a.attnum, 'SELECT')
+         order by a.attnum`,
+        [schema, table],
+      );
+      if (
+        columns.length < 1 ||
+        columns.length > MAX_SCAN_COLUMNS ||
+        columns.some((column) => column.supported !== true)
+      )
+        throw new SqlConnectorRefused('scan_columns');
+      const names = columns.map((column) => String(column.name));
+      const fields = names.map((name) => profileField(name, []));
+      let lastKey: string | null = null;
+      let processedRows = 0;
+      let pages = 0;
+      let complete = false;
+      while (processedRows < maxRows) {
+        if (Date.parse(context.deadline) <= this.now()) throw new SqlConnectorRefused('deadline');
+        const take = Math.min(pageSize, maxRows - processedRows);
+        const { rows } = await session.query(
+          `select ${quoteIdent(key)}::text as __scan_key,
+             ${names.map((name, index) => `left(${quoteIdent(name)}::text, 512) as c${index}`).join(', ')}
+           from ${quoteIdent(schema)}.${quoteIdent(table)}
+           ${lastKey === null ? '' : `where ${quoteIdent(key)} > $1::bigint`}
+           order by ${quoteIdent(key)} limit ${take + 1}`,
+          lastKey === null ? [] : [lastKey],
+        );
+        const page = rows.slice(0, take);
+        if (page.length === 0) {
+          complete = true;
+          break;
+        }
+        pages += 1;
+        for (const [index, name] of names.entries()) {
+          const count = profileField(
+            name,
+            page.map((row) => row[`c${index}`]),
+          );
+          const field = fields[index]!;
+          field.sampled += count.sampled;
+          field.nonNull += count.nonNull;
+          for (const [shape, matches] of Object.entries(count.detected))
+            field.detected[shape] = (field.detected[shape] ?? 0) + matches;
+        }
+        processedRows += page.length;
+        const cursor = page.at(-1)?.__scan_key;
+        if (typeof cursor !== 'string' || !/^-?\d{1,19}$/.test(cursor))
+          throw new SqlConnectorRefused('scan_key');
+        lastKey = cursor;
+        if (rows.length <= take) {
+          complete = true;
+          break;
+        }
+      }
+      if (Date.parse(context.deadline) <= this.now()) throw new SqlConnectorRefused('deadline');
+      return { resource, processedRows, pages, complete, fields };
     });
   }
 

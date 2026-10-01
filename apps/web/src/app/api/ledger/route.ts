@@ -1,60 +1,52 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requireTenantContext } from '@/lib/tenant-context';
+import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  // Let the shared session/tenant gate redirect or refuse on its own terms.
+  // Catching that control flow below would turn an auth failure into a 500.
+  const { supabase, tenantId } = await requireTenantContext();
   try {
     const { searchParams } = new URL(request.url);
     // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
     // by design, and these queries carried no tenant filter, so any
     // authenticated user saw every tenant's data. The client below is
     // user-scoped: RLS applies, and the explicit filters state the intent.
-    const { supabase, tenantId } = await requireTenantContext();
 
     const isExport = searchParams.get('export') === 'true';
     const agent = searchParams.get('agent');
     const action = searchParams.get('action');
     const result = searchParams.get('result');
     const q = searchParams.get('q')?.trim();
+    if (q && !isSafeLedgerSearch(q)) {
+      return NextResponse.json({ error: 'Invalid ledger search query' }, { status: 400 });
+    }
 
-    // Resolve tenant identifier from query params, headers, or active tenant cookie
+    // The session membership gate selects the tenant. An explicit tenant must match it.
     const requestedTenantId =
       searchParams.get('tenantId') ||
       searchParams.get('tenant_id') ||
-      request.headers.get('x-tenant-id') ||
-      request.cookies.get('axiom_active_tenant')?.value;
-
-    let targetTenant: { id: string; name: string; slug: string } | null = null;
-    if (requestedTenantId) {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        requestedTenantId,
-      );
-      const query = supabase.from('tenants').select('id, name, slug');
-      const { data } = isUuid
-        ? await query.eq('id', requestedTenantId).maybeSingle()
-        : await query.eq('slug', requestedTenantId).maybeSingle();
-      if (data) {
-        targetTenant = data;
-      }
+      request.headers.get('x-tenant-id');
+    if (requestedTenantId && requestedTenantId !== tenantId) {
+      return NextResponse.json({ error: 'Tenant mismatch' }, { status: 403 });
     }
 
-    if (!targetTenant) {
-      const { data } = await supabase
-        .from('tenants')
-        .select('id, name, slug')
-        .limit(1)
-        .maybeSingle();
-      if (data) {
-        targetTenant = data;
-      }
-    }
+    const { data: targetTenant } = await supabase
+      .from('tenants')
+      .select('id, name, slug')
+      .eq('id', tenantId)
+      .maybeSingle();
 
     // ─── AUDITOR EXPORT HANDLER ──────────────────────────────────────────────
     if (isExport) {
+      if (!targetTenant) {
+        return NextResponse.json({ error: 'Unable to verify the export tenant' }, { status: 503 });
+      }
       let exportQuery = supabase
         .from('audit_ledger')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('tenant_id', tenantId)
         .order('sequence_no', { ascending: true })
         .limit(5000);
@@ -92,52 +84,61 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const { data: records, error: exportError } = await exportQuery;
+      const { data: records, count: availableRecordCount, error: exportError } = await exportQuery;
       if (exportError) {
         return NextResponse.json({ error: exportError.message }, { status: 500 });
+      }
+      if (
+        !Array.isArray(records) ||
+        typeof availableRecordCount !== 'number' ||
+        !Number.isInteger(availableRecordCount) ||
+        availableRecordCount < 0
+      ) {
+        return NextResponse.json({ error: 'Ledger export source is unavailable' }, { status: 503 });
       }
 
       // Verify chain integrity for the target tenant
       let chainIntact = true;
       let firstBreak = null;
-      if (targetTenant?.id) {
-        const { data: verifyData } = await supabase.rpc('verify_ledger', {
-          p_tenant_id: targetTenant.id,
-          p_from_sequence: 1,
-        });
-        if (verifyData && verifyData.length > 0) {
-          chainIntact = false;
-          firstBreak = verifyData[0];
-        }
+      const { data: verifyData, error: verifyError } = await supabase.rpc('verify_ledger', {
+        p_tenant_id: targetTenant.id,
+        p_from_sequence: 1,
+      });
+      if (verifyError || !Array.isArray(verifyData)) {
+        return NextResponse.json({ error: 'Ledger verification is unavailable' }, { status: 503 });
+      }
+      if (verifyData.length > 0) {
+        chainIntact = false;
+        firstBreak = verifyData[0];
       }
 
-      const entriesList = records || [];
-      const genesisRecord = entriesList[0];
-      const headRecord = entriesList[entriesList.length - 1];
+      const entriesList = records;
+      const firstExportedRecord = entriesList[0];
+      const lastExportedRecord = entriesList[entriesList.length - 1];
 
       const auditBundle = {
         export_metadata: {
-          standard: 'Digital Personal Data Protection Act (DPDPA), 2023 — Statutory Audit Trail',
-          legal_framework: 'DPDPA 2023 § 8(5) & ISO/IEC 27001:2022 Control A.8.15',
-          cryptographic_specification: 'SHA-256 genesis-linked append-only ledger (ADR-5)',
+          format: 'Axiom Proof audit ledger export',
+          cryptographic_specification: 'SHA-256 hash-chain verification (ADR-5)',
           platform: 'Axiom Proof — Agentic DPDPA Compliance Platform',
           exported_at: new Date().toISOString(),
           tenant: {
-            id: targetTenant?.id || '00000000-0000-0000-0000-000000000001',
-            name: targetTenant?.name || 'Organization',
-            slug: targetTenant?.slug || 'org',
+            id: targetTenant.id,
+            name: targetTenant.name,
+            slug: targetTenant.slug,
           },
           chain_integrity: {
             status: chainIntact ? 'intact' : 'broken',
             verified: chainIntact,
-            total_entries_verified: entriesList.length,
+            scope: 'full tenant ledger from genesis',
             first_break: firstBreak,
-            genesis_sequence: genesisRecord?.sequence_no ?? 1,
-            head_sequence: headRecord?.sequence_no ?? 0,
-            genesis_hash: genesisRecord?.entry_hash || genesisRecord?.prev_entry_hash || null,
-            head_hash: headRecord?.entry_hash || null,
           },
           total_records: entriesList.length,
+          total_records_available: availableRecordCount,
+          export_truncated:
+            availableRecordCount === null || availableRecordCount > entriesList.length,
+          first_exported_sequence: firstExportedRecord?.sequence_no ?? null,
+          last_exported_sequence: lastExportedRecord?.sequence_no ?? null,
         },
         records: entriesList.map((e) => ({
           sequence_no: e.sequence_no,
@@ -172,7 +173,7 @@ export async function GET(request: NextRequest) {
       };
 
       const dateStr = new Date().toISOString().slice(0, 10);
-      const filename = `axiom-proof-audit-ledger-${targetTenant?.slug || 'meridian'}-${dateStr}.json`;
+      const filename = `axiom-proof-audit-ledger-${targetTenant.slug}-${dateStr}.json`;
 
       return new NextResponse(JSON.stringify(auditBundle, null, 2), {
         status: 200,
@@ -185,8 +186,8 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── PAGINATED QUERY HANDLER ─────────────────────────────────────────────
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.min(100, Math.max(5, parseInt(searchParams.get('limit') || '25', 10)));
+    const page = ledgerPageNumber(searchParams.get('page'), 1, 1_000_000);
+    const limit = Math.max(5, ledgerPageNumber(searchParams.get('limit'), 25, 100));
 
     let query = supabase
       .from('audit_ledger')
@@ -234,10 +235,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const totalMatching = count ?? (data?.length || 0);
+    if (
+      !Array.isArray(data) ||
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 0
+    ) {
+      return NextResponse.json({ error: 'Ledger records are unavailable' }, { status: 503 });
+    }
+
+    const totalMatching = count;
     const totalPages = Math.max(1, Math.ceil(totalMatching / limit));
 
-    const entries = (data || []).map((e) => ({
+    const entries = data.map((e) => ({
       id: String(e.id),
       seq: e.sequence_no,
       type: e.action_type || 'system.audit',
@@ -248,19 +258,21 @@ export async function GET(request: NextRequest) {
             hour: '2-digit',
             minute: '2-digit',
           })
-        : '11:42',
-      corr: e.correlation_id ? `cr-${e.correlation_id.slice(0, 4)}` : 'cr-118',
-      fullCorr: e.correlation_id || 'cr-118',
-      target: e.target_ref || 'pg.prod · kyc_documents',
+        : 'Unknown time',
+      corr: e.correlation_id ? `cr-${e.correlation_id.slice(0, 4)}` : 'No correlation ID',
+      fullCorr: e.correlation_id || '',
+      target: e.target_ref || 'No target recorded',
       entryHash: e.entry_hash
         ? `${e.entry_hash.slice(0, 4)}…${e.entry_hash.slice(-3)}`
-        : 'a3f0…9c1',
+        : 'Unavailable',
       fullEntryHash: e.entry_hash || '',
-      prevHash: e.prev_hash ? `${e.prev_hash.slice(0, 4)}…${e.prev_hash.slice(-3)}` : '0000…000',
-      fullPrevHash: e.prev_hash || '',
-      result: e.result || 'success',
+      prevHash: e.prev_entry_hash
+        ? `${e.prev_entry_hash.slice(0, 4)}…${e.prev_entry_hash.slice(-3)}`
+        : 'Genesis or unavailable',
+      fullPrevHash: e.prev_entry_hash || '',
+      result: e.result || 'unknown',
       detail: e.detail,
-      dot: e.result === 'success' ? '#0FB5A5' : e.result === 'failure' ? '#D9534F' : '#C9A227',
+      dot: e.result === 'success' ? '#0FB5A5' : e.result === 'failure' ? '#D9534F' : '#64748B',
       actorStyle:
         e.actor_type === 'agent'
           ? 'bg-[#e6f7f5] text-[#0a8d80]'
@@ -278,7 +290,7 @@ export async function GET(request: NextRequest) {
       totalPages,
       hasMore: page < totalPages,
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Server error' }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: 'Ledger service unavailable' }, { status: 503 });
   }
 }

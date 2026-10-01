@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
@@ -64,7 +64,7 @@ async function persist(
   resultSchema: z.ZodType,
   status: 200 | 201 = 200,
 ) {
-  const { data, error } = await createSupabaseAdmin().rpc(fn, {
+  const { data, error } = await createHumanActionWriter().rpc(fn, {
     ...parameters,
     p_tenant_id: c.get('tenantId'),
     p_correlation_id: randomUUID(),

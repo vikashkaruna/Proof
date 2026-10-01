@@ -14,6 +14,7 @@ services:
     image: axiom-agent-runtime:prod
     environment:
       - ENVIRONMENT=production
+      - SUPABASE_AGENT_LEDGER_WRITER_KEY=${SUPABASE_AGENT_LEDGER_WRITER_KEY:?Set agent/BFF-only agent ledger writer JWT}
       - LOG_LEVEL=warn
     restart: always
 
@@ -23,6 +24,10 @@ services:
       - NODE_ENV=production
       - AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS=${AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS:-90}
       - ENVIRONMENT=production
+      - SUPABASE_STATUTORY_PROOF_WRITER_KEY=${SUPABASE_STATUTORY_PROOF_WRITER_KEY:?Set BFF-only statutory proof writer JWT}
+      - SUPABASE_HUMAN_ACTION_WRITER_KEY=${SUPABASE_HUMAN_ACTION_WRITER_KEY:?Set BFF-only human action writer JWT}
+      - SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=${SUPABASE_EVIDENCE_INGESTION_WRITER_KEY:?Set BFF-only evidence ingestion writer JWT}
+      - SUPABASE_AGENT_LEDGER_WRITER_KEY=${SUPABASE_AGENT_LEDGER_WRITER_KEY:?Set agent/BFF-only agent ledger writer JWT}
       - AXIOM_MFA_ENCRYPTION_KEY=${AXIOM_MFA_ENCRYPTION_KEY:?Set the distinct persistent MFA encryption key}
       - AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}
       - LOG_LEVEL=warn

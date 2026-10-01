@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   Capability,
   PrepareOnboardingProposalSchema,
@@ -39,10 +39,15 @@ export function onboardingProposalRoutes() {
         .eq('tenant_id', tenant)
         .order('created_at', { ascending: false }),
     ]);
-    if (intake.error || proposals.error)
+    if (
+      intake.error ||
+      proposals.error ||
+      !Array.isArray(intake.data) ||
+      !Array.isArray(proposals.data)
+    )
       return c.json({ error: { code: 'proposal_unavailable' } }, 503);
     return c.json({
-      data: { intake: intake.data ?? [], proposals: proposals.data ?? [] },
+      data: { intake: intake.data, proposals: proposals.data },
     });
   });
   app.post('/onboarding/proposals', async (c) => {
@@ -56,7 +61,7 @@ export function onboardingProposalRoutes() {
         },
         400,
       );
-    const { data, error } = await createSupabaseAdmin().rpc('prepare_onboarding_proposal', {
+    const { data, error } = await createHumanActionWriter().rpc('prepare_onboarding_proposal', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_estate_id: input.data.estateId,
@@ -88,7 +93,7 @@ export function onboardingProposalRoutes() {
         },
         400,
       );
-    const { data, error } = await createSupabaseAdmin().rpc('review_onboarding_proposal', {
+    const { data, error } = await createHumanActionWriter().rpc('review_onboarding_proposal', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_proposal_id: c.req.param('id'),

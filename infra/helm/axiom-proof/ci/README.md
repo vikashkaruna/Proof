@@ -12,3 +12,10 @@ was attached.
 A fixture is not an environment and holds no secrets. It exists to force a
 branch of the templates to execute. Add one whenever a template grows a
 conditional that the defaults leave cold.
+
+# Secret scope assertion
+
+For every rendered values set, pipe the chart output through
+`python3 infra/helm/axiom-proof/ci/assert-secret-scoping.py`. The check rejects
+Supabase service-role credentials in the web and marketing pods and requires
+them in the BFF and agent-runtime pods.

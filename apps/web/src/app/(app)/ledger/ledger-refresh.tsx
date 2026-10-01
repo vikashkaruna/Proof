@@ -45,7 +45,7 @@ export function LedgerRefresh({ runningCount }: LedgerRefreshProps) {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500" />
           </span>
-          Live streaming ({runningCount} active)
+          {runningCount} active run(s) reported · polling
         </span>
       )}
 

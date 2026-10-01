@@ -15,9 +15,9 @@ insert into public.connector_descriptors(id,slug,version,transport,target_bindin
 insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_binding,name,endpoint_ref,assurance) values ('41410000-0000-4000-8000-0000000000f6','41410000-0000-4000-8000-0000000000f2','41410000-0000-4000-8000-0000000000f4','41410000-0000-4000-8000-0000000000f5','production','Race','race','high');
 SQL
 archive="public.manage_estate('41410000-0000-4000-8000-0000000000f2','41410000-0000-4000-8000-0000000000f1','estate.update','41410000-0000-4000-8000-0000000000f3','{\"name\":\"Race\",\"status\":\"archived\",\"expectedVersion\":1}',gen_random_uuid())"
-enable="public.manage_connector('41410000-0000-4000-8000-0000000000f2','41410000-0000-4000-8000-0000000000f1','transition','41410000-0000-4000-8000-0000000000f6','{\"status\":\"active\",\"expectedVersion\":1}',(select manifest from public.connector_descriptors where id='41410000-0000-4000-8000-0000000000f5'),gen_random_uuid())"
+enable="public.manage_connector('41410000-0000-4000-8000-0000000000f2','41410000-0000-4000-8000-0000000000f1','transition','41410000-0000-4000-8000-0000000000f6','{\"status\":\"active\",\"expectedVersion\":1}','{\"schemaVersion\":1,\"id\":\"41410000-0000-4000-8000-0000000000f5\",\"targetBinding\":\"production\",\"assurance\":\"high\"}'::jsonb,gen_random_uuid())"
 race() {
-  sql -c "set application_name='connector-first'; begin; set local role service_role; select $1; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
+  sql -c "set application_name='connector-first'; begin; set local role human_action_writer; select $1; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
   first_pid=$!
   ready=false
   for attempt in $(seq 1 50); do
@@ -25,7 +25,7 @@ race() {
     sleep 0.05
   done
   [ "$ready" = true ] || { cat "$result_dir/first"; exit 1; }
-  sql -c "set application_name='connector-second'; set role service_role; select $2;" > "$result_dir/second" 2>&1 &
+  sql -c "set application_name='connector-second'; set role human_action_writer; select $2;" > "$result_dir/second" 2>&1 &
   second_pid=$!
   blocked=false
   for attempt in $(seq 1 30); do

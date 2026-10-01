@@ -6,7 +6,7 @@ trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
 sql -c 'create schema policy_race'
 sed '/-- POLICY_FIXTURE_READY/,$d' tests/database/dispatch-key-policy.test.sql | sed '/^begin;$/d;s/pg_temp/policy_race/g;s/71710000/73730000/g;s/policy-fixture/policy-race/g;s/policy-legacy-/policy-race-legacy-/g;s/'"'"'policy-'"'"'/'"'"'policy-race-'"'"'/g' | sql
-sql -c 'grant usage on schema policy_race to service_role;'
+sql -c 'grant usage on schema policy_race to service_role, human_action_writer;'
 sql -c 'select policy_race.publish(0,61,array[61,62]);' > /dev/null
 initial=$(sql -c 'select policy_race.fingerprint()')
 sql -c "select policy_race.queued(51,1,'$initial');" > /dev/null
@@ -17,11 +17,14 @@ barrier() {
  done
  echo 'Policy concurrency barrier not reached'; exit 1
 }
+# publish_assessment_dispatch_key_policy appends a human event (0099: human
+# writer only); enqueue/claim remain producer operations for service_role.
+role_for() { case "$1" in *publish*) echo human_action_writer;; *) echo service_role;; esac; }
 race() {
- sql -c "set application_name='policy-first'; begin; set local role service_role; $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
+ sql -c "set application_name='policy-first'; begin; set local role $(role_for "$1"); $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
  local first_pid=$!
  barrier policy-first wait_event PgSleep
- sql -c "set application_name='policy-second'; set role service_role; $2;" > "$result_dir/second" 2>&1 &
+ sql -c "set application_name='policy-second'; set role $(role_for "$2"); $2;" > "$result_dir/second" 2>&1 &
  local second_pid=$!
  barrier policy-second wait_event_type Lock
  wait "$first_pid" || { cat "$result_dir/first"; exit 1; }

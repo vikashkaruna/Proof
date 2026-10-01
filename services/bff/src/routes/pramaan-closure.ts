@@ -1,13 +1,12 @@
 /**
  * Pramaan Statutory Closure & Dispatch API Routes.
- * Implements dossier synthesis, Founder sealing, history querying,
- * and verified email dispatch (W12 / W14 / Option B).
+ * Historical dossier inspection and fail-closed source/dispatch boundaries.
  */
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -37,7 +36,11 @@ export function pramaanClosureRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new PramaanClosureService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ??
+    new PramaanClosureService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createStatutoryProofWriter(),
+    );
 
   // 1. Synthesize Statutory Closure Dossier (Pramaan Agent L1 / Authorized Manager)
   app.post('/engagements/:engagementId/closure/pramaan', async (c) => {
@@ -61,6 +64,31 @@ export function pramaanClosureRoutes(
         c.get('user').id,
         parsed.data,
         correlationId,
+        signal,
+      );
+      return c.json(result, 201);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  // DPB breach/notification packs are tenant-scoped; no engagement is inferred.
+  app.post('/closure/pramaan/dpb', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || 'engagementId' in body)
+      return invalid(c, 'DPB dossier is tenant-level');
+    const parsed = synthesizeDossierInputSchema.safeParse({ ...body, engagementId: null });
+    if (!parsed.success || parsed.data.dossierType !== 'dpb_statutory')
+      return invalid(c, 'Invalid tenant-level DPB dossier payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().synthesizeDossier(
+        c.get('tenantId'),
+        c.get('user').id,
+        parsed.data,
+        randomUUID(),
         signal,
       );
       return c.json(result, 201);
@@ -98,9 +126,82 @@ export function pramaanClosureRoutes(
     }
   });
 
+  // An ambiguous provider response never creates a second object. This route
+  // looks up only the fixed object key and settles an independently verified version.
+  app.post('/dossiers/:id/archive/reconcile', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const body = await c.req.json().catch(() => null);
+    const parsed = z.object({ operationKey: z.string().uuid() }).strict().safeParse(body);
+    if (!parsed.success) return invalid(c, 'Invalid reconciliation payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().reconcileDossier(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        parsed.data.operationKey,
+        signal,
+      );
+      return c.json(result, 200);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.post('/dossiers/:id/archive/retry-missing', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const body = await c.req.json().catch(() => null);
+    const parsed = z.object({ operationKey: z.string().uuid() }).strict().safeParse(body);
+    if (!parsed.success) return invalid(c, 'Invalid retry payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      return c.json(
+        await service().retryMissingDossier(
+          c.get('tenantId'),
+          c.get('user').id,
+          id,
+          parsed.data.operationKey,
+          signal,
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.get('/dossiers/:id/archive', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = c.req.param('id');
+    if (!z.string().uuid().safeParse(id).success) return invalid(c, 'Invalid dossier ID');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().getDossierArchive(
+        c.get('tenantId'),
+        c.get('user').id,
+        id,
+        signal,
+      );
+      c.header('Content-Type', 'application/zip');
+      c.header('X-Content-SHA256', result.sha256);
+      c.header('Content-Disposition', `attachment; filename="pramaan-${id}.zip"`);
+      return c.body(new Uint8Array(result.body));
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
   // 3. List Dossiers
   app.get('/dossiers', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
     if (denied) return denied;
 
     const query = c.req.query();
@@ -109,8 +210,25 @@ export function pramaanClosureRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
     try {
-      const result = await service().listDossiers(c.get('tenantId'), parsed.data, signal);
+      const result = await service().listDossiers(
+        c.get('tenantId'),
+        c.get('user').id,
+        parsed.data,
+        signal,
+      );
       return c.json(result, 200);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.get('/dossiers/mine', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
+    try {
+      return c.json(await service().listMyBuilds(c.get('tenantId'), c.get('user').id, signal));
     } catch (cause) {
       return failure(c, cause);
     }
@@ -118,7 +236,8 @@ export function pramaanClosureRoutes(
 
   // 4. Get Dossier by ID
   app.get('/dossiers/:id', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
     const id = c.req.param('id');
@@ -126,7 +245,7 @@ export function pramaanClosureRoutes(
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
     try {
-      const result = await service().getDossier(c.get('tenantId'), id, signal);
+      const result = await service().getDossier(c.get('tenantId'), c.get('user').id, id, signal);
       return c.json(result, 200);
     } catch (cause) {
       return failure(c, cause);
@@ -135,7 +254,7 @@ export function pramaanClosureRoutes(
 
   // 5. Dispatch Report or Dossier via Email
   app.post('/reports/email/dispatch', async (c) => {
-    const denied = requireCapability(c, Capability.REPORT_READ);
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
 
     const body = await c.req.json().catch(() => null);

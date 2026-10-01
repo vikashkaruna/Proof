@@ -248,14 +248,17 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     await page.getByRole('button', { name: 'Save reviewed purpose', exact: true }).click();
     const saved = await response;
     expect(saved.status()).toBe(201);
-    const { data } = (await saved.json()) as {
-      data: { purpose_id: string; notice_version: number };
-    };
-    expect(data.notice_version).toBe(1);
     await expect(
       page.getByRole('heading', { name: `${name} सहमति उद्देश्य`, exact: true }),
     ).toBeVisible();
-    return { id: data.purpose_id, name, noticeEn, noticeHi };
+    const persisted = await get(page, '/purposes');
+    expect(persisted.status()).toBe(200);
+    const { data: purposes } = (await persisted.json()) as {
+      data: Array<{ id: string; purpose_key: string; notice_version: number }>;
+    };
+    const purpose = purposes.find((row) => row.purpose_key === `form-${which}-${suffix}`);
+    expect(purpose?.notice_version).toBe(1);
+    return { id: purpose!.id, name, noticeEn, noticeHi };
   };
   const first = await register('first');
   const second = await register('second');
@@ -296,7 +299,6 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     language: 'hi',
     principalRef: principal,
   });
-  const { data: record } = (await capture.json()) as { data: { consent_id: string } };
   const recordsSection = page.locator('section').filter({
     has: page.getByRole('heading', { name: 'Consent records', exact: true }),
   });
@@ -305,6 +307,15 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
   });
   await expect(recordCard).toContainText('granted · Notice 1 (hi)');
   await expect(recordCard).toContainText('Notice snapshot SHA-256:');
+  const recorded = await get(page, '/records');
+  expect(recorded.status()).toBe(200);
+  const { data: records } = (await recorded.json()) as {
+    data: Array<{ id: string; purpose_id: string; principal_ref: string }>;
+  };
+  const record = records.find(
+    (row) => row.purpose_id === first.id && row.principal_ref === principal,
+  );
+  expect(record).toBeDefined();
   await recordCard.getByRole('button', { name: 'Withdraw consent', exact: true }).click();
   await recordCard.getByLabel('Withdrawal language', { exact: true }).selectOption('hi');
   await recordCard
@@ -318,17 +329,25 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     .check();
   const withdrawalResponse = page.waitForResponse(
     (res) =>
-      res.url().endsWith(`/api/bff/v1/consent/records/${record.consent_id}/withdraw`) &&
+      res.url().endsWith(`/api/bff/v1/consent/records/${record!.id}/withdraw`) &&
       res.request().method() === 'POST',
   );
   await recordCard.getByRole('button', { name: 'Confirm withdrawal', exact: true }).click();
   const withdrawal = await withdrawalResponse;
   expect(withdrawal.status()).toBe(200);
-  const { data: withdrawn } = (await withdrawal.json()) as { data: { withdrawal_id: string } };
   await expect(recordCard).toContainText('withdrawn · Notice 1 (hi)');
   await expect(
     recordCard.getByRole('button', { name: 'Withdraw consent', exact: true }),
   ).toHaveCount(0);
+  const withdrawalReadback = await get(page, '/withdrawals');
+  expect(withdrawalReadback.status()).toBe(200);
+  const { data: withdrawals } = (await withdrawalReadback.json()) as {
+    data: Array<{ id: string; consent_record_id: string; principal_ref: string }>;
+  };
+  const withdrawn = withdrawals.find(
+    (row) => row.consent_record_id === record!.id && row.principal_ref === principal,
+  );
+  expect(withdrawn).toBeDefined();
   const followUp = page
     .locator('section')
     .filter({
@@ -345,7 +364,7 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
     .check();
   const completionResponse = page.waitForResponse(
     (res) =>
-      res.url().endsWith(`/api/bff/v1/consent/withdrawals/${withdrawn.withdrawal_id}/complete`) &&
+      res.url().endsWith(`/api/bff/v1/consent/withdrawals/${withdrawn!.id}/complete`) &&
       res.request().method() === 'POST',
   );
   await followUp

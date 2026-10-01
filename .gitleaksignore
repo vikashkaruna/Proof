@@ -64,3 +64,13 @@ e65ecf5776d512af4b626492263a2f5724190479:apps/web/src/middleware.ts:jwt:38
 9c9be105a128c0165fb1af22564d2b074086e30c:scripts/mint-license.ts:private-key:30
 9c9be105a128c0165fb1af22564d2b074086e30c:services/bff/src/routes/sovereign-license.test.ts:private-key:6
 
+
+# W8.5 synthetic approval-signing-key fixtures in tests (values are literal "synthetic-"/"test-" strings; verified 2026-10-01).
+02deb45e9d42b23be0c998ef9b7771bb2334faf8:services/agent-runtime/tests/test_pramaan.py:generic-api-key:65
+02deb45e9d42b23be0c998ef9b7771bb2334faf8:tests/database/migration-dsn.sh:generic-api-key:125
+02deb45e9d42b23be0c998ef9b7771bb2334faf8:tests/e2e/tests/approval-archive-provider.spec.ts:generic-api-key:17
+bcf008e31023b974a4a9d850473f9679aea9731a:tests/database/migration-dsn.sh:generic-api-key:125
+bcf008e31023b974a4a9d850473f9679aea9731a:tests/database/migration-dsn.sh:generic-api-key:129
+bcf008e31023b974a4a9d850473f9679aea9731a:tests/scripts/test_bootstrap_onprem.py:generic-api-key:28
+bcf008e31023b974a4a9d850473f9679aea9731a:tests/scripts/test_provision_reconciliation_key.py:generic-api-key:27
+be2cde9d8e623461936eb03a1a0ec271e4f511fd:packages/evidence/src/storage-acceptance.test.ts:generic-api-key:36

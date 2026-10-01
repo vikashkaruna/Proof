@@ -92,7 +92,13 @@ export default async function ExecutionPage() {
       : Promise.resolve(emptyOk),
   ]);
 
-  if (batchesRes.error) {
+  if (
+    batchesRes.error ||
+    actionsRes.error ||
+    rollbacksRes.error ||
+    verificationsRes.error ||
+    reconciliationsRes.error
+  ) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -103,7 +109,7 @@ export default async function ExecutionPage() {
           role="alert"
           className="rounded-md border border-ember-500 bg-ember-50 p-4 text-sm text-ember-700"
         >
-          Execution records could not be loaded. Refresh to try again.
+          Execution records or their outcome details could not be loaded. Refresh to try again.
         </p>
       </div>
     );
@@ -138,20 +144,28 @@ export default async function ExecutionPage() {
         title="Execution & Rollback"
         description="What Karya actually did: batches with per-action outcomes, halts and rollbacks, Parikshan's post-execution verification, and the signed maker-checker reconciliation. Actions execute only against a signed approval token — this page shows the recorded outcome."
         actions={
-          <Link
-            href="/plans"
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
-          >
-            Remediation plans →
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/execution/technical-reviews"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
+            >
+              Recorded technical registers →
+            </Link>
+            <Link
+              href="/plans"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-mist-50"
+            >
+              Remediation plans →
+            </Link>
+          </div>
         }
       />
 
       <StatGrid>
         <Stat
-          label="Recent batches"
+          label="Recent batches shown"
           value={String(batches.length)}
-          hint={open > 0 ? `${open} still in flight` : 'none in flight'}
+          hint={open > 0 ? `${open} in flight on this page` : 'none in flight on this page'}
         />
         <Stat
           label="Need review"

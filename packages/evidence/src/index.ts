@@ -26,6 +26,8 @@ export interface SealEvidenceInput {
   retentionDays: number;
   retainUntil?: string;
   operationId?: string;
+  /** Fail if any current object exists at the key; protects one-version artifacts. */
+  createOnly?: boolean;
   legalHold?: boolean;
   encryption?: ServerSideEncryption;
   tenantId: string;
@@ -141,8 +143,11 @@ export class EvidenceVault {
     if (size > maxBytes) throw new Error('Evidence exceeds byte limit');
     const body = Buffer.isBuffer(input.body) ? input.body : Buffer.from(input.body);
     const contentHash = createHash('sha256').update(body).digest('hex');
+    // Postgres retains microseconds while S3 timestamps may round to seconds.
+    // Request one extra second so provider readback cannot fall just below the
+    // frozen database deadline after JavaScript parses it at millisecond precision.
     const retainUntil = input.retainUntil
-      ? new Date(input.retainUntil)
+      ? new Date(Date.parse(input.retainUntil) + 1_000)
       : new Date(Math.ceil((Date.now() + input.retentionDays * 86_400_000) / 1000) * 1000);
     if (!Number.isFinite(retainUntil.getTime()) || retainUntil.getTime() <= Date.now())
       throw new Error('Invalid retention date');
@@ -153,6 +158,7 @@ export class EvidenceVault {
         new PutObjectCommand({
           Bucket: input.bucket,
           Key: input.key,
+          ...(input.createOnly ? { IfNoneMatch: '*' } : {}),
           Body: body,
           ContentType: input.contentType,
           ContentMD5: createHash('md5').update(body).digest('base64'),

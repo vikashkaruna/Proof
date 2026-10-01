@@ -81,8 +81,12 @@ HELP
   exit 0
 fi
 
-ENV_FILE="infra/docker/environments/.env.${TARGET_ENV}"
+ENV_FILE="${AXIOM_ENV_FILE:-infra/docker/environments/.env.${TARGET_ENV}}"
 if [[ ! -f "$ENV_FILE" ]]; then
+  if [[ -n "${AXIOM_ENV_FILE:-}" ]]; then
+    fail "Explicit environment file not found: ${ENV_FILE}"
+    exit 1
+  fi
   if [[ -f ".env.${TARGET_ENV}" ]]; then
     ENV_FILE=".env.${TARGET_ENV}"
   elif [[ -f "infra/docker/environments/.env.${TARGET_ENV}.example" ]]; then
@@ -162,6 +166,11 @@ do_verify() {
     "SUPABASE_URL:Database & Auth"
     "SUPABASE_ANON_KEY:Database & Auth"
     "SUPABASE_SERVICE_KEY:Database & Auth"
+    "SUPABASE_STATUTORY_PROOF_WRITER_KEY:Database & Auth"
+    "SUPABASE_ARCHIVE_WRITER_KEY:Database & Auth"
+    "SUPABASE_HUMAN_ACTION_WRITER_KEY:Database & Auth"
+    "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY:Database & Auth"
+    "SUPABASE_AGENT_LEDGER_WRITER_KEY:Database & Auth"
     "NEXT_PUBLIC_APP_URL:Client URLs"
     "NEXT_PUBLIC_BFF_URL:Client URLs"
     "BFF_URL:Inter-service"
@@ -198,7 +207,17 @@ do_verify() {
       # generate it: the anon and service keys are JWTs signed WITH it, so a
       # random value would leave GoTrue issuing tokens PostgREST rejects.
       "SUPABASE_JWT_SECRET:Database & Auth"
-      "AXIOM_EVIDENCE_RETENTION_DAYS:Evidence Vault"
+    )
+  fi
+  if [[ "$TARGET_ENV" == "preprod" ]]; then
+    required_keys+=(
+      "AXIOM_STORAGE_ACCESS_KEY_ID:Evidence Vault"
+      "AXIOM_STORAGE_SECRET_ACCESS_KEY:Evidence Vault"
+      "AXIOM_EVIDENCE_PROBE_KEY:Evidence Vault"
+      "AXIOM_EVIDENCE_PROBE_VERSION_ID:Evidence Vault"
+      "AXIOM_RELEASE_SHA:Release Identity"
+      "AXIOM_RELEASE_MANIFEST_FILE:Release Identity"
+      "AXIOM_TF_STATE_BUCKET:Cloud Infrastructure"
     )
   fi
 
@@ -225,6 +244,7 @@ do_verify() {
       fi
     elif [[ "$val" == *"-el.a.run.app"* || "$val" == *"7zb7qphjbq"* || "$val" == *"<hash>"* ]]; then
       local preview="${val:0:18}..."
+      [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]] && preview="(redacted)"
       printf "  %-32s %-22s \033[0;33m%-12s\033[0m %s (ephemeral hash)\n" "$key" "$cat" "EPHEMERAL_URL" "$preview"
       warn_count=$((warn_count + 1))
     elif [[ "$val" == *"placeholder"* || "$val" == *"<"*">"* || "$val" == *"YOUR_"* ]]; then
@@ -233,18 +253,14 @@ do_verify() {
         simulated_count=$((simulated_count + 1))
       else
         local preview="${val:0:18}..."
+        [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]] && preview="(redacted)"
         printf "  %-32s %-22s \033[0;33m%-12s\033[0m %s\n" "$key" "$cat" "PLACEHOLDER" "$preview"
         warn_count=$((warn_count + 1))
       fi
     else
       local preview=""
       if [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]]; then
-        local len="${#val}"
-        if [ "$len" -gt 12 ]; then
-          preview="${val:0:7}...${val: -4}"
-        else
-          preview="${val:0:3}..."
-        fi
+        preview="(redacted)"
       else
         preview="${val:0:22}"
       fi
@@ -337,13 +353,18 @@ tfvar_value() {
     # Private dispatch inputs/proofs; independent from sealed evidence.
     assessment_dispatch_retention_days) get_val "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS" "90" ;;
 
-    # ── Evidence retention ──
-    # Applied as a COMPLIANCE-mode Object Lock, which nobody including the
-    # project owner can shorten or delete before it expires. It had no
-    # environment key at all and could only come from the Terraform default,
-    # so a bucket could be created with a test-length retention while the
-    # product documented seven years.
-    retention_days)             get_val "AXIOM_EVIDENCE_RETENTION_DAYS" "7" ;;
+    # ── Approved external S3 evidence vault and immutable release ──
+    release_sha)                get_val "AXIOM_RELEASE_SHA" ;;
+    release_manifest_file)      get_val "AXIOM_RELEASE_MANIFEST_FILE" ;;
+    evidence_bucket)            get_val "AXIOM_EVIDENCE_BUCKET" ;;
+    evidence_endpoint)          get_val "AXIOM_STORAGE_ENDPOINT" ;;
+    evidence_access_key_id)     get_val "AXIOM_STORAGE_ACCESS_KEY_ID" ;;
+    evidence_secret_access_key) get_val "AXIOM_STORAGE_SECRET_ACCESS_KEY" ;;
+
+    # Named /32 runner CIDRs for a temporary external migration runner, as
+    # `name=cidr,name=cidr`. Empty keeps Cloud SQL private-only. Terraform's own
+    # validation rejects anything that is not a /32.
+    cloud_sql_authorized_networks) get_val "AXIOM_CLOUD_SQL_AUTHORIZED_NETWORKS" "" ;;
 
     # ── Managed services ──
     upstash_redis_url)          get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")" ;;
@@ -375,6 +396,11 @@ tfvar_value() {
     supabase_jwt_secret)          get_val "SUPABASE_JWT_SECRET" ;;
     supabase_anon_key)            get_val "SUPABASE_ANON_KEY" ;;
     supabase_service_key)         get_val "SUPABASE_SERVICE_KEY" ;;
+    supabase_statutory_proof_writer_key) get_val "SUPABASE_STATUTORY_PROOF_WRITER_KEY" ;;
+    supabase_archive_writer_key)  get_val "SUPABASE_ARCHIVE_WRITER_KEY" ;;
+    supabase_human_action_writer_key) get_val "SUPABASE_HUMAN_ACTION_WRITER_KEY" ;;
+    supabase_evidence_ingestion_writer_key) get_val "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY" ;;
+    supabase_agent_ledger_writer_key) get_val "SUPABASE_AGENT_LEDGER_WRITER_KEY" ;;
 
     # ── Email ──
     resend_api_key)             get_val "RESEND_API_KEY" ;;
@@ -394,12 +420,47 @@ tfvar_value() {
 # `type = number` variable.
 tfvar_is_number() {
   case "$1" in
-    cloud_sql_disk_size_gb|retention_days|assessment_dispatch_retention_days) return 0 ;;
+    cloud_sql_disk_size_gb|assessment_dispatch_retention_days) return 0 ;;
     *) return 1 ;;
   esac
 }
 
+# `map(string)` variables are written as an HCL map, not a quoted string.
+tfvar_is_map() {
+  case "$1" in
+    cloud_sql_authorized_networks) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# `name=cidr,name=cidr` -> `{ "name" = "cidr", "name" = "cidr" }`; empty -> `{}`.
+# The value is written into a .tfvars file, so only plain identifier and CIDR
+# characters are accepted; anything else is refused rather than escaped.
+tfvar_map_literal() {
+  local raw="$1" out="" pair name cidr
+  local -a pairs=()
+  if [ -z "$raw" ]; then
+    echo '{}'
+    return 0
+  fi
+  # An empty pair (leading, trailing or doubled comma) is refused, not skipped.
+  if [[ "$raw" == ,* || "$raw" == *, || "$raw" == *,,* ]]; then
+    return 1
+  fi
+  IFS=',' read -ra pairs <<< "$raw"
+  for pair in "${pairs[@]}"; do
+    name="${pair%%=*}"
+    cidr="${pair#*=}"
+    if [[ "$pair" != *=* || ! "$name" =~ ^[A-Za-z0-9._-]+$ || ! "$cidr" =~ ^[0-9./]+$ ]]; then
+      return 1
+    fi
+    out+="\"${name}\" = \"${cidr}\", "
+  done
+  echo "{ ${out%, } }"
+}
+
 do_terraform() {
+  umask 077
   info "Propagating ${TARGET_ENV} configuration to Terraform..."
 
   # The Terraform directory for `production` is named `prod`. Without this the
@@ -430,10 +491,19 @@ do_terraform() {
       unmapped+=("$name")
       continue
     fi
-    if tfvar_is_number "$name"; then
-      body+="$(printf '%-28s = %s\n' "$name" "${value:-0}")"
+    if tfvar_is_map "$name"; then
+      if ! value="$(tfvar_map_literal "$value")"; then
+        fail "${name} must be name=cidr[,name=cidr] using only letters, digits, . _ - and CIDR characters."
+        return 1
+      fi
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
+    elif tfvar_is_number "$name"; then
+      [[ "$value" =~ ^[0-9]+$ ]] || { fail "${name} must be a nonnegative integer"; return 1; }
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
     else
-      body+="$(printf '%-28s = "%s"\n' "$name" "$value")"
+      local quoted
+      quoted="$(printf '%s' "$value" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+      body+="$(printf '%-28s = %s\n' "$name" "$quoted")"
     fi
     body+=$'\n'
   done < <(grep -oE '^variable "[a-z0-9_]+"' "$vars_file" | sed 's/variable "//;s/"//')
@@ -481,6 +551,7 @@ do_secrets() {
     "axiom-${TARGET_ENV}-gemini-api-key:$(get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")")"
     "axiom-${TARGET_ENV}-temporal-api-key:$(get_val "TEMPORAL_API_KEY")"
     "axiom-${TARGET_ENV}-approval-signing-key:$(get_val "APPROVAL_SIGNING_KEY")"
+    "axiom-${TARGET_ENV}-supabase-archive-writer-key:$(get_val "SUPABASE_ARCHIVE_WRITER_KEY")"
     "axiom-${TARGET_ENV}-mfa-encryption-key:$(get_val "AXIOM_MFA_ENCRYPTION_KEY")"
     "axiom-${TARGET_ENV}-agent-runtime-internal-token:$(get_val "AGENT_RUNTIME_INTERNAL_TOKEN")"
     "axiom-${TARGET_ENV}-model-gateway-api-key:$(get_val "MODEL_GATEWAY_API_KEY")"

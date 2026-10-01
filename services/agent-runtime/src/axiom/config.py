@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # ─── Service identity ───────────────────────────────────────────
     service_name: str = "axiom-agent-runtime"
-    environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
+    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = "development"
     log_level: Literal["debug", "info", "warn", "error"] = "info"
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8000")))
     # Containers must listen on all interfaces; exposure is controlled by the
@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     supabase_service_key: str = Field(
         default="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU",
         description="Supabase service-role key (server-side only)",
+    )
+    supabase_anon_key: str | None = Field(
+        default=None,
+        description="Public gateway apikey presented alongside the scoped writer Bearer token",
+    )
+    supabase_agent_ledger_writer_key: str | None = Field(
+        default=None,
+        description=(
+            "JWT for the agent_ledger_writer role: may execute only "
+            "append_agent_ledger. Never the service-role key."
+        ),
     )
     supabase_db_url: str | None = None
 
@@ -166,11 +177,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> Settings:
-        if self.environment == "production":
+        if self.environment in ("production", "onprem"):
             if not self.supabase_url or "localhost" in self.supabase_url or "127.0.0.1" in self.supabase_url:
                 raise ValueError("Valid production SUPABASE_URL is required")
             if not self.supabase_service_key or self.supabase_service_key.startswith("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v"):
                 raise ValueError("Valid production SUPABASE_SERVICE_KEY is required")
+            if (
+                not self.supabase_agent_ledger_writer_key
+                or self.supabase_agent_ledger_writer_key == self.supabase_service_key
+            ):
+                raise ValueError("Valid production SUPABASE_AGENT_LEDGER_WRITER_KEY is required")
+            if not self.supabase_anon_key:
+                raise ValueError("SUPABASE_ANON_KEY is required in production")
             if self.axiom_region not in ("ap-south-1", "asia-south1"):
                 raise ValueError("Production data-plane services must run in Mumbai (ap-south-1 or asia-south1)")
             if not self.internal_token:

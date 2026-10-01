@@ -119,6 +119,28 @@ echo '  ✓ Refuses an unreachable database'
 ./scripts/migrate-cloudsql.sh --skip-seeds "$dsn" >/dev/null
 echo '  ✓ Applies and re-applies cleanly against a live database'
 
+# Deployed path keeps both the admin URL and HMAC out of process argv. The
+# verifier key is provisioned only through the admin connection after migrate.
+SUPABASE_DB_URL="$dsn" python3 scripts/migrate-database.py --dsn-env --probe >/dev/null
+if SUPABASE_DB_URL="$dsn" APPROVAL_SIGNING_KEY='synthetic-dsn-reconciliation-key-0123456789' \
+  ./scripts/migrate-cloudsql.sh --skip-seeds >/dev/null 2>&1; then
+  echo 'FAIL: verifier key crossed a plaintext remote DSN'; exit 1
+fi
+APPROVAL_SIGNING_KEY='synthetic-dsn-reconciliation-key-0123456789' \
+  python3 scripts/provision-reconciliation-key.py --container "$container" --database axiom_dsn_test >/dev/null
+key_count="$(docker exec "$container" psql -X -U postgres -d axiom_dsn_test -At \
+  -c "select count(*) from axiom_secrets.reconciliation_keys where scope='global';")"
+[ "$key_count" = '1' ] || { echo 'FAIL: admin-only verifier key was not provisioned'; exit 1; }
+echo '  ✓ Plaintext remote DSN refused; local socket provisions the protected HMAC key'
+
+printf 'create table if not exists axiom_seed_probe(id integer primary key);\n' > "$workdir/seed-probe.sql"
+SUPABASE_DB_URL="$dsn" python3 scripts/migrate-database.py --dsn-env \
+  --sql-file "$workdir/seed-probe.sql" >/dev/null
+probe_count="$(docker exec "$container" psql -X -U postgres -d axiom_dsn_test -At \
+  -c "select count(*) from pg_catalog.pg_tables where schemaname='public' and tablename='axiom_seed_probe';")"
+[ "$probe_count" = '1' ] || { echo 'FAIL: environment-only SQL file did not apply'; exit 1; }
+echo '  ✓ SQL seed path keeps the admin URL out of psql argv'
+
 # The control-library seed is required, not best-effort: without the Supabase
 # service endpoint it must refuse rather than report a seeded library.
 if SUPABASE_URL='' SUPABASE_SERVICE_KEY='' ./scripts/migrate-cloudsql.sh "$dsn" >/dev/null 2>&1; then

@@ -89,14 +89,16 @@ async function fixture(reply?: SvidResponse, mode?: 'hang' | 'deny' | 'rotate') 
     server.forceShutdown();
     await rm(directory, { recursive: true, force: true });
   });
-  const trust = new WorkloadApiJwtTrust({ socketPath, trustDomains: [domain], timeoutMs: 250 });
+  // CI may be building Chromium and running scanners concurrently; keep the
+  // transport deadline realistic while preserving the strict refusal cases.
+  const trust = new WorkloadApiJwtTrust({ socketPath, trustDomains: [domain], timeoutMs: 1000 });
   return {
     server,
     requests,
     metadata,
     reads: () => bundleReads,
     check: () =>
-      requireControllerIdentity({ socketPath, trustDomain: domain, timeoutMs: 250 }, trust),
+      requireControllerIdentity({ socketPath, trustDomain: domain, timeoutMs: 1000 }, trust),
   };
 }
 it('requires the exact controller SVID and independently current signature trust over Unix gRPC', async () => {

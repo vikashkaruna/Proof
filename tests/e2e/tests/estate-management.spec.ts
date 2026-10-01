@@ -44,7 +44,16 @@ test('owner declares, edits and archives an estate and system', async ({ page })
     .locator('form')
     .filter({ has: page.getByRole('button', { name: 'Save system', exact: true }) });
   await edit.getByLabel('Status', { exact: true }).selectOption('archived');
+  const savedSystem = page.waitForResponse(
+    (res) =>
+      res.url().includes('/api/bff/v1/estate-systems/') && res.request().method() === 'PATCH',
+  );
   await edit.getByRole('button', { name: 'Save system', exact: true }).click();
+  expect((await savedSystem).status()).toBe(200);
+  // Read the committed state through a fresh server render. The mutation form
+  // already requests router.refresh(); this readback makes the archival
+  // assertion independent of Next's asynchronous transition scheduling.
+  await page.reload();
   await expect(estate.getByText('database · archived')).toBeVisible();
   const intakeTitle = `Scope confirmation ${suffix}`;
   const created = await page.evaluate(

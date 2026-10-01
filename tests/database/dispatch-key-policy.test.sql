@@ -19,8 +19,16 @@ create function pg_temp.enqueue(job int default 51,hash text default repeat('a',
  select public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('policy-legacy-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'))$$;
 
 create function pg_temp.ref(n int) returns text language sql immutable as $$select 'arn:aws:kms:ap-south-1:123456789012:key/'||pg_temp.id(n)::text$$;
-create function pg_temp.publish(revision integer,primary_key integer default 61,keys integer[] default array[61]) returns jsonb language sql as $$
- select public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),revision,'aws',pg_temp.ref(primary_key),array(select pg_temp.ref(k) from unnest(keys) k))$$;
+create function pg_temp.publish(revision integer,primary_key integer default 61,keys integer[] default array[61]) returns jsonb language plpgsql as $$
+declare r jsonb; prior text := current_user;
+begin
+ set local role human_action_writer;
+ begin
+  r := public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),revision,'aws',pg_temp.ref(primary_key),array(select pg_temp.ref(k) from unnest(keys) k));
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior);
+ return r;
+end $$;
 create function pg_temp.fingerprint() returns text language sql as $$select fingerprint from public.assessment_dispatch_key_policies where tenant_id=pg_temp.id(11)$$;
 create function pg_temp.queued(job int,revision integer default null,digest text default null,key_id integer default 61) returns jsonb language sql as $$
  select public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),repeat('a',64),encode(sha256(convert_to('policy-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes',pg_temp.ref(key_id),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),revision,digest)$$;
@@ -77,10 +85,10 @@ select pg_temp.ok((select revision=3 and not (pg_temp.ref(64)=any(readable_refs)
 reset role;
 drop trigger fail_policy on public.audit_ledger;
 set local role authenticated;
-select pg_temp.reject('select pg_temp.publish(3)','42501');
+select pg_temp.reject('select public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),3,''aws'',pg_temp.ref(61),array[pg_temp.ref(61)])','42501');
 select pg_temp.reject('select * from public.assessment_dispatch_key_policies','42501');
 reset role;
 set local role anon;
-select pg_temp.reject('select pg_temp.publish(3)','42501');
+select pg_temp.reject('select public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),3,''aws'',pg_temp.ref(61),array[pg_temp.ref(61)])','42501');
 reset role;
 rollback;

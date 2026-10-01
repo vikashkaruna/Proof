@@ -76,6 +76,11 @@ const expiresAt = issuedAt + Math.round(years * 365.25 * 24 * 60 * 60);
 
 const anonKey = mintKey('anon', jwtSecret, issuedAt, expiresAt);
 const serviceKey = mintKey('service_role', jwtSecret, issuedAt, expiresAt);
+const statutoryProofWriterKey = mintKey('statutory_proof_writer', jwtSecret, issuedAt, expiresAt);
+const archiveWriterKey = mintKey('approval_archive_writer', jwtSecret, issuedAt, expiresAt);
+const humanActionWriterKey = mintKey('human_action_writer', jwtSecret, issuedAt, expiresAt);
+const evidenceIngestionWriterKey = mintKey('evidence_ingestion_writer', jwtSecret, issuedAt, expiresAt);
+const agentLedgerWriterKey = mintKey('agent_ledger_writer', jwtSecret, issuedAt, expiresAt);
 
 const expiryDate = new Date(expiresAt * 1000).toISOString().slice(0, 10);
 
@@ -93,6 +98,14 @@ console.log('');
 console.log(`SUPABASE_JWT_SECRET=${jwtSecret}`);
 console.log(`SUPABASE_ANON_KEY=${anonKey}`);
 console.log(`SUPABASE_SERVICE_KEY=${serviceKey}`);
+console.log(`# BFF only: do not put this writer key in the agent runtime or workers.`);
+console.log(`SUPABASE_STATUTORY_PROOF_WRITER_KEY=${statutoryProofWriterKey}`);
+console.log(`# BFF-only archive mutation role; never give this key to agents or workers.`);
+console.log(`SUPABASE_ARCHIVE_WRITER_KEY=${archiveWriterKey}`);
+console.log(`SUPABASE_HUMAN_ACTION_WRITER_KEY=${humanActionWriterKey}`);
+console.log(`SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=${evidenceIngestionWriterKey}`);
+console.log('# BFF and agent runtime only: append_agent_ledger (agent/system events), nothing else.');
+console.log(`SUPABASE_AGENT_LEDGER_WRITER_KEY=${agentLedgerWriterKey}`);
 console.log('');
 console.log('# The web and marketing apps read the public pair:');
 console.log(`NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}`);

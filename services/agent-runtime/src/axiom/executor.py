@@ -5,7 +5,7 @@ and executes it through a write adapter, recording everything through the
 migration-0061 SECURITY DEFINER functions and nothing else. The
 structural guarantees live in the database, not here:
 
-- scope: `start_execution_batch` refuses any action set beyond the
+- scope: `start_claimed_execution_batch` refuses any action set beyond the
   approved token's `action_ids` (`scope_exceeded`);
 - content: it recomputes the content digest over the stored rows and
   matches it against the token's signed snapshot (`digest_mismatch`);
@@ -152,7 +152,9 @@ async def execute_batch(
         raise ExecutorRefused(f"approval_token_invalid: {reason}")
 
     started = db.rpc(
-        "start_execution_batch",
+        # Requires the BFF's prior atomic claim + consumed token (0099); the
+        # legacy start_execution_batch is no longer callable by service_role.
+        "start_claimed_execution_batch",
         {
             "p_tenant_id": payload.tenant_id,
             "p_plan_id": payload.plan_id,

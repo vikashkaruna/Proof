@@ -16,7 +16,7 @@ select public.register_consent_purpose('$tenant','analytics','Analytics','वि
 SQL
 purpose=$(sql -c "select id from public.consent_purposes where tenant_id='$tenant'")
 race() {
-  local label="$1" first="$2" second="$3" role_name="${4:-service_role}"
+  local label="$1" first="$2" second="$3" role_name="${4:-human_action_writer}"
   sql -c "set application_name='$label-first'; begin; set local role $role_name; select $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
   local first_pid=$! ready=false blocked=false
   for attempt in $(seq 1 60); do
@@ -24,7 +24,7 @@ race() {
     sleep 0.05
   done
   [ "$ready" = true ] || { echo "$label missed barrier"; cat "$result_dir/$label-first"; exit 1; }
-  sql -c "set application_name='$label-second'; set role service_role; select $second;" > "$result_dir/$label-second" 2>&1 &
+  sql -c "set application_name='$label-second'; set role human_action_writer; select $second;" > "$result_dir/$label-second" 2>&1 &
   local second_pid=$!
   for attempt in $(seq 1 40); do
     [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
@@ -64,7 +64,7 @@ for attempt in $(seq 1 60); do
   sleep 0.05
 done
 [ "$ready" = true ] || { cat "$result_dir/demote-first"; exit 1; }
-sql -c "set application_name='consent-demote-second'; set role service_role; select public.set_consent_legal_hold('$tenant','$consent',true,'$owner',gen_random_uuid());" > "$result_dir/demote-second" 2>&1 &
+sql -c "set application_name='consent-demote-second'; set role human_action_writer; select public.set_consent_legal_hold('$tenant','$consent',true,'$owner',gen_random_uuid());" > "$result_dir/demote-second" 2>&1 &
 second_pid=$!
 blocked=false
 for attempt in $(seq 1 40); do

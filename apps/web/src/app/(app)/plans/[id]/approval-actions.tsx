@@ -81,11 +81,19 @@ export function ApprovalActions({
   const [stepUpCode, setStepUpCode] = useState('');
   const [needsEnrolment, setNeedsEnrolment] = useState(false);
 
+  function changeSelection(next: Set<string>) {
+    setSelected(next);
+    // The challenge was signed for the previous action set. A new selection
+    // needs a new challenge, even if the BFF would also refuse a mismatch.
+    setStepUp(null);
+    setStepUpCode('');
+  }
+
   function toggle(id: string) {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setSelected(next);
+    changeSelection(next);
   }
 
   /** Read `{ error: { code, message, details } }` out of a failed response. */
@@ -138,7 +146,20 @@ export function ApprovalActions({
         setError(message);
         return;
       }
-      const body = await res.json();
+      const body: unknown = await res.json();
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('challengeId' in body) ||
+        typeof body.challengeId !== 'string' ||
+        !body.challengeId ||
+        !('expiresAt' in body) ||
+        typeof body.expiresAt !== 'string' ||
+        !Number.isFinite(Date.parse(body.expiresAt))
+      ) {
+        setError('Approval challenge is unavailable. Request a new one.');
+        return;
+      }
       setStepUp({ challengeId: body.challengeId, expiresAt: body.expiresAt });
       setStepUpCode('');
     } catch (e) {
@@ -167,6 +188,19 @@ export function ApprovalActions({
         setError(message);
         // These are terminal for this challenge — a new one is needed.
         if (code === 'attempts_exhausted' || code === 'challenge_expired') setStepUp(null);
+        return;
+      }
+      const verified: unknown = await verify.json();
+      if (
+        !verified ||
+        typeof verified !== 'object' ||
+        !('satisfied' in verified) ||
+        verified.satisfied !== true ||
+        !('challengeId' in verified) ||
+        verified.challengeId !== stepUp.challengeId
+      ) {
+        setError('Approval verification is unconfirmed. Request a new challenge.');
+        setStepUp(null);
         return;
       }
       await issueApproval(stepUp.challengeId);
@@ -199,9 +233,31 @@ export function ApprovalActions({
       setStepUp(null);
       return;
     }
-    const body = await res.json();
-    setApprovalToken(JSON.stringify(body.token));
-    setApprovedActionIds(Array.from(selected));
+    const body: unknown = await res.json();
+    const token = body && typeof body === 'object' && 'token' in body ? body.token : null;
+    const spec = token && typeof token === 'object' && 'spec' in token ? token.spec : null;
+    if (
+      !token ||
+      typeof token !== 'object' ||
+      !('signature' in token) ||
+      typeof token.signature !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(token.signature) ||
+      !spec ||
+      typeof spec !== 'object' ||
+      !('planId' in spec) ||
+      spec.planId !== planId ||
+      !('actionIds' in spec) ||
+      !Array.isArray(spec.actionIds) ||
+      spec.actionIds.length !== selected.size ||
+      !spec.actionIds.every((id) => typeof id === 'string' && selected.has(id))
+    ) {
+      setStepUp(null);
+      setError('Approval result is unconfirmed. Refresh the plan before retrying.');
+      router.refresh();
+      return;
+    }
+    setApprovalToken(JSON.stringify(token));
+    setApprovedActionIds(spec.actionIds);
     setStepUp(null);
     setStepUpCode('');
     setSuccess(`Approved ${selected.size} action(s). Signed approval token issued.`);
@@ -236,18 +292,29 @@ export function ApprovalActions({
         setError(body?.error?.message ?? `Execution failed (HTTP ${res.status})`);
         return;
       }
-      const body = (await res.json()) as {
+      const body = (await res.json().catch(() => null)) as {
         status?: string;
         acceptedActionIds?: string[];
         rejectedActionIds?: string[];
       };
       setApprovalToken(null);
       setApprovedActionIds([]);
-      setExecutionOutcome({
-        status: body.status ?? 'unknown',
-        accepted: body.acceptedActionIds?.length ?? 0,
-        rejected: body.rejectedActionIds?.length ?? 0,
-      });
+      const known =
+        body &&
+        ['accepted', 'partial', 'dispatch_failed', 'dispatch_unknown'].includes(
+          body.status ?? '',
+        ) &&
+        Array.isArray(body.acceptedActionIds) &&
+        Array.isArray(body.rejectedActionIds);
+      setExecutionOutcome(
+        known
+          ? {
+              status: body.status!,
+              accepted: body.acceptedActionIds!.length,
+              rejected: body.rejectedActionIds!.length,
+            }
+          : { status: 'dispatch_unknown', accepted: 0, rejected: 0 },
+      );
       setSuccess(null);
       router.refresh();
     } catch (e) {
@@ -273,6 +340,11 @@ export function ApprovalActions({
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body?.error?.message ?? `Rejection failed (HTTP ${res.status})`);
+        return;
+      }
+      if ((await res.json().catch(() => null))?.ok !== true) {
+        setError('Plan rejection is unconfirmed. Refresh the plan before retrying.');
+        router.refresh();
         return;
       }
       setSuccess('Plan rejected. Actions have been marked as skipped.');
@@ -378,18 +450,50 @@ export function ApprovalActions({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
-          onClick={() => setSelected(new Set(eligible.map((a) => a.id)))}
+          onClick={() => changeSelection(new Set(eligible.map((a) => a.id)))}
           size="sm"
         >
           Select all eligible
         </Button>
-        <Button variant="ghost" onClick={() => setSelected(new Set())} size="sm">
+        <Button variant="ghost" onClick={() => changeSelection(new Set())} size="sm">
           Clear
         </Button>
         <span className="text-sm text-slate-500">
           {selected.size} of {eligible.length} eligible selected
         </span>
       </div>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium text-slate-800">Actions in this plan</legend>
+        {actions.map((action) => {
+          const canSelect = eligible.some((item) => item.id === action.id);
+          return (
+            <label
+              key={action.id}
+              className="flex items-start gap-3 rounded-md border border-slate-200 p-3 text-sm"
+            >
+              <input
+                type="checkbox"
+                checked={canSelect && selected.has(action.id)}
+                disabled={!canSelect || Boolean(stepUp)}
+                onChange={() => toggle(action.id)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                <strong className="block text-slate-800">{action.description}</strong>
+                <span className="text-slate-600">
+                  {action.action_type} · {action.risk_class} risk
+                </span>
+                {!canSelect && (
+                  <span className="block text-ember-700">
+                    Requires a completed dry-run and validated rollback.
+                  </span>
+                )}
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="flex flex-col gap-1.5">

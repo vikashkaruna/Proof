@@ -33,7 +33,7 @@ returns jsonb language sql as $$
  select public.create_tenant_invitation('00000000-0000-4000-8000-00000000b001',actor,email,r,scopes,pg_temp.h(token),ttl,false,gen_random_uuid());
 $$;
 grant execute on function pg_temp.invite(uuid,text,public.user_role,text[],text,int) to service_role;
-set local role service_role;
+reset role; -- business fixture inspects invitation rows directly
 do $$
 declare r jsonb; inv uuid; events bigint;
 begin
@@ -112,7 +112,7 @@ alter table public.tenant_invitations disable trigger tenant_invitation_guard;
 update public.tenant_invitations set created_at=now()-interval '4 days', expires_at=now()-interval '1 day'
  where email='someone.else@inv.invalid' and revoked_at is null;
 alter table public.tenant_invitations enable trigger tenant_invitation_guard;
-set local role service_role;
+reset role; -- expired invitation fixture reads retained rows directly
 do $$ declare r jsonb; begin
  r:=public.accept_tenant_invitation(pg_temp.h('tok-again'),'00000000-0000-4000-8000-00000000a006',gen_random_uuid());
  perform pg_temp.ok(r->>'error'='expired','expired invitation refused');
@@ -122,6 +122,7 @@ do $$ declare r jsonb; begin
 end $$;
 
 -- Direct writes are refused; settlement moves once.
+set local role service_role;
 select pg_temp.fails($q$insert into public.tenant_invitations(tenant_id,email,role,token_hash,invited_by,expires_at)
   values('00000000-0000-4000-8000-00000000b001','z@inv.invalid','owner',repeat('a',64),'00000000-0000-4000-8000-00000000a001',now()+interval '1 day')$q$,'backend cannot insert directly');
 select pg_temp.fails($q$update public.tenant_invitations set role='owner'$q$,'backend cannot change role');

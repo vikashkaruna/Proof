@@ -7,8 +7,10 @@ import {
 } from './target';
 import type { PersonaState } from './personas';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { HARNESS_MFA_KEY } from './personas';
+import { mintLocalPostgrestRoleKey } from '../../packages/supabase/src/local-proof-writer-key';
 
 /**
  * Browser journeys, run against REAL authentication.
@@ -41,6 +43,42 @@ function personaState(): PersonaState | null {
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
+function localWriterKey(
+  role:
+    | 'statutory_proof_writer'
+    | 'approval_archive_writer'
+    | 'human_action_writer'
+    | 'evidence_ingestion_writer'
+    | 'agent_ledger_writer',
+) {
+  if (!state || acceptanceTarget) return '';
+  const statusPath = resolve(
+    process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
+    'status.json',
+  );
+  const status = JSON.parse(readFileSync(statusPath, 'utf8')) as Record<string, string>;
+  if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
+    throw new Error('Persona state and local Supabase signing target differ');
+  const jwtSecret = status.JWT_SECRET;
+  if (!jwtSecret) throw new Error('Local Supabase JWT signing secret is missing');
+  return mintLocalPostgrestRoleKey({
+    role,
+    jwtSecret,
+    serviceKey: state.serviceKey,
+  });
+}
+
+function archiveWriterKey() {
+  if (!acceptanceTarget) return localWriterKey('approval_archive_writer');
+  const key = process.env.SUPABASE_ARCHIVE_WRITER_KEY;
+  if (!key)
+    throw new Error('Deployed browser acceptance requires a BFF-only SUPABASE_ARCHIVE_WRITER_KEY');
+  return key;
+}
+
+const bffArchiveWriterKey = archiveWriterKey();
+if (bffArchiveWriterKey) process.env.SUPABASE_ARCHIVE_WRITER_KEY = bffArchiveWriterKey;
+
 const BFF_PORT = '4000';
 
 /** Shared by both servers so the ring key and the Supabase target cannot drift. */
@@ -71,6 +109,12 @@ const bffEnv = {
   // discover a harness misconfiguration.
   AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
+  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
+  // Issued separately for this PostgREST target and kept out of browser persona state.
+  SUPABASE_ARCHIVE_WRITER_KEY: bffArchiveWriterKey,
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: localWriterKey('human_action_writer'),
+  SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: localWriterKey('evidence_ingestion_writer'),
+  SUPABASE_AGENT_LEDGER_WRITER_KEY: localWriterKey('agent_ledger_writer'),
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',
@@ -94,6 +138,9 @@ export default defineConfig({
           '**/evidence-ingestion.spec.ts',
           '**/evidence-packs.spec.ts',
           '**/evidence-packs-access.spec.ts',
+          '**/board-reports-provider.spec.ts',
+          '**/approval-archive-provider.spec.ts',
+          '**/source-bound-formats-provider.spec.ts',
         ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**
@@ -126,15 +173,17 @@ export default defineConfig({
     video: acceptanceTarget ? 'off' : 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Every local run must own its servers so persona keys and provider env
+  // cannot be inherited from an earlier run or another worktree.
   webServer: acceptanceTarget
     ? undefined
     : [
         {
-          command: 'pnpm --filter @axiom/web dev',
+          command: 'pnpm --filter @axiom/web exec next dev --webpack --port 3001',
           port: 3001,
           cwd: repoRoot,
           env: webEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
         {
@@ -145,7 +194,7 @@ export default defineConfig({
           port: Number(BFF_PORT),
           cwd: repoRoot,
           env: bffEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
         {
@@ -153,11 +202,11 @@ export default defineConfig({
           // public-surface specs do, and dropping it from here turned four
           // dormant specs into ECONNREFUSED the moment the suite could run at
           // all.
-          command: 'pnpm --filter @axiom/marketing dev',
+          command: 'pnpm --filter @axiom/marketing exec next dev --webpack --port 3000',
           port: 3000,
           cwd: repoRoot,
           env: webEnv,
-          reuseExistingServer: !process.env.CI,
+          reuseExistingServer: false,
           timeout: 120_000,
         },
       ],

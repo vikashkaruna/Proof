@@ -34,7 +34,7 @@ after=$(sql -c "select md5(jsonb_agg(to_jsonb(r)-array['operation_key','created_
 [ "$(sql -c 'select count(*) from public.report_reviews')" = 0 ]
 [ "$(sql -c 'select count(*) from public.evidence_pack_archives')" = 0 ]
 [ "$(sql -c 'select count(*) from public.reports where content_text is not null or reviewed_content_hash is not null or released_archive_hash is not null')" = 0 ]
-[ "$(sql -c "select public.release_report('99747777-0000-4000-8000-000000000010','99747777-0000-4000-8000-000000000031','99747777-0000-4000-8000-000000000001',repeat('a',64),null,gen_random_uuid())->>'error'")" = legacy_report_requires_revision ]
+[ "$(sql -c "set role statutory_proof_writer; select public.release_report('99747777-0000-4000-8000-000000000010','99747777-0000-4000-8000-000000000031','99747777-0000-4000-8000-000000000001',repeat('a',64),null,gen_random_uuid())->>'error'")" = legacy_report_requires_revision ]
 [ "$(sql -c "select has_table_privilege('service_role','public.reports','INSERT')")" = f ]
 [ "$(sql -c "select has_table_privilege('service_role','public.reports','TRUNCATE')")" = f ]
 python3 scripts/migrate-database.py --container "$container" --user postgres --database evidence_pack_upgrade_test > "$fixture_dir/reapply.log"

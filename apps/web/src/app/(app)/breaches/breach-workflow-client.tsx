@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 /**
  * W8.2 — breach operations, the real surface.
@@ -138,14 +139,22 @@ export function BreachWorkflowClient({
             never editable.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setIntakeOpen((v) => !v)}
-          className="rounded-md px-4 py-2 text-sm font-medium text-white"
-          style={{ backgroundColor: '#1E2A4A' }}
-        >
-          {intakeOpen ? 'Close' : 'Record incident'}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/breaches/dpb-reviews"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            DPB review packs
+          </Link>
+          <button
+            type="button"
+            onClick={() => setIntakeOpen((v) => !v)}
+            className="rounded-md px-4 py-2 text-sm font-medium text-white"
+            style={{ backgroundColor: '#1E2A4A' }}
+          >
+            {intakeOpen ? 'Close' : 'Record incident'}
+          </button>
+        </div>
       </div>
 
       {error ? (

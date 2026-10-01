@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   Capability,
   CreateEstateRequestSchema,
@@ -44,7 +44,7 @@ async function mutate(c: EstateContext, operation: string, schema: z.ZodType) {
       },
       400,
     );
-  const { data, error } = await createSupabaseAdmin().rpc('manage_estate', {
+  const { data, error } = await createHumanActionWriter().rpc('manage_estate', {
     p_tenant_id: c.get('tenantId'),
     p_actor_id: c.get('user').id,
     p_operation: operation,

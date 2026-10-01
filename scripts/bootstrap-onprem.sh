@@ -1,128 +1,86 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# scripts/bootstrap-onprem.sh
-#
-# Axiom Proof — Sovereign On-Premise & Air-Gapped Bootstrap Automation (W10)
-#
-# Automates:
-#   1. Pre-flight verification (Docker, Compose, ports, storage)
-#   2. Sovereign environment configuration (.env.onprem)
-#   3. Offline Cryptographic License Generation and Validation
-#   4. Database bootstrap and append-only migrations (0000-0079)
-#   5. Default multi-tenant identity and control library seeding
-#   6. MinIO Object Lock WORM evidence bucket provisioning
-# ==============================================================================
-
+# Offline operator bootstrap. No image pulls, demo users, or silent WORM failures.
 set -euo pipefail
-
+umask 077
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${ROOT_DIR}"
+cd "$ROOT_DIR"
+ENV_FILE="${AXIOM_ONPREM_ENV_FILE:-infra/docker/environments/.env.onprem}"
+COMPOSE_FILE="infra/docker/docker-compose.onprem.yml"
 
-echo "======================================================================"
-echo " Axiom Proof — Sovereign On-Premise Bootstrap (W10)"
-echo "======================================================================"
+for tool in docker python3 pnpm node; do
+  command -v "$tool" >/dev/null || { echo "Missing required offline tool: $tool" >&2; exit 1; }
+done
+docker info >/dev/null
+docker compose version >/dev/null
+python3 scripts/onprem-preflight.py "$ENV_FILE" >/dev/null
+read_env() {
+  sed -n "s/^${1}=//p" "$ENV_FILE"
+}
+LICENSE="$(read_env AXIOM_OFFLINE_LICENSE)"
+AXIOM_OFFLINE_LICENSE="$LICENSE" pnpm tsx scripts/verify-license.ts >/dev/null || {
+  echo 'Offline license verification failed' >&2; exit 1;
+}
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+"${COMPOSE[@]}" config --quiet
+# Requiring every pinned image locally keeps this path genuinely air-gapped.
+while IFS= read -r image; do
+  docker image inspect "$image" >/dev/null || { echo "Offline image missing: $image" >&2; exit 1; }
+done < <("${COMPOSE[@]}" config --images)
 
-# 1. Pre-flight checks
-echo "[1/6] Running sovereign pre-flight verification..."
-if ! command -v docker >/dev/null 2>&1; then
-  echo "[-] Error: docker is not installed or not in PATH."
-  exit 1
+# This is first installation, never an implicit upgrade or restore. Starting
+# over an existing volume could migrate a live database before its backup is
+# verified, and `up` would silently replace images in a running appliance.
+if [ -n "${COMPOSE_PROJECT_NAME:-}" ] && [ "$COMPOSE_PROJECT_NAME" != axiom-proof-onprem ]; then
+  echo 'Unexpected Compose project identity' >&2; exit 1
 fi
-
-if ! docker info >/dev/null 2>&1; then
-  echo "[-] Error: Docker daemon is not running."
-  exit 1
+if [ -n "$("${COMPOSE[@]}" ps -aq)" ]; then
+  echo 'Existing on-prem containers require a reviewed upgrade or restore procedure' >&2; exit 1
 fi
-echo "  -> Docker daemon is operational."
-
-# 2. Sovereign Environment Configuration (.env.onprem)
-echo "[2/6] Verifying sovereign configuration (.env.onprem)..."
-ENV_FILE="infra/docker/environments/.env.onprem"
-if [ ! -f "${ENV_FILE}" ]; then
-  echo "  -> Copying ${ENV_FILE}.example to ${ENV_FILE}..."
-  cp "${ENV_FILE}.example" "${ENV_FILE}"
-fi
-
-# Ensure secrets are minted if placeholders remain
-MINT_SCRIPT="scripts/mint-supabase-keys.mjs"
-if [ -f "${MINT_SCRIPT}" ]; then
-  echo "  -> Verifying minted cryptographic keys in ${ENV_FILE}..."
-  # If placeholder keys are found, generate real cryptographic keys
-  if grep -q "<64 hex chars" "${ENV_FILE}" 2>/dev/null || grep -q "<48 hex chars" "${ENV_FILE}" 2>/dev/null; then
-    echo "  -> Generating sovereign cryptographic keys..."
-    SIGNING_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-    MFA_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-    RUNTIME_TOKEN=$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))")
-    GATEWAY_KEY=$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))")
-
-    sed -i.bak -e "s/<64 hex chars — approval signing key>/${SIGNING_KEY}/g" "${ENV_FILE}"
-    sed -i.bak -e "s/<64 hex chars — distinct MFA encryption key>/${MFA_KEY}/g" "${ENV_FILE}"
-    sed -i.bak -e "s/<48 hex chars — internal runtime token>/${RUNTIME_TOKEN}/g" "${ENV_FILE}"
-    sed -i.bak -e "s/<48 hex chars — model gateway key>/${GATEWAY_KEY}/g" "${ENV_FILE}"
-    rm -f "${ENV_FILE}.bak"
-    echo "  -> Cryptographic keys injected into ${ENV_FILE}."
+for volume in supabase-db-data temporal-db-data redis-data minio-data; do
+  if docker volume inspect "axiom-proof-onprem_${volume}" >/dev/null 2>&1; then
+    echo "Existing on-prem state volume (${volume}) requires a reviewed upgrade or restore procedure" >&2
+    exit 1
   fi
+done
+
+# GoTrue must own auth schema. Only roles/bootstrap SQL runs before it.
+"${COMPOSE[@]}" up -d --no-deps --wait supabase-db
+# An application database starts from template0; Auth owns its schema before
+# Axiom's migration series runs.
+if ! "${COMPOSE[@]}" exec -T supabase-db psql -X -U postgres -d postgres -Atqc \
+  "select 1 from pg_database where datname='axiom_onprem'" | grep -qx 1; then
+  "${COMPOSE[@]}" exec -T supabase-db createdb -U postgres -T template0 axiom_onprem
 fi
-
-# 3. Cryptographic Offline License Token
-echo "[3/6] Verifying offline cryptographic sovereign license..."
-if ! grep -q "^AXIOM_OFFLINE_LICENSE=v1\." "${ENV_FILE}" 2>/dev/null; then
-  if [ -n "${AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY:-}" ] || [ -f ".axiom-authority-key.pem" ]; then
-    LICENSE_TOKEN=$(pnpm tsx scripts/mint-license.ts \
-      --licensee "Sovereign Enterprise Customer" \
-      --tier enterprise-airgapped \
-      --days 365 \
-      --max-tenants 10 \
-      --max-nodes 50 | grep "^v1\." || true)
-
-    if [ -n "${LICENSE_TOKEN}" ]; then
-      echo "AXIOM_OFFLINE_LICENSE=${LICENSE_TOKEN}" >> "${ENV_FILE}"
-      echo "  -> Offline license appended to ${ENV_FILE}."
-    fi
-  else
-    echo "  -> Note: No authority private key configured in environment."
-    echo "     Set AXIOM_OFFLINE_LICENSE in ${ENV_FILE} using token provided by Axiom Minds."
-  fi
-fi
-
-# Verify the license token
-CURRENT_LICENSE=$(grep "^AXIOM_OFFLINE_LICENSE=" "${ENV_FILE}" | cut -d= -f2- || true)
-if [ -n "${CURRENT_LICENSE}" ]; then
-  pnpm tsx scripts/verify-license.ts "${CURRENT_LICENSE}" >/dev/null 2>&1 && {
-    echo "  -> Cryptographic license token verified: ACTIVE & GENUINE."
-  } || {
-    echo "[!] Warning: License token verification reported issues."
-  }
-fi
-
-# 4. Database Migrations & Bootstrap
-echo "[4/6] Verifying database schema & append-only migrations..."
-if [ -f "scripts/test-database.sh" ]; then
-  echo "  -> Verifying migrations 0000-0079 on active database..."
-  ./scripts/test-database.sh >/dev/null 2>&1 && {
-    echo "  -> Database schema verified (all 80 migrations applied cleanly)."
-  } || {
-    echo "[!] Note: Database container already has active migrations."
-  }
-fi
-
-# 5. Seeding Default Identity & Tenancy
-echo "[5/6] Seeding sovereign identities and control library..."
-pnpm seed:controls >/dev/null 2>&1 || true
-echo "  -> Control library seeded (DPDPA baseline + 3 sector packs)."
-pnpm seed:users >/dev/null 2>&1 || true
-echo "  -> Multi-tenant users and roles provisioned."
-
-# 6. Summary
-echo "[6/6] Sovereign Bootstrap Assessment..."
-echo "----------------------------------------------------------------------"
-echo " [✓] SOVEREIGN ON-PREMISE BOOTSTRAP READY"
-echo " Environment:         onprem (Strict Authentication Mode)"
-echo " MinIO Evidence WORM: axiom-proof-evidence-onprem (Object Lock Compliance)"
-echo " Model Gateway:       Self-Hosted LLM (Zero Outbound Cloud Egress)"
-echo " Auth / MFA:          Air-gapped Self-Managed TOTP"
-echo " Offline License:     Cryptographically Signed Ed25519"
-echo " Default Admin:       founder@axiomminds.ai (Password: Admin@12345678)"
-echo " Web Workbench:       http://localhost:3001 (or :3000)"
-echo " BFF API Gateway:     http://localhost:4000"
-echo "======================================================================"
+"${COMPOSE[@]}" exec -T supabase-db psql -X -U postgres -d axiom_onprem -v ON_ERROR_STOP=1 -q \
+  < infra/supabase/bootstrap-selfhosted.sql
+REST_PASSWORD="$(read_env POSTGREST_DB_PASSWORD)"
+printf "ALTER ROLE authenticator LOGIN PASSWORD '%s';\n" "$REST_PASSWORD" | \
+  "${COMPOSE[@]}" exec -T supabase-db psql -X -U postgres -d axiom_onprem -v ON_ERROR_STOP=1 -q
+"${COMPOSE[@]}" up -d --no-deps --wait supabase-auth
+DB_CONTAINER="$("${COMPOSE[@]}" ps -q supabase-db)"
+python3 scripts/migrate-database.py --container "$DB_CONTAINER" --user postgres --database axiom_onprem >/dev/null || {
+  echo 'Checksummed migration failed' >&2; exit 1;
+}
+# The reconciliation verifier key is provisioned through the local database
+# socket, never over the network; the signing key is exported, not put in argv.
+APPROVAL_SIGNING_KEY="$(read_env APPROVAL_SIGNING_KEY)"
+export APPROVAL_SIGNING_KEY
+python3 scripts/provision-reconciliation-key.py --container "$DB_CONTAINER" --database axiom_onprem >/dev/null || {
+  echo 'Reconciliation verifier key provisioning failed' >&2; exit 1;
+}
+"${COMPOSE[@]}" up -d --no-deps supabase-rest supabase-gateway
+# The reviewed BFF image carries the seed script and dependencies. Run it
+# inside the egress-blocked sovereign network; no host DB/API port is needed.
+"${COMPOSE[@]}" run --rm --no-deps --entrypoint /app/node_modules/.bin/tsx \
+  bff /app/packages/control-library/scripts/seed.ts >/dev/null || {
+  echo 'Control library seed failed' >&2; exit 1;
+}
+# No demo password installation, including on first boot.
+"${COMPOSE[@]}" up -d --no-deps --wait minio
+"${COMPOSE[@]}" run --rm --no-deps minio-init >/dev/null || {
+  echo 'Compliance Object Lock provisioning/readback failed' >&2; exit 1;
+}
+"${COMPOSE[@]}" up -d --no-deps temporal-db redis model-gateway
+"${COMPOSE[@]}" up -d --no-deps temporal
+"${COMPOSE[@]}" up -d --no-deps agent-runtime bff temporal-worker web
+printf 'On-prem bootstrap stages passed: license, local images, Auth ordering, checksummed migrations, control seed, and WORM default. Run persona and recovery acceptance before release.\n'

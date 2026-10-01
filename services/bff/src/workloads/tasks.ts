@@ -72,6 +72,8 @@ export interface IssuedTask {
  * No public route or legacy run receives this authority implicitly. */
 export class WorkloadTaskIssuer {
   readonly #lifetime: number;
+  /** `db` MUST be the BFF human action writer: delegate/revoke_workload_task
+   * append human-labelled ledger events and are executable only by that role. */
   constructor(
     private readonly db: SupabaseClient,
     lifetimeSeconds = 300,

@@ -32,8 +32,8 @@ returns jsonb language sql as $$
  select public.record_consent('99720000-0000-4000-8000-000000000010',p_purpose,p_version,
   'cookie_id',p_principal,p_language,'cookie',null,'99720000-0000-4000-8000-000000000001',gen_random_uuid());
 $$;
--- Trusted BFF credentials still require a live manager membership and review.
-set local role service_role;
+-- The scoped BFF writer still requires a live manager membership and review.
+reset role; -- mixed business fixture reads retained tables directly
 select pg_temp.assert_true(pg_temp.register('refused','consent',false,'99720000-0000-4000-8000-000000000001')->>'error'='invalid_request','human review required');
 select pg_temp.assert_true(pg_temp.register('refused','consent',true,'99720000-0000-4000-8000-000000000002')->>'error'='forbidden','viewer cannot publish');
 select pg_temp.assert_true(pg_temp.register('refused','consent',true,'99720000-0000-4000-8000-000000000003')->>'error'='forbidden','employee flag is not authority');

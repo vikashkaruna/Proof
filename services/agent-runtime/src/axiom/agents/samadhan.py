@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -168,9 +169,9 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
         if (
             input.approved_content_digest is not None
             and input.recomputed_content_digest is not None
+            and input.approved_content_digest != input.recomputed_content_digest
         ):
-            if input.approved_content_digest != input.recomputed_content_digest:
-                content_digest_drift = True
+            content_digest_drift = True
 
         # 3. Unexecuted / Swept Actions Calculation
         counts: dict[str, int] = {}
@@ -185,11 +186,9 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
 
         # 4. Database RPC Call (if ExecutorDb passed in deps)
         db: ExecutorDb | None = deps.get("db")
-        signing_key = (
-            input.signing_key
-            or self.settings.approval_signing_key
-            or "axiom-approval-signing-key"
-        )
+        signing_key = input.signing_key or self.settings.approval_signing_key
+        if not signing_key:
+            raise ExecutorRefused("reconciliation_signing_key_unavailable")
         rec_result: dict[str, Any] | None = None
         if db is not None:
             try:
@@ -211,13 +210,11 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
                         and rec_info["content_digest_drift"] is not None
                     ):
                         content_digest_drift = rec_info["content_digest_drift"]
-            except ExecutorRefused as exc:
-                if exc.reason == "out_of_scope_executed":
-                    is_out_of_scope = True
-                    if input.raise_on_out_of_scope:
-                        raise
-                else:
-                    raise
+            except ExecutorRefused:
+                # A DB refusal cannot become an attestation assembled from
+                # caller-supplied outcomes, regardless of the helper's
+                # out-of-scope presentation flag.
+                raise
 
         # 5. Build Human-Readable Dual-Control Statement
         parts = [
@@ -240,14 +237,49 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
             )
 
         statement = " ".join(parts)
+        verification_failed = False
 
-        # 6. Sign statement with HMAC-SHA256 using approval signing key
-        raw_key = signing_key if isinstance(signing_key, bytes) else signing_key.encode("utf-8")
-        statement_signature = hmac.new(
-            raw_key,
-            statement.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        # The persisted statement must be exactly the DB-computed statement;
+        # prose assembled from the dispatch payload cannot attest DB facts.
+        if rec_result is not None:
+            recorded_statement = rec_result.get("statement")
+            recorded_signature = rec_result.get("statement_signature")
+            if not isinstance(recorded_statement, str) or not isinstance(recorded_signature, str):
+                raise ExecutorRefused("reconciliation_record_unconfirmed")
+            try:
+                facts = json.loads(recorded_statement)
+            except (TypeError, ValueError) as exc:
+                raise ExecutorRefused("reconciliation_source_unavailable") from exc
+            if (
+                not isinstance(facts, dict)
+                or facts.get("schema_version") != 2
+                or not isinstance(facts.get("action_outcomes"), dict)
+                or not isinstance(facts.get("unexecuted"), list)
+                or not isinstance(facts.get("verification_results"), list)
+                or not isinstance(facts.get("content_digest_drift"), bool)
+                or not isinstance(facts.get("batch_status"), str)
+            ):
+                raise ExecutorRefused("reconciliation_source_unavailable")
+            counts = {}
+            for outcome in facts["action_outcomes"].values():
+                if not isinstance(outcome, str):
+                    raise ExecutorRefused("reconciliation_source_unavailable")
+                counts[outcome] = counts.get(outcome, 0) + 1
+            unexecuted_count = len(facts["unexecuted"])
+            content_digest_drift = facts["content_digest_drift"]
+            batch_status = facts["batch_status"]
+            verification_failed = any(
+                isinstance(result, dict) and result.get("outcome") == "failed"
+                for result in facts["verification_results"]
+            )
+            is_out_of_scope = False
+            out_of_scope_ids = []
+            statement = recorded_statement
+            statement_signature = recorded_signature
+        else:
+            batch_status = input.batch_status
+            raw_key = signing_key if isinstance(signing_key, bytes) else signing_key.encode("utf-8")
+            statement_signature = hmac.new(raw_key, statement.encode("utf-8"), hashlib.sha256).hexdigest()
 
         # 7. Formulate Verdict
         if is_out_of_scope:
@@ -256,9 +288,10 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
             verdict = "drift_detected"
         elif (
             unexecuted_count > 0
-            or input.batch_status in ("partial_failure", "failed", "halted")
+            or batch_status in ("partial_failure", "failed", "halted")
             or counts.get("failed", 0) > 0
             or counts.get("rolled_back", 0) > 0
+            or verification_failed
         ):
             verdict = "partial_execution"
         else:
@@ -275,8 +308,10 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
             reconciled_by="samadhan",
             details={
                 "counts": counts,
-                "batch_status": input.batch_status,
+                "batch_status": batch_status,
                 "is_out_of_scope": is_out_of_scope,
+                "source_bound": rec_result is not None,
+                "verification_failed": verification_failed,
                 "db_reconciliation": rec_result,
             },
         )

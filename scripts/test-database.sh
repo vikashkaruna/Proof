@@ -68,6 +68,7 @@ bash tests/database/concurrent-invitation.sh "$container"
 bash tests/database/concurrent-consent-notice.sh "$container"
 bash tests/database/concurrent-evidence-ingestion.sh "$container"
 bash tests/database/concurrent-evidence-pack.sh "$container"
+bash tests/database/concurrent-approval-reconciliation.sh "$container"
 # The deployed path: the runner reached by DSN over TCP, and the deploy
 # entrypoint that calls it. Starts its own published-port container, because
 # every higher environment is reached over a network rather than docker exec.
