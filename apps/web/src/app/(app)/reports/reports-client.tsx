@@ -40,6 +40,13 @@ type Access = {
 };
 
 export function ReportsClient(access: Access) {
+  // All list, pagination and detail state belongs to one tenant. A server
+  // navigation may reuse this component instance with a different tenant prop;
+  // remount before painting so no previous tenant's report survives that hop.
+  return <TenantReportsClient key={access.tenantId} {...access} />;
+}
+
+function TenantReportsClient(access: Access) {
   const { tenantId, canPrepare } = access;
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [offset, setOffset] = useState(0);

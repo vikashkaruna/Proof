@@ -43,16 +43,17 @@ describe.skipIf(!adminUrl)('PostgresReadConnector against a live database', () =
       create schema w46_crm; create schema w46_hidden;
       create table w46_crm.customers (id serial primary key, email text, mobile text, pan_no text, full_name text, notes text);
       create table w46_crm.orders (id serial primary key, customer_id int, amount numeric);
+      create table w46_crm.keyless (note text);
       create table w46_crm.restricted (id int, secret text);
       create table w46_hidden.payroll (employee_id int, salary numeric);
-      insert into w46_crm.customers (email, mobile, pan_no, full_name, notes) values
-        ('asha@example.in', '+91 9876543210', 'ABCDE1234F', 'Asha Rao', 'call after 6'),
-        ('ravi@example.in', '9123456780', 'PQRSX6789Z', 'Ravi K', null),
-        ('not-an-email', '12345', 'bad', 'X', 'n/a');
+      insert into w46_crm.customers (id, email, mobile, pan_no, full_name, notes) values
+        (1, 'asha@example.in', '+91 9876543210', 'ABCDE1234F', 'Asha Rao', 'call after 6'),
+        (3, 'ravi@example.in', '9123456780', 'PQRSX6789Z', 'Ravi K', null),
+        (5, 'not-an-email', '12345', 'bad', 'X', 'n/a');
       analyze w46_crm.customers;
       create role w46_reader login password '${PASSWORD}';
       grant usage on schema w46_crm to w46_reader;
-      grant select on w46_crm.customers, w46_crm.orders to w46_reader;
+      grant select on w46_crm.customers, w46_crm.orders, w46_crm.keyless to w46_reader;
       create role w46_writer login password '${PASSWORD}';
       grant usage on schema w46_crm to w46_writer;
       grant select, insert on w46_crm.orders to w46_writer;
@@ -71,7 +72,7 @@ describe.skipIf(!adminUrl)('PostgresReadConnector against a live database', () =
     const { records, cursor } = await reader.enumerate(context());
     expect(cursor).toBeUndefined();
     const resources = records.map((r) => r.resource);
-    expect(resources).toEqual(['w46_crm.customers', 'w46_crm.orders']);
+    expect(resources).toEqual(['w46_crm.customers', 'w46_crm.keyless', 'w46_crm.orders']);
     const customers = records[0] as {
       categoryHints: string[];
       columns: { name: string; categoryHints: string[] }[];
@@ -91,6 +92,52 @@ describe.skipIf(!adminUrl)('PostgresReadConnector against a live database', () =
     const serialized = JSON.stringify(records);
     for (const raw of ['asha@example.in', '9876543210', 'ABCDE1234F', 'Asha Rao', 'call after 6'])
       expect(serialized).not.toContain(raw);
+  });
+
+  it('processes bounded keyset pages into counts without returning row values or a cursor', async () => {
+    const scan = await reader.scanRedacted(context(), 'w46_crm.customers', 3, 2);
+    expect(scan).toMatchObject({
+      resource: 'w46_crm.customers',
+      processedRows: 3,
+      pages: 2,
+      complete: true,
+    });
+    expect(
+      Object.fromEntries(scan.fields.map((field) => [field.field, field])).email,
+    ).toMatchObject({
+      sampled: 3,
+      detected: { email: 2 },
+    });
+    const serialized = JSON.stringify(scan);
+    for (const raw of ['asha@example.in', '9876543210', 'ABCDE1234F', 'Asha Rao'])
+      expect(serialized).not.toContain(raw);
+    expect(serialized).not.toContain('scan_key');
+    const bounded = await reader.scanRedacted(context(), 'w46_crm.customers', 2, 2);
+    expect(bounded).toMatchObject({ processedRows: 2, pages: 1, complete: false });
+    await expect(reader.read()).rejects.toMatchObject({ reason: 'raw_read_disabled' });
+  });
+
+  it('refuses unbounded, inaccessible, or keyless redacted scans', async () => {
+    await expect(
+      reader.scanRedacted(context(), 'w46_crm.customers', 1_000_001, 10),
+    ).rejects.toMatchObject({ reason: 'max_rows' });
+    await expect(
+      reader.scanRedacted(context(), 'w46_crm.customers', 10, 1_001),
+    ).rejects.toMatchObject({ reason: 'page_size' });
+    await expect(reader.scanRedacted(context(), 'w46_crm.restricted', 10, 2)).rejects.toMatchObject(
+      { reason: 'scan_key' },
+    );
+    await expect(reader.scanRedacted(context(), 'w46_crm.keyless', 10, 2)).rejects.toMatchObject({
+      reason: 'scan_key',
+    });
+    await expect(
+      new PostgresReadConnector(sessionsAs('w46_writer')).scanRedacted(
+        context(),
+        'w46_crm.customers',
+        3,
+        2,
+      ),
+    ).rejects.toMatchObject({ reason: 'write_privilege' });
   });
 
   it('refuses relations outside the grant and malformed input', async () => {

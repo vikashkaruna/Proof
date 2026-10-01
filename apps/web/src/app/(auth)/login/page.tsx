@@ -158,7 +158,7 @@ export default async function LoginPage({
         <Link href={`https://${BRAND.primaryDomain}/privacy`} className="underline">
           Privacy Policy
         </Link>
-        . Data residency: {BRAND.dataResidencyRegion}.
+        . Configured residency target: {BRAND.dataResidencyRegion}; verify deployment separately.
       </p>
     </div>
   );

@@ -38,6 +38,20 @@ variable "cloud_sql_instance_version" {
   default     = "v1"
 }
 
+variable "cloud_sql_authorized_networks" {
+  description = "Named, narrowly scoped IPv4 CIDRs for a temporary external migration runner. Empty keeps Cloud SQL private-only. Never use a public catch-all."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition = alltrue([
+      for name, cidr in var.cloud_sql_authorized_networks :
+      length(name) > 0 && length(name) <= 64 &&
+      can(cidrnetmask(cidr)) && can(regex("/32$", cidr))
+    ])
+    error_message = "Cloud SQL authorized networks must be named valid IPv4 /32 runner CIDRs; broad networks are forbidden."
+  }
+}
+
 variable "retention_days" {
   description = "Evidence vault retention duration in days (WORM Compliance lock)"
   type        = number

@@ -76,6 +76,9 @@ export function resolveAppUrl(): string {
     if (host === 'localhost' || host === '127.0.0.1') {
       return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001';
     }
+
+    // A preview/custom host must never offer a loopback Workbench link to its users.
+    return 'https://app.axiomproof.ai';
   }
 
   // Server-side fallback:

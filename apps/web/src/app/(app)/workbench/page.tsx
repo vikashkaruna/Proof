@@ -41,16 +41,20 @@ export default async function WorkbenchPage() {
       userEmail={email ?? ''}
       ledgerTodayCount={todayRes.error ? null : (todayRes.count ?? null)}
       awaitingReviewCount={plansRes.error ? null : (plansRes.count ?? null)}
-      recentRuns={(ledgerRes.data ?? []).map((r) => ({
-        seq: Number(r.sequence_no),
-        actor: r.actor_id,
-        action: r.action_type,
-        target_ref: r.target_ref,
-        correlation_id: r.correlation_id,
-        timestamp: r.occurred_at,
-        result: r.result,
-      }))}
-      pendingPlans={plansRes.data ?? []}
+      recentRuns={
+        ledgerRes.error || !ledgerRes.data
+          ? null
+          : ledgerRes.data.map((r) => ({
+              seq: Number(r.sequence_no),
+              actor: r.actor_id,
+              action: r.action_type,
+              target_ref: r.target_ref,
+              correlation_id: r.correlation_id,
+              timestamp: r.occurred_at,
+              result: r.result,
+            }))
+      }
+      pendingPlans={plansRes.error || !plansRes.data ? null : plansRes.data}
       dataResidencyRegion={BRAND.dataResidencyRegion}
       environment={loadWebEnv().ENVIRONMENT ?? 'local'}
       loadError={loadError}

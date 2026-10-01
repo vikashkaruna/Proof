@@ -3833,10 +3833,13 @@ export function v1Routes(deps: Deps) {
       .in('status', ['running', 'queued'])
       .order('started_at', { ascending: false });
 
-    if (error) {
-      return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+    if (error || !Array.isArray(data)) {
+      return c.json(
+        { error: { code: 'query_failed', message: 'Unable to read active agent runs.' } },
+        503,
+      );
     }
-    return c.json({ active_runs: data ?? [] });
+    return c.json({ active_runs: data });
   });
 
   app.post('/agents/:name/run', async (c) => {

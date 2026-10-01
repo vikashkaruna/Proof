@@ -39,7 +39,7 @@ export default async function MembersPage() {
         title="Members and invitations"
         description={`Invite people to ${ctx.tenantName}. An invitation grants its role only when accepted by the invited, signed-in email address.`}
       />
-      {members.error || invitations.error ? (
+      {members.error || invitations.error || !members.data || !invitations.data ? (
         <p role="alert">Members could not be loaded. Refresh to try again.</p>
       ) : (
         <MembersClient

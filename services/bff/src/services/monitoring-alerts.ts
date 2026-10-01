@@ -70,11 +70,11 @@ export class MonitoringAlertsService {
     }
 
     const { data, error } = signal ? await q.abortSignal(signal) : await q;
-    if (error) {
+    if (error || !Array.isArray(data)) {
       throw new EvidenceError('database_unavailable', 503);
     }
 
-    const alerts = (data ?? []) as MonitoringAlertRow[];
+    const alerts = data as MonitoringAlertRow[];
     const unread = alerts.filter((a) => a.status === 'unread' || a.status === 'read').length;
     const critical = alerts.filter(
       (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'critical',

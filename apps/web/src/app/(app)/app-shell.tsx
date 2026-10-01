@@ -7,6 +7,7 @@ import { AxiomLogo } from '@axiom/ui';
 import { SidebarAgentPanel } from './sidebar-agent-panel';
 import { APP_NAV_GROUPS, visibleNavGroups, type NavGroup, type NavItem } from './nav';
 import { switchTenantAction } from './tenant-actions';
+import { z } from 'zod';
 
 export { APP_NAV_GROUPS };
 export type { NavGroup, NavItem };
@@ -31,6 +32,26 @@ export interface TenantOption {
 }
 
 const TENANT_COLORS = ['#1E2A4A', '#0FB5A5', '#475569', '#5B6BA8', '#7A5C9E', '#3F7D6B'];
+const alertReadSchema = z.object({
+  data: z.object({
+    summary: z.object({
+      unread: z.number().int().nonnegative(),
+      critical: z.number().int().nonnegative(),
+      high: z.number().int().nonnegative(),
+    }),
+    alerts: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string(),
+        summary: z.string(),
+        severity: z.string(),
+        status: z.string(),
+        alert_type: z.string(),
+        created_at: z.string().datetime({ offset: true }),
+      }),
+    ),
+  }),
+});
 
 /** Stable per tenant, so the same client keeps the same chip between visits. */
 function tenantColor(id: string): string {
@@ -87,11 +108,12 @@ export function AppShell({
     }
     return pathname === itemRoute || (itemRoute !== '/dashboard' && pathname.startsWith(itemRoute));
   };
-  const [killOn, setKillOn] = useState(false);
+  const [killState, setKillState] = useState<{ tenantId: string; engaged: boolean } | null>(null);
   const [tenantsOpen, setTenantsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [alertsSummary, setAlertsSummary] = useState<{
+    tenantId: string;
     unread: number;
     critical: number;
     high: number;
@@ -135,6 +157,8 @@ export function AppShell({
   const selectedTenant: TenantOption | null = preferred ?? tenants[0] ?? null;
 
   const selectedTenantId = selectedTenant?.id ?? null;
+  const killOn = killState?.tenantId === selectedTenantId ? killState.engaged : null;
+  const visibleAlertsSummary = alertsSummary?.tenantId === selectedTenantId ? alertsSummary : null;
 
   useEffect(() => {
     let active = true;
@@ -150,7 +174,7 @@ export function AppShell({
         if (res.ok) {
           const data = await res.json();
           if (active && typeof data.engaged === 'boolean') {
-            setKillOn(data.engaged);
+            setKillState({ tenantId: selectedTenantId, engaged: data.engaged });
           }
         }
       } catch {
@@ -159,11 +183,11 @@ export function AppShell({
     }
     fetchKillStatus();
 
-    const handleEvent = (e: Event) => {
-      const custom = e as CustomEvent<{ engaged: boolean }>;
-      if (typeof custom.detail?.engaged === 'boolean') {
-        setKillOn(custom.detail.engaged);
-      }
+    const handleEvent = () => {
+      // Global browser events do not carry a tenant-bound proof. Re-read the
+      // selected tenant's BFF status instead of trusting their boolean payload.
+      setKillState(null);
+      void fetchKillStatus();
     };
     window.addEventListener('axiom:kill-switch-changed', handleEvent);
     return () => {
@@ -182,19 +206,22 @@ export function AppShell({
         });
         if (res.ok) {
           const body = await res.json();
-          if (active && body?.data?.summary) {
+          const parsed = alertReadSchema.safeParse(body);
+          if (active && parsed.success) {
+            const { summary, alerts } = parsed.data.data;
             setAlertsSummary({
-              unread: body.data.summary.unread ?? 0,
-              critical: body.data.summary.critical ?? 0,
-              high: body.data.summary.high ?? 0,
-              alerts: (body.data.alerts ?? []).filter(
-                (a: { status: string }) => a.status === 'unread' || a.status === 'read',
-              ),
+              tenantId: selectedTenantId,
+              unread: summary.unread,
+              critical: summary.critical,
+              high: summary.high,
+              alerts: alerts.filter((a) => a.status === 'unread' || a.status === 'read'),
             });
+            return;
           }
         }
+        if (active) setAlertsSummary(null);
       } catch {
-        // silent
+        if (active) setAlertsSummary(null);
       }
     }
     fetchAlerts();
@@ -206,7 +233,7 @@ export function AppShell({
   }, [selectedTenantId]);
 
   async function handleToggleKillSwitch() {
-    if (!selectedTenantId || !canKillSwitch) return;
+    if (!selectedTenantId || !canKillSwitch || killOn === null) return;
     if (!killOn) {
       if (
         !confirm('ENGAGE KILL SWITCH?\n\nThis halts all in-flight agent execution for this tenant.')
@@ -218,13 +245,16 @@ export function AppShell({
           headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
           body: JSON.stringify({ scope: 'tenant', reason: 'Engaged from navigation bar' }),
         });
-        if (res.ok) {
-          setKillOn(true);
+        if (res.ok && (await res.json().catch(() => null))?.engaged === true) {
+          setKillState({ tenantId: selectedTenantId, engaged: true });
           window.dispatchEvent(
             new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: true } }),
           );
+        } else if (res.ok) {
+          setKillState(null);
         }
       } catch (err) {
+        setKillState(null);
         console.error('Failed to engage kill switch:', err);
       }
     } else {
@@ -235,13 +265,16 @@ export function AppShell({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': selectedTenantId },
         });
-        if (res.ok) {
-          setKillOn(false);
+        if (res.ok && (await res.json().catch(() => null))?.engaged === false) {
+          setKillState({ tenantId: selectedTenantId, engaged: false });
           window.dispatchEvent(
             new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: false } }),
           );
+        } else if (res.ok) {
+          setKillState(null);
         }
       } catch (err) {
+        setKillState(null);
         console.error('Failed to release kill switch:', err);
       }
     }
@@ -577,13 +610,16 @@ export function AppShell({
               title="Continuous monitoring alerts"
             >
               <span className="text-sm">🔔</span>
-              {(alertsSummary?.unread ?? 0) > 0 && (
+              {(visibleAlertsSummary?.unread ?? 0) > 0 && (
                 <span
                   className={`absolute -top-1.5 -right-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow ${
-                    (alertsSummary?.critical ?? 0) > 0 ? 'bg-[#D9534F]' : 'bg-[#C9A227]'
+                    (visibleAlertsSummary?.critical ?? 0) > 0 ||
+                    (visibleAlertsSummary?.high ?? 0) > 0
+                      ? 'bg-[#D9534F]'
+                      : 'bg-[#0FB5A5]'
                   }`}
                 >
-                  {alertsSummary?.unread}
+                  {visibleAlertsSummary?.unread}
                 </span>
               )}
             </button>
@@ -601,12 +637,16 @@ export function AppShell({
                   </Link>
                 </div>
                 <div className="mt-2 flex flex-col gap-2 max-h-72 overflow-y-auto">
-                  {!alertsSummary?.alerts || alertsSummary.alerts.length === 0 ? (
+                  {visibleAlertsSummary === null ? (
+                    <div role="alert" className="py-4 text-center text-xs text-slate-500">
+                      Alert status is unavailable.
+                    </div>
+                  ) : visibleAlertsSummary.alerts.length === 0 ? (
                     <div className="py-4 text-center text-xs text-slate-500">
-                      No active unacknowledged alerts
+                      No alerts in this loaded page.
                     </div>
                   ) : (
-                    alertsSummary.alerts.map((alert) => (
+                    visibleAlertsSummary.alerts.map((alert) => (
                       <div
                         key={alert.id}
                         className="rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 text-xs text-slate-700"
@@ -614,11 +654,9 @@ export function AppShell({
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span
                             className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white ${
-                              alert.severity === 'critical'
+                              alert.severity === 'critical' || alert.severity === 'high'
                                 ? 'bg-[#D9534F]'
-                                : alert.severity === 'high'
-                                  ? 'bg-[#C9A227]'
-                                  : 'bg-slate-500'
+                                : 'bg-slate-500'
                             }`}
                           >
                             {alert.severity}
@@ -652,7 +690,7 @@ export function AppShell({
           {canKillSwitch && (
             <button
               onClick={handleToggleKillSwitch}
-              disabled={!selectedTenantId}
+              disabled={!selectedTenantId || killOn === null}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
                 killOn
                   ? 'border-[#D9534F] bg-[#D9534F] text-white shadow-sm animate-pulse'
@@ -660,7 +698,12 @@ export function AppShell({
               }`}
               title="Halt autonomous agent execution for this tenant"
             >
-              <span>⏻</span> {killOn ? 'Kill switch active' : 'Kill switch'}
+              <span>⏻</span>{' '}
+              {killOn === null
+                ? 'Kill switch status unavailable'
+                : killOn
+                  ? 'Kill switch active'
+                  : 'Kill switch'}
             </button>
           )}
         </header>

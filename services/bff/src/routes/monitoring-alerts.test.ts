@@ -112,6 +112,36 @@ describe('GET /v1/monitoring/alerts', () => {
     expect(body.data.summary.unread).toBe(1);
     expect(body.data.summary.critical).toBe(1);
   });
+
+  it('returns a genuine empty tenant page with zero loaded-page counts', async () => {
+    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { alerts: [], summary: { total: 0, unread: 0, critical: 0, high: 0 } },
+    });
+  });
+
+  it('refuses a database error instead of reporting zero monitoring alerts', async () => {
+    fake.failNext('monitoring_alerts');
+    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'database_unavailable' } });
+  });
+
+  it('refuses a null-success list response instead of claiming no alerts', async () => {
+    const query: Record<string, unknown> = {};
+    query.select = () => query;
+    query.eq = () => query;
+    query.order = () => query;
+    query.limit = () => query;
+    query.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: null, error: null }).then(resolve);
+    fake.client.from = () => query;
+
+    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'database_unavailable' } });
+  });
 });
 
 describe('POST /v1/monitoring/alerts/dispatch', () => {

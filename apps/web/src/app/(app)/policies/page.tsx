@@ -128,7 +128,12 @@ export default async function PoliciesPage() {
       .limit(EVALUATION_LIMIT),
   ]);
 
-  if (policiesRes.error || evaluationsRes.error) {
+  if (
+    policiesRes.error ||
+    evaluationsRes.error ||
+    !Array.isArray(policiesRes.data) ||
+    !Array.isArray(evaluationsRes.data)
+  ) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -145,8 +150,8 @@ export default async function PoliciesPage() {
     );
   }
 
-  const policies = (policiesRes.data ?? []) as unknown as PolicyRow[];
-  const evaluations = (evaluationsRes.data ?? []) as unknown as EvaluationRow[];
+  const policies = policiesRes.data as unknown as PolicyRow[];
+  const evaluations = evaluationsRes.data as unknown as EvaluationRow[];
 
   const active = policies.filter((p) => p.status === 'active');
   const escalated = evaluations.filter((e) => e.decision === 'escalated').length;

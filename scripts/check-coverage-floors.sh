@@ -73,6 +73,29 @@ MODULES=(
   "@axiom/marketing"
 )
 
+# Fail when a new source-bearing workspace has no explicit floor. This also
+# catches stale names in the list before a missing --filter silently passes.
+node - "${MODULES[@]}" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const expected = new Set(process.argv.slice(2));
+const actual = new Set();
+for (const parent of ['apps', 'packages', 'services']) {
+  for (const item of fs.readdirSync(parent, { withFileTypes: true })) {
+    const dir = path.join(parent, item.name);
+    if (!item.isDirectory() || !fs.existsSync(path.join(dir, 'package.json')) ||
+        !fs.existsSync(path.join(dir, 'src'))) continue;
+    actual.add(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name);
+  }
+}
+const missing = [...actual].filter((name) => !expected.has(name));
+const stale = [...expected].filter((name) => !actual.has(name));
+if (missing.length || stale.length || expected.size !== process.argv.length - 2) {
+  console.error('Coverage module inventory mismatch:', { missing, stale });
+  process.exit(1);
+}
+NODE
+
 for module in "${MODULES[@]}"; do
   echo "  -> ${module}..."
   output="$(mktemp)"

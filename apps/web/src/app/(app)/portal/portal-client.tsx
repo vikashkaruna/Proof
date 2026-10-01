@@ -32,7 +32,7 @@ export interface PlanActionSummary {
   description: string;
   actionType: string;
   riskClass: string;
-  blastRadius: any;
+  blastRadius: unknown;
   approvalStatus: string;
 }
 
@@ -104,6 +104,20 @@ export interface PortalClientProps {
 }
 
 type TabType = 'overview' | 'approvals' | 'evidence' | 'dsars' | 'ledger';
+
+function formatBlastRadius(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return 'Scoped';
+  const radius = value as Record<string, unknown>;
+  if (typeof radius.rows === 'number' && Number.isFinite(radius.rows) && radius.rows >= 0)
+    return `${radius.rows.toLocaleString()} rows`;
+  if (
+    typeof radius.endpoints === 'number' &&
+    Number.isFinite(radius.endpoints) &&
+    radius.endpoints >= 0
+  )
+    return `${radius.endpoints} endpoints`;
+  return 'Scoped';
+}
 
 export function PortalClient({
   tenants,
@@ -189,7 +203,7 @@ export function PortalClient({
                 </span>
               </div>
               <span className="text-xs text-[#8a97b8]">Autonomy L1 — Agent-Proposes</span>
-              <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-[#C9A227]">
+              <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-200">
                 DPDPA §8(2) & §6 Client Portal
               </span>
             </div>
@@ -203,8 +217,8 @@ export function PortalClient({
 
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">
               Tenant-scoped executive portal for client leadership, compliance officers, and
-              statutory auditors. Real-time posture surveillance, cryptographic evidence
-              verification, and safe human-in-the-loop approvals.
+              statutory auditors. Figures below come from saved tenant records. Verify assessment,
+              stored evidence versions, and approval authority in their dedicated workflows.
             </p>
           </div>
 
@@ -247,7 +261,7 @@ export function PortalClient({
             </span>
             <span>·</span>
             <span>
-              Residency: <strong className="text-white">ap-south-1 (Mumbai)</strong>
+              Deployment region: <strong className="text-white">verify operationally</strong>
             </span>
             <span>·</span>
             <span>
@@ -259,8 +273,8 @@ export function PortalClient({
             {activeTenant.is_sdf && (
               <>
                 <span>·</span>
-                <span className="rounded bg-[#C9A227]/20 px-2 py-0.5 text-[10px] font-semibold text-[#C9A227]">
-                  SDF Classified
+                <span className="rounded bg-teal-500/20 px-2 py-0.5 text-[10px] font-semibold text-teal-200">
+                  SDF profile flag recorded
                 </span>
               </>
             )}
@@ -348,10 +362,10 @@ export function PortalClient({
             Pending Approvals
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="font-heading text-2xl font-bold text-[#C9A227]">
+            <span className="font-heading text-2xl font-bold text-[#1E2A4A]">
               {pendingPlanCount}
             </span>
-            <span className="text-xs text-[#94a3b8]">plans</span>
+            <span className="text-xs text-[#94a3b8]">loaded plans</span>
           </div>
           <div className="mt-2 text-[11px] text-[#64748b]">{totalActionsCount} actions drafted</div>
         </div>
@@ -359,25 +373,27 @@ export function PortalClient({
         {/* Sealed Evidence */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-4 shadow-2xs">
           <div className="text-[11px] font-medium text-[#64748b] uppercase tracking-wider">
-            Sealed Proofs
+            Evidence records
           </div>
           <div className="mt-2 font-heading text-2xl font-bold text-[#1E2A4A]">
             {evidence.length}
           </div>
-          <div className="mt-2 text-[11px] text-[#64748b]">Recorded evidence items</div>
+          <div className="mt-2 text-[11px] text-[#64748b]">
+            Loaded records; storage unverified here
+          </div>
         </div>
 
         {/* Open DSARs */}
         <div className="rounded-2xl border border-[#e4e8ee] bg-white p-4 shadow-2xs">
           <div className="text-[11px] font-medium text-[#64748b] uppercase tracking-wider">
-            Active DSARs
+            Active DSARs in loaded page
           </div>
           <div className="mt-2 font-heading text-2xl font-bold text-[#1E2A4A]">{openDsarCount}</div>
           <div className="mt-2 text-[11px] text-[#64748b]">
             {nearingSla > 0 ? (
               <span className="text-[#D9534F] font-semibold">{nearingSla} due within 3 days</span>
             ) : (
-              <span>None due within 3 days</span>
+              <span>None due within 3 days in loaded page</span>
             )}
           </div>
         </div>
@@ -410,7 +426,7 @@ export function PortalClient({
         >
           <span>Pending Approvals</span>
           {pendingPlanCount > 0 && (
-            <span className="rounded-full bg-[#C9A227]/20 text-[#856711] px-1.5 py-0.2 font-mono text-[10px]">
+            <span className="rounded-full bg-teal-50 text-teal-700 px-1.5 py-0.2 font-mono text-[10px]">
               {pendingPlanCount}
             </span>
           )}
@@ -425,7 +441,7 @@ export function PortalClient({
               : 'border-transparent text-[#64748b] hover:text-[#1E2A4A] hover:bg-slate-50'
           }`}
         >
-          <span>Sealed Evidence Vault</span>
+          <span>Evidence Records</span>
           <span className="rounded-full bg-slate-100 text-slate-700 px-1.5 py-0.2 font-mono text-[10px]">
             {evidence.length}
           </span>
@@ -476,7 +492,7 @@ export function PortalClient({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-[#0FB5A5]/10 text-[#0a7a6f] px-2.5 py-0.5 text-xs font-semibold">
-                      Active Statutory Engagement
+                      Saved assessment engagement
                     </span>
                     <span className="text-xs text-[#94a3b8]">
                       Started:{' '}
@@ -486,16 +502,15 @@ export function PortalClient({
                             month: 'short',
                             year: 'numeric',
                           })
-                        : 'Live'}
+                        : 'Not recorded'}
                     </span>
                   </div>
                   <h2 className="mt-2 font-heading text-xl font-bold text-[#1E2A4A]">
                     {engagement.title}
                   </h2>
                   <p className="mt-1 text-xs text-[#64748b] max-w-2xl">
-                    Full statutory readiness scope across DPDPA 2023 provisions: Notice & Consent
-                    (§5-6), Purpose Limitation (§7), Reasonable Security Safeguards (§8(5)), and
-                    Data Principal Rights (§11-14).
+                    This view reflects saved assessment findings only. Review the selected control
+                    library, cited evidence and unresolved findings for the actual scope.
                   </p>
                 </div>
 
@@ -574,16 +589,16 @@ export function PortalClient({
 
                 <Link
                   href="/reports?tab=pramaan"
-                  className="rounded-xl border border-[#C9A227]/40 bg-[#FBF6E7]/30 p-3 hover:border-[#C9A227] hover:bg-[#FBF6E7]/60 transition-all flex items-center justify-between"
+                  className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs font-semibold text-[#776217] flex items-center gap-1">
+                    <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
                       <span>Proof Dossiers</span>
-                      <span className="text-[#C9A227] text-xs">★</span>
+                      <span className="text-teal-600 text-xs">★</span>
                     </div>
-                    <div className="text-[11px] text-[#A0821F]">Pramaan · Closure Seal</div>
+                    <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                   </div>
-                  <span className="text-[#C9A227] text-xs font-bold">Seal →</span>
+                  <span className="text-teal-700 text-xs font-bold">Seal →</span>
                 </Link>
               </div>
             </div>
@@ -720,16 +735,16 @@ export function PortalClient({
 
                 <Link
                   href="/reports?tab=pramaan"
-                  className="rounded-xl border border-[#C9A227]/40 bg-[#FBF6E7]/30 p-3 hover:border-[#C9A227] hover:bg-[#FBF6E7]/60 transition-all flex items-center justify-between"
+                  className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs font-semibold text-[#776217] flex items-center gap-1">
+                    <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
                       <span>Proof Dossiers</span>
-                      <span className="text-[#C9A227] text-xs">★</span>
+                      <span className="text-teal-600 text-xs">★</span>
                     </div>
-                    <div className="text-[11px] text-[#A0821F]">Pramaan · Closure Seal</div>
+                    <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                   </div>
-                  <span className="text-[#C9A227] text-xs font-bold">Seal →</span>
+                  <span className="text-teal-700 text-xs font-bold">Seal →</span>
                 </Link>
               </div>
             </div>
@@ -815,7 +830,7 @@ export function PortalClient({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="rounded bg-[#C9A227]/20 text-[#856711] px-2 py-0.5 text-[11px] font-bold uppercase">
+                      <span className="rounded bg-indigo-50 text-indigo-700 px-2 py-0.5 text-[11px] font-bold uppercase">
                         {plan.status}
                       </span>
                       <span className="text-xs text-slate-500 font-mono">v{plan.version}</span>
@@ -860,14 +875,7 @@ export function PortalClient({
                               <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
                                 <span className="font-mono">{act.actionType}</span>
                                 <span>·</span>
-                                <span>
-                                  Blast radius:{' '}
-                                  {act.blastRadius?.rows
-                                    ? `${act.blastRadius.rows.toLocaleString()} rows`
-                                    : act.blastRadius?.endpoints
-                                      ? `${act.blastRadius.endpoints} endpoints`
-                                      : 'Scoped'}
-                                </span>
+                                <span>Blast radius: {formatBlastRadius(act.blastRadius)}</span>
                               </div>
                             </div>
                           </div>
@@ -905,11 +913,11 @@ export function PortalClient({
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-heading text-base font-bold text-[#1E2A4A]">
-                Cryptographic Evidence Vault ({evidence.length})
+                Recent evidence records ({evidence.length} loaded)
               </h2>
               <p className="text-xs text-[#64748b]">
-                Immutable proofs sealed with SHA-256 and protected by AWS S3 Object Lock in
-                ap-south-1.
+                Recorded evidence metadata only. Verify exact stored bytes, object version and
+                retention through the evidence console before relying on a seal.
               </p>
             </div>
             <Link href="/evidence" className="text-xs font-bold text-[#0FB5A5] hover:underline">
@@ -921,29 +929,24 @@ export function PortalClient({
             <div className="rounded-2xl border border-[#e4e8ee] bg-white overflow-hidden shadow-sm">
               <div className="grid grid-cols-[160px_130px_minmax(180px,1fr)_160px_120px] gap-2 px-4 py-2.5 bg-[#f8fafc] border-b border-[#eef1f5] text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
                 <div>Artifact ID / Type</div>
-                <div>Sealing Agent</div>
+                <div>Collector</div>
                 <div>Description & Scope</div>
                 <div>Storage Vault URI</div>
-                <div className="text-right">Compliance Mode</div>
+                <div className="text-right">Storage assurance</div>
               </div>
               <div className="p-8 text-center space-y-2.5">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-[#C9A227] text-base font-bold">
+                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 text-base font-bold">
                   ✦
                 </div>
                 <div className="text-xs font-semibold text-[#1E2A4A]">
-                  No sealed evidence items on record.
+                  No evidence records loaded for this tenant.
                 </div>
                 <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
-                  Cryptographic evidence vault is active with AWS S3 Object Lock Compliance Mode in
-                  ap-south-1. Artifacts sealed by Saakshi will appear here with SHA-256 integrity
-                  proofs.
+                  No stored-byte or retention proof can be inferred from this empty list.
                 </p>
                 <div className="flex justify-center gap-2 pt-1">
-                  <span className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-mono text-[#8a6d10] font-semibold">
-                    S3 Object Lock Compliance Mode
-                  </span>
-                  <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-mono text-[#0a8d80]">
-                    Zero Data Egress (ap-south-1)
+                  <span className="rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600 font-semibold">
+                    Open evidence console for provider verification
                   </span>
                 </div>
               </div>
@@ -959,14 +962,14 @@ export function PortalClient({
                           {item.evidenceType}
                         </span>
                         <div className="flex items-center gap-1 text-xs text-slate-600">
-                          <span>Sealed by</span>
+                          <span>Collected by</span>
                           <AgentIcon
                             agent={item.collectedByAgent || 'saakshi'}
                             size="xs"
                             variant="default"
                           />
                           <span className="font-medium capitalize">
-                            {item.collectedByAgent || 'Saakshi'}
+                            {item.collectedByAgent || 'Unknown'}
                           </span>
                         </div>
                         <span className="text-xs text-slate-400">·</span>
@@ -977,7 +980,7 @@ export function PortalClient({
                                 month: 'short',
                                 year: 'numeric',
                               })
-                            : 'Recent'}
+                            : 'Not recorded'}
                         </span>
                       </div>
 
@@ -1004,11 +1007,12 @@ export function PortalClient({
                         <span className="text-[11px] font-mono text-slate-700">
                           {item.contentHash
                             ? `${item.contentHash.slice(0, 8)}…${item.contentHash.slice(-6)}`
-                            : 'sha256'}
+                            : 'Hash not recorded'}
                         </span>
                         <button
                           type="button"
                           onClick={() => copyHash(item.contentHash)}
+                          disabled={!item.contentHash}
                           className="text-[10px] text-[#0FB5A5] hover:underline font-medium"
                         >
                           {copiedHash === item.contentHash ? 'Copied!' : 'Copy'}
@@ -1020,7 +1024,7 @@ export function PortalClient({
                               's3://axiom-evidence-prod-ap-south-1/',
                               's3://…/',
                             )
-                          : 's3://evidence-vault'}
+                          : 'Storage URI not recorded'}
                       </span>
                     </div>
                   </div>
@@ -1041,7 +1045,7 @@ export function PortalClient({
               </h2>
               <p className="text-xs text-[#64748b]">
                 Under DPDPA §11-14: Access, Correction, Erasure, and Grievance Redressal workflows
-                with statutory SLA tracking.
+                with recorded server deadlines. Confirm the applicable deadline for each request.
               </p>
             </div>
             <Link href="/dsars" className="text-xs font-bold text-[#0FB5A5] hover:underline">
@@ -1068,14 +1072,14 @@ export function PortalClient({
                 </div>
                 <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
                   Data principal rights requests submitted through the portal or API endpoints will
-                  appear here with automated 15-day statutory SLA tracking.
+                  appear here with their recorded server deadlines and workflow status.
                 </p>
                 <div className="flex justify-center gap-2 pt-1">
                   <span className="rounded bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-mono text-blue-700 font-semibold">
-                    DPDPA §11-14 SLA Gateway
+                    Recorded request workflow
                   </span>
                   <span className="rounded bg-slate-50 border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600">
-                    Statutory Window: 15 Days
+                    Inspect server deadline per request
                   </span>
                 </div>
               </div>

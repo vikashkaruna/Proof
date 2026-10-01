@@ -1,7 +1,6 @@
-import { requireTenantContext } from '@/lib/tenant-context';
 import { Card, CardContent, Badge, SeverityChip } from '@axiom/ui';
-import { controls as controlLib, CONTROL_LIBRARY_COUNT } from '@axiom/control-library';
-import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
+import { controls as controlLib, LIBRARY_VERSION } from '@axiom/control-library';
+import { GenericModuleView } from '../generic-module-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,65 +10,33 @@ export default async function ControlLibraryPage({
   searchParams: Promise<{ domain?: string; severity?: string; q?: string }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
-  // by design, and these queries carried no tenant filter, so any
-  // authenticated user saw every tenant's data. The client below is
-  // user-scoped: RLS applies, and the explicit filters state the intent.
-  const { supabase, tenantId } = await requireTenantContext();
-  let dbControls: any[] = [];
-  let recentRuns: any[] = [];
-
-  try {
-    const [ctrlRes, ledgerRes] = await Promise.all([
-      supabase.from('controls').select('*'),
-      supabase
-        .from('audit_ledger')
-        .select('seq, actor, action, target_ref, timestamp, entry_hash, result')
-        .eq('tenant_id', tenantId)
-        .eq('actor_id', 'parikshan')
-        .order('sequence_no', { ascending: false })
-        .limit(4),
-    ]);
-    if (ctrlRes.data && ctrlRes.data.length > 0) {
-      dbControls = ctrlRes.data;
-    }
-    if (ledgerRes.data) {
-      recentRuns = ledgerRes.data;
-    }
-  } catch {
-    // Fallback if db offline
-  }
-
-  // Use database controls or static control-library
-  const allControls = dbControls.length > 0 ? dbControls : controlLib;
-  const libVersion = allControls[0]?.introducedInVersion || allControls[0]?.version || 'v25.11.2';
+  // The catalogue is the explicitly versioned, immutable package release. It
+  // does not represent tenant findings or a silently substituted DB result.
+  const allControls = controlLib;
 
   // Count by obligation / domain
-  const noticeCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('consent') ||
-        c.domain?.toLowerCase().includes('notice') ||
-        c.title?.toLowerCase().includes('notice') ||
-        c.title?.toLowerCase().includes('consent'),
-    ).length || 9;
+  const noticeCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('consent') ||
+      c.domain?.toLowerCase().includes('notice') ||
+      c.title?.toLowerCase().includes('notice') ||
+      c.title?.toLowerCase().includes('consent'),
+  ).length;
 
-  const rightsCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('principal') ||
-        c.domain?.toLowerCase().includes('rights') ||
-        c.domain?.toLowerCase().includes('erasure') ||
-        c.domain?.toLowerCase().includes('dsar'),
-    ).length || 7;
+  const rightsCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('principal') ||
+      c.domain?.toLowerCase().includes('rights') ||
+      c.domain?.toLowerCase().includes('erasure') ||
+      c.domain?.toLowerCase().includes('dsar'),
+  ).length;
 
-  const securityCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('security') ||
-        c.domain?.toLowerCase().includes('breach') ||
-        c.domain?.toLowerCase().includes('technical'),
-    ).length || 11;
+  const securityCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('security') ||
+      c.domain?.toLowerCase().includes('breach') ||
+      c.domain?.toLowerCase().includes('technical'),
+  ).length;
 
   let filtered = allControls;
   if (resolvedSearchParams.domain) {
@@ -82,9 +49,9 @@ export default async function ControlLibraryPage({
     const q = resolvedSearchParams.q.toLowerCase();
     filtered = filtered.filter(
       (c) =>
-        c.id?.toLowerCase().includes(q) ||
-        c.title?.toLowerCase().includes(q) ||
-        c.obligation?.toLowerCase().includes(q),
+        c.id.toLowerCase().includes(q) ||
+        c.title.toLowerCase().includes(q) ||
+        c.obligation.toLowerCase().includes(q),
     );
   }
 
@@ -92,16 +59,6 @@ export default async function ControlLibraryPage({
     new Set(allControls.map((c) => c.domain).filter(Boolean)),
   ).sort() as string[];
   const severities = ['critical', 'high', 'medium', 'low'] as const;
-
-  const telemetryEvents: ModuleTelemetryEvent[] = recentRuns.map((r) => ({
-    seq: r.seq,
-    title: r.action || 'Parikshan Control Verification Check',
-    detail: `Control Target: ${r.target_ref || 'Full Statutory Library'} · Actor: parikshan`,
-    time: r.timestamp ? new Date(r.timestamp).toLocaleTimeString('en-IN') : 'Recently',
-    target: r.target_ref || 'Control Library',
-    hash: r.entry_hash,
-    status: r.result === 'success' ? '✓ passed' : r.result,
-  }));
 
   return (
     <GenericModuleView
@@ -114,19 +71,19 @@ export default async function ControlLibraryPage({
         autonomy: '—',
         moduleId: 'M0.2',
         statutoryCitation: 'DPDPA 2023 §4-§16 & Rules 2025',
-        desc: `Versioned catalogue of ~${allControls.length || CONTROL_LIBRARY_COUNT} discrete, testable controls, each mapped to a DPDP Act section / Rule citation, required evidence type and remediation pattern. Multi-framework overlays from Phase 4.`,
-        actionLabel: 'Execute Parikshan Audit Run ⚡',
+        desc: `Packaged control library version ${LIBRARY_VERSION}: ${allControls.length} controls. This catalogue is not a tenant assessment; review the saved engagement before running Parikshan.`,
+        actionLabel: 'Open saved assessment',
+        actionHref: '/assessment',
         cards: [
           {
             h: 'Coverage',
             rows: [
-              { t: 'Total controls', v: String(allControls.length || 43), dot: '#1E2A4A' },
+              { t: 'Total controls', v: String(allControls.length), dot: '#1E2A4A' },
               {
                 t: 'Library version',
-                v: String(libVersion).startsWith('v') ? String(libVersion) : `v${libVersion}`,
+                v: LIBRARY_VERSION,
                 dot: '#0FB5A5',
               },
-              { t: 'Multi-framework overlays', v: 'P4 (ISO/SOC2)', dot: '#C9A227' },
             ],
           },
           {
@@ -138,8 +95,6 @@ export default async function ControlLibraryPage({
             ],
           },
         ],
-        recentEvents: telemetryEvents,
-        telemetryTitle: 'Parikshan Audit Evaluations & Evidence Mappings',
       }}
     >
       <div className="flex flex-col gap-4">
@@ -202,13 +157,11 @@ export default async function ControlLibraryPage({
         {/* Controls catalogue cards */}
         <div className="grid grid-cols-1 gap-3">
           {filtered.map((c) => {
-            const citationsList = Array.isArray(c.citations)
-              ? c.citations
-                  .map((cit: any) => `${cit.instrument || 'DPDPA'} ${cit.reference || ''}`)
-                  .join('; ')
-              : c.citations || 'DPDPA 2023';
-            const maxPenaltyINR = c.scoring?.maxPenaltyINR ?? 2500000000;
-            const penaltyPts = c.scoring?.penaltyPoints ?? 25;
+            const citationsList = c.citations
+              .map((cit) => `${cit.instrument} ${cit.reference}`)
+              .join('; ');
+            const maxPenaltyINR = c.scoring.maxPenaltyINR;
+            const penaltyPts = c.scoring.penaltyPoints;
 
             return (
               <Card key={c.id} className="transition-all hover:border-slate-300 hover:shadow-xs">

@@ -545,6 +545,7 @@ if should_run_phase "db"; then
     BOOTSTRAP_PASSWORD=$(cd "infra/terraform/envs/preprod" && terraform output -raw db_password 2>/dev/null || echo "")
     if [ -z "$DB_PUBLIC_IP" ] || [ -z "$BOOTSTRAP_PASSWORD" ]; then
       fail "Cloud SQL address or password unavailable; cannot bootstrap the Supabase schema."
+      echo "    This host-side script requires a reviewed /32 cloud_sql_authorized_networks runner CIDR; use a separate private-VPC bootstrap path otherwise."
       exit 1
     fi
     info "Creating Supabase roles and an empty auth schema..."
@@ -552,7 +553,7 @@ if should_run_phase "db"; then
          "postgresql://axiom_admin@${DB_PUBLIC_IP}:5432/axiom_proof_preprod?sslmode=require" \
          -v ON_ERROR_STOP=1 -q -f infra/supabase/bootstrap-selfhosted.sql; then
       fail "Supabase bootstrap failed. GoTrue cannot start without its roles and schema."
-      echo "    If the connection was refused, add this host to the instance's authorized networks."
+      echo "    If refused, verify the reviewed runner CIDR and remove the public exception after migration."
       exit 1
     fi
     pass "Supabase roles and auth schema ready for GoTrue"
@@ -617,6 +618,7 @@ if should_run_phase "migrate"; then
     if [ -z "$DB_PUBLIC_IP" ] || [ -z "$DB_PASSWORD" ]; then
       fail "Cloud SQL address or password could not be read from Terraform outputs."
       echo "    The database phase must complete before migrations can run."
+      echo "    This host-side script requires a reviewed /32 migration runner CIDR; use a separate private-VPC migration path otherwise."
       echo "    Re-run with --from-phase db, or --skip-migrate to defer deliberately."
       exit 1
     fi
@@ -628,8 +630,8 @@ if should_run_phase "migrate"; then
     if ! SUPABASE_DB_URL="$CONN_STR" ./scripts/migrate-cloudsql.sh "${SEED_ARGS[@]:-}"; then
       fail "Migrations failed. The deployed services are running against an"
       echo "    unmigrated or partially migrated schema."
-      echo "    If the connection was refused, add this host to the instance's"
-      echo "    authorized networks; the runner records nothing on a failure, so"
+      echo "    If refused, verify the narrow runner CIDR and remove it after migration;"
+      echo "    the runner records nothing on a failure, so"
       echo "    re-running after fixing access is safe."
       exit 1
     fi

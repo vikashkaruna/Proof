@@ -27,10 +27,12 @@
   },
   "devDependencies": {
     "@axiom/eslint-config": "workspace:*",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.1",
+    "jsdom": "^30.1.1",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",

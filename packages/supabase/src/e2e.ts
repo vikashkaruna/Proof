@@ -126,18 +126,18 @@ function createQuery(table: string): QueryBuilder {
             ? [E2E_LEDGER_ENTRY]
             : [];
 
-  const defaultSingle =
-    table === 'users'
-      ? E2E_USER_PROFILE
-      : table === 'remediation_plans'
-        ? E2E_PLAN
-        : table === 'tenants'
-          ? E2E_TENANT
-          : table === 'audit_ledger'
-            ? E2E_LEDGER_ENTRY
-            : null;
-
   const query = {} as QueryBuilder;
+  const matchingRows = () => {
+    const storeItems = Array.from(getTableStore(table).values());
+    const allData = storeItems.length > 0 ? storeItems : defaultRows;
+    return filters.length > 0
+      ? allData.filter((item) =>
+          filters.every(
+            (filter) => (item as Record<string, unknown>)[filter.field] === filter.value,
+          ),
+        )
+      : allData;
+  };
   query.select = () => query;
   query.order = () => query;
   query.limit = () => query;
@@ -189,17 +189,9 @@ function createQuery(table: string): QueryBuilder {
         error: null,
       };
     }
-    const store = getTableStore(table);
-    if (store.size > 0) {
-      for (const item of store.values()) {
-        const matches = filters.every((f) => item[f.field] === f.value);
-        if (matches) {
-          return { data: item, error: null };
-        }
-      }
-    }
-    if (defaultSingle) {
-      return { data: defaultSingle, error: null };
+    const first = matchingRows()[0];
+    if (first) {
+      return { data: first, error: null };
     }
     return { data: null, error: { message: 'Row not found', code: 'PGRST116' } as unknown as null };
   };
@@ -213,34 +205,14 @@ function createQuery(table: string): QueryBuilder {
         error: null,
       };
     }
-    const store = getTableStore(table);
-    if (store.size > 0) {
-      for (const item of store.values()) {
-        const matches = filters.every((f) => item[f.field] === f.value);
-        if (matches) {
-          return { data: item, error: null };
-        }
-      }
-    }
-    return { data: defaultSingle, error: null };
+    return { data: matchingRows()[0] ?? null, error: null };
   };
-
-  const storeItems = Array.from(getTableStore(table).values());
-  const allData = storeItems.length > 0 ? storeItems : defaultRows;
-  const filteredData =
-    filters.length > 0
-      ? allData.filter((item) =>
-          filters.every((f) => (item as Record<string, unknown>)[f.field] === f.value),
-        )
-      : allData;
-
-  const result: QueryResult = {
-    data: filteredData,
-    error: null,
-    count: filteredData.length,
-  };
-
-  query.then = Promise.resolve(result).then.bind(Promise.resolve(result));
+  // Resolve after the caller has applied filters and mutations. Constructing a
+  // promise here would snapshot unfiltered rows before `.eq()` runs.
+  query.then = ((onfulfilled, onrejected) => {
+    const data = matchingRows();
+    return Promise.resolve({ data, error: null, count: data.length }).then(onfulfilled, onrejected);
+  }) as Promise<QueryResult>['then'];
   return query;
 }
 
@@ -261,7 +233,7 @@ export { isAuthBypassEnabled as isE2EBypassEnabled } from '@axiom/config';
  */
 export function createE2ESupabaseClient(customEmail?: string): SupabaseClient {
   const email = customEmail || E2E_USER.email;
-  const currentUser: User = {
+  let currentUser: User = {
     ...E2E_USER,
     email,
   };
@@ -312,10 +284,20 @@ export function createE2ESupabaseClient(customEmail?: string): SupabaseClient {
         },
       }),
       resetPasswordForEmail: async () => ({ data: {}, error: null }),
-      updateUser: async (attrs: Record<string, unknown>) => ({
-        data: { user: { ...currentUser, ...attrs } },
-        error: null,
-      }),
+      updateUser: async (attrs: Record<string, unknown>) => {
+        const metadata = attrs.data;
+        currentUser = {
+          ...currentUser,
+          email: typeof attrs.email === 'string' ? attrs.email : currentUser.email,
+          user_metadata: {
+            ...currentUser.user_metadata,
+            ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+              ? metadata
+              : {}),
+          },
+        };
+        return { data: { user: currentUser }, error: null };
+      },
     },
     from: (table: string) => createQuery(table),
     rpc: async (_fn: string, _args?: unknown) => ({ data: [], error: null }),
