@@ -127,7 +127,7 @@
       <div style="font-family:var(--head);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate-3);font-weight:600;margin-bottom:16px">05 · Agent identity system</div>
       <p style="font-size:13px;color:var(--slate-2);margin:0 0 16px;max-width:640px">Indic sub-brands — the warmth of the product. Each agent has a mark, a colour, a function and an autonomy ceiling. Always referred to with its function on first mention (“Drishti, the discovery agent”).</p>
       <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
-        <sc-for list="{{ agents }}" as="a" hint-placeholder-count="10">
+        <sc-for list="{{ agents }}" as="a" hint-placeholder-count="12">
           <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:flex;gap:14px;align-items:center">
             <div style="width:46px;height:46px;flex:0 0 46px;border-radius:12px;background:{{ a.bg }};color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--head);font-weight:700;font-size:17px">{{ a.i }}</div>
             <div style="flex:1;min-width:0">
@@ -190,7 +190,9 @@ class Component extends DCLogic {
         {name:'Lekha',role:'Audit & traceability',i:'ले',bg:'#2F3542',autonomy:'L3',perms:'ledger append-only',persona:'I remember everything, forever.'},
         {name:'Nazar',role:'Regulatory watch',i:'न',bg:'#243356',autonomy:'L3',perms:'external sources read',persona:'I watch the law so you don’t have to.'},
         {name:'Prativedan',role:'Reporting',i:'प्र',bg:'#1E2A4A',autonomy:'L3',perms:'read all · doc generation',persona:'I turn findings into documents.'},
-        {name:'Sanket',role:'Market signal (internal)',i:'सं',bg:'#8a909b',autonomy:'L3',perms:'external sources read',persona:'I find who’s about to buy.'}
+        {name:'Sanket',role:'Market signal (internal)',i:'सं',bg:'#8a909b',autonomy:'L3',perms:'external sources read',persona:'I find who’s about to buy.'},
+        {name:'Samadhan',role:'Reconciliation · maker-checker',i:'सम',bg:'#0D9488',autonomy:'L1',perms:'reads plans & batches · writes reconciliations only',persona:'I prove that execution matched your plan and your approval.'},
+        {name:'Pramaan',role:'Statutory closure proof',i:'प्रमा',bg:'#C9A227',autonomy:'L1',perms:'reads findings, evidence, ledger · writes dossiers only',persona:'I turn findings, ledgers, and evidence into unassailable, auditor-ready proof.'}
       ],
       wordsUse:['proof','evidence','approve','traceable','rollback','prioritised','agents','dry-run'],
       wordsAvoid:['guarantee','fully automatic','autonomous','risk-free','certified','100% compliant']
