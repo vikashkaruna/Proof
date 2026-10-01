@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AgentIcon } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
+import { ModuleContextFor } from '@/lib/module-context';
 
 interface RecentRun {
   seq: number;
@@ -223,6 +224,7 @@ export function AgentWorkbenchClient({
           Inspect recorded activity and launch supported read-only agents. Approval-gated actions,
           evidence storage, reports, and unavailable feeds use their dedicated workflows.
         </p>
+        <ModuleContextFor module="workbench" tone="dark" className="mt-3" />
         <div className="mt-3.5 inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-1 text-[11px] text-slate-200">
           <span className="text-teal-300">◆</span> Module M0.6
         </div>

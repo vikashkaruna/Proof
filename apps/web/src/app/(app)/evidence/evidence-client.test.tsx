@@ -2,6 +2,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { moduleMeta } from '@/lib/module-meta';
 import { EvidenceClient } from './evidence-client';
 
 const workflow = vi.hoisted(() => ({ upload: vi.fn(), verify: vi.fn() }));
@@ -420,4 +421,17 @@ it('does not offer provider download for a legacy record with no object-version 
   expect(document.body.textContent).toContain(
     'Retention and stored-byte integrity are unverified.',
   );
+});
+
+it('renders the shared module context outside the heading', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(empty()));
+  render(<EvidenceClient tenantId="tenant-1" canRecord={false} canExport={false} />);
+  const meta = moduleMeta('evidence');
+  expect(meta.moduleId).toBe('M2.4');
+  expect(screen.getByText(meta.hi)).toBeTruthy();
+  expect(screen.getByText(meta.moduleId ?? '')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Evidence vault' }).textContent).not.toContain(
+    meta.hi,
+  );
+  await waitFor(() => expect(screen.getByText('No evidence matches these filters.')).toBeTruthy());
 });

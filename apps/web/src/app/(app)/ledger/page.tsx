@@ -9,6 +9,7 @@ import { LedgerFilters } from './ledger-filters';
 import { LedgerPagination } from './ledger-pagination';
 import { LedgerStreamView, type LedgerStreamEntry } from './ledger-stream-view';
 import type { AgentName } from '@axiom/design-tokens';
+import { ModuleContextFor } from '@/lib/module-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -246,6 +247,7 @@ export default async function LedgerPage({
               an event alone does not establish that a complete approval or execution lifecycle
               occurred.
             </p>
+            <ModuleContextFor module="ledger" tone="dark" className="mt-3" />
           </div>
 
           <div className="flex items-center gap-3">

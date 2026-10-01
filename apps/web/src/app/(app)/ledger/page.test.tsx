@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import LedgerPage from './page';
+import { moduleMeta } from '@/lib/module-meta';
 
 const state = vi.hoisted(() => ({
   ledger: {
@@ -20,7 +21,10 @@ vi.mock('@/lib/tenant-context', () => ({
   requireCapabilityContext: state.context,
 }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
-vi.mock('@axiom/ui', () => ({ AgentIcon: () => <span>Lekha</span> }));
+vi.mock('@axiom/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@axiom/ui')>()),
+  AgentIcon: () => <span>Lekha</span>,
+}));
 vi.mock('./verify-button', () => ({ VerifyButton: () => null }));
 vi.mock('./export-ledger-button', () => ({ ExportLedgerButton: () => null }));
 vi.mock('./ledger-refresh', () => ({ LedgerRefresh: () => null }));
@@ -133,4 +137,13 @@ it('refuses untrusted filter syntax before building a ledger query', async () =>
 it('keeps malformed pagination away from the ledger range query', async () => {
   const view = await renderPage({ page: 'NaN', limit: 'Infinity' });
   expect(view).toContain('0 rows');
+});
+
+it('renders the shared module context under the title with the registry Hindi name and M2.5', async () => {
+  const html = await renderPage();
+  expect(html).toContain('data-testid="module-context"');
+  expect(html).toContain(
+    `<span lang="hi" class="font-medium text-white">${moduleMeta('ledger').hi}</span>`,
+  );
+  expect(html).toContain('aria-label="Module M2.5"');
 });

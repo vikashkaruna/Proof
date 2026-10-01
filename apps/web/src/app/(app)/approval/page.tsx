@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ModuleContextFor } from '@/lib/module-context';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ export default async function ApprovalPage() {
           Recorded actions awaiting human review. Open the source plan to inspect the dry-run,
           rollback, scope, and approval authority before taking action.
         </p>
+        <ModuleContextFor module="approval" className="mt-3" />
       </header>
       {error || !actions ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">

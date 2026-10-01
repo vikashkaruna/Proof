@@ -59,7 +59,8 @@ it('shows empty approval and plan lists without demo actions or validated rollba
     'Rollback validated',
     '100%',
   ]) {
-    expect(approval + plans).not.toContain(fiction);
+    // Strip inline <style> blocks: the agent avatar animation CSS legitimately contains "100%".
+    expect((approval + plans).replace(/<style>[\s\S]*?<\/style>/g, '')).not.toContain(fiction);
   }
   expect(state.calls).toContainEqual(['remediation_actions', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['remediation_plans', 'tenant_id', 'tenant-1']);
@@ -91,4 +92,11 @@ it('links a recorded awaiting action to its actual source plan', async () => {
   expect(view).toContain('Review backup policy');
   expect(view).toContain('href="/plans/plan-1"');
   expect(view).not.toContain('dry-run ✓');
+});
+
+it('renders the shared module context line with the approval module id', async () => {
+  const view = renderToStaticMarkup(await ApprovalPage());
+  expect(view).toContain('अनुमोदन कंसोल');
+  expect(view).toContain('M3.3');
+  expect(view).not.toMatch(/<h1[^>]*>[^<]*अनुमोदन/);
 });

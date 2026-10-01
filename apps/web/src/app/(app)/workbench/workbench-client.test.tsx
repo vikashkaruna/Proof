@@ -3,6 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentWorkbenchClient } from './workbench-client';
+import { moduleMeta } from '@/lib/module-meta';
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/invoke-agent', () => ({
@@ -73,4 +74,12 @@ it('invokes a supported read-only agent and shows only returned proof references
   expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe(
     '/ledger?q=ledger-1',
   );
+});
+
+it('renders the shared module context with the registry Hindi name and M0.6', () => {
+  render(<AgentWorkbenchClient {...props} />);
+  const ctx = screen.getByTestId('module-context');
+  expect(ctx.textContent).toContain(moduleMeta('workbench').hi);
+  expect(ctx.querySelector('[aria-label="Module M0.6"]')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: /Agent Workbench/i })).toBeTruthy();
 });
