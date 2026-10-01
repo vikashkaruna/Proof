@@ -44,7 +44,11 @@ const state = personaState();
 if (state) assertPersonaTarget(state);
 
 function localWriterKey(
-  role: 'statutory_proof_writer' | 'human_action_writer' | 'evidence_ingestion_writer',
+  role:
+    | 'statutory_proof_writer'
+    | 'human_action_writer'
+    | 'evidence_ingestion_writer'
+    | 'agent_ledger_writer',
 ) {
   if (!state || acceptanceTarget) return '';
   const statusPath = resolve(
@@ -94,6 +98,7 @@ const bffEnv = {
   SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
   SUPABASE_HUMAN_ACTION_WRITER_KEY: localWriterKey('human_action_writer'),
   SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: localWriterKey('evidence_ingestion_writer'),
+  SUPABASE_AGENT_LEDGER_WRITER_KEY: localWriterKey('agent_ledger_writer'),
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',

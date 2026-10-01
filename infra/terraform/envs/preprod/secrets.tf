@@ -42,6 +42,7 @@ locals {
     supabase_statutory_proof_writer_key    = var.supabase_statutory_proof_writer_key
     supabase_human_action_writer_key       = var.supabase_human_action_writer_key
     supabase_evidence_ingestion_writer_key = var.supabase_evidence_ingestion_writer_key
+    supabase_agent_ledger_writer_key       = var.supabase_agent_ledger_writer_key
     gcs_hmac_access_key                    = google_storage_hmac_key.s3_compat_key.access_id
     gcs_hmac_secret_key                    = google_storage_hmac_key.s3_compat_key.secret
   }

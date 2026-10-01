@@ -226,6 +226,14 @@ variable "supabase_evidence_ingestion_writer_key" {
 }
 
 
+variable "supabase_agent_ledger_writer_key" {
+  description = "Restricted agent_ledger_writer JWT (append_agent_ledger only) held by the BFF and agent runtime, signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+
 variable "report_email_mode" {
   type        = string
   default     = "disabled"

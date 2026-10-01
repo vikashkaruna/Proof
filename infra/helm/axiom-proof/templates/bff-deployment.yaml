@@ -69,6 +69,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: evidence-ingestion-writer-key
+            - name: SUPABASE_AGENT_LEDGER_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: agent-ledger-writer-key
             - name: AWS_REGION
               value: {{ .Values.config.awsRegion }}
             - name: MODEL_GATEWAY_URL

@@ -148,6 +148,15 @@ resource "google_cloud_run_v2_service" "bff" {
           }
         }
       }
+      env {
+        name = "SUPABASE_AGENT_LEDGER_WRITER_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_agent_ledger_writer_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
 
       env {
         name = "AXIOM_MFA_ENCRYPTION_KEY"
@@ -475,6 +484,24 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.secret["supabase_service_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "SUPABASE_ANON_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_anon_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "SUPABASE_AGENT_LEDGER_WRITER_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_agent_ledger_writer_key"].secret_id
             version = "latest"
           }
         }

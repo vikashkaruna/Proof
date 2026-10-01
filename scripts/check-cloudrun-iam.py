@@ -15,12 +15,14 @@ EXPECTED = {
             'gcs_hmac_access_key', 'gcs_hmac_secret_key', 'mfa_encryption_key',
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
             'supabase_service_key', 'supabase_statutory_proof_writer_key',
-            'supabase_human_action_writer_key', 'supabase_evidence_ingestion_writer_key'},
+            'supabase_human_action_writer_key', 'supabase_evidence_ingestion_writer_key',
+            'supabase_agent_ledger_writer_key'},
     'web': {'supabase_anon_key'},
     'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
     'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',
                       'gcs_hmac_access_key', 'gcs_hmac_secret_key',
-                      'model_gateway_api_key', 'supabase_service_key'},
+                      'model_gateway_api_key', 'supabase_anon_key',
+                      'supabase_agent_ledger_writer_key', 'supabase_service_key'},
     'model_gateway': {'model_gateway_api_key', 'anthropic_api_key', 'openai_api_key',
                       'gemini_api_key', 'upstash_redis_url'},
     'temporal_worker': {'temporal_api_key', 'agent_runtime_internal_token'},
@@ -83,6 +85,8 @@ def check(files: dict[str, str]) -> None:
     required = {
         'agent_runtime': {'SUPABASE_URL': 'local.supabase_preprod_url',
                           'SUPABASE_SERVICE_KEY': 'supabase_service_key',
+                          'SUPABASE_ANON_KEY': 'supabase_anon_key',
+                          'SUPABASE_AGENT_LEDGER_WRITER_KEY': 'supabase_agent_ledger_writer_key',
                           'AGENT_RUNTIME_INTERNAL_TOKEN': 'agent_runtime_internal_token'},  # nosec B105 - env-var name to secret reference mapping, not a credential
         'temporal_worker': {'ENVIRONMENT': 'var.environment',
                             'AGENT_RUNTIME_INTERNAL_TOKEN': 'agent_runtime_internal_token'},  # nosec B105 - env-var name to secret reference mapping, not a credential
