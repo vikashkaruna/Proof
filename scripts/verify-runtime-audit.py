@@ -9,10 +9,14 @@ Never point this harness at a client deployment; only port 56321 loopback is acc
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
 import shutil
+import time
 import subprocess  # nosec B404 - fixed read-only git queries; list argv, no shell
 from pathlib import Path
 from unittest.mock import Mock
@@ -27,6 +31,17 @@ from supabase import create_client
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASE = "configuration"
+
+
+def mint_role_key(role: str, secret: str) -> str:
+    """Local-only HS256 JWT for a restricted PostgREST role (isolated stack)."""
+
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).rstrip(b"=").decode()
+
+    body = f"{part({'alg': 'HS256', 'typ': 'JWT'})}.{part({'role': role, 'exp': int(time.time()) + 3600})}"
+    signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
+    return f"{body}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
 
 
 class ProbeInput(BaseModel):
@@ -72,6 +87,8 @@ async def main() -> None:
         environment="preprod",
         supabase_url=status["API_URL"],
         supabase_service_key=status["SERVICE_ROLE_KEY"],
+        supabase_anon_key=status["ANON_KEY"],
+        supabase_agent_ledger_writer_key=mint_role_key("agent_ledger_writer", status["JWT_SECRET"]),
     )
     ledger = LedgerClient.from_settings(settings)
     if ledger.in_memory_mode:

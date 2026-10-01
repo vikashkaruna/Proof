@@ -2,7 +2,10 @@
 
 Mirrors packages/ledger/src/append.ts. Used by every agent to write
 to the hash-chained audit ledger. Writes go through the Postgres
-SECURITY DEFINER function `append_ledger()`.
+SECURITY DEFINER function `append_agent_ledger()` (a wrapper over the internal
+`append_ledger()`), authenticated as the scoped `agent_ledger_writer` role.
+That function refuses human actor types, and the generic service-role key can
+no longer execute `append_ledger()`, so this client never uses it.
 
 This module never bypasses the function — the only INSERT path is
 via the RPC, which is enforced at the DB role level too.
@@ -10,6 +13,9 @@ via the RPC, which is enforced at the DB role level too.
 
 from __future__ import annotations
 
+import base64
+import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +23,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 from .canonicalise import canonical_json, sha256_hex
 from .config import Settings, get_settings
@@ -52,6 +59,30 @@ class AppendResult:
     occurred_at: datetime
 
 
+def _validated_writer_key(key: str | None, service_key: str | None) -> str:
+    """Fail closed unless `key` is an unexpired agent_ledger_writer JWT.
+
+    PostgREST authenticates the signature; this only catches misconfiguration
+    (absent key, the shared service key, a different role, an expired token).
+    """
+    if not key or key == service_key:
+        raise ValueError("unavailable")
+    parts = key.split(".")
+    if len(parts) != 3:
+        raise ValueError("malformed")
+    claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    exp = claims.get("exp") if isinstance(claims, dict) else None
+    if (
+        not isinstance(claims, dict)
+        or claims.get("role") != "agent_ledger_writer"
+        or isinstance(exp, bool)
+        or not isinstance(exp, (int, float))
+        or exp <= time.time()
+    ):
+        raise ValueError("invalid")
+    return key
+
+
 class LedgerClient:
     """Append-only audit ledger client.
 
@@ -81,10 +112,24 @@ class LedgerClient:
             raise RuntimeError("Audit ledger configuration was refused") from None
         if s.environment in {"development", "test"} and is_loopback:
             # Explicit local development/test only. Strict environments always
-            # use the real append_ledger RPC, including isolated local stacks.
+            # use the real append_agent_ledger RPC, including isolated local stacks.
             return cls(in_memory=True)
         try:
-            client = create_client(s.supabase_url, s.supabase_service_key)
+            # Scoped writer identity: public gateway apikey + writer Bearer.
+            # Absent/generic/cross-role/expired credentials are refused here,
+            # never downgraded to the service-role key.
+            writer_key = _validated_writer_key(
+                getattr(s, "supabase_agent_ledger_writer_key", None),
+                getattr(s, "supabase_service_key", None),
+            )
+            anon_key = getattr(s, "supabase_anon_key", None)
+            if not anon_key:
+                raise ValueError("unavailable")
+            client = create_client(
+                s.supabase_url,
+                anon_key,
+                options=SyncClientOptions(headers={"Authorization": f"Bearer {writer_key}"}),
+            )
             return cls(client)
         except Exception:
             raise RuntimeError("Audit ledger configuration was refused") from None
@@ -103,6 +148,11 @@ class LedgerClient:
         return list(self._mem)
 
     async def append(self, input: AppendInput) -> AppendResult:
+        # This client holds only the agent ledger identity. A human-labelled
+        # event must be written by the BFF's human writer, so refuse it here
+        # rather than let the database be the first line of defence.
+        if input.actor_type not in ("agent", "system"):
+            raise RuntimeError("Audit ledger append refused for actor type")
         if self._in_memory:
             return self._append_in_memory(input)
         return await self._append_remote(input)
@@ -181,7 +231,7 @@ class LedgerClient:
         output_hash = input.output_hash or sha256_hex(canonical_json({**detail, "_kind": "output"}))
 
         rpc = self._client.rpc(  # type: ignore[union-attr]
-            "append_ledger",
+            "append_agent_ledger",
             {
                 "p_tenant_id": input.tenant_id,
                 "p_correlation_id": input.correlation_id,
@@ -203,7 +253,7 @@ class LedgerClient:
             },
         )
         result = rpc.execute()
-        # append_ledger returns the global bigint row ID, not a UUID. Accept
+        # append_agent_ledger returns the global bigint row ID, not a UUID. Accept
         # the JSON integer or canonical decimal form, never an absent/zero ID.
         receipt = result.data
         if type(receipt) is int:

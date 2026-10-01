@@ -1,6 +1,8 @@
 """Runtime audit must remain durable, redacted and fail closed."""
 
+import base64
 import json
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -158,23 +160,90 @@ async def test_invalid_output_fails_without_disclosing_or_recording_raw_values(f
     assert PRIVATE not in str(asdict(result))
 
 
+def _jwt(role: str, exp: int | None = None) -> str:
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+
+    return f"{part({'alg': 'HS256'})}.{part({'role': role, 'exp': exp or int(time.time()) + 600})}.sig"
+
+
+def _strict_settings(environment: str, **overrides):
+    values = dict(
+        environment=environment,
+        supabase_url="http://127.0.0.1:56321",
+        supabase_service_key="synthetic-service",
+        supabase_anon_key="synthetic-anon",
+        supabase_agent_ledger_writer_key=_jwt("agent_ledger_writer"),
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 @pytest.mark.parametrize("environment", ["staging", "preprod", "production"])
 def test_strict_environment_never_selects_memory_for_loopback_or_client_failure(
     monkeypatch, environment
 ):
-    settings = SimpleNamespace(
-        environment=environment,
-        supabase_url="http://127.0.0.1:56321",
-        supabase_service_key="synthetic",
-    )
+    settings = _strict_settings(environment)
     client = Mock()
     create = Mock(return_value=client)
     monkeypatch.setattr("axiom.ledger_client.create_client", create)
     assert LedgerClient.from_settings(settings).in_memory_mode is False
-    create.assert_called_once_with(settings.supabase_url, settings.supabase_service_key)
+    # Public apikey, with the scoped writer as the Bearer identity; the shared
+    # service-role key is never presented.
+    assert create.call_args.args == (settings.supabase_url, "synthetic-anon")
+    options = create.call_args.kwargs["options"]
+    assert options.headers == {
+        "Authorization": f"Bearer {settings.supabase_agent_ledger_writer_key}"
+    }
+    assert settings.supabase_service_key not in str(create.call_args)
     create.side_effect = RuntimeError(PRIVATE)
     with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
+
+
+@pytest.mark.parametrize("environment", ["staging", "preprod", "production", "development"])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"supabase_agent_ledger_writer_key": None},
+        {"supabase_agent_ledger_writer_key": ""},
+        {"supabase_agent_ledger_writer_key": "synthetic-service"},
+        {"supabase_agent_ledger_writer_key": "not-a-jwt"},
+        {"supabase_agent_ledger_writer_key": _jwt("service_role")},
+        {"supabase_agent_ledger_writer_key": _jwt("human_action_writer")},
+        {"supabase_agent_ledger_writer_key": _jwt("agent_ledger_writer", exp=1)},
+        {"supabase_anon_key": None},
+    ],
+)
+def test_missing_or_wrong_writer_credential_fails_closed_without_fallback(
+    monkeypatch, environment, overrides
+):
+    # development only reaches the remote path for a non-loopback target.
+    url = "https://remote.test.invalid" if environment == "development" else "http://127.0.0.1:1"
+    settings = _strict_settings(environment, supabase_url=url, **overrides)
+    create = Mock()
+    monkeypatch.setattr("axiom.ledger_client.create_client", create)
+    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+        LedgerClient.from_settings(settings)
+    create.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_memory", [True, False])
+async def test_human_labelled_events_are_refused_by_the_agent_ledger(in_memory):
+    db = Mock()
+    ledger = LedgerClient.in_memory() if in_memory else LedgerClient(db)
+    with pytest.raises(RuntimeError, match="^Audit ledger append refused for actor type$"):
+        await ledger.append(
+            AppendInput(
+                tenant_id=TENANT,
+                correlation_id=TENANT,
+                actor_type="human",
+                actor_id=TENANT,
+                action_type="approval.granted",
+            )
+        )
+    db.rpc.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -182,11 +251,7 @@ def test_strict_environment_never_selects_memory_for_loopback_or_client_failure(
     ["https://remote.test.invalid", "http://localhost.evil.invalid", "http://127.evil.invalid"],
 )
 def test_remote_development_configuration_also_cannot_silently_fall_back(monkeypatch, url):
-    settings = SimpleNamespace(
-        environment="development",
-        supabase_url=url,
-        supabase_service_key="synthetic",
-    )
+    settings = _strict_settings("development", supabase_url=url)
     monkeypatch.setattr(
         "axiom.ledger_client.create_client", Mock(side_effect=RuntimeError(PRIVATE))
     )
@@ -237,5 +302,5 @@ async def test_confirmed_remote_receipt_uses_append_function_only(receipt):
         )
     )
     assert result.id == str(receipt)
-    assert db.rpc.call_args.args[0] == "append_ledger"
+    assert db.rpc.call_args.args[0] == "append_agent_ledger"
     db.table.assert_not_called()

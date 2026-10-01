@@ -58,3 +58,32 @@ def test_settings_falls_back_to_legacy_aws_and_gcp_variables():
         assert settings.axiom_storage_access_key_id == "LEGACY_KEY"
         assert settings.axiom_storage_secret_access_key == "LEGACY_SECRET"
         assert settings.axiom_project_id == "legacy-project"
+
+
+def _production_kwargs(**overrides):
+    values = dict(
+        environment="production",
+        supabase_url="https://db.example.invalid",
+        supabase_service_key="service-key-not-the-demo-one",
+        supabase_anon_key="anon-key",
+        supabase_agent_ledger_writer_key="writer-key",
+        axiom_region="ap-south-1",
+        internal_token="t" * 32,
+        approval_signing_key="k" * 48,
+        model_gateway_api_key="m" * 32,
+    )
+    values.update(overrides)
+    return values
+
+
+def test_production_requires_distinct_agent_ledger_writer_and_anon_keys():
+    import pytest
+
+    Settings(**_production_kwargs(), _env_file=None)
+    for bad in (
+        {"supabase_agent_ledger_writer_key": None},
+        {"supabase_agent_ledger_writer_key": "service-key-not-the-demo-one"},
+        {"supabase_anon_key": None},
+    ):
+        with pytest.raises(ValueError, match="required"):
+            Settings(**_production_kwargs(**bad), _env_file=None)
