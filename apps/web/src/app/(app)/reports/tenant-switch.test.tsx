@@ -216,3 +216,35 @@ it('retries an uncertain board request with the same operation key and no premat
   expect(submitted[0]!.operationKey).toMatch(/^[0-9a-f-]{36}$/);
   expect(submitted[1]!.operationKey).toBe(submitted[0]!.operationKey);
 });
+
+it('removes private detail on a denied refresh instead of preserving the last authorized view', async () => {
+  let detailReads = 0;
+  request.mockImplementation((_tenant, path) => {
+    if (path === `/reports/${id}`) {
+      detailReads++;
+      return detailReads === 1
+        ? Promise.resolve(Response.json({ data: { ...report, contentText: '{}', content: {} } }))
+        : Promise.reject(new Error('forbidden'));
+    }
+    return Promise.resolve(page([report]));
+  });
+  const access = {
+    tenantId: tenantA,
+    canPrepare: false,
+    canReview: true,
+    canRelease: true,
+    canExport: false,
+    canRequestBoard: false,
+    canManageBoard: false,
+  };
+  render(<ReportsClient {...access} />);
+  const recorded = screen.getByRole('region', { name: 'Recorded reports' });
+  fireEvent.click(await within(recorded).findByRole('button', { name: /Private tenant A report/ }));
+  const detail = await screen.findByRole('region', { name: 'Report detail' });
+  await within(detail).findByRole('heading', { name: 'Private tenant A report' });
+  fireEvent.click(within(detail).getByRole('button', { name: 'Refresh report detail' }));
+  await within(detail).findByRole('alert');
+  expect(within(detail).queryByRole('heading', { name: 'Private tenant A report' })).toBeNull();
+  expect(within(detail).queryByRole('button', { name: 'Approve reviewed content' })).toBeNull();
+  expect(detailReads).toBe(2);
+});
