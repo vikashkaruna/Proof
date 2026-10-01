@@ -1,10 +1,11 @@
+import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
 export const EVIDENCE_HTTP_MAX_BYTES = 12 * 1024 * 1024;
 export const REPORT_HTTP_MAX_BYTES = 64 * 1024;
 
 /** Count actual bytes before idempotency clones the upload; never trust a length header. */
-export function boundedJsonBody(maxBytes: number) {
+export function boundedJsonBody(maxBytes: number): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     if (c.req.method !== 'POST' || !c.req.raw.body) return next();
     const reader = c.req.raw.body.getReader();
@@ -44,7 +45,7 @@ export function boundedJsonBody(maxBytes: number) {
 }
 export const evidenceBodyLimit = boundedJsonBody(EVIDENCE_HTTP_MAX_BYTES);
 const smallBodyLimit = boundedJsonBody(REPORT_HTTP_MAX_BYTES);
-export const reportBodyLimit = createMiddleware(async (c, next) => {
+export const reportBodyLimit: MiddlewareHandler = createMiddleware(async (c, next) => {
   if (/^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(c.req.path)) return smallBodyLimit(c, next);
   return next();
 });
