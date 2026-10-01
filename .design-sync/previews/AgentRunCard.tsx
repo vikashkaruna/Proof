@@ -33,7 +33,7 @@ export const StatusSweep = () => (
     <AgentRunCard
       agent="parikshan"
       step="Control testing"
-      message="2 of 31 controls failed their checks."
+      message="2 controls failed their checks."
       status="failed"
       startedAt={ago(95)}
       progress={0.8}
