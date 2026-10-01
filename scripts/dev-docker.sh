@@ -11,7 +11,12 @@
 #   --env, -e <name>   Target environment: local (default), staging, preprod, prod
 #   --status, -s       Inspect & report status of all components without modifying
 #   --build, -b        Force rebuild of all Docker container images
-#   --down, -d         Stop and remove all running containers
+#   --down, -d         Stop containers (local: nothing is removed, data is kept)
+#   --pause / --unpause  Freeze or thaw running containers without stopping them
+#   --remove           Remove stopped containers EXCEPT databases (local only)
+#   --remove-all       Remove every container including databases (needs --yes)
+#   --volumes          With --remove-all: also delete data volumes (needs
+#                      --confirm-data-loss; irreversible, wipes local test data)
 #   --restart, -r      Restart all services
 #   --test, -t         Run the full local Pre-CI verification suite
 #   --logs, -l [svc]   Follow logs of all or a specific service
@@ -46,6 +51,11 @@ ACTION="up"
 FORCE_BUILD=false
 SPECIFIC_SERVICE=""
 NO_MARKETING=false
+ASSUME_YES=false
+DELETE_VOLUMES=false
+CONFIRM_DATA_LOSS=false
+# Database containers hold local test data. Plain down/remove never touch them.
+DB_SERVICES=("temporal-db" "supabase-db")
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -82,11 +92,39 @@ while [[ $# -gt 0 ]]; do
       ACTION="restart"
       shift
       ;;
+    --pause)
+      ACTION="pause"
+      shift
+      ;;
+    --unpause)
+      ACTION="unpause"
+      shift
+      ;;
+    --remove)
+      ACTION="remove"
+      shift
+      ;;
+    --remove-all)
+      ACTION="remove-all"
+      shift
+      ;;
+    --yes|-y)
+      ASSUME_YES=true
+      shift
+      ;;
+    --volumes)
+      DELETE_VOLUMES=true
+      shift
+      ;;
+    --confirm-data-loss)
+      CONFIRM_DATA_LOSS=true
+      shift
+      ;;
     --test|-t)
       ACTION="test"
       shift
       ;;
-    status|down|restart|test)
+    status|down|restart|test|pause|unpause|remove|remove-all)
       ACTION="$1"
       shift
       ;;
@@ -112,7 +150,12 @@ while [[ $# -gt 0 ]]; do
       echo -e "  --no-marketing     Exclude the public marketing site (workbench-only / intranet)"
       echo -e "  --status, -s       Inspect & report status of all components"
       echo -e "  --build, -b        Force rebuild of all Docker images"
-      echo -e "  --down, -d         Stop and remove containers"
+      echo -e "  --down, -d         Stop containers; local keeps them (and all data) in place"
+      echo -e "  --pause|--unpause  Freeze or thaw running containers"
+      echo -e "  --remove           Remove containers except databases (local only)"
+      echo -e "  --remove-all --yes Remove every container including databases; volumes kept"
+      echo -e "  --remove-all --yes --volumes --confirm-data-loss"
+      echo -e "                     Also delete data volumes (irreversible)"
       echo -e "  --restart, -r      Restart all services"
       echo -e "  --test, -t         Run the full local Pre-CI verification suite"
       echo -e "  --logs, -l [svc]   Follow logs of all or a specific service"
@@ -388,9 +431,68 @@ case "$ACTION" in
   down)
     ensure_docker_running
     setup_environment
-    log_step "Stopping and removing all Axiom Proof containers..."
-    docker compose "${COMPOSE_ARGS[@]}" down
-    log_succ "All containers stopped."
+    if [[ "$TARGET_ENV" == "local" ]]; then
+      # stop, not down: containers (databases especially) stay in place so a
+      # later `up` resumes with the same local test data.
+      log_step "Stopping Axiom Proof containers (nothing is removed)..."
+      docker compose "${COMPOSE_ARGS[@]}" stop
+      log_succ "All containers stopped. Use --remove or --remove-all to delete them."
+    else
+      log_step "Stopping and removing all Axiom Proof containers..."
+      docker compose "${COMPOSE_ARGS[@]}" down
+      log_succ "All containers stopped."
+    fi
+    ;;
+  pause)
+    ensure_docker_running
+    setup_environment
+    docker compose "${COMPOSE_ARGS[@]}" pause
+    log_succ "Containers paused."
+    ;;
+  unpause)
+    ensure_docker_running
+    setup_environment
+    docker compose "${COMPOSE_ARGS[@]}" unpause
+    log_succ "Containers resumed."
+    ;;
+  remove)
+    ensure_docker_running
+    setup_environment
+    if [[ "$TARGET_ENV" != "local" ]]; then
+      log_err "--remove is local-only; use --down for ${TARGET_ENV}."
+      exit 1
+    fi
+    # Remove every compose service except the database ones.
+    REMOVE_SERVICES=()
+    while IFS= read -r svc; do
+      [[ -z "$svc" ]] && continue
+      keep=false
+      for db in "${DB_SERVICES[@]}"; do [[ "$svc" == "$db" ]] && keep=true; done
+      [[ "$keep" == false ]] && REMOVE_SERVICES+=("$svc")
+    done < <(docker compose "${COMPOSE_ARGS[@]}" config --services)
+    log_step "Removing containers (databases kept: ${DB_SERVICES[*]})..."
+    docker compose "${COMPOSE_ARGS[@]}" rm --stop --force "${REMOVE_SERVICES[@]}"
+    log_succ "Removed ${#REMOVE_SERVICES[@]} service containers; database containers untouched."
+    ;;
+  remove-all)
+    ensure_docker_running
+    setup_environment
+    if [[ "$ASSUME_YES" != true ]]; then
+      log_err "--remove-all deletes every container, databases included. Re-run with --yes."
+      exit 1
+    fi
+    if [[ "$DELETE_VOLUMES" == true ]]; then
+      if [[ "$CONFIRM_DATA_LOSS" != true ]]; then
+        log_err "--volumes permanently deletes local database data. Add --confirm-data-loss to proceed."
+        exit 1
+      fi
+      log_warn "Deleting containers AND data volumes. Local test data will be lost."
+      docker compose "${COMPOSE_ARGS[@]}" down --volumes
+    else
+      log_step "Removing all containers; data volumes are kept."
+      docker compose "${COMPOSE_ARGS[@]}" down
+    fi
+    log_succ "Done."
     ;;
   restart)
     ensure_docker_running
