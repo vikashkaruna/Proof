@@ -32,7 +32,7 @@ export function PostureScore({
       : s >= 65
         ? 'text-indigo-700'
         : s >= 40
-          ? 'text-gold-700'
+          ? 'text-amber-700'
           : 'text-ember-700';
 
   if (variant === 'compact') {

@@ -11,7 +11,7 @@ const badgeVariants = cva(
         neutral: 'bg-mist-200 text-slate-700',
         info: 'bg-teal-50 text-teal-700',
         success: 'bg-green-50 text-green-700',
-        warning: 'bg-gold-50 text-gold-700',
+        warning: 'bg-amber-50 text-amber-800',
         danger: 'bg-ember-50 text-ember-700',
         proof: 'bg-gold-50 text-gold-700 border border-gold-500',
         indigo: 'bg-indigo-50 text-indigo-700',
