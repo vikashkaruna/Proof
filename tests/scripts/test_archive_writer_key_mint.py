@@ -47,8 +47,18 @@ class ArchiveWriterMintTests(unittest.TestCase):
         source = (ROOT / "scripts/test-deployed-http.sh").read_text()
         self.assertRegex(
             source,
-            r'SUPABASE_ARCHIVE_WRITER_KEY="\$archive_writer_key" '
+            r'SUPABASE_ARCHIVE_WRITER_KEY="\$archive_writer_key" \\\n\s+'
+            r'SUPABASE_HUMAN_ACTION_WRITER_KEY="\$human_writer_key" \\\n\s+'
+            r'SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="\$evidence_writer_key" \\\n\s+'
             r'\./scripts/run-deployed-acceptance\.sh "\$state_dir/\$environment\.json"\n',
+        )
+        # The API-only path runs the same strict-parity script, which registers
+        # workload identities through the human writer; without the key it 401s.
+        self.assertRegex(
+            source,
+            r'SUPABASE_HUMAN_ACTION_WRITER_KEY="\$human_writer_key" \\\n\s+'
+            r'SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="\$evidence_writer_key" \\\n\s+'
+            r'\./scripts/run-deployed-acceptance\.sh "\$state_dir/\$environment\.json" api-only',
         )
         self.assertIn("SUPABASE_ARCHIVE_WRITER_KEY=//p' \"$state_dir/$environment.env\"", source)
         config = (ROOT / "tests/e2e/playwright.config.ts").read_text()

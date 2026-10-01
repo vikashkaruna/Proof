@@ -1034,9 +1034,13 @@ async function main() {
   const planId = randomUUID();
   const actionId = randomUUID();
   // Plans and actions are not writable through the service credential (0099), so
-  // these synthetic rows are written as the local database owner. A deployed
-  // target has no such connection.
-  assert(!target, 'Plan fixtures cannot be written to a deployed target (migration 0099)');
+  // these synthetic rows are written as the local database owner. A local-docker
+  // target shares the loopback parity database; a remote target has no such
+  // connection.
+  assert(
+    !target || target.topology === 'local-docker',
+    'Plan fixtures cannot be written to a remote target (migration 0099)',
+  );
   const fixtureTarget = { repoRoot: process.cwd(), stateDir };
   await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
     {

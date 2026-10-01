@@ -231,11 +231,12 @@ async function main() {
   const planA = { id: randomUUID(), title: `Persona plan A ${run}` };
   const planB = { id: randomUUID(), title: `Persona plan B ${run}` };
   // Plans and actions are not writable through the service credential (0099), so
-  // synthetic rows go in as the local database owner. A deployed target has no
-  // such connection; its plan fixtures must come from the operator database path.
-  if (target)
+  // synthetic rows go in as the local database owner. A local-docker target is
+  // backed by the same loopback parity database; a remote target has no such
+  // connection and its plan fixtures must come from the operator database path.
+  if (target && target.topology !== 'local-docker')
     throw new Error(
-      'Plan fixtures cannot be seeded into a deployed target with the service credential (migration 0099); seed them through the operator database path.',
+      'Plan fixtures cannot be seeded into a remote target with the service credential (migration 0099); seed them through the operator database path.',
     );
   const fixtureTarget = { repoRoot: process.cwd(), stateDir };
   await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
