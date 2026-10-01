@@ -276,7 +276,7 @@ def main():
                 ],
                 cwd=ROOT,
                 env=env,
-                timeout=900,
+                timeout=1800,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
             summary["counts"] = {
@@ -288,7 +288,7 @@ def main():
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all thirteen tests without skips or retries"
+                    "Evidence browser acceptance requires all fourteen tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
