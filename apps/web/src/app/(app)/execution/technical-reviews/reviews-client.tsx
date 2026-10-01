@@ -10,6 +10,7 @@ import {
   retainedArtifactSchema,
   retainedBuildResultSchema,
 } from '../../reports/retained-artifact-state';
+import { useReceiptRefresh } from '../../reports/use-receipt-refresh';
 
 export type TechnicalPlan = { id: string; title: string; status: string; created_at: string };
 
@@ -92,6 +93,7 @@ export function TechnicalReviewsClient({
   const [releaseConfirmed, setReleaseConfirmed] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  useReceiptRefresh(requests, refresh);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {

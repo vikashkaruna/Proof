@@ -10,6 +10,7 @@ import {
   retainedArtifactSchema,
   retainedBuildResultSchema,
 } from '../../reports/retained-artifact-state';
+import { useReceiptRefresh } from '../../reports/use-receipt-refresh';
 
 export type DpbBreach = { id: string; title: string; detected_at: string };
 export type DpbNotification = {
@@ -90,6 +91,7 @@ export function DpbReviewsClient({
   const [releaseConfirmed, setReleaseConfirmed] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  useReceiptRefresh(requests, refresh);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
