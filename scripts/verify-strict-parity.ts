@@ -2,6 +2,7 @@ import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-t
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
+import { insertLocalFixtureRows, updateLocalFixtureRow } from './lib/local-fixture-db.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
@@ -1032,38 +1033,37 @@ async function main() {
 
   const planId = randomUUID();
   const actionId = randomUUID();
-  assert.equal(
-    (
-      await apiRequest('/rest/v1/remediation_plans', 'POST', {
-        id: planId,
-        tenant_id: tenantB,
-        engagement_id: engagementB,
-        library_version: library,
-        title: 'Parity approval only — no execution',
-        status: 'review',
-        version: 1,
-      })
-    ).status,
-    201,
-  );
-  assert.equal(
-    (
-      await apiRequest('/rest/v1/remediation_actions', 'POST', {
-        id: actionId,
-        tenant_id: tenantB,
-        plan_id: planId,
-        sequence: 1,
-        action_type: 'data.mask',
-        description: 'Synthetic approval fixture',
-        risk_score: 10,
-        rollback_definition: { fixture: true },
-        rollback_validated: true,
-        dry_run_status: 'dry_run_complete',
-        dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-      })
-    ).status,
-    201,
-  );
+  // Plans and actions are not writable through the service credential (0099), so
+  // these synthetic rows are written as the local database owner. A deployed
+  // target has no such connection.
+  assert(!target, 'Plan fixtures cannot be written to a deployed target (migration 0099)');
+  const fixtureTarget = { repoRoot: process.cwd(), stateDir };
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
+    {
+      id: planId,
+      tenant_id: tenantB,
+      engagement_id: engagementB,
+      library_version: library,
+      title: 'Parity approval only — no execution',
+      status: 'review',
+      version: 1,
+    },
+  ]);
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_actions', [
+    {
+      id: actionId,
+      tenant_id: tenantB,
+      plan_id: planId,
+      sequence: 1,
+      action_type: 'data.mask',
+      description: 'Synthetic approval fixture',
+      risk_score: 10,
+      rollback_definition: { fixture: true },
+      rollback_validated: true,
+      dry_run_status: 'dry_run_complete',
+      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    },
+  ]);
   const approval = { planId, actionIds: [actionId], mode: 'batch' };
   await check(
     'session_mfa_does_not_replace_approval_step_up',
@@ -1076,11 +1076,7 @@ async function main() {
     { ...approval, purpose: 'approval_issuance' },
     recoveryCodes[1]!,
   );
-  assert.equal(
-    (await apiRequest(`/rest/v1/remediation_plans?id=eq.${planId}`, 'PATCH', { version: 2 }))
-      .status,
-    200,
-  );
+  await updateLocalFixtureRow(fixtureTarget, 'remediation_plans', planId, { version: 2 });
   await check(
     'changed_plan_invalidates_step_up',
     '/v1/plans/approve',
@@ -1092,14 +1088,9 @@ async function main() {
     { ...approval, purpose: 'approval_issuance' },
     recoveryCodes[2]!,
   );
-  assert.equal(
-    (
-      await apiRequest(`/rest/v1/remediation_actions?id=eq.${actionId}`, 'PATCH', {
-        parameters: { changedAfterStepUp: true },
-      })
-    ).status,
-    200,
-  );
+  await updateLocalFixtureRow(fixtureTarget, 'remediation_actions', actionId, {
+    parameters: { changedAfterStepUp: true },
+  });
   await check(
     'changed_action_content_invalidates_step_up',
     '/v1/plans/approve',
