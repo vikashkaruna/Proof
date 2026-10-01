@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { AgentIcon } from '@axiom/ui';
+import { AgentIcon, AgentLabel } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import { ModuleContextFor } from '@/lib/module-context';
@@ -198,13 +198,13 @@ export function AgentWorkbenchClient({
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#0FB5A5]">
             <span>Agent ·</span>
             <span className="inline-flex items-center gap-1">
-              <AgentIcon
+              <AgentLabel
                 agent={selectedAgent}
                 size="xs"
-                variant="on-dark"
+                tone="dark"
                 state={isExecuting ? 'working' : 'idle'}
               />
-              <span className="capitalize">{selectedAgent} (fleet)</span>
+              <span>(fleet)</span>
             </span>
           </div>
           <span className="text-[11px] text-[#8a97b8]">Autonomy —</span>

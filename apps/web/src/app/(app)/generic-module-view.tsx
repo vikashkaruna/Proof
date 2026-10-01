@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentIcon } from '@axiom/ui';
+import { AgentLabel } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 
@@ -134,30 +134,24 @@ export function GenericModuleView({
                       return (
                         <React.Fragment key={idx}>
                           {idx > 0 && <span className="text-[#0FB5A5]/70">+</span>}
-                          <span className="inline-flex items-center gap-1">
-                            <AgentIcon
-                              agent={key}
-                              size="xs"
-                              variant="on-dark"
-                              state={isExecuting ? 'working' : 'idle'}
-                            />
-                            <span>{part}</span>
-                          </span>
+                          <AgentLabel
+                            agent={key}
+                            size="xs"
+                            tone="dark"
+                            state={isExecuting && key === meta.agentKey ? 'working' : 'idle'}
+                          />
                         </React.Fragment>
                       );
                     })
+                  ) : meta.agentKey ? (
+                    <AgentLabel
+                      agent={meta.agentKey}
+                      size="xs"
+                      tone="dark"
+                      state={isExecuting ? 'working' : 'idle'}
+                    />
                   ) : (
-                    <span className="inline-flex items-center gap-1">
-                      {meta.agentKey && (
-                        <AgentIcon
-                          agent={meta.agentKey}
-                          size="xs"
-                          variant="on-dark"
-                          state={isExecuting ? 'working' : 'idle'}
-                        />
-                      )}
-                      <span>{meta.agent}</span>
-                    </span>
+                    <span>{meta.agent}</span>
                   )}
                 </div>
               )}

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
-import { PageHeader, Card, CardContent, Badge, AgentIcon } from '@axiom/ui';
+import { PageHeader, Card, CardContent, Badge, AgentLabel } from '@axiom/ui';
 import { VerifyButton } from './verify-button';
 import { ExportLedgerButton } from './export-ledger-button';
 import { LedgerRefresh } from './ledger-refresh';
@@ -213,10 +213,7 @@ export default async function LedgerPage({
               </span>
               <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
                 <span>Agent ·</span>
-                <span className="inline-flex items-center gap-1">
-                  <AgentIcon agent="lekha" size="xs" variant="on-dark" state="working" />
-                  <span>Lekha</span>
-                </span>
+                <AgentLabel agent="lekha" size="xs" tone="dark" />
               </div>
               <span className="text-xs text-[#8a97b8]">Autonomy L3 (append-only)</span>
               <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-[#C9A227]">

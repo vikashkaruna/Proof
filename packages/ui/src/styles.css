@@ -1,0 +1,6 @@
+/*
+ * Entry for the compiled library stylesheet (dist/ui.css): design tokens plus the Tailwind
+ * utilities the components use. A relative path, because the Tailwind CLI's @import
+ * resolver does not read package "exports".
+ */
+@import '../../design-tokens/src/globals.css';

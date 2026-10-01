@@ -13,7 +13,7 @@ import {
   StatusBadge,
   SeverityChip,
   Button,
-  AgentIcon,
+  AgentLabel,
   ProofSeal,
   type StatusKind,
 } from '@axiom/ui';
@@ -176,10 +176,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
           <span className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
               Agent ·
-              <span className="inline-flex items-center gap-1">
-                <AgentIcon agent="sudhaar" size={16} />
-                <span>Sudhaar</span>
-              </span>
+              <AgentLabel agent="sudhaar" size="xs" />
             </span>
             <span className="text-slate-400">·</span>
             <span>{typedPlan.description ?? 'Deterministic, rollbackable remediation plan.'}</span>

@@ -86,3 +86,16 @@ it('renders the shared context line with phase and agents, leaving the Hindi nam
   expect(container.textContent?.split(moduleMeta('workbench').hi)).toHaveLength(2);
   expect(screen.getByRole('heading', { name: /Agent Workbench/i })).toBeTruthy();
 });
+
+it('labels the hero agent through AgentLabel, animated only while a real invocation is in flight', async () => {
+  let finish: (v: unknown) => void = () => undefined;
+  invoke.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+  render(<AgentWorkbenchClient {...props} />);
+  const hero = () => screen.getAllByTestId('agent-label')[0]!;
+  expect(hero().getAttribute('data-agent')).toBe('drishti');
+  expect(hero().getAttribute('data-state')).toBe('idle');
+  fireEvent.click(screen.getByRole('button', { name: 'Run drishti' }));
+  await waitFor(() => expect(hero().getAttribute('data-state')).toBe('working'));
+  finish({ status: 'succeeded', latency_ms: 1, ledger_entry_ids: [] });
+  await waitFor(() => expect(hero().getAttribute('data-state')).toBe('idle'));
+});
