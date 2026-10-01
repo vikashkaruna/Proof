@@ -48,7 +48,7 @@ export function applyEnv(overrides: Record<string, string | undefined> = {}): vo
 
 type AuthOutcome =
   | { kind: 'user'; id: string; email?: string }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; status?: number; name?: string }
   | { kind: 'unreachable'; message: string };
 
 type MembershipOutcome = { role: string } | null;
@@ -94,7 +94,14 @@ export function createSupabaseDouble(options: {
       getUser: async () => {
         if (state.auth.kind === 'unreachable') throw new Error(state.auth.message);
         if (state.auth.kind === 'error') {
-          return { data: { user: null }, error: { message: state.auth.message } };
+          return {
+            data: { user: null },
+            error: {
+              message: state.auth.message,
+              status: state.auth.status,
+              name: state.auth.name,
+            },
+          };
         }
         return {
           data: {

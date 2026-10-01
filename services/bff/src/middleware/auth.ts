@@ -81,6 +81,17 @@ export const authMiddleware = createMiddleware<{ Variables: Variables }>(async (
 
     // SEC-1: this branch used to fall back to the founder identity whenever
     // `isDevOrTest` was true. It now rejects, unconditionally.
+    if (
+      error &&
+      (error.name === 'AuthRetryableFetchError' ||
+        (typeof error.status === 'number' && (error.status === 0 || error.status >= 500)))
+    ) {
+      logger.error({ error: error.message }, 'auth service unavailable');
+      return c.json(
+        { error: { code: 'auth_unavailable', message: 'Auth service unreachable' } },
+        503,
+      );
+    }
     if (error || !user) {
       logger.warn({ error: error?.message }, 'auth rejected');
       return c.json({ error: { code: 'unauthorized', message: 'Invalid or expired token' } }, 401);

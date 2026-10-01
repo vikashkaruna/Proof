@@ -1,6 +1,6 @@
 /**
- * Historical Pramaan dossier read service. Source-free synthesis, sealing and
- * outbound dispatch remain closed until exact retained artifacts are verified.
+ * Pramaan dossier router. Supported report kinds require exact released source
+ * and PDF versions; historical source-free rows and outbound dispatch stay closed.
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -8,10 +8,13 @@ import { DossierTypeSchema, type DossierType, type PramaanDossier } from '@axiom
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 import { accessFor } from './evidence-pack-records.js';
 import { PramaanArtifactService } from './pramaan-artifacts.js';
+import { PramaanAuditorArtifactService } from './pramaan-auditor-artifacts.js';
+import { PramaanTechnicalArtifactService } from './pramaan-technical-artifacts.js';
+import { PramaanDpbArtifactService } from './pramaan-dpb-artifacts.js';
 
 export const synthesizeDossierInputSchema = z
   .object({
-    engagementId: z.string().uuid(),
+    engagementId: z.string().uuid().nullable(),
     dossierType: DossierTypeSchema,
     title: z.string().trim().min(1).max(300),
     reportId: z.string().uuid(),
@@ -56,11 +59,29 @@ export type DispatchReportEmailInput = z.infer<typeof dispatchReportEmailInputSc
 
 export class PramaanClosureService {
   readonly artifacts: PramaanArtifactService;
+  readonly auditorArtifacts: PramaanAuditorArtifactService;
+  readonly technicalArtifacts: PramaanTechnicalArtifactService;
+  readonly dpbArtifacts: PramaanDpbArtifactService;
   constructor(
     private readonly db: EvidenceDatabase,
     writerDb?: EvidenceDatabase,
   ) {
     this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
+    this.auditorArtifacts = new PramaanAuditorArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
+    this.technicalArtifacts = new PramaanTechnicalArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
+    this.dpbArtifacts = new PramaanDpbArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
   }
 
   private async assertHistoricalReader(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -69,10 +90,20 @@ export class PramaanClosureService {
   }
 
   async listMyBuilds(tenantId: string, actorId: string, signal?: AbortSignal) {
-    return this.artifacts.mine(tenantId, actorId, signal);
+    const [board, auditor, technical, dpb] = await Promise.all([
+      this.artifacts.mine(tenantId, actorId, signal),
+      this.auditorArtifacts.mine(tenantId, actorId, signal),
+      this.technicalArtifacts.mine(tenantId, actorId, signal),
+      this.dpbArtifacts.mine(tenantId, actorId, signal),
+    ]);
+    return {
+      builds: [...board.builds, ...auditor.builds, ...technical.builds, ...dpb.builds].sort(
+        (a, b) => b.createdAt.localeCompare(a.createdAt),
+      ),
+    };
   }
 
-  /** Only published, exact-version board evidence currently has a dossier source contract. */
+  /** Each supported dossier kind requires published, exact-version source artifacts. */
   async synthesizeDossier(
     tenantId: string,
     actorId: string,
@@ -80,7 +111,29 @@ export class PramaanClosureService {
     _correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ) {
-    return this.artifacts.create(tenantId, actorId, input, signal);
+    if (input.dossierType === 'dpb_statutory')
+      return this.dpbArtifacts.create(tenantId, actorId, input, signal);
+    if (input.engagementId === null) throw new EvidenceError('source_bound_dossier_required', 409);
+    if (input.dossierType === 'auditor_assurance')
+      return this.auditorArtifacts.create(
+        tenantId,
+        actorId,
+        { ...input, engagementId: input.engagementId },
+        signal,
+      );
+    if (input.dossierType === 'technical_register')
+      return this.technicalArtifacts.create(
+        tenantId,
+        actorId,
+        { ...input, engagementId: input.engagementId },
+        signal,
+      );
+    return this.artifacts.create(
+      tenantId,
+      actorId,
+      { ...input, engagementId: input.engagementId },
+      signal,
+    );
   }
 
   /** Historical rows cannot enter this source-bound seal path. */
@@ -92,7 +145,8 @@ export class PramaanClosureService {
     _correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ) {
-    return this.artifacts.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.seal(tenantId, actorId, dossierId, input.expectedProofSeal, signal);
   }
 
   async reconcileDossier(
@@ -102,7 +156,8 @@ export class PramaanClosureService {
     operationKey: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.reconcile(tenantId, actorId, dossierId, operationKey, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.reconcile(tenantId, actorId, dossierId, operationKey, signal);
   }
 
   async retryMissingDossier(
@@ -112,7 +167,8 @@ export class PramaanClosureService {
     operationKey: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.retryMissing(tenantId, actorId, dossierId, operationKey, signal);
   }
 
   async getDossierArchive(
@@ -121,7 +177,16 @@ export class PramaanClosureService {
     dossierId: string,
     signal?: AbortSignal,
   ) {
-    return this.artifacts.archive(tenantId, actorId, dossierId, signal);
+    const service = await this.artifactFor(tenantId, dossierId, signal);
+    return service.archive(tenantId, actorId, dossierId, signal);
+  }
+
+  private async artifactFor(tenantId: string, dossierId: string, signal?: AbortSignal) {
+    if (await this.auditorArtifacts.owns(tenantId, dossierId, signal)) return this.auditorArtifacts;
+    if (await this.technicalArtifacts.owns(tenantId, dossierId, signal))
+      return this.technicalArtifacts;
+    if (await this.dpbArtifacts.owns(tenantId, dossierId, signal)) return this.dpbArtifacts;
+    return this.artifacts;
   }
 
   /**
@@ -166,11 +231,13 @@ export class PramaanClosureService {
     if (res.error) throw new EvidenceError('closure_storage_unavailable', 503);
     const row = Array.isArray(res.data) ? res.data[0] : res.data;
     if (!row) throw new EvidenceError('dossier_not_found', 404);
-    const source = await this.artifacts.status(tenantId, actorId, dossierId, signal);
+    const source = await (
+      await this.artifactFor(tenantId, dossierId, signal)
+    ).status(tenantId, actorId, dossierId, signal);
     return {
       id: row.id as string,
       tenantId: row.tenant_id as string,
-      engagementId: row.engagement_id as string,
+      engagementId: (row.engagement_id as string) ?? null,
       reportId: (row.report_id as string) ?? null,
       dossierType: row.dossier_type as DossierType,
       title: row.title as string,
@@ -237,7 +304,7 @@ export class PramaanClosureService {
     const dossiers: PramaanDossier[] = (data ?? []).map((row) => ({
       id: row.id as string,
       tenantId: row.tenant_id as string,
-      engagementId: row.engagement_id as string,
+      engagementId: (row.engagement_id as string) ?? null,
       reportId: (row.report_id as string) ?? null,
       dossierType: row.dossier_type as DossierType,
       title: row.title as string,

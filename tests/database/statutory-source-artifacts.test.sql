@@ -81,6 +81,7 @@ declare
  b public.statutory_artifact_builds; q jsonb; x jsonb; receipt jsonb; source_receipt jsonb; pdf_receipt jsonb;
  content text; pdf_hash text:=repeat('d',64); build_key uuid:=gen_random_uuid();
  wrong jsonb; count_before integer;
+ dossier_request jsonb; dossier_receipt jsonb; dossier_id uuid; dossier_build uuid; dossier_proof text;
 begin
  perform pg_temp.ok(public.request_statutory_report(t,manager,gen_random_uuid(),eng,run,'auditor','Premature auditor report',gen_random_uuid())->>'error'='assessment_not_finalized','unfinalized packet cannot enter auditor workflow');
  perform pg_temp.ok(public.confirm_workload_assessment(t,run)->>'status'='succeeded','real finalized assessment');
@@ -164,6 +165,38 @@ begin
  perform pg_temp.ok((public.release_report(t,r.id,founder,r.content_sha256,pdf_hash,gen_random_uuid())->>'replayed')::boolean,'release idempotent');
  perform pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=t and action_type='report.released' and target_ref=r.id::text),'one release ledger entry');
  perform pg_temp.ok((select count(*)=2 from public.audit_ledger where tenant_id=t and action_type='report.artifact.settled' and target_ref=r.id::text),'one settlement ledger per typed receipt');
+ -- Pramaan auditor assurance uses this exact released assessment-derived report.
+ dossier_request:=jsonb_build_object('provider','s3-compatible','bucket','statutory-test',
+  'source_sha256',src.source_sha256,'pdf_sha256',pdf_hash,
+  'source_version_id',(select id::text from public.statutory_artifact_versions where build_id=b.id and artifact_kind='source_json'),
+  'pdf_version_id',(select id::text from public.statutory_artifact_versions where build_id=b.id and artifact_kind='statutory_pdf'),
+  'manifest_sha256',repeat('a',64),'archive_sha256',repeat('b',64),'archive_bytes',2000,
+  'object_key','tenants/'||t||'/pramaan/auditor/'||r.id||'/'||build_key||'/'||repeat('b',64));
+ perform pg_temp.ok(public.begin_auditor_pramaan(t,'99880000-0000-4000-8000-000000000004',r.id,build_key,'Auditor assurance',dossier_request,gen_random_uuid())->>'error'='manager_authority_required','viewer cannot create auditor dossier');
+ perform pg_temp.ok(public.begin_auditor_pramaan(t,manager,r.id,build_key,'Auditor assurance',jsonb_set(dossier_request,'{source_sha256}',to_jsonb(repeat('e',64))),gen_random_uuid())->>'error'='source_version_conflict','wrong frozen auditor source hash refused');
+ x:=public.begin_auditor_pramaan(t,manager,r.id,build_key,'Auditor assurance',dossier_request,gen_random_uuid());
+ perform pg_temp.ok(x->>'status'='pending','released auditor source creates only pending dossier');
+ dossier_id:=(x->>'dossierId')::uuid; dossier_build:=(x->>'buildId')::uuid;
+ dossier_proof:=(select proof_seal_hash from public.pramaan_dossiers where id=dossier_id);
+ perform pg_temp.ok(public.seal_auditor_pramaan(t,founder,dossier_id,dossier_proof,gen_random_uuid())->>'error'='archive_unverified','auditor seal requires archive readback');
+ dossier_receipt:=jsonb_build_object('provider','s3-compatible','bucket','statutory-test',
+  'object_key',dossier_request->>'object_key','version_id','auditor-dossier-v1','content_hash',repeat('b',64),
+  'byte_size',2000,'tenant_id',t,'engagement_id',eng,'collected_by_agent','pramaan',
+  'retain_until',(select retain_until from public.pramaan_auditor_builds where id=dossier_build)+interval '1 second',
+  'readback_at',clock_timestamp(),'lock_mode','COMPLIANCE','verified',true,'legal_hold',false,
+  'encryption','AES256','operation_id',dossier_build,
+  'correlation_id',(select correlation_id from public.pramaan_auditor_builds where id=dossier_build));
+ perform pg_temp.ok(public.settle_auditor_pramaan(t,manager,dossier_build,dossier_receipt||'{"lock_mode":"GOVERNANCE"}'::jsonb,gen_random_uuid())->>'error'='receipt_mismatch','governance lock cannot settle auditor archive');
+ x:=public.settle_auditor_pramaan(t,manager,dossier_build,dossier_receipt,gen_random_uuid());
+ perform pg_temp.ok(x->>'status'='settled','verified auditor archive receipt settles');
+ perform pg_temp.ok(public.seal_auditor_pramaan(t,manager,dossier_id,dossier_proof,gen_random_uuid())->>'error'='founder_authority_required','manager cannot seal auditor dossier');
+ x:=public.seal_auditor_pramaan(t,founder,dossier_id,dossier_proof,gen_random_uuid());
+ perform pg_temp.ok(x->>'status'='sealed','founder seals exact retained auditor archive');
+ perform pg_temp.ok((select dossier_type='auditor_assurance' and sealed_by=founder from public.pramaan_dossiers where id=dossier_id),'auditor dossier type and founder bound');
+ perform pg_temp.ok(not has_table_privilege('service_role','public.pramaan_auditor_builds','INSERT')
+  and not has_table_privilege('service_role','public.pramaan_auditor_archives','INSERT')
+  and not has_function_privilege('authenticated','public.begin_auditor_pramaan(uuid,uuid,uuid,uuid,text,jsonb,uuid)','EXECUTE'),
+  'auditor dossier has no direct service/client write');
  perform pg_temp.ok(not has_table_privilege('service_role','public.statutory_artifact_versions','INSERT')
   and not has_table_privilege('service_role','public.statutory_artifact_builds','INSERT')
   and not has_table_privilege('authenticated','public.statutory_artifact_versions','SELECT')

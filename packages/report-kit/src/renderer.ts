@@ -349,6 +349,28 @@ function generateDeterministicPdf(htmlContent: string): Buffer {
 }
 
 /**
+ * A short, log-safe reason for a failed Chromium run. The child's stderr holds
+ * only browser diagnostics and local temp paths, never report content.
+ */
+export function describeChromiumFailure(label: string, error: unknown): string {
+  if (!(error instanceof Error)) return `${label}: unknown failure`;
+  const failure = error as Error & {
+    killed?: boolean;
+    signal?: string | null;
+    code?: string | number | null;
+    stderr?: unknown;
+  };
+  const parts = [label];
+  if (failure.killed) parts.push('killed (timeout)');
+  if (failure.signal) parts.push(`signal=${failure.signal}`);
+  if (failure.code !== undefined && failure.code !== null) parts.push(`code=${failure.code}`);
+  const stderr = typeof failure.stderr === 'string' ? failure.stderr.trim() : '';
+  if (stderr) parts.push(`stderr=${stderr.replace(/\s+/g, ' ').slice(-300)}`);
+  if (parts.length === 1) parts.push(failure.message.slice(0, 200));
+  return parts.join(' ');
+}
+
+/**
  * Render HTML to deterministic PDF buffer.
  */
 export async function renderHtmlToPdf(
@@ -374,6 +396,7 @@ export async function renderHtmlToPdf(
     const inHtmlPath = `${tempPrefix}.html`;
     const outPdfPath = `${tempPrefix}.pdf`;
     const profilePath = `${tempPrefix}-profile`;
+    let firstFailure = '';
 
     try {
       await fs.writeFile(inHtmlPath, htmlContent, { encoding: 'utf-8', mode: 0o600 });
@@ -401,9 +424,14 @@ export async function renderHtmlToPdf(
 
       try {
         await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
-      } catch {
+      } catch (first) {
+        firstFailure = describeChromiumFailure('headless=new', first);
         // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
-        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
+        try {
+          await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
+        } catch (second) {
+          throw new Error(`${firstFailure}; ${describeChromiumFailure('headless', second)}`);
+        }
       }
 
       const rawPdf = await fs.readFile(outPdfPath);
@@ -421,8 +449,11 @@ export async function renderHtmlToPdf(
         byteLength: pdfBuffer.length,
         renderer: 'chromium',
       };
-    } catch {
-      if (options.requireChromium) throw new Error('Chromium PDF rendering failed');
+    } catch (cause) {
+      if (options.requireChromium) {
+        const reason = cause instanceof Error ? cause.message.slice(0, 600) : 'unknown';
+        throw new Error(`Chromium PDF rendering failed: ${reason}`);
+      }
       // Other callers may use the text-only fallback when Chromium fails.
     } finally {
       await fs.unlink(inHtmlPath).catch(() => {});

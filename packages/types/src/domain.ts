@@ -541,7 +541,7 @@ export type DossierStatus = z.infer<typeof DossierStatusSchema>;
 export const PramaanDossierSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
-  engagementId: z.string().uuid(),
+  engagementId: z.string().uuid().nullable(),
   reportId: z.string().uuid().nullable().optional(),
   dossierType: DossierTypeSchema,
   title: z.string().min(1).max(300),
