@@ -12,9 +12,20 @@ export const retainedArtifactSchema = z.object({
     .nullable(),
 });
 
-export const retainedBuildResultSchema = retainedArtifactSchema.extend({
+/**
+ * The build route answers a settled build with only the identifiers it just
+ * recorded (`reportId`, `buildId`, `status`, `operationKey`); the full artifact
+ * detail (report status, PDF receipt) comes from the list read. A pending
+ * answer carries the detail. Both must parse, or a settled build leaves the
+ * card unchanged and skips the refresh that would show it.
+ */
+export const retainedBuildResultSchema = z.object({
   reportId: z.uuid(),
   status: z.enum(['pending', 'settled']),
+  operationKey: z.uuid().nullable(),
+  reportStatus: z.string().optional(),
+  lastErrorCode: z.string().nullable().optional(),
+  pdf: retainedArtifactSchema.shape.pdf.optional(),
 });
 
 type RetainedArtifact = z.infer<typeof retainedArtifactSchema>;
@@ -53,7 +64,11 @@ export function mergeRetainedRequests<T extends RequestWithArtifact>(
   });
 }
 
-/** Project the authoritative build response immediately, before any list refresh. */
+/**
+ * Project the authoritative build response immediately, before any list
+ * refresh. Fields the response does not carry keep what the card already
+ * showed; a settled build never claims a PDF receipt it was not given.
+ */
 export function applyRetainedBuild<T extends RequestWithArtifact>(
   current: T[],
   build: RetainedBuildResult,
@@ -63,13 +78,32 @@ export function applyRetainedBuild<T extends RequestWithArtifact>(
       ? {
           ...item,
           artifact: {
-            reportStatus: build.reportStatus,
+            reportStatus:
+              build.reportStatus ?? item.artifact?.reportStatus ?? item.reportStatus ?? 'unknown',
             status: build.status,
             operationKey: build.operationKey,
-            lastErrorCode: build.lastErrorCode,
-            pdf: build.pdf,
+            lastErrorCode: build.lastErrorCode ?? null,
+            pdf: build.pdf ?? item.artifact?.pdf ?? null,
           },
         }
       : item,
   );
+}
+
+/** Waits between re-reads while a settled card still lacks its PDF receipt. */
+export const RECEIPT_REFRESH_DELAYS_MS = [1000, 1500, 2000, 3000, 4000, 5000] as const;
+
+/**
+ * A build answer proves the artifact settled but carries no receipt, and a
+ * stale list read cannot supply one. Until a read returns the receipt the
+ * card has nothing to release, so it must read again rather than stand still.
+ */
+export function awaitsReceipt(requests: RequestWithArtifact[]): boolean {
+  return requests.some((item) => item.artifact?.status === 'settled' && !item.artifact.pdf);
+}
+
+/** Delay before the next re-read, or null when none is needed or attempts are spent. */
+export function nextReceiptRefreshDelay(attempt: number, waiting: boolean): number | null {
+  if (!waiting) return null;
+  return RECEIPT_REFRESH_DELAYS_MS[attempt] ?? null;
 }

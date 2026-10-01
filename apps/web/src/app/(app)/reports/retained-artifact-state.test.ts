@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  RECEIPT_REFRESH_DELAYS_MS,
   applyRetainedBuild,
+  awaitsReceipt,
   mergeRetainedRequests,
+  nextReceiptRefreshDelay,
   retainedBuildResultSchema,
 } from './retained-artifact-state';
 
@@ -73,5 +76,66 @@ describe('retained artifact UI state', () => {
     expect(result[0]?.artifact?.status).toBe('settled');
     expect(result[0]?.artifact?.reportStatus).toBe('published');
     expect(result[0]?.artifact?.pdf).toEqual(pdf);
+  });
+  it('parses the BFF settled answer, which carries only identifiers, and projects settled', () => {
+    // Exactly what POST /reports/{technical,dpb}/:id/artifacts returns on 200.
+    const build = retainedBuildResultSchema.parse({
+      reportId,
+      buildId: '44444444-4444-4444-8444-444444444444',
+      status: 'settled',
+      operationKey,
+      replayed: false,
+    });
+    const projected = applyRetainedBuild([request(reportId, 'not_started')], build);
+    expect(projected[0]?.artifact?.status).toBe('settled');
+    expect(projected[0]?.artifact?.operationKey).toBe(operationKey);
+    // No receipt was supplied, so none is claimed; the list read supplies it.
+    expect(projected[0]?.artifact?.pdf).toBeNull();
+    expect(projected[0]?.artifact?.reportStatus).toBe('approved');
+  });
+
+  it('keeps a known PDF receipt when a later build answer omits it, and never invents a status', () => {
+    const settled = [request(reportId, 'settled')];
+    const again = retainedBuildResultSchema.parse({ reportId, status: 'settled', operationKey });
+    expect(applyRetainedBuild(settled, again)[0]?.artifact?.pdf).toEqual(pdf);
+    const bare: Array<{
+      reportId: string | null;
+      reportStatus: string | null;
+      artifact: ReturnType<typeof request>['artifact'] | null;
+    }> = [{ reportId, reportStatus: null, artifact: null }];
+    expect(applyRetainedBuild(bare, again)[0]?.artifact?.reportStatus).toBe('unknown');
+  });
+
+  it('rejects a build answer for a different shape of status', () => {
+    expect(() =>
+      retainedBuildResultSchema.parse({ reportId, status: 'not_started', operationKey }),
+    ).toThrow();
+  });
+  it('keeps re-reading while a settled card has no receipt, then stops and resets', () => {
+    const projected = applyRetainedBuild(
+      [request(reportId, 'not_started')],
+      retainedBuildResultSchema.parse({ reportId, status: 'settled', operationKey }),
+    );
+    expect(awaitsReceipt(projected)).toBe(true);
+    // A stale list read cannot supply the receipt, so the card must stay waiting.
+    expect(
+      awaitsReceipt(mergeRetainedRequests(projected, [request(reportId, 'not_started')])),
+    ).toBe(true);
+    // The first read that carries the receipt ends the wait.
+    expect(awaitsReceipt(mergeRetainedRequests(projected, [request(reportId, 'settled')]))).toBe(
+      false,
+    );
+    expect(
+      awaitsReceipt([request(reportId, 'pending'), request(otherReportId, 'not_started')]),
+    ).toBe(false);
+    expect(awaitsReceipt([{ reportId, reportStatus: 'approved', artifact: null }])).toBe(false);
+  });
+
+  it('bounds the re-reads and never schedules one when nothing is waiting', () => {
+    expect(nextReceiptRefreshDelay(0, false)).toBeNull();
+    expect(nextReceiptRefreshDelay(0, true)).toBe(RECEIPT_REFRESH_DELAYS_MS[0]);
+    const last = RECEIPT_REFRESH_DELAYS_MS.length - 1;
+    expect(nextReceiptRefreshDelay(last, true)).toBe(RECEIPT_REFRESH_DELAYS_MS[last]);
+    expect(nextReceiptRefreshDelay(last + 1, true)).toBeNull();
   });
 });
