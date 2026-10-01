@@ -35,7 +35,9 @@ $$;
 create function pg_temp.resolve(spiffe text, scope text) returns jsonb language sql as $$
  select public.resolve_broker_grant('00000000-0000-4000-8000-000000000b61','00000000-0000-4000-8000-000000000c61','00000000-0000-4000-8000-000000000e61',spiffe,scope);
 $$;
-set local role service_role;
+-- Privileged fixture exercises the mixed human-issuance and worker-resolve
+-- workflow; the 0098 boundary suite proves each role's exact grant.
+reset role;
 do $$
 declare r jsonb; read_grant uuid; write_grant uuid; events bigint;
 begin
@@ -55,6 +57,7 @@ begin
  perform pg_temp.ok(pg_temp.issue('00000000-0000-4000-8000-000000000e61','00000000-0000-4000-8000-000000000f71','connector.read','{crm.read}',30)->>'error'='grant_exists','duplicate active grant refused');
  write_grant:=(pg_temp.issue('00000000-0000-4000-8000-000000000e61','00000000-0000-4000-8000-000000000f72','connector.write','{crm.write}',7)#>>'{grant,id}')::uuid;
  perform pg_temp.ok(write_grant is not null,'karya write grant on production');
+
 
  r:=pg_temp.resolve('spiffe://test/grant/drishti','connector.read');
  perform pg_temp.ok(r->>'grantId'=read_grant::text and r->>'credentialId'='00000000-0000-4000-8000-000000000f61' and r->>'grantType'='client_credentials','live read grant resolves with its credential');
@@ -91,6 +94,7 @@ reset role;
 update public.connector_credentials set revoked_at=null where id='00000000-0000-4000-8000-000000000f61';
 set local role service_role;
 select pg_temp.check_resolves(true,'resolves again once every input is live');
+reset role;
 do $$
 declare events bigint;
 begin
@@ -100,7 +104,7 @@ begin
 end $$;
 reset role;
 update public.connectors set status='disabled' where id='00000000-0000-4000-8000-000000000e61';
-set local role service_role;
+reset role;
 do $$
 declare events bigint;
 begin

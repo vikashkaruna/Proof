@@ -39,7 +39,10 @@ export interface MonitoringAlertRow {
 }
 
 export class MonitoringAlertsService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writer: Pick<EvidenceDatabase, 'rpc'> = db,
+  ) {}
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
     const query = this.db.rpc(name, args);
@@ -129,16 +132,15 @@ export class MonitoringAlertsService {
     correlationId: string = randomUUID(),
     signal?: AbortSignal,
   ): Promise<{ dismissed: boolean; alertId: string; acknowledgedBy?: string }> {
-    const result = await this.rpc(
-      'dismiss_monitoring_alert',
-      {
-        p_tenant_id: tenantId,
-        p_alert_id: alertId,
-        p_user_id: userId,
-        p_correlation_id: correlationId,
-      },
-      signal,
-    );
+    const query = this.writer.rpc('dismiss_monitoring_alert', {
+      p_tenant_id: tenantId,
+      p_alert_id: alertId,
+      p_user_id: userId,
+      p_correlation_id: correlationId,
+    });
+    const { data, error } = signal ? await query.abortSignal(signal) : await query;
+    if (error) throw new EvidenceError('database_unavailable', 503);
+    const result = data as Record<string, unknown>;
 
     if (result.error) {
       const status = result.error === 'alert_not_found' ? 404 : 409;

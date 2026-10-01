@@ -22,7 +22,10 @@ const state = vi.hoisted(() => {
   return { db: null as FakeDb | null };
 });
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }));
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => state.db!.client }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => state.db!.client,
+  createHumanActionWriter: () => state.db!.client,
+}));
 let fake: FakeDb;
 let calls: { fn: string; args: Record<string, unknown> }[];
 const grant = {

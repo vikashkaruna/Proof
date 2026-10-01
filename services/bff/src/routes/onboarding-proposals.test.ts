@@ -6,7 +6,10 @@ import type { Variables } from '../types.js';
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
 const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => db.current!.client }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => db.current!.client,
+  createHumanActionWriter: () => db.current!.client,
+}));
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 let fake: FakeDb;
 let calls: Record<string, unknown>[];

@@ -32,7 +32,7 @@ create function pg_temp.receipt(r public.evidence_ingestions) returns jsonb lang
     'version_id','fixture-version-'||r.id::text,'retain_until',r.retain_until,'readback_at',clock_timestamp(),
     'lock_mode','COMPLIANCE','verified',true,'encryption','AES256');
 $$;
-set local role service_role;
+reset role; -- fixture reads retained rows directly; 0098 suite proves writer grants
 do $$
 declare t uuid:='99730000-0000-4000-8000-000000000010'; a uuid:='99730000-0000-4000-8000-000000000001';
  k uuid:=gen_random_uuid(); k2 uuid:=gen_random_uuid(); q jsonb; x jsonb; r public.evidence_ingestions; receipt jsonb; e uuid;
@@ -106,7 +106,7 @@ select pg_temp.denied('update public.evidence_object_versions set version_id=''c
 select pg_temp.denied('update public.evidence_ingestions set last_error_code=''changed'' where status=''settled''');
 -- Membership revocation invalidates both settlement and reconciliation authority.
 update public.tenant_users set role='viewer' where user_id='99730000-0000-4000-8000-000000000001';
-set local role service_role;
+set local role evidence_ingestion_writer;
 select pg_temp.assert_true(public.settle_evidence_ingest('99730000-0000-4000-8000-000000000010','99730000-0000-4000-8000-000000000001',gen_random_uuid(),'{}',gen_random_uuid())->>'error'='forbidden','demoted actor refused');
 select pg_temp.assert_true(public.note_evidence_ingest_failure('99730000-0000-4000-8000-000000000010','99730000-0000-4000-8000-000000000001',gen_random_uuid(),'provider_unavailable',gen_random_uuid())->>'error'='forbidden','demoted reconciler refused');
 reset role;

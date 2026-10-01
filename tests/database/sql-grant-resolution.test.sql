@@ -21,7 +21,7 @@ insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status)
 create function pg_temp.resolve(conn uuid, spiffe text) returns jsonb language sql as $$
  select public.resolve_sql_read_grant('00000000-0000-4000-8000-000000005b61','00000000-0000-4000-8000-000000005c61',conn,spiffe);
 $$;
-set local role service_role;
+reset role; -- mixed human grant issuance and agent resolution fixture
 do $$
 declare r jsonb; g uuid;
 begin
@@ -59,8 +59,10 @@ set local role service_role;
 select pg_temp.check(true,'resolves again once every input is live');
 do $$
 begin
+ execute 'set local role human_action_writer';
  perform public.attest_connector_grant('00000000-0000-4000-8000-000000005b61','00000000-0000-4000-8000-000000005a61',
    current_setting('sql_test.grant')::uuid,'revoke',gen_random_uuid());
+ execute 'set local role service_role';
  perform pg_temp.check(false,'revoked grant resolves nothing');
 end $$;
 reset role;

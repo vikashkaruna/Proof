@@ -130,6 +130,24 @@ resource "google_cloud_run_v2_service" "bff" {
           }
         }
       }
+      env {
+        name = "SUPABASE_HUMAN_ACTION_WRITER_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_human_action_writer_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["supabase_evidence_ingestion_writer_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
 
       env {
         name = "AXIOM_MFA_ENCRYPTION_KEY"

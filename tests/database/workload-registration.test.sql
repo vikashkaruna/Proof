@@ -29,6 +29,7 @@ set local role service_role;
 select pg_temp.reject('update public.workload_identities set status=''disabled''','42501');
 select pg_temp.reject('delete from public.workload_identities','42501');
 select pg_temp.reject('insert into public.workload_identities(tenant_id,agent_name,spiffe_id) values(pg_temp.id(11),''parikshan'',''spiffe://test/agent/parikshan'')','42501');
+reset role; -- mixed privileged fixture checks; 0098 suite proves writer grants
 select pg_temp.ok(pg_temp.manage(0,'active',pg_temp.id(32))->>'error'='registration_required','new identities cannot start active');
 select pg_temp.ok(pg_temp.manage(0,'disabled',pg_temp.id(32),'drishti','spiffe://axiom.test/agent/karya')->>'error'='invalid_registration','agent-subject binding');
 select pg_temp.ok(pg_temp.manage(0,'disabled',pg_temp.id(32),'drishti',E'spiffe://axiom.test/agent/drishti\n')->>'error'='invalid_registration','line endings refused');
@@ -54,7 +55,7 @@ insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) value
 insert into public.connector_descriptors(id,slug,version,transport,target_binding,manifest) values(pg_temp.id(82),'registration','1','sql','sandbox','{}');
 insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_binding,name,endpoint_ref,assurance) values(pg_temp.id(83),pg_temp.id(11),pg_temp.id(81),pg_temp.id(82),'sandbox','Fixture','fixture','high');
 insert into public.connector_grants(id,tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values(pg_temp.id(84),pg_temp.id(11),pg_temp.id(83),pg_temp.id(32),'drishti','connector.read',now()+interval '1 hour');
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(2,'disabled',pg_temp.id(32),'drishti','spiffe://axiom.test/agent/drishti')->>'version'='3','disable read agent');
 select pg_temp.ok(pg_temp.manage(3,'active',pg_temp.id(32),'drishti','spiffe://axiom.test/agent/drishti')->>'version'='4','re-enable read agent');
 select pg_temp.ok((select revoked_at is not null from public.connector_grants where id=pg_temp.id(84)),'old connector grant stays revoked');
@@ -64,7 +65,7 @@ update public.workload_task_delegations set revoked_at=null where run_id=(select
 insert into public.connector_grants(id,tenant_id,connector_id,workload_identity_id,agent_name,internal_scope,expires_at) values(pg_temp.id(85),pg_temp.id(11),pg_temp.id(83),pg_temp.id(32),'drishti','connector.read',now()+interval '1 hour');
 create function pg_temp.refuse_lifecycle_audit() returns trigger language plpgsql as $$begin if new.action_type='workload.registration_changed' then raise exception 'synthetic audit unavailable'; end if; return new; end$$;
 create trigger reject_lifecycle_audit before insert on public.audit_ledger for each row execute function pg_temp.refuse_lifecycle_audit();
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.reject('select pg_temp.manage(3,''disabled'')','P0001');
 select pg_temp.reject('select pg_temp.manage(4,''disabled'',pg_temp.id(32),''drishti'',''spiffe://axiom.test/agent/drishti'')','P0001');
 select pg_temp.ok((select revoked_at is null from public.connector_grants where id=pg_temp.id(85)),'audit failure rolls back grant revocation');
@@ -73,23 +74,23 @@ select pg_temp.ok((select revoked_at is null from public.workload_task_delegatio
 reset role;
 drop trigger reject_lifecycle_audit on public.audit_ledger;
 update public.tenant_users set role='viewer' where user_id=pg_temp.id(1);
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(3,'disabled')->>'error'='forbidden','viewer cannot administer');
 reset role;
 update public.tenant_users set role='axiom_analyst' where user_id=pg_temp.id(1);
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(3,'disabled')->>'error'='forbidden','analyst cannot administer');
 reset role;
 update public.tenant_users set role='founder' where user_id=pg_temp.id(1);
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(3,'disabled')->>'error'='forbidden','external founder denied');
 reset role;
 update public.users set is_axiom_internal=true where id=pg_temp.id(1);
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(3,'disabled')->>'version'='4','internal founder may disable');
 reset role;
 update public.tenant_users set role='admin' where user_id=pg_temp.id(1);
-set local role service_role;
+reset role; -- privileged business fixture; 0098 boundary suite checks scoped grants
 select pg_temp.ok(pg_temp.manage(4,'active')->>'version'='5','tenant admin may activate');
 select pg_temp.ok(public.manage_workload_identity(pg_temp.id(99),pg_temp.id(1),pg_temp.id(41),pg_temp.id(31),5,'parikshan','spiffe://axiom.test/agent/parikshan','disabled')->>'error'='forbidden','foreign tenant denied');
 set local role authenticated;

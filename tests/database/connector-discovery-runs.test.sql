@@ -16,7 +16,7 @@ insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_bindin
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status) values
  ('00000000-0000-4000-8000-000000006f71','00000000-0000-4000-8000-000000006b61','drishti','spiffe://test/disc/drishti','active'),
  ('00000000-0000-4000-8000-000000006f72','00000000-0000-4000-8000-000000006b61','karya','spiffe://test/disc/karya','active');
-set local role service_role;
+set local role human_action_writer;
 do $$
 declare g uuid; k uuid; r jsonb; events bigint;
   meta jsonb := '[{"resource":"crm.customers","kind":"r","estimatedRows":3,"columns":[{"name":"email","type":"character varying(255)","nullable":true,"categoryHints":["contact"]}],"categoryHints":["contact"]}]';
@@ -27,6 +27,7 @@ begin
    '00000000-0000-4000-8000-000000006f71','connector.read','{sql.enumerate}',30,gen_random_uuid())#>>'{grant,id}')::uuid;
  k:=(public.issue_connector_grant('00000000-0000-4000-8000-000000006b61','00000000-0000-4000-8000-000000006a61','00000000-0000-4000-8000-000000006e61',
    '00000000-0000-4000-8000-000000006f72','connector.write','{sql.execute}',7,gen_random_uuid())#>>'{grant,id}')::uuid;
+ execute 'set local role service_role';
  execute rec into r using g,'spiffe://test/disc/drishti','enumerate',null::text,meta;
  perform pg_temp.ok((r#>>'{run,recordCount}')::int=1,'metadata enumerate recorded');
  perform pg_temp.ok((select count(*)=1 from public.audit_ledger where action_type='connector.discovery.completed' and actor_type='agent' and actor_id='drishti'),'run audited as drishti');
@@ -46,7 +47,9 @@ begin
  execute rec into r using k,'spiffe://test/disc/karya','enumerate',null::text,meta;
  perform pg_temp.ok(r->>'error'='grant_inactive','karya write grant cannot record discovery');
  perform pg_temp.ok((select count(*)=events from public.audit_ledger),'refusals are not audited as success');
+ execute 'set local role human_action_writer';
  perform public.attest_connector_grant('00000000-0000-4000-8000-000000006b61','00000000-0000-4000-8000-000000006a61',g,'revoke',gen_random_uuid());
+ execute 'set local role service_role';
  execute rec into r using g,'spiffe://test/disc/drishti','enumerate',null::text,meta;
  perform pg_temp.ok(r->>'error'='grant_inactive','revoked grant cannot record');
  r:=public.record_connector_discovery('00000000-0000-4000-8000-000000006b62','00000000-0000-4000-8000-000000006e61',g,'spiffe://test/disc/drishti','enumerate',null,meta,gen_random_uuid());

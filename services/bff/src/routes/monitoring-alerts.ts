@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -31,7 +31,11 @@ export function monitoringAlertRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new MonitoringAlertsService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ??
+    new MonitoringAlertsService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createHumanActionWriter(),
+    );
 
   // ─── 1. List Alerts ──────────────────────────────────────────────────
   app.get('/monitoring/alerts', async (c) => {

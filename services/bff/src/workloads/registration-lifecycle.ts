@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { AgentName } from '@axiom/types';
 import { z } from 'zod';
 import { parseWorkloadSpiffeId } from './jwt-svid.js';
@@ -30,7 +31,7 @@ const receipt = z
  * This changes tenant app registration, never SPIRE enrollment or tool grants.
  */
 export class WorkloadRegistrationLifecycle {
-  constructor(private readonly db: SupabaseClient) {}
+  constructor(private readonly writer: SupabaseClient = createHumanActionWriter()) {}
   async manage(input: z.input<typeof command>): Promise<z.infer<typeof receipt>> {
     try {
       const value = command.parse(input);
@@ -42,7 +43,7 @@ export class WorkloadRegistrationLifecycle {
         )
           throw new Error('invalid registration');
       }
-      const { data, error } = await this.db
+      const { data, error } = await this.writer
         .rpc('manage_workload_identity', {
           p_tenant_id: value.tenantId.toLowerCase(),
           p_actor_id: value.actorId.toLowerCase(),

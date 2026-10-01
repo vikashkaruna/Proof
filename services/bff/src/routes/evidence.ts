@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability, EvidenceType } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createEvidenceIngestionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import {
@@ -67,7 +67,12 @@ export function evidenceRoutes(
   const service = () => {
     if (dependencies.service) return dependencies.service;
     const { vault, config } = evidenceStorage();
-    return new EvidenceIngestionService(db(), vault, config);
+    return new EvidenceIngestionService(
+      db(),
+      vault,
+      config,
+      dependencies.db ?? createEvidenceIngestionWriter(),
+    );
   };
   async function receipts(database: EvidenceDatabase, tenantId: string, ids: string[]) {
     if (!ids.length) return new Map<string, EvidenceReceipt>();

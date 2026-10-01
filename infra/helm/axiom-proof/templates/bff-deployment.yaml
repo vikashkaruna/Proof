@@ -49,11 +49,26 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: service-key
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: anon-key
             - name: SUPABASE_STATUTORY_PROOF_WRITER_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-supabase
                   key: statutory-proof-writer-key
+            - name: SUPABASE_HUMAN_ACTION_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: human-action-writer-key
+            - name: SUPABASE_EVIDENCE_INGESTION_WRITER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-supabase
+                  key: evidence-ingestion-writer-key
             - name: AWS_REGION
               value: {{ .Values.config.awsRegion }}
             - name: MODEL_GATEWAY_URL

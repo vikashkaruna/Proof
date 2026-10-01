@@ -18,7 +18,7 @@ insert into public.connector_descriptors(id,slug,version,transport,target_bindin
 create function pg_temp.step(w uuid, s text, v integer, body jsonb) returns jsonb language sql as $$
  select public.advance_onboarding_wizard('00000000-0000-4000-8000-0000000000b1','00000000-0000-4000-8000-0000000000a1',w,s,v,body,gen_random_uuid());
 $$;
-set local role service_role;
+reset role; -- mixed direct fixture inspection; 0098 suite proves writer grants
 do $$
 declare w uuid; again jsonb; r jsonb; estate uuid; other_estate uuid; crm uuid; hr uuid; events bigint;
 begin

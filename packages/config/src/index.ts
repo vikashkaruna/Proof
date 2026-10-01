@@ -80,6 +80,8 @@ const EnvFields = z.object({
   // BFF-only PostgREST credential for exact statutory proof RPCs. Never share
   // this role with agent-runtime or workers holding the generic service key.
   SUPABASE_STATUTORY_PROOF_WRITER_KEY: z.string().optional(),
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: z.string().optional(),
+  SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: z.string().optional(),
   SUPABASE_DB_URL: z.string().url().optional(),
 
   // Cloud-Agnostic Storage & Evidence Vault (GCS / AWS S3 / MinIO / On-Prem)

@@ -511,8 +511,9 @@ select pg_temp.denied($q$update public.consent_records set status = 'withdrawn'$
 select pg_temp.denied($q$delete from public.consent_records$q$);
 select pg_temp.denied($q$delete from public.consent_withdrawals$q$);
 select pg_temp.denied($q$delete from public.consent_purposes$q$);
--- And the EXECUTE proof: the full consent lifecycle runs through the RPCs
--- as the BFF service role, and the row is only reachable that way.
+-- The full consent lifecycle runs through the human writer RPCs.
+reset role;
+set local role human_action_writer;
 do $$
 declare
   v_consent uuid; v_withdrawal uuid; v_out jsonb;
@@ -522,7 +523,7 @@ begin
     'email', 'bff.subject@example.invalid', 'en', 'api', null,
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000b14');
   if v_out ->> 'status' is distinct from 'granted' then
-    raise exception 'ASSERTION FAILED: the service role calls the grant path (got %)', v_out ->> 'error';
+    raise exception 'ASSERTION FAILED: the human writer calls the grant path (got %)', v_out ->> 'error';
   end if;
   v_consent := (v_out ->> 'consent_id')::uuid;
 
@@ -530,7 +531,7 @@ begin
     '00000000-0000-0000-0000-0000000000c1', v_consent, 'BFF-driven withdrawal', 'en',
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000b15');
   if v_out ->> 'withdrawal_id' is null then
-    raise exception 'ASSERTION FAILED: the service role calls the withdraw path (got %)', v_out ->> 'error';
+    raise exception 'ASSERTION FAILED: the human writer calls the withdraw path (got %)', v_out ->> 'error';
   end if;
   v_withdrawal := (v_out ->> 'withdrawal_id')::uuid;
 
@@ -538,14 +539,14 @@ begin
     '00000000-0000-0000-0000-0000000000c1', v_withdrawal,
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000b16');
   if v_out ->> 'completed_at' is null then
-    raise exception 'ASSERTION FAILED: the service role calls the completion path (got %)', v_out ->> 'error';
+    raise exception 'ASSERTION FAILED: the human writer calls the completion path (got %)', v_out ->> 'error';
   end if;
 
   v_out := public.set_consent_legal_hold(
     '00000000-0000-0000-0000-0000000000c1', v_consent, true,
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000b17');
   if v_out ->> 'legal_hold' is distinct from 'true' then
-    raise exception 'ASSERTION FAILED: the service role calls the hold path (got %)', v_out ->> 'error';
+    raise exception 'ASSERTION FAILED: the human writer calls the hold path (got %)', v_out ->> 'error';
   end if;
 end $$;
 reset role;

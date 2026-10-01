@@ -211,6 +211,20 @@ variable "supabase_statutory_proof_writer_key" {
   sensitive   = true
 }
 
+variable "supabase_human_action_writer_key" {
+  description = "BFF-only restricted human_action_writer JWT signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_evidence_ingestion_writer_key" {
+  description = "BFF-only restricted evidence_ingestion_writer JWT signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 
 variable "report_email_mode" {
   type        = string

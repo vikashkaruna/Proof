@@ -19,7 +19,7 @@ $$;
 create function pg_temp.step(w uuid, s text, v integer, body jsonb) returns jsonb language sql as $$
  select public.advance_onboarding_wizard('00000000-0000-4000-8000-0000000000e1','00000000-0000-4000-8000-0000000000d1',w,s,v,body,gen_random_uuid());
 $$;
-set local role service_role;
+reset role; -- mixed human mutations, producer reads and direct fixture inspection
 do $$
 declare w uuid; estate uuid; crm uuid; hr uuid; late uuid; conn uuid; r jsonb;
 begin
@@ -72,7 +72,7 @@ insert into public.connector_grants(id,tenant_id,connector_id,workload_identity_
  ('00000000-0000-4000-8000-0000000000f4','00000000-0000-4000-8000-0000000000e1',
   (select id from public.connectors where tenant_id='00000000-0000-4000-8000-0000000000e1'),
   '00000000-0000-4000-8000-0000000000f2','drishti','connector.read',now()-interval '1 day',now()+interval '30 days');
-set local role service_role;
+reset role; -- business fixture; 0098 suite proves scoped writer grants
 do $$
 declare q jsonb; r jsonb; events bigint;
 begin
@@ -97,6 +97,7 @@ begin
  r:=public.attest_connector_grant('00000000-0000-4000-8000-0000000000e1','00000000-0000-4000-8000-0000000000d1','00000000-0000-4000-8000-0000000000f4','keep',gen_random_uuid());
  perform pg_temp.ok(r->>'error'='not_active' and (select count(*)=events from public.audit_ledger),'revoked grant cannot be kept');
  -- Decisions and baselines are append-only for the backend role too.
+ execute 'set local role human_action_writer';
  begin update public.connector_grant_attestations set decision='keep'; raise exception 'attestation changed';
  exception when insufficient_privilege then null; end;
  begin insert into public.onboarding_attested_systems select * from public.onboarding_attested_systems limit 1; raise exception 'baseline forged';

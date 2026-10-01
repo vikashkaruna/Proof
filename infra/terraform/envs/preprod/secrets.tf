@@ -36,12 +36,14 @@ locals {
     # anon/service keys were signed with, so GoTrue would issue tokens
     # PostgREST rejects. An empty value here is a configuration error that
     # sync-env.sh's verify gate stops before Terraform runs.
-    supabase_jwt_secret  = var.supabase_jwt_secret
-    supabase_anon_key    = var.supabase_anon_key
-    supabase_service_key = var.supabase_service_key
-    supabase_statutory_proof_writer_key = var.supabase_statutory_proof_writer_key
-    gcs_hmac_access_key  = google_storage_hmac_key.s3_compat_key.access_id
-    gcs_hmac_secret_key  = google_storage_hmac_key.s3_compat_key.secret
+    supabase_jwt_secret                    = var.supabase_jwt_secret
+    supabase_anon_key                      = var.supabase_anon_key
+    supabase_service_key                   = var.supabase_service_key
+    supabase_statutory_proof_writer_key    = var.supabase_statutory_proof_writer_key
+    supabase_human_action_writer_key       = var.supabase_human_action_writer_key
+    supabase_evidence_ingestion_writer_key = var.supabase_evidence_ingestion_writer_key
+    gcs_hmac_access_key                    = google_storage_hmac_key.s3_compat_key.access_id
+    gcs_hmac_secret_key                    = google_storage_hmac_key.s3_compat_key.secret
   }
 }
 

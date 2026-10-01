@@ -32,9 +32,13 @@ for environment in preprod production; do
   container="axiom-http-${environment}-$$"
   python3 - "$state_dir" "$environment" "$port" "$revision" "$web_port" "$marketing_port" <<'PY'
 from pathlib import Path
+from urllib.parse import urlparse
 import base64,hashlib,hmac,json,sys,secrets,os
 root=Path(sys.argv[1]);environment=sys.argv[2];port=sys.argv[3];revision=sys.argv[4]
 status=json.loads((Path(os.environ.get('AXIOM_PARITY_STATE_DIR','.axiom-runtime/parity'))/'status.json').read_text())
+api=urlparse(status['API_URL'])
+if api.hostname not in ('127.0.0.1','localhost') or not api.port:
+    raise SystemExit('Container acceptance requires an isolated local Supabase gateway')
 def b64(data): return base64.urlsafe_b64encode(data).decode().rstrip('=')
 def decode(part): return base64.urlsafe_b64decode(part + '=' * (-len(part) % 4))
 secret=status['JWT_SECRET'].encode()
@@ -46,11 +50,13 @@ expected=hmac.new(secret,f'{parts[0]}.{parts[1]}'.encode(),hashlib.sha256).diges
 if header.get('alg')!='HS256' or claims.get('role')!='service_role' or claims.get('exp',0)<=__import__('time').time() or not hmac.compare_digest(decode(parts[2]),expected):
     raise SystemExit('Parity service role key does not match the target JWT secret')
 now=int(__import__('time').time())
-writer_claims={'iss':claims.get('iss','supabase'),'role':'statutory_proof_writer','iat':now,'exp':min(claims['exp'],now+3600)}
-unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
-writer=f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
-env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':'http://host.docker.internal:56321','SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
-env['SUPABASE_STATUTORY_PROOF_WRITER_KEY']=writer
+def scoped_writer(role):
+    writer_claims={'iss':claims.get('iss','supabase'),'role':role,'iat':now,'exp':min(claims['exp'],now+3600)}
+    unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
+    return f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
+env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':f'http://host.docker.internal:{api.port}','SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
+for role,key in [('statutory_proof_writer','SUPABASE_STATUTORY_PROOF_WRITER_KEY'),('human_action_writer','SUPABASE_HUMAN_ACTION_WRITER_KEY'),('evidence_ingestion_writer','SUPABASE_EVIDENCE_INGESTION_WRITER_KEY')]:
+    env[key]=scoped_writer(role)
 (root/f'{environment}.env').write_text(''.join(f'{k}={v}\n' for k,v in env.items()))
 target={'schemaVersion':1,'deploymentId':f'http-{environment}','environment':environment,'topology':'local-docker','syntheticFixtures':True,'expectedRevision':revision,'bffUrl':f'http://127.0.0.1:{port}','webUrl':f'http://127.0.0.1:{sys.argv[5]}','marketingUrl':f'http://127.0.0.1:{sys.argv[6]}','supabaseUrl':status['API_URL'],'anonKey':status['ANON_KEY'],'publishableKey':status['PUBLISHABLE_KEY'],'serviceKey':status['SERVICE_ROLE_KEY']}
 (root/f'{environment}.json').write_text(json.dumps(target))

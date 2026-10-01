@@ -31,20 +31,20 @@ end \$\$;
 SQL
 race() {
  local label="$1" first="$2" second="$3" first_role="${4:-statutory_proof_writer}" second_role="${5:-statutory_proof_writer}"
- sql -c "set application_name='$label-first'; begin; set local role $first_role; $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
+ sql -c "set application_name='$label-first'; begin; set local role $first_role; $first; select pg_sleep(8); commit;" > "$result_dir/$label-first" 2>&1 &
  local first_pid=$! ready=false blocked=false
  for attempt in $(seq 1 60); do
   [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
   sleep 0.05
  done
- [ "$ready" = true ] || { cat "$result_dir/$label-first"; exit 1; }
+ [ "$ready" = true ] || { echo "Race $label did not reach the first writer hold" >&2; cat "$result_dir/$label-first"; exit 1; }
  sql -c "set application_name='$label-second'; set role $second_role; $second;" > "$result_dir/$label-second" 2>&1 &
  local second_pid=$!
  for attempt in $(seq 1 40); do
   [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
   sleep 0.05
  done
- [ "$blocked" = true ] || { cat "$result_dir/$label-second"; exit 1; }
+ [ "$blocked" = true ] || { echo "Race $label did not block the second writer" >&2; cat "$result_dir/$label-second"; exit 1; }
  wait "$first_pid"; wait "$second_pid"
 }
 member=$(sql -c "select id from public.evidence_object_versions where tenant_id='$tenant'")

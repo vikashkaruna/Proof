@@ -44,7 +44,7 @@ import { ACTION_CONTENT_COLUMNS, actionSetDigestSha256 } from '../services/actio
 import { clientAddressKey, trustedClientAddress } from '../services/client-address.js';
 import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
@@ -1247,39 +1247,42 @@ export function v1Routes(deps: Deps) {
     const planId = c.req.param('id');
     const tenantId = c.get('tenantId');
     const user = c.get('user');
-    const role = c.get('role');
 
     const rejectRefusal = requireCapability(c, Capability.PLAN_REJECT);
     if (rejectRefusal) return rejectRefusal;
-
-    const admin = createSupabaseAdmin();
-    const { error } = await admin
-      .from('remediation_plans')
-      .update({ status: 'cancelled' })
-      .eq('id', planId)
-      .eq('tenant_id', tenantId);
-    if (error) {
-      return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+    if (!z.uuid().safeParse(planId).success) {
+      return c.json({ error: { code: 'validation_failed' } }, 400);
     }
-    await admin
-      .from('remediation_actions')
-      .update({ approval_status: 'skipped', final_outcome: 'skipped' })
-      .eq('plan_id', planId)
-      .eq('tenant_id', tenantId)
-      .in('approval_status', ['draft', 'awaiting_approval', 'approved']);
-
-    await deps.ledger.append({
-      tenantId,
-      correlationId: randomUUID(),
-      actorType: 'human',
-      actorId: user.id,
-      actionType: 'approval.token.invalid',
-      targetRef: planId,
-      result: 'success',
-      detail: { reason: 'plan rejected by approver' },
+    const { data, error } = await createHumanActionWriter().rpc('reject_remediation_plan', {
+      p_tenant_id: tenantId,
+      p_plan_id: planId,
+      p_actor_id: user.id,
+      p_correlation_id: randomUUID(),
     });
-
-    return c.json({ ok: true });
+    if (error) return c.json({ error: { code: 'update_failed' } }, 503);
+    const result = z
+      .object({
+        status: z.literal('cancelled'),
+        skippedActions: z.number().int().nonnegative(),
+        revokedTokens: z.number().int().nonnegative(),
+      })
+      .safeParse(data);
+    if (!result.success) {
+      const refusal = z.object({ error: z.string() }).safeParse(data);
+      if (refusal.success) {
+        const status =
+          refusal.data.error === 'forbidden'
+            ? 403
+            : refusal.data.error === 'invalid_request'
+              ? 400
+              : refusal.data.error === 'plan_not_found'
+                ? 404
+                : 409;
+        return c.json({ error: { code: refusal.data.error } }, status);
+      }
+      return c.json({ error: { code: 'update_failed' } }, 503);
+    }
+    return c.json({ ok: true, ...result.data });
   });
 
   // ─── W5 · M3.2 — the dry-run engine ────────────────────────────────

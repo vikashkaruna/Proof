@@ -58,11 +58,15 @@ function fixture() {
   let endpoint = 'crm';
   let rpcError = false;
   let stored: Record<string, unknown> | null = null;
-  const requests: { url: URL; body: Record<string, unknown> | null }[] = [];
+  const requests: {
+    url: URL;
+    body: Record<string, unknown> | null;
+    authorization: string | null;
+  }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-    requests.push({ url, body });
+    requests.push({ url, body, authorization: new Headers(init?.headers).get('authorization') });
     let result: unknown;
     switch (url.pathname.split('/').at(-1)) {
       case 'tenant_users':
@@ -131,6 +135,7 @@ function fixture() {
   });
   return {
     db,
+    fetcher,
     requests,
     setRole: (v: string) => {
       role = v;
@@ -148,12 +153,34 @@ function fixture() {
   };
 }
 describe('credential vault administrative adapter', () => {
+  it('keeps credential reads on the ordinary client and writes on the human writer', async () => {
+    const f = fixture();
+    const writer = createClient('https://vault-db.test.invalid', 'synthetic-human-key', {
+      global: { fetch: f.fetcher },
+      auth: { persistSession: false },
+    });
+    await new CredentialVault(f.db, wrapper(), writer).create(
+      actor,
+      connectorId,
+      'client_credentials',
+      profile(),
+    );
+    const rpc = f.requests.find((request) =>
+      request.url.pathname.endsWith('/manage_connector_credential'),
+    );
+    expect(rpc?.authorization).toBe('Bearer synthetic-human-key');
+    expect(
+      f.requests
+        .filter((request) => !request.url.pathname.endsWith('/manage_connector_credential'))
+        .every((request) => request.authorization === 'Bearer synthetic-service-key'),
+    ).toBe(true);
+  });
   it('rejects malformed and mismatched OAuth profiles before wrapping or persistence', async () => {
     for (const secret of [Buffer.from('raw secret'), Buffer.from('{}'), profile()]) {
       const f = fixture();
       const key = wrapper();
       await expect(
-        new CredentialVault(f.db, key).create(actor, connectorId, 'jwt_bearer', secret),
+        new CredentialVault(f.db, key, f.db).create(actor, connectorId, 'jwt_bearer', secret),
       ).rejects.toThrow(VaultError);
       expect(key.wrap).not.toHaveBeenCalled();
       expect(f.requests.some((r) => r.body)).toBe(false);
@@ -164,7 +191,7 @@ describe('credential vault administrative adapter', () => {
     const f = fixture();
     const initial = wrapper();
     const next = wrapper('fixture/new');
-    const vault = new CredentialVault(f.db, initial);
+    const vault = new CredentialVault(f.db, initial, f.db);
     const secret = profile();
     const receipt = await vault.create(actor, connectorId, 'client_credentials', secret);
     expect(secret).toEqual(Buffer.alloc(secret.length));
@@ -224,7 +251,7 @@ describe('credential vault administrative adapter', () => {
     const key = wrapper();
     const secret = profile();
     await expect(
-      new CredentialVault(f.db, key).create(actor, connectorId, 'client_credentials', secret),
+      new CredentialVault(f.db, key, f.db).create(actor, connectorId, 'client_credentials', secret),
     ).rejects.toThrow(VaultError);
     expect(f.requests).toHaveLength(1);
     expect(key.wrap).not.toHaveBeenCalled();
@@ -240,7 +267,7 @@ describe('credential vault administrative adapter', () => {
     ]) {
       const f = fixture();
       const key = wrapper();
-      const vault = new CredentialVault(f.db, key);
+      const vault = new CredentialVault(f.db, key, f.db);
       const receipt = await vault.create(actor, connectorId, 'client_credentials', profile());
       f.patchStored(change);
       await expect(
@@ -252,7 +279,7 @@ describe('credential vault administrative adapter', () => {
   it('surfaces an atomic persistence refusal without claiming the rotation succeeded', async () => {
     const f = fixture();
     const key = wrapper();
-    const vault = new CredentialVault(f.db, key);
+    const vault = new CredentialVault(f.db, key, f.db);
     const receipt = await vault.create(actor, connectorId, 'client_credentials', profile());
     const before = JSON.stringify(f.stored());
     f.failRpc();

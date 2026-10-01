@@ -40,7 +40,7 @@ insert into public.tenant_users(tenant_id, user_id, role)
   ('99760000-0000-4000-8000-000000000020', '99760000-0000-4000-8000-000000000006', 'admin');
 
 -- ─── 2. Test ROPA Records ─────────────────────────────────────────────
-set local role service_role;
+reset role; -- fixture inspects retained rows; 0098 suite proves writer grants
 do $$
 declare
   t_a uuid := '99760000-0000-4000-8000-000000000010';

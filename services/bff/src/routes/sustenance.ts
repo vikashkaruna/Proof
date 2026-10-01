@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   AttestConnectorGrantRequestSchema,
   Capability,
@@ -39,6 +39,7 @@ const id = z.uuid();
 export function sustenanceRoutes(deps: { client?: typeof createSupabaseAdmin } = {}) {
   const app = new Hono<{ Variables: Variables }>();
   const db = () => (deps.client ?? createSupabaseAdmin)();
+  const writer = () => (deps.client ?? createHumanActionWriter)();
 
   app.get('/estates/:id/drift', async (c) => {
     const denied = requireCapability(c, Capability.POSTURE_READ);
@@ -75,7 +76,7 @@ export function sustenanceRoutes(deps: { client?: typeof createSupabaseAdmin } =
     );
     if (!parsed.success)
       return c.json({ error: { code: 'invalid_request', message: 'Choose keep or revoke.' } }, 400);
-    const { data, error } = await db().rpc('attest_connector_grant', {
+    const { data, error } = await writer().rpc('attest_connector_grant', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_grant_id: c.req.param('id'),
@@ -101,7 +102,7 @@ export function sustenanceRoutes(deps: { client?: typeof createSupabaseAdmin } =
         { error: { code: 'invalid_request', message: failures.invalid_request![1] } },
         400,
       );
-    const { data, error } = await db().rpc('issue_connector_grant', {
+    const { data, error } = await writer().rpc('issue_connector_grant', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_connector_id: parsed.data.connectorId,

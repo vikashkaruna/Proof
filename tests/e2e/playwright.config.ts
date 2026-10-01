@@ -43,7 +43,9 @@ function personaState(): PersonaState | null {
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
-function localStatutoryWriterKey() {
+function localWriterKey(
+  role: 'statutory_proof_writer' | 'human_action_writer' | 'evidence_ingestion_writer',
+) {
   if (!state || acceptanceTarget) return '';
   const statusPath = resolve(
     process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
@@ -53,7 +55,7 @@ function localStatutoryWriterKey() {
   if (status.API_URL !== state.supabaseUrl || status.SERVICE_ROLE_KEY !== state.serviceKey)
     throw new Error('Persona state and local Supabase signing target differ');
   return mintLocalPostgrestRoleKey({
-    role: 'statutory_proof_writer',
+    role,
     jwtSecret: status.JWT_SECRET,
     serviceKey: state.serviceKey,
   });
@@ -89,7 +91,9 @@ const bffEnv = {
   // discover a harness misconfiguration.
   AXIOM_MFA_ENCRYPTION_KEY: HARNESS_MFA_KEY,
   SUPABASE_SERVICE_KEY: state?.serviceKey ?? '',
-  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localStatutoryWriterKey(),
+  SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: localWriterKey('human_action_writer'),
+  SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: localWriterKey('evidence_ingestion_writer'),
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',
