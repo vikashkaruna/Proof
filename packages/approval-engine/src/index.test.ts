@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { createHmac } from 'node:crypto';
 import { ApprovalEngine, generateTestSecret } from './index';
 
 describe('ApprovalEngine', () => {
@@ -7,6 +8,17 @@ describe('ApprovalEngine', () => {
 
   beforeEach(() => {
     engine = new ApprovalEngine(generateTestSecret());
+  });
+
+  it('verifies a persisted reconciliation statement with tenant key and rejects tampering', () => {
+    const key = 'tenant-specific-proof-key';
+    engine.setTenantSecret(tenantId, key);
+    const statement = '{"batch_id":"b1","approved_scope":["a1"]}';
+    const signature = createHmac('sha256', key).update(statement, 'utf8').digest('hex');
+    expect(engine.verifyDetachedStatement(tenantId, statement, signature)).toBe(true);
+    expect(engine.verifyDetachedStatement(tenantId, `${statement} `, signature)).toBe(false);
+    expect(engine.verifyDetachedStatement('other-tenant', statement, signature)).toBe(false);
+    expect(engine.verifyDetachedStatement(tenantId, statement, 'not-a-signature')).toBe(false);
   });
 
   describe('issue + verify', () => {

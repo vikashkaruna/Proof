@@ -22,6 +22,7 @@ import { parseDryRunChanges, describeRefusal } from '@/lib/execution-view';
 import { ApprovalActions } from './approval-actions';
 import { KillSwitchButton } from './kill-switch-button';
 import { DryRunHistory, type DryRunRow } from './dry-run-history';
+import { ApprovalProofArchive } from './approval-proof-archive';
 import { DryRunDiffView } from '../../execution/dry-run-diff';
 
 export const dynamic = 'force-dynamic';
@@ -74,7 +75,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
   // W1 · SEC-9/SEC-8: this page read the session directly, so any signed-in
   // user could open any plan the RLS policy let through, and — once login MFA
   // landed — could do so without having met the second factor.
-  const { supabase, email, role, approvalScopes } = await requireCapabilityContext(
+  const { supabase, email, role, approvalScopes, isAxiomInternal } = await requireCapabilityContext(
     Capability.PLAN_READ,
   );
 
@@ -84,6 +85,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
   const canReject = can(Capability.PLAN_REJECT, { role, approvalScopes });
   const canExecute = can(Capability.PLAN_EXECUTE, { role, approvalScopes });
   const canKillSwitch = can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role });
+  const canExportEvidence = can(Capability.EVIDENCE_EXPORT, { role });
 
   const { data: plan, error } = await supabase
     .from('remediation_plans')
@@ -99,6 +101,19 @@ export default async function PlanDetailPage({ params }: PageProps) {
 
   if (error || !plan) notFound();
   const typedPlan = plan as unknown as PlanDetail;
+
+  const archiveTokens = canExportEvidence
+    ? ((
+        await supabase
+          .from('approval_tokens')
+          .select('id')
+          .eq('tenant_id', typedPlan.tenant_id)
+          .eq('plan_id', id)
+          .eq('status', 'consumed')
+          .order('issued_at', { ascending: false })
+          .limit(20)
+      ).data ?? [])
+    : [];
 
   const actions = [...(typedPlan.remediation_actions ?? [])].sort(
     (a, b) => a.sequence - b.sequence,
@@ -209,6 +224,23 @@ export default async function PlanDetailPage({ params }: PageProps) {
           </>
         }
       />
+
+      {archiveTokens.length > 0 && (
+        <section aria-label="Retained approval proofs" className="space-y-3">
+          <h2 className="text-base font-semibold text-slate-900">Retained approval proofs</h2>
+          <p className="text-sm text-slate-600">
+            Showing the 20 most recent executed approvals for this plan.
+          </p>
+          {archiveTokens.map((token) => (
+            <ApprovalProofArchive
+              key={token.id}
+              tenantId={typedPlan.tenant_id}
+              tokenId={token.id}
+              canManage={role === 'founder' && isAxiomInternal}
+            />
+          ))}
+        </section>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

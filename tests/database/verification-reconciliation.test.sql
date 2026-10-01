@@ -11,6 +11,15 @@
 -- and no browser session can write any of it.
 
 begin;
+insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
+values('global',convert_to('test-reconciliation-signing-key-0123456789','UTF8'));
+
+create function pg_temp.recon_signature(p_tenant uuid,p_plan uuid,p_batch uuid)
+returns text language sql stable as $$
+ select encode(hmac(convert_to((public.prepare_plan_reconciliation(
+   p_tenant,p_plan,p_batch)->>'statement'),'UTF8'),
+   convert_to('test-reconciliation-signing-key-0123456789','UTF8'),'sha256'),'hex')
+$$;
 
 create function pg_temp.assert_true(value boolean, message text) returns void language plpgsql as $$
 begin if value is distinct from true then raise exception 'ASSERTION FAILED: %', message; end if; end $$;
@@ -57,10 +66,10 @@ values
   ('00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3', 3,
    'data.mask', 'Out of scope probe', 10, '{"system": "hr", "fields": ["salary"]}'::jsonb, '{}'::jsonb);
 
-insert into public.approval_tokens(id, tenant_id, plan_id, action_ids, approver_id, mode, signature, signed_payload, nonce, expires_at, status)
+insert into public.approval_tokens(id, tenant_id, plan_id, action_ids, approver_id, mode, concurrency, signature, signed_payload, nonce, expires_at, status)
 values ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
         array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[],
-        '00000000-0000-0000-0000-0000000000a9', 'batch', 'sig-1', '{}'::jsonb, 'nonce-vr-1',
+        '00000000-0000-0000-0000-0000000000a9', 'batch', 2, 'sig-1', '{}'::jsonb, 'nonce-vr-1',
         now() + interval '1 hour', 'consumed');
 
 insert into public.execution_batches(id, tenant_id, plan_id, request_key, correlation_id, approval_token_id,
@@ -71,6 +80,13 @@ values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000
         public.action_set_content_digest('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
           array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[]),
         'batch', 2, true, 'partial_failure', now());
+
+update public.approval_tokens set signed_payload=jsonb_build_object(
+  'planId',plan_id,'actionIds',to_jsonb(action_ids),
+  'mode',mode,'concurrency',concurrency,'stopOnFailure',stop_on_failure,
+  'contentDigest',(select content_digest from public.execution_batches
+    where id='00000000-0000-0000-0000-0000000000f1'))
+where id='00000000-0000-0000-0000-0000000000e1';
 
 -- d1 executed and settled; d2 was claimed, then swept back to `approved`.
 update public.remediation_actions
@@ -127,8 +143,10 @@ select pg_temp.assert_eq(
   (select public.record_plan_reconciliation(
      '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
      '00000000-0000-0000-0000-0000000000f1', gen_random_uuid(),
-     'Batch req-vr-1 finished partial_failure. Approved 2 action(s): failed=0, rolled_back=0, skipped=0, succeeded=1.',
-     repeat('a', 64))
+     (public.prepare_plan_reconciliation('00000000-0000-0000-0000-0000000000c1',
+       '00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000f1')->>'statement'),
+     pg_temp.recon_signature('00000000-0000-0000-0000-0000000000c1',
+       '00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000f1'))
    -> 'reconciliation' ->> 'unexecuted'),
   '1', 'the swept action is stated as unexecuted');
 
@@ -146,19 +164,24 @@ select pg_temp.assert_true((select count(*) >= 1 from public.audit_ledger
     and target_ref = '00000000-0000-0000-0000-0000000000c3'),
   'the reconciliation is in the ledger');
 
--- One statement per batch.
-select pg_temp.raises('23505',
-  $q$select public.record_plan_reconciliation(
+-- One immutable statement per batch; a changed retry is an explicit conflict.
+select pg_temp.assert_eq(
+  (select public.record_plan_reconciliation(
      '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
-     '00000000-0000-0000-0000-0000000000f1', gen_random_uuid(), 'again', repeat('b', 64))$q$,
-  'a batch is reconciled once');
+     '00000000-0000-0000-0000-0000000000f1', gen_random_uuid(),
+     (public.prepare_plan_reconciliation('00000000-0000-0000-0000-0000000000c1',
+       '00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000f1')->>'statement'),
+     repeat('b',64))->>'error'), 'reconciliation_signature_unverified',
+  'a bad retry signature cannot replace the signed statement');
 
 -- ─── Out-of-scope execution is computed and screams ──────────────────
 insert into public.execution_batches(id, tenant_id, plan_id, request_key, correlation_id, approval_token_id,
   content_digest, mode, concurrency, stop_on_failure, status, finished_at)
 values ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000c1',
         '00000000-0000-0000-0000-0000000000c3', 'req-vr-2', gen_random_uuid(),
-        '00000000-0000-0000-0000-0000000000e1', repeat('c', 64), 'batch', 1, true, 'completed', now());
+        '00000000-0000-0000-0000-0000000000e1',
+        (select content_digest from public.execution_batches where id='00000000-0000-0000-0000-0000000000f1'),
+        'batch', 2, true, 'completed', now());
 
 -- The defect: d4 was touched by the batch but the token never covered it.
 update public.remediation_actions
@@ -184,8 +207,11 @@ select pg_temp.assert_eq(
   (select public.record_plan_reconciliation(
      '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3',
      '00000000-0000-0000-0000-0000000000f1', gen_random_uuid(),
-     'Batch req-vr-1 finished partial_failure. Content changed under a finished batch.',
-     repeat('a', 64)) -> 'reconciliation' ->> 'content_digest_drift'),
+     (public.prepare_plan_reconciliation('00000000-0000-0000-0000-0000000000c1',
+       '00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000f1')->>'statement'),
+     pg_temp.recon_signature('00000000-0000-0000-0000-0000000000c1',
+       '00000000-0000-0000-0000-0000000000c3','00000000-0000-0000-0000-0000000000f1'))
+     -> 'reconciliation' ->> 'content_digest_drift'),
   'true', 'content changed under a finished batch is stated as drift');
 
 -- ─── Gate refusals ────────────────────────────────────────────────────

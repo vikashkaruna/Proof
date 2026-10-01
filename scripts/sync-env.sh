@@ -163,6 +163,7 @@ do_verify() {
     "SUPABASE_ANON_KEY:Database & Auth"
     "SUPABASE_SERVICE_KEY:Database & Auth"
     "SUPABASE_STATUTORY_PROOF_WRITER_KEY:Database & Auth"
+    "SUPABASE_ARCHIVE_WRITER_KEY:Database & Auth"
     "NEXT_PUBLIC_APP_URL:Client URLs"
     "NEXT_PUBLIC_BFF_URL:Client URLs"
     "BFF_URL:Inter-service"
@@ -377,6 +378,7 @@ tfvar_value() {
     supabase_anon_key)            get_val "SUPABASE_ANON_KEY" ;;
     supabase_service_key)         get_val "SUPABASE_SERVICE_KEY" ;;
     supabase_statutory_proof_writer_key) get_val "SUPABASE_STATUTORY_PROOF_WRITER_KEY" ;;
+    supabase_archive_writer_key)  get_val "SUPABASE_ARCHIVE_WRITER_KEY" ;;
 
     # ── Email ──
     resend_api_key)             get_val "RESEND_API_KEY" ;;
@@ -483,6 +485,7 @@ do_secrets() {
     "axiom-${TARGET_ENV}-gemini-api-key:$(get_val "GEMINI_API_KEY" "$(get_val "GOOGLE_API_KEY")")"
     "axiom-${TARGET_ENV}-temporal-api-key:$(get_val "TEMPORAL_API_KEY")"
     "axiom-${TARGET_ENV}-approval-signing-key:$(get_val "APPROVAL_SIGNING_KEY")"
+    "axiom-${TARGET_ENV}-supabase-archive-writer-key:$(get_val "SUPABASE_ARCHIVE_WRITER_KEY")"
     "axiom-${TARGET_ENV}-mfa-encryption-key:$(get_val "AXIOM_MFA_ENCRYPTION_KEY")"
     "axiom-${TARGET_ENV}-agent-runtime-internal-token:$(get_val "AGENT_RUNTIME_INTERNAL_TOKEN")"
     "axiom-${TARGET_ENV}-model-gateway-api-key:$(get_val "MODEL_GATEWAY_API_KEY")"

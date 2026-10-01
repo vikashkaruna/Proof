@@ -94,21 +94,21 @@ async def reconcile_batch(
     reconciliation step attributes to Samadhan and records in the ledger
     with actor 'samadhan'.
     """
-    counts: dict[str, int] = {}
-    for outcome in outcomes:
-        counts[outcome.outcome] = counts.get(outcome.outcome, 0) + 1
-    parts = [
-        f"Batch {batch_id} (request {payload.request_key}) finished {batch_status}.",
-        f"Approved {len(payload.action_ids)} action(s): "
-        + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())),
-    ]
-    unexecuted = counts.get("skipped", 0)
-    if unexecuted:
-        parts.append(
-            f"{unexecuted} approved action(s) did not execute and returned to `approved`; "
-            "they remain retryable only under a fresh approval."
-        )
-    statement = " ".join(parts)
+    if not signing_key:
+        raise ExecutorRefused("reconciliation_signing_key_unavailable")
+    prepared = db.rpc(
+        "prepare_plan_reconciliation",
+        {
+            "p_tenant_id": payload.tenant_id,
+            "p_plan_id": payload.plan_id,
+            "p_batch_id": batch_id,
+        },
+    )
+    if "error" in prepared:
+        raise ExecutorRefused(prepared["error"])
+    statement = prepared.get("statement")
+    if not isinstance(statement, str) or not statement or len(statement.encode("utf-8")) > 262144:
+        raise ExecutorRefused("reconciliation_source_unavailable")
     signature = hmac.new(
         signing_key if isinstance(signing_key, bytes) else signing_key.encode("utf-8"),
         statement.encode("utf-8"),
@@ -127,33 +127,8 @@ async def reconcile_batch(
     )
     if "error" in recorded:
         raise ExecutorRefused(recorded["error"])
-    if ledger is not None:
-        try:
-            from .ledger_client import AppendInput
-
-            tenant_id = getattr(payload, "tenant_id", "00000000-0000-0000-0000-000000000001")
-            correlation_id = getattr(payload, "correlation_id", None) or "00000000-0000-0000-0000-000000000001"
-            plan_id = getattr(payload, "plan_id", None)
-            await ledger.append(
-                AppendInput(
-                    tenant_id=tenant_id,
-                    correlation_id=correlation_id,
-                    actor_type="agent",
-                    actor_id="samadhan",
-                    agent_version="0.1.0",
-                    action_type="execution.reconciliation.recorded",
-                    target_ref=plan_id,
-                    result="success" if (unexecuted == 0) else "skipped",
-                    detail={
-                        "phase": "completed",
-                        "batch_id": batch_id,
-                        "batch_status": batch_status,
-                        "reconciled_by_agent": "samadhan",
-                        "unexecuted": unexecuted,
-                        "statement_sha256": hashlib.sha256(statement.encode("utf-8")).hexdigest(),
-                    },
-                )
-            )
-        except Exception:
-            pass
-    return recorded
+    reconciliation = recorded.get("reconciliation")
+    if not isinstance(reconciliation, dict) or not isinstance(reconciliation.get("id"), str):
+        raise ExecutorRefused("reconciliation_record_unconfirmed")
+    # The SECURITY DEFINER RPC appends the ledger in the same transaction.
+    return {**recorded, "statement": statement, "statement_signature": signature}

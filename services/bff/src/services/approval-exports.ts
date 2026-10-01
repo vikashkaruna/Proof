@@ -55,7 +55,10 @@ function escapeCsvField(val: unknown): string {
 }
 
 export class ApprovalExportService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writerDb: Pick<EvidenceDatabase, 'rpc'>,
+  ) {}
 
   private async assertLiveAccess(
     tenantId: string,
@@ -82,7 +85,7 @@ export class ApprovalExportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.db.rpc(name, args) as unknown as {
+    const query = this.writerDb.rpc(name, args) as unknown as {
       abortSignal?: (sig: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
     };
     const { data, error } =
@@ -252,6 +255,73 @@ export class ApprovalExportService {
       }
     }
 
+    const releasedArchiveMap = new Map<
+      string,
+      {
+        archive_id: string;
+        reconciliation_id: string;
+        source_sha256: string;
+        version_id: string;
+        retain_until: string;
+      }
+    >();
+    const tokenIds = tokens
+      .map((row) => row.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (tokenIds.length > 0) {
+      let aq = this.db
+        .from('approval_proof_archives')
+        .select('id, token_id, reconciliation_id, source_sha256, status')
+        .eq('tenant_id', tenantId)
+        .in('token_id', tokenIds);
+      if (signal) aq = aq.abortSignal(signal);
+      const { data: archives, error } = await aq;
+      if (error || !Array.isArray(archives))
+        throw new EvidenceError('export_storage_unavailable', 503);
+      const released = archives.filter((row) => row.status === 'released');
+      if (released.length > 0) {
+        let vq = this.db
+          .from('approval_proof_versions')
+          .select('archive_id, version_id, retain_until')
+          .eq('tenant_id', tenantId)
+          .in(
+            'archive_id',
+            released.map((row) => row.id),
+          );
+        if (signal) vq = vq.abortSignal(signal);
+        const { data: versions, error: versionError } = await vq;
+        if (versionError || !Array.isArray(versions))
+          throw new EvidenceError('export_storage_unavailable', 503);
+        const versionsByArchive = new Map(versions.map((row) => [row.archive_id, row]));
+        for (const row of released) {
+          const version = versionsByArchive.get(row.id);
+          const parsed = z
+            .object({
+              id: uuidSchema,
+              token_id: uuidSchema,
+              reconciliation_id: uuidSchema,
+              source_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+            })
+            .safeParse(row);
+          const parsedVersion = z
+            .object({
+              version_id: z.string().min(1).max(1024),
+              retain_until: z.string().datetime({ offset: true }),
+            })
+            .safeParse(version);
+          if (!parsed.success || !parsedVersion.success)
+            throw new EvidenceError('approval_export_source_incomplete', 409);
+          releasedArchiveMap.set(parsed.data.token_id, {
+            archive_id: parsed.data.id,
+            reconciliation_id: parsed.data.reconciliation_id,
+            source_sha256: parsed.data.source_sha256,
+            version_id: parsedVersion.data.version_id,
+            retain_until: new Date(parsedVersion.data.retain_until).toISOString(),
+          });
+        }
+      }
+    }
+
     return tokens.map((row) => {
       const pId = row.plan_id;
       const appId = row.approver_id;
@@ -319,6 +389,7 @@ export class ApprovalExportService {
           actionIds.length === 1 ? actionMap.get(actionIds[0]!)!.dry_run_status : null,
         rollback_validated: rollbackValidated,
         reconciliation_statement: null,
+        archived_proof: releasedArchiveMap.get(row.id) ?? null,
         approval_reason: typeof row.reason === 'string' ? row.reason : null,
         status: row.status as 'issued' | 'consumed' | 'revoked' | 'expired' | 'invalid',
         issued_at: new Date(row.issued_at).toISOString(),
@@ -474,6 +545,10 @@ export class ApprovalExportService {
           'consumed_at',
           'revoked_at',
           'stored_signature_prefix_unverified',
+          'released_proof_archive_id',
+          'released_proof_reconciliation_id',
+          'released_proof_source_sha256',
+          'released_proof_version_id',
         ];
         const lines = [headers.join(',')];
         for (const r of records) {
@@ -496,6 +571,10 @@ export class ApprovalExportService {
               escapeCsvField(r.consumed_at),
               escapeCsvField(r.revoked_at),
               escapeCsvField(r.signature_preview),
+              escapeCsvField(r.archived_proof?.archive_id),
+              escapeCsvField(r.archived_proof?.reconciliation_id),
+              escapeCsvField(r.archived_proof?.source_sha256),
+              escapeCsvField(r.archived_proof?.version_id),
             ].join(','),
           );
         }

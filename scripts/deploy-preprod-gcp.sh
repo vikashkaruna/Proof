@@ -625,7 +625,7 @@ if should_run_phase "migrate"; then
     info "Applying the migration series to Cloud SQL (${DB_PUBLIC_IP})..."
     SEED_ARGS=()
     [ "$SEED_IDENTITIES" = true ] && SEED_ARGS+=("--seed-identities")
-    if ! ./scripts/migrate-cloudsql.sh "${SEED_ARGS[@]:-}" "$CONN_STR"; then
+    if ! SUPABASE_DB_URL="$CONN_STR" ./scripts/migrate-cloudsql.sh "${SEED_ARGS[@]:-}"; then
       fail "Migrations failed. The deployed services are running against an"
       echo "    unmigrated or partially migrated schema."
       echo "    If the connection was refused, add this host to the instance's"
@@ -709,4 +709,3 @@ if should_run_phase "verify"; then
   echo -e "  ${BOLD}Run Live Functional Flow:${NC}"
   echo -e "  ${CYAN}./scripts/run-preprod-flow.sh \"${BFF_URL}\"${NC}\n"
 fi
-

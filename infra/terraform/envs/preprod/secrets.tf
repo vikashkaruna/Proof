@@ -40,6 +40,7 @@ locals {
     supabase_anon_key                   = var.supabase_anon_key
     supabase_service_key                = var.supabase_service_key
     supabase_statutory_proof_writer_key = var.supabase_statutory_proof_writer_key
+    supabase_archive_writer_key         = var.supabase_archive_writer_key
     gcs_hmac_access_key                 = google_storage_hmac_key.s3_compat_key.access_id
     gcs_hmac_secret_key                 = google_storage_hmac_key.s3_compat_key.secret
   }

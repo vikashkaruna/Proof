@@ -324,7 +324,8 @@ test.describe('real-provider board report lifecycle', () => {
       const built = await post(founder, `/reports/board/${draft.reportId}/artifacts`, {
         operationKey,
       });
-      expect(built.status()).toBe(200);
+      // The body carries the BFF error code; without it a CI 503 is opaque.
+      expect(built.status(), await built.text()).toBe(200);
       const result = (await built.json()) as { buildId: string; status: string };
       expect(result.status).toBe('settled');
       const rows = (await database(

@@ -197,6 +197,23 @@ describe('POST /v1/plans/approve — MFA step-up', () => {
     expect(challenge?.consumed_for).toBe(fake.rows('approval_tokens')[0]?.id);
   });
 
+  it('binds approval conditions into the signed token scope', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    const conditions = { changeWindow: 'reviewed-2026-09-30' };
+    const result = await post(
+      app,
+      '/v1/plans/approve',
+      approveBody({
+        mfaChallengeId: challengeId,
+        conditions,
+      }),
+    );
+    expect(result.status).toBe(201);
+    expect(fake.rows('approval_tokens')[0]?.['signed_payload']).toMatchObject({ conditions });
+    expect(fake.rows('approval_tokens')[0]?.['conditions']).toEqual(conditions);
+  });
+
   it('records the step-up in the ledger entry for the approval', async () => {
     const app = await buildApp();
     const challengeId = await freshStepUp(app);

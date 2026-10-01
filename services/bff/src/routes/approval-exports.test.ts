@@ -23,7 +23,7 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
     c.set('tenantId', tenantId);
     await next();
   });
-  instance.route('/v1', approvalExportRoutes({ db: fixture.db }));
+  instance.route('/v1', approvalExportRoutes({ db: fixture.db, writerDb: fixture.db }));
   return instance;
 }
 
@@ -137,6 +137,43 @@ describe('Approval Exports HTTP Routes', () => {
     const response = await app().request('/v1/approvals/export?format=csv');
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('"\'\t=HYPERLINK(""https://invalid.example"")"');
+  });
+
+  it('links a released exact-version proof without reclassifying this historical export as verified', async () => {
+    const { tokenId } = seedApproval();
+    const archiveId = randomUUID();
+    const reconciliationId = randomUUID();
+    fixture.base.rows('approval_proof_archives').push({
+      id: archiveId,
+      tenant_id: tenant,
+      token_id: tokenId,
+      reconciliation_id: reconciliationId,
+      source_sha256: 'b'.repeat(64),
+      status: 'released',
+    });
+    fixture.base.rows('approval_proof_versions').push({
+      archive_id: archiveId,
+      tenant_id: tenant,
+      version_id: 'immutable-v1',
+      retain_until: '2035-01-01T00:00:00.000Z',
+    });
+    installRecorder();
+    const response = await app().request('/v1/approvals/export?format=json');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      approvals: Array<Record<string, unknown>>;
+      source_context: Record<string, unknown>;
+    };
+    expect(body.approvals[0]).toMatchObject({
+      reconciliation_statement: null,
+      archived_proof: {
+        archive_id: archiveId,
+        reconciliation_id: reconciliationId,
+        source_sha256: 'b'.repeat(64),
+        version_id: 'immutable-v1',
+      },
+    });
+    expect(body.source_context.signature_verification).toBe('not_performed');
   });
 
   it('refuses a truncated export before recording an export event', async () => {

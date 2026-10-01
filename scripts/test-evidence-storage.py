@@ -268,6 +268,7 @@ def main():
                     "evidence-packs.spec.ts",
                     "evidence-packs-access.spec.ts",
                     "board-reports-provider.spec.ts",
+                    "approval-archive-provider.spec.ts",
                     "--workers=1",
                     "--retries=0",
                     "--reporter=line,json",
@@ -275,7 +276,7 @@ def main():
                 ],
                 cwd=ROOT,
                 env=env,
-                timeout=900,
+                timeout=1800,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
             summary["counts"] = {
@@ -283,11 +284,11 @@ def main():
             }
             if (
                 result.returncode
-                or stats.get("expected") != 13
+                or stats.get("expected") != 14
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
-                    "Evidence browser acceptance requires all thirteen tests without skips or retries"
+                    "Evidence browser acceptance requires all fourteen tests without skips or retries"
                 )
             summary["status"] = "passed"
             summary["outcomes"] = [
@@ -307,6 +308,7 @@ def main():
                 "board-manager-and-founder-browser-request-review-build-preview-and-release",
                 "board-live-authority-revocation-refuses-cached-review-and-private-reads",
                 "auditor-finalized-source-founder-review-exact-versions-and-release",
+                "approval-human-signed-reconciliation-exact-version-founder-release-and-owner-download",
             ]
         finally:
             try:

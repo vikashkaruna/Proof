@@ -36,5 +36,8 @@ for component in deployments:
     has_writer = "SUPABASE_STATUTORY_PROOF_WRITER_KEY" in env_names(component)
     if has_writer != (component == "bff"):
         raise SystemExit(f"{component}: statutory proof writer must be BFF-only")
-
-print("Supabase service key is scoped to BFF and agent runtime")
+if "SUPABASE_ARCHIVE_WRITER_KEY" not in env_names("bff"):
+    raise SystemExit("BFF is missing the dedicated archive writer key")
+for component in ("web", "marketing", "agent-runtime"):
+    if "SUPABASE_ARCHIVE_WRITER_KEY" in env_names(component):
+        raise SystemExit(f"{component} must not receive SUPABASE_ARCHIVE_WRITER_KEY")

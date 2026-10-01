@@ -32,7 +32,7 @@ for environment in preprod production; do
   container="axiom-http-${environment}-$$"
   python3 - "$state_dir" "$environment" "$port" "$revision" "$web_port" "$marketing_port" <<'PY'
 from pathlib import Path
-import base64,hashlib,hmac,json,sys,secrets,os
+import base64,hashlib,hmac,json,sys,secrets,os,time,urllib.request
 root=Path(sys.argv[1]);environment=sys.argv[2];port=sys.argv[3];revision=sys.argv[4]
 status=json.loads((Path(os.environ.get('AXIOM_PARITY_STATE_DIR','.axiom-runtime/parity'))/'status.json').read_text())
 def b64(data): return base64.urlsafe_b64encode(data).decode().rstrip('=')
@@ -43,14 +43,25 @@ parts=service.split('.')
 if len(parts)!=3: raise SystemExit('Parity service role key is not an HS256 JWT')
 header=json.loads(decode(parts[0])); claims=json.loads(decode(parts[1]))
 expected=hmac.new(secret,f'{parts[0]}.{parts[1]}'.encode(),hashlib.sha256).digest()
-if header.get('alg')!='HS256' or claims.get('role')!='service_role' or claims.get('exp',0)<=__import__('time').time() or not hmac.compare_digest(decode(parts[2]),expected):
+if header.get('alg')!='HS256' or claims.get('role')!='service_role' or claims.get('exp',0)<=time.time() or not hmac.compare_digest(decode(parts[2]),expected):
     raise SystemExit('Parity service role key does not match the target JWT secret')
-now=int(__import__('time').time())
-writer_claims={'iss':claims.get('iss','supabase'),'role':'statutory_proof_writer','iat':now,'exp':min(claims['exp'],now+3600)}
-unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
-writer=f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
-env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':'http://host.docker.internal:56321','SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
-env['SUPABASE_STATUTORY_PROOF_WRITER_KEY']=writer
+def writer_key(role):
+    issued=int(time.time())
+    writer_claims={'iss':claims.get('iss','supabase'),'role':role,'iat':issued,'exp':min(claims['exp'],issued+3600)}
+    unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
+    return f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
+statutory_writer_key=writer_key('statutory_proof_writer')
+archive_writer_key=writer_key('approval_archive_writer')
+probe_body=json.dumps({'p_tenant_id':'00000000-0000-4000-8000-0000000000ff','p_actor_id':'00000000-0000-4000-8000-0000000000fe','p_plan_id':None,'p_format':'json','p_filter_params':{},'p_summary':{},'p_artifact_sha256':'a'*64,'p_artifact_bytes':1,'p_correlation_id':'00000000-0000-4000-8000-0000000000fd'}).encode()
+probe=urllib.request.Request(status['API_URL'].rstrip('/')+'/rest/v1/rpc/record_approval_export',data=probe_body,headers={'apikey':status['ANON_KEY'],'Authorization':'Bearer '+archive_writer_key,'Content-Type':'application/json'})
+try:
+    with urllib.request.urlopen(probe,timeout=10) as response:
+        outcome=json.load(response)
+except Exception as error:
+    raise SystemExit('Dedicated archive writer JWT was rejected by parity PostgREST') from error
+if outcome.get('error')!='tenant_not_found':
+    raise SystemExit('Dedicated archive writer did not reach the expected tenant gate')
+env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':'http://host.docker.internal:56321','SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'SUPABASE_STATUTORY_PROOF_WRITER_KEY':statutory_writer_key,'SUPABASE_ARCHIVE_WRITER_KEY':archive_writer_key,'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
 (root/f'{environment}.env').write_text(''.join(f'{k}={v}\n' for k,v in env.items()))
 target={'schemaVersion':1,'deploymentId':f'http-{environment}','environment':environment,'topology':'local-docker','syntheticFixtures':True,'expectedRevision':revision,'bffUrl':f'http://127.0.0.1:{port}','webUrl':f'http://127.0.0.1:{sys.argv[5]}','marketingUrl':f'http://127.0.0.1:{sys.argv[6]}','supabaseUrl':status['API_URL'],'anonKey':status['ANON_KEY'],'publishableKey':status['PUBLISHABLE_KEY'],'serviceKey':status['SERVICE_ROLE_KEY']}
 (root/f'{environment}.json').write_text(json.dumps(target))
@@ -87,7 +98,14 @@ PY
       done
       [ "$ready" = true ] || { echo "$app did not start; inspect protected logs." >&2; docker logs "$app_container" > "$state_dir/$environment-$app.private.log" 2>&1; exit 1; }
     done
-    ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    # The Playwright config/global setup must hold the exact BFF archive JWT
+    # (deployed mode has no local minting path). Hand it over per invocation
+    # from the protected env file; it is never written to the target file or
+    # to the web container env, and is not exported to later steps.
+    archive_writer_key=$(sed -n 's/^SUPABASE_ARCHIVE_WRITER_KEY=//p' "$state_dir/$environment.env")
+    [ -n "$archive_writer_key" ] || { echo 'Archive writer key missing from protected BFF env.' >&2; exit 1; }
+    SUPABASE_ARCHIVE_WRITER_KEY="$archive_writer_key" ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    unset archive_writer_key
     AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
     # Real process restart, not a second read from the same in-memory cache.
     docker restart "$container" "axiom-http-${environment}-marketing-$$" >/dev/null
