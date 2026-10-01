@@ -406,7 +406,7 @@ function ReconciliationSection({ reconciliation: rec }: { reconciliation: Reconc
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <AgentIcon agent="samadhan" size="sm" state="idle" />
+          <AgentIcon agent="samadhan" size="sm" />
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
             Samadhan · समाधान · Maker-Checker Reconciliation
           </h4>

@@ -3,7 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DataPlaceholder } from './DataPlaceholder';
 import { PageHeader } from './Layout';
-import { ModuleContext } from './ModuleContext';
+import { ModuleBar } from './ModuleBar';
 import { RelatedAgents } from './RelatedAgents';
 
 const html = (element: React.ReactElement) => renderToStaticMarkup(element);
@@ -34,7 +34,7 @@ describe('related agents strip', () => {
 describe('module context line', () => {
   it('shows the Hindi name, phase and module id without adding a heading', () => {
     const markup = html(
-      <ModuleContext crumb="Execute" titleHi="अनुमोदन कंसोल" phase="P3" moduleId="M3.3" />,
+      <ModuleBar crumb="Execute" titleHi="अनुमोदन कंसोल" phase="P3" moduleId="M3.3" />,
     );
     expect(markup).toContain('lang="hi"');
     expect(markup).toContain('अनुमोदन कंसोल');
@@ -48,21 +48,21 @@ describe('module context line', () => {
 
   it('switches to light-on-dark text for dark banners', () => {
     const dark = html(
-      <ModuleContext crumb="Operate" titleHi="अ" phase="P0" agents={['karya']} tone="dark" />,
+      <ModuleBar crumb="Operate" titleHi="अ" phase="P0" agents={['karya']} tone="dark" />,
     );
     expect(dark).toContain('text-slate-300');
     expect(dark).toContain('text-white');
-    const light = html(<ModuleContext crumb="Operate" titleHi="अ" phase="P0" agents={['karya']} />);
+    const light = html(<ModuleBar crumb="Operate" titleHi="अ" phase="P0" agents={['karya']} />);
     expect(light).not.toContain('text-white');
   });
 
   it('renders nothing when given nothing', () => {
-    expect(html(<ModuleContext />)).toBe('');
+    expect(html(<ModuleBar />)).toBe('');
   });
 
   it('includes the agents strip only when agents are given', () => {
-    expect(html(<ModuleContext phase="P0" />)).not.toContain('related-agents');
-    expect(html(<ModuleContext phase="P0" agents={['karya']} />)).toContain('related-agents');
+    expect(html(<ModuleBar phase="P0" />)).not.toContain('related-agents');
+    expect(html(<ModuleBar phase="P0" agents={['karya']} />)).toContain('related-agents');
   });
 });
 
@@ -75,12 +75,12 @@ describe('page header with module context', () => {
       />,
     );
     expect(markup).toMatch(/<h1[^>]*>Approval queue<\/h1>/);
-    expect(markup).toContain('data-testid="module-context"');
-    expect(markup.indexOf('</h1>')).toBeLessThan(markup.indexOf('module-context'));
+    expect(markup).toContain('data-testid="module-bar"');
+    expect(markup.indexOf('</h1>')).toBeLessThan(markup.indexOf('module-bar'));
   });
 
   it('is unchanged for pages that give no module context', () => {
-    expect(html(<PageHeader title="Plans" />)).not.toContain('module-context');
+    expect(html(<PageHeader title="Plans" />)).not.toContain('module-bar');
   });
 });
 

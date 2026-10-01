@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AgentIcon } from '@axiom/ui';
+import { AgentLabel } from '@axiom/ui';
 import { z } from 'zod';
 import { detailSchema, type ReportDetail } from './report-contract';
 import { reportRequest } from './report-request';
@@ -210,8 +210,8 @@ function TenantBoardWorkflow({
     <section aria-label="Board report workflow" className={`${panel} space-y-5`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <AgentIcon agent="prativedan" size="sm" state="idle" />
           <div>
+            <AgentLabel agent="prativedan" />
             <h2 className="text-lg font-semibold text-[#1E2A4A]">Board reports</h2>
             <p className="text-sm text-slate-600">
               Request a draft from a finalized assessment. A founder reviews the exact content,

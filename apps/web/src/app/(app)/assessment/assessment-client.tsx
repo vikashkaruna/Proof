@@ -4,8 +4,8 @@ import React, { useState, useRef } from 'react';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentIcon } from '@axiom/ui';
-import { ModuleContextFor } from '@/lib/module-context';
+import { AgentLabel } from '@axiom/ui';
+import { ModuleBarFor } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 
 export interface AssessmentClientProps {
@@ -164,7 +164,7 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
               Runs Parikshan only for the displayed saved assessment. Discovery, evidence sealing
               and report generation run separately.
             </div>
-            <ModuleContextFor module="assessment" tone="dark" className="mt-2" />
+            <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
           </div>
 
           <button
@@ -223,14 +223,13 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
                 </div>
 
                 {/* Agent Name with Mini Icon */}
-                <div className="mt-2 flex items-center justify-center gap-1.5 text-white">
-                  <AgentIcon
+                <div className="mt-2 flex items-center justify-center text-white">
+                  <AgentLabel
                     agent={p.agentKey}
                     size="xs"
-                    state={isActive ? 'thinking' : isCompleted ? 'working' : 'idle'}
-                    className="transition-transform group-hover:scale-110"
+                    tone="dark"
+                    state={isActive ? 'thinking' : 'idle'}
                   />
-                  <span className="text-[12px] font-semibold">{p.agent}</span>
                 </div>
 
                 {/* Stage Label & Indic Subtitle */}

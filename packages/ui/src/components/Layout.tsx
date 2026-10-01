@@ -1,6 +1,6 @@
 import { type HTMLAttributes, type ReactNode } from 'react';
 import { cn } from '../utils';
-import { ModuleContext, type ModuleContextProps } from './ModuleContext';
+import { ModuleBar, type ModuleBarProps } from './ModuleBar';
 
 export interface PageHeaderProps {
   title: ReactNode;
@@ -8,7 +8,7 @@ export interface PageHeaderProps {
   actions?: ReactNode;
   meta?: ReactNode;
   /** Breadcrumb, Hindi name, phase, module id and related agents under the title. */
-  module?: ModuleContextProps;
+  module?: ModuleBarProps;
   className?: string;
 }
 
@@ -33,7 +33,7 @@ export function PageHeader({
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
-      {module && <ModuleContext {...module} />}
+      {module && <ModuleBar {...module} />}
       {meta && <div className="flex flex-wrap items-center gap-2">{meta}</div>}
     </header>
   );

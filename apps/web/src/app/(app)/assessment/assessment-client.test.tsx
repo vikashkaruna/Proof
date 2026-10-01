@@ -127,3 +127,15 @@ it('renders the shared module context outside the heading', () => {
     meta.hi,
   );
 });
+
+it('labels each pipeline stage through AgentLabel; a finished run is static, not animated', async () => {
+  state.invoke.mockResolvedValue({ ledger_entry_ids: ['ledger-1'] });
+  render(<AssessmentClient snapshot={snapshot} />);
+  const stage = (key: string) =>
+    screen.getByTestId(`pipeline-${key}`).querySelector('[data-testid="agent-label"]');
+  expect(stage('parikshan')?.getAttribute('data-agent')).toBe('parikshan');
+  fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
+  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+  expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
+  expect(stage('parikshan')?.getAttribute('data-state')).toBe('idle');
+});

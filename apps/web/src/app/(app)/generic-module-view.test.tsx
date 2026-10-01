@@ -15,7 +15,10 @@ vi.mock('next/link', () => ({
     <a href={href}>{children}</a>
   ),
 }));
-vi.mock('@axiom/ui', () => ({ AgentIcon: () => <span aria-hidden="true" /> }));
+vi.mock('@axiom/ui', async () => {
+  const real = await vi.importActual<typeof import('@axiom/ui')>('@axiom/ui');
+  return { AgentLabel: real.AgentLabel };
+});
 const meta: GenericModuleMeta = {
   title: 'Recorded module',
   hi: 'मॉड्यूल',
@@ -92,4 +95,32 @@ it('leaves an ambiguous invocation unconfirmed without proof', async () => {
   expect(document.body.textContent).not.toContain('Task executed successfully');
   expect(document.body.textContent).not.toContain('Immutable ledger proof');
   expect(state.refresh).not.toHaveBeenCalled();
+});
+
+it('shows the agent with AgentLabel, animated only while its own run is in flight', async () => {
+  let finish: (v: unknown) => void = () => {};
+  state.invoke.mockReturnValue(new Promise((r) => (finish = r)));
+  render(
+    <GenericModuleView
+      meta={{
+        ...meta,
+        agent: 'Vibhaag + Drishti',
+        agentKey: 'vibhaag',
+        actionLabel: 'Run it',
+        actionHref: undefined,
+        cards: [],
+      }}
+    />,
+  );
+  const labels = () => screen.getAllByTestId('agent-label');
+  expect(labels().map((l) => l.getAttribute('data-agent'))).toEqual(['vibhaag', 'drishti']);
+  expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']);
+  fireEvent.click(screen.getByRole('button', { name: /Run it/ }));
+  await waitFor(() =>
+    expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['working', 'idle']),
+  );
+  finish({ latency_ms: 1, ledger_entry_ids: [] });
+  await waitFor(() =>
+    expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']),
+  );
 });

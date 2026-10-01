@@ -1,0 +1,9 @@
+/*
+ * Entry for the compiled library stylesheet (dist/ui.css): the brand fonts, the design
+ * tokens and the Tailwind utilities the components use. The web app loads the same
+ * families through next/font; this file is for tools that render the library on its own,
+ * so it imports them from Google Fonts. Relative path for the tokens, because the
+ * Tailwind CLI's @import resolver does not read package "exports".
+ */
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import '../../design-tokens/src/globals.css';

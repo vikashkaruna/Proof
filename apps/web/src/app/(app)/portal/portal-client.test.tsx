@@ -183,3 +183,10 @@ it('does not infer residency, provider retention or full statutory scope from sa
   expect(document.body.textContent).not.toContain('AWS S3 Object Lock');
   expect(screen.getByRole('button', { name: 'Copy' }).hasAttribute('disabled')).toBe(true);
 });
+
+it('shows Saakshi and Sudhaar in the hero as static AgentLabels, not as running', () => {
+  render(<PortalClient {...props} />);
+  const labels = screen.getAllByTestId('agent-label');
+  expect(labels.map((l) => l.getAttribute('data-agent'))).toEqual(['saakshi', 'sudhaar']);
+  expect(labels.map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']);
+});
