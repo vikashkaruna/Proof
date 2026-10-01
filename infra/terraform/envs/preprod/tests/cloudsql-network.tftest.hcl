@@ -4,13 +4,22 @@ mock_provider "google-beta" {}
 mock_provider "random" {}
 
 variables {
-  project_id           = "axiom-network-fixture"
+  # Must match the project the release-manifest fixture is bound to.
+  project_id           = "axiom-iam-fixture"
   supabase_jwt_secret  = "synthetic-jwt-signing-key-for-offline-tests-only"
   supabase_anon_key    = "synthetic-public-anon-fixture"
   supabase_service_key = "synthetic-service-role-fixture"
   # The base now requires a minted BFF-only archive writer key; a synthetic
   # fixture satisfies the variable without any real credential.
   supabase_archive_writer_key = "synthetic-archive-writer-fixture"
+  # Preprod also requires an exact release identity and the operator-owned S3
+  # evidence vault; synthetic fixtures satisfy those variables offline.
+  release_sha                = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_manifest_file      = "tests/runtime_iam_release.fixture.json"
+  evidence_bucket            = "axiom-offline-fixture-evidence"
+  evidence_endpoint          = "https://s3.ap-south-1.amazonaws.com"
+  evidence_access_key_id     = "synthetic-access-key-for-tests"
+  evidence_secret_access_key = "synthetic-secret-key-for-offline-tests-only"
 }
 
 run "private_only_by_default" {
