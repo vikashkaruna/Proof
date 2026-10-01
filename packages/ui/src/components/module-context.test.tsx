@@ -7,6 +7,8 @@ import { ModuleContext } from './ModuleContext';
 import { RelatedAgents } from './RelatedAgents';
 
 const html = (element: React.ReactElement) => renderToStaticMarkup(element);
+// Agent icons inline every agent's animation keyframes, so judge visible markup only.
+const visible = (markup: string) => markup.replace(/<style>[\s\S]*?<\/style>/g, '');
 
 describe('related agents strip', () => {
   it('names each agent and states the approval rule, but never a live status', () => {
@@ -15,7 +17,13 @@ describe('related agents strip', () => {
     expect(markup).toContain('drishti');
     expect(markup).toContain('parikshan');
     expect(markup).toContain('nothing changes without a recorded human approval');
-    expect(markup).not.toMatch(/online|healthy|running|offline/i);
+    expect(visible(markup)).not.toMatch(/online|healthy|running|offline|idle|working|thinking/i);
+  });
+
+  it('titles each agent with its persona, never with a state', () => {
+    const markup = html(<RelatedAgents agents={['drishti']} />);
+    expect(markup).toContain('title="Discovery"');
+    expect(markup).not.toContain('(idle)');
   });
 
   it('renders nothing when a module has no agents', () => {
@@ -30,7 +38,9 @@ describe('module context line', () => {
     );
     expect(markup).toContain('lang="hi"');
     expect(markup).toContain('अनुमोदन कंसोल');
-    expect(markup).toContain('>P3<');
+    expect(markup).toContain('Delivery phase');
+    expect(markup).toContain('P3');
+    expect(markup).toContain('Module </span>M3.3');
     expect(markup).toContain('M3.3');
     expect(markup).toContain('Execute');
     expect(markup).not.toMatch(/<h[1-6]/);

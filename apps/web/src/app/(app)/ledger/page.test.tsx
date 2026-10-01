@@ -139,11 +139,11 @@ it('keeps malformed pagination away from the ledger range query', async () => {
   expect(view).toContain('0 rows');
 });
 
-it('renders the shared module context under the title with the registry Hindi name and M2.5', async () => {
+it('renders the shared context line with the module id and agents, and prints the Hindi name once', async () => {
   const html = await renderPage();
   expect(html).toContain('data-testid="module-context"');
-  expect(html).toContain(
-    `<span lang="hi" class="font-medium text-white">${moduleMeta('ledger').hi}</span>`,
-  );
-  expect(html).toContain('aria-label="Module M2.5"');
+  const ctx = html.slice(html.indexOf('data-testid="module-context"'));
+  expect(ctx).toContain('M2.5');
+  expect(ctx).toContain('data-testid="related-agents"');
+  expect(html.split(moduleMeta('ledger').hi)).toHaveLength(2);
 });

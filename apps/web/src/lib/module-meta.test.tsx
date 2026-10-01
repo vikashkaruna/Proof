@@ -6,6 +6,8 @@ import { MODULES, moduleMeta, type ModuleKey } from './module-meta';
 import { ModuleContextFor } from './module-context';
 
 const keys = Object.keys(MODULES) as ModuleKey[];
+// Agent icons inline every agent's animation keyframes, so check visible markup only.
+const visible = (markup: string) => markup.replace(/<style>[\s\S]*?<\/style>/g, '');
 
 describe('module metadata', () => {
   it('covers the 21 design routes', () => {
@@ -47,8 +49,10 @@ describe('ModuleContextFor', () => {
     expect(markup).toContain('Evidence &amp; Audit');
     expect(markup).toContain(moduleMeta('ledger').hi);
     expect(markup).toContain('M2.5');
-    expect(markup).toContain('saakshi');
-    expect(markup).toContain('lekha');
+    expect(visible(markup)).toContain('lekha');
+    expect(visible(markup)).not.toContain('saakshi');
+    expect(visible(markup).match(/<li>/g)).toHaveLength(1);
+    expect(moduleMeta('ledger').agents).toEqual(['lekha']);
   });
 
   it('shows no agents strip for a module with no named agent', () => {

@@ -1,6 +1,6 @@
 import { type AgentName } from '@axiom/design-tokens';
 import { cn } from '../utils';
-import { AgentPill } from './AgentPill';
+import { AGENT_PERSONAS, AgentPill } from './AgentPill';
 
 export interface RelatedAgentsProps {
   agents: readonly AgentName[];
@@ -38,7 +38,7 @@ export function RelatedAgents({
       <ul className="flex flex-wrap items-center gap-2">
         {agents.map((agent) => (
           <li key={agent}>
-            <AgentPill agent={agent} />
+            <AgentPill agent={agent} title={AGENT_PERSONAS[agent]?.persona ?? agent} />
           </li>
         ))}
       </ul>

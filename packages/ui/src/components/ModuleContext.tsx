@@ -51,19 +51,16 @@ export function ModuleContext({
             </span>
           )}
           {phase && (
-            <Badge
-              variant={tone === 'dark' ? 'neutral' : 'indigo'}
-              size="sm"
-              aria-label={`Delivery phase ${phase}`}
-            >
+            <Badge variant={tone === 'dark' ? 'neutral' : 'indigo'} size="sm">
+              <span className="sr-only">Delivery phase </span>
               {phase}
             </Badge>
           )}
           {moduleId && (
             <span
               className={cn('font-mono', tone === 'dark' ? 'text-slate-300' : 'text-slate-500')}
-              aria-label={`Module ${moduleId}`}
             >
+              <span className="sr-only">Module </span>
               {moduleId}
             </span>
           )}

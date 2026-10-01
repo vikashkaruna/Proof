@@ -5,19 +5,22 @@ import { moduleMeta, type ModuleKey } from './module-meta';
 export function ModuleContextFor({
   module,
   tone,
+  omit = [],
   className,
 }: {
   module: ModuleKey;
   tone?: 'light' | 'dark';
+  /** Leave out parts the page already shows in its own banner, so nothing prints twice. */
+  omit?: readonly ('hi' | 'moduleId')[];
   className?: string;
 }) {
   const meta = moduleMeta(module);
   return (
     <ModuleContext
       crumb={meta.section}
-      titleHi={meta.hi}
+      titleHi={omit.includes('hi') ? undefined : meta.hi}
       phase={meta.phase}
-      moduleId={meta.moduleId}
+      moduleId={omit.includes('moduleId') ? undefined : meta.moduleId}
       agents={meta.agents}
       tone={tone}
       className={className}

@@ -76,10 +76,13 @@ it('invokes a supported read-only agent and shows only returned proof references
   );
 });
 
-it('renders the shared module context with the registry Hindi name and M0.6', () => {
-  render(<AgentWorkbenchClient {...props} />);
+it('renders the shared context line with phase and agents, leaving the Hindi name and module id to the banner', () => {
+  const { container } = render(<AgentWorkbenchClient {...props} />);
   const ctx = screen.getByTestId('module-context');
-  expect(ctx.textContent).toContain(moduleMeta('workbench').hi);
-  expect(ctx.querySelector('[aria-label="Module M0.6"]')).toBeTruthy();
+  expect(ctx.textContent).toContain(moduleMeta('workbench').phase);
+  expect(ctx.querySelector('[data-testid="related-agents"]')).toBeTruthy();
+  expect(ctx.textContent).not.toContain(moduleMeta('workbench').hi);
+  expect(ctx.textContent).not.toContain('M0.6');
+  expect(container.textContent?.split(moduleMeta('workbench').hi)).toHaveLength(2);
   expect(screen.getByRole('heading', { name: /Agent Workbench/i })).toBeTruthy();
 });
