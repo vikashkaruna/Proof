@@ -37,6 +37,19 @@ class ArchiveWriterMintTests(unittest.TestCase):
         self.assertNotIn("'archiveWriterKey':", source)
         self.assertNotIn("'SUPABASE_ARCHIVE_WRITER_KEY' for k", source)
 
+    def test_browser_acceptance_receives_writer_key_for_playwright(self):
+        # Deployed Playwright (config + global setup) throws without this key
+        # in its own process env; the container env file alone is not enough.
+        source = (ROOT / "scripts/test-deployed-http.sh").read_text()
+        self.assertRegex(
+            source,
+            r'SUPABASE_ARCHIVE_WRITER_KEY="\$archive_writer_key" '
+            r'\./scripts/run-deployed-acceptance\.sh "\$state_dir/\$environment\.json"\n',
+        )
+        self.assertIn("SUPABASE_ARCHIVE_WRITER_KEY=//p' \"$state_dir/$environment.env\"", source)
+        config = (ROOT / "tests/e2e/playwright.config.ts").read_text()
+        self.assertIn("requires a BFF-only SUPABASE_ARCHIVE_WRITER_KEY", config)
+
     def test_minted_writer_is_signed_and_distinct_from_shared_service_role(self):
         result = subprocess.run(
             ["node", "scripts/mint-supabase-keys.mjs", "--env", "test"],

@@ -98,7 +98,14 @@ PY
       done
       [ "$ready" = true ] || { echo "$app did not start; inspect protected logs." >&2; docker logs "$app_container" > "$state_dir/$environment-$app.private.log" 2>&1; exit 1; }
     done
-    ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    # The Playwright config/global setup must hold the exact BFF archive JWT
+    # (deployed mode has no local minting path). Hand it over per invocation
+    # from the protected env file; it is never written to the target file or
+    # to the web container env, and is not exported to later steps.
+    archive_writer_key=$(sed -n 's/^SUPABASE_ARCHIVE_WRITER_KEY=//p' "$state_dir/$environment.env")
+    [ -n "$archive_writer_key" ] || { echo 'Archive writer key missing from protected BFF env.' >&2; exit 1; }
+    SUPABASE_ARCHIVE_WRITER_KEY="$archive_writer_key" ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    unset archive_writer_key
     AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
     # Real process restart, not a second read from the same in-memory cache.
     docker restart "$container" "axiom-http-${environment}-marketing-$$" >/dev/null
