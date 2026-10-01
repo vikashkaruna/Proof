@@ -542,6 +542,7 @@ test.describe('real-provider board report lifecycle', () => {
       await expect(detail.getByRole('heading', { name: request.title, exact: true })).toBeVisible();
       await fixturePatch(`users?id=eq.${founderAccount.id}`, { is_axiom_internal: false });
       expect((await review()).status()).toBe(403);
+      expect((await founder.request.get(`/api/bff/v1/reports/${reportId}`)).status()).toBe(404);
       await detail.getByRole('button', { name: 'Refresh report detail' }).click();
       await expect(detail.getByRole('alert')).toBeVisible();
       await expect(detail.getByRole('heading', { name: request.title, exact: true })).toHaveCount(
