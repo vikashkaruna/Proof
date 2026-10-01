@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # ─── Service identity ───────────────────────────────────────────
     service_name: str = "axiom-agent-runtime"
-    environment: Literal["development", "staging", "preprod", "production", "test"] = "development"
+    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = "development"
     log_level: Literal["debug", "info", "warn", "error"] = "info"
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8000")))
     # Containers must listen on all interfaces; exposure is controlled by the
@@ -177,7 +177,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> Settings:
-        if self.environment == "production":
+        if self.environment in ("production", "onprem"):
             if not self.supabase_url or "localhost" in self.supabase_url or "127.0.0.1" in self.supabase_url:
                 raise ValueError("Valid production SUPABASE_URL is required")
             if not self.supabase_service_key or self.supabase_service_key.startswith("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v"):

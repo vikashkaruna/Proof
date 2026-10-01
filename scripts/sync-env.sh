@@ -81,8 +81,12 @@ HELP
   exit 0
 fi
 
-ENV_FILE="infra/docker/environments/.env.${TARGET_ENV}"
+ENV_FILE="${AXIOM_ENV_FILE:-infra/docker/environments/.env.${TARGET_ENV}}"
 if [[ ! -f "$ENV_FILE" ]]; then
+  if [[ -n "${AXIOM_ENV_FILE:-}" ]]; then
+    fail "Explicit environment file not found: ${ENV_FILE}"
+    exit 1
+  fi
   if [[ -f ".env.${TARGET_ENV}" ]]; then
     ENV_FILE=".env.${TARGET_ENV}"
   elif [[ -f "infra/docker/environments/.env.${TARGET_ENV}.example" ]]; then
@@ -203,7 +207,17 @@ do_verify() {
       # generate it: the anon and service keys are JWTs signed WITH it, so a
       # random value would leave GoTrue issuing tokens PostgREST rejects.
       "SUPABASE_JWT_SECRET:Database & Auth"
-      "AXIOM_EVIDENCE_RETENTION_DAYS:Evidence Vault"
+    )
+  fi
+  if [[ "$TARGET_ENV" == "preprod" ]]; then
+    required_keys+=(
+      "AXIOM_STORAGE_ACCESS_KEY_ID:Evidence Vault"
+      "AXIOM_STORAGE_SECRET_ACCESS_KEY:Evidence Vault"
+      "AXIOM_EVIDENCE_PROBE_KEY:Evidence Vault"
+      "AXIOM_EVIDENCE_PROBE_VERSION_ID:Evidence Vault"
+      "AXIOM_RELEASE_SHA:Release Identity"
+      "AXIOM_RELEASE_MANIFEST_FILE:Release Identity"
+      "AXIOM_TF_STATE_BUCKET:Cloud Infrastructure"
     )
   fi
 
@@ -230,6 +244,7 @@ do_verify() {
       fi
     elif [[ "$val" == *"-el.a.run.app"* || "$val" == *"7zb7qphjbq"* || "$val" == *"<hash>"* ]]; then
       local preview="${val:0:18}..."
+      [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]] && preview="(redacted)"
       printf "  %-32s %-22s \033[0;33m%-12s\033[0m %s (ephemeral hash)\n" "$key" "$cat" "EPHEMERAL_URL" "$preview"
       warn_count=$((warn_count + 1))
     elif [[ "$val" == *"placeholder"* || "$val" == *"<"*">"* || "$val" == *"YOUR_"* ]]; then
@@ -238,18 +253,14 @@ do_verify() {
         simulated_count=$((simulated_count + 1))
       else
         local preview="${val:0:18}..."
+        [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]] && preview="(redacted)"
         printf "  %-32s %-22s \033[0;33m%-12s\033[0m %s\n" "$key" "$cat" "PLACEHOLDER" "$preview"
         warn_count=$((warn_count + 1))
       fi
     else
       local preview=""
       if [[ "$key" == *"KEY"* || "$key" == *"SECRET"* || "$key" == *"TOKEN"* || "$key" == *"PASSWORD"* ]]; then
-        local len="${#val}"
-        if [ "$len" -gt 12 ]; then
-          preview="${val:0:7}...${val: -4}"
-        else
-          preview="${val:0:3}..."
-        fi
+        preview="(redacted)"
       else
         preview="${val:0:22}"
       fi
@@ -342,13 +353,13 @@ tfvar_value() {
     # Private dispatch inputs/proofs; independent from sealed evidence.
     assessment_dispatch_retention_days) get_val "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS" "90" ;;
 
-    # ── Evidence retention ──
-    # Applied as a COMPLIANCE-mode Object Lock, which nobody including the
-    # project owner can shorten or delete before it expires. It had no
-    # environment key at all and could only come from the Terraform default,
-    # so a bucket could be created with a test-length retention while the
-    # product documented seven years.
-    retention_days)             get_val "AXIOM_EVIDENCE_RETENTION_DAYS" "7" ;;
+    # ── Approved external S3 evidence vault and immutable release ──
+    release_sha)                get_val "AXIOM_RELEASE_SHA" ;;
+    release_manifest_file)      get_val "AXIOM_RELEASE_MANIFEST_FILE" ;;
+    evidence_bucket)            get_val "AXIOM_EVIDENCE_BUCKET" ;;
+    evidence_endpoint)          get_val "AXIOM_STORAGE_ENDPOINT" ;;
+    evidence_access_key_id)     get_val "AXIOM_STORAGE_ACCESS_KEY_ID" ;;
+    evidence_secret_access_key) get_val "AXIOM_STORAGE_SECRET_ACCESS_KEY" ;;
 
     # ── Managed services ──
     upstash_redis_url)          get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")" ;;
@@ -404,12 +415,13 @@ tfvar_value() {
 # `type = number` variable.
 tfvar_is_number() {
   case "$1" in
-    cloud_sql_disk_size_gb|retention_days|assessment_dispatch_retention_days) return 0 ;;
+    cloud_sql_disk_size_gb|assessment_dispatch_retention_days) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 do_terraform() {
+  umask 077
   info "Propagating ${TARGET_ENV} configuration to Terraform..."
 
   # The Terraform directory for `production` is named `prod`. Without this the
@@ -441,9 +453,12 @@ do_terraform() {
       continue
     fi
     if tfvar_is_number "$name"; then
-      body+="$(printf '%-28s = %s\n' "$name" "${value:-0}")"
+      [[ "$value" =~ ^[0-9]+$ ]] || { fail "${name} must be a nonnegative integer"; return 1; }
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
     else
-      body+="$(printf '%-28s = "%s"\n' "$name" "$value")"
+      local quoted
+      quoted="$(printf '%s' "$value" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+      body+="$(printf '%-28s = %s\n' "$name" "$quoted")"
     fi
     body+=$'\n'
   done < <(grep -oE '^variable "[a-z0-9_]+"' "$vars_file" | sed 's/variable "//;s/"//')

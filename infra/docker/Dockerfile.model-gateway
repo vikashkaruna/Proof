@@ -14,10 +14,12 @@ RUN pip install uv
 
 COPY services/model-gateway/pyproject.toml ./services/model-gateway/
 COPY services/model-gateway/src ./services/model-gateway/src
+COPY packages/offline-license-python ./packages/offline-license-python
 WORKDIR /app/services/model-gateway
 RUN uv pip install --system -e .
 
 WORKDIR /app
+ENV PYTHONPATH="/app/services/model-gateway/src:/app/packages/offline-license-python"
 EXPOSE 8001
 
 RUN useradd --create-home --shell /bin/bash axiom

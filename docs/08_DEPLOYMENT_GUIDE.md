@@ -150,59 +150,38 @@ Environment templates live in `infra/docker/environments/`:
 
 ### 4.1 Master Environment Variable Reference
 
-| Variable Name                     | Module              | Required In  | Description / Default                                                                            |
-| :-------------------------------- | :------------------ | :----------- | :----------------------------------------------------------------------------------------------- |
-| `ENVIRONMENT`                     | All                 | All          | Deployment tier: `local`, `development`, `staging`, `preprod`, `production`.                     |
-| `NODE_ENV`                        | Web, Marketing, BFF | All          | Node runtime mode: `development` or `production`.                                                |
-| `PORT`                            | All                 | All          | Service bind port (`3000`, `3001`, `4000`, `8000`, `8001`).                                      |
-| `NEXT_PUBLIC_APP_URL`             | Web                 | All          | Public Web Workbench URL (`http://localhost:3001` or `https://app.axiomproof.ai`).               |
-| `NEXT_PUBLIC_MARKETING_URL`       | Web, Marketing      | All          | Public marketing website URL (`http://localhost:3000` or `https://axiomproof.ai`).               |
-| `NEXT_PUBLIC_SUPABASE_URL`        | Web, Marketing      | All          | Supabase HTTP gateway (`http://localhost:55321` or Supabase project URL).                        |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`   | Web, Marketing      | All          | Supabase public anon token.                                                                      |
-| `SUPABASE_SERVICE_KEY`            | BFF, Worker         | All          | Supabase service-role key (SECURITY DEFINER operations).                                         |
-| `DATABASE_URL`                    | BFF                 | Staging/Prod | Postgres connection string for direct pooled SQL execution.                                      |
-| `BFF_URL`                         | Web, Marketing      | All          | BFF API internal base URL (`http://localhost:4000` or `http://bff:4000`).                        |
-| `AGENT_RUNTIME_URL`               | BFF, Workers        | All          | Agent runtime FastAPI URL (`http://localhost:8000` or `http://agent-runtime:8000`).              |
-| `MODEL_GATEWAY_URL`               | Agents, BFF         | All          | Model Gateway FastAPI URL (`http://localhost:8001` or `http://model-gateway:8001`).              |
-| `APPROVAL_SIGNING_KEY`            | BFF, Runtime        | All          | 32-byte hex key for HMAC-SHA256 signing of human approval tokens.                                |
-| `LEDGER_ENCRYPTION_KEY`           | Ledger, BFF         | Staging/Prod | 32-byte hex key for encrypting sensitive fields in append-only audit ledger.                     |
-| `AXIOM_REGION`                    | All                 | All          | Sovereign region (`ap-south-1` or `asia-south1`) for DPDPA data residency compliance.            |
-| `AXIOM_EVIDENCE_BUCKET`           | Evidence, BFF       | All          | Sovereign WORM bucket name configured with Compliance Object Lock.                               |
-| `AXIOM_STORAGE_ENDPOINT`          | Evidence, BFF       | All          | S3-compatible storage endpoint URL (e.g. `https://storage.googleapis.com` or MinIO).             |
-| `AXIOM_STORAGE_ACCESS_KEY_ID`     | Evidence, BFF       | All          | Storage credentials / GCS HMAC access key.                                                       |
-| `AXIOM_STORAGE_SECRET_ACCESS_KEY` | Evidence, BFF       | All          | Storage credentials / GCS HMAC secret key.                                                       |
-| `TEMPORAL_HOST_PORT`              | Worker, BFF         | All          | Temporal frontend host:port (`localhost:7233` or Temporal Cloud endpoint).                       |
-| `TEMPORAL_NAMESPACE`              | Worker, BFF         | All          | Temporal namespace (`default` or `axiom-proof`).                                                 |
-| `AXIOM_E2E_BYPASS_AUTH`           | Web, Supabase       | Local Only   | Bypasses Supabase auth session during automated test execution. Must be `false` in staging/prod. |
+| Variable Name                     | Module              | Required In  | Description / Default                                                                                            |
+| :-------------------------------- | :------------------ | :----------- | :--------------------------------------------------------------------------------------------------------------- |
+| `ENVIRONMENT`                     | All                 | All          | Deployment tier: `local`, `development`, `staging`, `preprod`, `production`.                                     |
+| `NODE_ENV`                        | Web, Marketing, BFF | All          | Node runtime mode: `development` or `production`.                                                                |
+| `PORT`                            | All                 | All          | Service bind port (`3000`, `3001`, `4000`, `8000`, `8001`).                                                      |
+| `NEXT_PUBLIC_APP_URL`             | Web                 | All          | Public Web Workbench URL (`http://localhost:3001` or `https://app.axiomproof.ai`).                               |
+| `NEXT_PUBLIC_MARKETING_URL`       | Web, Marketing      | All          | Public marketing website URL (`http://localhost:3000` or `https://axiomproof.ai`).                               |
+| `NEXT_PUBLIC_SUPABASE_URL`        | Web, Marketing      | All          | Supabase HTTP gateway (`http://localhost:55321` or Supabase project URL).                                        |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`   | Web, Marketing      | All          | Supabase public anon token.                                                                                      |
+| `SUPABASE_SERVICE_KEY`            | BFF, Worker         | All          | Supabase service-role key (SECURITY DEFINER operations).                                                         |
+| `DATABASE_URL`                    | BFF                 | Staging/Prod | Postgres connection string for direct pooled SQL execution.                                                      |
+| `BFF_URL`                         | Web, Marketing      | All          | BFF API internal base URL (`http://localhost:4000` or `http://bff:4000`).                                        |
+| `AGENT_RUNTIME_URL`               | BFF, Workers        | All          | Agent runtime FastAPI URL (`http://localhost:8000` or `http://agent-runtime:8000`).                              |
+| `MODEL_GATEWAY_URL`               | Agents, BFF         | All          | Model Gateway FastAPI URL (`http://localhost:8001` or `http://model-gateway:8001`).                              |
+| `APPROVAL_SIGNING_KEY`            | BFF, Runtime        | All          | 32-byte hex key for HMAC-SHA256 signing of human approval tokens.                                                |
+| `LEDGER_ENCRYPTION_KEY`           | Ledger, BFF         | Staging/Prod | 32-byte hex key for encrypting sensitive fields in append-only audit ledger.                                     |
+| `AXIOM_REGION`                    | All                 | All          | Sovereign region (`ap-south-1` or `asia-south1`) for DPDPA data residency compliance.                            |
+| `AXIOM_EVIDENCE_BUCKET`           | Evidence, BFF       | All          | Sovereign WORM bucket name configured with Compliance Object Lock.                                               |
+| `AXIOM_STORAGE_ENDPOINT`          | Evidence, BFF       | All          | Evidence endpoint; preprod/production require approved AWS S3 in `ap-south-1` (local development may use MinIO). |
+| `AXIOM_STORAGE_ACCESS_KEY_ID`     | Evidence, BFF       | All          | Scoped AWS S3 evidence-vault access key in preprod/production.                                                   |
+| `AXIOM_STORAGE_SECRET_ACCESS_KEY` | Evidence, BFF       | All          | Scoped AWS S3 evidence-vault secret key in preprod/production.                                                   |
+| `TEMPORAL_HOST_PORT`              | Worker, BFF         | All          | Temporal frontend host:port (`localhost:7233` or Temporal Cloud endpoint).                                       |
+| `TEMPORAL_NAMESPACE`              | Worker, BFF         | All          | Temporal namespace (`default` or `axiom-proof`).                                                                 |
+| `AXIOM_E2E_BYPASS_AUTH`           | Web, Supabase       | Local Only   | Bypasses Supabase auth session during automated test execution. Must be `false` in staging/prod.                 |
 
 ### 4.1 Getting and Updating Evidence Storage Credentials (`AXIOM_STORAGE_ACCESS_KEY_ID` & `AXIOM_STORAGE_SECRET_ACCESS_KEY`)
 
 The Evidence Vault client (`@axiom/evidence` and `axiom.evidence_client`) seals immutable audit evidence to S3-compatible object storage across clouds and on-prem deployments.
 
-#### A. Google Cloud Platform (Preprod & Prod)
+#### A. Preprod and production evidence on AWS S3
 
-In GCP, access is provided via Google Cloud Storage S3-interoperability HMAC keys attached to the storage service account (`axiom-<env>-storage-sa`).
-
-- **How to GET the values**:
-  - From Terraform outputs:
-    ```bash
-    cd infra/terraform/envs/preprod
-    terraform output -raw gcs_hmac_access_id
-    terraform output -raw gcs_hmac_secret
-    ```
-  - From Google Secret Manager:
-    ```bash
-    gcloud secrets versions access latest --secret="axiom-preprod-gcs-hmac-access-key" --project="axiom-proof"
-    gcloud secrets versions access latest --secret="axiom-preprod-gcs-hmac-secret-key" --project="axiom-proof"
-    ```
-  - Using the `gcloud storage hmac` CLI:
-    ```bash
-    gcloud storage hmac list --service-account=axiom-preprod-storage-sa@axiom-proof.iam.gserviceaccount.com --project=axiom-proof
-    ```
-- **How to UPDATE the values**:
-  - In `.env.preprod`: Set `AXIOM_STORAGE_ACCESS_KEY_ID=<access_id>` and `AXIOM_STORAGE_SECRET_ACCESS_KEY=<secret>`.
-  - In Cloud Run: **No manual update required.** `cloudrun.tf` dynamically mounts both keys from Secret Manager.
-  - To rotate: Run `terraform taint google_storage_hmac_key.s3_compat_key && terraform apply`.
+The evidence vault must use AWS S3 Object Lock **Compliance** mode in `ap-south-1`, with at least seven years' default retention and exact-version proof. GCP may host Cloud Run and Cloud SQL, but GCS Bucket Lock/HMAC does not replace the evidence provider. Supply approved, bucket-scoped S3 credentials through the private environment and regional Secret Manager. The [preprod guide](GCP_PREPROD_DEPLOYMENT_GUIDE.md) gives the live readback and acceptance gates. Do not run Terraform directly and bypass those checks.
 
 #### B. Local Development & On-Premise (MinIO)
 
@@ -411,7 +390,8 @@ Target Architecture: Intranet sovereign host or on-premise Kubernetes cluster. F
 #### Step 1: Mint Sovereign Offline License
 
 ```bash
-# Generate a cryptographically signed Ed25519 offline license token
+# On an authority-controlled machine, generate a signed Ed25519 license token.
+# Never bring the private issuance key into the on-prem appliance.
 pnpm tsx scripts/mint-license.ts \
   --licensee "Sovereign Customer Organization" \
   --tier enterprise-airgapped \
@@ -422,37 +402,48 @@ pnpm tsx scripts/mint-license.ts \
 
 Add the generated `AXIOM_OFFLINE_LICENSE=v1....` token to `infra/docker/environments/.env.onprem`.
 
-#### Step 2: Automated Sovereign Bootstrap
+#### Step 2: Prepare a private operator environment
+
+Copy `infra/docker/environments/.env.onprem.example` to `.env.onprem`, set mode
+`0600`, mint the Supabase JWT secret/keys with `node scripts/mint-supabase-keys.mjs
+--env onprem`, and set distinct database, Temporal, storage, approval, MFA,
+runtime, and gateway secrets. Set every `AXIOM_*_IMAGE` to a reviewed immutable
+registry manifest digest and preload the exact images into the isolated host. The example deliberately
+contains no working credentials. Keep the private signing key for licenses
+outside this stack; install only a signed token in the environment file.
+The two `AXIOM_WORM_*_IMAGE` values must be approved, preloaded server/client
+digests that pass the seven-year Compliance retention and delete-refusal drill.
+The earlier `minio/minio` and `minio/mc` tags are unavailable from the
+registries used in the W10 rehearsal; leave these values unset until the exact
+replacement artifacts are verified.
+
+#### Step 3: Automated Sovereign Bootstrap
 
 ```bash
-# Automates pre-flight, secrets injection, migration execution, and initial identity seeding
+# Validates secrets/license, local images, Auth order, migrations, WORM, startup.
 ./scripts/bootstrap-onprem.sh
 ```
 
-#### Step 3: Launch Sovereign Docker Compose Overlay
+The Compose file is standalone. Do not layer it with `docker-compose.yml`:
+that development file contains public ports and default passwords. Bootstrap
+starts Auth on an empty schema before the checksummed application migrations.
+It does not install demo users or mint a local model. Without an approved local
+model service, model requests return `503 local_model_unavailable`.
+The BFF, agent runtime, and model gateway re-verify the signed license and its
+expiry for each on-prem request. Temporal workers refuse boot without a valid
+license and stop polling within one second after expiry. Operations already in
+flight require their separate action authorization checks.
+The internal Compose network blocks container egress. On Docker Desktop it
+also suppressed host-published ports during rehearsal, so an intranet ingress
+with its own egress-deny policy and a browser/persona drill remain release gates.
+
+#### Step 4: Verify Sovereign License & Health
 
 ```bash
-docker compose -f docker-compose.yml -f infra/docker/docker-compose.onprem.yml \
-  --env-file infra/docker/environments/.env.onprem up -d
-```
-
-_Provisions the complete self-contained stack: PostgreSQL/Supabase, MinIO S3 WORM with Object Lock, Redis, Temporal, Model Gateway (self-hosted mode), Agent Runtime, BFF API gate, and Web Workbench._
-
-#### Step 4: Air-Gapped Kubernetes Deployment (Helm)
-
-```bash
-helm upgrade --install axiom-proof ./infra/helm/axiom-proof \
-  --namespace axiom-proof \
-  --create-namespace \
-  --values ./infra/helm/axiom-proof/values-onprem.yaml
-```
-
-#### Step 5: Verify Sovereign License & Health
-
-```bash
-# Verify offline license status from BFF API Gateway
-curl -fsS http://localhost:4000/v1/system/license
-# Expected: {"environment":"onprem","status":"valid","licensed":true,"tier":"enterprise-airgapped",...}
+# After intranet ingress works, an authenticated operator checks the license
+# route with their normal bearer token, then runs real persona workflows.
+curl -fsS -H "Authorization: Bearer ${OPERATOR_ACCESS_TOKEN}" \
+  "${NEXT_PUBLIC_BFF_URL}/v1/system/license"
 ```
 
 ---
