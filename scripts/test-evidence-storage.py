@@ -284,7 +284,7 @@ def main():
             }
             if (
                 result.returncode
-                or stats.get("expected") != 13
+                or stats.get("expected") != 14
                 or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
             ):
                 raise RuntimeError(
