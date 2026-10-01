@@ -119,17 +119,26 @@ Work top to bottom. Tier A costs nothing and unblocks engineering; tier C is the
 1. **P0-1** Decide the target: project, region, billing account, topology. Everything deployed waits on this.
 2. Answer the small policy questions engineering is waiting on: **P1-W2a** (legacy assignment), **P1-W3a/b** (estate taxonomy, system kinds), **P2-10** (BR-4 gap-scan exception), **P2-11** (mock-data line), **P0-14** (prod EKS CIDR), **P2-8** (sector pack order), **P2-5** (`saml2_bearer`).
 3. **P0-9** Confirm whether the three held historical secrets were ever used by a deployed stack.
-4. Housekeeping: **P0-16** (approval-reconciliation stash and old DPB remnants: safe to discard, verified lossless), **P2-15** (three leftover directories, `git pull --ff-only` in the main checkout, the two protected branches), run **`/design-login`** once in an interactive Claude Code terminal and review the card page (**P1-DS2**), then eyeball the app's error, warning and success surfaces now that their colours exist (**P1-DS3**).
+4. Design system, in this order: (a) run **`/design-login`** once in an interactive Claude Code terminal; (b) open the card review page and say what is wrong for the brand, then ask for the upload to the new "Axiom Proof UI Library" project (**P1-DS2**); (c) eyeball the app's error, warning and success surfaces, which now have colour for the first time (**P1-DS3**); (d) copy the Samadhan and Pramaan entries into the "Axiom Proof Design System" page inside claude.ai (the repo copy has them; that project can only be edited in Claude Design) (**P1-DS4**).
+5. Housekeeping: **P0-16** (approval-reconciliation stash and old DPB remnants: safe to discard, verified lossless), **P2-15** (three leftover directories, `git pull --ff-only` in the main checkout, the two protected branches), and decide the `turbo` `AGENTS.md` block: `turbo` re-adds agent guidance to `AGENTS.md` whenever it runs under an agent; set `"agentGuidance": false` in `turbo.json` to stop it (**P2-16**).
 
-**Tier B — prepare the target (still no billing)** 5. **P0-2** scaffold and mint config, **P0-3** dry-run review, **P0-12** backup and rollback plan, **P0-10** fresh secrets, **P1-R3** configure the acceptance workflow and GitHub environments.
+**Tier B — prepare the target (still no billing)**
 
-**Tier C — provision and prove (billing starts; explicit go-ahead)** 6. **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
+6. **P0-2** scaffold and mint config, **P0-3** dry-run review, **P0-12** backup and rollback plan, **P0-10** fresh secrets, **P1-R3** configure the acceptance workflow and GitHub environments.
 
-**Tier D — verify each workstream on the deployed environment** 7. W1 (**P1-W1a–d**), W2 (**P1-W2b**), W3 (**P1-W3c/d**), W4 (**P1-W4a–m**), **P1-W5**, **P1-W6**, W8 (**P1-W8b** opt-ins, **P1-W8c** durability probe, **P1-W8a** Object Lock last), **P1-W9**, **P1-W10**, then **P1-R4/R5/R6** (W8 journeys on preprod, production release, failure handling).
+**Tier C — provision and prove (billing starts; explicit go-ahead)**
 
-**Tier E — founder and commercial (run in parallel, any time)** 8. **P2-12** incorporation and commercial setup, **P2-13** phase-exit evidence, **P2-14** gated Phase 5 items, **P2-6/P2-7/P2-9** (vendor descriptors, lineage model, provider equivalence).
+7. **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
 
-Engineering-owned items you only need to watch: **P1-DS1**, **P1-W8d** (renderer flake), **P1-W9b**, **P1-0099b**, **P2-3/P2-4**.
+**Tier D — verify each workstream on the deployed environment**
+
+8. W1 (**P1-W1a–d**), W2 (**P1-W2b**), W3 (**P1-W3c/d**), W4 (**P1-W4a–m**), **P1-W5**, **P1-W6**, W8 (**P1-W8b** opt-ins, the gap-scan durability probe, **P1-W8a** Object Lock last), **P1-W9**, **P1-W10**, then **P1-R4/R5/R6** (W8 journeys on preprod, production release, failure handling).
+
+**Tier E — founder and commercial (run in parallel, any time)**
+
+9. **P2-12** incorporation and commercial setup, **P2-13** phase-exit evidence, **P2-14** gated Phase 5 items, **P2-6/P2-7/P2-9** (vendor descriptors, lineage model, provider equivalence).
+
+Engineering-owned items you only need to watch: **P1-DS1** (remaining 15 routes), **P1-W8d** (renderer flake, root cause open), **P1-W9b**, **P1-0099b**, **P2-3/P2-4**.
 
 ## 3. P0 — blockers
 
@@ -221,6 +230,7 @@ Engineering-owned items you only need to watch: **P1-DS1**, **P1-W8d** (renderer
 - [ ] **P1-DS1 Design-system pass on the remaining screens** · Engineering · the shared `ModuleBar` line (breadcrumb, Hindi name, phase, module id), `RelatedAgents` strip and `DataPlaceholder` ("Data yet to be populated", never sample values) exist in `@axiom/ui`; the registry `apps/web/src/lib/module-meta.ts` mirrors the design's `navDef`/`genericMeta` for all 21 routes. Applied so far to dashboard, approval, evidence, ledger, assessment and workbench. Remaining: the other 15 module routes (use `<ModuleBarFor module="…" />` or `PageHeader`'s `module` prop) and swap bare "no data" messages for `DataPlaceholder` where the visible sentence is not asserted by a test. Workbench and ledger heroes already print the Hindi name, so it shows twice there; remove the older instance when those heroes are next touched · Closure: every route in `MODULES` renders the context line; web tests green.
 - [ ] **P1-DS2 Run /design-sync** · Operator + Engineering · **local half done 2026-10-01**: `@axiom/ui` has a real build, the converter output validates (28 components, render check 28/28 clean), 28 authored previews are graded good, and the conventions header, `.design-sync/config.json` and `NOTES.md` are committed. **Waiting on you:** run `/design-login` once from an interactive Claude Code terminal on this machine (this session cannot start that sign-in), then ask for the upload: it creates the new project "Axiom Proof UI Library" in your claude.ai account and uploads with one approval. Also open the review page (`node .ds-sync/storybook/http-serve.mjs ./ds-bundle`, then `/.review.html`) and tell me anything that is wrong for the brand · Closure: project link recorded here and `projectId` committed in `.design-sync/config.json`.
 - [ ] **P1-DS3 Visual review of the restored status colours** · Operator · the brand preset had no red, green, amber, emerald, yellow, orange, blue or rose, so error alerts, warning boxes and success badges across the app rendered with no colour; the families were added (Tailwind defaults) and warnings moved from gold to amber. Open the approval queue (failure state), plans, MFA enrolment, reports and the ledger filters and confirm the surfaces look right; any brand-specific shade can be tuned in `packages/design-tokens/src/tailwind.ts` · Closure: confirmation or the shades you want.
+- [ ] **P1-DS4 Mirror Samadhan and Pramaan into the claude.ai design page** · Operator · the repo's `design-system/Axiom Proof Design System.dc.html` lists all 12 agents; the copy inside the claude.ai design project still lists 10 and can only be edited in Claude Design · Closure: the project page shows 12.
 - [ ] **P1-0099b Move the archive release label** · Engineering · `release_approval_proof_archive` still appends a human-labelled `approval.archive.released` event through the archive writer, not the human writer · Closure: routed through the human writer with a boundary test.
 
 ---
@@ -279,6 +289,7 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 - [ ] **P2-13 Phase-exit commercial evidence** (`[13]`) · Founder · client counts, delivery-time reductions, funded costs, production-client remediation outcomes (not waived).
 - [ ] **P2-14 Gated Phase 5 items** (`[13]`) · Founder · SOC 2 Type 2 / ISO 27001 programme, Consent Manager registration, enterprise tier, split-plane, pack #2, policy-governed L4: each has its original external/revenue gate.
 - [ ] **P2-15 Cleanup leftovers** · Operator · (a) Dependabot PRs #130-#134 were all merged to staging by 2026-10-01 (the three CI-action major bumps passed full CI on `b463ce7`; hono 4.13.10 needed explicit `MiddlewareHandler` return types in `evidence-body-limit.ts`, fixed in `feca7a3`); nothing left to do. (b) The worktrees `approval-reconciliation` (18 uncommitted files, the polluted stash, P0-16) and `axiom-proof-phase-gap-closure` (8 uncommitted files) were not touched, so their branches `codex/revision124-approval-proof-archive` and `claude/axiom-proof-phase-gap-closure-b88105` remain. (c) Three codex worktree directories were unregistered from git but macOS refused to delete their files (`~/.codex/worktrees/750f`, `human-proof-writers`, `statutory-source-bound`); remove them by hand. (d) The main checkout `/Users/vikash/Axiom Proof` still has local `staging` at `3492ffa`; run `git pull --ff-only` there. · Closure: `git branch -a` shows only the intended branches.
+- [ ] **P2-16 `turbo` writes to `AGENTS.md`** · Operator · `turbo` appends a managed block to `AGENTS.md` whenever it runs under an AI agent and re-adds it if removed; sessions revert it before committing. Choose: keep reverting, commit the block, or opt out with `"agentGuidance": false` in the root `turbo.json` · Closure: decision recorded.
 
 ## 7. Engineering blockers that gate operator steps (not operator tasks)
 
