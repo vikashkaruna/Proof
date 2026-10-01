@@ -65,7 +65,9 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
       router.push('/dashboard');
       router.refresh();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred during onboarding.');
+      setError(
+        err instanceof Error ? err.message : 'An unexpected error occurred during onboarding.',
+      );
       setLoading(false);
     }
   };
@@ -91,7 +93,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="organization-name" className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label
+              htmlFor="organization-name"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
               Organization Legal Name *
             </label>
             <input
@@ -106,7 +111,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label htmlFor="organization-slug" className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label
+              htmlFor="organization-slug"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
               Tenant Slug (Optional)
             </label>
             <input
@@ -120,7 +128,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label htmlFor="organization-tier" className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label
+              htmlFor="organization-tier"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
               Subscription Tier
             </label>
             <select
@@ -136,7 +147,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label htmlFor="organization-residency" className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label
+              htmlFor="organization-residency"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
               Data Residency Boundary
             </label>
             <input
@@ -218,7 +232,12 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="organization-dpo-name" className="block text-xs font-medium text-[#2F3542] mb-1">DPO Full Name</label>
+            <label
+              htmlFor="organization-dpo-name"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
+              DPO Full Name
+            </label>
             <input
               id="organization-dpo-name"
               type="text"
@@ -230,7 +249,10 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
           </div>
 
           <div>
-            <label htmlFor="organization-dpo-email" className="block text-xs font-medium text-[#2F3542] mb-1">
+            <label
+              htmlFor="organization-dpo-email"
+              className="block text-xs font-medium text-[#2F3542] mb-1"
+            >
               DPO Official Email
             </label>
             <input

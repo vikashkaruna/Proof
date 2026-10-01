@@ -8,11 +8,18 @@ const state = vi.hoisted(() => ({
   results: {} as Record<string, Result>,
   from: vi.fn(),
 }));
-vi.mock('@/lib/tenant-context', () => ({ requireTenantContext: async () => ({
-  tenantId: 'tenant-1', tenantName: 'Actual organization',
-  supabase: { from: state.from },
-}) }));
-vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
+vi.mock('@/lib/tenant-context', () => ({
+  requireTenantContext: async () => ({
+    tenantId: 'tenant-1',
+    tenantName: 'Actual organization',
+    supabase: { from: state.from },
+  }),
+}));
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 
 beforeEach(() => {
   state.results = {};
@@ -30,7 +37,9 @@ beforeEach(() => {
   });
 });
 
-async function html() { return renderToStaticMarkup(await DashboardPage()); }
+async function html() {
+  return renderToStaticMarkup(await DashboardPage());
+}
 
 it('shows zero recorded data without invented posture, evidence, agents, or legal countdown', async () => {
   const view = await html();
@@ -38,7 +47,16 @@ it('shows zero recorded data without invented posture, evidence, agents, or lega
   expect(view).toContain('No verified posture score is available.');
   expect(view).toContain('No agent runs recorded for this tenant.');
   expect(view).toContain('>0<');
-  for (const fiction of ['1,284', '182k', '48,102', 'Meridian', 'Karya is waiting', '13 May 2027', '2 new signals', 'dry-run ✓']) {
+  for (const fiction of [
+    '1,284',
+    '182k',
+    '48,102',
+    'Meridian',
+    'Karya is waiting',
+    '13 May 2027',
+    '2 new signals',
+    'dry-run ✓',
+  ]) {
     expect(view).not.toContain(fiction);
   }
   expect(state.from).toHaveBeenCalledWith('consent_records');
@@ -55,10 +73,25 @@ it('distinguishes unavailable queries from zero counts', async () => {
 });
 
 it('counts only recorded pending approvals and open findings', async () => {
-  state.results.findings = { data: [{ id: 'f1', status: 'open' }, { id: 'f2', status: 'closed' }], error: null };
-  state.results.remediation_actions = { data: [{ id: 'a1', approval_status: 'awaiting_approval' }, { id: 'a2', approval_status: 'draft' }], error: null };
+  state.results.findings = {
+    data: [
+      { id: 'f1', status: 'open' },
+      { id: 'f2', status: 'closed' },
+    ],
+    error: null,
+  };
+  state.results.remediation_actions = {
+    data: [
+      { id: 'a1', approval_status: 'awaiting_approval' },
+      { id: 'a2', approval_status: 'draft' },
+    ],
+    error: null,
+  };
   state.results.engagements = { data: { posture_score: 0.83 }, error: null };
-  state.results.agent_runs = { data: [{ id: 'r1', agent: 'drishti', status: 'running', started_at: '2026-10-01T00:00:00Z' }], error: null };
+  state.results.agent_runs = {
+    data: [{ id: 'r1', agent: 'drishti', status: 'running', started_at: '2026-10-01T00:00:00Z' }],
+    error: null,
+  };
   const view = await html();
   expect(view).toContain('83/100');
   expect(view).toMatch(/Recorded open findings<\/h2><p[^>]*>1<\/p>/);

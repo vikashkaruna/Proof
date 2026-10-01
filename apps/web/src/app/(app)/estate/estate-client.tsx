@@ -86,7 +86,9 @@ export function MutationForm({
       }
       if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
         setUncertain(true);
-        setMessage('The server response did not identify the saved record. Retry the same request before making another change.');
+        setMessage(
+          'The server response did not identify the saved record. Retry the same request before making another change.',
+        );
         return;
       }
       pending.current = null;

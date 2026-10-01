@@ -89,7 +89,9 @@ export default async function EngagementDetailPage({
           </CardHeader>
           <CardContent>
             {plansError ? (
-              <p role="alert" className="text-sm text-red-700">Remediation plans are unavailable.</p>
+              <p role="alert" className="text-sm text-red-700">
+                Remediation plans are unavailable.
+              </p>
             ) : (plans ?? []).length === 0 ? (
               <p className="text-sm text-slate-500">
                 No remediation plans recorded for this engagement.
@@ -118,7 +120,9 @@ export default async function EngagementDetailPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Findings {findingsError ? '(unavailable)' : `(${findings?.length ?? 0})`}</CardTitle>
+          <CardTitle>
+            Findings {findingsError ? '(unavailable)' : `(${findings?.length ?? 0})`}
+          </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">
@@ -132,25 +136,30 @@ export default async function EngagementDetailPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {!findingsError && (findings ?? []).map((f) => (
-                <tr key={f.id} className="hover:bg-mist-50">
-                  <td className="px-4 py-2">
-                    <code className="font-mono text-xs text-indigo-700">{f.control_id}</code>
-                  </td>
-                  <td className="px-4 py-2">
-                    <StatusBadge status={f.status} />
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{Number(f.score).toFixed(0)}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    {Number(f.risk_points).toFixed(1)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-600">
-                    <span className="line-clamp-2">{f.rationale}</span>
+              {!findingsError &&
+                (findings ?? []).map((f) => (
+                  <tr key={f.id} className="hover:bg-mist-50">
+                    <td className="px-4 py-2">
+                      <code className="font-mono text-xs text-indigo-700">{f.control_id}</code>
+                    </td>
+                    <td className="px-4 py-2">
+                      <StatusBadge status={f.status} />
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">{Number(f.score).toFixed(0)}</td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {Number(f.risk_points).toFixed(1)}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-600">
+                      <span className="line-clamp-2">{f.rationale}</span>
+                    </td>
+                  </tr>
+                ))}
+              {findingsError && (
+                <tr>
+                  <td colSpan={5} role="alert" className="px-4 py-8 text-center text-red-700">
+                    Findings are unavailable.
                   </td>
                 </tr>
-              ))}
-              {findingsError && (
-                <tr><td colSpan={5} role="alert" className="px-4 py-8 text-center text-red-700">Findings are unavailable.</td></tr>
               )}
               {!findingsError && (findings ?? []).length === 0 && (
                 <tr>

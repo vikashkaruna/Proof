@@ -139,7 +139,8 @@ export function EstateGraph({ input }: { input: GraphInput }) {
       </div>
       <p className="text-sm" data-testid="graph-summary">
         {graph.edges.filter((e) => e.kind === 'read').length} read grants ·{' '}
-        {graph.edges.filter((e) => e.kind === 'write').length} write grants in this view. Other estates or filters may have additional grants.
+        {graph.edges.filter((e) => e.kind === 'write').length} write grants in this view. Other
+        estates or filters may have additional grants.
       </p>
       <div className="flex flex-col gap-4 lg:flex-row">
         <div className="overflow-x-auto rounded-md border">

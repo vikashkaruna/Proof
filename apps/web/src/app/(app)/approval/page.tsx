@@ -33,12 +33,16 @@ export default async function ApprovalPage() {
         <ul className="space-y-3">
           {actions.map((action) => (
             <li key={action.id} className="rounded-lg border border-slate-200 bg-white p-4">
-              <h2 className="font-medium text-[#1E2A4A]">{action.description || action.action_type || action.id}</h2>
+              <h2 className="font-medium text-[#1E2A4A]">
+                {action.description || action.action_type || action.id}
+              </h2>
               <p className="mt-1 break-all text-xs text-slate-600">
                 Action {action.id} · Recorded risk {action.risk_class ?? 'unavailable'}
               </p>
-              <Link href={`/plans/${action.plan_id}`}
-                className="mt-3 inline-block rounded-md bg-[#1E2A4A] px-3 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-teal-500">
+              <Link
+                href={`/plans/${action.plan_id}`}
+                className="mt-3 inline-block rounded-md bg-[#1E2A4A] px-3 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-teal-500"
+              >
                 Inspect source plan
               </Link>
             </li>

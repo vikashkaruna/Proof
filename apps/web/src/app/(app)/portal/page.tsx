@@ -89,7 +89,11 @@ export default async function ClientPortalPage({
       .order('sequence_no', { ascending: false })
       .limit(20),
   ]);
-  if ([plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes].some((r) => r.error || !Array.isArray(r.data)))
+  if (
+    [plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes].some(
+      (r) => r.error || !Array.isArray(r.data),
+    )
+  )
     loadError = true;
 
   // The saved-results projection is the single source for assessment figures.

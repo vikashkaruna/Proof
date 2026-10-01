@@ -6,9 +6,21 @@ import { ALL_AGENTS, SidebarAgentPanel } from './sidebar-agent-panel';
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
-vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
-vi.mock('@/lib/invoke-agent', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/invoke-agent')>(), invokeAgent: mocks.invoke }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); mocks.invoke.mockReset(); mocks.refresh.mockReset(); });
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+vi.mock('@/lib/invoke-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/invoke-agent')>()),
+  invokeAgent: mocks.invoke,
+}));
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  mocks.invoke.mockReset();
+  mocks.refresh.mockReset();
+});
 
 it('does not offer a fictional regulatory feed scan or an enforcement countdown', async () => {
   const nazar = ALL_AGENTS.find((agent) => agent.name === 'nazar');
@@ -19,7 +31,9 @@ it('does not offer a fictional regulatory feed scan or an enforcement countdown'
   await waitFor(() => expect(screen.getByText('No active agent runs reported')).toBeTruthy());
   expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /nazar/i }));
-  expect(screen.getByRole('link', { name: /Open Regulatory Watch/ }).getAttribute('href')).toBe('/regwatch');
+  expect(screen.getByRole('link', { name: /Open Regulatory Watch/ }).getAttribute('href')).toBe(
+    '/regwatch',
+  );
   expect(screen.queryByRole('button', { name: /Scan Regulatory Feeds/ })).toBeNull();
 });
 
@@ -29,8 +43,12 @@ it('routes source-bound and approval-gated agents to dedicated workflows', async
   render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('No active agent runs reported')).toBeTruthy());
   for (const [name, path] of [
-    ['parikshan', '/assessment'], ['saakshi', '/evidence'], ['karya', '/approval'],
-    ['prativedan', '/reports'], ['sanket', '/breaches'], ['samadhan', '/execution'],
+    ['parikshan', '/assessment'],
+    ['saakshi', '/evidence'],
+    ['karya', '/approval'],
+    ['prativedan', '/reports'],
+    ['sanket', '/breaches'],
+    ['samadhan', '/execution'],
     ['pramaan', '/reports'],
   ] as const) {
     const label = ALL_AGENTS.find((agent) => agent.name === name)?.actionLabel;
@@ -51,7 +69,12 @@ it('marks unreadable agent-run status unavailable instead of claiming no active 
 });
 
 it('accepts active state only from a well-formed run list', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })));
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })),
+  );
   const view = render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('1 agent run(s) reported active')).toBeTruthy());
   expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: working');
@@ -62,9 +85,18 @@ it('accepts active state only from a well-formed run list', async () => {
 });
 
 it('counts recorded runs separately from distinct agent names', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [
-    { agent: 'drishti', status: 'running' }, { agent: 'drishti', status: 'queued' }, { agent: 'vibhaag', status: 'running' },
-  ] })));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json({
+        active_runs: [
+          { agent: 'drishti', status: 'running' },
+          { agent: 'drishti', status: 'queued' },
+          { agent: 'vibhaag', status: 'running' },
+        ],
+      }),
+    ),
+  );
   render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('3 agent run(s) reported active')).toBeTruthy());
   expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: working');
@@ -76,22 +108,38 @@ it('retracts a previously active run when the next status poll is unreadable', a
   let poll: (() => void) | null = null;
   const realSetInterval = globalThis.setInterval;
   const realClearInterval = globalThis.clearInterval;
-  vi.stubGlobal('setInterval', vi.fn((handler: () => void, interval: number) => {
-    if (interval === 4000) { poll = handler; return 1; }
-    return realSetInterval(handler, interval);
-  }));
-  vi.stubGlobal('clearInterval', vi.fn((id: number) => { if (id !== 1) realClearInterval(id); }));
+  vi.stubGlobal(
+    'setInterval',
+    vi.fn((handler: () => void, interval: number) => {
+      if (interval === 4000) {
+        poll = handler;
+        return 1;
+      }
+      return realSetInterval(handler, interval);
+    }),
+  );
+  vi.stubGlobal(
+    'clearInterval',
+    vi.fn((id: number) => {
+      if (id !== 1) realClearInterval(id);
+    }),
+  );
   let reads = 0;
-  vi.stubGlobal('fetch', vi.fn(async () => {
-    reads++;
-    return reads === 1
-      ? Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })
-      : new Response(null, { status: 503 });
-  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      reads++;
+      return reads === 1
+        ? Response.json({ active_runs: [{ agent: 'drishti', status: 'running' }] })
+        : new Response(null, { status: 503 });
+    }),
+  );
   render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('1 agent run(s) reported active')).toBeTruthy());
   expect(poll).not.toBeNull();
-  await act(async () => { poll?.(); });
+  await act(async () => {
+    poll?.();
+  });
   await waitFor(() => expect(screen.getByText('Agent-run status unavailable')).toBeTruthy());
   expect(document.body.textContent).not.toContain('1 agent run(s) reported active');
   expect(screen.getByRole('button', { name: /drishti/i }).title).toContain('Status: unavailable');
@@ -114,7 +162,9 @@ it('shows ledger proof only after a confirmed direct invocation', async () => {
   fireEvent.click(screen.getByRole('button', { name: /Run Discovery Scan/ }));
   await waitFor(() => expect(screen.getByText('✓ Succeeded')).toBeTruthy());
   expect(mocks.invoke).toHaveBeenCalledWith('drishti', { scope: 'manual_trigger' });
-  expect(screen.getByRole('link', { name: /#ledger-1, #ledger-2/ }).getAttribute('href')).toBe('/ledger?q=ledger-1');
+  expect(screen.getByRole('link', { name: /#ledger-1, #ledger-2/ }).getAttribute('href')).toBe(
+    '/ledger?q=ledger-1',
+  );
   expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 

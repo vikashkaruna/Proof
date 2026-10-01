@@ -128,8 +128,12 @@ export default async function PoliciesPage() {
       .limit(EVALUATION_LIMIT),
   ]);
 
-  if (policiesRes.error || evaluationsRes.error ||
-    !Array.isArray(policiesRes.data) || !Array.isArray(evaluationsRes.data)) {
+  if (
+    policiesRes.error ||
+    evaluationsRes.error ||
+    !Array.isArray(policiesRes.data) ||
+    !Array.isArray(evaluationsRes.data)
+  ) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader

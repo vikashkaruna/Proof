@@ -13,9 +13,18 @@ function at(url: string) {
 
 describe('Workbench URL isolation', () => {
   it.each([
-    ['https://axiom-marketing-preprod-123.asia-south1.run.app', 'https://axiom-web-preprod-123.asia-south1.run.app'],
-    ['https://axiom-marketing-staging-123.asia-south1.run.app', 'https://axiom-web-staging-123.asia-south1.run.app'],
-    ['https://axiom-marketing-123.asia-south1.run.app', 'https://axiom-web-123.asia-south1.run.app'],
+    [
+      'https://axiom-marketing-preprod-123.asia-south1.run.app',
+      'https://axiom-web-preprod-123.asia-south1.run.app',
+    ],
+    [
+      'https://axiom-marketing-staging-123.asia-south1.run.app',
+      'https://axiom-web-staging-123.asia-south1.run.app',
+    ],
+    [
+      'https://axiom-marketing-123.asia-south1.run.app',
+      'https://axiom-web-123.asia-south1.run.app',
+    ],
     ['https://axiomproof.ai', 'https://app.axiomproof.ai'],
     ['https://www.axiomminds.ai', 'https://app.axiomproof.ai'],
     ['https://staging.axiomproof.ai', 'https://app-staging.axiomproof.ai'],

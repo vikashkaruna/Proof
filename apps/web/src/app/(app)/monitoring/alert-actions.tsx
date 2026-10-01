@@ -103,7 +103,9 @@ export function DismissAlertButton({
         throw new Error(body?.error?.message ?? body?.error?.code ?? 'Dismissal failed');
       }
       if (body?.data?.dismissed !== true || body?.data?.alertId !== alertId) {
-        throw new Error('Could not confirm alert acknowledgement. Review the alert before retrying.');
+        throw new Error(
+          'Could not confirm alert acknowledgement. Review the alert before retrying.',
+        );
       }
 
       router.refresh();

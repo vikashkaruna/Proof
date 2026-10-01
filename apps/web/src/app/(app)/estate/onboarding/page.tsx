@@ -17,25 +17,38 @@ const intakeSystemSchema = z.object({
 });
 const proposalDataSchema: z.ZodType<ProposalData> = z.object({
   intake: z.array(intakeSystemSchema),
-  proposals: z.array(z.object({
-    id: z.string().uuid(),
-    estate_id: z.string().uuid(),
-    prepared_by: z.string().uuid(),
-    estate_snapshot: z.object({
-      id: z.string().uuid(), name: z.string(), slug: z.string(), description: z.string(),
-      status: z.enum(['active', 'archived']), version: z.number().int().nonnegative(),
+  proposals: z.array(
+    z.object({
+      id: z.string().uuid(),
+      estate_id: z.string().uuid(),
+      prepared_by: z.string().uuid(),
+      estate_snapshot: z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        slug: z.string(),
+        description: z.string(),
+        status: z.enum(['active', 'archived']),
+        version: z.number().int().nonnegative(),
+      }),
+      source_snapshot: z.array(intakeSystemSchema),
+      systems: z.array(
+        z.object({
+          name: z.string(),
+          systemKind: z.string(),
+          description: z.string(),
+          externalRef: z.string().nullable(),
+          dataCategories: z.array(z.string()),
+        }),
+      ),
+      content_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      status: z.enum(['pending', 'approved', 'rejected']),
+      review_reason: z.string().nullable(),
+      reviewed_by: z.string().nullable(),
+      onboarding_proposal_systems: z.array(
+        z.object({ source_index: z.number().int().nonnegative(), system_id: z.string().uuid() }),
+      ),
     }),
-    source_snapshot: z.array(intakeSystemSchema),
-    systems: z.array(z.object({
-      name: z.string(), systemKind: z.string(), description: z.string(),
-      externalRef: z.string().nullable(), dataCategories: z.array(z.string()),
-    })),
-    content_sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    status: z.enum(['pending', 'approved', 'rejected']),
-    review_reason: z.string().nullable(),
-    reviewed_by: z.string().nullable(),
-    onboarding_proposal_systems: z.array(z.object({ source_index: z.number().int().nonnegative(), system_id: z.string().uuid() })),
-  })),
+  ),
 });
 export default async function OnboardingProposalsPage() {
   const ctx = await requireCapabilityContext(Capability.POSTURE_READ);

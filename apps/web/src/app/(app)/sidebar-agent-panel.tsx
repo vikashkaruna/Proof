@@ -57,8 +57,7 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     indic: 'परीक्षण · Assessment',
     autonomy: 'L1 Autonomous',
     phase: 'Phase 0 · 46 Controls',
-    description:
-      'Evaluates recorded assessment inputs against the versioned control library.',
+    description: 'Evaluates recorded assessment inputs against the versioned control library.',
     statutoryBoundary:
       'Review scoring inputs, source controls, and gap rationales before relying on the result.',
     modulePath: '/assessment',
@@ -253,10 +252,20 @@ export function SidebarAgentPanel({
           return;
         }
         const data = await res.json();
-        if (isMounted && Array.isArray(data?.active_runs) &&
-          data.active_runs.every((run: unknown) => run && typeof run === 'object' &&
-            'agent' in run && typeof run.agent === 'string' && run.agent.length > 0 &&
-            'status' in run && (run.status === 'running' || run.status === 'queued'))) {
+        if (
+          isMounted &&
+          Array.isArray(data?.active_runs) &&
+          data.active_runs.every(
+            (run: unknown) =>
+              run &&
+              typeof run === 'object' &&
+              'agent' in run &&
+              typeof run.agent === 'string' &&
+              run.agent.length > 0 &&
+              'status' in run &&
+              (run.status === 'running' || run.status === 'queued'),
+          )
+        ) {
           const names = new Set<string>();
           for (const run of data.active_runs) {
             names.add(run.agent.toLowerCase());
@@ -323,8 +332,8 @@ export function SidebarAgentPanel({
     (activeAgentNames === null
       ? 'Agent-run status unavailable'
       : activeCount > 0
-      ? `${activeCount} agent run(s) reported active`
-      : 'No active agent runs reported');
+        ? `${activeCount} agent run(s) reported active`
+        : 'No active agent runs reported');
 
   return (
     <div

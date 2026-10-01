@@ -15,31 +15,28 @@ export default async function ControlLibraryPage({
   const allControls = controlLib;
 
   // Count by obligation / domain
-  const noticeCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('consent') ||
-        c.domain?.toLowerCase().includes('notice') ||
-        c.title?.toLowerCase().includes('notice') ||
-        c.title?.toLowerCase().includes('consent'),
-    ).length;
+  const noticeCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('consent') ||
+      c.domain?.toLowerCase().includes('notice') ||
+      c.title?.toLowerCase().includes('notice') ||
+      c.title?.toLowerCase().includes('consent'),
+  ).length;
 
-  const rightsCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('principal') ||
-        c.domain?.toLowerCase().includes('rights') ||
-        c.domain?.toLowerCase().includes('erasure') ||
-        c.domain?.toLowerCase().includes('dsar'),
-    ).length;
+  const rightsCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('principal') ||
+      c.domain?.toLowerCase().includes('rights') ||
+      c.domain?.toLowerCase().includes('erasure') ||
+      c.domain?.toLowerCase().includes('dsar'),
+  ).length;
 
-  const securityCount =
-    allControls.filter(
-      (c) =>
-        c.domain?.toLowerCase().includes('security') ||
-        c.domain?.toLowerCase().includes('breach') ||
-        c.domain?.toLowerCase().includes('technical'),
-    ).length;
+  const securityCount = allControls.filter(
+    (c) =>
+      c.domain?.toLowerCase().includes('security') ||
+      c.domain?.toLowerCase().includes('breach') ||
+      c.domain?.toLowerCase().includes('technical'),
+  ).length;
 
   let filtered = allControls;
   if (resolvedSearchParams.domain) {

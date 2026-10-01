@@ -79,7 +79,10 @@ export function EvidenceClient({
           ...headers(),
           ...(body === undefined
             ? {}
-            : { 'content-type': 'application/json', 'idempotency-key': idempotencyKey ?? crypto.randomUUID() }),
+            : {
+                'content-type': 'application/json',
+                'idempotency-key': idempotencyKey ?? crypto.randomUUID(),
+              }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
@@ -275,11 +278,16 @@ export function EvidenceClient({
       );
       const result = operationResponse.parse(
         await (
-          await request('/ingestions', {
+          await request(
+            '/ingestions',
+            {
+              operationKey,
+              ...metadata,
+              contentBase64: encoded.contentBase64,
+            },
+            undefined,
             operationKey,
-            ...metadata,
-            contentBase64: encoded.contentBase64,
-          }, undefined, operationKey)
+          )
         ).json(),
       ).data;
       setMessage(
@@ -450,8 +458,13 @@ export function EvidenceClient({
                     const result = providerResponse.parse(
                       await (await request(`/${row.id}/verify`, {})).json(),
                     ).data;
-                    if (result.evidenceId !== row.id || result.versionId !== row.object_version?.version_id)
-                      throw new Error('Provider verification did not match the selected evidence version.');
+                    if (
+                      result.evidenceId !== row.id ||
+                      result.versionId !== row.object_version?.version_id
+                    )
+                      throw new Error(
+                        'Provider verification did not match the selected evidence version.',
+                      );
                     if (selection.current === row.id) setProviderResult(result);
                   })
                 }

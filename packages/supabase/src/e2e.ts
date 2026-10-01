@@ -132,7 +132,9 @@ function createQuery(table: string): QueryBuilder {
     const allData = storeItems.length > 0 ? storeItems : defaultRows;
     return filters.length > 0
       ? allData.filter((item) =>
-          filters.every((filter) => (item as Record<string, unknown>)[filter.field] === filter.value),
+          filters.every(
+            (filter) => (item as Record<string, unknown>)[filter.field] === filter.value,
+          ),
         )
       : allData;
   };
@@ -209,10 +211,7 @@ function createQuery(table: string): QueryBuilder {
   // promise here would snapshot unfiltered rows before `.eq()` runs.
   query.then = ((onfulfilled, onrejected) => {
     const data = matchingRows();
-    return Promise.resolve({ data, error: null, count: data.length }).then(
-      onfulfilled,
-      onrejected,
-    );
+    return Promise.resolve({ data, error: null, count: data.length }).then(onfulfilled, onrejected);
   }) as Promise<QueryResult>['then'];
   return query;
 }

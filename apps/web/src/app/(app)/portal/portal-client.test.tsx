@@ -5,19 +5,35 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PortalClient, type PortalClientProps } from './portal-client';
 
 const push = vi.hoisted(() => vi.fn());
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push }), useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 const tenant = { id: 'tenant-alpha-1234', name: 'Alpha', slug: 'alpha', tier: 'standard' };
 const props: PortalClientProps = {
-  tenants: [tenant], activeTenant: tenant, engagement: null, plans: [], evidence: [], dsars: [],
-  breaches: [], ledger: [], assessmentUnavailable: false, loadError: false,
+  tenants: [tenant],
+  activeTenant: tenant,
+  engagement: null,
+  plans: [],
+  evidence: [],
+  dsars: [],
+  breaches: [],
+  ledger: [],
+  assessmentUnavailable: false,
+  loadError: false,
 };
 
-afterEach(() => { cleanup(); push.mockReset(); });
+afterEach(() => {
+  cleanup();
+  push.mockReset();
+});
 
 it('shows absence and partial-load states without invented compliance figures', () => {
   render(<PortalClient {...props} assessmentUnavailable loadError />);
   expect(screen.getByTestId('portal-posture').textContent).toBe('—');
-  expect(screen.getByTestId('portal-no-engagement').textContent).toContain('Saved assessment results are unavailable');
+  expect(screen.getByTestId('portal-no-engagement').textContent).toContain(
+    'Saved assessment results are unavailable',
+  );
   expect(screen.getByRole('alert').textContent).toContain('nothing has been substituted');
   expect(document.body.textContent).toContain('Not recorded');
 });
@@ -49,13 +65,74 @@ it('keeps empty approvals, evidence, DSARs and ledger explicitly empty across ta
 });
 
 it('shows saved tenant data in each tab and keeps recorded values distinct from placeholders', () => {
-  render(<PortalClient {...props}
-    engagement={{ id: 'engagement-1', title: 'Baseline', status: 'completed', postureScore: 72, estimatedExposureInr: 12500000, summary: { pass: 7, partial: 2, fail: 1, unassessed: 0 }, totalControls: 10 }}
-    plans={[{ id: 'plan-1', title: 'Close breach finding', status: 'review', version: 2, generatedByAgent: 'sudhaar', createdAt: '2026-09-30T00:00:00Z', actions: [{ id: 'action-1', description: 'Patch retention', actionType: 'connector.patch', riskClass: 'low', blastRadius: {}, approvalStatus: 'pending' }] }]}
-    evidence={[{ id: 'proof-1', contentHash: 'a'.repeat(64), storageUri: 's3://proof/version-1', evidenceType: 'policy', description: 'Policy snapshot', collectedByAgent: 'saakshi', collectedAt: '2026-09-30T00:00:00Z', demonstratesControlIds: ['DPDPA-001'] }]}
-    dsars={[{ id: 'dsar-1', kind: 'access', status: 'open', principalName: 'Asha', dueBy: '2026-10-02T00:00:00Z', receivedAt: '2026-09-30T00:00:00Z', slaDays: 2 }]}
-    ledger={[{ sequenceNo: 1, actorId: 'agent-1', actionType: 'evidence.sealed', result: 'success', targetRef: 'proof-1', entryHash: 'b'.repeat(64), occurredAt: '2026-09-30T00:00:00Z' }]}
-  />);
+  render(
+    <PortalClient
+      {...props}
+      engagement={{
+        id: 'engagement-1',
+        title: 'Baseline',
+        status: 'completed',
+        postureScore: 72,
+        estimatedExposureInr: 12500000,
+        summary: { pass: 7, partial: 2, fail: 1, unassessed: 0 },
+        totalControls: 10,
+      }}
+      plans={[
+        {
+          id: 'plan-1',
+          title: 'Close breach finding',
+          status: 'review',
+          version: 2,
+          generatedByAgent: 'sudhaar',
+          createdAt: '2026-09-30T00:00:00Z',
+          actions: [
+            {
+              id: 'action-1',
+              description: 'Patch retention',
+              actionType: 'connector.patch',
+              riskClass: 'low',
+              blastRadius: {},
+              approvalStatus: 'pending',
+            },
+          ],
+        },
+      ]}
+      evidence={[
+        {
+          id: 'proof-1',
+          contentHash: 'a'.repeat(64),
+          storageUri: 's3://proof/version-1',
+          evidenceType: 'policy',
+          description: 'Policy snapshot',
+          collectedByAgent: 'saakshi',
+          collectedAt: '2026-09-30T00:00:00Z',
+          demonstratesControlIds: ['DPDPA-001'],
+        },
+      ]}
+      dsars={[
+        {
+          id: 'dsar-1',
+          kind: 'access',
+          status: 'open',
+          principalName: 'Asha',
+          dueBy: '2026-10-02T00:00:00Z',
+          receivedAt: '2026-09-30T00:00:00Z',
+          slaDays: 2,
+        },
+      ]}
+      ledger={[
+        {
+          sequenceNo: 1,
+          actorId: 'agent-1',
+          actionType: 'evidence.sealed',
+          result: 'success',
+          targetRef: 'proof-1',
+          entryHash: 'b'.repeat(64),
+          occurredAt: '2026-09-30T00:00:00Z',
+        },
+      ]}
+    />,
+  );
   expect(screen.getByTestId('portal-posture').textContent).toBe('72');
   expect(document.body.textContent).toContain('₹1.3 Cr');
   fireEvent.click(screen.getByRole('button', { name: /Pending Approvals/ }));
@@ -69,12 +146,32 @@ it('shows saved tenant data in each tab and keeps recorded values distinct from 
 });
 
 it('does not infer residency, provider retention or full statutory scope from saved rows', () => {
-  render(<PortalClient {...props}
-    engagement={{ id: 'engagement-1', title: 'Recorded review', status: 'active', postureScore: null,
-      estimatedExposureInr: null, summary: { pass: 0, partial: 0, fail: 0, unassessed: 1 }, totalControls: 1 }}
-    evidence={[{ id: 'e1', contentHash: '', storageUri: '', evidenceType: 'record', description: 'Metadata only',
-      collectedByAgent: '', collectedAt: '', demonstratesControlIds: [] }]}
-  />);
+  render(
+    <PortalClient
+      {...props}
+      engagement={{
+        id: 'engagement-1',
+        title: 'Recorded review',
+        status: 'active',
+        postureScore: null,
+        estimatedExposureInr: null,
+        summary: { pass: 0, partial: 0, fail: 0, unassessed: 1 },
+        totalControls: 1,
+      }}
+      evidence={[
+        {
+          id: 'e1',
+          contentHash: '',
+          storageUri: '',
+          evidenceType: 'record',
+          description: 'Metadata only',
+          collectedByAgent: '',
+          collectedAt: '',
+          demonstratesControlIds: [],
+        },
+      ]}
+    />,
+  );
   expect(document.body.textContent).toContain('Deployment region:');
   expect(document.body.textContent).toContain('verify operationally');
   expect(document.body.textContent).not.toContain('Full statutory readiness scope');

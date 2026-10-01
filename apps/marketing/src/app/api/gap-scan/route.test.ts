@@ -24,15 +24,27 @@ it('rejects invalid submissions before calling the BFF', async () => {
 
 it('relays a valid scan, strips the ownership token, and sets an HttpOnly secure cookie', async () => {
   cookieJar.get.mockReturnValue({ value: token });
-  backend.mockResolvedValue(Response.json({ id: 'report-id', accessToken: token }, { status: 201 }));
-  const response = await POST(request({ sessionId: 'session-123', answers: { notice: true }, extra: 'discard' }));
+  backend.mockResolvedValue(
+    Response.json({ id: 'report-id', accessToken: token }, { status: 201 }),
+  );
+  const response = await POST(
+    request({ sessionId: 'session-123', answers: { notice: true }, extra: 'discard' }),
+  );
   expect(response.status).toBe(201);
   expect(await response.json()).toEqual({ id: 'report-id' });
-  expect(backend).toHaveBeenCalledWith('/public/gap-scan', expect.objectContaining({
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Gap-Scan-Access': token },
-    body: JSON.stringify({ sessionId: 'session-123', answers: { notice: true }, followUpRequested: false, marketingConsent: false }),
-  }));
+  expect(backend).toHaveBeenCalledWith(
+    '/public/gap-scan',
+    expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Gap-Scan-Access': token },
+      body: JSON.stringify({
+        sessionId: 'session-123',
+        answers: { notice: true },
+        followUpRequested: false,
+        marketingConsent: false,
+      }),
+    }),
+  );
   expect(response.headers.get('set-cookie')).toContain('HttpOnly');
   expect(response.headers.get('set-cookie')).toContain('Secure');
   expect(response.headers.get('set-cookie')).not.toContain('report-id');
@@ -40,14 +52,21 @@ it('relays a valid scan, strips the ownership token, and sets an HttpOnly secure
 });
 
 it('fails closed when a successful backend response lacks a valid ownership token', async () => {
-  backend.mockResolvedValue(Response.json({ id: 'report-id', accessToken: 'bad' }, { status: 201 }));
+  backend.mockResolvedValue(
+    Response.json({ id: 'report-id', accessToken: 'bad' }, { status: 201 }),
+  );
   const response = await POST(request({ sessionId: 'session-123', answers: {} }));
   expect(response.status).toBe(503);
   expect(response.headers.get('set-cookie')).toBeNull();
 });
 
 it('preserves BFF rate limits without setting a cookie', async () => {
-  backend.mockResolvedValue(Response.json({ error: { code: 'rate_limited' } }, { status: 429, headers: { 'Retry-After': '30' } }));
+  backend.mockResolvedValue(
+    Response.json(
+      { error: { code: 'rate_limited' } },
+      { status: 429, headers: { 'Retry-After': '30' } },
+    ),
+  );
   const response = await POST(request({ sessionId: 'session-123', answers: {} }));
   expect(response.status).toBe(429);
   expect(response.headers.get('retry-after')).toBe('30');

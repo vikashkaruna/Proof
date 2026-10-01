@@ -112,7 +112,9 @@ describe('GET /v1/monitoring/alerts', () => {
   it('returns a genuine empty tenant page with zero loaded-page counts', async () => {
     const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { alerts: [], summary: { total: 0, unread: 0, critical: 0, high: 0 } } });
+    expect(await res.json()).toEqual({
+      data: { alerts: [], summary: { total: 0, unread: 0, critical: 0, high: 0 } },
+    });
   });
 
   it('refuses a database error instead of reporting zero monitoring alerts', async () => {

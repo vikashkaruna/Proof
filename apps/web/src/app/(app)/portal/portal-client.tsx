@@ -110,7 +110,11 @@ function formatBlastRadius(value: unknown): string {
   const radius = value as Record<string, unknown>;
   if (typeof radius.rows === 'number' && Number.isFinite(radius.rows) && radius.rows >= 0)
     return `${radius.rows.toLocaleString()} rows`;
-  if (typeof radius.endpoints === 'number' && Number.isFinite(radius.endpoints) && radius.endpoints >= 0)
+  if (
+    typeof radius.endpoints === 'number' &&
+    Number.isFinite(radius.endpoints) &&
+    radius.endpoints >= 0
+  )
     return `${radius.endpoints} endpoints`;
   return 'Scoped';
 }
@@ -374,7 +378,9 @@ export function PortalClient({
           <div className="mt-2 font-heading text-2xl font-bold text-[#1E2A4A]">
             {evidence.length}
           </div>
-          <div className="mt-2 text-[11px] text-[#64748b]">Loaded records; storage unverified here</div>
+          <div className="mt-2 text-[11px] text-[#64748b]">
+            Loaded records; storage unverified here
+          </div>
         </div>
 
         {/* Open DSARs */}
@@ -869,10 +875,7 @@ export function PortalClient({
                               <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
                                 <span className="font-mono">{act.actionType}</span>
                                 <span>·</span>
-                                <span>
-                                  Blast radius:{' '}
-                                  {formatBlastRadius(act.blastRadius)}
-                                </span>
+                                <span>Blast radius: {formatBlastRadius(act.blastRadius)}</span>
                               </div>
                             </div>
                           </div>

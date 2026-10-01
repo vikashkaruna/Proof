@@ -7,7 +7,11 @@ import { MutationForm } from '../estate-client';
 
 type Load<T> = { state: 'loading' } | { state: 'error' } | { state: 'ready'; data: T };
 
-async function get<T>(tenantId: string, path: string, parse: (value: unknown) => T): Promise<Load<T>> {
+async function get<T>(
+  tenantId: string,
+  path: string,
+  parse: (value: unknown) => T,
+): Promise<Load<T>> {
   try {
     const res = await fetch(`/api/bff/v1${path}`, {
       headers: { 'X-Tenant-Id': tenantId },
@@ -20,7 +24,12 @@ async function get<T>(tenantId: string, path: string, parse: (value: unknown) =>
   }
 }
 
-function useBff<T>(tenantId: string, path: string, revision: number, parse: (value: unknown) => T): Load<T> {
+function useBff<T>(
+  tenantId: string,
+  path: string,
+  revision: number,
+  parse: (value: unknown) => T,
+): Load<T> {
   const source = `${tenantId}\u0000${path}\u0000${revision}`;
   const [loaded, setLoaded] = useState<{ source: string; result: Load<T> } | null>(null);
   useEffect(() => {
@@ -37,21 +46,43 @@ function useBff<T>(tenantId: string, path: string, revision: number, parse: (val
 }
 
 const driftItem = z.object({ id: z.string(), name: z.string() });
-const driftResponse = z.object({ data: z.object({
-  status: z.enum(['not_onboarded', 'no_baseline', 'current', 'drifted']),
-  added: z.array(driftItem).optional(), removed: z.array(driftItem).optional(),
-  changed: z.array(driftItem).optional(), connectionLost: z.array(driftItem).optional(),
-}) });
-const grantResponse = z.object({ data: z.array(z.object({
-  id: z.string(), connectorName: z.string(), agentName: z.string(),
-  scope: z.enum(['connector.read', 'connector.write']), dueAt: z.string(),
-  expiresAt: z.string(), overdue: z.boolean(),
-})) });
-const toolResponse = z.object({ data: z.array(z.object({
-  id: z.string(), tool_name: z.string(), tool_version: z.string(),
-  operation_class: z.enum(['read', 'write']), description_sha256: z.string(),
-})) });
-type ReviewRow = Pick<GrantReviewItem, 'id' | 'connectorName' | 'agentName' | 'scope' | 'dueAt' | 'expiresAt' | 'overdue'>;
+const driftResponse = z.object({
+  data: z.object({
+    status: z.enum(['not_onboarded', 'no_baseline', 'current', 'drifted']),
+    added: z.array(driftItem).optional(),
+    removed: z.array(driftItem).optional(),
+    changed: z.array(driftItem).optional(),
+    connectionLost: z.array(driftItem).optional(),
+  }),
+});
+const grantResponse = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      connectorName: z.string(),
+      agentName: z.string(),
+      scope: z.enum(['connector.read', 'connector.write']),
+      dueAt: z.string(),
+      expiresAt: z.string(),
+      overdue: z.boolean(),
+    }),
+  ),
+});
+const toolResponse = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      tool_name: z.string(),
+      tool_version: z.string(),
+      operation_class: z.enum(['read', 'write']),
+      description_sha256: z.string(),
+    }),
+  ),
+});
+type ReviewRow = Pick<
+  GrantReviewItem,
+  'id' | 'connectorName' | 'agentName' | 'scope' | 'dueAt' | 'expiresAt' | 'overdue'
+>;
 const parseDrift = (value: unknown): EstateDrift => driftResponse.parse(value).data;
 const parseGrants = (value: unknown): ReviewRow[] => grantResponse.parse(value).data;
 const parseTools = (value: unknown): RegisteredTool[] => toolResponse.parse(value).data;
@@ -269,7 +300,8 @@ export function ToolRegistry({
   const [connectorId, setConnectorId] = useState(connectors[0]?.id ?? '');
   const [revision, setRevision] = useState(0);
   const selectedConnectorId = connectors.some((connector) => connector.id === connectorId)
-    ? connectorId : connectors[0]?.id ?? '';
+    ? connectorId
+    : (connectors[0]?.id ?? '');
   const tools = useBff(
     tenantId,
     selectedConnectorId ? `/connectors/${selectedConnectorId}/tools` : '',

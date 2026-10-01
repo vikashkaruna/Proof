@@ -60,18 +60,25 @@ async function fetchWizard(tenantId: string): Promise<Loaded> {
       data: OnboardingWizard | null;
       readiness: OnboardingReadiness | null;
     };
-    if (!body || typeof body !== 'object' || !('data' in body) || !('readiness' in body) ||
-      (body.data !== null && (typeof body.data !== 'object' ||
-        typeof body.data.id !== 'string' ||
-        !['in_progress', 'completed'].includes(body.data.status) ||
-        !Number.isSafeInteger(body.data.version) ||
-        !Array.isArray(body.data.completed_steps) ||
-        !Array.isArray(body.data.manual_system_ids))) ||
-      (body.readiness !== null && (typeof body.readiness !== 'object' ||
-        !Array.isArray(body.readiness.checks) ||
-        !body.readiness.counts ||
-        !Number.isSafeInteger(body.readiness.counts.activeReadGrants) ||
-        !Number.isSafeInteger(body.readiness.counts.activeWriteGrants)))) {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('data' in body) ||
+      !('readiness' in body) ||
+      (body.data !== null &&
+        (typeof body.data !== 'object' ||
+          typeof body.data.id !== 'string' ||
+          !['in_progress', 'completed'].includes(body.data.status) ||
+          !Number.isSafeInteger(body.data.version) ||
+          !Array.isArray(body.data.completed_steps) ||
+          !Array.isArray(body.data.manual_system_ids))) ||
+      (body.readiness !== null &&
+        (typeof body.readiness !== 'object' ||
+          !Array.isArray(body.readiness.checks) ||
+          !body.readiness.counts ||
+          !Number.isSafeInteger(body.readiness.counts.activeReadGrants) ||
+          !Number.isSafeInteger(body.readiness.counts.activeWriteGrants)))
+    ) {
       return { state: 'error' };
     }
     return { state: 'ready', wizard: body.data, readiness: body.readiness };

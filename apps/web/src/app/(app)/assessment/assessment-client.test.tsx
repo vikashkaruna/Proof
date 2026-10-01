@@ -30,12 +30,22 @@ const snapshot: AssessmentSnapshot = {
   exposureInr: null,
   controls: [
     {
-      id: 'CTRL-1', name: 'Recorded consent control', domain: 'Consent', cite: 'Source citation',
-      score: 75, status: 'partial', evidenceIds: [],
+      id: 'CTRL-1',
+      name: 'Recorded consent control',
+      domain: 'Consent',
+      cite: 'Source citation',
+      score: 75,
+      status: 'partial',
+      evidenceIds: [],
     },
     {
-      id: 'CTRL-2', name: 'Unassessed control', domain: 'Consent', cite: '',
-      score: null, status: 'unassessed', evidenceIds: [],
+      id: 'CTRL-2',
+      name: 'Unassessed control',
+      domain: 'Consent',
+      cite: '',
+      score: null,
+      status: 'unassessed',
+      evidenceIds: [],
     },
   ],
   summary: { pass: 0, partial: 1, fail: 0, unassessed: 1 },
@@ -51,7 +61,9 @@ it('refuses invocation when saved assessment results are unavailable', () => {
   render(<AssessmentClient snapshot={null} />);
   expect(screen.getByTestId('assessment-provenance').textContent).toContain('unavailable');
   expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
-  expect(screen.getByTestId('assessment-summary').textContent).toContain('Control posture unavailable');
+  expect(screen.getByTestId('assessment-summary').textContent).toContain(
+    'Control posture unavailable',
+  );
   expect(document.body.textContent).toContain('Control results unavailable.');
   expect(document.body.textContent).not.toContain('Recorded consent control');
   expect(state.invoke).not.toHaveBeenCalled();
@@ -59,7 +71,9 @@ it('refuses invocation when saved assessment results are unavailable', () => {
 
 it('shows saved controls without inventing an assessment or exposure when no engagement exists', () => {
   render(<AssessmentClient snapshot={{ ...snapshot, engagement: null }} />);
-  expect(screen.getByTestId('assessment-provenance').textContent).toContain('No saved assessment exists');
+  expect(screen.getByTestId('assessment-provenance').textContent).toContain(
+    'No saved assessment exists',
+  );
   expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByTestId('assessment-summary').textContent).toContain('Not assessed');
   expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
@@ -80,15 +94,20 @@ it('invokes Parikshan only for the saved engagement and shows only a returned le
   });
   expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
   expect(screen.getByTestId('pipeline-saakshi').getAttribute('data-state')).toBe('not-run');
-  expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe('/ledger?q=ledger-1');
+  expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe(
+    '/ledger?q=ledger-1',
+  );
 });
 
 it('keeps failed or ambiguous invocations unconfirmed and does not show a proof reference', async () => {
   state.invoke.mockRejectedValue(new Error('network failed'));
   render(<AssessmentClient snapshot={snapshot} />);
   fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
-  await waitFor(() => expect(screen.getByTestId('assessment-invocation-error').textContent)
-    .toContain('Could not confirm the assessment outcome'));
+  await waitFor(() =>
+    expect(screen.getByTestId('assessment-invocation-error').textContent).toContain(
+      'Could not confirm the assessment outcome',
+    ),
+  );
   expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('not-run');
   expect(screen.queryByRole('link', { name: /Ledger entry #/ })).toBeNull();
   expect(state.refresh).not.toHaveBeenCalled();

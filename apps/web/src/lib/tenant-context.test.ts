@@ -4,13 +4,30 @@ import { Capability } from '@axiom/types';
 const state = vi.hoisted(() => ({
   user: { id: 'user-1', email: 'reader@example.invalid' } as { id: string; email: string } | null,
   memberships: [
-    { tenant_id: 'tenant-a', role: 'viewer', approval_scopes: [], tenants: { slug: 'alpha', name: 'Alpha', is_demo: false } },
-    { tenant_id: 'tenant-b', role: 'owner', approval_scopes: [], tenants: { slug: 'beta', name: 'Beta', is_demo: true } },
-  ] as Array<{ tenant_id: string; role: string; approval_scopes: string[]; tenants: { slug: string; name: string; is_demo: boolean } }>,
+    {
+      tenant_id: 'tenant-a',
+      role: 'viewer',
+      approval_scopes: [],
+      tenants: { slug: 'alpha', name: 'Alpha', is_demo: false },
+    },
+    {
+      tenant_id: 'tenant-b',
+      role: 'owner',
+      approval_scopes: [],
+      tenants: { slug: 'beta', name: 'Beta', is_demo: true },
+    },
+  ] as Array<{
+    tenant_id: string;
+    role: string;
+    approval_scopes: string[];
+    tenants: { slug: string; name: string; is_demo: boolean };
+  }>,
   cookieSlug: 'alpha',
   internal: false,
   factors: [{ id: 'factor-1' }] as Array<{ id: string }>,
-  attestations: [{ expires_at: new Date(Date.now() + 60000).toISOString() }] as Array<{ expires_at: string }>,
+  attestations: [{ expires_at: new Date(Date.now() + 60000).toISOString() }] as Array<{
+    expires_at: string;
+  }>,
   session: { access_token: 'token' } as { access_token: string } | null,
   policyRoles: [] as string[],
 }));
@@ -18,21 +35,46 @@ const state = vi.hoisted(() => ({
 const database = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: state.user } }), getSession: async () => ({ data: { session: state.session } }) },
+    auth: {
+      getUser: async () => ({ data: { user: state.user } }),
+      getSession: async () => ({ data: { session: state.session } }),
+    },
     from: database.from,
   }),
   sessionIdFromAccessToken: () => 'session-1',
 }));
-vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => state.cookieSlug ? { value: state.cookieSlug } : undefined }) }));
-vi.mock('next/navigation', () => ({ redirect: (path: string) => { throw new Error(`redirect:${path}`); } }));
+vi.mock('next/headers', () => ({
+  cookies: async () => ({
+    get: () => (state.cookieSlug ? { value: state.cookieSlug } : undefined),
+  }),
+}));
+vi.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`redirect:${path}`);
+  },
+}));
 
-import { requireCapabilityContext, requireInternalContext, requireTenantContext } from './tenant-context';
+import {
+  requireCapabilityContext,
+  requireInternalContext,
+  requireTenantContext,
+} from './tenant-context';
 
 beforeEach(() => {
   state.user = { id: 'user-1', email: 'reader@example.invalid' };
   state.memberships = [
-    { tenant_id: 'tenant-a', role: 'viewer', approval_scopes: [], tenants: { slug: 'alpha', name: 'Alpha', is_demo: false } },
-    { tenant_id: 'tenant-b', role: 'owner', approval_scopes: [], tenants: { slug: 'beta', name: 'Beta', is_demo: true } },
+    {
+      tenant_id: 'tenant-a',
+      role: 'viewer',
+      approval_scopes: [],
+      tenants: { slug: 'alpha', name: 'Alpha', is_demo: false },
+    },
+    {
+      tenant_id: 'tenant-b',
+      role: 'owner',
+      approval_scopes: [],
+      tenants: { slug: 'beta', name: 'Beta', is_demo: true },
+    },
   ];
   state.cookieSlug = 'alpha';
   state.internal = false;
@@ -53,8 +95,16 @@ beforeEach(() => {
       eq: () => builder,
       is: () => builder,
       limit: () => builder,
-      maybeSingle: async () => ({ data: table === 'users' ? { is_axiom_internal: state.internal } : table === 'tenants' ? { mfa_required_roles: state.policyRoles } : null }),
-      then: (resolve: (value: { data: unknown }) => unknown) => Promise.resolve(resolve({ data: rows() })),
+      maybeSingle: async () => ({
+        data:
+          table === 'users'
+            ? { is_axiom_internal: state.internal }
+            : table === 'tenants'
+              ? { mfa_required_roles: state.policyRoles }
+              : null,
+      }),
+      then: (resolve: (value: { data: unknown }) => unknown) =>
+        Promise.resolve(resolve({ data: rows() })),
     };
     return builder;
   });
@@ -83,8 +133,12 @@ it('ignores a forged active-tenant cookie and returns only a verified membership
 it('quarantines a caller when tenant MFA policy requires a missing factor', async () => {
   state.policyRoles = ['viewer'];
   state.factors = [];
-  await expect(requireTenantContext()).rejects.toThrow('redirect:/settings/security?enrol=required');
-  expect((await requireTenantContext(undefined, { allowUnverifiedMfa: true })).tenantId).toBe('tenant-a');
+  await expect(requireTenantContext()).rejects.toThrow(
+    'redirect:/settings/security?enrol=required',
+  );
+  expect((await requireTenantContext(undefined, { allowUnverifiedMfa: true })).tenantId).toBe(
+    'tenant-a',
+  );
 });
 
 it('requires a live session-bound MFA attestation', async () => {
@@ -96,7 +150,9 @@ it('requires a live session-bound MFA attestation', async () => {
 });
 
 it('refuses a capability not granted to the tenant role', async () => {
-  await expect(requireCapabilityContext(Capability.PLAN_APPROVE)).rejects.toThrow('redirect:/portal?error=forbidden');
+  await expect(requireCapabilityContext(Capability.PLAN_APPROVE)).rejects.toThrow(
+    'redirect:/portal?error=forbidden',
+  );
 });
 
 it('requires both internal employment and Workbench role authority', async () => {

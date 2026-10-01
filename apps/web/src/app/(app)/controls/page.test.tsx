@@ -6,18 +6,25 @@ import ControlLibraryPage from './page';
 
 vi.mock('../generic-module-view', () => ({
   GenericModuleView: ({ meta, children }: { meta: unknown; children: React.ReactNode }) => (
-    <div><pre data-testid="meta">{JSON.stringify(meta)}</pre>{children}</div>
+    <div>
+      <pre data-testid="meta">{JSON.stringify(meta)}</pre>
+      {children}
+    </div>
   ),
 }));
 
 async function html(searchParams: { domain?: string; severity?: string; q?: string } = {}) {
-  return renderToStaticMarkup(await ControlLibraryPage({ searchParams: Promise.resolve(searchParams) }));
+  return renderToStaticMarkup(
+    await ControlLibraryPage({ searchParams: Promise.resolve(searchParams) }),
+  );
 }
 
 it('identifies the packaged immutable library and routes assessment through saved engagement', async () => {
   const view = await html();
   expect(view).toContain(`Packaged control library version ${LIBRARY_VERSION}`);
-  expect(view).toContain(`Showing <strong>${controls.length}</strong> of ${controls.length} controls`);
+  expect(view).toContain(
+    `Showing <strong>${controls.length}</strong> of ${controls.length} controls`,
+  );
   expect(view).toContain('&quot;actionHref&quot;:&quot;/assessment&quot;');
   expect(view).not.toContain('Execute Parikshan Audit Run');
   expect(view).not.toContain('v25.11.2');

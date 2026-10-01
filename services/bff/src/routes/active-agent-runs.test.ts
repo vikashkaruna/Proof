@@ -81,7 +81,9 @@ describe('GET /v1/agents/runs/active', () => {
 
     const response = await request();
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { active_runs: Array<{ id: string; agent: string; status: string }> };
+    const body = (await response.json()) as {
+      active_runs: Array<{ id: string; agent: string; status: string }>;
+    };
     expect(body.active_runs.map((run) => run.id)).toEqual(['own-running', 'own-queued']);
     expect(body.active_runs.map((run) => ({ agent: run.agent, status: run.status }))).toEqual([
       { agent: 'drishti', status: 'running' },

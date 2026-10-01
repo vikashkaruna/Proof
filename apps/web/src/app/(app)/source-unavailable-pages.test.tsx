@@ -6,7 +6,10 @@ import PartnerPage from './partner/page';
 
 vi.mock('./generic-module-view', () => ({
   GenericModuleView: ({ meta, children }: { meta: unknown; children: React.ReactNode }) => (
-    <div><pre>{JSON.stringify(meta)}</pre>{children}</div>
+    <div>
+      <pre>{JSON.stringify(meta)}</pre>
+      {children}
+    </div>
   ),
 }));
 

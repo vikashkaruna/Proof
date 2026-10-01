@@ -8,11 +8,7 @@ interface ExportLedgerButtonProps {
   tenantSlug?: string;
 }
 
-export function ExportLedgerButton({
-  tenantId,
-  tenantName,
-  tenantSlug,
-}: ExportLedgerButtonProps) {
+export function ExportLedgerButton({ tenantId, tenantName, tenantSlug }: ExportLedgerButtonProps) {
   const [status, setStatus] = useState<'idle' | 'exporting' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [exportedCount, setExportedCount] = useState<number | null>(null);
@@ -38,8 +34,11 @@ export function ExportLedgerButton({
       const data = await res.json();
       const exported = data?.export_metadata?.total_records;
       if (
-        !Array.isArray(data?.records) || typeof exported !== 'number' ||
-        !Number.isSafeInteger(exported) || exported < 0 || exported !== data.records.length ||
+        !Array.isArray(data?.records) ||
+        typeof exported !== 'number' ||
+        !Number.isSafeInteger(exported) ||
+        exported < 0 ||
+        exported !== data.records.length ||
         data?.export_metadata?.tenant?.id !== tenantId ||
         typeof data?.export_metadata?.export_truncated !== 'boolean'
       ) {
@@ -106,7 +105,9 @@ export function ExportLedgerButton({
         {status === 'success' && (
           <>
             <span className="text-teal-600 font-bold">✓</span>
-            <span>Export downloaded ({exportedCount} records{truncated ? '; truncated' : ''})</span>
+            <span>
+              Export downloaded ({exportedCount} records{truncated ? '; truncated' : ''})
+            </span>
           </>
         )}
         {status === 'error' && (

@@ -7,12 +7,17 @@ import { InviteAccept } from './invite-accept';
 const push = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); push.mockReset(); });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  push.mockReset();
+});
 
 it('hides a fragment token, redirects a signed-out caller, and accepts only a recorded membership', async () => {
   const token = 'a'.repeat(43);
   window.history.replaceState(null, '', `/invite#token=${token}`);
-  const fetcher = vi.fn()
+  const fetcher = vi
+    .fn()
     .mockResolvedValueOnce(new Response(null, { status: 401 }))
     .mockResolvedValueOnce(Response.json({ data: { tenantId: 'tenant-1' } }));
   vi.stubGlobal('fetch', fetcher);

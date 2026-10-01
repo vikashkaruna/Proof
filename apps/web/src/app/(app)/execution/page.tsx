@@ -92,7 +92,13 @@ export default async function ExecutionPage() {
       : Promise.resolve(emptyOk),
   ]);
 
-  if (batchesRes.error || actionsRes.error || rollbacksRes.error || verificationsRes.error || reconciliationsRes.error) {
+  if (
+    batchesRes.error ||
+    actionsRes.error ||
+    rollbacksRes.error ||
+    verificationsRes.error ||
+    reconciliationsRes.error
+  ) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader

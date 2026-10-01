@@ -79,9 +79,10 @@ export default async function LedgerPage({
     p_from_sequence: 1,
   });
   if (!verificationError && Array.isArray(verificationRows)) {
-    verification = verificationRows.length > 0
-      ? { status: 'broken', firstBreak: verificationRows[0] as LedgerVerification['firstBreak'] }
-      : { status: 'intact' };
+    verification =
+      verificationRows.length > 0
+        ? { status: 'broken', firstBreak: verificationRows[0] as LedgerVerification['firstBreak'] }
+        : { status: 'intact' };
   }
 
   // Build filtered query with exact count
@@ -143,10 +144,19 @@ export default async function LedgerPage({
       .eq('tenant_id', tenantId),
   ]);
 
-  if (activeRunsRes.error || ledgerRes.error || totalCountRes.error ||
-    !Array.isArray(activeRunsRes.data) || !Array.isArray(ledgerRes.data) ||
-    typeof ledgerRes.count !== 'number' || !Number.isSafeInteger(ledgerRes.count) || ledgerRes.count < 0 ||
-    typeof totalCountRes.count !== 'number' || !Number.isSafeInteger(totalCountRes.count) || totalCountRes.count < 0) {
+  if (
+    activeRunsRes.error ||
+    ledgerRes.error ||
+    totalCountRes.error ||
+    !Array.isArray(activeRunsRes.data) ||
+    !Array.isArray(ledgerRes.data) ||
+    typeof ledgerRes.count !== 'number' ||
+    !Number.isSafeInteger(ledgerRes.count) ||
+    ledgerRes.count < 0 ||
+    typeof totalCountRes.count !== 'number' ||
+    !Number.isSafeInteger(totalCountRes.count) ||
+    totalCountRes.count < 0
+  ) {
     throw new Error('Ledger records are unavailable. No audit status can be inferred.');
   }
 
@@ -168,9 +178,13 @@ export default async function LedgerPage({
     corr: e.correlation_id ? `cr-${e.correlation_id.slice(0, 4)}` : 'No correlation ID',
     fullCorr: e.correlation_id || '',
     target: e.target_ref || 'No target recorded',
-    entryHash: e.entry_hash ? `${e.entry_hash.slice(0, 4)}…${e.entry_hash.slice(-3)}` : 'Unavailable',
+    entryHash: e.entry_hash
+      ? `${e.entry_hash.slice(0, 4)}…${e.entry_hash.slice(-3)}`
+      : 'Unavailable',
     fullEntryHash: e.entry_hash || '',
-    prevHash: e.prev_entry_hash ? `${e.prev_entry_hash.slice(0, 4)}…${e.prev_entry_hash.slice(-3)}` : 'Genesis or unavailable',
+    prevHash: e.prev_entry_hash
+      ? `${e.prev_entry_hash.slice(0, 4)}…${e.prev_entry_hash.slice(-3)}`
+      : 'Genesis or unavailable',
     fullPrevHash: e.prev_entry_hash || '',
     result: e.result || 'unknown',
     detail: e.detail,
@@ -183,7 +197,6 @@ export default async function LedgerPage({
           : 'bg-slate-100 text-slate-600',
     chainHead: e.sequence_no === 1,
   }));
-
 
   return (
     <div className="mx-auto max-w-[1180px] space-y-5 animate-in fade-in-0 duration-200">
@@ -230,7 +243,8 @@ export default async function LedgerPage({
             </div>
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">
               Recorded audit events for this tenant. Inspect each entry and verify the hash chain;
-              an event alone does not establish that a complete approval or execution lifecycle occurred.
+              an event alone does not establish that a complete approval or execution lifecycle
+              occurred.
             </p>
           </div>
 
@@ -245,18 +259,19 @@ export default async function LedgerPage({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-            {verification.status === 'intact' ? 'Chain verified from genesis' : verification.status === 'broken' ? 'Chain verification failed' : 'Chain verification unavailable'} · {totalCount} recorded entries
+            {verification.status === 'intact'
+              ? 'Chain verified from genesis'
+              : verification.status === 'broken'
+                ? 'Chain verification failed'
+                : 'Chain verification unavailable'}{' '}
+            · {totalCount} recorded entries
           </span>
           <span className="text-slate-500 hidden md:inline">
             Append-only · hash-chained · INSERT-only enforced by DB role, not app code (ADR-5)
           </span>
         </div>
 
-        <ExportLedgerButton
-          tenantId={tenantId}
-          tenantName={tenantName}
-          tenantSlug={tenantSlug}
-        />
+        <ExportLedgerButton tenantId={tenantId} tenantName={tenantName} tenantSlug={tenantSlug} />
       </div>
 
       {/* Contextual Filters Bar */}

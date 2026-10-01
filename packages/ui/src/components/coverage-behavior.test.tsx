@@ -7,7 +7,14 @@ import { PageHeader, Stat, StatGrid } from './Layout';
 import { PostureScore } from './PostureScore';
 import { ProofSeal } from './ProofSeal';
 import { Button } from '../primitives/Button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../primitives/Card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '../primitives/Card';
 import { Input, Label, Textarea } from '../primitives/Input';
 import { ProgressBar } from '../primitives/Progress';
 
@@ -18,7 +25,9 @@ describe('proof and status semantics', () => {
     const unsealed = html(<ProofSeal data-testid="proof" />);
     expect(unsealed).toContain('Unsealed');
     expect(unsealed).not.toContain('border-gold');
-    const sealed = html(<ProofSeal hash={'a'.repeat(64)} sealedAt="2026-09-30T00:00:00Z" compact />);
+    const sealed = html(
+      <ProofSeal hash={'a'.repeat(64)} sealedAt="2026-09-30T00:00:00Z" compact />,
+    );
     expect(sealed).toContain('border-gold');
     expect(sealed).toContain('SHA-256:');
     expect(sealed).toContain('Sealed: 2026-09-30');
@@ -42,15 +51,28 @@ describe('proof and status semantics', () => {
     expect(html(<PostureScore score={70} exposureInr={1_00_000} />)).toContain('Acceptable');
     expect(html(<PostureScore score={45} exposureInr={1_000} />)).toContain('At Risk');
     expect(html(<PostureScore score={null} exposureInr={0} />)).toContain('Critical');
-    expect(html(<PostureScore score={80} variant="compact" />)).not.toContain('Estimated max statutory exposure');
+    expect(html(<PostureScore score={80} variant="compact" />)).not.toContain(
+      'Estimated max statutory exposure',
+    );
   });
 
   it('renders agent state and clamps visible run progress', () => {
     const pill = html(<AgentPill agent="pramaan" state="working" />);
     expect(pill).toContain('Closure Proof');
     expect(pill).toContain('ring-1');
-    expect(html(<AgentPill agent="drishti" showPersona={false} />)).not.toContain('Discovery</span>');
-    const run = html(<AgentRunCard agent="saakshi" status="working" step="readback" message="Verifying" progress={1.5} actions={<button>Inspect</button>} />);
+    expect(html(<AgentPill agent="drishti" showPersona={false} />)).not.toContain(
+      'Discovery</span>',
+    );
+    const run = html(
+      <AgentRunCard
+        agent="saakshi"
+        status="working"
+        step="readback"
+        message="Verifying"
+        progress={1.5}
+        actions={<button>Inspect</button>}
+      />,
+    );
     expect(run).toContain('readback');
     expect(run).toContain('Verifying');
     expect(run).toContain('width:100%');
@@ -61,19 +83,53 @@ describe('proof and status semantics', () => {
 describe('input and layout accessibility', () => {
   it('disables a loading button and marks invalid input consistently', () => {
     expect(html(<Button loading>Save</Button>)).toContain('disabled');
-    expect(html(<Button disabled variant="danger">Delete</Button>)).toContain('bg-ember-500');
+    expect(
+      html(
+        <Button disabled variant="danger">
+          Delete
+        </Button>,
+      ),
+    ).toContain('bg-ember-500');
     expect(html(<Input invalid aria-label="Email" />)).toContain('border-ember-500');
     expect(html(<Textarea invalid aria-label="Description" />)).toContain('border-ember-500');
-    expect(html(<Label required htmlFor="email">Email</Label>)).toContain('text-ember-500');
+    expect(
+      html(
+        <Label required htmlFor="email">
+          Email
+        </Label>,
+      ),
+    ).toContain('text-ember-500');
   });
 
   it('renders optional page metadata and composed card structure', () => {
-    const header = html(<PageHeader title="Evidence" description="Retained proof" actions={<button>Export</button>} meta="Reviewed" />);
+    const header = html(
+      <PageHeader
+        title="Evidence"
+        description="Retained proof"
+        actions={<button>Export</button>}
+        meta="Reviewed"
+      />,
+    );
     expect(header).toContain('Retained proof');
     expect(header).toContain('Export');
     expect(header).toContain('Reviewed');
-    expect(html(<StatGrid><Stat label="Controls" value="10" hint="Verified" /></StatGrid>)).toContain('Verified');
-    const card = html(<Card><CardHeader><CardTitle>Title</CardTitle><CardDescription>Detail</CardDescription></CardHeader><CardContent>Body</CardContent><CardFooter>Action</CardFooter></Card>);
+    expect(
+      html(
+        <StatGrid>
+          <Stat label="Controls" value="10" hint="Verified" />
+        </StatGrid>,
+      ),
+    ).toContain('Verified');
+    const card = html(
+      <Card>
+        <CardHeader>
+          <CardTitle>Title</CardTitle>
+          <CardDescription>Detail</CardDescription>
+        </CardHeader>
+        <CardContent>Body</CardContent>
+        <CardFooter>Action</CardFooter>
+      </Card>,
+    );
     for (const text of ['Title', 'Detail', 'Body', 'Action']) expect(card).toContain(text);
   });
 });

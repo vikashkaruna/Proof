@@ -15,7 +15,10 @@ export default async function PartnerPage() {
         cards: [],
       }}
     >
-      <p role="status" className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700">
+      <p
+        role="status"
+        className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
+      >
         No partner portfolio or processor due-diligence records can be verified in this view. A
         tenant count or ledger event cannot establish contracts, isolation, or delivery of an
         auditor pack.

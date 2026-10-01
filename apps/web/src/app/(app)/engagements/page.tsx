@@ -47,7 +47,11 @@ export default async function EngagementsListPage() {
             </thead>
             <tbody className="divide-y divide-slate-200">
               {error && (
-                <tr><td colSpan={7} role="alert" className="px-4 py-8 text-center text-red-700">Engagement records are unavailable.</td></tr>
+                <tr>
+                  <td colSpan={7} role="alert" className="px-4 py-8 text-center text-red-700">
+                    Engagement records are unavailable.
+                  </td>
+                </tr>
               )}
               {!error && (engagements ?? []).length === 0 && (
                 <tr>
@@ -56,30 +60,31 @@ export default async function EngagementsListPage() {
                   </td>
                 </tr>
               )}
-              {!error && (engagements ?? []).map((e) => (
-                <tr key={e.id} className="hover:bg-mist-50">
-                  <td className="px-4 py-2 font-medium text-slate-700">{e.title}</td>
-                  <td className="px-4 py-2 text-slate-600">{e.tenants?.[0]?.name ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <StatusBadge status={e.status} />
-                  </td>
-                  <td className="px-4 py-2">
-                    <PostureScore score={e.posture_score} variant="compact" />
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    {e.estimated_exposure_inr == null ? '—' : formatINR(e.estimated_exposure_inr)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{formatDate(e.started_at)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <Link
-                      href={`/engagements/${e.id}`}
-                      className="rounded-md border border-slate-300 px-3 py-1 text-xs hover:bg-mist-100"
-                    >
-                      Open
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {!error &&
+                (engagements ?? []).map((e) => (
+                  <tr key={e.id} className="hover:bg-mist-50">
+                    <td className="px-4 py-2 font-medium text-slate-700">{e.title}</td>
+                    <td className="px-4 py-2 text-slate-600">{e.tenants?.[0]?.name ?? '—'}</td>
+                    <td className="px-4 py-2">
+                      <StatusBadge status={e.status} />
+                    </td>
+                    <td className="px-4 py-2">
+                      <PostureScore score={e.posture_score} variant="compact" />
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {e.estimated_exposure_inr == null ? '—' : formatINR(e.estimated_exposure_inr)}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-500">{formatDate(e.started_at)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <Link
+                        href={`/engagements/${e.id}`}
+                        className="rounded-md border border-slate-300 px-3 py-1 text-xs hover:bg-mist-100"
+                      >
+                        Open
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </CardContent>

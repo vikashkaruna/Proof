@@ -5,12 +5,24 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentWorkbenchClient } from './workbench-client';
 
 const invoke = vi.hoisted(() => vi.fn());
-vi.mock('@/lib/invoke-agent', () => ({ invokeAgent: invoke, AgentInvocationError: class AgentInvocationError extends Error {} }));
-vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
+vi.mock('@/lib/invoke-agent', () => ({
+  invokeAgent: invoke,
+  AgentInvocationError: class AgentInvocationError extends Error {},
+}));
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 const props = {
-  userEmail: 'operator@example.com', ledgerTodayCount: null, awaitingReviewCount: null,
-  recentRuns: [], pendingPlans: [], dataResidencyRegion: 'configured-target',
-  environment: 'local', loadError: true,
+  userEmail: 'operator@example.com',
+  ledgerTodayCount: null,
+  awaitingReviewCount: null,
+  recentRuns: [],
+  pendingPlans: [],
+  dataResidencyRegion: 'configured-target',
+  environment: 'local',
+  loadError: true,
 };
 beforeEach(() => invoke.mockReset());
 afterEach(cleanup);
@@ -19,7 +31,9 @@ it('shows unavailable metrics without fictional health, redaction, or reconciled
   render(<AgentWorkbenchClient {...props} />);
   expect(screen.getByTestId('workbench-ledger-today').textContent).toBe('Unavailable');
   expect(screen.getByTestId('workbench-awaiting-review').textContent).toBe('Unavailable');
-  expect(document.body.textContent).toContain('This does not establish that all plans are reconciled');
+  expect(document.body.textContent).toContain(
+    'This does not establish that all plans are reconciled',
+  );
   expect(document.body.textContent).not.toContain('PII Redaction: Enforced');
   expect(document.body.textContent).not.toContain('All remediation plans are reconciled');
   expect(document.body.textContent).toContain('configured region target');
@@ -36,10 +50,14 @@ it('distinguishes unreadable ledger and plan lists from real empty lists', () =>
 it('routes approval and unavailable regulatory feeds to dedicated workflows', () => {
   render(<AgentWorkbenchClient {...props} />);
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'karya' } });
-  expect(screen.getByRole('link', { name: 'Open karya workflow' }).getAttribute('href')).toBe('/approval');
+  expect(screen.getByRole('link', { name: 'Open karya workflow' }).getAttribute('href')).toBe(
+    '/approval',
+  );
   expect(screen.queryByRole('button', { name: 'Run karya' })).toBeNull();
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'nazar' } });
-  expect(screen.getByRole('link', { name: 'Open nazar workflow' }).getAttribute('href')).toBe('/regwatch');
+  expect(screen.getByRole('link', { name: 'Open nazar workflow' }).getAttribute('href')).toBe(
+    '/regwatch',
+  );
   expect(screen.queryByRole('button', { name: 'Run nazar' })).toBeNull();
   expect(invoke).not.toHaveBeenCalled();
 });
@@ -48,7 +66,11 @@ it('invokes a supported read-only agent and shows only returned proof references
   invoke.mockResolvedValue({ status: 'succeeded', latency_ms: 23, ledger_entry_ids: ['ledger-1'] });
   render(<AgentWorkbenchClient {...props} />);
   fireEvent.click(screen.getByRole('button', { name: 'Run drishti' }));
-  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Execution completed'));
+  await waitFor(() =>
+    expect(screen.getByRole('status').textContent).toContain('Execution completed'),
+  );
   expect(invoke).toHaveBeenCalledWith('drishti', { scope: 'workbench' });
-  expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe('/ledger?q=ledger-1');
+  expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe(
+    '/ledger?q=ledger-1',
+  );
 });

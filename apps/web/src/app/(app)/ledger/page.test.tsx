@@ -4,7 +4,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import LedgerPage from './page';
 
 const state = vi.hoisted(() => ({
-  ledger: { data: [] as Record<string, unknown>[] | null, count: 0 as number | null, error: null as Error | null },
+  ledger: {
+    data: [] as Record<string, unknown>[] | null,
+    count: 0 as number | null,
+    error: null as Error | null,
+  },
   total: { count: 0, error: null as Error | null },
   active: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   verification: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
@@ -22,7 +26,11 @@ vi.mock('./export-ledger-button', () => ({ ExportLedgerButton: () => null }));
 vi.mock('./ledger-refresh', () => ({ LedgerRefresh: () => null }));
 vi.mock('./ledger-filters', () => ({ LedgerFilters: () => null }));
 vi.mock('./ledger-pagination', () => ({ LedgerPagination: () => null }));
-vi.mock('./ledger-stream-view', () => ({ LedgerStreamView: ({ entries }: { entries: unknown[] }) => <span data-testid="rows">{entries.length} rows</span> }));
+vi.mock('./ledger-stream-view', () => ({
+  LedgerStreamView: ({ entries }: { entries: unknown[] }) => (
+    <span data-testid="rows">{entries.length} rows</span>
+  ),
+}));
 
 function makeQuery(value: () => unknown) {
   const query = {
@@ -30,8 +38,12 @@ function makeQuery(value: () => unknown) {
       if (options?.head) return makeQuery(() => state.total);
       return query;
     },
-    eq: () => query, in: () => query, order: () => query, range: () => query,
-    ilike: () => query, or: () => query,
+    eq: () => query,
+    in: () => query,
+    order: () => query,
+    range: () => query,
+    ilike: () => query,
+    or: () => query,
     maybeSingle: async () => ({ data: { is_axiom_internal: true }, error: null }),
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(value()).then(resolve),
   };
@@ -45,11 +57,17 @@ beforeEach(() => {
   state.verification = { data: [], error: null };
   state.context.mockReset();
   state.context.mockImplementation(async () => ({
-    userId: 'auditor-1', tenantId: 'tenant-1', tenantName: 'Actual tenant', tenantSlug: 'actual',
+    userId: 'auditor-1',
+    tenantId: 'tenant-1',
+    tenantName: 'Actual tenant',
+    tenantSlug: 'actual',
     supabase: {
-      from: (table: string) => table === 'users' ? makeQuery(() => ({}))
-        : table === 'agent_runs' ? makeQuery(() => state.active)
-          : makeQuery(() => state.ledger),
+      from: (table: string) =>
+        table === 'users'
+          ? makeQuery(() => ({}))
+          : table === 'agent_runs'
+            ? makeQuery(() => state.active)
+            : makeQuery(() => state.ledger),
       rpc: async () => state.verification,
     },
   }));
@@ -86,7 +104,9 @@ it('shows a recorded chain break and binds the requested tenant through capabili
 });
 
 it('refuses an unavailable requested tenant instead of silently displaying another tenant', async () => {
-  await expect(renderPage({ tenant: 'foreign-tenant' })).rejects.toThrow('Requested ledger tenant is unavailable');
+  await expect(renderPage({ tenant: 'foreign-tenant' })).rejects.toThrow(
+    'Requested ledger tenant is unavailable',
+  );
 });
 
 it('refuses to turn a ledger query error into an empty verified audit', async () => {
@@ -105,7 +125,9 @@ it('refuses missing ledger rows, counts, or running-agent sources', async () => 
 });
 
 it('refuses untrusted filter syntax before building a ledger query', async () => {
-  await expect(renderPage({ q: 'target),tenant_id.eq.foreign' })).rejects.toThrow('Invalid ledger search query');
+  await expect(renderPage({ q: 'target),tenant_id.eq.foreign' })).rejects.toThrow(
+    'Invalid ledger search query',
+  );
 });
 
 it('keeps malformed pagination away from the ledger range query', async () => {

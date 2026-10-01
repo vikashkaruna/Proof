@@ -6,11 +6,17 @@ import { LedgerRefresh } from './ledger-refresh';
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
-afterEach(() => { cleanup(); vi.useRealTimers(); refresh.mockReset(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  refresh.mockReset();
+});
 
 it('defaults automatic refresh off and permits an explicit manual refresh', () => {
   render(<LedgerRefresh runningCount={0} />);
-  expect((screen.getByRole('combobox', { name: 'Auto-refresh interval' }) as HTMLSelectElement).value).toBe('0');
+  expect(
+    (screen.getByRole('combobox', { name: 'Auto-refresh interval' }) as HTMLSelectElement).value,
+  ).toBe('0');
   fireEvent.click(screen.getByRole('button', { name: /Refresh/ }));
   expect(refresh).toHaveBeenCalledOnce();
   expect(document.body.textContent).not.toContain('Live streaming');

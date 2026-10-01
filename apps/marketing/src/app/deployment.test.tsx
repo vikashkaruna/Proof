@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('@axiom/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@axiom/config')>()),
-  loadWebEnv: () => ({ ENVIRONMENT: 'preprod', AXIOM_RELEASE_SHA: 'a'.repeat(40), AXIOM_AUTH_MODE: 'local' }),
+  loadWebEnv: () => ({
+    ENVIRONMENT: 'preprod',
+    AXIOM_RELEASE_SHA: 'a'.repeat(40),
+    AXIOM_AUTH_MODE: 'local',
+  }),
 }));
 import RootLayout from './layout';
 import robots from './robots';
@@ -26,12 +30,21 @@ it('exposes deployment identity without credentials or cacheable status', async 
   const response = health();
   expect(response.headers.get('cache-control')).toBe('no-store');
   const payload = await response.json();
-  expect(payload).toMatchObject({ status: 'ok', service: 'axiom-marketing', environment: 'preprod', revision: 'a'.repeat(40) });
+  expect(payload).toMatchObject({
+    status: 'ok',
+    service: 'axiom-marketing',
+    environment: 'preprod',
+    revision: 'a'.repeat(40),
+  });
   expect(JSON.stringify(payload)).not.toContain('private-key');
 });
 
 it('wraps public content in the branded accessible document structure', () => {
-  const html = renderToStaticMarkup(<RootLayout><main id="content">Hello</main></RootLayout>);
+  const html = renderToStaticMarkup(
+    <RootLayout>
+      <main id="content">Hello</main>
+    </RootLayout>,
+  );
   expect(html).toContain('id="content"');
   expect(html).toContain('Hello');
   expect(html).toContain('<html');

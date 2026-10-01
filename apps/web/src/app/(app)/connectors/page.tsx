@@ -33,8 +33,10 @@ export default async function ConnectorsPage() {
         Connector execution is not yet available. Credentials, live access grants and transport
         verification are separate steps.
       </p>
-      {connectors.error || systems.error ||
-        !Array.isArray(connectors.data) || !Array.isArray(systems.data) ? (
+      {connectors.error ||
+      systems.error ||
+      !Array.isArray(connectors.data) ||
+      !Array.isArray(systems.data) ? (
         <p role="alert">Connector inventory could not be loaded. Refresh to try again.</p>
       ) : (
         <ConnectorsClient

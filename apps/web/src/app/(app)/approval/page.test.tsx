@@ -14,7 +14,11 @@ vi.mock('@/lib/tenant-context', () => ({
   Capability: { PLAN_READ: 'plan.read' },
   requireCapabilityContext: state.capability,
 }));
-vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 
 beforeEach(() => {
   state.actions = { data: [], error: null };
@@ -22,15 +26,23 @@ beforeEach(() => {
   state.calls = [];
   state.capability.mockReset().mockImplementation(async () => ({
     tenantId: 'tenant-1',
-    supabase: { from: (table: string) => {
-      const query = {
-        select: () => query,
-        eq: (field: string, value: unknown) => { state.calls.push([table, field, value]); return query; },
-        order: () => query,
-        then: (resolve: (value: unknown) => unknown) => Promise.resolve(table === 'remediation_actions' ? state.actions : state.plans).then(resolve),
-      };
-      return query;
-    } },
+    supabase: {
+      from: (table: string) => {
+        const query = {
+          select: () => query,
+          eq: (field: string, value: unknown) => {
+            state.calls.push([table, field, value]);
+            return query;
+          },
+          order: () => query,
+          then: (resolve: (value: unknown) => unknown) =>
+            Promise.resolve(table === 'remediation_actions' ? state.actions : state.plans).then(
+              resolve,
+            ),
+        };
+        return query;
+      },
+    },
   }));
 });
 
@@ -39,7 +51,14 @@ it('shows empty approval and plan lists without demo actions or validated rollba
   const plans = renderToStaticMarkup(await PlansPage());
   expect(approval).toContain('No recorded actions await approval.');
   expect(plans).toContain('No remediation plans recorded for this tenant.');
-  for (const fiction of ['1,840', 'ACT-01', 'e-8841', 'PLAN-2026-0881', 'Rollback validated', '100%']) {
+  for (const fiction of [
+    '1,840',
+    'ACT-01',
+    'e-8841',
+    'PLAN-2026-0881',
+    'Rollback validated',
+    '100%',
+  ]) {
     expect(approval + plans).not.toContain(fiction);
   }
   expect(state.calls).toContainEqual(['remediation_actions', 'tenant_id', 'tenant-1']);
@@ -55,7 +74,19 @@ it('keeps query errors distinct from empty queues', async () => {
 });
 
 it('links a recorded awaiting action to its actual source plan', async () => {
-  state.actions = { data: [{ id: 'action-1', plan_id: 'plan-1', description: 'Review backup policy', action_type: 'policy.update', approval_status: 'awaiting_approval', risk_class: 'high' }], error: null };
+  state.actions = {
+    data: [
+      {
+        id: 'action-1',
+        plan_id: 'plan-1',
+        description: 'Review backup policy',
+        action_type: 'policy.update',
+        approval_status: 'awaiting_approval',
+        risk_class: 'high',
+      },
+    ],
+    error: null,
+  };
   const view = renderToStaticMarkup(await ApprovalPage());
   expect(view).toContain('Review backup policy');
   expect(view).toContain('href="/plans/plan-1"');

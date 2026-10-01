@@ -11,35 +11,97 @@ export default async function DashboardPage() {
   const { supabase, tenantId, tenantName } = await requireTenantContext();
   const [ledger, evidence, dsars, consents, findings, actions, engagement, runs] =
     await Promise.all([
-      supabase.from('audit_ledger').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('evidence').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      supabase
+        .from('audit_ledger')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId),
+      supabase
+        .from('evidence')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId),
       supabase.from('dsars').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-      supabase.from('consent_records').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      supabase
+        .from('consent_records')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId),
       supabase.from('findings').select('id, status').eq('tenant_id', tenantId),
       supabase.from('remediation_actions').select('id, approval_status').eq('tenant_id', tenantId),
-      supabase.from('engagements').select('posture_score').eq('tenant_id', tenantId)
-        .order('started_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('agent_runs').select('id, agent, status, started_at').eq('tenant_id', tenantId)
-        .order('started_at', { ascending: false }).limit(5),
+      supabase
+        .from('engagements')
+        .select('posture_score')
+        .eq('tenant_id', tenantId)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('agent_runs')
+        .select('id, agent, status, started_at')
+        .eq('tenant_id', tenantId)
+        .order('started_at', { ascending: false })
+        .limit(5),
     ]);
 
-  const openFindings = findings.error || !findings.data ? null
-    : findings.data.filter((row) => ['open', 'planned', 'in_remediation'].includes(row.status)).length;
-  const pendingApprovals = actions.error || !actions.data ? null
-    : actions.data.filter((row) => row.approval_status === 'awaiting_approval').length;
+  const openFindings =
+    findings.error || !findings.data
+      ? null
+      : findings.data.filter((row) => ['open', 'planned', 'in_remediation'].includes(row.status))
+          .length;
+  const pendingApprovals =
+    actions.error || !actions.data
+      ? null
+      : actions.data.filter((row) => row.approval_status === 'awaiting_approval').length;
   const rawPosture = engagement.error ? null : engagement.data?.posture_score;
-  const normalizedPosture = rawPosture == null ? null
-    : Number(rawPosture) <= 1 ? Number(rawPosture) * 100 : Number(rawPosture);
-  const posture = normalizedPosture !== null && Number.isFinite(normalizedPosture)
-    && normalizedPosture >= 0 && normalizedPosture <= 100 ? Math.round(normalizedPosture) : null;
+  const normalizedPosture =
+    rawPosture == null
+      ? null
+      : Number(rawPosture) <= 1
+        ? Number(rawPosture) * 100
+        : Number(rawPosture);
+  const posture =
+    normalizedPosture !== null &&
+    Number.isFinite(normalizedPosture) &&
+    normalizedPosture >= 0 &&
+    normalizedPosture <= 100
+      ? Math.round(normalizedPosture)
+      : null;
 
   const cards = [
-    { label: 'Recorded open findings', value: openFindings, href: '/assessment', detail: 'Open, planned, or in remediation' },
-    { label: 'Awaiting approval', value: pendingApprovals, href: '/approval', detail: 'Recorded actions awaiting human review' },
-    { label: 'Evidence records', value: evidence.error ? null : evidence.count, href: '/evidence', detail: 'Storage assurance is shown per record' },
-    { label: 'DSAR records', value: dsars.error ? null : dsars.count, href: '/dsars', detail: 'Inspect each request for status and deadline' },
-    { label: 'Consent records', value: consents.error ? null : consents.count, href: '/consent', detail: 'Recorded grants and withdrawals; validity is record-specific' },
-    { label: 'Ledger entries', value: ledger.error ? null : ledger.count, href: '/ledger', detail: 'Verify chain integrity in the ledger' },
+    {
+      label: 'Recorded open findings',
+      value: openFindings,
+      href: '/assessment',
+      detail: 'Open, planned, or in remediation',
+    },
+    {
+      label: 'Awaiting approval',
+      value: pendingApprovals,
+      href: '/approval',
+      detail: 'Recorded actions awaiting human review',
+    },
+    {
+      label: 'Evidence records',
+      value: evidence.error ? null : evidence.count,
+      href: '/evidence',
+      detail: 'Storage assurance is shown per record',
+    },
+    {
+      label: 'DSAR records',
+      value: dsars.error ? null : dsars.count,
+      href: '/dsars',
+      detail: 'Inspect each request for status and deadline',
+    },
+    {
+      label: 'Consent records',
+      value: consents.error ? null : consents.count,
+      href: '/consent',
+      detail: 'Recorded grants and withdrawals; validity is record-specific',
+    },
+    {
+      label: 'Ledger entries',
+      value: ledger.error ? null : ledger.count,
+      href: '/ledger',
+      detail: 'Verify chain integrity in the ledger',
+    },
   ];
 
   return (
@@ -53,17 +115,27 @@ export default async function DashboardPage() {
         </p>
         <div className="mt-5 rounded-xl border border-white/20 p-4">
           <p className="text-sm text-slate-200">Latest recorded engagement posture</p>
-          <p className="mt-1 text-3xl font-semibold">{posture === null ? 'Unavailable' : `${posture}/100`}</p>
+          <p className="mt-1 text-3xl font-semibold">
+            {posture === null ? 'Unavailable' : `${posture}/100`}
+          </p>
           <p className="mt-1 text-xs text-slate-300">
-            {posture === null ? 'No verified posture score is available.' : 'Review the engagement for assessment scope and source.'}
+            {posture === null
+              ? 'No verified posture score is available.'
+              : 'Review the engagement for assessment scope and source.'}
           </p>
         </div>
       </header>
 
-      <section aria-label="Recorded tenant metrics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <section
+        aria-label="Recorded tenant metrics"
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
         {cards.map((card) => (
-          <Link key={card.label} href={card.href}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm focus-visible:outline-2 focus-visible:outline-teal-500 hover:border-teal-500">
+          <Link
+            key={card.label}
+            href={card.href}
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm focus-visible:outline-2 focus-visible:outline-teal-500 hover:border-teal-500"
+          >
             <h2 className="text-sm font-medium text-slate-600">{card.label}</h2>
             <p className="mt-2 text-3xl font-semibold text-[#1E2A4A]">{metric(card.value)}</p>
             <p className="mt-2 text-xs text-slate-500">{card.detail}</p>
@@ -83,7 +155,9 @@ export default async function DashboardPage() {
               <li key={run.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
                 <span className="font-medium">{run.agent}</span>
                 <span>{run.status}</span>
-                <time dateTime={run.started_at} className="text-slate-500">{run.started_at}</time>
+                <time dateTime={run.started_at} className="text-slate-500">
+                  {run.started_at}
+                </time>
               </li>
             ))}
           </ul>

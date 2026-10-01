@@ -331,7 +331,8 @@ export function AgentWorkbenchClient({
             </p>
           </div>
           <p className="mt-4 border-t border-[#eef1f5] pt-3 text-[11px] text-slate-500">
-            Gateway location and redaction health require runtime checks; no status is inferred here.
+            Gateway location and redaction health require runtime checks; no status is inferred
+            here.
           </p>
         </div>
       </div>
@@ -367,7 +368,10 @@ export function AgentWorkbenchClient({
               </select>
 
               {workflowHref ? (
-                <Link href={workflowHref} className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-4 py-2 text-xs font-semibold text-white">
+                <Link
+                  href={workflowHref}
+                  className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-4 py-2 text-xs font-semibold text-white"
+                >
                   Open {selectedAgent} workflow
                 </Link>
               ) : (
@@ -442,7 +446,9 @@ export function AgentWorkbenchClient({
             </div>
 
             {recentRuns === null ? (
-              <p role="alert" className="text-xs text-slate-500">Recent ledger activity is unavailable.</p>
+              <p role="alert" className="text-xs text-slate-500">
+                Recent ledger activity is unavailable.
+              </p>
             ) : recentRuns.length === 0 ? (
               <div className="p-8 text-center bg-white space-y-3">
                 <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 border border-teal-200 text-[#0FB5A5]">
@@ -454,16 +460,24 @@ export function AgentWorkbenchClient({
                   </div>
                   <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
                     When autonomous agents (Drishti, Parikshan, Sudhaar, Karya, Saakshi, etc.)
-                    record ledger events for this tenant, the saved events appear here after refresh.
+                    record ledger events for this tenant, the saved events appear here after
+                    refresh.
                   </p>
                 </div>
                 {workflowHref ? (
-                  <Link href={workflowHref} className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-3.5 py-1.5 text-xs font-semibold text-white">
+                  <Link
+                    href={workflowHref}
+                    className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-3.5 py-1.5 text-xs font-semibold text-white"
+                  >
                     Open selected workflow
                   </Link>
                 ) : (
-                  <button type="button" onClick={handleRun} disabled={isExecuting}
-                    className="inline-flex items-center rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                  <button
+                    type="button"
+                    onClick={handleRun}
+                    disabled={isExecuting}
+                    className="inline-flex items-center rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >
                     Run selected agent
                   </button>
                 )}
@@ -534,7 +548,9 @@ export function AgentWorkbenchClient({
 
             <div className="mb-4">
               {pendingPlans === null ? (
-                <p role="alert" className="text-xs text-slate-500">Review plans are unavailable.</p>
+                <p role="alert" className="text-xs text-slate-500">
+                  Review plans are unavailable.
+                </p>
               ) : pendingPlans.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-[#F4F6F8]/70 p-4 text-center space-y-2">
                   <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-[#0a8d80] text-sm">
@@ -592,7 +608,9 @@ export function AgentWorkbenchClient({
             <div className="font-semibold text-slate-800">Deployment Telemetry</div>
             <div className="flex justify-between text-slate-600">
               <span>Target Region</span>
-              <span className="font-mono font-medium text-slate-900">Configured target: {dataResidencyRegion}; verify deployment</span>
+              <span className="font-mono font-medium text-slate-900">
+                Configured target: {dataResidencyRegion}; verify deployment
+              </span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>Admin Operator</span>

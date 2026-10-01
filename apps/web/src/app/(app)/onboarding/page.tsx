@@ -21,7 +21,9 @@ export default async function OnboardingPage() {
             P0
           </span>
           <span className="text-[11px] text-[#0FB5A5] font-medium">Enterprise Onboarding</span>
-          <span className="text-[11px] text-[#8a97b8]">Deployment region requires verification</span>
+          <span className="text-[11px] text-[#8a97b8]">
+            Deployment region requires verification
+          </span>
         </div>
         <div className="flex flex-wrap items-baseline gap-3">
           <h1 className="font-heading text-2xl sm:text-[26px] font-bold text-white tracking-tight">

@@ -123,8 +123,14 @@ export default async function MonitoringPage() {
       .limit(50),
   ]);
 
-  if (schedulesRes.error || driftRes.error || alertsRes.error ||
-    !schedulesRes.data || !driftRes.data || !alertsRes.data) {
+  if (
+    schedulesRes.error ||
+    driftRes.error ||
+    alertsRes.error ||
+    !schedulesRes.data ||
+    !driftRes.data ||
+    !alertsRes.data
+  ) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -355,7 +361,9 @@ export default async function MonitoringPage() {
         <CardContent className="flex flex-col gap-2">
           {driftEvents.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No drift events in the loaded page</p>
+              <p className="text-sm font-medium text-indigo-500">
+                No drift events in the loaded page
+              </p>
               <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
                 When a drift check finds the estate has moved — a new system, a lost connection, a
                 control that no longer holds — the detection is recorded here and stays open until

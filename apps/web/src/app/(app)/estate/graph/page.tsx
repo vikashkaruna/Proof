@@ -33,9 +33,15 @@ export default async function EstateGraphPage() {
       .eq('tenant_id', tenant)
       .is('revoked_at', null),
   ]);
-  const failed = estates.error || systems.error || connectors.error || grants.error ||
-    !Array.isArray(estates.data) || !Array.isArray(systems.data) ||
-    !Array.isArray(connectors.data) || !Array.isArray(grants.data);
+  const failed =
+    estates.error ||
+    systems.error ||
+    connectors.error ||
+    grants.error ||
+    !Array.isArray(estates.data) ||
+    !Array.isArray(systems.data) ||
+    !Array.isArray(connectors.data) ||
+    !Array.isArray(grants.data);
   const input: GraphInput = {
     agents: Object.values(AGENT_CONTRACTS).map((a) => ({
       name: a.name,

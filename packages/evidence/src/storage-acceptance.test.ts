@@ -55,31 +55,40 @@ function provider() {
       return {};
     throw new Error('unexpected provider command');
   });
-  vault.seal.mockImplementation(async (input: { bucket: string; key: string; legalHold?: boolean }) => {
-    if (input.bucket.endsWith('-unlocked')) throw new Error('Object Lock required');
-    if (input.legalHold) return { ...receipt, key: input.key, versionId: 'hold-v1', legalHold: true };
-    if (input.key === receipt.key && vault.seal.mock.calls.length > 1)
-      return { ...receipt, versionId: 'v2' };
-    return receipt;
-  });
+  vault.seal.mockImplementation(
+    async (input: { bucket: string; key: string; legalHold?: boolean }) => {
+      if (input.bucket.endsWith('-unlocked')) throw new Error('Object Lock required');
+      if (input.legalHold)
+        return { ...receipt, key: input.key, versionId: 'hold-v1', legalHold: true };
+      if (input.key === receipt.key && vault.seal.mock.calls.length > 1)
+        return { ...receipt, versionId: 'v2' };
+      return receipt;
+    },
+  );
   vault.findEvidenceVersion.mockImplementation(async () => {
     findCount++;
     if (findCount === 2) throw new Error('Ambiguous retained versions');
     return receipt;
   });
-  vault.verifyReceipt.mockImplementation(async (input: { tenantId: string; legalHold?: boolean }) => {
-    if (input.tenantId !== receipt.tenantId) throw new Error('metadata mismatch');
-    if (input.legalHold) throw new Error('legal hold mismatch');
-    return receipt;
-  });
-  vault.retrieve.mockImplementation(async (_bucket: string, _key: string, version: string,
-    options?: { maxBytes?: number }) => {
-    if (version !== 'v1') throw new Error('missing version');
-    if (options?.maxBytes === 1) throw new Error('byte limit');
-    return { body: original };
-  });
-  vault.verifyIntegrity.mockImplementation(async (_bucket: string, _key: string, _version: string,
-    hash: string) => ({ ok: hash !== '0'.repeat(64) }));
+  vault.verifyReceipt.mockImplementation(
+    async (input: { tenantId: string; legalHold?: boolean }) => {
+      if (input.tenantId !== receipt.tenantId) throw new Error('metadata mismatch');
+      if (input.legalHold) throw new Error('legal hold mismatch');
+      return receipt;
+    },
+  );
+  vault.retrieve.mockImplementation(
+    async (_bucket: string, _key: string, version: string, options?: { maxBytes?: number }) => {
+      if (version !== 'v1') throw new Error('missing version');
+      if (options?.maxBytes === 1) throw new Error('byte limit');
+      return { body: original };
+    },
+  );
+  vault.verifyIntegrity.mockImplementation(
+    async (_bucket: string, _key: string, _version: string, hash: string) => ({
+      ok: hash !== '0'.repeat(64),
+    }),
+  );
   return send;
 }
 
@@ -104,19 +113,31 @@ describe('isolated storage acceptance script', () => {
     const configPath = join(dir, 'config.json');
     const resultPath = join(dir, 'result.json');
     const privateStatePath = join(dir, 'state.json');
-    writeFileSync(configPath, JSON.stringify({
-      endpoint: 'http://127.0.0.1:9000', accessKeyId: 'test-user',
-      secretAccessKey: 'test-private', bucket: receipt.bucket, privateStatePath, resultPath,
-    }));
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        endpoint: 'http://127.0.0.1:9000',
+        accessKeyId: 'test-user',
+        secretAccessKey: 'test-private',
+        bucket: receipt.bucket,
+        privateStatePath,
+        resultPath,
+      }),
+    );
     try {
       const send = provider();
       await run(configPath, 'initial');
-      const initial = JSON.parse(readFileSync(resultPath, 'utf8')) as { status: string; outcomes: string[] };
+      const initial = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+        status: string;
+        outcomes: string[];
+      };
       expect(initial.status).toBe('passed');
       expect(initial.outcomes).toContain('root-exact-version-delete-denied-by-local-provider');
       expect(initial.outcomes).toContain('multiple-version-recovery-refuses-ambiguity');
       expect(initial.outcomes).toContain('unlocked-bucket-refused-before-upload');
-      expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(true);
+      expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(
+        true,
+      );
       expect(JSON.parse(readFileSync(privateStatePath, 'utf8'))).toMatchObject({ versionId: 'v1' });
       expect(vault.close).toHaveBeenCalledOnce();
 
@@ -124,7 +145,8 @@ describe('isolated storage acceptance script', () => {
       provider();
       await run(configPath, 'restart');
       expect(JSON.parse(readFileSync(resultPath, 'utf8'))).toMatchObject({
-        status: 'passed', outcomes: ['persistent-volume-restart-preserves-exact-version-encryption-and-retention'],
+        status: 'passed',
+        outcomes: ['persistent-volume-restart-preserves-exact-version-encryption-and-retention'],
       });
 
       vi.clearAllMocks();
@@ -132,7 +154,8 @@ describe('isolated storage acceptance script', () => {
       vault.retrieve.mockRejectedValue(new Error('provider unavailable'));
       await run(configPath, 'unavailable');
       expect(JSON.parse(readFileSync(resultPath, 'utf8'))).toMatchObject({
-        status: 'passed', outcomes: ['unavailable-provider-refuses-within-deadline'],
+        status: 'passed',
+        outcomes: ['unavailable-provider-refuses-within-deadline'],
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

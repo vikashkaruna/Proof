@@ -9,10 +9,12 @@ const state = vi.hoisted(() => ({
   redirect: vi.fn(),
 }));
 vi.mock('@supabase/ssr', () => ({ createServerClient: state.createServerClient }));
-vi.mock('next/server', () => ({ NextResponse: {
-  next: state.next,
-  redirect: state.redirect,
-} }));
+vi.mock('next/server', () => ({
+  NextResponse: {
+    next: state.next,
+    redirect: state.redirect,
+  },
+}));
 
 function request(pathname: string, cookieValues: Record<string, string> = {}): NextRequest {
   const origin = 'https://app.axiomproof.ai';
@@ -22,7 +24,7 @@ function request(pathname: string, cookieValues: Record<string, string> = {}): N
       clone: () => new URL(pathname, origin),
     },
     cookies: {
-      get: (name: string) => cookieValues[name] ? { value: cookieValues[name] } : undefined,
+      get: (name: string) => (cookieValues[name] ? { value: cookieValues[name] } : undefined),
       set: vi.fn(),
     },
   } as unknown as NextRequest;
@@ -34,7 +36,9 @@ beforeEach(() => {
   state.getUser.mockReset();
   state.createServerClient.mockReset().mockReturnValue({ auth: { getUser: state.getUser } });
   state.next.mockReset().mockImplementation(() => ({ kind: 'next', cookies: { set: vi.fn() } }));
-  state.redirect.mockReset().mockImplementation((url: URL) => ({ kind: 'redirect', url: url.toString() }));
+  state.redirect
+    .mockReset()
+    .mockImplementation((url: URL) => ({ kind: 'redirect', url: url.toString() }));
 });
 afterEach(() => vi.unstubAllEnvs());
 

@@ -47,10 +47,16 @@ const review = {
 describe('proposal authority', () => {
   it('returns only tenant-bound persisted proposals and an explicit empty intake', async () => {
     fake.seed('onboarding_proposals', { id: USER, tenant_id: TENANT, status: 'pending' });
-    fake.seed('onboarding_proposals', { id: 'foreign', tenant_id: '33333333-3333-4333-8333-333333333333', status: 'pending' });
+    fake.seed('onboarding_proposals', {
+      id: 'foreign',
+      tenant_id: '33333333-3333-4333-8333-333333333333',
+      status: 'pending',
+    });
     const res = await app(UserRole.VIEWER).request('/v1/onboarding/proposals');
     expect(res.status).toBe(200);
-    const body = await res.json() as { data: { intake: unknown[]; proposals: Array<{ id: string }> } };
+    const body = (await res.json()) as {
+      data: { intake: unknown[]; proposals: Array<{ id: string }> };
+    };
     expect(body.data.intake).toEqual([]);
     expect(body.data.proposals.map((proposal) => proposal.id)).toEqual([USER]);
   });

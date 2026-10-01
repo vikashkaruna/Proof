@@ -3,14 +3,30 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it, vi } from 'vitest';
 import SettingsPage from './page';
 
-vi.mock('@/lib/tenant-context', () => ({ requireTenantContext: async () => ({
-  role: 'viewer',
-  supabase: { auth: { getUser: async () => ({ data: { user: {
-    id: 'user-12345678901234567890', email: 'reader@example.com', user_metadata: {},
-    last_sign_in_at: null,
-  } } }) } },
-}) }));
-vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
+vi.mock('@/lib/tenant-context', () => ({
+  requireTenantContext: async () => ({
+    role: 'viewer',
+    supabase: {
+      auth: {
+        getUser: async () => ({
+          data: {
+            user: {
+              id: 'user-12345678901234567890',
+              email: 'reader@example.com',
+              user_metadata: {},
+              last_sign_in_at: null,
+            },
+          },
+        }),
+      },
+    },
+  }),
+}));
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 
 it('shows only known identity and leaves deployment/storage assertions unverified', async () => {
   const view = renderToStaticMarkup(await SettingsPage());

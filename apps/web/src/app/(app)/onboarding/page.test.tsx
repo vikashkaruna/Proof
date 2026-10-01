@@ -3,9 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it, vi } from 'vitest';
 import OnboardingPage from './page';
 
-vi.mock('@axiom/supabase', () => ({ createSupabaseServerClient: async () => ({ auth: {
-  getUser: async () => ({ data: { user: { email: 'founder@example.com', user_metadata: {} } } }),
-} }) }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseServerClient: async () => ({
+    auth: {
+      getUser: async () => ({
+        data: { user: { email: 'founder@example.com', user_metadata: {} } },
+      }),
+    },
+  }),
+}));
 vi.mock('./onboarding-form', () => ({ OnboardingForm: () => <div>Onboarding fields</div> }));
 
 it('does not claim ledger sealing, assessment completion, or region proof at onboarding', async () => {

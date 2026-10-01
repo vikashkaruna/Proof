@@ -109,23 +109,21 @@ it('requires a human downstream confirmation without claiming connector deletion
 it('labels a legacy current notice as unproven rather than a reviewed publication', async () => {
   vi.stubGlobal(
     'fetch',
-    vi
-      .fn()
-      .mockImplementation(async (url: string) =>
-        url.endsWith('/versions')
-          ? list([
-              {
-                purpose_id: purpose.id,
-                notice_version: 2,
-                notice_en: 'English notice',
-                notice_hi: null,
-                snapshot_sha256: 'a'.repeat(64),
-                provenance: 'legacy_current',
-                created_at: '2026-10-01T00:00:00Z',
-              },
-            ])
-          : reads(url),
-      ),
+    vi.fn().mockImplementation(async (url: string) =>
+      url.endsWith('/versions')
+        ? list([
+            {
+              purpose_id: purpose.id,
+              notice_version: 2,
+              notice_en: 'English notice',
+              notice_hi: null,
+              snapshot_sha256: 'a'.repeat(64),
+              provenance: 'legacy_current',
+              created_at: '2026-10-01T00:00:00Z',
+            },
+          ])
+        : reads(url),
+    ),
   );
   render(<ConsentClient tenantId="tenant-1" canManage={false} />);
   await waitFor(() =>
