@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
 
@@ -9,11 +9,12 @@ const state = vi.hoisted(() => ({
   refresh: vi.fn(),
   switchTenant: vi.fn(),
   pathname: '/dashboard',
+  search: '',
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push, refresh: state.refresh }),
   usePathname: () => state.pathname,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(state.search),
 }));
 vi.mock('./tenant-actions', () => ({ switchTenantAction: state.switchTenant }));
 vi.mock('./sidebar-agent-panel', () => ({ SidebarAgentPanel: () => null }));
@@ -36,6 +37,7 @@ beforeEach(() => {
   state.refresh.mockReset();
   state.switchTenant.mockReset();
   state.pathname = '/dashboard';
+  state.search = '';
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) =>
@@ -505,4 +507,64 @@ it('shows only returned active alerts with their recorded severity and title', a
   expect(screen.getByText('Recorded critical alert')).toBeTruthy();
   expect(screen.getByText('Evidence-backed drift')).toBeTruthy();
   expect(document.body.textContent).not.toContain('No alerts in this loaded page.');
+});
+
+it('does not read or mutate a fabricated tenant when membership is absent', async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <AppShell
+      {...props}
+      tenants={[]}
+      activeTenantSlug="forged-cookie"
+      capabilities={['kill_switch.engage.tenant', 'report.read']}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Switch organization' }).textContent).toContain(
+    'No organization',
+  );
+  expect(
+    screen
+      .getByRole('button', { name: /Kill switch status unavailable/i })
+      .hasAttribute('disabled'),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  expect(screen.getByText('You are not a member of any organization yet.')).toBeTruthy();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('scopes shell reads to a verified membership when a preferred slug is forged', async () => {
+  const fetcher = vi.mocked(globalThis.fetch);
+  render(<AppShell {...props} activeTenantSlug="forged-cookie" capabilities={['report.read']} />);
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/bff/v1/kill-switch/status',
+      expect.objectContaining({ headers: { 'X-Tenant-Id': 'tenant-alpha' } }),
+    ),
+  );
+  expect(screen.getByRole('button', { name: 'Switch organization' }).textContent).toContain(
+    'Alpha Org',
+  );
+  expect(
+    fetcher.mock.calls.every(
+      ([, init]) => (init?.headers as Record<string, string>)?.['X-Tenant-Id'] === 'tenant-alpha',
+    ),
+  ).toBe(true);
+});
+
+it('marks only the selected report tab as the current navigation destination', () => {
+  state.pathname = '/reports';
+  state.search = 'tab=pramaan';
+  render(<AppShell {...props} capabilities={['report.read']} />);
+  const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
+  expect(
+    within(nav)
+      .getByRole('link', { name: /Statutory Proof Dossiers/ })
+      .getAttribute('aria-current'),
+  ).toBe('page');
+  expect(
+    within(nav)
+      .getByRole('link', { name: /Working Reports & Registers/ })
+      .getAttribute('aria-current'),
+  ).toBeNull();
 });
