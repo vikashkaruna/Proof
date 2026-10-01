@@ -10,6 +10,7 @@ import {
   satisfyLoginMfaWithSecret,
   state,
 } from '../fixtures';
+import { localRoleBearer } from '../local-writer';
 import { acceptanceTarget, repoRoot } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
@@ -46,14 +47,14 @@ async function providerAction(action: '--pause-provider' | '--resume-provider') 
   );
 }
 
-async function database(path: string, body?: unknown) {
+async function database(path: string, body?: unknown, bearer: string = state.serviceKey) {
   const response = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     redirect: 'error',
     signal: AbortSignal.timeout(30_000),
     headers: {
       apikey: state.publishableKey,
-      authorization: `Bearer ${state.serviceKey}`,
+      authorization: `Bearer ${bearer}`,
       'content-type': 'application/json',
       Prefer: 'return=representation',
     },
@@ -78,8 +79,10 @@ async function fixturePatch(path: string, body: Record<string, unknown>) {
   expect(response.status).toBe(204);
 }
 
-async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
-  const result = (await database(`rpc/${name}`, args)) as T & { error?: string };
+const humanWriter = () => localRoleBearer('human_action_writer', state);
+
+async function rpc<T>(name: string, args: Record<string, unknown>, bearer?: string): Promise<T> {
+  const result = (await database(`rpc/${name}`, args, bearer)) as T & { error?: string };
   if (result.error) throw new Error(`${name}: ${result.error}`);
   return result;
 }
@@ -137,46 +140,58 @@ async function finalizedAssessment(
   const workloadId = existing[0]?.id ?? crypto.randomUUID();
   let registration = existing[0];
   if (!registration) {
-    registration = (await rpc<{ version: number; status: string }>('manage_workload_identity', {
-      p_tenant_id: state.tenantA.id,
-      p_actor_id: actorId,
-      p_correlation_id: crypto.randomUUID(),
-      p_workload_id: workloadId,
-      p_expected_version: 0,
-      p_agent: 'parikshan',
-      p_spiffe_id: spiffeId,
-      p_status: 'disabled',
-    })) as { id: string; version: number; status: string };
+    registration = (await rpc<{ version: number; status: string }>(
+      'manage_workload_identity',
+      {
+        p_tenant_id: state.tenantA.id,
+        p_actor_id: actorId,
+        p_correlation_id: crypto.randomUUID(),
+        p_workload_id: workloadId,
+        p_expected_version: 0,
+        p_agent: 'parikshan',
+        p_spiffe_id: spiffeId,
+        p_status: 'disabled',
+      },
+      humanWriter(),
+    )) as { id: string; version: number; status: string };
   }
   if (registration.status !== 'active') {
-    const activation = await rpc<{ status: string }>('manage_workload_identity', {
-      p_tenant_id: state.tenantA.id,
-      p_actor_id: actorId,
-      p_correlation_id: crypto.randomUUID(),
-      p_workload_id: workloadId,
-      p_expected_version: registration.version,
-      p_agent: 'parikshan',
-      p_spiffe_id: spiffeId,
-      p_status: 'active',
-    });
+    const activation = await rpc<{ status: string }>(
+      'manage_workload_identity',
+      {
+        p_tenant_id: state.tenantA.id,
+        p_actor_id: actorId,
+        p_correlation_id: crypto.randomUUID(),
+        p_workload_id: workloadId,
+        p_expected_version: registration.version,
+        p_agent: 'parikshan',
+        p_spiffe_id: spiffeId,
+        p_status: 'active',
+      },
+      humanWriter(),
+    );
     expect(activation.status).toBe('active');
   }
   const proofHash = sha(`board-proof-${suffix}`);
   const inputHash = sha(`board-input-${suffix}`);
   const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-  const issued = await rpc<{ run_id: string }>('delegate_workload_task', {
-    p_tenant_id: state.tenantA.id,
-    p_actor_id: actorId,
-    p_workload_id: workloadId,
-    p_agent: 'parikshan',
-    p_estate_id: estateId,
-    p_engagement_id: engagementId,
-    p_correlation_id: crypto.randomUUID(),
-    p_input_hash: inputHash,
-    p_proof_hash: proofHash,
-    p_scopes: ['control_library.read', 'findings.write'],
-    p_expires_at: expiresAt,
-  });
+  const issued = await rpc<{ run_id: string }>(
+    'delegate_workload_task',
+    {
+      p_tenant_id: state.tenantA.id,
+      p_actor_id: actorId,
+      p_workload_id: workloadId,
+      p_agent: 'parikshan',
+      p_estate_id: estateId,
+      p_engagement_id: engagementId,
+      p_correlation_id: crypto.randomUUID(),
+      p_input_hash: inputHash,
+      p_proof_hash: proofHash,
+      p_scopes: ['control_library.read', 'findings.write'],
+      p_expires_at: expiresAt,
+    },
+    humanWriter(),
+  );
   expect(issued.run_id).toMatch(/^[0-9a-f-]{36}$/);
   const started = await rpc<{ library_digest: string; controls: { id: string }[] }>(
     'start_workload_assessment',
@@ -400,6 +415,41 @@ test.describe('real-provider board report lifecycle', () => {
       expect(((await released.json()) as { data: { status: string } }).data.status).toBe(
         'published',
       );
+      const requestTimes = (await database(
+        `board_report_requests?id=eq.${request.requestId}&select=created_at`,
+      )) as { created_at: string }[];
+      const reportTimes = (await database(
+        `reports?id=eq.${draft.reportId}&select=generated_at,reviewed_at,published_at`,
+      )) as { generated_at: string; reviewed_at: string; published_at: string }[];
+      expect(requestTimes).toHaveLength(1);
+      expect(reportTimes).toHaveLength(1);
+      const requestedAt = Date.parse(requestTimes[0]!.created_at);
+      const generatedAt = Date.parse(reportTimes[0]!.generated_at);
+      const reviewedAt = Date.parse(reportTimes[0]!.reviewed_at);
+      const publishedAt = Date.parse(reportTimes[0]!.published_at);
+      expect([requestedAt, generatedAt, reviewedAt, publishedAt].every(Number.isFinite)).toBe(true);
+      expect(requestedAt).toBeLessThanOrEqual(generatedAt);
+      expect(generatedAt).toBeLessThanOrEqual(reviewedAt);
+      expect(reviewedAt).toBeLessThanOrEqual(publishedAt);
+      await test.info().attach('nfr8-board-report-timing.json', {
+        body: Buffer.from(
+          JSON.stringify({
+            kind: 'board',
+            fixture: 'one synthetic finalized assessment control',
+            target: 'owned local provider',
+            sourceBound: true,
+            exactRetainedVersionsVerified: true,
+            released: true,
+            requestToDraftMs: generatedAt - requestedAt,
+            draftToFounderReviewMs: reviewedAt - generatedAt,
+            reviewToReleaseMs: publishedAt - reviewedAt,
+            requestToReleaseWallMs: publishedAt - requestedAt,
+            thresholdMs: 300_000,
+            nfr8: 'UNVERIFIED: synthetic one-control fixture and human-review dwell',
+          }),
+        ),
+        contentType: 'application/json',
+      });
       const publicPdf = await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`);
       expect(publicPdf.status()).toBe(200);
       expect(sha(Buffer.from(await publicPdf.body()))).toBe(pdfVersion.content_hash);

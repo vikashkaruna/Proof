@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: vi.fn() }));
 import { sustenanceRoutes } from './sustenance.js';
 
@@ -42,7 +43,15 @@ function app(role: UserRole = UserRole.ADMIN) {
     c.set('role', role);
     await next();
   });
-  hono.route('/v1', sustenanceRoutes({ client: () => fake.client as never }));
+  // Moved proof RPCs (register_connector_tool, attest/issue grant) must reach the
+  // human writer; the service-role double throws if a handler uses it for them.
+  hono.route(
+    '/v1',
+    sustenanceRoutes({
+      client: () => refuseMovedProofRpcs(fake.client) as never,
+      writer: () => fake.client as never,
+    }),
+  );
   return hono;
 }
 const attestAs = (decision: unknown, role?: UserRole, grant = GRANT) =>

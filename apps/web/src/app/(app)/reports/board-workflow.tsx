@@ -62,19 +62,25 @@ type Artifact = z.infer<typeof artifactSchema>;
 const pageSize = 20;
 const date = (value: string) => new Date(value).toLocaleString();
 
-export function BoardWorkflow({
-  tenantId,
-  canRequest,
-  canManage,
-  onOpenReport,
-  onChanged,
-}: {
+type BoardWorkflowProps = {
   tenantId: string;
   canRequest: boolean;
   canManage: boolean;
   onOpenReport: (reportId: string) => void;
   onChanged: () => void;
-}) {
+};
+
+export function BoardWorkflow(props: BoardWorkflowProps) {
+  return <TenantBoardWorkflow key={props.tenantId} {...props} />;
+}
+
+function TenantBoardWorkflow({
+  tenantId,
+  canRequest,
+  canManage,
+  onOpenReport,
+  onChanged,
+}: BoardWorkflowProps) {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentTotal, setAssessmentTotal] = useState(0);
   const [assessmentOffset, setAssessmentOffset] = useState(0);

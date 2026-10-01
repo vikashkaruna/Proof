@@ -8,9 +8,16 @@ insert into public.control_libraries(version,published_at,published_by,change_lo
  values('test-onboarding',now(),'test','fixture',1,true);
 insert into public.controls(id,library_version,title,obligation,domain,severity,citations,evidence_required,assessment_questions,scoring,remediation_patterns,introduced_in_version)
  values('TEST','test-onboarding','Test','Test','GOV','low','[]','[]','[]','{}','{}','test-onboarding');
-create function pg_temp.onboard(tier public.tenant_tier default 'growth',library text default 'test-onboarding') returns jsonb language sql as $$
- select public.onboard_organization('00000000-0000-0000-0000-000000000061',gen_random_uuid()::text,'Test org',tier,false,false,false,'DPO','dpo@test.invalid','[{"name":"proposed db"}]',library,gen_random_uuid())
-$$;
+create function pg_temp.onboard(tier public.tenant_tier default 'growth',library text default 'test-onboarding') returns jsonb language plpgsql as $$
+declare r jsonb;
+begin
+ set local role human_action_writer;
+ begin
+  r := public.onboard_organization('00000000-0000-0000-0000-000000000061',gen_random_uuid()::text,'Test org',tier,false,false,false,'DPO','dpo@test.invalid','[{"name":"proposed db"}]',library,gen_random_uuid());
+ exception when others then set local role service_role; raise; end;
+ set local role service_role;
+ return r;
+end $$;
 set local role service_role;
 do $$
 declare r jsonb; tid uuid;

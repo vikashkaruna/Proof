@@ -28,12 +28,14 @@ python3 scripts/migrate-database.py --container "$container" --user postgres --d
 sql <<'SQL'
 select registration_upgrade.ok((select bool_and(version=1 and lifecycle_receipt is null) from public.workload_identities),'old identities get no fabricated approval');
 select registration_upgrade.ok((select revoked_at is null from public.workload_task_delegations),'migration changes no outstanding authority');
-grant usage on schema registration_upgrade to service_role;
-grant execute on all functions in schema registration_upgrade to service_role;
+grant usage on schema registration_upgrade to service_role,human_action_writer;
+grant execute on all functions in schema registration_upgrade to service_role,human_action_writer;
 set role service_role;
 select registration_upgrade.reject('update public.workload_identities set status=''disabled''','42501');
+set role human_action_writer;
 select registration_upgrade.ok(public.manage_workload_identity(registration_upgrade.id(11),registration_upgrade.id(1),registration_upgrade.id(41),registration_upgrade.id(31),1,'parikshan','spiffe://axiom.test/parikshan','disabled')->>'version'='2','legacy binding can be disabled without rewriting');
 select registration_upgrade.ok(public.manage_workload_identity(registration_upgrade.id(11),registration_upgrade.id(1),registration_upgrade.id(41),registration_upgrade.id(31),2,'parikshan','spiffe://axiom.test/parikshan','active')->>'error'='invalid_registration','noncanonical legacy identity requires separate reviewed enrollment');
+reset role;
 select registration_upgrade.ok((select revoked_at is not null from public.workload_task_delegations),'reviewed disable permanently revokes old proof');
 select registration_upgrade.ok((select count(*)=1 from public.agent_runs),'upgrade never creates an execution');
 SQL

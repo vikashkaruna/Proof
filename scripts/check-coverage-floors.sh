@@ -73,6 +73,29 @@ MODULES=(
   "@axiom/marketing"
 )
 
+# Fail when a new source-bearing workspace has no explicit floor. This also
+# catches stale names in the list before a missing --filter silently passes.
+node - "${MODULES[@]}" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const expected = new Set(process.argv.slice(2));
+const actual = new Set();
+for (const parent of ['apps', 'packages', 'services']) {
+  for (const item of fs.readdirSync(parent, { withFileTypes: true })) {
+    const dir = path.join(parent, item.name);
+    if (!item.isDirectory() || !fs.existsSync(path.join(dir, 'package.json')) ||
+        !fs.existsSync(path.join(dir, 'src'))) continue;
+    actual.add(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name);
+  }
+}
+const missing = [...actual].filter((name) => !expected.has(name));
+const stale = [...expected].filter((name) => !actual.has(name));
+if (missing.length || stale.length || expected.size !== process.argv.length - 2) {
+  console.error('Coverage module inventory mismatch:', { missing, stale });
+  process.exit(1);
+}
+NODE
+
 for module in "${MODULES[@]}"; do
   echo "  -> ${module}..."
   output="$(mktemp)"
@@ -81,7 +104,20 @@ for module in "${MODULES[@]}"; do
     --coverage.include='src/**/*.{ts,tsx}' \
     --coverage.thresholds.lines=80 \
     --coverage.reporter=text >"${output}" 2>&1; then
-    rg '^Lines[[:space:]]*:' "${output}" | tail -n 1
+    # The text reporter prints a per-file table; a 'Lines :' summary is not
+    # always emitted (CI output lacks it), so read the table's All files row.
+    lines_pct="$(sed 's/\x1b\[[0-9;]*m//g' "${output}" | awk -F'|' '/^[[:space:]]*All files[[:space:]]*\|/ {gsub(/[[:space:]]/, "", $5); print $5; exit}')"
+    if [ -z "${lines_pct}" ]; then
+      # A fully covered package prints only the summary block.
+      lines_pct="$(sed 's/\x1b\[[0-9;]*m//g' "${output}" | awk -F: '/^Lines[[:space:]]*:/ {split($2, a, "%"); gsub(/[[:space:]]/, "", a[1]); print a[1]; exit}')"
+    fi
+    if [ -z "${lines_pct}" ]; then
+      echo "[!] ${module} passed but printed no line-coverage figure; vitest output follows"
+      tail -n 40 "${output}"
+      EXIT_CODE=1
+    else
+      echo "     lines: ${lines_pct}%"
+    fi
   else
     echo "[!] ${module} did not meet the 80% source-line floor or its tests failed"
     tail -n 24 "${output}"

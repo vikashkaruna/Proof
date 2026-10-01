@@ -46,8 +46,9 @@ export function LedgerPagination({
 
   const handleJumpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const p = parseInt(jumpPage.trim(), 10);
-    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+    const entered = jumpPage.trim();
+    const p = Number(entered);
+    if (/^\d+$/.test(entered) && Number.isSafeInteger(p) && p >= 1 && p <= totalPages) {
       navigateTo(p);
       setJumpPage('');
     }

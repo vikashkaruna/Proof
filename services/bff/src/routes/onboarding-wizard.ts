@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { AdvanceOnboardingWizardRequestSchema, Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
@@ -35,6 +35,7 @@ const unavailable = {
 export function onboardingWizardRoutes(deps: { client?: typeof createSupabaseAdmin } = {}) {
   const app = new Hono<{ Variables: Variables }>();
   const db = () => (deps.client ?? createSupabaseAdmin)();
+  const writer = () => (deps.client ?? createHumanActionWriter)();
 
   app.get('/onboarding/wizard', async (c) => {
     const denied = requireCapability(c, Capability.POSTURE_READ);
@@ -64,7 +65,7 @@ export function onboardingWizardRoutes(deps: { client?: typeof createSupabaseAdm
   app.post('/onboarding/wizard', async (c) => {
     const denied = requireCapability(c, Capability.ESTATE_MANAGE);
     if (denied) return denied;
-    const { data, error } = await db().rpc('start_onboarding_wizard', {
+    const { data, error } = await writer().rpc('start_onboarding_wizard', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_correlation_id: randomUUID(),
@@ -94,7 +95,7 @@ export function onboardingWizardRoutes(deps: { client?: typeof createSupabaseAdm
         400,
       );
     const { step, expectedVersion, ...payload } = parsed.data;
-    const { data, error } = await db().rpc('advance_onboarding_wizard', {
+    const { data, error } = await writer().rpc('advance_onboarding_wizard', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_wizard_id: c.req.param('id'),

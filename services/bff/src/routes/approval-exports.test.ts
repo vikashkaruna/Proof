@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { randomUUID } from 'node:crypto';
 import { approvalExportRoutes } from './approval-exports.js';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { abortableResult } from '../test/abortable-result.js';
 import { packFixture } from '../test/evidence-pack-fixture.js';
 import { tenant } from '../test/evidence-fixture.js';
@@ -23,7 +24,10 @@ function app(user = fixture.owner, role: UserRole = UserRole.OWNER, tenantId = t
     c.set('tenantId', tenantId);
     await next();
   });
-  instance.route('/v1', approvalExportRoutes({ db: fixture.db, writerDb: fixture.db }));
+  instance.route(
+    '/v1',
+    approvalExportRoutes({ db: refuseMovedProofRpcs(fixture.db), writer: () => fixture.db }),
+  );
   return instance;
 }
 

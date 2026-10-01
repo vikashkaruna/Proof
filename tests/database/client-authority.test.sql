@@ -59,11 +59,19 @@ select pg_temp.assert_true((select not is_axiom_internal from users where id=aut
 
 reset role;
 set local role service_role;
-select public.append_ledger(
+select pg_temp.denied($q$select public.append_ledger(
+  '00000000-0000-0000-0000-000000000021', gen_random_uuid(), 'system', 'security-test',
+  null, null, null, 'tenant.updated', null, null, null, null, null, null, null, 'success', '{}'
+)$q$);
+reset role;
+set local role agent_ledger_writer;
+select public.append_agent_ledger(
   '00000000-0000-0000-0000-000000000021', gen_random_uuid(), 'system', 'security-test',
   null, null, null, 'tenant.updated', null, null, null, null, null, null, null, 'success', '{}'
 );
-select pg_temp.assert_true((select count(*) = 1 from public.audit_ledger), 'sanctioned ledger RPC still works');
+reset role;
+set local role service_role;
+select pg_temp.assert_true((select count(*) = 1 from public.audit_ledger), 'sanctioned producer ledger RPC still works and service role cannot call append_ledger directly');
 select pg_temp.denied('delete from public.audit_ledger');
 reset role;
 select pg_temp.assert_true(not has_table_privilege('service_role','public.audit_ledger','INSERT'), 'backend cannot insert ledger directly');

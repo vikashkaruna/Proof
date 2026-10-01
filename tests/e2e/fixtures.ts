@@ -1,4 +1,6 @@
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
+import { localRoleBearer } from './local-writer';
+import { insertLocalFixtureRow } from './local-db';
 import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
 import { readFileSync } from 'node:fs';
 import { expect, type Page, type Response } from '@playwright/test';
@@ -56,55 +58,32 @@ export async function createApprovablePlan(label: string): Promise<{
   const actionId = crypto.randomUUID();
   const title = `${label} ${id.slice(0, 8)}`;
 
-  const post = async (path: string, body: unknown, what: string) => {
-    const res = await fetch(`${state.supabaseUrl}${path}`, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        apikey: state.publishableKey,
-        Authorization: `Bearer ${state.serviceKey}`,
-        'content-type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify(body),
-    });
-    if (res.status !== 201) {
-      throw new Error(`${what}: ${res.status} — ${(await res.text()).slice(0, 300)}`);
-    }
-  };
-
-  await post(
-    '/rest/v1/remediation_plans',
-    {
-      id,
-      tenant_id: state.tenantA.id,
-      engagement_id: state.engagementA,
-      library_version: state.libraryVersion,
-      title,
-      status: 'review',
-    },
-    'plan fixture',
-  );
-  await post(
-    '/rest/v1/remediation_actions',
-    {
-      id: actionId,
-      tenant_id: state.tenantA.id,
-      plan_id: id,
-      sequence: 1,
-      action_type: 'data.mask',
-      description: 'Mask a column',
-      risk_score: 10,
-      rollback_definition: { restore: 'persona-snapshot' },
-      parameters: { columns: ['email'] },
-      closes_finding_ids: [],
-      dry_run_status: 'dry_run_complete',
-      rollback_validated: true,
-      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-      dry_run_result: { recordsAffected: 12 },
-    },
-    'action fixture',
-  );
+  // Plans and actions are not writable through the service credential (0099), so
+  // these synthetic rows go in as the local database owner.
+  await insertLocalFixtureRow('remediation_plans', {
+    id,
+    tenant_id: state.tenantA.id,
+    engagement_id: state.engagementA,
+    library_version: state.libraryVersion,
+    title,
+    status: 'review',
+  });
+  await insertLocalFixtureRow('remediation_actions', {
+    id: actionId,
+    tenant_id: state.tenantA.id,
+    plan_id: id,
+    sequence: 1,
+    action_type: 'data.mask',
+    description: 'Mask a column',
+    risk_score: 10,
+    rollback_definition: { restore: 'persona-snapshot' },
+    parameters: { columns: ['email'] },
+    closes_finding_ids: [],
+    dry_run_status: 'dry_run_complete',
+    rollback_validated: true,
+    dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    dry_run_result: { recordsAffected: 12 },
+  });
 
   return { id, title, actionId };
 }
@@ -324,7 +303,7 @@ export async function registerWorkload(agent: 'drishti' | 'karya', label: string
       method: 'POST',
       headers: {
         apikey: state.publishableKey,
-        Authorization: `Bearer ${state.serviceKey}`,
+        Authorization: `Bearer ${localRoleBearer('human_action_writer', state)}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({

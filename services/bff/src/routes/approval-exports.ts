@@ -16,7 +16,6 @@ import {
   listApprovalHistoryInputSchema,
   exportApprovalHistoryInputSchema,
 } from '../services/approval-exports.js';
-import { createApprovalArchiveWriter } from '../services/approval-archive-writer.js';
 
 type Ctx = Context<{ Variables: Variables }>;
 
@@ -34,17 +33,14 @@ function invalid(c: Ctx, message?: string) {
 export function approvalExportRoutes(
   dependencies: {
     db?: EvidenceDatabase;
-    writerDb?: Pick<EvidenceDatabase, 'rpc'>;
+    writer?: () => EvidenceDatabase;
     service?: ApprovalExportService;
   } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
     dependencies.service ??
-    new ApprovalExportService(
-      dependencies.db ?? createSupabaseAdmin(),
-      dependencies.writerDb ?? createApprovalArchiveWriter(),
-    );
+    new ApprovalExportService(dependencies.db ?? createSupabaseAdmin(), dependencies.writer);
 
   // 1. List Approval History
   app.get('/approvals/history', async (c) => {

@@ -46,9 +46,10 @@ docker network create "$NET" >/dev/null
 # One secret signs in GoTrue and validates in PostgREST. They were two
 # different hardcoded values once, which meant no token GoTrue issued could
 # ever be accepted; nothing noticed because authentication was bypassed.
-eval "$(node scripts/mint-supabase-keys.mjs --env selfhosted-test | grep -E '^(SUPABASE_JWT_SECRET|SUPABASE_ANON_KEY|SUPABASE_SERVICE_KEY|SUPABASE_ARCHIVE_WRITER_KEY)=')"
+eval "$(node scripts/mint-supabase-keys.mjs --env selfhosted-test | grep -E '^(SUPABASE_JWT_SECRET|SUPABASE_ANON_KEY|SUPABASE_SERVICE_KEY|SUPABASE_ARCHIVE_WRITER_KEY|SUPABASE_HUMAN_ACTION_WRITER_KEY|SUPABASE_AGENT_LEDGER_WRITER_KEY)=')"
 [ -n "${SUPABASE_JWT_SECRET:-}" ] || { echo 'FAIL: no JWT secret minted'; exit 1; }
 [ -n "${SUPABASE_ANON_KEY:-}" ] || { echo 'FAIL: no anon key minted'; exit 1; }
+[ -n "${SUPABASE_HUMAN_ACTION_WRITER_KEY:-}" ] && [ -n "${SUPABASE_AGENT_LEDGER_WRITER_KEY:-}" ] && [ -n "${SUPABASE_ARCHIVE_WRITER_KEY:-}" ] || { echo 'FAIL: a scoped writer key was not minted'; exit 1; }
 echo '  ✓ Minted a JWT secret and its anon/service keys'
 
 # ─── An empty managed database, as Cloud SQL is ──────────────────────
@@ -211,39 +212,55 @@ SERVICE_ROWS="$(curl -fsS "${BASE}/rest/v1/tenants?select=id" \
 [ "$SERVICE_ROWS" = "1" ] || { echo "FAIL: service role read ${SERVICE_ROWS} rows; expected the known tenant without BYPASSRLS"; exit 1; }
 echo '  ✓ Service role reads known application data without BYPASSRLS'
 
-# The shared agent/service JWT cannot forge an exported ledger receipt. The
-# BFF-only writer JWT reaches the audited RPC (which then rejects the absent
-# tenant). These are real PostgREST role-switch checks, not SQL-owner calls.
+# Real PostgREST role-switch checks (not SQL-owner calls). A refusal must be
+# exactly HTTP 403 (insufficient_privilege): 404 would also pass for a
+# misspelt parameter and make every denial below vacuous, so each refusal is
+# paired with a positive control that reaches the same function shape.
+rpc_code() { # key function body -> HTTP status
+  curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/rpc/$2" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d "$3"
+}
+rpc_body() { # key function body -> response body (must be HTTP 200)
+  curl -fsS -X POST "${BASE}/rest/v1/rpc/$2" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d "$3"
+}
+expect_refused() { # label key function body
+  local code; code="$(rpc_code "$2" "$3" "$4")"
+  [ "$code" = "403" ] || { echo "FAIL: $1 (expected HTTP 403, got ${code})"; exit 1; }
+}
+expect_json_error() { # label expected response
+  printf '%s' "$3" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("error") == sys.argv[1]' "$2" \
+    || { echo "FAIL: $1 (response: $(printf '%s' "$3" | head -c 200))"; exit 1; }
+}
+
+# The shared agent/service JWT cannot forge an exported ledger receipt or an
+# archive transition. Only the BFF human action writer reaches them, and the
+# 0090 archive writer now keeps release only.
 EXPORT_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_plan_id":null,"p_format":"json","p_filter_params":{},"p_summary":{},"p_artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_artifact_bytes":1,"p_correlation_id":"00000000-0000-4000-8000-0000000000fd"}'
-SERVICE_EXPORT_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/rpc/record_approval_export" \
-  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-  -H 'Content-Type: application/json' -d "$EXPORT_BODY")"
-[ "$SERVICE_EXPORT_CODE" = "403" ] || [ "$SERVICE_EXPORT_CODE" = "404" ] || {
-  echo "FAIL: shared service key reached approval export recorder (${SERVICE_EXPORT_CODE})"; exit 1;
-}
-WRITER_EXPORT_RESPONSE="$(curl -fsS -X POST "${BASE}/rest/v1/rpc/record_approval_export" \
-  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_ARCHIVE_WRITER_KEY}" \
-  -H 'Content-Type: application/json' -d "$EXPORT_BODY")"
-printf '%s' "$WRITER_EXPORT_RESPONSE" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("error") == "tenant_not_found"'
-echo '  ✓ Shared service JWT denied; dedicated archive writer JWT reaches audited recorder'
+expect_refused 'shared service key reached approval export recorder' "$SUPABASE_SERVICE_KEY" record_approval_export "$EXPORT_BODY"
+expect_refused 'archive writer still reaches the moved export recorder' "$SUPABASE_ARCHIVE_WRITER_KEY" record_approval_export "$EXPORT_BODY"
+expect_json_error 'human writer did not reach the audited recorder tenant gate' tenant_not_found \
+  "$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" record_approval_export "$EXPORT_BODY")"
+echo '  ✓ Shared service and archive-writer JWTs denied; human action writer JWT reaches audited recorder'
 ARCHIVE_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_token_id":"00000000-0000-4000-8000-0000000000fd","p_operation_key":"00000000-0000-4000-8000-0000000000fc","p_provider":"s3","p_bucket":"archive-fixture","p_object_key":"invalid","p_source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_source_bytes":1,"p_correlation_id":"00000000-0000-4000-8000-0000000000fb"}'
-SERVICE_ARCHIVE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/rpc/begin_approval_proof_archive" \
-  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-  -H 'Content-Type: application/json' -d "$ARCHIVE_BODY")"
-[ "$SERVICE_ARCHIVE_CODE" = "403" ] || [ "$SERVICE_ARCHIVE_CODE" = "404" ] || {
-  echo "FAIL: shared service key reached archive mutation (${SERVICE_ARCHIVE_CODE})"; exit 1;
-}
-WRITER_ARCHIVE_RESPONSE="$(curl -fsS -X POST "${BASE}/rest/v1/rpc/begin_approval_proof_archive" \
-  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_ARCHIVE_WRITER_KEY}" \
-  -H 'Content-Type: application/json' -d "$ARCHIVE_BODY")"
-printf '%s' "$WRITER_ARCHIVE_RESPONSE" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("error") == "founder_authority_required"'
-echo '  ✓ Shared service JWT denied; dedicated archive writer JWT reaches founder gate'
+expect_refused 'shared service key reached archive mutation' "$SUPABASE_SERVICE_KEY" begin_approval_proof_archive "$ARCHIVE_BODY"
+expect_refused 'archive writer still reaches the moved begin RPC' "$SUPABASE_ARCHIVE_WRITER_KEY" begin_approval_proof_archive "$ARCHIVE_BODY"
+expect_json_error 'human writer did not reach the archive founder gate' founder_authority_required \
+  "$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" begin_approval_proof_archive "$ARCHIVE_BODY")"
+RELEASE_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_archive_id":"00000000-0000-4000-8000-0000000000fd","p_source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_version_id":"probe","p_correlation_id":"00000000-0000-4000-8000-0000000000fc"}'
+expect_refused 'shared service key reached archive release' "$SUPABASE_SERVICE_KEY" release_approval_proof_archive "$RELEASE_BODY"
+expect_refused 'human writer reached archive release' "$SUPABASE_HUMAN_ACTION_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY"
+expect_json_error 'archive writer did not reach the release founder gate' founder_authority_required \
+  "$(rpc_body "$SUPABASE_ARCHIVE_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY")"
+echo '  ✓ Archive RPCs: service denied; human writer reaches begin; archive writer reaches release only'
 
 # Exercise the same apikey/Authorization split that the BFF's supabase-js
 # client sends through the HTTP gateway, not just hand-crafted curl headers.
 (
   cd services/bff
-  AXIOM_PROBE_URL="$BASE" AXIOM_PROBE_ANON="$SUPABASE_ANON_KEY" AXIOM_PROBE_WRITER="$SUPABASE_ARCHIVE_WRITER_KEY" \
+  AXIOM_PROBE_URL="$BASE" AXIOM_PROBE_ANON="$SUPABASE_ANON_KEY" AXIOM_PROBE_WRITER="$SUPABASE_HUMAN_ACTION_WRITER_KEY" \
     node --input-type=module <<'NODE'
 import { createClient } from '@supabase/supabase-js';
 const client = createClient(process.env.AXIOM_PROBE_URL, process.env.AXIOM_PROBE_ANON, {
@@ -271,6 +288,61 @@ SERVICE_WRITE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1
   -d '{"id":"00000000-0000-4000-8000-0000000000f2","slug":"service-write","name":"Service write fixture"}')"
 [ "$SERVICE_WRITE" = "201" ] || { echo "FAIL: service-role write was refused (${SERVICE_WRITE})"; exit 1; }
 echo '  ✓ Service role can persist application data without BYPASSRLS'
+
+# ─── 0099: ledger authorship and the claimed execution gate ──────────
+# The tenant created just above is the throwaway the producer event lands in.
+LEDGER_TENANT='00000000-0000-4000-8000-0000000000f2'
+ledger_body() { # actor_type actor_id action_type
+  printf '{"p_tenant_id":"%s","p_correlation_id":"00000000-0000-4000-8000-0000000000e1","p_actor_type":"%s","p_actor_id":"%s","p_agent_version":null,"p_model_id":null,"p_prompt_hash":null,"p_action_type":"%s","p_target_ref":null,"p_input_hash":null,"p_output_hash":null,"p_approval_token_id":null,"p_approver_id":null,"p_pre_state_ref":null,"p_post_state_ref":null,"p_result":"success","p_detail":{}}' \
+    "$LEDGER_TENANT" "$1" "$2" "$3"
+}
+SYSTEM_EVENT="$(ledger_body system gateway-probe discovery.started)"
+# A real member of the throwaway tenant, so the human wrapper's membership check
+# passes and only the role grant can refuse the agent writer (no masked denial).
+MEMBER_ID="$(printf '%s' "$SIGNUP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["user"]["id"])')"
+curl -fsS -o /dev/null -X POST "${BASE}/rest/v1/users" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"${MEMBER_ID}\",\"email\":\"${EMAIL}\"}" || { echo 'FAIL: could not mirror the ledger probe user'; exit 1; }
+MEMBER_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/tenant_users" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"tenant_id\":\"${LEDGER_TENANT}\",\"user_id\":\"${MEMBER_ID}\",\"role\":\"founder\"}")"
+[ "$MEMBER_CODE" = "201" ] || { echo "FAIL: could not enrol the ledger probe member (${MEMBER_CODE})"; exit 1; }
+HUMAN_EVENT="$(ledger_body human "$MEMBER_ID" discovery.started)"
+HUMAN_AUTHORITY_EVENT="$(ledger_body system gateway-probe report.released)"
+# (b) positive control first: the agent writer appends a harmless system event.
+AGENT_APPEND="$(rpc_body "$SUPABASE_AGENT_LEDGER_WRITER_KEY" append_agent_ledger "$SYSTEM_EVENT")"
+printf '%s' "$AGENT_APPEND" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v,int) and v>0' \
+  || { echo "FAIL: agent ledger writer did not append a system event (response: ${AGENT_APPEND})"; exit 1; }
+# Positive control for the human wrapper: its own writer appends the same event
+# for a real member, so the refusals below cannot be masked by the membership check.
+HUMAN_APPEND="$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" append_human_ledger "$HUMAN_EVENT")"
+printf '%s' "$HUMAN_APPEND" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v,int) and v>0' \
+  || { echo "FAIL: human action writer did not append a member's event (response: ${HUMAN_APPEND})"; exit 1; }
+# (a) the generic service JWT is refused on all four entry points.
+for fn in append_ledger append_agent_ledger; do
+  expect_refused "shared service key reached ${fn}" "$SUPABASE_SERVICE_KEY" "$fn" "$SYSTEM_EVENT"
+done
+expect_refused 'shared service key reached append_human_ledger' "$SUPABASE_SERVICE_KEY" append_human_ledger "$HUMAN_EVENT"
+BATCH_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000f2","p_plan_id":"00000000-0000-4000-8000-0000000000d1","p_request_key":"gateway-probe","p_correlation_id":"00000000-0000-4000-8000-0000000000e2","p_nonce":"n","p_content_digest":"d","p_mode":"sequential","p_concurrency":1,"p_stop_on_failure":true,"p_dispatch_reference":"gateway-probe","p_action_ids":[]}'
+expect_refused 'shared service key reached the legacy start_execution_batch' "$SUPABASE_SERVICE_KEY" start_execution_batch "$BATCH_BODY"
+# (b) the agent writer cannot author a human event, nor a human-authority event
+# under a system label, nor call the raw append.
+expect_refused 'agent ledger writer reached append_human_ledger' "$SUPABASE_AGENT_LEDGER_WRITER_KEY" append_human_ledger "$HUMAN_EVENT"
+expect_refused 'agent ledger writer appended a human-authority event' "$SUPABASE_AGENT_LEDGER_WRITER_KEY" append_agent_ledger "$HUMAN_AUTHORITY_EVENT"
+expect_refused 'agent ledger writer reached append_ledger' "$SUPABASE_AGENT_LEDGER_WRITER_KEY" append_ledger "$SYSTEM_EVENT"
+# (c) the human writer is refused the producer entry points.
+expect_refused 'human action writer reached append_agent_ledger' "$SUPABASE_HUMAN_ACTION_WRITER_KEY" append_agent_ledger "$SYSTEM_EVENT"
+expect_refused 'human action writer reached start_claimed_execution_batch' "$SUPABASE_HUMAN_ACTION_WRITER_KEY" start_claimed_execution_batch "$BATCH_BODY"
+expect_refused 'agent ledger writer reached start_claimed_execution_batch' "$SUPABASE_AGENT_LEDGER_WRITER_KEY" start_claimed_execution_batch "$BATCH_BODY"
+# (d) the service JWT reaches the claimed gate's business check.
+expect_json_error 'service key did not reach the claimed execution gate' plan_not_found \
+  "$(rpc_body "$SUPABASE_SERVICE_KEY" start_claimed_execution_batch "$BATCH_BODY")"
+echo '  ✓ Ledger: service JWT refused on append_ledger/append_agent_ledger/append_human_ledger/start_execution_batch;'
+echo '    agent writer appends system events only; human writer refused producer paths; service reaches claimed gate'
+# The probe member was only a fixture; later RLS checks need a user with no membership.
+curl -fsS -o /dev/null -X DELETE "${BASE}/rest/v1/tenant_users?user_id=eq.${MEMBER_ID}" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+  || { echo 'FAIL: could not remove the ledger probe membership'; exit 1; }
 
 # ─── RLS answers the token as itself ─────────────────────────────────
 # A brand-new user belongs to no tenant. Migration 0016 made every tenant read

@@ -5,9 +5,9 @@ result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
 sql < tests/database/credential-vault-race-fixture.sql
-sql -c 'grant usage on schema vault_race to service_role;'
+sql -c 'grant usage on schema vault_race to human_action_writer;'
 race() {
-  sql -c "set application_name='vault-first'; begin; set local role service_role; select vault_race.manage('$1',1); select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
+  sql -c "set application_name='vault-first'; begin; set local role human_action_writer; select vault_race.manage('$1',1); select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
   first_pid=$!
   ready=false
   for attempt in $(seq 1 50); do
@@ -15,7 +15,7 @@ race() {
     sleep 0.05
   done
   [ "$ready" = true ] || { cat "$result_dir/first"; exit 1; }
-  sql -c "set application_name='vault-second'; set role service_role; select vault_race.manage('$2',1);" > "$result_dir/second" 2>&1 &
+  sql -c "set application_name='vault-second'; set role human_action_writer; select vault_race.manage('$2',1);" > "$result_dir/second" 2>&1 &
   second_pid=$!
   blocked=false
   for attempt in $(seq 1 30); do

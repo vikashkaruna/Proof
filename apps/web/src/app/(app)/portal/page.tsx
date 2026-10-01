@@ -15,7 +15,9 @@ export const dynamic = 'force-dynamic';
 
 function computeSlaDays(dueBy: string | null | undefined): number | null {
   if (!dueBy) return null;
-  return Math.max(0, Math.round((new Date(dueBy).getTime() - Date.now()) / 86_400_000));
+  const dueAt = new Date(dueBy).getTime();
+  if (!Number.isFinite(dueAt)) return null;
+  return Math.max(0, Math.round((dueAt - Date.now()) / 86_400_000));
 }
 
 /**
@@ -41,8 +43,8 @@ export default async function ClientPortalPage({
     .from('tenants')
     .select('id, name, slug, tier, is_sdf')
     .order('name');
-  if (tenantList.error) loadError = true;
-  else if (tenantList.data?.length)
+  if (tenantList.error || !Array.isArray(tenantList.data)) loadError = true;
+  else if (tenantList.data.length)
     tenants = tenantList.data.map((t) => ({
       id: t.id,
       name: t.name,
@@ -87,7 +89,11 @@ export default async function ClientPortalPage({
       .order('sequence_no', { ascending: false })
       .limit(20),
   ]);
-  if ([plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes].some((r) => r.error))
+  if (
+    [plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes].some(
+      (r) => r.error || !Array.isArray(r.data),
+    )
+  )
     loadError = true;
 
   // The saved-results projection is the single source for assessment figures.
@@ -100,7 +106,7 @@ export default async function ClientPortalPage({
       .eq('tenant_id', tenantId)
       .eq('id', snapshot.engagement.id)
       .maybeSingle();
-    if (detail.error) loadError = true;
+    if (detail.error || !detail.data) loadError = true;
     const posture = detail.data?.posture_score;
     engagement = {
       id: snapshot.engagement.id,
@@ -114,7 +120,7 @@ export default async function ClientPortalPage({
     };
   }
 
-  const dbPlans = plansRes.data ?? [];
+  let dbPlans = plansRes.data ?? [];
   // Actions only for this tenant's listed plans; never an unfiltered table read.
   let dbActions: Array<{
     id: string;
@@ -134,8 +140,12 @@ export default async function ClientPortalPage({
         'plan_id',
         dbPlans.map((p) => p.id),
       );
-    if (actionsRes.error) loadError = true;
-    dbActions = actionsRes.data ?? [];
+    if (actionsRes.error || !Array.isArray(actionsRes.data)) {
+      loadError = true;
+      dbPlans = [];
+    } else {
+      dbActions = actionsRes.data;
+    }
   }
 
   const plans: PlanSummary[] = dbPlans.map((p) => ({

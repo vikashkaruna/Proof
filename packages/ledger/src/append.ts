@@ -3,7 +3,11 @@
  *
  * The BFF and the agent runtime both use this to write entries to the
  * hash-chained ledger. Writes go through the Postgres SECURITY DEFINER
- * function `append_ledger()`, which:
+ * functions `append_human_ledger()` (actor_type human) and
+ * `append_agent_ledger()` (actor_type agent/system), both wrappers over the
+ * internal `append_ledger()`. Each is executable only by a distinct,
+ * scoped PostgREST role, so a human-labelled event can never be written with
+ * the producer credential and vice versa. The routed function:
  *   1. Locks the per-tenant counter
  *   2. Computes the next sequence number
  *   3. Computes the entry hash (SHA-256 of canonicalised payload)
@@ -45,8 +49,55 @@ export interface AppendLedgerResult {
   occurredAt: string;
 }
 
+/**
+ * Writer clients are resolved lazily so a process that only appends one kind
+ * of event does not need the other credential at start-up. A missing resolver
+ * (or a resolver that throws) fails the append closed; there is deliberately
+ * no fallback to the read/verify client.
+ */
+export interface LedgerWriters {
+  human?: () => SupabaseClient;
+  agent?: () => SupabaseClient;
+}
+
+const WRITER_RPC = {
+  human: 'append_human_ledger',
+  agent: 'append_agent_ledger',
+} as const;
+
 export class LedgerClient {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly writers: LedgerWriters = {},
+  ) {}
+
+  private route(actorType: ActorType): {
+    rpc: (typeof WRITER_RPC)[keyof typeof WRITER_RPC];
+    client: SupabaseClient;
+  } {
+    const kind =
+      actorType === 'human'
+        ? 'human'
+        : actorType === 'agent' || actorType === 'system'
+          ? 'agent'
+          : null;
+    if (!kind) throw new LedgerWriteError(`Unsupported ledger actor type: ${String(actorType)}`);
+    const resolve = this.writers[kind];
+    if (!resolve) {
+      throw new LedgerWriteError(
+        `No ${kind} ledger writer is configured for actor type '${actorType}'`,
+      );
+    }
+    let client: SupabaseClient;
+    try {
+      client = resolve();
+    } catch (err) {
+      throw new LedgerWriteError(
+        `The ${kind} ledger writer credential is unavailable: ${err instanceof Error ? err.message : 'unknown'}`,
+      );
+    }
+    return { rpc: WRITER_RPC[kind], client };
+  }
 
   /**
    * Append a single entry to the hash-chained audit ledger.
@@ -63,7 +114,8 @@ export class LedgerClient {
     const outputHash =
       input.outputHash ?? (await sha256(canonicalJson({ ...detail, _kind: 'output' })));
 
-    const { data, error } = await this.supabase.rpc('append_ledger', {
+    const { rpc, client } = this.route(input.actorType);
+    const { data, error } = await client.rpc(rpc, {
       p_tenant_id: input.tenantId,
       p_correlation_id: input.correlationId,
       p_actor_type: input.actorType,
@@ -91,7 +143,7 @@ export class LedgerClient {
       });
     }
     if (!data) {
-      throw new LedgerWriteError('append_ledger returned no data');
+      throw new LedgerWriteError(`${rpc} returned no data`);
     }
 
     // The RPC returns the new id (bigint); the sequence and hash are
@@ -181,11 +233,15 @@ export class LedgerWriteError extends Error {
   }
 }
 
-export function createLedgerClient(supabaseUrl: string, supabaseKey: string): LedgerClient {
+export function createLedgerClient(
+  supabaseUrl: string,
+  supabaseKey: string,
+  writers: LedgerWriters = {},
+): LedgerClient {
   const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: { persistSession: false },
   });
-  return new LedgerClient(supabase);
+  return new LedgerClient(supabase, writers);
 }
 
 export { canonicalJson, sha256 };

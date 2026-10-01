@@ -7,6 +7,11 @@ region                 = "asia-south1" # Strictly Mumbai
 environment            = "preprod"
 cloud_sql_tier         = "db-custom-2-7680" # Or db-f1-micro for cost-optimized preprod
 cloud_sql_disk_size_gb = 20
+# Cloud SQL is private-only by default. The current deployment script's
+# host-side bootstrap/migration phases need a reviewed /32 runner egress CIDR.
+# Set it only for that window, then remove it and reapply. A runner already
+# inside the private VPC does not need this public exception.
+# cloud_sql_authorized_networks = { "reviewed-migration-runner" = "203.0.113.7/32" }
 
 # Upstash Redis
 upstash_redis_url = "rediss://default:YOUR_UPSTASH_TOKEN@your-upstash-instance.upstash.io:6379"

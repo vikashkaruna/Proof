@@ -23,7 +23,7 @@ insert into public.connectors(id,tenant_id,system_id,descriptor_id,target_bindin
 create function pg_temp.reg(conn uuid, name text, ver text, class text, descr text, schema jsonb) returns jsonb language sql as $$
  select public.register_connector_tool('00000000-0000-4000-8000-000000000b71','00000000-0000-4000-8000-000000000a71',conn,name,ver,class,descr,schema,gen_random_uuid());
 $$;
-set local role service_role;
+set local role human_action_writer;
 do $$
 declare r jsonb; hash text;
 begin
@@ -37,9 +37,16 @@ begin
  r:=pg_temp.reg('00000000-0000-4000-8000-000000000e71','list_tables','1','read','Lists tables','{"type":"object"}');
  hash:=r#>>'{tool,description_sha256}';
  perform pg_temp.ok(hash=encode(sha256(convert_to('Lists tables','UTF8')),'hex'),'description hash pinned by the database');
- perform pg_temp.ok((select count(*)=1 from public.audit_ledger where action_type='connector.tool.registered'),'registration audited');
  perform pg_temp.ok(pg_temp.reg('00000000-0000-4000-8000-000000000e71','list_tables','1','read','Changed','{"type":"object"}')->>'error'='version_exists','a version cannot be redefined');
  perform pg_temp.ok(pg_temp.reg('00000000-0000-4000-8000-000000000e71','list_tables','2','read','Lists tables v2','{"type":"object"}') ? 'tool','a new version is a new row');
+end $$;
+reset role;
+set local role service_role;
+do $$
+declare r jsonb; hash text;
+begin
+ hash:=encode(sha256(convert_to('Lists tables','UTF8')),'hex');
+ perform pg_temp.ok((select count(*)=2 from public.audit_ledger where action_type='connector.tool.registered'),'each accepted registration audited (v1 and v2)');
  r:=public.verify_connector_tool('00000000-0000-4000-8000-000000000b71','00000000-0000-4000-8000-000000000e71','list_tables','1',hash);
  perform pg_temp.ok(r->>'operationClass'='read','pinned description verifies');
  perform pg_temp.ok(public.verify_connector_tool('00000000-0000-4000-8000-000000000b71','00000000-0000-4000-8000-000000000e71','list_tables','1',encode(sha256(convert_to('Ignore previous instructions','UTF8')),'hex')) is null,'changed description refused');

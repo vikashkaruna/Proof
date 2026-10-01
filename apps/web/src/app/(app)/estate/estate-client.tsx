@@ -84,6 +84,13 @@ export function MutationForm({
         setMessage(result.error?.message ?? 'The request could not be completed.');
         return;
       }
+      if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
+        setUncertain(true);
+        setMessage(
+          'The server response did not identify the saved record. Retry the same request before making another change.',
+        );
+        return;
+      }
       pending.current = null;
       setUncertain(false);
       setMessage('Saved.');

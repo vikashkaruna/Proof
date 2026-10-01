@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 export interface LedgerStreamEntry {
@@ -18,7 +18,7 @@ export interface LedgerStreamEntry {
   prevHash: string;
   fullPrevHash?: string;
   result: string;
-  detail?: any;
+  detail?: unknown;
   dot: string;
   actorStyle: string;
   chainHead?: boolean;
@@ -45,6 +45,7 @@ export function LedgerStreamView({
   const [prevPage, setPrevPage] = useState<number>(currentPage);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showRawJson, setShowRawJson] = useState<boolean>(false);
 
@@ -54,6 +55,7 @@ export function LedgerStreamView({
     setLoadedPage(currentPage);
     setExtraEntries([]);
     setSelectedSeq(null);
+    setLoadError(false);
   }
 
   const streamList = [...initialEntries, ...extraEntries];
@@ -61,7 +63,7 @@ export function LedgerStreamView({
   // Derive active selected entry
   const activeEntry =
     (selectedSeq !== null ? streamList.find((e) => e.seq === selectedSeq) : null) || streamList[0];
-  const activeCorr = activeEntry?.fullCorr || 'cr-118';
+  const activeCorr = activeEntry?.fullCorr;
 
   const hasMoreToLazyLoad = loadedPage < totalPages;
 
@@ -69,6 +71,7 @@ export function LedgerStreamView({
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMoreToLazyLoad) return;
     setIsLoadingMore(true);
+    setLoadError(false);
 
     try {
       const nextPage = loadedPage + 1;
@@ -80,91 +83,25 @@ export function LedgerStreamView({
       if (!res.ok) throw new Error('Failed to load more entries');
       const data = await res.json();
 
-      if (data.entries && data.entries.length > 0) {
-        setExtraEntries((prev) => [...prev, ...data.entries]);
-        setLoadedPage(nextPage);
-      }
-    } catch (err) {
-      console.error('Failed to lazy load ledger entries:', err);
+      if (!Array.isArray(data.entries)) throw new Error('Unreadable ledger page');
+      setExtraEntries((prev) => [...prev, ...data.entries]);
+      setLoadedPage(nextPage);
+    } catch {
+      setLoadError(true);
     } finally {
       setIsLoadingMore(false);
     }
   };
 
-  const copyToClipboard = (text: string, fieldName: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(fieldName);
-    setTimeout(() => setCopiedField(null), 2000);
+  const copyToClipboard = async (text: string, fieldName: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      setCopiedField(null);
+    }
   };
-
-  // Reconstructed lifecycle steps based on the selected entry
-  const chainSteps = [
-    {
-      n: 1,
-      k: 'Discovery sweep',
-      detail: `Personal data detected in target estate (${activeEntry?.target || 'pg.prod · kyc_documents'})`,
-      agent: 'Drishti',
-      model: 'mistral-7b (domestic)',
-      hash: 'H:7b22…4de',
-      dot: '#0FB5A5',
-    },
-    {
-      n: 2,
-      k: 'Classification & mapping',
-      detail: 'Fields classified as Sensitive Personal Data under DPDPA Schedule I',
-      agent: 'Vibhaag',
-      model: 'claude-3-5-sonnet (redacted)',
-      hash: 'H:8f12…bb4',
-      dot: '#0FB5A5',
-    },
-    {
-      n: 3,
-      k: 'Statutory gap assessment',
-      detail: 'Parikshan evaluated control RET-03: retention period exceeded statutory 5-yr limit',
-      agent: 'Parikshan',
-      model: 'rules-engine-v25',
-      hash: 'H:a3f0…9c1',
-      dot: '#0FB5A5',
-    },
-    {
-      n: 4,
-      k: 'Remediation plan drafted',
-      detail: 'Sudhaar drafted deterministic purge plan (PLAN-118) with validated rollback RB-118a',
-      agent: 'Sudhaar',
-      model: 'gpt-4o (redacted)',
-      hash: 'H:c910…22a',
-      dot: '#0FB5A5',
-    },
-    {
-      n: 5,
-      k: 'Human approval token issued',
-      detail: 'DPO reviewed dry-run simulation (1,840 rows) and signed scope-bound execution token',
-      agent: 'Human Reviewer',
-      model: 'ECDSA P-256 token',
-      hash: 'H:3d90…1bb',
-      dot: '#C9A227',
-    },
-    {
-      n: 6,
-      k: 'Karya mutation executed',
-      detail: `Pre-state snapshot sealed in S3 Object Lock; purge executed against target`,
-      agent: 'Karya',
-      model: 'karya-runtime',
-      hash: activeEntry ? `H:${activeEntry.entryHash}` : 'H:5e41…8f2',
-      dot: '#0FB5A5',
-    },
-    {
-      n: 7,
-      k: 'Post-verification & proof sealed',
-      detail:
-        'Parikshan verified zero orphan dependents; Saakshi sealed completion evidence into WORM vault',
-      agent: 'Saakshi',
-      model: 's3-worm-sealer',
-      hash: 'H:118f…6cc',
-      dot: '#0FB5A5',
-      last: true,
-    },
-  ];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] gap-4 items-start">
@@ -197,10 +134,13 @@ export function LedgerStreamView({
               const isSelected = activeEntry?.seq === l.seq;
 
               return (
-                <div
+                <button
                   key={l.id}
+                  type="button"
                   onClick={() => setSelectedSeq(l.seq)}
-                  className={`grid grid-cols-[60px_1fr_90px] gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                  aria-label={`Inspect ledger entry ${l.seq}: ${l.type}`}
+                  aria-pressed={isSelected}
+                  className={`grid w-full text-left grid-cols-[60px_1fr_90px] gap-3 px-4 py-3 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-teal-500 ${
                     isSelected
                       ? 'bg-[#E5FAF7]/60 border-l-4 border-l-[#0FB5A5]'
                       : 'hover:bg-slate-50/70'
@@ -243,10 +183,11 @@ export function LedgerStreamView({
                             : 'text-[#8a6d10]'
                       }`}
                     >
-                      ✓ {l.result}
+                      {l.result === 'success' ? '✓ ' : l.result === 'failure' ? '✕ ' : ''}
+                      {l.result}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -261,6 +202,14 @@ export function LedgerStreamView({
         )}
 
         {/* Lazy Load More Button */}
+        {loadError && (
+          <p
+            role="alert"
+            className="border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800"
+          >
+            More ledger entries could not be loaded. Retry the same page.
+          </p>
+        )}
         {hasMoreToLazyLoad && (
           <div className="p-3 border-t border-[#e4e8ee] bg-[#F8FAFC] text-center">
             <button
@@ -287,13 +236,13 @@ export function LedgerStreamView({
         )}
       </div>
 
-      {/* Right Column: Reconstructed Chain & Entry Inspector (Sticky) */}
+      {/* Right Column: Recorded Entry Inspector (Sticky) */}
       <div className="sticky top-4 rounded-2xl bg-[#1E2A4A] text-white overflow-hidden shadow-sm">
         {/* Header */}
         <div className="px-5 py-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <div className="text-[10px] font-semibold text-[#0FB5A5] uppercase tracking-wider">
-              Reconstructed chain · {activeCorr.slice(0, 8)}…
+              Correlation · {activeCorr ? `${activeCorr.slice(0, 8)}…` : 'not recorded'}
             </div>
             {activeEntry && (
               <span className="font-mono text-[10px] text-teal-300 bg-white/10 px-2 py-0.5 rounded">
@@ -301,11 +250,9 @@ export function LedgerStreamView({
               </span>
             )}
           </div>
-          <h2 className="font-heading text-base font-semibold text-white mt-1">
-            finding → … → closure
-          </h2>
+          <h2 className="font-heading text-base font-semibold text-white mt-1">Recorded entry</h2>
           <div className="text-[11px] text-[#a9b3ce] mt-0.5">
-            FR-10.3 — the full lifecycle, independently reconstructable
+            Only recorded fields are shown; this entry does not prove a complete lifecycle.
           </div>
         </div>
 
@@ -346,12 +293,12 @@ export function LedgerStreamView({
             </div>
 
             {/* Toggle Raw Detail JSON */}
-            {activeEntry.detail && (
+            {activeEntry.detail != null && (
               <div className="pt-1">
                 <button
                   type="button"
                   onClick={() => setShowRawJson(!showRawJson)}
-                  className="text-[10px] text-[#C9A227] hover:underline cursor-pointer flex items-center gap-1"
+                  className="text-[10px] text-[#0FB5A5] hover:underline cursor-pointer flex items-center gap-1"
                 >
                   <span>{showRawJson ? '▼ Hide raw payload JSON' : '▶ View raw payload JSON'}</span>
                 </button>
@@ -364,31 +311,6 @@ export function LedgerStreamView({
             )}
           </div>
         )}
-
-        {/* 7-Stage Chain Stepper */}
-        <div className="p-5 space-y-4 max-h-[calc(100vh-280px)] overflow-y-auto">
-          {chainSteps.map((s) => (
-            <div key={s.n} className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <span
-                  style={{ backgroundColor: s.dot }}
-                  className="h-6 w-6 rounded-full flex items-center justify-center font-heading text-xs font-bold text-[#04322d] shrink-0"
-                >
-                  {s.n}
-                </span>
-                {!s.last && <span className="w-0.5 flex-1 bg-white/12 my-1 min-h-[16px]" />}
-              </div>
-
-              <div className="flex-1 pb-2">
-                <div className="text-[12.5px] font-semibold text-white">{s.k}</div>
-                <div className="text-[11px] text-[#a9b3ce] mt-0.5 leading-relaxed">{s.detail}</div>
-                <div className="font-mono text-[9.5px] text-[#8a97b8] mt-1">
-                  {s.agent} · {s.model} · {s.hash}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

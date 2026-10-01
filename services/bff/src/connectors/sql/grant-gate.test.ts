@@ -50,6 +50,34 @@ const sessions = async (): Promise<SqlSession> => {
   };
 };
 const gate = () => new SqlDiscoveryGate(identity, sessions, { client: () => fake.client as never });
+const scanSessions = async (): Promise<SqlSession> => {
+  opened += 1;
+  return {
+    query: async (text) => {
+      if (text.includes('transaction_read_only'))
+        return { rows: [{ read_only: true, privileged: false, can_write: false }] };
+      if (text.includes('join pg_index')) return { rows: [{ name: 'id' }] };
+      if (text.includes('as supported'))
+        return {
+          rows: [
+            { name: 'id', supported: true },
+            { name: 'email', supported: true },
+          ],
+        };
+      if (text.includes('as __scan_key'))
+        return {
+          rows: [
+            { __scan_key: '1', c0: '1', c1: 'private@example.test' },
+            { __scan_key: '2', c0: '2', c1: 'second@example.test' },
+          ],
+        };
+      return { rows: [] };
+    },
+    end: async () => undefined,
+  };
+};
+const scanGate = () =>
+  new SqlDiscoveryGate(identity, scanSessions, { client: () => fake.client as never });
 
 // The MySQL connector issues different session-control and catalogue SQL; this
 // fake answers the MySQL posture query and the information_schema page query.
@@ -123,5 +151,36 @@ describe('SqlDiscoveryGate (W4.6)', () => {
     await expect(mysqlGate().enumerate(request)).rejects.toMatchObject({
       reason: 'grant_changed',
     });
+  });
+
+  it('withholds redacted scan aggregates when the grant is revoked after processing', async () => {
+    answers = [grant(), null];
+    await expect(scanGate().scanRedacted(request, 'crm.customers', 2, 2)).rejects.toMatchObject({
+      reason: 'grant_changed',
+    });
+    expect(opened).toBe(1);
+  });
+
+  it('releases only counts from a redacted scan under an unchanged grant', async () => {
+    const { result, grant: resolved } = await scanGate().scanRedacted(
+      request,
+      'crm.customers',
+      2,
+      2,
+    );
+    expect(resolved.grantId).toBe(grant().grantId);
+    expect(result).toMatchObject({ processedRows: 2, pages: 1, complete: true });
+    expect(result.fields.find((field) => field.field === 'email')).toMatchObject({
+      sampled: 2,
+      detected: { email: 2 },
+    });
+    expect(JSON.stringify(result)).not.toContain('private@example.test');
+  });
+
+  it('refuses scan on MySQL without opening a session', async () => {
+    await expect(mysqlGate().scanRedacted(request, 'crm.customers', 2, 2)).rejects.toMatchObject({
+      reason: 'engine_unsupported',
+    });
+    expect(opened).toBe(0);
   });
 });

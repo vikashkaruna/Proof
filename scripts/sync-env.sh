@@ -164,6 +164,9 @@ do_verify() {
     "SUPABASE_SERVICE_KEY:Database & Auth"
     "SUPABASE_STATUTORY_PROOF_WRITER_KEY:Database & Auth"
     "SUPABASE_ARCHIVE_WRITER_KEY:Database & Auth"
+    "SUPABASE_HUMAN_ACTION_WRITER_KEY:Database & Auth"
+    "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY:Database & Auth"
+    "SUPABASE_AGENT_LEDGER_WRITER_KEY:Database & Auth"
     "NEXT_PUBLIC_APP_URL:Client URLs"
     "NEXT_PUBLIC_BFF_URL:Client URLs"
     "BFF_URL:Inter-service"
@@ -347,6 +350,11 @@ tfvar_value() {
     # product documented seven years.
     retention_days)             get_val "AXIOM_EVIDENCE_RETENTION_DAYS" "7" ;;
 
+    # Named /32 runner CIDRs for a temporary external migration runner, as
+    # `name=cidr,name=cidr`. Empty keeps Cloud SQL private-only. Terraform's own
+    # validation rejects anything that is not a /32.
+    cloud_sql_authorized_networks) get_val "AXIOM_CLOUD_SQL_AUTHORIZED_NETWORKS" "" ;;
+
     # ── Managed services ──
     upstash_redis_url)          get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")" ;;
     temporal_address)           get_val "TEMPORAL_ADDRESS" "axiom-proof.dkxyc.tmprl.cloud:7233" ;;
@@ -379,6 +387,9 @@ tfvar_value() {
     supabase_service_key)         get_val "SUPABASE_SERVICE_KEY" ;;
     supabase_statutory_proof_writer_key) get_val "SUPABASE_STATUTORY_PROOF_WRITER_KEY" ;;
     supabase_archive_writer_key)  get_val "SUPABASE_ARCHIVE_WRITER_KEY" ;;
+    supabase_human_action_writer_key) get_val "SUPABASE_HUMAN_ACTION_WRITER_KEY" ;;
+    supabase_evidence_ingestion_writer_key) get_val "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY" ;;
+    supabase_agent_ledger_writer_key) get_val "SUPABASE_AGENT_LEDGER_WRITER_KEY" ;;
 
     # ── Email ──
     resend_api_key)             get_val "RESEND_API_KEY" ;;
@@ -401,6 +412,40 @@ tfvar_is_number() {
     cloud_sql_disk_size_gb|retention_days|assessment_dispatch_retention_days) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# `map(string)` variables are written as an HCL map, not a quoted string.
+tfvar_is_map() {
+  case "$1" in
+    cloud_sql_authorized_networks) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# `name=cidr,name=cidr` -> `{ "name" = "cidr", "name" = "cidr" }`; empty -> `{}`.
+# The value is written into a .tfvars file, so only plain identifier and CIDR
+# characters are accepted; anything else is refused rather than escaped.
+tfvar_map_literal() {
+  local raw="$1" out="" pair name cidr
+  local -a pairs=()
+  if [ -z "$raw" ]; then
+    echo '{}'
+    return 0
+  fi
+  # An empty pair (leading, trailing or doubled comma) is refused, not skipped.
+  if [[ "$raw" == ,* || "$raw" == *, || "$raw" == *,,* ]]; then
+    return 1
+  fi
+  IFS=',' read -ra pairs <<< "$raw"
+  for pair in "${pairs[@]}"; do
+    name="${pair%%=*}"
+    cidr="${pair#*=}"
+    if [[ "$pair" != *=* || ! "$name" =~ ^[A-Za-z0-9._-]+$ || ! "$cidr" =~ ^[0-9./]+$ ]]; then
+      return 1
+    fi
+    out+="\"${name}\" = \"${cidr}\", "
+  done
+  echo "{ ${out%, } }"
 }
 
 do_terraform() {
@@ -434,7 +479,13 @@ do_terraform() {
       unmapped+=("$name")
       continue
     fi
-    if tfvar_is_number "$name"; then
+    if tfvar_is_map "$name"; then
+      if ! value="$(tfvar_map_literal "$value")"; then
+        fail "${name} must be name=cidr[,name=cidr] using only letters, digits, . _ - and CIDR characters."
+        return 1
+      fi
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
+    elif tfvar_is_number "$name"; then
       body+="$(printf '%-28s = %s\n' "$name" "${value:-0}")"
     else
       body+="$(printf '%-28s = "%s"\n' "$name" "$value")"

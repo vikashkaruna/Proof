@@ -4,14 +4,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077
 state_dir="${AXIOM_PARITY_STATE_DIR:-$PWD/.axiom-runtime/parity}"
+project_id="${AXIOM_PARITY_PROJECT_ID:-axiom-w0-parity}"
+port_prefix="${AXIOM_PARITY_PORT_PREFIX:-563}"
+if [[ ! "$project_id" =~ ^axiom-[a-z0-9-]+$ || ! "$port_prefix" =~ ^[0-9]{3}$ ]]; then
+  echo 'Invalid isolated Supabase project or port prefix.' >&2
+  exit 1
+fi
+db_container="supabase_db_${project_id}"
 mkdir -p "$state_dir/supabase"
 chmod 700 "$state_dir"
-python3 - "$state_dir" <<'PY'
+python3 - "$state_dir" "$project_id" "$port_prefix" <<'PY'
 from pathlib import Path
 import sys
 state = Path(sys.argv[1])
 config = Path('infra/supabase/config.toml').read_text()
-config = config.replace('project_id = "axiom-proof"', 'project_id = "axiom-w0-parity"').replace('553', '563')
+config = config.replace('project_id = "axiom-proof"', f'project_id = "{sys.argv[2]}"').replace('553', sys.argv[3])
 config = config.replace('[studio]\nenabled = true', '[studio]\nenabled = false').replace('[analytics]\nenabled = true', '[analytics]\nenabled = false')
 # Historical bootstrap needs the Supabase administration role. CLI migrations
 # use restricted postgres; apply via the checksummed runner AFTER Auth starts.
@@ -47,13 +54,13 @@ patterns = {
 found = [label for label, terms in patterns.items() if any(term in message for term in terms)]
 print('Startup diagnostic categories: ' + (', '.join(found) or 'unclassified; protected log required'), file=sys.stderr)
 PYDIAG
-  docker ps -a --filter 'name=axiom-w0-parity' --format '{{.Names}}: {{.Status}}' >&2
+  docker ps -a --filter "name=$project_id" --format '{{.Names}}: {{.Status}}' >&2
   exit 1
 fi
-python3 scripts/migrate-database.py --container supabase_db_axiom-w0-parity
+python3 scripts/migrate-database.py --container "$db_container"
 # Synthetic browser personas use one fixed test-only HMAC key. Provision it
 # through the DB administration role, never through the PostgREST service key.
-docker exec -i supabase_db_axiom-w0-parity psql -X -U supabase_admin -d postgres \
+docker exec -i "$db_container" psql -X -U supabase_admin -d postgres \
   -v ON_ERROR_STOP=1 -q >/dev/null <<'SQL'
 insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
 values('global',convert_to('axiom-e2e-persona-harness-approval-signing-key','UTF8'))
@@ -64,7 +71,7 @@ select 1 / case when (select key_bytes=convert_to(
   from axiom_secrets.reconciliation_keys where scope='global') then 1 else 0 end;
 SQL
 # Reload API schema only after the whole migration series succeeds.
-docker exec supabase_db_axiom-w0-parity psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -q -c "notify pgrst, 'reload schema';"
+docker exec "$db_container" psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -q -c "notify pgrst, 'reload schema';"
 supabase status --workdir "$state_dir" -o json > "$state_dir/status.json" 2> "$state_dir/status.log"
 chmod 600 "$state_dir/status.json"
-echo 'Isolated Supabase Auth/Postgres ready on port 56321; credentials retained in protected local state.'
+echo "Isolated Supabase Auth/Postgres ready on port ${port_prefix}21; credentials retained in protected local state."

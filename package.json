@@ -16,7 +16,7 @@
     "test": "turbo run test",
     "test:coverage": "./scripts/check-coverage-floors.sh",
     "test:restore": "./scripts/test-backup-restore.sh",
-    "bench": "tsx scripts/run-performance-benchmarks.ts",
+    "bench": "pnpm --filter @axiom/bff exec tsx scripts/w9-live-performance.ts",
     "gate:security": "./scripts/check-env-security-gate.sh",
     "test:e2e": "turbo run test:e2e",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",

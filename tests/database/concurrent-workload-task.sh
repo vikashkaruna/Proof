@@ -15,9 +15,11 @@ insert into public.tenant_users(tenant_id,user_id,role) values(task_race.id(11),
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values(task_race.id(21),task_race.id(11),'drishti','spiffe://test/task-race/drishti');
 update public.workload_identities set status='active' where id=task_race.id(21);
 create function task_race.issue() returns jsonb language sql as $$select public.delegate_workload_task(task_race.id(11),task_race.id(1),task_race.id(21),'drishti',null,null,task_race.id(31),repeat('b',64),repeat('a',64),array['connector.read'],clock_timestamp()+interval '5 minutes')$$;
-create function task_race.revoke() returns jsonb language sql as $$select public.revoke_workload_task(task_race.id(11),task_race.id(1),(select id from public.agent_runs where tenant_id=task_race.id(11)),task_race.id(31))$$;
-grant usage on schema task_race to service_role;
-grant execute on all functions in schema task_race to service_role;
+-- Definer: the run id is resolved past RLS; the race exercises locking, while
+-- the writer-only grant on the RPC itself is asserted by the privilege suites.
+create function task_race.revoke() returns jsonb language sql security definer as $$select public.revoke_workload_task(task_race.id(11),task_race.id(1),(select id from public.agent_runs where tenant_id=task_race.id(11)),task_race.id(31))$$;
+grant usage on schema task_race to human_action_writer;
+grant execute on all functions in schema task_race to human_action_writer;
 SQL
 barrier() {
   local name="$1" column="$2" event="$3"
@@ -39,15 +41,15 @@ race() {
  wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
 }
 # Demotion holds the membership lock first: issuance must re-check after waiting.
-race "update public.tenant_users set role='viewer' where user_id=task_race.id(1)" "set role service_role; select task_race.issue()"
+race "update public.tenant_users set role='viewer' where user_id=task_race.id(1)" "set role human_action_writer; select task_race.issue()"
 grep -q forbidden "$result_dir/second"
 [ "$(sql -c 'select count(*) from public.agent_runs where tenant_id=task_race.id(11)')" = 0 ]
 sql -c "update public.tenant_users set role='owner' where user_id=task_race.id(1)"
 # Issuance holds the lock first: the later demotion invalidates its proof.
-race "set local role service_role; select task_race.issue()" "update public.tenant_users set role='viewer' where user_id=task_race.id(1)"
+race "set local role human_action_writer; select task_race.issue()" "update public.tenant_users set role='viewer' where user_id=task_race.id(1)"
 [ "$(sql -c "select public.read_workload_task(task_race.id(11),(select id from public.agent_runs where tenant_id=task_race.id(11)),task_race.id(21),'drishti',repeat('a',64),'connector.read') is null")" = t ]
 sql -c "update public.tenant_users set role='owner' where user_id=task_race.id(1)"
-race "set local role service_role; select task_race.revoke()" "set role service_role; select task_race.revoke()"
+race "set local role human_action_writer; select task_race.revoke()" "set role human_action_writer; select task_race.revoke()"
 grep -q '"revoked": true' "$result_dir/second"
 [ "$(sql -c "select count(*) from public.audit_ledger where tenant_id=task_race.id(11) and action_type='workload.task_revoked'")" = 1 ]
 sql -c 'drop schema task_race cascade' >/dev/null 2>&1

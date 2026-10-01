@@ -5,7 +5,7 @@ locals {
   runtime_services = {
     bff = {
       suffix  = "bff"
-      secrets = ["agent_runtime_internal_token", "approval_signing_key", "gcs_hmac_access_key", "gcs_hmac_secret_key", "mfa_encryption_key", "model_gateway_api_key", "resend_api_key", "supabase_anon_key", "supabase_service_key", "supabase_statutory_proof_writer_key", "supabase_archive_writer_key"]
+      secrets = ["agent_runtime_internal_token", "approval_signing_key", "gcs_hmac_access_key", "gcs_hmac_secret_key", "mfa_encryption_key", "model_gateway_api_key", "resend_api_key", "supabase_anon_key", "supabase_service_key", "supabase_statutory_proof_writer_key", "supabase_archive_writer_key", "supabase_human_action_writer_key", "supabase_evidence_ingestion_writer_key", "supabase_agent_ledger_writer_key"]
     }
     web = {
       suffix  = "web"
@@ -13,7 +13,7 @@ locals {
     }
     agent_runtime = {
       suffix  = "runtime"
-      secrets = ["agent_runtime_internal_token", "approval_signing_key", "gcs_hmac_access_key", "gcs_hmac_secret_key", "model_gateway_api_key", "supabase_service_key"]
+      secrets = ["agent_runtime_internal_token", "approval_signing_key", "gcs_hmac_access_key", "gcs_hmac_secret_key", "model_gateway_api_key", "supabase_anon_key", "supabase_agent_ledger_writer_key", "supabase_service_key"]
     }
     model_gateway = {
       suffix  = "model"

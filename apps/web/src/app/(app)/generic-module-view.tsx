@@ -163,7 +163,7 @@ export function GenericModuleView({
               )}
               <span className="text-xs text-[#8a97b8]">Autonomy {meta.autonomy}</span>
               {meta.statutoryCitation && (
-                <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-[#C9A227]">
+                <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-200">
                   {meta.statutoryCitation}
                 </span>
               )}
@@ -182,12 +182,7 @@ export function GenericModuleView({
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] text-white">
-                <span className="text-[#C9A227]">◆</span> Module {meta.moduleId} · DPDPA 2023
-                Statutory Suite
-              </div>
-              <div className="inline-flex items-center gap-1.5 rounded-full bg-teal-500/20 border border-teal-500/30 px-3 py-1 text-[11px] text-[#0FB5A5] font-mono">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#0FB5A5] animate-pulse" />
-                ap-south-1 domestic
+                <span className="text-teal-300">◆</span> Module {meta.moduleId}
               </div>
             </div>
           </div>
@@ -218,7 +213,7 @@ export function GenericModuleView({
         {isExecuting && (
           <div className="mt-4 rounded-lg border border-teal-400/40 bg-teal-950/40 p-2.5 text-xs text-teal-200 flex items-center gap-2 animate-in fade-in-0 duration-150">
             <span className="animate-spin font-bold text-[#0FB5A5]">↻</span>
-            <span>Invoking {meta.agent || 'compliance agent'}… verifying statutory bounds…</span>
+            <span>Invoking {meta.agent || 'compliance agent'}…</span>
           </div>
         )}
 
@@ -264,9 +259,9 @@ export function GenericModuleView({
       {/* 2. DYNAMIC CARDS GRID                                        */}
       {/* ============================================================ */}
       {isDemo && meta.cards.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-[#C9A227]/30 bg-[#C9A227]/5 px-3.5 py-2.5">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-[#C9A227]" />
-          <p className="text-[11px] leading-tight text-[#6b5a14]">
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-slate-500" />
+          <p className="text-[11px] leading-tight text-slate-700">
             <span className="font-semibold">Sample data.</span> The figures below are illustrative,
             not measured from this estate. They appear because this tenant is flagged for
             demonstration.
@@ -317,8 +312,8 @@ export function GenericModuleView({
             Nothing measured yet
           </h2>
           <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[#8a909b]">
-            This module has no results for your estate. Once {meta.agent ?? 'the responsible agent'}{' '}
-            has run, its findings and the ledger entries behind them appear here.
+            This page has no measured results for your estate. Check the recorded workflows and
+            audit ledger for completed work.
           </p>
         </div>
       )}
@@ -378,7 +373,7 @@ export function GenericModuleView({
                 <div className="text-right shrink-0">
                   <div className="text-[10.5px] text-[#8a909b] font-mono">{e.time}</div>
                   <div className="text-[10px] font-semibold text-[#0a8d80]">
-                    {e.status || '✓ verified'}
+                    {e.status || 'Status unavailable'}
                   </div>
                 </div>
               </div>
@@ -388,15 +383,14 @@ export function GenericModuleView({
       )}
 
       {/* ============================================================ */}
-      {/* 4. INSTITUTIONAL LIVE OPERATIONS BAR (REPLACES MOCK NOTE)    */}
+      {/* 4. Navigation to the recorded ledger and agent workbench. */}
       {/* ============================================================ */}
       <div className="rounded-xl border border-teal-200 bg-[#E5FAF7] p-4 text-xs text-[#0a6b61] flex flex-wrap items-center justify-between gap-3 shadow-2xs">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
           <span>
-            <strong>Live Compliance Telemetry:</strong> Connected to statutory audit ledger &
-            autonomous compliance engine. All client data resides strictly in sovereign Indian
-            region (<code>ap-south-1</code> Mumbai).
+            View recorded ledger entries and agent runs in their dedicated workspaces. This page
+            does not verify service health or deployment region.
           </span>
         </div>
         <div className="flex items-center gap-3 font-medium text-[11px]">

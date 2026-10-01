@@ -6,7 +6,10 @@ import type { Variables } from '../types.js';
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
 const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => db.current!.client }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => db.current!.client,
+  createHumanActionWriter: () => db.current!.client,
+}));
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 let fake: FakeDb;
 let calls: Record<string, unknown>[];
@@ -14,6 +17,7 @@ beforeEach(() => {
   fake = createFakeDb({});
   db.current = fake;
   calls = [];
+  fake.onRpc('read_onboarding_inventory', () => []);
   for (const fn of ['prepare_onboarding_proposal', 'review_onboarding_proposal'])
     fake.onRpc(fn, (args) => {
       calls.push(args);
@@ -44,6 +48,48 @@ const review = {
   reason: 'Reviewed inventory',
 };
 describe('proposal authority', () => {
+  it('returns only tenant-bound persisted proposals and an explicit empty intake', async () => {
+    fake.seed('onboarding_proposals', { id: USER, tenant_id: TENANT, status: 'pending' });
+    fake.seed('onboarding_proposals', {
+      id: 'foreign',
+      tenant_id: '33333333-3333-4333-8333-333333333333',
+      status: 'pending',
+    });
+    const res = await app(UserRole.VIEWER).request('/v1/onboarding/proposals');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { intake: unknown[]; proposals: Array<{ id: string }> };
+    };
+    expect(body.data.intake).toEqual([]);
+    expect(body.data.proposals.map((proposal) => proposal.id)).toEqual([USER]);
+  });
+
+  it('refuses a null-success intake rather than inventing an empty source', async () => {
+    fake.onRpc('read_onboarding_inventory', () => null);
+    const res = await app(UserRole.VIEWER).request('/v1/onboarding/proposals');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'proposal_unavailable' } });
+  });
+
+  it('refuses an unreadable proposal list', async () => {
+    fake.failNext('onboarding_proposals');
+    const res = await app(UserRole.VIEWER).request('/v1/onboarding/proposals');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'proposal_unavailable' } });
+  });
+
+  it('refuses a null-success proposal list', async () => {
+    const query: Record<string, unknown> = {};
+    query.select = () => query;
+    query.eq = () => query;
+    query.order = () => query;
+    query.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: null, error: null }).then(resolve);
+    fake.client.from = () => query;
+    const res = await app(UserRole.VIEWER).request('/v1/onboarding/proposals');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'proposal_unavailable' } });
+  });
   it.each([UserRole.OWNER, UserRole.ADMIN])('%s can review the bound snapshot', async (role) => {
     const res = await post(role, `/${USER}/review`, review);
     expect(res.status).toBe(200);

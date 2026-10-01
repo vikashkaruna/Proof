@@ -24,7 +24,7 @@ s=s.replace("repeat('b',64)","encode(sha256(convert_to('"+sys.argv[1]+".proof','
 s=s.replace('create temporary table issued','create table issued')
 s=re.sub(r'\bissued\b',sys.argv[1]+'.issued',s)
 print(s)
-print(f'grant usage on schema {sys.argv[1]} to service_role; grant execute on all functions in schema {sys.argv[1]} to service_role;')
+print(f'grant usage on schema {sys.argv[1]} to service_role,human_action_writer; grant execute on all functions in schema {sys.argv[1]} to service_role,human_action_writer;')
 PY
  sql -c "select $scope.start_tool()" > "$result_dir/setup"
 }
@@ -46,10 +46,13 @@ race() {
  exec 9> "$gate"
  printf "set application_name='registration-gate'; begin; select pg_advisory_xact_lock(777701,%s);\n" "$index" >&9
  barrier registration-gate state 'idle in transaction'
- sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-first'; begin; set local role service_role; $1; select pg_advisory_xact_lock(777701,$index); commit;" > "$result_dir/first" 2>&1 &
+ local first_role=service_role second_role=service_role
+ [[ "$1" == *"$scope.manage("* || "$1" == *"public.delegate_workload_task("* ]] && first_role=human_action_writer
+ [[ "$2" == *"$scope.manage("* || "$2" == *"public.delegate_workload_task("* ]] && second_role=human_action_writer
+ sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-first'; begin; set local role $first_role; $1; select pg_advisory_xact_lock(777701,$index); commit;" > "$result_dir/first" 2>&1 &
  local first_pid=$!
  barrier registration-first wait_event advisory
- sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-second'; set role service_role; $2;" > "$result_dir/second" 2>&1 &
+ sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-second'; set role $second_role; $2;" > "$result_dir/second" 2>&1 &
  local second_pid=$!
  barrier registration-second wait_event_type Lock
  printf 'commit;\n' >&9

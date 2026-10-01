@@ -18,14 +18,14 @@ SQL
 hash() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
 
 race() { # $1 label, $2 statement run by both sessions; the first holds its transaction open
-  sql -c "set application_name='$1-first'; begin; set local role service_role; select $2; select pg_sleep(3); commit;" > "$result_dir/$1-first" 2>&1 &
+  sql -c "set application_name='$1-first'; begin; set local role human_action_writer; select $2; select pg_sleep(3); commit;" > "$result_dir/$1-first" 2>&1 &
   local first_pid=$! ready=false blocked=false
   for attempt in $(seq 1 60); do
     [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
     sleep 0.05
   done
   [ "$ready" = true ] || { echo "$1 race missed barrier"; cat "$result_dir/$1-first"; exit 1; }
-  sql -c "set application_name='$1-second'; set role service_role; select $2;" > "$result_dir/$1-second" 2>&1 &
+  sql -c "set application_name='$1-second'; set role human_action_writer; select $2;" > "$result_dir/$1-second" 2>&1 &
   local second_pid=$!
   for attempt in $(seq 1 40); do
     [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }

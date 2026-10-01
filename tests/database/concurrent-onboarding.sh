@@ -17,7 +17,7 @@ SQL
 pids=()
 for worker in $(seq 1 8); do
   docker exec "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq -c \
-    "set role service_role; select coalesce(public.onboard_organization('00000000-0000-0000-0000-000000000062',gen_random_uuid()::text,'Concurrent client','growth',false,false,false,null,null,'[]','quota-race',gen_random_uuid())->>'error','created'); select public.take_rate_limit('concurrent-onboarding','test-subject',3,3600)->>'allowed';" > "$result_dir/$worker" &
+    "set role human_action_writer; select coalesce(public.onboard_organization('00000000-0000-0000-0000-000000000062',gen_random_uuid()::text,'Concurrent client','growth',false,false,false,null,null,'[]','quota-race',gen_random_uuid())->>'error','created'); reset role; set role service_role; select public.take_rate_limit('concurrent-onboarding','test-subject',3,3600)->>'allowed';" > "$result_dir/$worker" &
   pids+=("$!")
 done
 for pid in "${pids[@]}"; do wait "$pid"; done

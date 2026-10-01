@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ApprovalEngine } from '@axiom/approval-engine';
 import { abortableResult } from '../test/abortable-result.js';
@@ -169,20 +170,46 @@ async function setup() {
     contentType: 'application/json',
     versionId,
   } as never);
-  const writerDb = {
+  const archiveWriterDb = {
     rpc: vi.fn((name: string, args: Record<string, unknown>) => f.db.rpc(name, args)),
   };
-  const service = new ApprovalProofArchiveService(f.db, engine, writerDb as never, () => ({
-    vault: f.vault,
-    config,
-  }));
-  return { f, service, writerDb, source, sourceText, sourceSha256, archiveId, tokenId, versionId };
+  const humanWriterDb = {
+    rpc: vi.fn((name: string, args: Record<string, unknown>) => f.db.rpc(name, args)),
+  };
+  const service = new ApprovalProofArchiveService(
+    refuseMovedProofRpcs(f.db),
+    engine,
+    archiveWriterDb as never,
+    () => ({ vault: f.vault, config }),
+    () => humanWriterDb as never,
+  );
+  return {
+    f,
+    service,
+    archiveWriterDb,
+    humanWriterDb,
+    source,
+    sourceText,
+    sourceSha256,
+    archiveId,
+    tokenId,
+    versionId,
+  };
 }
 
 describe('approval proof archive', () => {
   it('retains exact source, releases only after provider receipt, and downloads that version', async () => {
-    const { f, service, writerDb, archiveId, tokenId, sourceSha256, sourceText, versionId } =
-      await setup();
+    const {
+      f,
+      service,
+      archiveWriterDb,
+      humanWriterDb,
+      archiveId,
+      tokenId,
+      sourceSha256,
+      sourceText,
+      versionId,
+    } = await setup();
     const started = await service.start(tenant, actor, tokenId, operationKey);
     expect(started).toMatchObject({ archiveId, status: 'settled', sourceSha256, versionId });
     expect(f.vault.seal).toHaveBeenCalledWith(
@@ -216,11 +243,15 @@ describe('approval proof archive', () => {
       status: 'released',
       versionId,
     });
-    expect(writerDb.rpc.mock.calls.map(([name]) => name)).toEqual([
+    // Human-labelled begin/settle/review go through the human action writer;
+    // only release stays on the dedicated archive writer.
+    expect(humanWriterDb.rpc.mock.calls.map(([name]) => name)).toEqual([
       'begin_approval_proof_archive',
       'settle_approval_proof_archive',
-      'release_approval_proof_archive',
       'review_approval_proof_archive',
+    ]);
+    expect(archiveWriterDb.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'release_approval_proof_archive',
       'release_approval_proof_archive',
     ]);
   });

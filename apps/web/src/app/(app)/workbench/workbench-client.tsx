@@ -16,14 +16,22 @@ interface RecentRun {
   result: string;
 }
 
+interface PendingPlan {
+  id: string;
+  title: string;
+  status: string;
+  version: number;
+  created_at: string;
+}
+
 interface WorkbenchClientProps {
   userEmail: string;
   /** Ledger entries recorded today; null when the count could not be read. */
   ledgerTodayCount: number | null;
   /** Plans in draft or review; null when unreadable. */
   awaitingReviewCount: number | null;
-  recentRuns: RecentRun[];
-  pendingPlans: any[];
+  recentRuns: RecentRun[] | null;
+  pendingPlans: PendingPlan[] | null;
   dataResidencyRegion: string;
   /** Deployment label from configuration, not a claim about health. */
   environment: string;
@@ -48,7 +56,7 @@ const AGENTS: Array<{
     name: 'vibhaag',
     label: 'Vibhaag',
     role: 'Classification',
-    desc: 'Classifies discovered data into 9 statutory categories.',
+    desc: 'Classifies observed personal-data fields using configured patterns.',
     autonomy: 'L1',
   },
   {
@@ -90,7 +98,7 @@ const AGENTS: Array<{
     name: 'nazar',
     label: 'Nazar',
     role: 'Regulatory Watch',
-    desc: 'Watches MeitY gazette feeds, DPB orders & tribunal rulings.',
+    desc: 'Regulatory feed integration is unavailable pending authoritative sources.',
     autonomy: 'L1',
   },
   {
@@ -123,6 +131,16 @@ const AGENTS: Array<{
   },
 ];
 
+const WORKFLOW_HREF: Partial<Record<AgentName, string>> = {
+  karya: '/approval',
+  saakshi: '/evidence',
+  prativedan: '/reports',
+  nazar: '/regwatch',
+  sanket: '/breaches',
+  samadhan: '/execution',
+  pramaan: '/reports',
+};
+
 export function AgentWorkbenchClient({
   userEmail,
   ledgerTodayCount,
@@ -141,9 +159,10 @@ export function AgentWorkbenchClient({
     ledgerIds?: string[];
     message?: string;
   } | null>(null);
+  const workflowHref = WORKFLOW_HREF[selectedAgent];
 
   const handleRun = async () => {
-    if (isExecuting) return;
+    if (isExecuting || WORKFLOW_HREF[selectedAgent]) return;
     setIsExecuting(true);
     setRunResult(null);
 
@@ -189,7 +208,7 @@ export function AgentWorkbenchClient({
           </div>
           <span className="text-[11px] text-[#8a97b8]">Autonomy —</span>
           <span className="ml-auto rounded border border-teal-500/30 bg-teal-500/10 px-2.5 py-0.5 text-[11px] font-medium text-teal-300">
-            Env: {environment} · {dataResidencyRegion}
+            Env: {environment} · configured region target: {dataResidencyRegion}
           </span>
         </div>
         <div className="flex flex-wrap items-baseline gap-3">
@@ -201,12 +220,11 @@ export function AgentWorkbenchClient({
           </span>
         </div>
         <p className="mt-2 text-[13px] text-[#c7cfe0] max-w-3xl leading-relaxed">
-          The founder’s and admin cockpit: run any agent, review every output before it reaches a
-          client, and manage the versioned prompt / model registry across on-prem and cloud
-          environments. High-throughput review is a first-class product surface.
+          Inspect recorded activity and launch supported read-only agents. Approval-gated actions,
+          evidence storage, reports, and unavailable feeds use their dedicated workflows.
         </p>
         <div className="mt-3.5 inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-1 text-[11px] text-slate-200">
-          <span className="text-[#C9A227]">◆</span> Sold standalone or bundled · module M0.6
+          <span className="text-teal-300">◆</span> Module M0.6
         </div>
       </div>
 
@@ -263,7 +281,7 @@ export function AgentWorkbenchClient({
           {/* Quick Agent Selection Grid */}
           <div className="mt-3.5 pt-3 border-t border-[#eef1f5]">
             <div className="text-[10.5px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-              Select Agent for Execution
+              Select agent or workflow
             </div>
             <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
               {AGENTS.map((a) => (
@@ -312,15 +330,10 @@ export function AgentWorkbenchClient({
               and model-gateway health will be shown here once they are recorded.
             </p>
           </div>
-          <div className="mt-4 pt-3 border-t border-[#eef1f5] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
-            <span className="inline-flex items-center gap-1.5 font-mono text-[11px]">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Gateway Guard: ap-south-1 (Mumbai)
-            </span>
-            <span className="rounded bg-teal-50 border border-teal-200 px-2 py-0.5 font-mono text-[10px] text-[#0a8d80] font-semibold">
-              PII Redaction: Enforced
-            </span>
-          </div>
+          <p className="mt-4 border-t border-[#eef1f5] pt-3 text-[11px] text-slate-500">
+            Gateway location and redaction health require runtime checks; no status is inferred
+            here.
+          </p>
         </div>
       </div>
 
@@ -330,14 +343,14 @@ export function AgentWorkbenchClient({
         <div className="space-y-4">
           <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
             <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-2 flex items-center justify-between">
-              <span>⚡ Execute & Test Autonomous Agent</span>
+              <span>Agent action</span>
               <span className="text-[11px] font-mono text-[#0FB5A5] font-semibold">
                 Scope: Workbench / Test
               </span>
             </div>
             <p className="text-xs text-[#5b6270] mb-4">
-              Trigger any agent directly through the API gateway. Execution outputs are logged in
-              the immutable audit ledger with cryptographic sequence proofs.
+              Supported read-only agents can be invoked through the API gateway. Use the linked
+              workflow for approval, storage, reports, and unavailable feeds.
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -354,21 +367,23 @@ export function AgentWorkbenchClient({
                 ))}
               </select>
 
-              <button
-                type="button"
-                onClick={handleRun}
-                disabled={isExecuting}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0FB5A5] px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#0a8d80] transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {isExecuting ? (
-                  <>
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Executing {selectedAgent}…
-                  </>
-                ) : (
-                  <>⚡ Run {selectedAgent}</>
-                )}
-              </button>
+              {workflowHref ? (
+                <Link
+                  href={workflowHref}
+                  className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-4 py-2 text-xs font-semibold text-white"
+                >
+                  Open {selectedAgent} workflow
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRun}
+                  disabled={isExecuting}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0FB5A5] px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#0a8d80] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isExecuting ? `Running ${selectedAgent}…` : `Run ${selectedAgent}`}
+                </button>
+              )}
             </div>
 
             {runResult && (
@@ -401,7 +416,7 @@ export function AgentWorkbenchClient({
             <div className="border-b border-[#e4e8ee] bg-[#F4F6F8] px-5 py-3 text-xs font-semibold text-[#1E2A4A] flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-heading text-sm font-semibold text-[#1E2A4A]">
-                  Recent Agent Activity Stream
+                  Recent Ledger Activity
                 </span>
                 <span className="rounded bg-[#1E2A4A] px-2 py-0.5 text-[10px] font-mono text-white">
                   Audit Ledger
@@ -409,7 +424,7 @@ export function AgentWorkbenchClient({
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-[11px] text-slate-500 font-mono">
-                  {recentRuns.length} recorded
+                  {recentRuns === null ? 'Unavailable' : `${recentRuns.length} loaded`}
                 </span>
                 <Link
                   href="/ledger"
@@ -430,7 +445,11 @@ export function AgentWorkbenchClient({
               <div className="text-right">Time (IST)</div>
             </div>
 
-            {recentRuns.length === 0 ? (
+            {recentRuns === null ? (
+              <p role="alert" className="text-xs text-slate-500">
+                Recent ledger activity is unavailable.
+              </p>
+            ) : recentRuns.length === 0 ? (
               <div className="p-8 text-center bg-white space-y-3">
                 <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 border border-teal-200 text-[#0FB5A5]">
                   ⚡
@@ -441,18 +460,27 @@ export function AgentWorkbenchClient({
                   </div>
                   <p className="text-[11.5px] text-slate-500 max-w-md mx-auto">
                     When autonomous agents (Drishti, Parikshan, Sudhaar, Karya, Saakshi, etc.)
-                    execute tasks for this tenant, cryptographic proofs with SHA-256 hash chaining
-                    are streamed here in real-time.
+                    record ledger events for this tenant, the saved events appear here after
+                    refresh.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleRun}
-                  disabled={isExecuting}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[#0a8d80] transition-colors cursor-pointer"
-                >
-                  Execute Selected Agent
-                </button>
+                {workflowHref ? (
+                  <Link
+                    href={workflowHref}
+                    className="inline-flex items-center rounded-lg bg-[#1E2A4A] px-3.5 py-1.5 text-xs font-semibold text-white"
+                  >
+                    Open selected workflow
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRun}
+                    disabled={isExecuting}
+                    className="inline-flex items-center rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    Run selected agent
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-[#eef1f5]">
@@ -519,7 +547,11 @@ export function AgentWorkbenchClient({
             </p>
 
             <div className="mb-4">
-              {pendingPlans.length === 0 ? (
+              {pendingPlans === null ? (
+                <p role="alert" className="text-xs text-slate-500">
+                  Review plans are unavailable.
+                </p>
+              ) : pendingPlans.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-[#F4F6F8]/70 p-4 text-center space-y-2">
                   <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-[#0a8d80] text-sm">
                     ✓
@@ -528,15 +560,15 @@ export function AgentWorkbenchClient({
                     0 plans awaiting review.
                   </div>
                   <p className="text-[11px] text-slate-500 leading-normal">
-                    All remediation plans are reconciled. When new findings are detected by
-                    Parikshan, Sudhaar will draft typed remediation plans here.
+                    No draft or review plans were returned for this tenant. This does not establish
+                    that all plans are reconciled or approved.
                   </p>
                   <div className="flex justify-center gap-1.5 pt-1">
                     <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[9.5px] font-mono text-slate-600">
-                      Dry-Run Gate: Active
+                      Dry-run required before approval
                     </span>
                     <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[9.5px] font-mono text-slate-600">
-                      Rollback: Required
+                      Validated rollback required
                     </span>
                   </div>
                 </div>
@@ -576,7 +608,9 @@ export function AgentWorkbenchClient({
             <div className="font-semibold text-slate-800">Deployment Telemetry</div>
             <div className="flex justify-between text-slate-600">
               <span>Target Region</span>
-              <span className="font-mono font-medium text-slate-900">{dataResidencyRegion}</span>
+              <span className="font-mono font-medium text-slate-900">
+                Configured target: {dataResidencyRegion}; verify deployment
+              </span>
             </div>
             <div className="flex justify-between text-slate-600">
               <span>Admin Operator</span>

@@ -25,6 +25,7 @@ import { createRemoteAssessmentServer } from '../services/bff/src/workloads/asse
 import { GoogleSchedulerIdentity } from '../services/bff/src/workloads/scheduler-identity.js';
 import { startAssessmentControllerSocket } from '../services/bff/src/workloads/assessment-socket.js';
 import { createClient } from '@supabase/supabase-js';
+import { mintLocalPostgrestRoleKey } from '../packages/supabase/src/local-proof-writer-key.js';
 import { z } from 'zod';
 import type { TenantId } from '../packages/types/src/domain.js';
 import { JwtSvidVerifier } from '../services/bff/src/workloads/jwt-svid.js';
@@ -94,6 +95,20 @@ async function main() {
   const db = createClient(url.origin, status.SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  // delegate/revoke_workload_task and key-policy publication append human
+  // ledger events and are executable only by the human action writer role.
+  const humanWriter = createClient(url.origin, status.ANON_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${mintLocalPostgrestRoleKey({
+          role: 'human_action_writer',
+          jwtSecret: status.JWT_SECRET!,
+          serviceKey: status.SERVICE_ROLE_KEY!,
+        })}`,
+      },
+    },
+  });
   const check = <T>(reply: { data: T; error: unknown }): T => {
     if (reply.error) throw new Error('database operation failed');
     return reply.data;
@@ -117,7 +132,8 @@ async function main() {
   check(
     await db.from('tenant_users').insert({ tenant_id: tenantId, user_id: actorId, role: 'owner' }),
   );
-  const lifecycle = new WorkloadRegistrationLifecycle(db);
+  // manage_workload_identity appends a human ledger event (0098/0099).
+  const lifecycle = new WorkloadRegistrationLifecycle(humanWriter);
   const registrationVersions = new Map<string, number>();
   const manageRegistration = async (
     tenant: string,
@@ -211,7 +227,7 @@ async function main() {
     return response.json() as Promise<unknown>;
   };
 
-  const issuer = new WorkloadTaskIssuer(db);
+  const issuer = new WorkloadTaskIssuer(humanWriter);
   const confirmation = new AssessmentConfirmation(db);
   // Production dispatch adapter, local cryptographic KMS fixture. No cloud call
   // or IAM claim. Keys remain in this controller fixture, never SQL/IPC/history.
@@ -228,7 +244,7 @@ async function main() {
   );
   const rotatedRef = syntheticRef();
   wrappingKeys.set(rotatedRef, randomBytes(32));
-  const policyStore = new DispatchPolicyStore(db);
+  const policyStore = new DispatchPolicyStore(db, () => humanWriter);
   const policyRevisions = new Map<string, number>();
   const initialPolicy = await policyStore.publish(
     keyPolicy,
@@ -590,7 +606,7 @@ except Exception as error:
       outcomes['policy-stale-writer-cannot-create-job'] = true;
       outcomes['policy-reviewed-reader-stage-and-primary-promotion'] = true;
     }
-    const recoveredRevision = await new DispatchPolicyStore(db).currentRevision(
+    const recoveredRevision = await new DispatchPolicyStore(db, () => humanWriter).currentRevision(
       keyPolicy,
       tenantId as TenantId,
     );

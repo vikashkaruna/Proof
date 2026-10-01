@@ -15,7 +15,7 @@ create function pg_temp.manage(op text,rev int,body jsonb default pg_temp.envelo
  select public.manage_connector_credential(pg_temp.id(2),pg_temp.id(1),pg_temp.id(6),credential,op,1,rev,body,gen_random_uuid()) $$;
 -- Disposable administrator fixture; application identity writes use the reviewed lifecycle.
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values(pg_temp.id(10),pg_temp.id(2),'drishti','spiffe://test/drishti');
-set local role service_role;
+reset role; -- business fixture reads encrypted rows directly
 do $$declare r jsonb; n bigint; begin
  r:=pg_temp.manage('create',0);
  perform pg_temp.ok(r->>'revision'='1' and r->>'revoked'='false','vault creation');
@@ -48,16 +48,16 @@ end $$;
 reset role;
 -- Parent archival and endpoint retargeting cannot reuse an old envelope.
 update public.connectors set endpoint_ref='other' where id=pg_temp.id(6);
-set local role service_role;
+reset role; -- mixed direct fixture reads; 0098 boundary suite checks scoped writer
 select pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope()||'{"endpointRef":"other"}',pg_temp.id(8))->>'error'='credential_unavailable','retargeted stored context refused');
 reset role;
 update public.estates set status='archived' where id=pg_temp.id(3);
-set local role service_role;
+reset role; -- mixed direct fixture reads; 0098 boundary suite checks scoped writer
 select pg_temp.ok(pg_temp.manage('rotate',1,pg_temp.envelope(),pg_temp.id(8))->>'error'='parent_archived','archived parent refused');
 select pg_temp.ok(pg_temp.manage('revoke',1,null,pg_temp.id(8))->>'revoked'='true','cleanup allowed under archived parent');
 reset role;
 update public.tenant_users set role='viewer' where tenant_id=pg_temp.id(2);
-set local role service_role;
+reset role; -- mixed direct fixture reads; 0098 boundary suite checks scoped writer
 select pg_temp.ok(pg_temp.manage('create',0)->>'error'='forbidden','live demotion respected');
 reset role;
 select pg_temp.ok(not has_function_privilege('authenticated','public.manage_connector_credential(uuid,uuid,uuid,uuid,text,integer,integer,jsonb,uuid)','execute'),'browser RPC denied');

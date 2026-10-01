@@ -135,7 +135,7 @@ test.describe('real-provider approval proof archive', () => {
     });
     expect(claim.decision).toBe('claimed');
     expect(claim.content_digest).toBe(token.signed_payload.contentDigest);
-    const started = await rpc<{ batch: { id: string } }>('start_execution_batch', {
+    const started = await rpc<{ batch: { id: string } }>('start_claimed_execution_batch', {
       p_tenant_id: tenantId(),
       p_plan_id: plan.id,
       p_request_key: requestKey,

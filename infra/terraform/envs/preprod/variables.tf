@@ -38,6 +38,20 @@ variable "cloud_sql_instance_version" {
   default     = "v1"
 }
 
+variable "cloud_sql_authorized_networks" {
+  description = "Named, narrowly scoped IPv4 CIDRs for a temporary external migration runner. Empty keeps Cloud SQL private-only. Never use a public catch-all."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition = alltrue([
+      for name, cidr in var.cloud_sql_authorized_networks :
+      length(name) > 0 && length(name) <= 64 &&
+      can(cidrnetmask(cidr)) && can(regex("/32$", cidr))
+    ])
+    error_message = "Cloud SQL authorized networks must be named valid IPv4 /32 runner CIDRs; broad networks are forbidden."
+  }
+}
+
 variable "retention_days" {
   description = "Evidence vault retention duration in days (WORM Compliance lock)"
   type        = number
@@ -220,6 +234,28 @@ variable "supabase_archive_writer_key" {
     condition     = length(var.supabase_archive_writer_key) > 0
     error_message = "A minted BFF-only approval_archive_writer JWT is required."
   }
+}
+
+variable "supabase_human_action_writer_key" {
+  description = "BFF-only restricted human_action_writer JWT signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "supabase_evidence_ingestion_writer_key" {
+  description = "BFF-only restricted evidence_ingestion_writer JWT signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+
+variable "supabase_agent_ledger_writer_key" {
+  description = "Restricted agent_ledger_writer JWT (append_agent_ledger only) held by the BFF and agent runtime, signed with supabase_jwt_secret."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 
