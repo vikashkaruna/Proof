@@ -1,0 +1,80 @@
+{
+  "pkg": "@axiom/ui",
+  "globalName": "AxiomUI",
+  "shape": "package",
+  "buildCmd": "pnpm --filter @axiom/ui build",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": "dist/ui.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "AgentLabel": {
+      "cardMode": "column"
+    },
+    "AgentPill": {
+      "cardMode": "column"
+    },
+    "AgentRunCard": {
+      "cardMode": "column"
+    },
+    "Badge": {
+      "cardMode": "column"
+    },
+    "Card": {
+      "cardMode": "column"
+    },
+    "CardContent": {
+      "cardMode": "column"
+    },
+    "CardDescription": {
+      "cardMode": "column"
+    },
+    "CardFooter": {
+      "cardMode": "column"
+    },
+    "CardHeader": {
+      "cardMode": "column"
+    },
+    "CardTitle": {
+      "cardMode": "column"
+    },
+    "DataPlaceholder": {
+      "cardMode": "column"
+    },
+    "Input": {
+      "cardMode": "column"
+    },
+    "Label": {
+      "cardMode": "column"
+    },
+    "ModuleBar": {
+      "cardMode": "column"
+    },
+    "PageHeader": {
+      "cardMode": "column"
+    },
+    "PostureScore": {
+      "cardMode": "column"
+    },
+    "ProgressBar": {
+      "cardMode": "column"
+    },
+    "ProofSeal": {
+      "cardMode": "column"
+    },
+    "RelatedAgents": {
+      "cardMode": "column"
+    },
+    "SeverityChip": {
+      "cardMode": "column"
+    },
+    "StatGrid": {
+      "cardMode": "column"
+    },
+    "StatusBadge": {
+      "cardMode": "column"
+    },
+    "Textarea": {
+      "cardMode": "column"
+    }
+  }
+}

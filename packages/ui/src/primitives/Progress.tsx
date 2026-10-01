@@ -18,13 +18,13 @@ export const ProgressBar = forwardRef<HTMLDivElement, ProgressBarProps>(
         : variant === 'danger'
           ? 'bg-ember-500'
           : variant === 'warning'
-            ? 'bg-gold-500'
+            ? 'bg-amber-500'
             : v >= 80
               ? 'bg-teal-500'
               : v >= 50
                 ? 'bg-indigo-500'
                 : v >= 30
-                  ? 'bg-gold-500'
+                  ? 'bg-amber-500'
                   : 'bg-ember-500';
 
     return (
