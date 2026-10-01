@@ -1,6 +1,7 @@
 import { LedgerClient } from '@axiom/ledger';
 import { loadEnv } from '@axiom/config';
 import { createClient } from '@supabase/supabase-js';
+import { createAgentLedgerWriter, createHumanActionWriter } from '@axiom/supabase';
 import type { AppendLedgerInput, AppendLedgerResult } from '@axiom/ledger';
 
 export type VerifyResult =
@@ -28,7 +29,12 @@ export function createLedgerService(): LedgerService {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
     auth: { persistSession: false },
   });
-  const client = new LedgerClient(supabase);
+  // Reads/verification use the generic client. Appends never do: human events
+  // use the human action writer, agent/system events the agent ledger writer.
+  const client = new LedgerClient(supabase, {
+    human: createHumanActionWriter,
+    agent: createAgentLedgerWriter,
+  });
 
   return {
     append: (input) => client.append(input),

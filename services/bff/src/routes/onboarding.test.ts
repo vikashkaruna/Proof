@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { Hono } from 'hono';
 import { LIBRARY_VERSION } from '@axiom/control-library';
 import type { Variables } from '../types.js';
@@ -14,7 +15,10 @@ const state = vi.hoisted(() => {
   });
   return { rpc: vi.fn() };
 });
-vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: () => ({ rpc: state.rpc }) }));
+vi.mock('@axiom/supabase', () => ({
+  createSupabaseAdmin: () => refuseMovedProofRpcs({ rpc: state.rpc }),
+  createHumanActionWriter: () => ({ rpc: state.rpc }),
+}));
 const USER = '11111111-1111-4111-8111-111111111111';
 const TENANT = '22222222-2222-4222-8222-222222222222';
 const ENGAGEMENT = '33333333-3333-4333-8333-333333333333';

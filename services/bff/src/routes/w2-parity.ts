@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { Capability } from '@axiom/types';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -35,7 +35,11 @@ export function w2ParityRoutes(
 ) {
   const app = new Hono<{ Variables: Variables }>();
   const service = () =>
-    dependencies.service ?? new W2ParityService(dependencies.db ?? createSupabaseAdmin());
+    dependencies.service ??
+    new W2ParityService(
+      dependencies.db ?? createSupabaseAdmin(),
+      dependencies.db ?? createHumanActionWriter(),
+    );
 
   // ─── 1. ROPA Records ──────────────────────────────────────────────────
   app.post('/ropa', async (c) => {

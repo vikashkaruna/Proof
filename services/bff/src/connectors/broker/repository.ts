@@ -72,8 +72,9 @@ export class LedgerBrokerAudit implements BrokerAudit {
     );
   }
   private readonly ledger: Pick<LedgerClient, 'append'>;
-  constructor(db: SupabaseClient | Pick<LedgerClient, 'append'>) {
-    this.ledger = 'append' in db ? db : new LedgerClient(db);
+  /** The ledger must already route agent events to the agent ledger writer. */
+  constructor(ledger: Pick<LedgerClient, 'append'>) {
+    this.ledger = ledger;
   }
   async write(
     phase: 'requested' | 'acquired' | 'denied',

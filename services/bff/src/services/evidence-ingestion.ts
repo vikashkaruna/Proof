@@ -174,6 +174,7 @@ export class EvidenceIngestionService {
     readonly db: EvidenceDatabase,
     readonly vault: EvidenceVaultApi,
     readonly config: EvidenceStorageConfig,
+    private readonly writer: Pick<EvidenceDatabase, 'rpc'> = db,
   ) {}
 
   async operation(tenantId: string, operationKey: string): Promise<IngestOperation> {
@@ -215,7 +216,7 @@ export class EvidenceIngestionService {
   private async pending(operation: IngestOperation, actorId: string, code: string) {
     // Diagnostic text is never persisted: provider errors may contain credentials/URLs.
     try {
-      await this.db.rpc('note_evidence_ingest_failure', {
+      await this.writer.rpc('note_evidence_ingest_failure', {
         p_tenant_id: operation.tenant_id,
         p_actor_id: actorId,
         p_operation_id: operation.id,
@@ -236,7 +237,7 @@ export class EvidenceIngestionService {
   private async settle(operation: IngestOperation, actorId: string, versionId: string) {
     const verified = await this.vault.verifyReceipt(this.expected(operation, versionId), options());
     const request = operation.request;
-    const { data, error } = await this.db.rpc('settle_evidence_ingest', {
+    const { data, error } = await this.writer.rpc('settle_evidence_ingest', {
       p_tenant_id: operation.tenant_id,
       p_actor_id: actorId,
       p_operation_id: operation.id,
@@ -288,7 +289,7 @@ export class EvidenceIngestionService {
       retention_policy: 'seven_years',
       legal_hold: false,
     };
-    const { data, error } = await this.db.rpc('begin_evidence_ingest', {
+    const { data, error } = await this.writer.rpc('begin_evidence_ingest', {
       p_tenant_id: tenantId,
       p_actor_id: actorId,
       p_operation_key: input.operationKey,

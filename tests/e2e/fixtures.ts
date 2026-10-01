@@ -1,4 +1,5 @@
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
+import { localRoleBearer } from './local-writer';
 import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
 import { readFileSync } from 'node:fs';
 import { expect, type Page, type Response } from '@playwright/test';
@@ -324,7 +325,7 @@ export async function registerWorkload(agent: 'drishti' | 'karya', label: string
       method: 'POST',
       headers: {
         apikey: state.publishableKey,
-        Authorization: `Bearer ${state.serviceKey}`,
+        Authorization: `Bearer ${localRoleBearer('human_action_writer', state)}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({

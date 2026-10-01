@@ -107,10 +107,13 @@ export const submitClassificationReviewInputSchema = z
 export type SubmitClassificationReviewInput = z.infer<typeof submitClassificationReviewInputSchema>;
 
 export class W2ParityService {
-  constructor(private readonly db: EvidenceDatabase) {}
+  constructor(
+    private readonly db: EvidenceDatabase,
+    private readonly writer: Pick<EvidenceDatabase, 'rpc'> = db,
+  ) {}
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.db.rpc(name, args);
+    const query = this.writer.rpc(name, args);
     const { data, error } = signal ? await query.abortSignal(signal) : await query;
     if (error) {
       throw new EvidenceError('database_unavailable', 503);

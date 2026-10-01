@@ -11,7 +11,7 @@ create function pg_temp.prepare() returns jsonb language sql as $$select public.
 create function pg_temp.fail_proposal_audit() returns trigger language plpgsql as $$
 begin if new.action_type='onboarding.proposal.approved' and new.detail->>'reason'='Audit fault' then raise exception 'Injected final audit failure' using errcode='23514'; end if; return new; end $$;
 create trigger proposal_audit_fault before insert on public.audit_ledger for each row execute function pg_temp.fail_proposal_audit();
-set local role service_role;
+reset role; -- business fixture inspects lineage directly
 select pg_temp.ok(jsonb_array_length(public.read_onboarding_inventory(pg_temp.id(11)))=1,'non-bypass service reads inventory without private contact data');
 do $$ declare p jsonb; result jsonb; proposal_id uuid; digest text;
 begin
@@ -56,8 +56,14 @@ end $$;
 reset role;
 -- Changing the preparer's role cannot make self-review valid.
 update public.tenant_users set role='admin' where user_id=pg_temp.id(1);
-set local role service_role;
-select pg_temp.ok((select public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),id,content_sha256,'approved','Self review',gen_random_uuid())->>'error'='self_review' from public.onboarding_proposals where status='approved'),'preparer remains unable to self-review after promotion');
+select set_config('proposal_test.id',id::text,true),
+       set_config('proposal_test.digest',content_sha256,true)
+  from public.onboarding_proposals where status='approved';
+set local role human_action_writer;
+select pg_temp.ok(public.review_onboarding_proposal(pg_temp.id(11),pg_temp.id(1),
+  current_setting('proposal_test.id')::uuid,current_setting('proposal_test.digest'),
+  'approved','Self review',gen_random_uuid())->>'error'='self_review',
+  'preparer remains unable to self-review after promotion');
 reset role;
 select pg_temp.ok(not has_table_privilege('service_role','public.onboarding_proposals','UPDATE'),'broker cannot rewrite proposal snapshots');
 select pg_temp.ok(not has_table_privilege('authenticated','public.onboarding_proposal_systems','INSERT'),'browser cannot forge lineage');

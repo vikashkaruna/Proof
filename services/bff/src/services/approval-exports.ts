@@ -5,6 +5,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { authorize, Capability, type UserRole } from '@axiom/types';
 import {
   BRANDING,
@@ -57,7 +58,7 @@ function escapeCsvField(val: unknown): string {
 export class ApprovalExportService {
   constructor(
     private readonly db: EvidenceDatabase,
-    private readonly writerDb: Pick<EvidenceDatabase, 'rpc'>,
+    private readonly writer: () => EvidenceDatabase = createHumanActionWriter,
   ) {}
 
   private async assertLiveAccess(
@@ -85,7 +86,9 @@ export class ApprovalExportService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const query = this.writerDb.rpc(name, args) as unknown as {
+    // Only record_approval_export is called here; it appends a human-labelled
+    // ledger event, so it must use the human action writer, never the shared key.
+    const query = this.writer().rpc(name, args) as unknown as {
       abortSignal?: (sig: AbortSignal) => Promise<{ data: unknown; error: unknown }>;
     };
     const { data, error } =

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   Capability,
   PrepareOnboardingProposalSchema,
@@ -56,7 +56,7 @@ export function onboardingProposalRoutes() {
         },
         400,
       );
-    const { data, error } = await createSupabaseAdmin().rpc('prepare_onboarding_proposal', {
+    const { data, error } = await createHumanActionWriter().rpc('prepare_onboarding_proposal', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_estate_id: input.data.estateId,
@@ -88,7 +88,7 @@ export function onboardingProposalRoutes() {
         },
         400,
       );
-    const { data, error } = await createSupabaseAdmin().rpc('review_onboarding_proposal', {
+    const { data, error } = await createHumanActionWriter().rpc('review_onboarding_proposal', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_proposal_id: c.req.param('id'),

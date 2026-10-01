@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { repoRoot } from '../target';
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { selectTenant, signIn, state } from '../fixtures';
+import { localRoleBearer } from '../local-writer';
 
 // Real GoTrue -> browser bridge -> BFF reads. These fixtures are explicitly
 // legacy records: their hashes are real, but no object is uploaded and no
@@ -53,7 +54,7 @@ async function pendingOperation() {
     method: 'POST',
     headers: {
       apikey: state.publishableKey,
-      Authorization: `Bearer ${state.serviceKey}`,
+      Authorization: `Bearer ${localRoleBearer('evidence_ingestion_writer', state)}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

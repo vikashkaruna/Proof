@@ -2,6 +2,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ApprovalEngine } from '@axiom/approval-engine';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { authorize, Capability, type UserRole } from '@axiom/types';
 import {
   EvidenceError,
@@ -94,12 +95,20 @@ const readOptions = (signal?: AbortSignal) => ({
   signal,
 });
 
+/** Proof RPCs that append a human-labelled ledger event; human writer only. */
+const HUMAN_WRITER_RPCS: ReadonlySet<string> = new Set([
+  'begin_approval_proof_archive',
+  'settle_approval_proof_archive',
+  'review_approval_proof_archive',
+]);
+
 export class ApprovalProofArchiveService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly approvalEngine: ApprovalEngine,
-    private readonly writerDb: Pick<EvidenceDatabase, 'rpc'>,
+    private readonly archiveWriterDb: Pick<EvidenceDatabase, 'rpc'>,
     private readonly storage: () => Storage = evidenceStorage,
+    private readonly writer: () => EvidenceDatabase = createHumanActionWriter,
   ) {}
 
   private async queryRow<T>(
@@ -141,7 +150,10 @@ export class ApprovalProofArchiveService {
   }
 
   private mutationRpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    return this.rpcOn(this.writerDb, name, args, signal);
+    // begin/settle/review append a human-labelled event: human writer only.
+    // release stays on the dedicated archive writer (not a moved RPC).
+    const target = HUMAN_WRITER_RPCS.has(name) ? this.writer() : this.archiveWriterDb;
+    return this.rpcOn(target, name, args, signal);
   }
 
   private async authority(

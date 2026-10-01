@@ -12,7 +12,7 @@ create function pg_temp.manage(op text,id uuid,body jsonb) returns jsonb languag
  select public.manage_connector('41410000-0000-4000-8000-000000000021','41410000-0000-4000-8000-000000000011',op,id,body,pg_temp.descriptor(),gen_random_uuid()); $$;
 -- Disposable administrator fixture; not a service-role write path.
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id) values('41410000-0000-4000-8000-000000000061','41410000-0000-4000-8000-000000000021','drishti','spiffe://test/drishti');
-set local role service_role;
+reset role; -- mixed privileged fixture; writer grant is asserted by 0098 boundary suite
 do $$
 declare c uuid; result jsonb; events bigint; identity_id uuid;
  payload jsonb:='{"systemId":"41410000-0000-4000-8000-000000000041","descriptorId":"41410000-0000-4000-8000-000000000001","name":"Primary","endpointRef":"primary_crm"}';
@@ -66,7 +66,7 @@ begin
 end $$;
 reset role;
 update public.tenant_users set role='viewer' where tenant_id='41410000-0000-4000-8000-000000000021';
-set local role service_role;
+set local role human_action_writer;
 select pg_temp.ok(pg_temp.manage('create',null,'{}')->>'error'='forbidden','live demotion respected');
 reset role;
 select pg_temp.ok(not has_function_privilege('authenticated','public.manage_connector(uuid,uuid,text,uuid,jsonb,jsonb,uuid)','execute'),'browser cannot invoke lifecycle RPC');

@@ -43,7 +43,14 @@ function personaState(): PersonaState | null {
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
-function localWriterKey(role: 'statutory_proof_writer' | 'approval_archive_writer') {
+function localWriterKey(
+  role:
+    | 'statutory_proof_writer'
+    | 'approval_archive_writer'
+    | 'human_action_writer'
+    | 'evidence_ingestion_writer'
+    | 'agent_ledger_writer',
+) {
   if (!state || acceptanceTarget) return '';
   const statusPath = resolve(
     process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
@@ -54,7 +61,11 @@ function localWriterKey(role: 'statutory_proof_writer' | 'approval_archive_write
     throw new Error('Persona state and local Supabase signing target differ');
   const jwtSecret = status.JWT_SECRET;
   if (!jwtSecret) throw new Error('Local Supabase JWT signing secret is missing');
-  return mintLocalPostgrestRoleKey({ role, jwtSecret, serviceKey: state.serviceKey });
+  return mintLocalPostgrestRoleKey({
+    role,
+    jwtSecret,
+    serviceKey: state.serviceKey,
+  });
 }
 
 function archiveWriterKey() {
@@ -101,6 +112,9 @@ const bffEnv = {
   SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
   // Issued separately for this PostgREST target and kept out of browser persona state.
   SUPABASE_ARCHIVE_WRITER_KEY: bffArchiveWriterKey,
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: localWriterKey('human_action_writer'),
+  SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: localWriterKey('evidence_ingestion_writer'),
+  SUPABASE_AGENT_LEDGER_WRITER_KEY: localWriterKey('agent_ledger_writer'),
   NODE_ENV: 'development',
   BFF_PORT,
   AXIOM_REPORT_EMAIL_MODE: 'disabled',

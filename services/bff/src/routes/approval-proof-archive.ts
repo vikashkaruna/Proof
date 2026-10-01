@@ -29,6 +29,7 @@ function invalid(c: Ctx) {
 export function approvalProofArchiveRoutes(dependencies: {
   approvalEngine: ApprovalEngine;
   db?: EvidenceDatabase;
+  writer?: () => EvidenceDatabase;
   service?: ApprovalProofArchiveService;
 }) {
   const app = new Hono<{ Variables: Variables }>();
@@ -38,6 +39,8 @@ export function approvalProofArchiveRoutes(dependencies: {
       dependencies.db ?? createSupabaseAdmin(),
       dependencies.approvalEngine,
       createApprovalArchiveWriter(),
+      undefined,
+      dependencies.writer,
     );
   app.post('/approvals/:tokenId/archive', async (c) => {
     const denied = requireCapability(c, Capability.EVIDENCE_EXPORT);

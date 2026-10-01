@@ -163,6 +163,7 @@ export const LedgerActionType = {
   PLAN_GENERATED: 'plan.generated',
   PLAN_DRY_RUN_COMPLETED: 'plan.dry_run.completed',
   PLAN_APPROVAL_REQUESTED: 'plan.approval_requested',
+  PLAN_REJECTED: 'plan.rejected',
   APPROVAL_TOKEN_ISSUED: 'approval.token.issued',
   APPROVAL_TOKEN_USED: 'approval.token.used',
   APPROVAL_TOKEN_REVOKED: 'approval.token.revoked',

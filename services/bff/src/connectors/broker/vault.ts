@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { OAuthProfileSchema } from './oauth-grants.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -73,6 +74,7 @@ export class CredentialVault {
   constructor(
     private readonly db: SupabaseClient,
     private readonly wrapper: KeyWrapper,
+    private readonly writer: SupabaseClient = createHumanActionWriter(),
   ) {}
 
   private async context(actor: VaultActor, connectorId: ConnectorId) {
@@ -136,7 +138,7 @@ export class CredentialVault {
     revision: number,
     envelope: CredentialEnvelope,
   ) {
-    const { data, error } = await this.db.rpc('manage_connector_credential', {
+    const { data, error } = await this.writer.rpc('manage_connector_credential', {
       p_tenant_id: actor.tenantId,
       p_actor_id: actor.actorId,
       p_connector_id: identity.connectorId,
@@ -243,7 +245,7 @@ export class CredentialVault {
   ): Promise<VaultReceipt> {
     try {
       const context = await this.context(actor, connectorId);
-      const { data, error } = await this.db.rpc('manage_connector_credential', {
+      const { data, error } = await this.writer.rpc('manage_connector_credential', {
         p_tenant_id: actor.tenantId,
         p_actor_id: actor.actorId,
         p_connector_id: connectorId,

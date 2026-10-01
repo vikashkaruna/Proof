@@ -9,7 +9,12 @@ function sign(input: string, secret: string) {
  * The deployed BFF receives an operator-provisioned key from its secret store.
  */
 export function mintLocalPostgrestRoleKey(input: {
-  role: 'statutory_proof_writer' | 'approval_archive_writer';
+  role:
+    | 'statutory_proof_writer'
+    | 'approval_archive_writer'
+    | 'human_action_writer'
+    | 'agent_ledger_writer'
+    | 'evidence_ingestion_writer';
   jwtSecret: string;
   serviceKey: string;
 }) {

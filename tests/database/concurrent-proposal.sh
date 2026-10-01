@@ -13,8 +13,10 @@ insert into public.estates(id,tenant_id,slug,name) values ('e0000000-0000-4000-8
 insert into public.tenant_onboarding_intakes(tenant_id,submitted_by,proposed_systems) values ('e0000000-0000-4000-8000-000000000011','e0000000-0000-4000-8000-000000000002','[{"name":"CRM"}]');
 select public.prepare_onboarding_proposal('e0000000-0000-4000-8000-000000000011','e0000000-0000-4000-8000-000000000001','e0000000-0000-4000-8000-000000000021','[{"name":"CRM","systemKind":"saas","dataCategories":[]}]',gen_random_uuid());
 SQL
-review="select public.review_onboarding_proposal('e0000000-0000-4000-8000-000000000011','e0000000-0000-4000-8000-000000000002',id,content_sha256,'approved','Reviewed',gen_random_uuid()) from public.onboarding_proposals where tenant_id='e0000000-0000-4000-8000-000000000011'"
-sql -c "set application_name='proposal-first'; begin; set local role service_role; $review; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
+proposal_id=$(sql -c "select id from public.onboarding_proposals where tenant_id='e0000000-0000-4000-8000-000000000011'")
+proposal_digest=$(sql -c "select content_sha256 from public.onboarding_proposals where id='$proposal_id'")
+review="select public.review_onboarding_proposal('e0000000-0000-4000-8000-000000000011','e0000000-0000-4000-8000-000000000002','$proposal_id','$proposal_digest','approved','Reviewed',gen_random_uuid())"
+sql -c "set application_name='proposal-first'; begin; set local role human_action_writer; $review; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
 first_pid=$!
 ready=false
 for attempt in $(seq 1 50); do
@@ -22,7 +24,7 @@ for attempt in $(seq 1 50); do
  sleep 0.05
 done
 [ "$ready" = true ] || { echo 'Proposal race missed barrier'; cat "$result_dir/first"; exit 1; }
-sql -c "set application_name='proposal-second'; set role service_role; $review;" > "$result_dir/second" 2>&1 &
+sql -c "set application_name='proposal-second'; set role human_action_writer; $review;" > "$result_dir/second" 2>&1 &
 second_pid=$!
 blocked=false
 for attempt in $(seq 1 30); do

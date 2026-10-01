@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createSupabaseAdmin } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   AcceptInvitationRequestSchema,
   Capability,
@@ -46,6 +46,7 @@ export function invitationRoutes(
   const app = new Hono<{ Variables: Variables }>();
   const sendEmail = deps.sendEmail ?? sendInvitationEmail;
   const db = () => (deps.client ?? createSupabaseAdmin)();
+  const writer = () => (deps.client ?? createHumanActionWriter)();
   const refuse = (code: string) => {
     const failure = failures[code];
     return failure ? ([{ error: { code, message: failure[1] } }, failure[0]] as const) : null;
@@ -75,7 +76,7 @@ export function invitationRoutes(
     const tenantId = c.get('tenantId');
     const token = randomBytes(32).toString('base64url');
     const deliver = invitationEmailEnabled();
-    const { data, error } = await db().rpc('create_tenant_invitation', {
+    const { data, error } = await writer().rpc('create_tenant_invitation', {
       p_tenant_id: tenantId,
       p_actor_id: c.get('user').id,
       p_email: parsed.data.email,
@@ -108,7 +109,7 @@ export function invitationRoutes(
       } catch {
         outcome = { status: 'failed', errorCode: 'provider_unavailable' };
       }
-      const settled = await db()
+      const settled = await writer()
         .from('tenant_invitations')
         .update(
           outcome.status === 'sent'
@@ -149,7 +150,7 @@ export function invitationRoutes(
     if (denied) return denied;
     const id = c.req.param('id');
     if (!z.uuid().safeParse(id).success) return c.json({ error: { code: 'invalid_id' } }, 400);
-    const { data, error } = await db().rpc('revoke_tenant_invitation', {
+    const { data, error } = await writer().rpc('revoke_tenant_invitation', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,
       p_invitation_id: id,
@@ -185,7 +186,7 @@ export function invitationRoutes(
       c.header('Retry-After', String(budget.data.retry_after));
       return c.json({ error: { code: 'rate_limited', message: 'Please try again later.' } }, 429);
     }
-    const { data, error } = await db().rpc('accept_tenant_invitation', {
+    const { data, error } = await writer().rpc('accept_tenant_invitation', {
       p_token_hash: digest(parsed.data.token),
       p_user_id: user.id,
       p_correlation_id: randomUUID(),

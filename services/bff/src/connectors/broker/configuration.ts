@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { LedgerClient } from '@axiom/ledger';
+import { createAgentLedgerWriter } from '@axiom/supabase';
 import { EndpointRefSchema, TargetBindingSchema, type TenantId } from '@axiom/types';
 import {
   CredentialBroker,
@@ -99,7 +101,7 @@ export function createCredentialBroker(
   db: SupabaseClient,
   configuration: unknown,
   authority?: BrokerAuthority,
-  clients: { aws?: AwsKmsPort; gcp?: GcpKmsPort } = {},
+  clients: { aws?: AwsKmsPort; gcp?: GcpKmsPort; ledger?: Pick<LedgerClient, 'append'> } = {},
 ): CredentialBroker {
   const config = BrokerConfigurationSchema.parse(configuration);
   const endpoints = new BrokerEndpointRegistry(config);
@@ -116,7 +118,9 @@ export function createCredentialBroker(
   const resources: BrokerResources = {
     keys,
     credentials: new SupabaseBrokerCredentialStore(db),
-    audit: new LedgerBrokerAudit(db),
+    audit: new LedgerBrokerAudit(
+      clients.ledger ?? new LedgerClient(db, { agent: createAgentLedgerWriter }),
+    ),
     transport: (lease) => endpoints.forLease(lease),
   };
   return new CredentialBroker(resources, authority);

@@ -12,7 +12,7 @@ insert into public.tenant_users(tenant_id,user_id,role) values ('00000000-0000-4
 insert into public.estates(id,tenant_id,slug,name) values ('00000000-0000-4000-8000-0000000000f3','00000000-0000-4000-8000-0000000000f2','race','Race');
 SQL
 manage="public.manage_estate('00000000-0000-4000-8000-0000000000f2','00000000-0000-4000-8000-0000000000f1','estate.update','00000000-0000-4000-8000-0000000000f3','{\"name\":\"Changed\",\"status\":\"active\",\"expectedVersion\":1}',gen_random_uuid())"
-sql -c "set application_name='estate-first'; begin; set local role service_role; select $manage; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
+sql -c "set application_name='estate-first'; begin; set local role human_action_writer; select $manage; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
 first_pid=$!
 ready=false
 for attempt in $(seq 1 50); do
@@ -20,7 +20,7 @@ for attempt in $(seq 1 50); do
   sleep 0.05
 done
 [ "$ready" = true ] || { echo 'Estate race missed barrier'; exit 1; }
-sql -c "set application_name='estate-second'; set role service_role; select $manage;" > "$result_dir/second" 2>&1 &
+sql -c "set application_name='estate-second'; set role human_action_writer; select $manage;" > "$result_dir/second" 2>&1 &
 second_pid=$!
 blocked=false
 for attempt in $(seq 1 30); do

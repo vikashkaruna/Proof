@@ -28,6 +28,10 @@ vi.mock('@axiom/supabase', () => ({
     if (!db.current) throw new Error('fake db not installed');
     return db.current.client;
   },
+  createHumanActionWriter: () => {
+    if (!db.current) throw new Error('fake db not installed');
+    return db.current.client;
+  },
 }));
 
 let fake: FakeDb;

@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { loadEnv } from '@axiom/config';
 import { createApp } from './app.js';
+import { createEvidenceIngestionWriter, createHumanActionWriter } from '@axiom/supabase';
 import { logger as rootLogger } from './lib/logger.js';
 
 /**
@@ -8,6 +9,10 @@ import { logger as rootLogger } from './lib/logger.js';
  * middleware chain is testable without binding a port (W9).
  */
 const env = loadEnv();
+// A deployed API must fail at startup, before it can accept a human or
+// provider-backed mutation with the wrong PostgREST identity.
+createHumanActionWriter();
+createEvidenceIngestionWriter();
 const log = rootLogger.child({ module: 'bff' });
 
 const app = createApp();

@@ -32,12 +32,22 @@ for component in ("bff", "agent-runtime"):
     if "SUPABASE_SERVICE_KEY" not in env_names(component):
         raise SystemExit(f"{component} is missing SUPABASE_SERVICE_KEY")
 
+for component in ("bff", "agent-runtime"):
+    if "SUPABASE_ANON_KEY" not in env_names(component):
+        raise SystemExit(f"{component} is missing the public gateway apikey for restricted-role calls")
+    if "SUPABASE_AGENT_LEDGER_WRITER_KEY" not in env_names(component):
+        raise SystemExit(f"{component} is missing SUPABASE_AGENT_LEDGER_WRITER_KEY")
+
 for component in deployments:
-    has_writer = "SUPABASE_STATUTORY_PROOF_WRITER_KEY" in env_names(component)
-    if has_writer != (component == "bff"):
-        raise SystemExit(f"{component}: statutory proof writer must be BFF-only")
-if "SUPABASE_ARCHIVE_WRITER_KEY" not in env_names("bff"):
-    raise SystemExit("BFF is missing the dedicated archive writer key")
-for component in ("web", "marketing", "agent-runtime"):
-    if "SUPABASE_ARCHIVE_WRITER_KEY" in env_names(component):
-        raise SystemExit(f"{component} must not receive SUPABASE_ARCHIVE_WRITER_KEY")
+    for key in ("SUPABASE_STATUTORY_PROOF_WRITER_KEY", "SUPABASE_ARCHIVE_WRITER_KEY",
+                "SUPABASE_HUMAN_ACTION_WRITER_KEY", "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY"):
+        has_writer = key in env_names(component)
+        if has_writer != (component == "bff"):
+            raise SystemExit(f"{component}: {key} must be BFF-only")
+
+for component in deployments:
+    has_agent_writer = "SUPABASE_AGENT_LEDGER_WRITER_KEY" in env_names(component)
+    if has_agent_writer != (component in ("bff", "agent-runtime")):
+        raise SystemExit(f"{component}: SUPABASE_AGENT_LEDGER_WRITER_KEY must be BFF/agent-runtime only")
+
+print("Supabase service key is scoped to BFF and agent runtime")

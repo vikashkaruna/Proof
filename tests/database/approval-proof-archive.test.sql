@@ -17,14 +17,17 @@ select pg_temp.assert_true(
  and not has_function_privilege('service_role','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
  and not has_function_privilege('service_role','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
  and not has_function_privilege('service_role','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
- and has_function_privilege('approval_archive_writer','public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)','EXECUTE')
- and has_function_privilege('approval_archive_writer','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
- and has_function_privilege('approval_archive_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and has_function_privilege('human_action_writer','public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)','EXECUTE')
+ and not has_function_privilege('approval_archive_writer','public.begin_approval_proof_archive(uuid,uuid,uuid,uuid,text,text,text,text,integer,uuid)','EXECUTE')
+ and has_function_privilege('human_action_writer','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
+ and not has_function_privilege('approval_archive_writer','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
+ and has_function_privilege('human_action_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and not has_function_privilege('approval_archive_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
  and has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
  and not pg_has_role('service_role','approval_archive_writer','MEMBER')
  and exists (select 1 from pg_roles where rolname='approval_archive_writer'
    and not rolcanlogin and not rolinherit and not rolbypassrls),
- 'archive mutation RPCs belong only to independent BFF writer role');
+ 'human-labelled archive RPCs belong only to the human writer (0099); the archive writer keeps release only');
 
 insert into auth.users(id,email) values
  ('10000000-0000-4000-8000-000000000001','archive-founder@example.invalid'),
@@ -201,14 +204,28 @@ end $$;
 reset role;
 select pg_temp.assert_true((select count(*)=0 from public.approval_proof_versions),
  'generic service credential could not forge a retained version');
-set local role approval_archive_writer;
+set local role human_action_writer;
 do $$ begin
   if (public.settle_approval_proof_archive(
     '10000000-0000-4000-8000-000000000010',
     '10000000-0000-4000-8000-000000000001',
     '10000000-0000-4000-8000-000000000099','{}'::jsonb,gen_random_uuid()
   )->>'error') is distinct from 'archive_not_found' then
-    raise exception 'ASSERTION FAILED: dedicated writer RPC unavailable';
+    raise exception 'ASSERTION FAILED: human writer RPC unavailable';
+  end if;
+end $$;
+reset role;
+set local role approval_archive_writer;
+do $$ begin
+  begin
+    perform public.settle_approval_proof_archive('10000000-0000-4000-8000-000000000010',
+      '10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000099','{}'::jsonb,gen_random_uuid());
+    raise exception 'ASSERTION FAILED: archive writer still settles';
+  exception when insufficient_privilege then null; end;
+  if (public.release_approval_proof_archive('10000000-0000-4000-8000-000000000010',
+    '10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000099',repeat('a',64),'v',gen_random_uuid())->>'error')
+    is distinct from 'archive_not_found' then
+    raise exception 'ASSERTION FAILED: archive writer release unavailable';
   end if;
 end $$;
 reset role;

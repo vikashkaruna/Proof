@@ -16,7 +16,7 @@ insert into public.tenant_users(tenant_id,user_id,role) values('$tenant','$owner
 SQL
 request=$(sql -c "select jsonb_build_object('content_hash',repeat('b',64),'byte_size',3,'mime_type','text/plain','evidence_type','document','control_ids','[]'::jsonb,'engagement_id',null,'collected_by_agent','human','provider','s3-compatible','bucket','axiom-test-vault','object_key','tenants/$tenant/evidence-ingestions/$key/'||repeat('b',64),'retention_policy','seven_years','legal_hold',false)")
 race() {
- local label="$1" first="$2" second="$3" role_name="${4:-service_role}"
+ local label="$1" first="$2" second="$3" role_name="${4:-evidence_ingestion_writer}"
  sql -c "set application_name='$label-first'; begin; set local role $role_name; $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
  local first_pid=$! ready=false blocked=false
  for attempt in $(seq 1 60); do
@@ -24,7 +24,7 @@ race() {
   sleep 0.05
  done
  [ "$ready" = true ] || { cat "$result_dir/$label-first"; exit 1; }
- sql -c "set application_name='$label-second'; set role service_role; $second;" > "$result_dir/$label-second" 2>&1 &
+ sql -c "set application_name='$label-second'; set role evidence_ingestion_writer; $second;" > "$result_dir/$label-second" 2>&1 &
  local second_pid=$!
  for attempt in $(seq 1 40); do
   [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }

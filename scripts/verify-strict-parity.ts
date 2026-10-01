@@ -6,6 +6,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
+import { mintLocalPostgrestRoleKey } from '../packages/supabase/src/local-proof-writer-key.js';
 
 async function main() {
   const target = loadAcceptanceTarget();
@@ -37,6 +38,21 @@ async function main() {
     .find((n) => n?.family === 'IPv4' && !n.internal)?.address;
   if (!target) assert(address, 'A Docker-reachable network interface is required');
   const api = new URL(status.API_URL!);
+  // Human-labelled proof RPCs (0098/0099) are executable only by the BFF's
+  // human action writer, never by the generic service key.
+  const writerRole = (
+    role: 'human_action_writer' | 'evidence_ingestion_writer' | 'agent_ledger_writer',
+  ) =>
+    target || !status.JWT_SECRET
+      ? ''
+      : mintLocalPostgrestRoleKey({
+          role,
+          jwtSecret: status.JWT_SECRET,
+          serviceKey: status.SERVICE_ROLE_KEY!,
+        });
+  const humanWriterKey = target
+    ? (process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY ?? '')
+    : writerRole('human_action_writer');
   if (!target) api.hostname = address!;
   if (!target)
     Object.assign(process.env, {
@@ -46,6 +62,9 @@ async function main() {
       SUPABASE_URL: api.origin,
       SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY,
       SUPABASE_SERVICE_KEY: status.SECRET_KEY,
+      SUPABASE_HUMAN_ACTION_WRITER_KEY: humanWriterKey,
+      SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: writerRole('evidence_ingestion_writer'),
+      SUPABASE_AGENT_LEDGER_WRITER_KEY: writerRole('agent_ledger_writer'),
       APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
       AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
       AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
@@ -247,16 +266,21 @@ async function main() {
       [0, 'disabled'],
       [1, 'active'],
     ] as const) {
-      const response = await apiRequest('/rest/v1/rpc/manage_workload_identity', 'POST', {
-        p_tenant_id: tenantId,
-        p_actor_id: actorId,
-        p_correlation_id: randomUUID(),
-        p_workload_id: workloadId,
-        p_expected_version: version,
-        p_agent: agent,
-        p_spiffe_id: binding.spiffe_id,
-        p_status: registrationStatus,
-      });
+      const response = await apiRequest(
+        '/rest/v1/rpc/manage_workload_identity',
+        'POST',
+        {
+          p_tenant_id: tenantId,
+          p_actor_id: actorId,
+          p_correlation_id: randomUUID(),
+          p_workload_id: workloadId,
+          p_expected_version: version,
+          p_agent: agent,
+          p_spiffe_id: binding.spiffe_id,
+          p_status: registrationStatus,
+        },
+        humanWriterKey,
+      );
       assert.equal(response.status, 200, 'Reviewed fixture registration');
       const receipt = (await response.json()) as Record<string, unknown>;
       assert.equal(receipt.tenant_id, tenantId, 'Registration tenant binding');
@@ -916,13 +940,18 @@ async function main() {
     ).status,
     201,
   );
-  const prepared = await apiRequest('/rest/v1/rpc/prepare_onboarding_proposal', 'POST', {
-    p_tenant_id: tenantB,
-    p_actor_id: preparer.id,
-    p_estate_id: estateB,
-    p_systems: [{ name: 'Reviewed CRM', systemKind: 'saas', dataCategories: ['contact'] }],
-    p_correlation_id: randomUUID(),
-  });
+  const prepared = await apiRequest(
+    '/rest/v1/rpc/prepare_onboarding_proposal',
+    'POST',
+    {
+      p_tenant_id: tenantB,
+      p_actor_id: preparer.id,
+      p_estate_id: estateB,
+      p_systems: [{ name: 'Reviewed CRM', systemKind: 'saas', dataCategories: ['contact'] }],
+      p_correlation_id: randomUUID(),
+    },
+    humanWriterKey,
+  );
   assert.equal(prepared.status, 200);
   const proposal = ((await prepared.json()) as { data: { id: string; content_sha256: string } })
     .data;
