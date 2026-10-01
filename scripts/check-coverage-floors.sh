@@ -104,10 +104,19 @@ for module in "${MODULES[@]}"; do
     --coverage.include='src/**/*.{ts,tsx}' \
     --coverage.thresholds.lines=80 \
     --coverage.reporter=text >"${output}" 2>&1; then
-    if ! grep -E '^Lines[[:space:]]*:' "${output}" | tail -n 1 | grep .; then
-      echo "[!] ${module} passed but printed no 'Lines :' summary; vitest output follows"
+    # The text reporter prints a per-file table; a 'Lines :' summary is not
+    # always emitted (CI output lacks it), so read the table's All files row.
+    lines_pct="$(sed 's/\x1b\[[0-9;]*m//g' "${output}" | awk -F'|' '/^[[:space:]]*All files[[:space:]]*\|/ {gsub(/[[:space:]]/, "", $5); print $5; exit}')"
+    if [ -z "${lines_pct}" ]; then
+      # A fully covered package prints only the summary block.
+      lines_pct="$(sed 's/\x1b\[[0-9;]*m//g' "${output}" | awk -F: '/^Lines[[:space:]]*:/ {split($2, a, "%"); gsub(/[[:space:]]/, "", a[1]); print a[1]; exit}')"
+    fi
+    if [ -z "${lines_pct}" ]; then
+      echo "[!] ${module} passed but printed no line-coverage figure; vitest output follows"
       tail -n 40 "${output}"
       EXIT_CODE=1
+    else
+      echo "     lines: ${lines_pct}%"
     fi
   else
     echo "[!] ${module} did not meet the 80% source-line floor or its tests failed"
