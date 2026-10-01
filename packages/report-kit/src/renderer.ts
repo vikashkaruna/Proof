@@ -422,15 +422,21 @@ export async function renderHtmlToPdf(
         env: { ...process.env, HOME: tmpdir(), XDG_CACHE_HOME: join(tmpdir(), 'chrome-cache') },
       };
 
+      // Classic '--headless' is understood by chrome-headless-shell (which has no
+      // 'new' mode) and by current Chrome. On CI runners the '--headless=new' attempt
+      // consumed a whole timeout before the fallback succeeded, so it goes second.
       try {
-        await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
+        await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
       } catch (first) {
-        firstFailure = describeChromiumFailure('headless=new', first);
-        // Fallback to classic '--headless' if '--headless=new' is not accepted by older Chromium
+        firstFailure = describeChromiumFailure('headless', first);
         try {
-          await execFileAsync(chromiumPath, ['--headless', ...baseArgs], childOptions);
+          await execFileAsync(chromiumPath, ['--headless=new', ...baseArgs], childOptions);
+          console.warn(
+            '[report-kit] classic --headless failed, --headless=new succeeded:',
+            firstFailure,
+          );
         } catch (second) {
-          throw new Error(`${firstFailure}; ${describeChromiumFailure('headless', second)}`);
+          throw new Error(`${firstFailure}; ${describeChromiumFailure('headless=new', second)}`);
         }
       }
 
