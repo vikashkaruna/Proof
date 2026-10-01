@@ -30,9 +30,17 @@ function fixture(reply: unknown, status = 200) {
     global: { fetch: fetcher },
     auth: { persistSession: false },
   });
-  return { db, fetcher, store: new DispatchPolicyStore(db) };
+  return { db, fetcher, store: new DispatchPolicyStore(db, () => db) };
 }
 describe('persisted dispatch policy', () => {
+  it('publishes through the injected human writer and never the read client', async () => {
+    const reader = fixture({});
+    const writer = fixture(receipt);
+    const store = new DispatchPolicyStore(reader.db, () => writer.db);
+    expect(await store.publish(policy, tenant, id(2), id(3), 0)).toEqual(receipt);
+    expect(writer.fetcher).toHaveBeenCalledTimes(1);
+    expect(reader.fetcher).not.toHaveBeenCalled();
+  });
   it('publishes only reviewed backend policy and validates its durable fingerprint', async () => {
     const f = fixture(receipt);
     expect(await f.store.publish(policy, tenant, id(2), id(3), 0)).toEqual(receipt);

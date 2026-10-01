@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ApprovalEngine } from '@axiom/approval-engine';
 import { abortableResult } from '../test/abortable-result.js';
@@ -169,7 +170,12 @@ async function setup() {
     contentType: 'application/json',
     versionId,
   } as never);
-  const service = new ApprovalProofArchiveService(f.db, engine, () => ({ vault: f.vault, config }));
+  const service = new ApprovalProofArchiveService(
+    refuseMovedProofRpcs(f.db),
+    engine,
+    () => ({ vault: f.vault, config }),
+    () => f.db,
+  );
   return { f, service, source, sourceText, sourceSha256, archiveId, tokenId, versionId };
 }
 

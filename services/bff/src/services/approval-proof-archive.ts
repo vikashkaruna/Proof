@@ -2,6 +2,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ApprovalEngine } from '@axiom/approval-engine';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { authorize, Capability, type UserRole } from '@axiom/types';
 import {
   EvidenceError,
@@ -94,11 +95,19 @@ const readOptions = (signal?: AbortSignal) => ({
   signal,
 });
 
+/** Proof RPCs that append a human-labelled ledger event; human writer only. */
+const HUMAN_WRITER_RPCS: ReadonlySet<string> = new Set([
+  'begin_approval_proof_archive',
+  'settle_approval_proof_archive',
+  'review_approval_proof_archive',
+]);
+
 export class ApprovalProofArchiveService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly approvalEngine: ApprovalEngine,
     private readonly storage: () => Storage = evidenceStorage,
+    private readonly writer: () => EvidenceDatabase = createHumanActionWriter,
   ) {}
 
   private async queryRow<T>(
@@ -120,7 +129,8 @@ export class ApprovalProofArchiveService {
   }
 
   private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    let query = this.db.rpc(name, args);
+    const target = HUMAN_WRITER_RPCS.has(name) ? this.writer() : this.db;
+    let query = target.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('approval_archive_persistence_unconfirmed', 503);

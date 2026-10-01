@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     SUPABASE_SERVICE_KEY: 'shared-service-key',
     SUPABASE_HUMAN_ACTION_WRITER_KEY: '',
     SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: '',
+    SUPABASE_AGENT_LEDGER_WRITER_KEY: '',
   },
   createClient: vi.fn(() => ({ rpc: vi.fn() })),
 }));
@@ -22,6 +23,7 @@ beforeEach(() => {
   mocks.createClient.mockClear();
   mocks.env.SUPABASE_HUMAN_ACTION_WRITER_KEY = '';
   mocks.env.SUPABASE_EVIDENCE_INGESTION_WRITER_KEY = '';
+  mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = '';
 });
 
 describe('BFF human and provider writer credentials', () => {
@@ -66,6 +68,37 @@ describe('BFF human and provider writer credentials', () => {
       {
         auth: { autoRefreshToken: false, persistSession: false },
         global: { headers: { Authorization: `Bearer ${provider}` } },
+      },
+    );
+  });
+});
+
+describe('agent ledger writer credential', () => {
+  it('refuses absent, generic, cross-role and expired keys and never calls createClient', async () => {
+    const { createAgentLedgerWriter } = await import('./agent-ledger-writer');
+    expect(() => createAgentLedgerWriter()).toThrow(/unavailable/);
+    mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = mocks.env.SUPABASE_SERVICE_KEY;
+    expect(() => createAgentLedgerWriter()).toThrow(/unavailable/);
+    mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = token('service_role');
+    expect(() => createAgentLedgerWriter()).toThrow(/Invalid/);
+    mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = token('human_action_writer');
+    expect(() => createAgentLedgerWriter()).toThrow(/Invalid/);
+    mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = token('agent_ledger_writer', 1);
+    expect(() => createAgentLedgerWriter()).toThrow(/Invalid/);
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  it('uses the public apikey with the scoped Bearer token', async () => {
+    const { createAgentLedgerWriter } = await import('./agent-ledger-writer');
+    const agent = token('agent_ledger_writer');
+    mocks.env.SUPABASE_AGENT_LEDGER_WRITER_KEY = agent;
+    createAgentLedgerWriter();
+    expect(mocks.createClient).toHaveBeenCalledWith(
+      'https://example.invalid',
+      'public-gateway-key',
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: `Bearer ${agent}` } },
       },
     );
   });

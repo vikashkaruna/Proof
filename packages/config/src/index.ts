@@ -82,6 +82,9 @@ const EnvFields = z.object({
   SUPABASE_STATUTORY_PROOF_WRITER_KEY: z.string().optional(),
   SUPABASE_HUMAN_ACTION_WRITER_KEY: z.string().optional(),
   SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: z.string().optional(),
+  // Scoped to public.append_agent_ledger (agent/system events only). Held by
+  // the agent runtime and by the BFF for connector-broker agent events.
+  SUPABASE_AGENT_LEDGER_WRITER_KEY: z.string().optional(),
   SUPABASE_DB_URL: z.string().url().optional(),
 
   // Cloud-Agnostic Storage & Evidence Vault (GCS / AWS S3 / MinIO / On-Prem)

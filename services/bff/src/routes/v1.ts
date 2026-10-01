@@ -1469,7 +1469,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('register_monitoring_schedule', {
+    const { data, error } = await createHumanActionWriter().rpc('register_monitoring_schedule', {
       p_tenant_id: tenantId,
       p_estate_id: parsed.data.estateId,
       p_name: parsed.data.name,
@@ -1525,7 +1525,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid event id' } }, 400);
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('acknowledge_drift_event', {
+    const { data, error } = await createHumanActionWriter().rpc('acknowledge_drift_event', {
       p_tenant_id: tenantId,
       p_event_id: eventId,
       p_acknowledged_by: user.id,
@@ -1653,7 +1653,7 @@ export function v1Routes(deps: Deps) {
       scope.environments = parsed.data.scope.environments;
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('create_standing_policy', {
+    const { data, error } = await createHumanActionWriter().rpc('create_standing_policy', {
       p_tenant_id: tenantId,
       p_name: parsed.data.name,
       p_scope: scope,
@@ -1708,7 +1708,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid policy id' } }, 400);
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('revoke_standing_policy', {
+    const { data, error } = await createHumanActionWriter().rpc('revoke_standing_policy', {
       p_tenant_id: tenantId,
       p_policy_id: policyId,
       p_revoked_by: user.id,
@@ -2100,7 +2100,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('record_dsar', {
+    const { data, error } = await createHumanActionWriter().rpc('record_dsar', {
       p_tenant_id: tenantId,
       p_kind: input.kind,
       p_principal_name: input.principalName ?? null,
@@ -2165,7 +2165,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('verify_dsar_identity', {
+    const { data, error } = await createHumanActionWriter().rpc('verify_dsar_identity', {
       p_tenant_id: tenantId,
       p_dsar_id: dsarId,
       p_method: method,
@@ -2218,7 +2218,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('advance_dsar', {
+    const { data, error } = await createHumanActionWriter().rpc('advance_dsar', {
       p_tenant_id: tenantId,
       p_dsar_id: dsarId,
       p_to_status: statusParsed.data,
@@ -2257,7 +2257,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('record_breach', {
+    const { data, error } = await createHumanActionWriter().rpc('record_breach', {
       p_tenant_id: tenantId,
       p_title: input.title,
       p_description: input.description,
@@ -2335,7 +2335,7 @@ export function v1Routes(deps: Deps) {
     }
     const note = typeof body?.note === 'string' ? body.note : undefined;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('advance_breach', {
+    const { data, error } = await createHumanActionWriter().rpc('advance_breach', {
       p_tenant_id: tenantId,
       p_breach_id: breachId,
       p_to_status: statusParsed.data,
@@ -2377,7 +2377,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('draft_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('draft_breach_notification', {
       p_tenant_id: tenantId,
       p_breach_id: breachId,
       p_kind: input.kind,
@@ -2442,7 +2442,7 @@ export function v1Routes(deps: Deps) {
       );
     }
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('review_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('review_breach_notification', {
       p_tenant_id: tenantId,
       p_notification_id: notificationId,
       p_reviewed_by: user.id,
@@ -2486,7 +2486,7 @@ export function v1Routes(deps: Deps) {
     }
     const input = parsed.data;
     const admin = createSupabaseAdmin();
-    const { data, error } = await admin.rpc('send_breach_notification', {
+    const { data, error } = await createHumanActionWriter().rpc('send_breach_notification', {
       p_tenant_id: tenantId,
       p_notification_id: notificationId,
       p_outcome: input.outcome,
@@ -3357,7 +3357,7 @@ export function v1Routes(deps: Deps) {
     const tenantId = c.get('tenantId');
     const user = c.get('user');
 
-    const { data, error } = await createSupabaseAdmin().rpc('reconcile_execution_dispatch', {
+    const { data, error } = await createHumanActionWriter().rpc('reconcile_execution_dispatch', {
       p_tenant_id: tenantId,
       p_plan_id: input.planId,
       p_request_key: input.requestKey,
@@ -3742,7 +3742,7 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 45) || 'organization';
-    const { data, error } = await admin.rpc('onboard_organization', {
+    const { data, error } = await createHumanActionWriter().rpc('onboard_organization', {
       p_user_id: user.id,
       p_slug: `${baseSlug}-${randomUUID()}`,
       p_name: input.name,

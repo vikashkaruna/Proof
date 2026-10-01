@@ -13,6 +13,7 @@ export function mintLocalPostgrestRoleKey(input: {
     | 'statutory_proof_writer'
     | 'approval_archive_writer'
     | 'human_action_writer'
+    | 'agent_ledger_writer'
     | 'evidence_ingestion_writer';
   jwtSecret: string;
   serviceKey: string;

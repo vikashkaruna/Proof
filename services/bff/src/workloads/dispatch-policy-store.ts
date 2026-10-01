@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantId } from '@axiom/types';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { z } from 'zod';
 import { DispatchKeyPolicy } from './dispatch-key-policy.js';
 import { DispatchRefused } from './dispatch-payload.js';
@@ -15,7 +16,12 @@ const policyReceipt = z
  * The backend must authenticate the human owner/admin and review this policy.
  * A successful publication fences old controllers; it does not deploy readers. */
 export class DispatchPolicyStore {
-  constructor(private readonly db: SupabaseClient) {}
+  /** `db` is read-only authority; `writer` (the BFF human action writer) is the
+   * only identity that may call the proof-bearing publication RPC. */
+  constructor(
+    private readonly db: SupabaseClient,
+    private readonly writer: () => SupabaseClient = createHumanActionWriter,
+  ) {}
   /** Startup/reconstruction only: match trusted local keys before recovering a
    * durable revision. Never silently refresh an in-flight controller's fence. */
   async currentRevision(policy: DispatchKeyPolicy, tenantId: TenantId): Promise<number> {
@@ -55,7 +61,7 @@ export class DispatchPolicyStore {
       z.number().int().min(0).max(2147483646).parse(expectedRevision);
       const ring = policy.snapshot().get(tenantId);
       if (!ring) throw new DispatchRefused();
-      const { data, error } = await this.db
+      const { data, error } = await this.writer()
         .rpc('publish_assessment_dispatch_key_policy', {
           p_tenant_id: tenantId,
           p_actor_id: actorId,
