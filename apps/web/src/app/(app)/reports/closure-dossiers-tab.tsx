@@ -93,7 +93,14 @@ export function ClosureDossiersTab({
         setReports((previous) => {
           const byId = new Map((reportOffset === 0 ? [] : previous).map((item) => [item.id, item]));
           for (const report of result.data)
-            if (report.kind === 'board' && report.engagementId) byId.set(report.id, report);
+            if (
+              ((report.kind === 'board' ||
+                report.kind === 'auditor' ||
+                report.kind === 'technical') &&
+                report.engagementId) ||
+              (report.kind === 'dpb' && !report.engagementId)
+            )
+              byId.set(report.id, report);
           return [...byId.values()];
         });
         setHasMoreReports(result.meta.hasMore);
@@ -101,7 +108,7 @@ export function ClosureDossiersTab({
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
           setError(
-            cause instanceof Error ? cause.message : 'Unable to load released board reports',
+            cause instanceof Error ? cause.message : 'Unable to load released source reports',
           );
       });
     return () => controller.abort();
@@ -110,18 +117,31 @@ export function ClosureDossiersTab({
   async function prepare(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const report = reports.find((item) => item.id === reportId);
-    if (!report?.engagementId || !title.trim()) return;
+    if (!report || !title.trim() || (report.kind !== 'dpb' && !report.engagementId)) return;
     setBusy(true);
     setActionError('');
     try {
-      await reportRequest(tenantId, `/engagements/${report.engagementId}/closure/pramaan`, {
-        body: {
-          dossierType: 'board_executive',
-          reportId,
-          title: title.trim(),
-          operationKey: crypto.randomUUID(),
+      await reportRequest(
+        tenantId,
+        report.kind === 'dpb'
+          ? '/closure/pramaan/dpb'
+          : `/engagements/${report.engagementId}/closure/pramaan`,
+        {
+          body: {
+            dossierType:
+              report.kind === 'auditor'
+                ? 'auditor_assurance'
+                : report.kind === 'technical'
+                  ? 'technical_register'
+                  : report.kind === 'dpb'
+                    ? 'dpb_statutory'
+                    : 'board_executive',
+            reportId,
+            title: title.trim(),
+            operationKey: crypto.randomUUID(),
+          },
         },
-      });
+      );
       refresh();
     } catch (cause) {
       setActionError(
@@ -229,9 +249,12 @@ export function ClosureDossiersTab({
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-[#1E2A4A]">Source-bound closure dossiers</h2>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          Board executive dossiers can use released board reports and exact retained assessment
-          source and PDF versions. Founder sealing requires a separately verified Compliance-locked
-          archive. Auditor, DPB, technical and full-closure dossiers need their own sources.
+          Board executive and assessment-derived auditor dossiers use released reports with exact
+          retained source and PDF versions. Founder sealing requires a separately verified
+          Compliance-locked archive. Auditor dossiers do not assert independent audit or evidence
+          certification. Technical dossiers repeat recorded plan claims without independently
+          certifying execution or closure. DPB dossiers repeat a recorded breach and notification;
+          they do not verify regulator receipt. Full-closure dossiers remain unavailable.
         </p>
       </div>
       {canGenerate && (
@@ -239,9 +262,9 @@ export function ClosureDossiersTab({
           onSubmit={(event) => void prepare(event)}
           className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
-          <h3 className="font-semibold text-slate-900">Prepare board executive dossier</h3>
+          <h3 className="font-semibold text-slate-900">Prepare source-bound dossier</h3>
           <label htmlFor="pramaan-report" className="block text-sm font-medium text-slate-700">
-            Released board report
+            Released board, auditor, DPB, or technical report
           </label>
           <select
             id="pramaan-report"
@@ -254,10 +277,17 @@ export function ClosureDossiersTab({
             }}
             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
           >
-            <option value="">Choose a released board report</option>
+            <option value="">Choose a released source report</option>
             {reports.map((report) => (
               <option key={report.id} value={report.id}>
-                {report.title}
+                {report.kind === 'auditor'
+                  ? 'Auditor review pack'
+                  : report.kind === 'technical'
+                    ? 'Recorded-plan technical pack'
+                    : report.kind === 'dpb'
+                      ? 'Recorded DPB notification pack'
+                      : 'Board report'}{' '}
+                · {report.title}
               </option>
             ))}
           </select>
@@ -330,7 +360,14 @@ export function ClosureDossiersTab({
                 <div className="min-w-0">
                   <p className="break-words font-medium text-slate-900">{dossier.title}</p>
                   <p className="mt-1 text-sm text-slate-600">
-                    {dossier.dossierType.replace(/_/g, ' ')} · Recorded status: {dossier.status} ·{' '}
+                    {dossier.dossierType === 'auditor_assurance'
+                      ? 'Assessment-derived auditor dossier'
+                      : dossier.dossierType === 'technical_register'
+                        ? 'Recorded-plan technical dossier'
+                        : dossier.dossierType === 'dpb_statutory'
+                          ? 'Recorded breach and DPB notification dossier'
+                          : dossier.dossierType.replace(/_/g, ' ')}{' '}
+                    · Recorded status: {dossier.status} ·{' '}
                     {new Date(dossier.createdAt).toLocaleDateString()}
                   </p>
                 </div>
@@ -350,7 +387,7 @@ export function ClosureDossiersTab({
                   className="flex flex-wrap items-center justify-between gap-3 py-3"
                 >
                   <div>
-                    <p className="font-medium text-slate-900">Board dossier {build.dossierId}</p>
+                    <p className="font-medium text-slate-900">Dossier {build.dossierId}</p>
                     <p className="mt-1 text-sm text-slate-600">Archive {build.status}</p>
                   </div>
                   <div className="flex gap-2">

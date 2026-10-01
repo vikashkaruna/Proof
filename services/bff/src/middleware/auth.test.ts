@@ -125,6 +125,24 @@ describe('authMiddleware — SEC-1 · fail closed on service failure', () => {
     expect(res.status).toBe(503);
     expect(await res.text()).not.toContain(FOUNDER_ID);
   });
+
+  it.each([
+    { status: 0, name: 'AuthApiError' },
+    { status: 504, name: 'AuthApiError' },
+    { status: undefined, name: 'AuthRetryableFetchError' },
+  ])('returns 503 when getUser returns a transient auth error (%j)', async (error) => {
+    const app = await buildApp(
+      { ENVIRONMENT: 'production' },
+      createSupabaseDouble({ auth: { kind: 'error', message: 'provider unavailable', ...error } }),
+    );
+    const res = await app.request('/v1/whoami', {
+      headers: { authorization: 'Bearer some-real-looking-jwt' },
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: { code: 'auth_unavailable', message: 'Auth service unreachable' },
+    });
+  });
 });
 
 describe('authMiddleware — the happy path still works', () => {

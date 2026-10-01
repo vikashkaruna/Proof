@@ -72,6 +72,31 @@ export function pramaanClosureRoutes(
     }
   });
 
+  // DPB breach/notification packs are tenant-scoped; no engagement is inferred.
+  app.post('/closure/pramaan/dpb', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_GENERATE);
+    if (denied) return denied;
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || 'engagementId' in body)
+      return invalid(c, 'DPB dossier is tenant-level');
+    const parsed = synthesizeDossierInputSchema.safeParse({ ...body, engagementId: null });
+    if (!parsed.success || parsed.data.dossierType !== 'dpb_statutory')
+      return invalid(c, 'Invalid tenant-level DPB dossier payload');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]);
+    try {
+      const result = await service().synthesizeDossier(
+        c.get('tenantId'),
+        c.get('user').id,
+        parsed.data,
+        randomUUID(),
+        signal,
+      );
+      return c.json(result, 201);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
   // 2. Seal Dossier under Founder Authority
   app.post('/dossiers/:id/seal', async (c) => {
     const denied = requireCapability(c, Capability.REPORT_RELEASE);

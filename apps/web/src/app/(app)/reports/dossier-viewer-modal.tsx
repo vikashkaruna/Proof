@@ -97,7 +97,13 @@ export function DossierViewerModal({
           >
             {dossier.sourceBound
               ? dossier.archiveStatus === 'settled'
-                ? 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
+                ? dossier.dossierType === 'auditor_assurance'
+                  ? 'This assessment-derived auditor dossier has an exact retained archive version. It is not an independent audit, auditor attestation, or evidence certification. Confirm the source and digest before founder sealing.'
+                  : dossier.dossierType === 'dpb_statutory'
+                    ? 'This tenant-level dossier repeats a recorded breach and reviewed notification. It does not verify regulator receipt, acceptance, or statutory filing. Confirm the source and digest before founder sealing.'
+                    : dossier.dossierType === 'technical_register'
+                      ? 'This dossier repeats recorded plan and action claims. It does not independently certify execution, rollback, verification, or closure. Confirm the source and digest before founder sealing.'
+                      : 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
                 : 'The archive outcome is pending. Reconcile the exact provider version before founder sealing or download.'
               : 'This historical record does not establish a verified source, retained closure pack, or Object Lock receipt. It is unavailable for sealing, download, or dispatch.'}
           </p>
@@ -108,7 +114,15 @@ export function DossierViewerModal({
             </div>
             <div>
               <dt className="font-medium text-slate-600">Dossier type</dt>
-              <dd className="mt-1 capitalize">{dossier.dossierType.replace(/_/g, ' ')}</dd>
+              <dd className="mt-1 capitalize">
+                {dossier.dossierType === 'auditor_assurance'
+                  ? 'Assessment-derived auditor dossier'
+                  : dossier.dossierType === 'dpb_statutory'
+                    ? 'Recorded breach and DPB notification dossier'
+                    : dossier.dossierType === 'technical_register'
+                      ? 'Recorded-plan technical dossier'
+                      : dossier.dossierType.replace(/_/g, ' ')}
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-slate-600">Created</dt>
@@ -116,7 +130,9 @@ export function DossierViewerModal({
             </div>
             <div>
               <dt className="font-medium text-slate-600">Engagement ID</dt>
-              <dd className="mt-1 break-all font-mono text-xs">{dossier.engagementId}</dd>
+              <dd className="mt-1 break-all font-mono text-xs">
+                {dossier.engagementId ?? 'Tenant-level breach record'}
+              </dd>
             </div>
             {dossier.reportId && (
               <div className="sm:col-span-2">
