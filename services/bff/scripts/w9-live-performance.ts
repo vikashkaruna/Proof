@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import pg from 'pg';
 import { renderHtmlToPdf } from '@axiom/report-kit/renderer';
 import { DiscoveryService } from '../src/connectors/discovery.js';
+import { PostgresReadConnector } from '../src/connectors/sql/postgres-read.js';
 import { createFakeDb } from '../src/test/fake-postgrest.js';
 
 const urlText = process.env.AXIOM_W9_DISPOSABLE_URL;
@@ -42,11 +43,11 @@ try {
   await admin.query('create schema w9_probe');
   createdSchema = true;
   await admin.query(
-    'create table w9_probe.records (id bigint primary key, category text not null)',
+    'create table w9_probe.records (id bigint primary key, category text not null, contact_email text not null)',
   );
   const load = await timed(() =>
     admin.query(
-      "insert into w9_probe.records select n, case when n % 2 = 0 then 'even' else 'odd' end from generate_series(1, 1000000) n",
+      "insert into w9_probe.records select n, case when n % 2 = 0 then 'even' else 'odd' end, 'person' || n || '@example.invalid' from generate_series(1, 1000000) n",
     ),
   );
   await admin.query('analyze w9_probe.records');
@@ -133,10 +134,56 @@ try {
   const sampledCounts = sample.value.records.map((record) => Number(record.sampled));
   if (
     !enumeration.value.records.some((record) => record.resource === 'w9_probe.records') ||
-    sampledCounts.length !== 2 ||
+    sampledCounts.length !== 3 ||
     sampledCounts.some((count) => count !== 200)
   )
     throw new Error('Discovery result did not match fixture');
+
+  const scanOnce = () =>
+    new PostgresReadConnector(async () => {
+      const client = new pg.Client({ connectionString: readerUrl.toString() });
+      await client.connect();
+      return {
+        query: (text, values) => client.query(text, values ? [...values] : undefined),
+        end: () => client.end(),
+      };
+    }).scanRedacted(
+      {
+        tenantId,
+        estateId,
+        systemId: '77777777-7777-4777-8777-777777777777',
+        connectorId,
+        descriptorSha256: 'b'.repeat(64),
+        grantId: '55555555-5555-4555-8555-555555555555',
+        workloadIdentity: spiffeId,
+        correlationId: '88888888-8888-4888-8888-888888888888',
+        deadline: new Date(Date.now() + 300_000).toISOString(),
+      },
+      'w9_probe.records',
+      1_000_000,
+      1_000,
+    );
+  const scanPasses = 5;
+  const scanDurationsMs: number[] = [];
+  let processedRows = 0;
+  let pages = 0;
+  const scanWindow = await timed(async () => {
+    for (let pass = 0; pass < scanPasses; pass += 1) {
+      const scan = await timed(scanOnce);
+      const emailProfile = scan.value.fields.find((field) => field.field === 'contact_email');
+      if (
+        scan.value.processedRows !== rowCount ||
+        !scan.value.complete ||
+        emailProfile?.detected.email !== rowCount ||
+        JSON.stringify(scan.value).includes('person1@example.invalid')
+      )
+        throw new Error('Redacted scan did not process every fixture row without raw values');
+      scanDurationsMs.push(scan.ms);
+      processedRows += scan.value.processedRows;
+      pages += scan.value.pages;
+    }
+  });
+  const scanRowsPerHour = Math.round((processedRows * 3_600_000) / scanWindow.ms);
 
   const html = `<!doctype html><html><head><title>W9 PDF renderer probe</title></head><body>
     <h1>W9 PDF renderer probe</h1><p>Synthetic performance fixture; no compliance claims or approval.</p>
@@ -164,6 +211,24 @@ try {
           sampleMs: sample.ms,
           sampleLimit: 200,
           sampledDistinctRows: 200,
+          rawReadAvailable: false,
+        },
+        redactedScan: {
+          target: `local-disposable-postgres:${url.port || '5432'}/axiom_w9_probe`,
+          resource: 'w9_probe.records',
+          databaseRole: 'w9_probe_reader (SELECT only)',
+          authorization: 'synthetic context; no live grant resolver',
+          recording: 'not connected to discovery RPC',
+          uniqueFixtureRows: rowCount,
+          scanPasses,
+          processedRows,
+          pages,
+          pageSize: 1_000,
+          complete: true,
+          passDurationsMs: scanDurationsMs,
+          elapsedMs: scanWindow.ms,
+          observedRowsPerHour: scanRowsPerHour,
+          rawRowsReturned: false,
           rawReadAvailable: false,
         },
         report: {
