@@ -376,6 +376,41 @@ test.describe('real-provider board report lifecycle', () => {
       expect(((await released.json()) as { data: { status: string } }).data.status).toBe(
         'published',
       );
+      const requestTimes = (await database(
+        `board_report_requests?id=eq.${request.requestId}&select=created_at`,
+      )) as { created_at: string }[];
+      const reportTimes = (await database(
+        `reports?id=eq.${draft.reportId}&select=generated_at,reviewed_at,published_at`,
+      )) as { generated_at: string; reviewed_at: string; published_at: string }[];
+      expect(requestTimes).toHaveLength(1);
+      expect(reportTimes).toHaveLength(1);
+      const requestedAt = Date.parse(requestTimes[0]!.created_at);
+      const generatedAt = Date.parse(reportTimes[0]!.generated_at);
+      const reviewedAt = Date.parse(reportTimes[0]!.reviewed_at);
+      const publishedAt = Date.parse(reportTimes[0]!.published_at);
+      expect([requestedAt, generatedAt, reviewedAt, publishedAt].every(Number.isFinite)).toBe(true);
+      expect(requestedAt).toBeLessThanOrEqual(generatedAt);
+      expect(generatedAt).toBeLessThanOrEqual(reviewedAt);
+      expect(reviewedAt).toBeLessThanOrEqual(publishedAt);
+      await test.info().attach('nfr8-board-report-timing.json', {
+        body: Buffer.from(
+          JSON.stringify({
+            kind: 'board',
+            fixture: 'one synthetic finalized assessment control',
+            target: 'owned local provider',
+            sourceBound: true,
+            exactRetainedVersionsVerified: true,
+            released: true,
+            requestToDraftMs: generatedAt - requestedAt,
+            draftToFounderReviewMs: reviewedAt - generatedAt,
+            reviewToReleaseMs: publishedAt - reviewedAt,
+            requestToReleaseWallMs: publishedAt - requestedAt,
+            thresholdMs: 300_000,
+            nfr8: 'UNVERIFIED: synthetic one-control fixture and human-review dwell',
+          }),
+        ),
+        contentType: 'application/json',
+      });
       const publicPdf = await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`);
       expect(publicPdf.status()).toBe(200);
       expect(sha(Buffer.from(await publicPdf.body()))).toBe(pdfVersion.content_hash);
