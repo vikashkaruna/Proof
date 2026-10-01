@@ -245,7 +245,7 @@ Each layer runs as an independent Docker container for modular scalability and l
 
 Execute the full statutory compliance flow (dynamic user creation, organization onboarding, datastore scanning across Drishti, Vibhaag, Parikshan, Sudhaar, token-gated Karya execution, Saakshi evidence sealing, Nazar, Sanket, and Prativedan reports) without hardcoded IDs:
 
-- Complete guide: [`docs/LIVE_FUNCTIONAL_FLOW_GUIDE.md`](./docs/LIVE_FUNCTIONAL_FLOW_GUIDE.md)
+- Complete guide: [`docs/22_Architecture_and_Flow.md`](./docs/22_Architecture_and_Flow.md) (flow and architecture). Current plan, progress log and operator runbook: [`docs/20_Plan.md`](./docs/20_Plan.md), [`docs/21_Progress.md`](./docs/21_Progress.md), [`docs/23_Operator_Runbook.md`](./docs/23_Operator_Runbook.md)
 
 ```bash
 # On Linux / macOS:

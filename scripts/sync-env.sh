@@ -361,6 +361,11 @@ tfvar_value() {
     evidence_access_key_id)     get_val "AXIOM_STORAGE_ACCESS_KEY_ID" ;;
     evidence_secret_access_key) get_val "AXIOM_STORAGE_SECRET_ACCESS_KEY" ;;
 
+    # Named /32 runner CIDRs for a temporary external migration runner, as
+    # `name=cidr,name=cidr`. Empty keeps Cloud SQL private-only. Terraform's own
+    # validation rejects anything that is not a /32.
+    cloud_sql_authorized_networks) get_val "AXIOM_CLOUD_SQL_AUTHORIZED_NETWORKS" "" ;;
+
     # ── Managed services ──
     upstash_redis_url)          get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")" ;;
     temporal_address)           get_val "TEMPORAL_ADDRESS" "axiom-proof.dkxyc.tmprl.cloud:7233" ;;
@@ -420,6 +425,40 @@ tfvar_is_number() {
   esac
 }
 
+# `map(string)` variables are written as an HCL map, not a quoted string.
+tfvar_is_map() {
+  case "$1" in
+    cloud_sql_authorized_networks) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# `name=cidr,name=cidr` -> `{ "name" = "cidr", "name" = "cidr" }`; empty -> `{}`.
+# The value is written into a .tfvars file, so only plain identifier and CIDR
+# characters are accepted; anything else is refused rather than escaped.
+tfvar_map_literal() {
+  local raw="$1" out="" pair name cidr
+  local -a pairs=()
+  if [ -z "$raw" ]; then
+    echo '{}'
+    return 0
+  fi
+  # An empty pair (leading, trailing or doubled comma) is refused, not skipped.
+  if [[ "$raw" == ,* || "$raw" == *, || "$raw" == *,,* ]]; then
+    return 1
+  fi
+  IFS=',' read -ra pairs <<< "$raw"
+  for pair in "${pairs[@]}"; do
+    name="${pair%%=*}"
+    cidr="${pair#*=}"
+    if [[ "$pair" != *=* || ! "$name" =~ ^[A-Za-z0-9._-]+$ || ! "$cidr" =~ ^[0-9./]+$ ]]; then
+      return 1
+    fi
+    out+="\"${name}\" = \"${cidr}\", "
+  done
+  echo "{ ${out%, } }"
+}
+
 do_terraform() {
   umask 077
   info "Propagating ${TARGET_ENV} configuration to Terraform..."
@@ -452,7 +491,13 @@ do_terraform() {
       unmapped+=("$name")
       continue
     fi
-    if tfvar_is_number "$name"; then
+    if tfvar_is_map "$name"; then
+      if ! value="$(tfvar_map_literal "$value")"; then
+        fail "${name} must be name=cidr[,name=cidr] using only letters, digits, . _ - and CIDR characters."
+        return 1
+      fi
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
+    elif tfvar_is_number "$name"; then
       [[ "$value" =~ ^[0-9]+$ ]] || { fail "${name} must be a nonnegative integer"; return 1; }
       body+="$(printf '%-28s = %s\n' "$name" "$value")"
     else

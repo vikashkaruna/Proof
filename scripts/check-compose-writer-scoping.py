@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,7 @@ COMPOSE_FILES = [
     "infra/docker/docker-compose.onprem.yml",
 ]
 WRITER_KEYS = (
+    "SUPABASE_ARCHIVE_WRITER_KEY",
     "SUPABASE_STATUTORY_PROOF_WRITER_KEY",
     "SUPABASE_HUMAN_ACTION_WRITER_KEY",
     "SUPABASE_EVIDENCE_INGESTION_WRITER_KEY",
@@ -41,14 +43,24 @@ for file in COMPOSE_FILES:
     for source in files:
         command.extend(["-f", str(ROOT / source)])
     command.extend(["config", "--format", "json"])
-    rendered = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # Compose refuses to render while any `${VAR:?...}` is unset. Every mode adds
+    # its own required variables, so supply a synthetic value for whatever it
+    # reports missing and retry; the scoping assertions below do not read values.
+    for _ in range(40):
+        rendered = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        missing = set(re.findall(r"required variable (\w+) is missing", rendered.stderr))
+        if not (rendered.returncode and missing - env.keys()):
+            break
+        for name in missing - env.keys():
+            # A bind address must parse as an IP; everything else is opaque.
+            env[name] = "127.0.0.1" if name.endswith("BIND_ADDRESS") else "synthetic-compose-check-only"
     if rendered.returncode:
         raise AssertionError(f"{file}: Compose render failed: {rendered.stderr.strip()}")
     services = json.loads(rendered.stdout)["services"]

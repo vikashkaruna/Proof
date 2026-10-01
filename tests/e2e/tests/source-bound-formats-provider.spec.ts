@@ -12,6 +12,7 @@ import {
   state,
 } from '../fixtures';
 import { acceptanceTarget } from '../target';
+import { insertLocalFixtureRow } from '../local-db';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
 
@@ -66,21 +67,8 @@ async function successful(response: APIResponse, expected: number) {
 async function technicalSource() {
   // Synthetic source setup only. The plan never asserts dry-run, rollback,
   // approval or execution; request/draft/review/release use sanctioned RPCs.
-  async function seed(table: string, body: unknown) {
-    const response = await fetch(`${state.supabaseUrl}/rest/v1/${table}`, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        apikey: state.publishableKey,
-        authorization: `Bearer ${state.serviceKey}`,
-        'content-type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify(body),
-    });
-    expect(response.status, await response.text()).toBe(201);
-  }
+  // Plans and actions are not writable through the service credential (0099).
+  const seed = insertLocalFixtureRow;
   const planId = crypto.randomUUID();
   await seed('remediation_plans', {
     id: planId,

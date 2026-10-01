@@ -29,6 +29,7 @@ import {
   type PersonaKey,
   type PersonaState,
 } from '../tests/e2e/personas.js';
+import { insertLocalFixtureRows } from './lib/local-fixture-db.js';
 
 async function main() {
   const target = loadAcceptanceTarget();
@@ -229,32 +230,37 @@ async function main() {
   // because the fixture is empty proves nothing about isolation.
   const planA = { id: randomUUID(), title: `Persona plan A ${run}` };
   const planB = { id: randomUUID(), title: `Persona plan B ${run}` };
-  await expectStatus(
-    await api('/rest/v1/remediation_plans', 'POST', [
-      {
-        id: planA.id,
-        tenant_id: tenantA.id,
-        engagement_id: engagementA,
-        library_version: library,
-        title: planA.title,
-        status: 'review',
-      },
-      {
-        id: planB.id,
-        tenant_id: tenantB.id,
-        engagement_id: engagementB,
-        library_version: library,
-        title: planB.title,
-        status: 'review',
-      },
-    ]),
-    201,
-    'Plan fixture',
-  );
+  // Plans and actions are not writable through the service credential (0099), so
+  // synthetic rows go in as the local database owner. A local-docker target is
+  // backed by the same loopback parity database; a remote target has no such
+  // connection and its plan fixtures must come from the operator database path.
+  if (target && target.topology !== 'local-docker')
+    throw new Error(
+      'Plan fixtures cannot be seeded into a remote target with the service credential (migration 0099); seed them through the operator database path.',
+    );
+  const fixtureTarget = { repoRoot: process.cwd(), stateDir };
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
+    {
+      id: planA.id,
+      tenant_id: tenantA.id,
+      engagement_id: engagementA,
+      library_version: library,
+      title: planA.title,
+      status: 'review',
+    },
+    {
+      id: planB.id,
+      tenant_id: tenantB.id,
+      engagement_id: engagementB,
+      library_version: library,
+      title: planB.title,
+      status: 'review',
+    },
+  ]);
 
   const actionId = randomUUID();
-  await expectStatus(
-    await api('/rest/v1/remediation_actions', 'POST', {
+  await insertLocalFixtureRows(fixtureTarget, 'remediation_actions', [
+    {
       id: actionId,
       tenant_id: tenantA.id,
       plan_id: planA.id,
@@ -269,10 +275,8 @@ async function main() {
       rollback_validated: true,
       dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
       dry_run_result: { recordsAffected: 12 },
-    }),
-    201,
-    'Action fixture',
-  );
+    },
+  ]);
 
   const state: PersonaState = {
     deployment: target

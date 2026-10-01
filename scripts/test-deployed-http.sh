@@ -118,8 +118,16 @@ PY
     # to the web container env, and is not exported to later steps.
     archive_writer_key=$(sed -n 's/^SUPABASE_ARCHIVE_WRITER_KEY=//p' "$state_dir/$environment.env")
     [ -n "$archive_writer_key" ] || { echo 'Archive writer key missing from protected BFF env.' >&2; exit 1; }
-    SUPABASE_ARCHIVE_WRITER_KEY="$archive_writer_key" ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
-    unset archive_writer_key
+    # Strict parity registers workload identities through the human writer and the
+    # provider probe also needs the evidence-ingestion writer (0098/0099).
+    human_writer_key=$(sed -n 's/^SUPABASE_HUMAN_ACTION_WRITER_KEY=//p' "$state_dir/$environment.env")
+    evidence_writer_key=$(sed -n 's/^SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=//p' "$state_dir/$environment.env")
+    [ -n "$human_writer_key" ] && [ -n "$evidence_writer_key" ] || { echo 'Human or evidence writer key missing from protected BFF env.' >&2; exit 1; }
+    SUPABASE_ARCHIVE_WRITER_KEY="$archive_writer_key" \
+      SUPABASE_HUMAN_ACTION_WRITER_KEY="$human_writer_key" \
+      SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="$evidence_writer_key" \
+      ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+    unset archive_writer_key human_writer_key evidence_writer_key
     AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
     # Real process restart, not a second read from the same in-memory cache.
     docker restart "$container" "axiom-http-${environment}-marketing-$$" >/dev/null
@@ -133,7 +141,13 @@ PY
     done
     AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts verify
   else
-    ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json" api-only
+    human_writer_key=$(sed -n 's/^SUPABASE_HUMAN_ACTION_WRITER_KEY=//p' "$state_dir/$environment.env")
+    evidence_writer_key=$(sed -n 's/^SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=//p' "$state_dir/$environment.env")
+    [ -n "$human_writer_key" ] && [ -n "$evidence_writer_key" ] || { echo 'Human or evidence writer key missing from protected BFF env.' >&2; exit 1; }
+    SUPABASE_HUMAN_ACTION_WRITER_KEY="$human_writer_key" \
+      SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="$evidence_writer_key" \
+      ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json" api-only
+    unset human_writer_key evidence_writer_key
   fi
   echo "$environment: HTTP acceptance passed against the running container."
 done
