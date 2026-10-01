@@ -1,15 +1,29 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { z } from 'zod';
 
-interface ArchiveStatus {
-  archiveId: string;
-  tokenId: string;
-  status: 'pending' | 'settled' | 'released';
-  sourceSha256: string;
-  versionId: string | null;
-  reviewed: boolean;
-  retainUntil: string;
+const archiveStatusSchema = z.object({
+  archiveId: z.uuid(),
+  tokenId: z.uuid(),
+  status: z.enum(['pending', 'settled', 'released']),
+  sourceSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  versionId: z.string().min(1).nullable(),
+  reviewed: z.boolean(),
+  retainUntil: z.string().datetime({ offset: true }),
+});
+type ArchiveStatus = z.infer<typeof archiveStatusSchema>;
+
+export function parseArchiveStatus(value: unknown, tokenId: string): ArchiveStatus {
+  const result = archiveStatusSchema.safeParse(value);
+  if (
+    !result.success ||
+    result.data.tokenId !== tokenId ||
+    (result.data.status === 'pending' && result.data.versionId !== null) ||
+    (result.data.status !== 'pending' && result.data.versionId === null)
+  )
+    throw new Error('Archive status is unconfirmed. Refresh before taking another action.');
+  return result.data;
 }
 
 interface Props {
@@ -58,11 +72,16 @@ export function ApprovalProofArchive({ tenantId, tokenId, canManage }: Props) {
       });
       if (response.status === 404 || (response.status === 403 && !canManage)) {
         setArchive(null);
+        setPreview(null);
+        setError(null);
         return;
       }
       if (!response.ok) throw new Error('Could not read the archive status.');
-      setArchive((await response.json()) as ArchiveStatus);
+      setArchive(parseArchiveStatus(await response.json(), tokenId));
+      setError(null);
     } catch (cause) {
+      setArchive(null);
+      setPreview(null);
       setError(cause instanceof Error ? cause.message : 'Archive status is unavailable.');
     } finally {
       setLoading(false);
@@ -78,13 +97,17 @@ export function ApprovalProofArchive({ tenantId, tokenId, canManage }: Props) {
       .then(async (response) => {
         if (response.status === 404 || (response.status === 403 && !canManage)) return null;
         if (!response.ok) throw new Error('Could not read the archive status.');
-        return response.json() as Promise<ArchiveStatus>;
+        return parseArchiveStatus(await response.json(), tokenId);
       })
       .then((result) => {
         if (active) setArchive(result);
       })
       .catch(() => {
-        if (active) setError('Archive status is unavailable.');
+        if (active) {
+          setArchive(null);
+          setPreview(null);
+          setError('Archive status is unavailable.');
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -115,10 +138,11 @@ export function ApprovalProofArchive({ tenantId, tokenId, canManage }: Props) {
         const code = result?.error?.code ?? String(response.status);
         throw new Error(errorMessages[code] ?? `${label} could not complete (${code}).`);
       }
-      setArchive((await response.json()) as ArchiveStatus);
+      setArchive(parseArchiveStatus(await response.json(), tokenId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `${label} failed.`);
+      const message = cause instanceof Error ? cause.message : `${label} failed.`;
       await refresh();
+      setError(message);
     } finally {
       setBusy(false);
     }
