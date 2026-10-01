@@ -136,15 +136,13 @@ it('requires step-up before factor revocation and reports the session consequenc
 });
 
 it('refuses an enrolment body with no verified setup key or safe authenticator URI', async () => {
-  const fetcher = vi
-    .fn()
-    .mockResolvedValue(
-      Response.json({
-        factorId: 'factor-1',
-        secret: 'SETUPKEY',
-        provisioningUri: 'javascript:alert(1)',
-      }),
-    );
+  const fetcher = vi.fn().mockResolvedValue(
+    Response.json({
+      factorId: 'factor-1',
+      secret: 'SETUPKEY',
+      provisioningUri: 'javascript:alert(1)',
+    }),
+  );
   vi.stubGlobal('fetch', fetcher);
   render(<MfaEnrolment {...base} initialStatus={empty} />);
   fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
@@ -211,4 +209,58 @@ it('does not display recovery codes from an unrelated activation response', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
   await waitFor(() => expect(screen.getByText(/Activation result is unconfirmed/)).toBeTruthy());
   expect(screen.queryByTestId('recovery-codes')).toBeNull();
+});
+
+it('disables further factor changes when activation succeeds but the live status re-read is malformed', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({
+        factorId: 'factor-1',
+        secret: 'SETUPKEY',
+        provisioningUri: 'otpauth://totp/Axiom',
+      }),
+    )
+    .mockResolvedValueOnce(Response.json({ factorId: 'factor-1', recoveryCodes: ['recover-1'] }))
+    .mockResolvedValueOnce(Response.json({ enrolled: true, factors: null }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<MfaEnrolment {...base} initialStatus={empty} enrolmentRequired />);
+  fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
+  await screen.findByText('SETUPKEY');
+  fireEvent.change(screen.getByLabelText('6-digit code'), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+  await screen.findByText(/Factor status is unavailable/);
+  expect(
+    screen.getByRole('button', { name: 'Enrol an authenticator' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(screen.getByText('Status unavailable')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Continue to sign-in verification' })).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+it('does not offer another revocation after a confirmed revoke with an unreadable status', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ challengeId: 'challenge-2' }))
+    .mockResolvedValueOnce(Response.json({ challengeId: 'challenge-2', satisfied: true }))
+    .mockResolvedValueOnce(Response.json({ factorId: 'factor-1', status: 'revoked' }))
+    .mockResolvedValueOnce(new Response(null, { status: 503 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<MfaEnrolment {...base} initialStatus={active} enrolmentRequired />);
+  fireEvent.click(screen.getByRole('button', { name: 'Revoke authenticator' }));
+  await screen.findByTestId('mfa-revoke-step-up');
+  fireEvent.change(screen.getByLabelText('Current code or recovery code'), {
+    target: { value: '123456' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm revocation' }));
+  await screen.findByText(/Factor status is unavailable/);
+  expect(
+    screen.getByRole('button', { name: 'Revoke authenticator' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(
+    screen.getByRole('button', { name: 'Replace authenticator' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(screen.queryByRole('link', { name: 'Continue to sign-in verification' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Revoke authenticator' }));
+  expect(fetcher).toHaveBeenCalledTimes(4);
 });

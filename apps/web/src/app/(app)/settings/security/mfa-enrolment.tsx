@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { z } from 'zod';
 import {
   Button,
   Card,
@@ -41,6 +42,21 @@ interface PendingEnrolment {
   provisioningUri: string;
 }
 
+const statusSchema = z.object({
+  enrolled: z.boolean(),
+  recoveryCodesRemaining: z.number().int().nonnegative(),
+  factors: z.array(
+    z.object({
+      id: z.string().min(1),
+      factorType: z.string().min(1),
+      status: z.string().min(1),
+      label: z.string().nullable(),
+      activatedAt: z.string().nullable(),
+      lastUsedAt: z.string().nullable(),
+    }),
+  ),
+});
+
 /**
  * TOTP enrolment (W1 · SEC-8).
  *
@@ -57,6 +73,7 @@ export function MfaEnrolment({
   enrolmentRequired = false,
 }: Props) {
   const [status, setStatus] = useState<MfaStatus>(initialStatus);
+  const [statusVerified, setStatusVerified] = useState(true);
   const [pending, setPending] = useState<PendingEnrolment | null>(null);
   const [code, setCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
@@ -99,10 +116,16 @@ export function MfaEnrolment({
   async function refresh() {
     try {
       const res = await fetch('/api/bff/v1/mfa/status', { headers });
-      if (res.ok) setStatus(await res.json());
+      if (!res.ok) throw new Error('unavailable');
+      const parsed = statusSchema.safeParse(await res.json());
+      if (!parsed.success) throw new Error('invalid factor status');
+      setStatus(parsed.data);
+      setStatusVerified(true);
     } catch {
-      // A failed status re-read is not worth an error banner; the actions
-      // below report their own failures, which is where it matters.
+      // A successful mutation with an unreadable re-read is an unknown live
+      // state. Never offer another factor change based on the old first paint.
+      setStatusVerified(false);
+      setError('Factor status is unavailable. Refresh the page before another change.');
     }
   }
 
@@ -165,6 +188,7 @@ export function MfaEnrolment({
    * `enrolment` challenge first when a live factor is being replaced.
    */
   async function beginOrChallenge(purpose: 'enrolment' | 'factor_revocation' = 'enrolment') {
+    if (!statusVerified) return;
     setNotice(null);
     if (!status.enrolled && purpose === 'enrolment') {
       await begin();
@@ -298,6 +322,7 @@ export function MfaEnrolment({
       setNotice(
         'Authenticator revoked. Its recovery codes and MFA-verified sessions have ended. Enrol a new authenticator before continuing if your role requires MFA.',
       );
+      setStatusVerified(false);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not revoke authenticator');
@@ -340,6 +365,7 @@ export function MfaEnrolment({
       setRecoveryCodes(body.recoveryCodes);
       setPending(null);
       setCode('');
+      setStatusVerified(false);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Activation failed');
@@ -353,7 +379,9 @@ export function MfaEnrolment({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           Authenticator app
-          {status.enrolled ? (
+          {!statusVerified ? (
+            <Badge variant="warning">Status unavailable</Badge>
+          ) : status.enrolled ? (
             <Badge variant="success">Active</Badge>
           ) : (
             <Badge variant="warning">Not enrolled</Badge>
@@ -515,14 +543,19 @@ export function MfaEnrolment({
 
         {!pending && !stepUp && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="accent" onClick={() => beginOrChallenge()} loading={busy}>
+            <Button
+              variant="accent"
+              onClick={() => beginOrChallenge()}
+              loading={busy}
+              disabled={!statusVerified}
+            >
               {status.enrolled ? 'Replace authenticator' : 'Enrol an authenticator'}
             </Button>
             {status.enrolled && (
               <Button
                 variant="ghost"
                 onClick={() => beginOrChallenge('factor_revocation')}
-                disabled={busy}
+                disabled={busy || !statusVerified}
               >
                 Revoke authenticator
               </Button>
@@ -536,13 +569,18 @@ export function MfaEnrolment({
           </div>
         )}
 
-        {enrolmentRequired && status.enrolled && !recoveryCodes && !pending && !stepUp && (
-          <Link href="/verify" prefetch={false} className="font-medium text-indigo-600 underline">
-            Continue to sign-in verification
-          </Link>
-        )}
+        {enrolmentRequired &&
+          statusVerified &&
+          status.enrolled &&
+          !recoveryCodes &&
+          !pending &&
+          !stepUp && (
+            <Link href="/verify" prefetch={false} className="font-medium text-indigo-600 underline">
+              Continue to sign-in verification
+            </Link>
+          )}
 
-        {status.enrolled && !pending && !stepUp && (
+        {statusVerified && status.enrolled && !pending && !stepUp && (
           <p className="text-xs text-slate-500">
             Replacing an active authenticator asks you to confirm with the current one (or a
             recovery code) first. Without that, anyone who got hold of your session could simply
