@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ModuleContextFor } from '@/lib/module-context';
+import { ModuleBarFor } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
@@ -114,7 +114,7 @@ export default async function DashboardPage() {
           Figures below reflect recorded tenant data. An unavailable value means the source could
           not be read; a zero means the query returned no matching records.
         </p>
-        <ModuleContextFor module="dashboard" tone="dark" className="mt-3" />
+        <ModuleBarFor module="dashboard" tone="dark" className="mt-3" />
         <div className="mt-5 rounded-xl border border-white/20 p-4">
           <p className="text-sm text-slate-200">Latest recorded engagement posture</p>
           <p className="mt-1 text-3xl font-semibold">

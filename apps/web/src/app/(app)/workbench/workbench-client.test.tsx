@@ -78,7 +78,7 @@ it('invokes a supported read-only agent and shows only returned proof references
 
 it('renders the shared context line with phase and agents, leaving the Hindi name and module id to the banner', () => {
   const { container } = render(<AgentWorkbenchClient {...props} />);
-  const ctx = screen.getByTestId('module-context');
+  const ctx = screen.getByTestId('module-bar');
   expect(ctx.textContent).toContain(moduleMeta('workbench').phase);
   expect(ctx.querySelector('[data-testid="related-agents"]')).toBeTruthy();
   expect(ctx.textContent).not.toContain(moduleMeta('workbench').hi);

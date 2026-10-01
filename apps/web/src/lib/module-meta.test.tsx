@@ -3,7 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { agentAccents } from '@axiom/design-tokens';
 import { MODULES, moduleMeta, type ModuleKey } from './module-meta';
-import { ModuleContextFor } from './module-context';
+import { ModuleBarFor } from './module-bar';
 
 const keys = Object.keys(MODULES) as ModuleKey[];
 // Agent icons inline every agent's animation keyframes, so check visible markup only.
@@ -43,9 +43,9 @@ describe('module metadata', () => {
   });
 });
 
-describe('ModuleContextFor', () => {
+describe('ModuleBarFor', () => {
   it('renders the module’s section, Hindi name, phase, id and agents', () => {
-    const markup = renderToStaticMarkup(<ModuleContextFor module="ledger" />);
+    const markup = renderToStaticMarkup(<ModuleBarFor module="ledger" />);
     expect(markup).toContain('Evidence &amp; Audit');
     expect(markup).toContain(moduleMeta('ledger').hi);
     expect(markup).toContain('M2.5');
@@ -56,7 +56,7 @@ describe('ModuleContextFor', () => {
   });
 
   it('shows no agents strip for a module with no named agent', () => {
-    const markup = renderToStaticMarkup(<ModuleContextFor module="dashboard" />);
+    const markup = renderToStaticMarkup(<ModuleBarFor module="dashboard" />);
     expect(markup).not.toContain('related-agents');
     expect(markup).toContain('P0');
   });

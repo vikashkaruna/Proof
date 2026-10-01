@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link';
 import { z } from 'zod';
 import { EvidenceType } from '@axiom/types';
-import { ModuleContextFor } from '@/lib/module-context';
+import { ModuleBarFor } from '@/lib/module-bar';
 import { evidenceUploadBytes, verifyLocalFile } from './evidence-workflow';
 import {
   evidenceRowSchema,
@@ -307,7 +307,7 @@ export function EvidenceClient({
           Inspect recorded evidence, check exact stored versions, or compare a local file against
           its recorded SHA-256.
         </p>
-        <ModuleContextFor module="evidence" tone="light" className="mt-3" />
+        <ModuleBarFor module="evidence" tone="light" className="mt-3" />
       </header>
       {error && (
         <p role="alert" className="rounded border border-red-200 bg-red-50 p-3">

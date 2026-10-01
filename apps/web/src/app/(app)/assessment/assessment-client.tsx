@@ -5,7 +5,7 @@ import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel } from '@axiom/ui';
-import { ModuleContextFor } from '@/lib/module-context';
+import { ModuleBarFor } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 
 export interface AssessmentClientProps {
@@ -164,7 +164,7 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
               Runs Parikshan only for the displayed saved assessment. Discovery, evidence sealing
               and report generation run separately.
             </div>
-            <ModuleContextFor module="assessment" tone="dark" className="mt-2" />
+            <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
           </div>
 
           <button

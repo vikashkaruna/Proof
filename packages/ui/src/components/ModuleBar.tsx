@@ -6,7 +6,7 @@ import { RelatedAgents } from './RelatedAgents';
 
 export type ModulePhase = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
 
-export interface ModuleContextProps {
+export interface ModuleBarProps {
   /** Where this screen sits, for example the section it belongs to. */
   crumb?: ReactNode;
   /** The module name in Hindi, shown beside the phase tag. Not part of the heading. */
@@ -24,7 +24,7 @@ export interface ModuleContextProps {
  * phase, module id and the related-agents strip. It renders no heading, so a page's own
  * h1 keeps its accessible name.
  */
-export function ModuleContext({
+export function ModuleBar({
   crumb,
   titleHi,
   phase,
@@ -32,11 +32,11 @@ export function ModuleContext({
   agents = [],
   tone = 'light',
   className,
-}: ModuleContextProps) {
+}: ModuleBarProps) {
   const hasLine = Boolean(crumb || titleHi || phase || moduleId);
   if (!hasLine && agents.length === 0) return null;
   return (
-    <div data-testid="module-context" className={cn('flex flex-col gap-2', className)}>
+    <div data-testid="module-bar" className={cn('flex flex-col gap-2', className)}>
       {hasLine && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           {crumb && (

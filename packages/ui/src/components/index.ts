@@ -6,7 +6,7 @@ export * from './AxiomMark';
 export * from './AxiomLogo';
 export * from './DataPlaceholder';
 export * from './Layout';
-export * from './ModuleContext';
+export * from './ModuleBar';
 export * from './PostureScore';
 export * from './ProofSeal';
 export * from './RelatedAgents';

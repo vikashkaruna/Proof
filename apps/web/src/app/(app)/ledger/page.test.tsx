@@ -137,8 +137,8 @@ it('keeps malformed pagination away from the ledger range query', async () => {
 
 it('renders the shared context line with the module id and agents, and prints the Hindi name once', async () => {
   const html = await renderPage();
-  expect(html).toContain('data-testid="module-context"');
-  const ctx = html.slice(html.indexOf('data-testid="module-context"'));
+  expect(html).toContain('data-testid="module-bar"');
+  const ctx = html.slice(html.indexOf('data-testid="module-bar"'));
   expect(ctx).toContain('M2.5');
   expect(ctx).toContain('data-testid="related-agents"');
   expect(html.split(moduleMeta('ledger').hi)).toHaveLength(2);

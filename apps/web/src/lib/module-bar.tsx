@@ -1,8 +1,8 @@
-import { ModuleContext } from '@axiom/ui';
+import { ModuleBar } from '@axiom/ui';
 import { moduleMeta, type ModuleKey } from './module-meta';
 
 /** The shared context line for a module: section, Hindi name, phase, id and related agents. */
-export function ModuleContextFor({
+export function ModuleBarFor({
   module,
   tone,
   omit = [],
@@ -16,7 +16,7 @@ export function ModuleContextFor({
 }) {
   const meta = moduleMeta(module);
   return (
-    <ModuleContext
+    <ModuleBar
       crumb={meta.section}
       titleHi={omit.includes('hi') ? undefined : meta.hi}
       phase={meta.phase}
