@@ -11,3 +11,7 @@ Three integration fixes followed failures in earlier full runs:
 - `fdff620` (cherry-picked here as `709733a`) creates a distinct internal founder with its own TOTP factor for each provider journey. This keeps the full suite inside the production MFA rate limit without disabling or bypassing that limit.
 
 The full workspace tests, typecheck, lint, build, and local security checks passed after the first two fixes; the final E2E-only change was compiled and exercised by the complete Playwright run. This checkpoint does **not** clear staging or production. The shared `service_role` credential could still directly call founder/receipt mutation RPCs on this validation branch, and separate restricted-writer fixes for board/statutory/Pramaan and approval archives are being tested. Full ordered migration, direct-call denial, real-provider rerun on the integrated security head, exact staging merge SHA, and remote production target acceptance remain required.
+
+## Integration note (W8.5 + statutory)
+
+The 15/15 count above predates the board-authority-revocation journey and the approval-archive journey carried on the W8.5 base. On the integrated branch `scripts/test-evidence-storage.py` requires the sum of every test in its seven specs: ingestion 1, vault 3, packs 3, pack-access 1, board 5, approval archive 1, technical and DPB source-bound formats 2, which is 16. This integrated count is computed from the specs and has not been run against a real provider by this checkpoint.
