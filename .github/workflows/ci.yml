@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
@@ -83,7 +83,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
@@ -211,7 +211,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
@@ -288,7 +288,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
@@ -421,7 +421,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 

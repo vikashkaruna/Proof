@@ -240,8 +240,8 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 
 ## 6. P2 — decisions, housekeeping, founder and gated items
 
-- [ ] **P2-1 Main promotion** (`[14][16]`; `20_Plan.md` D7) · Operator · promotion is **paused**; when asked, a staging-to-main PR merged with a merge commit (never squash, no direct pushes); no promotion while any gate is open · Closure: PR and exact-merge CI. `main` is at `3492ffa`.
-- [ ] **P2-2 Delete stale branches** (`[14]`) · Operator · all together, after plan completion · Closure: branch list.
+- [x] **P2-1 Main promotion** (`[14][16]`; `20_Plan.md` D7) · Done 2026-10-01 on the user's instruction: staging `8700264` (exact-SHA CI green) promoted by PR #129 merge commit to main `06bd190`, exact-SHA CI green. No deploy ran (main triggers CI and security only). Later promotions follow the same rule: merge commit, never squash, no direct pushes, no promotion while any gate is red.
+- [x] **P2-2 Delete stale branches** (`[14]`) · Done 2026-10-01 (see P2-15 for what remains) · 41 remote and 119 local branches deleted after each tip was shown to be in main or captured in the backup bundle `~/axiom-proof-branch-backup-20261001.bundle` (ref list `~/axiom-proof-refs-20261001.txt`; restore any branch with `git fetch <bundle> <ref>:<ref>`).
 - [ ] **P2-3 Dependabot holds** (`[14]`) · Operator/Engineering · `tailwindcss` 4 (major migration) and ESLint 10 (`scopeManager.addGlobals` breakage) held back; revisit deliberately (project memory also pins ESLint 9 + TS 6 in the lint shim; do not touch).
 - [ ] **P2-4 Follow-up hardening** (`[14]`) · Engineering · five web screens still fabricate values with `Math.random`; Bandit medium findings in test-harness SQL; CodeQL flags on world-readable SPIRE health files (deliberate) and a URL built in `verify-controller-issuance.py`.
 - [ ] **P2-5 `saml2_bearer` decision** (W4.7) · Operator · TODO, not a blocker; needs an XML-DSig dependency and a review decision.
@@ -254,6 +254,7 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 - [ ] **P2-12 Corporate and commercial** (`[13]` M0.1, BR-8) · Founder · incorporation, tax/banking, domain/trademark (Classes 42 and 45), commercial setup; new recurring spend only when covered by realised revenue.
 - [ ] **P2-13 Phase-exit commercial evidence** (`[13]`) · Founder · client counts, delivery-time reductions, funded costs, production-client remediation outcomes (not waived).
 - [ ] **P2-14 Gated Phase 5 items** (`[13]`) · Founder · SOC 2 Type 2 / ISO 27001 programme, Consent Manager registration, enterprise tier, split-plane, pack #2, policy-governed L4: each has its original external/revenue gate.
+- [ ] **P2-15 Cleanup leftovers** · Operator · (a) Dependabot PRs #130-#134 against staging were left open: `actions/download-artifact` 4→8, `supabase/setup-cli` 1→3 and `azure/setup-helm` 4→5 are major bumps, `turbo` and `hono` are patch bumps; review and merge or close deliberately. (b) The worktrees `approval-reconciliation` (18 uncommitted files, the polluted stash, P0-10) and `axiom-proof-phase-gap-closure` (8 uncommitted files) were not touched, so their branches `codex/revision124-approval-proof-archive` and `claude/axiom-proof-phase-gap-closure-b88105` remain. (c) Three codex worktree directories were unregistered from git but macOS refused to delete their files (`~/.codex/worktrees/750f`, `human-proof-writers`, `statutory-source-bound`); remove them by hand. (d) The main checkout `/Users/vikash/Axiom Proof` still has local `staging` at `3492ffa`; run `git pull --ff-only` there. · Closure: `git branch -a` shows only the intended branches.
 
 ## 7. Engineering blockers that gate operator steps (not operator tasks)
 
