@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { PramaanDossier } from '@axiom/types';
 import { reportRequest, readReleasedArchive } from './report-request';
-import { listSchema, type ReportSummary } from './report-contract';
+import { SOURCE_REPORT_PAGE_SIZE, listSchema, type ReportSummary } from './report-contract';
 import { DossierViewerModal } from './dossier-viewer-modal';
 
 type Build = {
@@ -83,9 +83,13 @@ export function ClosureDossiersTab({
   useEffect(() => {
     if (!canGenerate) return;
     const controller = new AbortController();
-    void reportRequest(tenantId, `/reports?limit=100&offset=${reportOffset}&status=published`, {
-      signal: controller.signal,
-    })
+    void reportRequest(
+      tenantId,
+      `/reports?limit=${SOURCE_REPORT_PAGE_SIZE}&offset=${reportOffset}&status=published`,
+      {
+        signal: controller.signal,
+      },
+    )
       .then((response) => response.json())
       .then((value: unknown) => {
         if (controller.signal.aborted) return;

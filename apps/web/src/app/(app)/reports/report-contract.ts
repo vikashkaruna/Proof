@@ -98,3 +98,10 @@ export const manifestPreviewSchema = z.object({
 });
 export type ReportSummary = z.infer<typeof reportSchema>;
 export type ReportDetail = z.infer<typeof detailSchema>;
+
+/**
+ * Page size for released source reports. The BFF refuses any list `limit`
+ * above 50 with `validation_failed` (services/bff/src/routes/evidence*.ts and
+ * statutory-reports.ts), which empties the dropdown that depends on it.
+ */
+export const SOURCE_REPORT_PAGE_SIZE = 50;
