@@ -83,3 +83,8 @@ temporal-project/
 
 # Isolated local deployment state, credentials and logs
 .axiom-runtime/
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

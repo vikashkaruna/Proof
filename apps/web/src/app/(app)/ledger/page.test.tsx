@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import LedgerPage from './page';
+import { moduleMeta } from '@/lib/module-meta';
 
 const state = vi.hoisted(() => ({
   ledger: {
@@ -20,7 +21,6 @@ vi.mock('@/lib/tenant-context', () => ({
   requireCapabilityContext: state.context,
 }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
-vi.mock('@axiom/ui', () => ({ AgentIcon: () => <span>Lekha</span> }));
 vi.mock('./verify-button', () => ({ VerifyButton: () => null }));
 vi.mock('./export-ledger-button', () => ({ ExportLedgerButton: () => null }));
 vi.mock('./ledger-refresh', () => ({ LedgerRefresh: () => null }));
@@ -133,4 +133,18 @@ it('refuses untrusted filter syntax before building a ledger query', async () =>
 it('keeps malformed pagination away from the ledger range query', async () => {
   const view = await renderPage({ page: 'NaN', limit: 'Infinity' });
   expect(view).toContain('0 rows');
+});
+
+it('renders the shared context line with the module id and agents, and prints the Hindi name once', async () => {
+  const html = await renderPage();
+  expect(html).toContain('data-testid="module-bar"');
+  const ctx = html.slice(html.indexOf('data-testid="module-bar"'));
+  expect(ctx).toContain('M2.5');
+  expect(ctx).toContain('data-testid="related-agents"');
+  expect(html.split(moduleMeta('ledger').hi)).toHaveLength(2);
+});
+
+it('names Lekha in the hero through AgentLabel, static because no run is claimed', async () => {
+  const html = await renderPage();
+  expect(html).toMatch(/data-testid="agent-label" data-agent="lekha" data-state="idle"/);
 });

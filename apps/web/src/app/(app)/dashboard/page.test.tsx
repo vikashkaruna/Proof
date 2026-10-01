@@ -100,3 +100,10 @@ it('counts only recorded pending approvals and open findings', async () => {
   expect(view).toContain('Recorded actions awaiting human review');
   expect(view).not.toContain('executing task in ap-south-1');
 });
+
+it('renders the shared module context line under the title', async () => {
+  const view = await html();
+  expect(view).toContain('डैशबोर्ड');
+  expect(view).toContain('P0');
+  expect(view).not.toMatch(/<h1[^>]*>[^<]*डैशबोर्ड/);
+});

@@ -43,7 +43,11 @@ describe('proof and status semantics', () => {
     expect(upper).toContain('width:100%');
     expect(upper).toContain('bg-gold-500');
     expect(html(<ProgressBar value={60} variant="danger" />)).toContain('bg-ember-500');
-    expect(html(<ProgressBar value={60} variant="warning" />)).toContain('bg-gold-500');
+    // Gold is reserved for sealed evidence, so warnings and the low-middle band use amber.
+    expect(html(<ProgressBar value={60} variant="warning" />)).toContain('bg-amber-500');
+    expect(html(<ProgressBar value={35} />)).toContain('bg-amber-500');
+    expect(html(<ProgressBar value={35} />)).not.toContain('gold');
+    expect(html(<ProgressBar value={60} variant="warning" />)).not.toContain('gold');
   });
 
   it('shows posture verdicts and formats positive statutory exposure', () => {

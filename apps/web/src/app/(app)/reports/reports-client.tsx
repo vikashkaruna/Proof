@@ -15,7 +15,7 @@ import {
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
-import { AgentIcon } from '@axiom/ui';
+import { AgentIcon, AgentLabel } from '@axiom/ui';
 import { BoardWorkflow } from './board-workflow';
 import { AuditorWorkflow } from './auditor-workflow';
 
@@ -109,9 +109,9 @@ function TenantReportsClient(access: Access) {
   }
   return (
     <div className="min-w-0 space-y-6">
-      <header className="flex items-start gap-3">
-        <AgentIcon agent="prativedan" size="sm" state="idle" />
+      <header>
         <div className="space-y-2">
+          <AgentLabel agent="prativedan" />
           <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence</h1>
           <p className="text-sm text-slate-600">
             Review recorded reports and evidence packs. A content hash alone does not establish a
@@ -135,7 +135,7 @@ function TenantReportsClient(access: Access) {
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            <AgentIcon agent="pramaan" size="sm" state="idle" />
+            <AgentIcon agent="pramaan" size="sm" />
             Closure dossiers
           </button>
         )}
@@ -149,7 +149,7 @@ function TenantReportsClient(access: Access) {
               : 'border-transparent text-slate-500 hover:text-slate-700'
           }`}
         >
-          <AgentIcon agent="prativedan" size="sm" state="idle" />
+          <AgentIcon agent="prativedan" size="sm" />
           Working reports and registers
         </button>
       </div>

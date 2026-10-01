@@ -10,7 +10,7 @@ should hand-roll its own palette or type scale.
   - **Colour** — Deep Indigo `#1E2A4A` (primary), Signal Teal `#0FB5A5` (accent/CTA), Seal Gold `#C9A227` (**reserved exclusively** for sealed evidence / verified badges — never decorative), Ember `#D9534F` (alerts/risk), Slate `#2F3542` (body text), Mist `#F4F6F8` (backgrounds).
   - **Type** — Inter Tight (headings), Inter (body), JetBrains Mono (hashes, logs, audit trails).
   - **Components** — buttons, risk/status badges, phase tags, evidence-seal treatment.
-  - **Agent identity system** — mark, colour, Devanagari initial, autonomy ceiling, and persona line for each of the 10 agents (Drishti, Vibhaag, Parikshan, Saakshi, Sudhaar, Karya, Lekha, Nazar, Prativedan, Sanket).
+  - **Agent identity system** — mark, colour, Devanagari initial, autonomy ceiling, and persona line for each of the 12 agents (Drishti, Vibhaag, Parikshan, Saakshi, Sudhaar, Karya, Lekha, Nazar, Prativedan, Sanket, Samadhan, Pramaan).
   - **Voice & tone** — words to use / avoid, and the critical brand rule: _never market autonomy without control_ — every agentic claim must pair the capability with the approval gate.
 
 ## On `/design-sync`

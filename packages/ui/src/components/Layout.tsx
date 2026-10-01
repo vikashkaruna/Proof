@@ -1,15 +1,25 @@
 import { type HTMLAttributes, type ReactNode } from 'react';
 import { cn } from '../utils';
+import { ModuleBar, type ModuleBarProps } from './ModuleBar';
 
 export interface PageHeaderProps {
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
   meta?: ReactNode;
+  /** Breadcrumb, Hindi name, phase, module id and related agents under the title. */
+  module?: ModuleBarProps;
   className?: string;
 }
 
-export function PageHeader({ title, description, actions, meta, className }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  description,
+  actions,
+  meta,
+  module,
+  className,
+}: PageHeaderProps) {
   return (
     <header className={cn('flex flex-col gap-4 border-b border-slate-200 pb-6', className)}>
       <div className="flex items-start justify-between gap-4">
@@ -23,6 +33,7 @@ export function PageHeader({ title, description, actions, meta, className }: Pag
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
+      {module && <ModuleBar {...module} />}
       {meta && <div className="flex flex-wrap items-center gap-2">{meta}</div>}
     </header>
   );

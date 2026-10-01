@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AgentIcon } from '@axiom/ui';
+import { AgentIcon, AgentLabel } from '@axiom/ui';
 
 export interface TenantSummary {
   id: string;
@@ -192,15 +192,9 @@ export function PortalClient({
               </span>
               <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
                 <span>Agent ·</span>
-                <span className="inline-flex items-center gap-1">
-                  <AgentIcon agent="saakshi" size="xs" variant="on-dark" state="working" />
-                  <span>Saakshi</span>
-                </span>
+                <AgentLabel agent="saakshi" size="xs" tone="dark" />
                 <span className="text-[#0FB5A5]/70">+</span>
-                <span className="inline-flex items-center gap-1">
-                  <AgentIcon agent="sudhaar" size="xs" variant="on-dark" state="idle" />
-                  <span>Sudhaar</span>
-                </span>
+                <AgentLabel agent="sudhaar" size="xs" tone="dark" />
               </div>
               <span className="text-xs text-[#8a97b8]">Autonomy L1 — Agent-Proposes</span>
               <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-200">
@@ -837,8 +831,7 @@ export function PortalClient({
                       <span className="text-xs text-slate-400">·</span>
                       <div className="flex items-center gap-1 text-xs text-slate-600">
                         <span>Agent:</span>
-                        <AgentIcon agent={plan.generatedByAgent} size="xs" variant="default" />
-                        <span className="font-medium capitalize">{plan.generatedByAgent}</span>
+                        <AgentLabel agent={plan.generatedByAgent} size="xs" />
                       </div>
                     </div>
                     <h3 className="mt-1.5 font-heading text-base font-bold text-[#1E2A4A]">
