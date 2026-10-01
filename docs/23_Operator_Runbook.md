@@ -69,10 +69,11 @@ failure send the failure (a migration checksum refusal, a `401` that is a
    containers and volumes) happens **only** via an explicit flag (for example
    `--purge`/`--volumes`) and should name what it will delete. Never pass
    `docker compose down -v` or `docker volume rm` implicitly.
-   _Current state:_ no `down.sh` exists at `41b70b6`; `scripts/dev-docker.sh
---down` runs `docker compose down` (containers removed, `-v` not passed).
-   Reconciling the script with this rule is an open **Engineering** item
-   (docs-only change here), see `20_Plan.md` D12.
+   _Current state:_ resolved for the local environment by PR #122 (merged to
+   staging `711a319`): `scripts/dev-docker.sh --down` only stops containers;
+   `--remove` keeps `temporal-db` and `supabase-db`; `--remove-all --yes`
+   removes containers; deleting volumes additionally needs `--volumes
+--confirm-data-loss`. Non-local environments keep the old `down`.
 2. Keep the isolated parity Supabase project (`axiom-w0-parity`, API 56321,
    DB 56322) between runs; `scripts/test-deployed-http.sh --browser` removes
    only its own application containers and leaves the Supabase project for
@@ -129,6 +130,9 @@ Closure evidence.
 - [ ] **P0-14 Decide the prod EKS public-access CIDR** (W0-9; `[16]`) · Operator · `infra/terraform/envs/prod` has `cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]` with a never-actioned "restrict via WAF / OIDC" comment · Verify: engineering applies the change and the Terraform gate re-validates · Closure: the CIDR list or a dated deferral. Required before any prod apply.
 
 ---
+
+- [ ] **P0-9 Provide the design system** · Operator · the claude.ai design file (`Axiom Proof App.dc.html`) needs a login; sign in in the in-app browser or export the file into the repo · Closure: file path or confirmation; unblocks the header, related-agents strip and placeholder-state pass.
+- [ ] **P0-10 Clean the popped stash from the approval-reconciliation worktree** · Operator · `/Users/vikash/.codex/worktrees/approval-reconciliation/Axiom Proof` holds the 5 modified and 15 untracked files from an accidental `git stash pop`; the stash itself is safe on the stack as `f63c8ed`. Run `git checkout --` on the five tracked files and `git clean -nd` then `-fd` on the listed untracked paths · Closure: `git status` shows only `.axiom-runtime`.
 
 ## 4. P1 — close each workstream
 
