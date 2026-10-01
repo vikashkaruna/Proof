@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { verifyOfflineLicense } from '@axiom/config';
 import { offlineLicenseGate } from './offline-license.js';
 
 vi.mock('@axiom/config', () => ({
@@ -43,5 +44,17 @@ describe('on-prem runtime license gate', () => {
       (await appFor('production').request('/internal/workload-tools/execute', { method: 'POST' }))
         .status,
     ).toBe(200);
+  });
+
+  it('verifies against the Axiom root unless an in-process trust root is injected', async () => {
+    const verify = vi.mocked(verifyOfflineLicense);
+    verify.mockClear();
+    await appFor('onprem', 'valid').request('/internal/workload-tools/execute', { method: 'POST' });
+    expect(verify).toHaveBeenLastCalledWith('valid', undefined);
+    const app = new Hono();
+    app.use('*', offlineLicenseGate('onprem', 'valid', 'TEST-PEM'));
+    app.post('/work', (c) => c.text('ok'));
+    await app.request('/work', { method: 'POST' });
+    expect(verify).toHaveBeenLastCalledWith('valid', { publicKeyPem: 'TEST-PEM' });
   });
 });
