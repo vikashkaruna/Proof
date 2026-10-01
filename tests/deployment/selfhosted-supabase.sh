@@ -297,16 +297,32 @@ ledger_body() { # actor_type actor_id action_type
     "$LEDGER_TENANT" "$1" "$2" "$3"
 }
 SYSTEM_EVENT="$(ledger_body system gateway-probe discovery.started)"
-HUMAN_EVENT="$(ledger_body human 00000000-0000-4000-8000-0000000000fe discovery.started)"
+# A real member of the throwaway tenant, so the human wrapper's membership check
+# passes and only the role grant can refuse the agent writer (no masked denial).
+MEMBER_ID="$(printf '%s' "$SIGNUP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["user"]["id"])')"
+curl -fsS -o /dev/null -X POST "${BASE}/rest/v1/users" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"${MEMBER_ID}\",\"email\":\"${EMAIL}\"}" || { echo 'FAIL: could not mirror the ledger probe user'; exit 1; }
+MEMBER_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/rest/v1/tenant_users" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"tenant_id\":\"${LEDGER_TENANT}\",\"user_id\":\"${MEMBER_ID}\",\"role\":\"founder\"}")"
+[ "$MEMBER_CODE" = "201" ] || { echo "FAIL: could not enrol the ledger probe member (${MEMBER_CODE})"; exit 1; }
+HUMAN_EVENT="$(ledger_body human "$MEMBER_ID" discovery.started)"
 HUMAN_AUTHORITY_EVENT="$(ledger_body system gateway-probe report.released)"
 # (b) positive control first: the agent writer appends a harmless system event.
 AGENT_APPEND="$(rpc_body "$SUPABASE_AGENT_LEDGER_WRITER_KEY" append_agent_ledger "$SYSTEM_EVENT")"
 printf '%s' "$AGENT_APPEND" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v,int) and v>0' \
   || { echo "FAIL: agent ledger writer did not append a system event (response: ${AGENT_APPEND})"; exit 1; }
+# Positive control for the human wrapper: its own writer appends the same event
+# for a real member, so the refusals below cannot be masked by the membership check.
+HUMAN_APPEND="$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" append_human_ledger "$HUMAN_EVENT")"
+printf '%s' "$HUMAN_APPEND" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v,int) and v>0' \
+  || { echo "FAIL: human action writer did not append a member's event (response: ${HUMAN_APPEND})"; exit 1; }
 # (a) the generic service JWT is refused on all four entry points.
-for fn in append_ledger append_agent_ledger append_human_ledger; do
+for fn in append_ledger append_agent_ledger; do
   expect_refused "shared service key reached ${fn}" "$SUPABASE_SERVICE_KEY" "$fn" "$SYSTEM_EVENT"
 done
+expect_refused 'shared service key reached append_human_ledger' "$SUPABASE_SERVICE_KEY" append_human_ledger "$HUMAN_EVENT"
 BATCH_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000f2","p_plan_id":"00000000-0000-4000-8000-0000000000d1","p_request_key":"gateway-probe","p_correlation_id":"00000000-0000-4000-8000-0000000000e2","p_nonce":"n","p_content_digest":"d","p_mode":"sequential","p_concurrency":1,"p_stop_on_failure":true,"p_dispatch_reference":"gateway-probe","p_action_ids":[]}'
 expect_refused 'shared service key reached the legacy start_execution_batch' "$SUPABASE_SERVICE_KEY" start_execution_batch "$BATCH_BODY"
 # (b) the agent writer cannot author a human event, nor a human-authority event
@@ -323,6 +339,10 @@ expect_json_error 'service key did not reach the claimed execution gate' plan_no
   "$(rpc_body "$SUPABASE_SERVICE_KEY" start_claimed_execution_batch "$BATCH_BODY")"
 echo '  ✓ Ledger: service JWT refused on append_ledger/append_agent_ledger/append_human_ledger/start_execution_batch;'
 echo '    agent writer appends system events only; human writer refused producer paths; service reaches claimed gate'
+# The probe member was only a fixture; later RLS checks need a user with no membership.
+curl -fsS -o /dev/null -X DELETE "${BASE}/rest/v1/tenant_users?user_id=eq.${MEMBER_ID}" \
+  -H "apikey: ${SUPABASE_ANON_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+  || { echo 'FAIL: could not remove the ledger probe membership'; exit 1; }
 
 # ─── RLS answers the token as itself ─────────────────────────────────
 # A brand-new user belongs to no tenant. Migration 0016 made every tenant read

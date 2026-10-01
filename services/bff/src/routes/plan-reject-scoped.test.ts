@@ -108,4 +108,16 @@ describe('atomic plan rejection route', () => {
     expect(serviceRpc).not.toHaveBeenCalled();
     expect(serviceFrom).not.toHaveBeenCalled();
   });
+
+  it('does not claim success when the atomic rejection fails or returns a malformed receipt', async () => {
+    db.writer!.onRpc('reject_remediation_plan', () => {
+      throw new Error('database unavailable');
+    });
+    const failed = await (await app()).request(`/v1/plans/${PLAN}/reject`, { method: 'POST' });
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    db.writer!.onRpc('reject_remediation_plan', () => ({ status: 'cancelled' }));
+    const malformed = await (await app()).request(`/v1/plans/${PLAN}/reject`, { method: 'POST' });
+    expect(malformed.status).toBe(503);
+    expect(await malformed.json()).toEqual({ error: { code: 'update_failed' } });
+  });
 });

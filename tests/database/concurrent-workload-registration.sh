@@ -47,8 +47,8 @@ race() {
  printf "set application_name='registration-gate'; begin; select pg_advisory_xact_lock(777701,%s);\n" "$index" >&9
  barrier registration-gate state 'idle in transaction'
  local first_role=service_role second_role=service_role
- [[ "$1" == *"$scope.manage("* ]] && first_role=human_action_writer
- [[ "$2" == *"$scope.manage("* ]] && second_role=human_action_writer
+ [[ "$1" == *"$scope.manage("* || "$1" == *"public.delegate_workload_task("* ]] && first_role=human_action_writer
+ [[ "$2" == *"$scope.manage("* || "$2" == *"public.delegate_workload_task("* ]] && second_role=human_action_writer
  sql 9>&- -c "set statement_timeout='45s'; set application_name='registration-first'; begin; set local role $first_role; $1; select pg_advisory_xact_lock(777701,$index); commit;" > "$result_dir/first" 2>&1 &
  local first_pid=$!
  barrier registration-first wait_event advisory

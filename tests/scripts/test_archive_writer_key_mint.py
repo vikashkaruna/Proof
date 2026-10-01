@@ -31,9 +31,13 @@ class ArchiveWriterMintTests(unittest.TestCase):
 
     def test_container_acceptance_keeps_writer_out_of_web_and_target(self):
         source = (ROOT / "scripts/test-deployed-http.sh").read_text()
-        self.assertIn("'SUPABASE_ARCHIVE_WRITER_KEY':archive_writer_key", source)
+        self.assertIn("('approval_archive_writer','SUPABASE_ARCHIVE_WRITER_KEY')", source)
+        self.assertIn("('human_action_writer','SUPABASE_HUMAN_ACTION_WRITER_KEY')", source)
+        self.assertIn("('agent_ledger_writer','SUPABASE_AGENT_LEDGER_WRITER_KEY')", source)
         self.assertIn("'JWT_SECRET'", source)
-        self.assertIn("tenant_not_found", source)
+        # 0099: the archive writer keeps release only; its probe reaches the founder gate.
+        self.assertIn("founder_authority_required", source)
+        self.assertIn("record_approval_export", source)
         self.assertNotIn("'archiveWriterKey':", source)
         self.assertNotIn("'SUPABASE_ARCHIVE_WRITER_KEY' for k", source)
 

@@ -36,10 +36,12 @@ const id = z.uuid();
  * periodic human re-attestation of agent grants. Revocation is the only
  * authority change; nothing here issues or extends a grant.
  */
-export function sustenanceRoutes(deps: { client?: typeof createSupabaseAdmin } = {}) {
+export function sustenanceRoutes(
+  deps: { client?: typeof createSupabaseAdmin; writer?: typeof createHumanActionWriter } = {},
+) {
   const app = new Hono<{ Variables: Variables }>();
   const db = () => (deps.client ?? createSupabaseAdmin)();
-  const writer = () => (deps.client ?? createHumanActionWriter)();
+  const writer = () => (deps.writer ?? deps.client ?? createHumanActionWriter)();
 
   app.get('/estates/:id/drift', async (c) => {
     const denied = requireCapability(c, Capability.POSTURE_READ);
