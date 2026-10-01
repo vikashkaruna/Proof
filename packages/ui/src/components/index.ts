@@ -1,4 +1,5 @@
 export * from './AgentIcon';
+export * from './AgentLabel';
 export * from './AgentPill';
 export * from './AgentRunCard';
 export * from './AxiomMark';
