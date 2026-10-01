@@ -15,11 +15,9 @@ terraform {
     }
   }
 
-  # In production/preprod, backend can be configured with GCS:
-  # backend "gcs" {
-  #   bucket = "axiom-proof-tfstate-preprod"
-  #   prefix = "terraform/state/preprod"
-  # }
+  # The deploy script supplies an operator-approved, regional, access-controlled
+  # state bucket at init time. Never write credentials into local state.
+  backend "gcs" {}
 }
 
 provider "google" {

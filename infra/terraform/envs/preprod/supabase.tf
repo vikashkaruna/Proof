@@ -40,9 +40,9 @@ locals {
   # Mirrored into Artifact Registry by scripts/build-preprod-images.sh: Cloud
   # Run cannot pull from Docker Hub directly. Versions match
   # docker-compose.supabase.yml so local and preprod run the same builds.
-  supabase_auth_image    = "${local.image_prefix}/gotrue:v2.169.0"
-  supabase_rest_image    = "${local.image_prefix}/postgrest:v12.2.8"
-  supabase_gateway_image = "${local.image_prefix}/axiom-supabase-gateway:${var.environment}"
+  supabase_auth_image    = local.release_manifest.images.gotrue
+  supabase_rest_image    = local.release_manifest.images.postgrest
+  supabase_gateway_image = local.release_manifest.images["supabase-gateway"]
 }
 
 # ─── GoTrue (Supabase Auth) ───────────────────────────────────────────────────
@@ -160,6 +160,7 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_project_service.apis,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -245,6 +246,7 @@ resource "google_cloud_run_v2_service" "supabase_rest" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_project_service.apis,
     google_secret_manager_secret_iam_member.runtime_access,
     google_secret_manager_secret_iam_member.mfa_previous_access,
@@ -297,6 +299,7 @@ resource "google_cloud_run_v2_service" "supabase_gateway" {
   }
 
   depends_on = [
+    terraform_data.release_identity,
     google_project_service.apis,
     google_cloud_run_v2_service.supabase_auth,
     google_cloud_run_v2_service.supabase_rest,

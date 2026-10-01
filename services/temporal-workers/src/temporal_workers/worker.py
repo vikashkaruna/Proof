@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from axiom_offline_license import verify_offline_license
 from temporalio.client import Client
 from temporalio.worker import Worker
 
@@ -29,15 +30,38 @@ from .workflows import TASK_QUEUE, ComplianceEngagementWorkflow
 log = logging.getLogger(__name__)
 
 
+def onprem_license_valid() -> bool:
+    return os.environ.get("ENVIRONMENT") != "onprem" or verify_offline_license(
+        os.environ.get("AXIOM_OFFLINE_LICENSE")
+    )
+
+
+async def watch_onprem_license() -> None:
+    """Stop worker polling promptly when a once-valid license expires."""
+    while True:
+        await asyncio.sleep(1)
+        if not onprem_license_valid():
+            raise RuntimeError("offline_license_invalid")
+
+
 async def handle_health(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
     try:
         await reader.read(1024)
-        body = b'{"status":"ok","service":"temporal-worker"}\n'
+        licensed = onprem_license_valid()
+        body = (
+            b'{"status":"ok","service":"temporal-worker"}\n'
+            if licensed
+            else b'{"status":"offline_license_invalid"}\n'
+        )
         response = (
-            b"HTTP/1.1 200 OK\r\n"
-            b"Content-Type: application/json\r\n"
+            (
+                b"HTTP/1.1 200 OK\r\n"
+                if licensed
+                else b"HTTP/1.1 503 Service Unavailable\r\n"
+            )
+            + b"Content-Type: application/json\r\n"
             b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
             b"Connection: close\r\n\r\n" + body
         )
@@ -103,6 +127,8 @@ async def run_worker_loop(
     backoff = 2
     while True:
         try:
+            if not onprem_license_valid():
+                raise RuntimeError("offline_license_invalid")
             log.info("temporal_worker.connecting")
             client = await Client.connect(
                 address,
@@ -114,6 +140,8 @@ async def run_worker_loop(
             workers = build_workers(client, controller)
             backoff = 2
             tasks = [asyncio.create_task(worker.run()) for worker in workers]
+            if os.environ.get("ENVIRONMENT") == "onprem":
+                tasks.append(asyncio.create_task(watch_onprem_license()))
             if outbox_pump:
                 tasks.append(
                     asyncio.create_task(AssessmentOutboxPump(client, controller).run())
@@ -164,6 +192,8 @@ def assessment_options(argv: list[str] | None = None):
 
 
 async def main():
+    if not onprem_license_valid():
+        raise RuntimeError("offline_license_invalid")
     controller, outbox_pump = assessment_options()
     logging.basicConfig(level=logging.INFO)
     port = int(os.environ.get("PORT", "8080"))

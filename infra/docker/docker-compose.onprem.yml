@@ -1,253 +1,270 @@
-# ==============================================================================
-# Axiom Proof — Sovereign On-Premise Docker Compose Overlay (W10)
-# ==============================================================================
-# Self-contained, air-gapped sovereign topology:
-# - Standalone PostgreSQL / Containerized Supabase
-# - Sovereign MinIO Evidence Vault with Compliance-Mode WORM Object Lock
-# - Local In-Perimeter Temporal Durable Orchestration
-# - In-Memory Redis Cache & Leaky-Bucket Rate Limiter
-# - Self-Hosted Model Gateway (Zero Outbound Egress Required)
-# - Air-gapped TOTP MFA and Cryptographic Offline License Token Verification
-#
-# Usage:
-#   docker compose -f docker-compose.yml -f infra/docker/docker-compose.onprem.yml \
-#     --env-file infra/docker/environments/.env.onprem up -d
-# ==============================================================================
+# Standalone sovereign topology; bootstrap-onprem.sh controls the startup order.
 name: axiom-proof-onprem
 
+x-common: &common
+  ENVIRONMENT: onprem
+  AXIOM_REGION: ap-south-1
+  SUPABASE_URL: http://supabase-gateway:80
+  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
+  SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:?mint keys}
+  SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set DB password}@supabase-db:5432/axiom_onprem
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: axiom-proof
+  TEMPORAL_TLS: 'false'
+  REDIS_URL: redis://redis:6379
+  AXIOM_EVIDENCE_BUCKET: ${AXIOM_EVIDENCE_BUCKET:?set bucket}
+  AXIOM_STORAGE_ENDPOINT: http://minio:9000
+  AXIOM_STORAGE_ACCESS_KEY_ID: ${AXIOM_STORAGE_ACCESS_KEY_ID:?set storage user}
+  AXIOM_STORAGE_SECRET_ACCESS_KEY: ${AXIOM_STORAGE_SECRET_ACCESS_KEY:?set storage secret}
+
 services:
-  # ─── MinIO S3-Compatible Evidence Vault (Object Lock WORM) ───────
-  minio:
-    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
-    container_name: axiom-minio
+  supabase-db:
+    image: ${AXIOM_POSTGRES_IMAGE:?supply approved PostgreSQL digest}
+    pull_policy: never
     restart: unless-stopped
-    command: server /data --console-address ":9001"
-    ports:
-      - '0.0.0.0:${MINIO_PORT:-9000}:9000'
-      - '0.0.0.0:${MINIO_CONSOLE_PORT:-9001}:9001'
     environment:
-      - MINIO_ROOT_USER=${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-      - MINIO_REGION_NAME=${AXIOM_REGION:-ap-south-1}
-    volumes:
-      - axiom-onprem-minio-data:/data
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set DB password}
+    volumes: [supabase-db-data:/var/lib/postgresql/data]
     healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - axiom-network
-
-  # ─── MinIO Object Lock Bucket Provisioner ─────────────────────────
-  minio-init:
-    image: minio/mc:RELEASE.2024-05-09T17-04-24Z
-    container_name: axiom-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 ${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin} ${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin};
-      /usr/bin/mc mb --with-lock local/${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem} || true;
-      /usr/bin/mc retention set --default COMPLIANCE 365d local/${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem} || true;
-      exit 0;
-      "
-    networks:
-      - axiom-network
-
-  # ─── Redis Cache & Session Store ──────────────────────────────────
-  redis:
-    image: redis:7.2-alpine
-    container_name: axiom-redis
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      retries: 20
+    networks: [sovereign]
+  supabase-auth:
+    image: ${AXIOM_AUTH_IMAGE:?supply approved GoTrue digest}
+    pull_policy: never
     restart: unless-stopped
-    ports:
-      - '0.0.0.0:${REDIS_PORT:-6379}:6379'
-    volumes:
-      - axiom-onprem-redis-data:/data
+    depends_on:
+      supabase-db: { condition: service_healthy }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: '9999'
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set DB password}@supabase-db:5432/axiom_onprem?sslmode=disable&search_path=auth
+      API_EXTERNAL_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set Auth origin}
+      GOTRUE_SITE_URL: ${NEXT_PUBLIC_APP_URL:?set web origin}
+      GOTRUE_URI_ALLOW_LIST: ${NEXT_PUBLIC_APP_URL:?set web origin}
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?mint keys}
+      GOTRUE_JWT_EXP: '3600'
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_MAILER_AUTOCONFIRM: 'false'
+      GOTRUE_DISABLE_SIGNUP: 'true'
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9999/health']
       interval: 5s
       timeout: 3s
-      retries: 5
-    networks:
-      - axiom-network
-
-  # ─── Model Gateway (Self-Hosted Model Mode) ───────────────────────
+      retries: 20
+    networks: [sovereign]
+  supabase-rest:
+    image: ${AXIOM_POSTGREST_IMAGE:?supply approved PostgREST digest}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      supabase-db: { condition: service_healthy }
+    environment:
+      PGRST_DB_URI: postgresql://authenticator:${POSTGREST_DB_PASSWORD:?set REST login password}@supabase-db:5432/axiom_onprem
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:?mint keys}
+    networks: [sovereign]
+  supabase-gateway:
+    image: ${AXIOM_INGRESS_IMAGE:?supply approved ingress digest}
+    pull_policy: never
+    restart: unless-stopped
+    ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${SUPABASE_API_PORT:-55321}:80']
+    volumes: ['./onprem-supabase-gateway.conf:/etc/nginx/conf.d/default.conf:ro']
+    depends_on: [supabase-auth, supabase-rest]
+    networks: [sovereign]
+  temporal-db:
+    image: ${AXIOM_TEMPORAL_POSTGRES_IMAGE:?supply approved Temporal PostgreSQL digest}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:?set Temporal DB password}
+      POSTGRES_DB: temporal
+    volumes: [temporal-db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d temporal']
+      interval: 5s
+      retries: 20
+    networks: [sovereign]
+  temporal:
+    image: ${AXIOM_TEMPORAL_IMAGE:?supply approved Temporal digest}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      temporal-db: { condition: service_healthy }
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_SEEDS: temporal-db
+      POSTGRES_PORT: '5432'
+      POSTGRES_VISIBILITY_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?set Temporal DB password}
+      POSTGRES_DB: temporal
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/docker.yaml
+      ENABLE_ES: 'false'
+      DEFAULT_NAMESPACE: axiom-proof
+      DEFAULT_NAMESPACE_RETENTION: 24h
+    networks: [sovereign]
+  redis:
+    image: ${AXIOM_REDIS_IMAGE:?supply approved Redis digest}
+    pull_policy: never
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes: [redis-data:/data]
+    networks: [sovereign]
+  minio:
+    image: ${AXIOM_WORM_SERVER_IMAGE:?supply approved WORM server digest}
+    pull_policy: never
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${AXIOM_STORAGE_ACCESS_KEY_ID:?set storage user}
+      MINIO_ROOT_PASSWORD: ${AXIOM_STORAGE_SECRET_ACCESS_KEY:?set storage secret}
+      MINIO_REGION_NAME: ap-south-1
+    volumes: [minio-data:/data]
+    networks: [sovereign]
+  minio-init:
+    image: ${AXIOM_WORM_CLIENT_IMAGE:?supply approved WORM client digest}
+    pull_policy: never
+    depends_on:
+      minio: { condition: service_started }
+    entrypoint: ['/bin/sh', '-ec']
+    command: |
+      attempt=0
+      until mc alias set local http://minio:9000 "$${AXIOM_STORAGE_ACCESS_KEY_ID}" "$${AXIOM_STORAGE_SECRET_ACCESS_KEY}" && mc ready local; do
+        attempt=$$((attempt + 1))
+        [ "$$attempt" -lt 30 ] || exit 1
+        sleep 2
+      done
+      if ! mc stat "local/$${AXIOM_EVIDENCE_BUCKET}" >/dev/null 2>&1; then mc mb --with-lock "local/$${AXIOM_EVIDENCE_BUCKET}"; fi
+      mc retention set --default COMPLIANCE 7y "local/$${AXIOM_EVIDENCE_BUCKET}"
+      retention="$$(mc retention info --default "local/$${AXIOM_EVIDENCE_BUCKET}")"
+      printf '%s\n' "$${retention}" | grep -qi COMPLIANCE
+      printf '%s\n' "$${retention}" | grep -Eq '(^|[^0-9])7(y| year)|2555d'
+    environment:
+      AXIOM_STORAGE_ACCESS_KEY_ID: ${AXIOM_STORAGE_ACCESS_KEY_ID:?set storage user}
+      AXIOM_STORAGE_SECRET_ACCESS_KEY: ${AXIOM_STORAGE_SECRET_ACCESS_KEY:?set storage secret}
+      AXIOM_EVIDENCE_BUCKET: ${AXIOM_EVIDENCE_BUCKET:?set bucket}
+    networks: [sovereign]
+  recovery:
+    image: ${AXIOM_AGENT_RUNTIME_IMAGE:?supply approved runtime digest}
+    pull_policy: never
+    profiles: [recovery]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID: ${AXIOM_RECOVERY_STORAGE_ACCESS_KEY_ID:-}
+      AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY: ${AXIOM_RECOVERY_STORAGE_SECRET_ACCESS_KEY:-}
+    networks: [sovereign]
   model-gateway:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-model-gateway:${IMAGE_TAG:-onprem}
-    container_name: axiom-model-gateway
+    image: ${AXIOM_MODEL_GATEWAY_IMAGE:?supply approved model gateway digest}
+    pull_policy: never
     restart: unless-stopped
-    ports:
-      - '0.0.0.0:${MODEL_GATEWAY_PORT:-8001}:8001'
     environment:
-      - ENVIRONMENT=onprem
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - AWS_REGION=${AXIOM_REGION:-ap-south-1}
-      - AXIOM_REGION=${AXIOM_REGION:-ap-south-1}
-      - PII_REDACTION_ENABLED=${PII_REDACTION_ENABLED:-true}
-      - MODEL_GATEWAY_API_KEY=${MODEL_GATEWAY_API_KEY:?Set a minted MODEL_GATEWAY_API_KEY}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-self-hosted-vllm}
-      - SELF_HOSTED_BASE_URL=${SELF_HOSTED_BASE_URL:-http://model-gateway:8001}
-      - REDIS_URL=redis://redis:6379
-    networks:
-      - axiom-network
-
-  # ─── Agent Runtime (10 Sovereign Agents) ───────────────────────────
+      ENVIRONMENT: onprem
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
+      SELF_HOSTED_MODEL: ${SELF_HOSTED_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}
+      SELF_HOSTED_BASE_URL: ${SELF_HOSTED_BASE_URL:-}
+      PII_REDACTION_ENABLED: 'true'
+    networks: [sovereign]
   agent-runtime:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-agent-runtime:${IMAGE_TAG:-onprem}
-    container_name: axiom-agent-runtime
+    image: ${AXIOM_AGENT_RUNTIME_IMAGE:?supply approved runtime digest}
+    pull_policy: never
     restart: unless-stopped
-    ports:
-      - '0.0.0.0:${AGENT_RUNTIME_PORT:-8000}:8000'
     environment:
-      - ENVIRONMENT=onprem
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - AWS_REGION=${AXIOM_REGION:-ap-south-1}
-      - AXIOM_REGION=${AXIOM_REGION:-ap-south-1}
-      - MODEL_GATEWAY_URL=http://model-gateway:8001
-      - MODEL_GATEWAY_API_KEY=${MODEL_GATEWAY_API_KEY:?Set a minted MODEL_GATEWAY_API_KEY}
-      - INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:?Set a minted AGENT_RUNTIME_INTERNAL_TOKEN}
-      - AGENT_RUNTIME_INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:?Set a minted AGENT_RUNTIME_INTERNAL_TOKEN}
-      - APPROVAL_SIGNING_KEY=${APPROVAL_SIGNING_KEY:?Set a minted APPROVAL_SIGNING_KEY}
-      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:55321}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
-      - SUPABASE_AGENT_LEDGER_WRITER_KEY=${SUPABASE_AGENT_LEDGER_WRITER_KEY:?Set agent/BFF-only agent ledger writer JWT}
-      - SUPABASE_DB_URL=${SUPABASE_DB_URL:-}
-      - REDIS_URL=redis://redis:6379
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-axiom-proof}
-      - TEMPORAL_TLS=false
-      - AXIOM_EVIDENCE_BUCKET=${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem}
-      - AXIOM_STORAGE_ENDPOINT=${AXIOM_STORAGE_ENDPOINT:-http://minio:9000}
-      - AXIOM_STORAGE_ACCESS_KEY_ID=${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      - AXIOM_STORAGE_SECRET_ACCESS_KEY=${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-      - S3_EVIDENCE_BUCKET=${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem}
-      - S3_ENDPOINT=${AXIOM_STORAGE_ENDPOINT:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+      <<: *common
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      MODEL_GATEWAY_URL: http://model-gateway:8001
+      MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
+      AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
+      APPROVAL_SIGNING_KEY: ${APPROVAL_SIGNING_KEY:?set signing key}
+      FEATURE_LIVE_CONNECTORS: 'false'
+      SUPABASE_AGENT_LEDGER_WRITER_KEY: ${SUPABASE_AGENT_LEDGER_WRITER_KEY:?set agent ledger writer JWT}
     depends_on:
-      - minio-init
-      - redis
-    networks:
-      - axiom-network
-
-  # ─── BFF (API Gateway, Strict Auth & Offline License) ───────────────
+      minio-init: { condition: service_completed_successfully }
+      supabase-gateway: { condition: service_started }
+      temporal: { condition: service_started }
+    networks: [sovereign]
   bff:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-bff:${IMAGE_TAG:-onprem}
-    container_name: axiom-bff
+    image: ${AXIOM_BFF_IMAGE:?supply approved BFF digest}
+    pull_policy: never
     restart: unless-stopped
-    ports:
-      - '0.0.0.0:${BFF_PORT:-4000}:4000'
+    ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${BFF_PORT:-4000}:4000']
     environment:
-      - NODE_ENV=production
-      - ENVIRONMENT=onprem
-      - SUPABASE_STATUTORY_PROOF_WRITER_KEY=${SUPABASE_STATUTORY_PROOF_WRITER_KEY:?Set BFF-only statutory proof writer JWT}
-      - SUPABASE_HUMAN_ACTION_WRITER_KEY=${SUPABASE_HUMAN_ACTION_WRITER_KEY:?Set BFF-only human action writer JWT}
-      - SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=${SUPABASE_EVIDENCE_INGESTION_WRITER_KEY:?Set BFF-only evidence ingestion writer JWT}
-      - SUPABASE_AGENT_LEDGER_WRITER_KEY=${SUPABASE_AGENT_LEDGER_WRITER_KEY:?Set agent/BFF-only agent ledger writer JWT}
-      - AXIOM_AUTH_MODE=strict
-      - AXIOM_OFFLINE_LICENSE=${AXIOM_OFFLINE_LICENSE:-}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - AXIOM_REGION=${AXIOM_REGION:-ap-south-1}
-      - AWS_REGION=${AXIOM_REGION:-ap-south-1}
-      - AGENT_RUNTIME_URL=http://agent-runtime:8000
-      - AGENT_RUNTIME_INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:?Set a minted AGENT_RUNTIME_INTERNAL_TOKEN}
-      - MODEL_GATEWAY_URL=http://model-gateway:8001
-      - MODEL_GATEWAY_API_KEY=${MODEL_GATEWAY_API_KEY:?Set a minted MODEL_GATEWAY_API_KEY}
-      - APPROVAL_SIGNING_KEY=${APPROVAL_SIGNING_KEY:?Set a minted APPROVAL_SIGNING_KEY}
-      - AXIOM_MFA_ENCRYPTION_KEY=${AXIOM_MFA_ENCRYPTION_KEY:?Set the distinct persistent MFA encryption key}
-      - AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS=${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}
-      - AXIOM_MFA_SESSION_TTL_HOURS=${AXIOM_MFA_SESSION_TTL_HOURS:-12}
-      - AXIOM_TRUSTED_PROXY_HOPS=${AXIOM_TRUSTED_PROXY_HOPS:-0}
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-axiom-proof}
-      - TEMPORAL_TLS=false
-      - REDIS_URL=redis://redis:6379
-      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:55321}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
-      - SUPABASE_DB_URL=${SUPABASE_DB_URL:-}
-      - SUPABASE_ARCHIVE_WRITER_KEY=${SUPABASE_ARCHIVE_WRITER_KEY:?Set a minted BFF-only archive writer JWT}
-      - AXIOM_EVIDENCE_BUCKET=${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem}
-      - AXIOM_STORAGE_ENDPOINT=${AXIOM_STORAGE_ENDPOINT:-http://minio:9000}
-      - AXIOM_STORAGE_ACCESS_KEY_ID=${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      - AXIOM_STORAGE_SECRET_ACCESS_KEY=${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-      - S3_EVIDENCE_BUCKET=${AXIOM_EVIDENCE_BUCKET:-axiom-proof-evidence-onprem}
-      - S3_ENDPOINT=${AXIOM_STORAGE_ENDPOINT:-http://minio:9000}
-      - AWS_ACCESS_KEY_ID=${AXIOM_STORAGE_ACCESS_KEY_ID:-minioadmin}
-      - AWS_SECRET_ACCESS_KEY=${AXIOM_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
-      - BFF_CORS_ORIGINS=${BFF_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
-      - AXIOM_REPORT_EMAIL_MODE=disabled
-      - AXIOM_CONTACT_EMAIL_MODE=disabled
-      - AXIOM_INVITATION_EMAIL_MODE=disabled
-      - AXIOM_WEB_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
-      - CONTACT_RECIPIENT_EMAIL=${CONTACT_RECIPIENT_EMAIL:-admin@axiomproof.local}
-      - FEATURE_DRY_RUN_ENGINE=true
-      - FEATURE_EXECUTION_ENGINE=true
-      - FEATURE_LIVE_CONNECTORS=true
-      - FEATURE_KILL_SWITCH=true
-      - PII_REDACTION_ENABLED=true
+      <<: *common
+      NODE_ENV: production
+      AXIOM_AUTH_MODE: strict
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AGENT_RUNTIME_URL: http://agent-runtime:8000
+      AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
+      MODEL_GATEWAY_URL: http://model-gateway:8001
+      MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
+      APPROVAL_SIGNING_KEY: ${APPROVAL_SIGNING_KEY:?set signing key}
+      AXIOM_MFA_ENCRYPTION_KEY: ${AXIOM_MFA_ENCRYPTION_KEY:?set MFA key}
+      BFF_CORS_ORIGINS: ${BFF_CORS_ORIGINS:?set intranet origin}
+      AXIOM_WEB_APP_URL: ${NEXT_PUBLIC_APP_URL:?set web origin}
+      FEATURE_LIVE_CONNECTORS: 'false'
+      AXIOM_REPORT_EMAIL_MODE: disabled
+      AXIOM_CONTACT_EMAIL_MODE: disabled
+      AXIOM_INVITATION_EMAIL_MODE: disabled
+      SUPABASE_STATUTORY_PROOF_WRITER_KEY: ${SUPABASE_STATUTORY_PROOF_WRITER_KEY:?set BFF-only statutory proof writer JWT}
+      SUPABASE_ARCHIVE_WRITER_KEY: ${SUPABASE_ARCHIVE_WRITER_KEY:?set BFF-only archive writer JWT}
+      SUPABASE_HUMAN_ACTION_WRITER_KEY: ${SUPABASE_HUMAN_ACTION_WRITER_KEY:?set BFF-only human action writer JWT}
+      SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: ${SUPABASE_EVIDENCE_INGESTION_WRITER_KEY:?set BFF-only evidence ingestion writer JWT}
+      SUPABASE_AGENT_LEDGER_WRITER_KEY: ${SUPABASE_AGENT_LEDGER_WRITER_KEY:?set agent ledger writer JWT}
+      AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS: ${AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS:-}
+      AXIOM_MFA_SESSION_TTL_HOURS: ${AXIOM_MFA_SESSION_TTL_HOURS:-12}
+      AXIOM_TRUSTED_PROXY_HOPS: ${AXIOM_TRUSTED_PROXY_HOPS:-0}
     depends_on:
-      - minio-init
-      - redis
-    networks:
-      - axiom-network
-
-  # ─── Temporal Worker ──────────────────────────────────────────────
+      minio-init: { condition: service_completed_successfully }
+      agent-runtime: { condition: service_started }
+    networks: [sovereign]
   temporal-worker:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-temporal-worker:${IMAGE_TAG:-onprem}
-    container_name: axiom-temporal-worker
+    image: ${AXIOM_WORKER_IMAGE:?supply approved worker digest}
+    pull_policy: never
     restart: unless-stopped
     environment:
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-axiom-proof}
-      - TEMPORAL_TLS=false
-      - AGENT_RUNTIME_URL=http://agent-runtime:8000
-      - AGENT_RUNTIME_INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:?Set a minted AGENT_RUNTIME_INTERNAL_TOKEN}
-    networks:
-      - axiom-network
-
-  # ─── Web Workbench (Next.js) ──────────────────────────────────────
+      <<: *common
+      AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AGENT_RUNTIME_URL: http://agent-runtime:8000
+      AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
+    depends_on:
+      temporal: { condition: service_started }
+      agent-runtime: { condition: service_started }
+    networks: [sovereign]
   web:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-web:${IMAGE_TAG:-onprem}
-    container_name: axiom-web
+    image: ${AXIOM_WEB_IMAGE:?supply approved web digest}
+    pull_policy: never
     restart: unless-stopped
-    ports:
-      - '0.0.0.0:${WEB_PORT:-3001}:3001'
+    ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${WEB_PORT:-3001}:3001']
     environment:
-      - NODE_ENV=production
-      - ENVIRONMENT=onprem
-      - NEXT_PUBLIC_BFF_URL=${NEXT_PUBLIC_BFF_URL:-http://${HOST_IP:-localhost}:4000}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://${HOST_IP:-localhost}:3001}
-      - BFF_PUBLIC_URL=http://bff:4000
-      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:55321}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
-      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
-      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-http://127.0.0.1:55321}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      - AXIOM_E2E_BYPASS_AUTH=false
-    networks:
-      - axiom-network
-
-  # ─── Marketing Portal (Next.js) ───────────────────────────────────
-  marketing:
-    image: ${DOCKER_REGISTRY:-}${DOCKER_REGISTRY:+/}axiom-marketing:${IMAGE_TAG:-onprem}
-    container_name: axiom-marketing
-    restart: unless-stopped
-    ports:
-      - '0.0.0.0:${MARKETING_PORT:-3000}:3000'
-    environment:
-      - NODE_ENV=production
-      - ENVIRONMENT=onprem
-      - NEXT_PUBLIC_MARKETING_URL=${NEXT_PUBLIC_MARKETING_URL:-http://${HOST_IP:-localhost}:3000}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://${HOST_IP:-localhost}:3001}
-      - NEXT_PUBLIC_BFF_URL=${NEXT_PUBLIC_BFF_URL:-http://${HOST_IP:-localhost}:4000}
-      - BFF_PUBLIC_URL=http://bff:4000
-    networks:
-      - axiom-network
-
+      NODE_ENV: production
+      ENVIRONMENT: onprem
+      BFF_PUBLIC_URL: http://bff:4000
+      NEXT_PUBLIC_BFF_URL: ${NEXT_PUBLIC_BFF_URL:?set BFF origin}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set web origin}
+      SUPABASE_URL: http://supabase-gateway:80
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set Auth origin}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?mint keys}
+      AXIOM_E2E_BYPASS_AUTH: 'false'
+    depends_on:
+      bff: { condition: service_started }
+    networks: [sovereign]
+networks:
+  sovereign:
+    internal: true
 volumes:
-  axiom-onprem-minio-data:
-  axiom-onprem-redis-data:
+  supabase-db-data:
+  temporal-db-data:
+  redis-data:
+  minio-data:

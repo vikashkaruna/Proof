@@ -3,7 +3,8 @@ import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-t
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { insertLocalFixtureRows, updateLocalFixtureRow } from './lib/local-fixture-db.js';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { mintOfflineLicense } from '../packages/config/src/license.js';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
@@ -376,7 +377,32 @@ async function main() {
         signal: AbortSignal.timeout(30_000),
       });
   else {
-    const app = (await import('../services/bff/src/app.js')).createApp();
+    // The on-prem licence gate verifies against the Axiom root key, whose private half
+    // never leaves the licensing authority. The harness therefore signs a short-lived
+    // licence with its own throwaway authority and injects that trust root in-process.
+    let licensePublicKeyPem: string | undefined;
+    if (environment === 'onprem') {
+      const authority = generateKeyPairSync('ed25519', {
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      });
+      licensePublicKeyPem = authority.publicKey;
+      process.env.AXIOM_OFFLINE_LICENSE = mintOfflineLicense(
+        {
+          licenseId: 'PARITY-ACCEPTANCE',
+          licensee: 'strict-parity-harness',
+          environment: 'onprem',
+          tier: 'enterprise-airgapped',
+          issuedAt: new Date(Date.now() - 60_000).toISOString(),
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          maxTenants: 1,
+          maxNodes: 1,
+          features: [],
+        },
+        authority.privateKey,
+      );
+    }
+    const app = (await import('../services/bff/src/app.js')).createApp({ licensePublicKeyPem });
     request = (path, options) => Promise.resolve(app.request(path, options));
   }
   const outcomes: Record<string, number | boolean> = {};

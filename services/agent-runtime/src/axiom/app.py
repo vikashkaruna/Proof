@@ -9,12 +9,14 @@ processes) drive the orchestration.
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import time
 from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
+from axiom_offline_license import verify_offline_license
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -87,7 +89,9 @@ async def lifespan(app: FastAPI):
 
         from .scheduler import SchedulerDb, scheduler_loop
 
-        scheduler_db = SchedulerDb(_create_client(settings.supabase_url, settings.supabase_service_key))
+        scheduler_db = SchedulerDb(
+            _create_client(settings.supabase_url, settings.supabase_service_key)
+        )
         scheduler_task = asyncio.create_task(
             scheduler_loop(scheduler_db, settings.scheduler_poll_seconds)
         )
@@ -119,6 +123,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_onprem_license(request: Request, call_next):
+    if (
+        os.environ.get("ENVIRONMENT") == "onprem"
+        and request.url.path != "/health"
+        and not verify_offline_license(os.environ.get("AXIOM_OFFLINE_LICENSE"))
+    ):
+        status = 503 if request.url.path == "/ready" else 403
+        return JSONResponse({"error": "offline_license_invalid"}, status_code=status)
+    return await call_next(request)
 
 
 class InvokeRequest(BaseModel):
@@ -275,12 +291,15 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
     settings: Settings = req.app.state.settings
     if not settings.feature_execution_engine or not settings.reference_write_origin:
         # No write path is configured: refuse rather than improvise a target.
-        return JSONResponse(status_code=503, content={
-            "accepted": False,
-            "contract_version": EXECUTION_CONTRACT_VERSION,
-            "correlation_id": body.correlation_id,
-            "reason": "execution_unconfigured",
-        })
+        return JSONResponse(
+            status_code=503,
+            content={
+                "accepted": False,
+                "contract_version": EXECUTION_CONTRACT_VERSION,
+                "correlation_id": body.correlation_id,
+                "reason": "execution_unconfigured",
+            },
+        )
 
     from supabase import create_client
 
@@ -309,20 +328,27 @@ async def internal_execute(body: InternalExecuteRequest, req: Request):
         )
     except ExecutorRefused as refused:
         status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
-        return JSONResponse(status_code=status, content={
-            "accepted": False,
-            "contract_version": EXECUTION_CONTRACT_VERSION,
-            "correlation_id": body.correlation_id,
-            "reason": refused.reason.split(":", 1)[0],
-        })
+        return JSONResponse(
+            status_code=status,
+            content={
+                "accepted": False,
+                "contract_version": EXECUTION_CONTRACT_VERSION,
+                "correlation_id": body.correlation_id,
+                "reason": refused.reason.split(":", 1)[0],
+            },
+        )
     return {
         "accepted": True,
         "contract_version": EXECUTION_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
         "batch": {"id": result.batch_id, "status": result.status, "replay": result.replay},
         "outcomes": [
-            {"action_id": o.action_id, "outcome": o.outcome,
-             "error_code": o.error_code, "rows_affected": o.rows_affected}
+            {
+                "action_id": o.action_id,
+                "outcome": o.outcome,
+                "error_code": o.error_code,
+                "rows_affected": o.rows_affected,
+            }
             for o in result.outcomes
         ],
     }
@@ -370,12 +396,15 @@ async def internal_rollback(body: InternalRollbackRequest, req: Request):
     # answer is a refusal, not an improvised target.
     settings: Settings = req.app.state.settings
     if not settings.feature_execution_engine or not settings.reference_write_origin:
-        return JSONResponse(status_code=503, content={
-            "accepted": False,
-            "contract_version": ROLLBACK_CONTRACT_VERSION,
-            "correlation_id": body.correlation_id,
-            "reason": "execution_unconfigured",
-        })
+        return JSONResponse(
+            status_code=503,
+            content={
+                "accepted": False,
+                "contract_version": ROLLBACK_CONTRACT_VERSION,
+                "correlation_id": body.correlation_id,
+                "reason": "execution_unconfigured",
+            },
+        )
 
     from supabase import create_client
 
@@ -388,9 +417,7 @@ async def internal_rollback(body: InternalRollbackRequest, req: Request):
         outcomes = await run_manual_rollbacks(
             db,
             KillSwitchReader.from_settings(settings),
-            ReferenceWriteAdapter(
-                settings.reference_write_origin, settings.internal_token or ""
-            ),
+            ReferenceWriteAdapter(settings.reference_write_origin, settings.internal_token or ""),
             tenant_id=body.tenant_id,
             batch_id=body.batch_id,
             action_ids=body.action_ids,
@@ -398,20 +425,27 @@ async def internal_rollback(body: InternalRollbackRequest, req: Request):
         )
     except ExecutorRefused as refused:
         status = 423 if refused.reason.startswith("kill_switch_engaged") else 409
-        return JSONResponse(status_code=status, content={
-            "accepted": False,
-            "contract_version": ROLLBACK_CONTRACT_VERSION,
-            "correlation_id": body.correlation_id,
-            "reason": refused.reason.split(":", 1)[0],
-        })
+        return JSONResponse(
+            status_code=status,
+            content={
+                "accepted": False,
+                "contract_version": ROLLBACK_CONTRACT_VERSION,
+                "correlation_id": body.correlation_id,
+                "reason": refused.reason.split(":", 1)[0],
+            },
+        )
     return {
         "accepted": True,
         "contract_version": ROLLBACK_CONTRACT_VERSION,
         "correlation_id": body.correlation_id,
         "batch": {"id": body.batch_id},
         "outcomes": [
-            {"action_id": o.action_id, "outcome": o.outcome,
-             "error_code": o.error_code, "rows_affected": o.rows_affected}
+            {
+                "action_id": o.action_id,
+                "outcome": o.outcome,
+                "error_code": o.error_code,
+                "rows_affected": o.rows_affected,
+            }
             for o in outcomes
         ],
     }
@@ -444,23 +478,20 @@ def _record_dry_run_via_rpc(
     from supabase import create_client
 
     client = create_client(settings.supabase_url, settings.supabase_service_key)
-    result = (
-        client.rpc(
-            "record_dry_run",
-            {
-                "p_tenant_id": payload.tenant_id,
-                "p_action_id": payload.action_id,
-                "p_status": outcome.status,
-                "p_diff": outcome.diff,
-                "p_refusal_reason": outcome.refusal_reason,
-                "p_simulated_by": "sudhaar",
-                "p_parameters": payload.parameters,
-                "p_rollback_definition": payload.rollback_definition,
-                "p_correlation_id": payload.correlation_id,
-            },
-        )
-        .execute()
-    )
+    result = client.rpc(
+        "record_dry_run",
+        {
+            "p_tenant_id": payload.tenant_id,
+            "p_action_id": payload.action_id,
+            "p_status": outcome.status,
+            "p_diff": outcome.diff,
+            "p_refusal_reason": outcome.refusal_reason,
+            "p_simulated_by": "sudhaar",
+            "p_parameters": payload.parameters,
+            "p_rollback_definition": payload.rollback_definition,
+            "p_correlation_id": payload.correlation_id,
+        },
+    ).execute()
     return result.data if isinstance(result.data, dict) else {"error": "record_failed"}
 
 

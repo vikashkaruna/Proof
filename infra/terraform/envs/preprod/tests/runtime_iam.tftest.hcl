@@ -15,6 +15,12 @@ variables {
   supabase_jwt_secret         = "synthetic-jwt-signing-key-for-offline-tests-only"
   supabase_anon_key           = "synthetic-public-anon-fixture"
   supabase_service_key        = "synthetic-service-role-fixture"
+  release_sha                 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_manifest_file       = "tests/runtime_iam_release.fixture.json"
+  evidence_bucket             = "axiom-offline-fixture-evidence"
+  evidence_endpoint           = "https://s3.ap-south-1.amazonaws.com"
+  evidence_access_key_id      = "synthetic-access-key-for-tests"
+  evidence_secret_access_key  = "synthetic-secret-key-for-offline-tests-only"
   supabase_archive_writer_key = "synthetic-archive-writer-fixture"
 }
 

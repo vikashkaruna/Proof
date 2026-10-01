@@ -248,10 +248,10 @@ if should_run_phase "base"; then
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
     info "Dry-run: Planning destruction of VPC Connector and Peering..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
   else
     info "Destroying VPC Connector and Peering..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime       -target=google_service_account.storage_sa       -target=google_storage_hmac_key.s3_compat_key || true
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
     pass "Serverless VPC connector and peering destroyed"
   fi
   cd "$REPO_ROOT"

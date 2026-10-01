@@ -23,24 +23,13 @@ output "cloud_sql_public_ip" {
 }
 
 output "evidence_vault_bucket" {
-  description = "Google Cloud Storage Evidence Vault Bucket (WORM Lock)"
-  value       = google_storage_bucket.evidence_vault.name
+  description = "Operator-provided ap-south-1 S3 Object Lock Compliance bucket"
+  value       = var.evidence_bucket
 }
 
-output "gcs_s3_endpoint" {
-  description = "S3-compatible XML API Endpoint for Google Cloud Storage"
-  value       = "https://storage.googleapis.com"
-}
-
-output "gcs_hmac_access_id" {
-  description = "GCS S3-interoperability HMAC Access ID for Evidence Vault"
-  value       = google_storage_hmac_key.s3_compat_key.access_id
-}
-
-output "gcs_hmac_secret" {
-  description = "GCS S3-interoperability HMAC Secret for Evidence Vault"
-  value       = google_storage_hmac_key.s3_compat_key.secret
-  sensitive   = true
+output "evidence_s3_endpoint" {
+  description = "Approved ap-south-1 S3 evidence endpoint"
+  value       = var.evidence_endpoint
 }
 
 output "artifact_registry_repo" {
@@ -89,4 +78,3 @@ output "supabase_rest_url" {
   description = "PostgREST's own Cloud Run URL. Behind the gateway; not what clients use."
   value       = google_cloud_run_v2_service.supabase_rest.uri
 }
-

@@ -25,8 +25,11 @@ class ArchiveWriterMintTests(unittest.TestCase):
             with self.subTest(path=path):
                 source = (ROOT / path).read_text()
                 services = re.split(r"(?m)^  ([a-z][a-z0-9-]*):\s*$", source)
+                # Compose accepts `- KEY=value` and `KEY: value`; match an assignment at
+                # the start of a line, not a `${KEY:?...}` reference inside a value.
+                assigned = re.compile(r"(?m)^\s*(?:-\s*)?SUPABASE_ARCHIVE_WRITER_KEY\s*[=:]")
                 owners = [name for name, body in zip(services[1::2], services[2::2])
-                          if "SUPABASE_ARCHIVE_WRITER_KEY=" in body]
+                          if assigned.search(body)]
                 self.assertEqual(owners, ["bff"])
 
     def test_container_acceptance_keeps_writer_out_of_web_and_target(self):
