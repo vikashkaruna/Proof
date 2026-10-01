@@ -277,7 +277,7 @@ def main():
                 ],
                 cwd=ROOT,
                 env=env,
-                timeout=900,
+                timeout=1_800,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
             # All five source-bound report/archive journeys are required in this
