@@ -8,6 +8,9 @@ variables {
   supabase_jwt_secret  = "synthetic-jwt-signing-key-for-offline-tests-only"
   supabase_anon_key    = "synthetic-public-anon-fixture"
   supabase_service_key = "synthetic-service-role-fixture"
+  # The base now requires a minted BFF-only archive writer key; a synthetic
+  # fixture satisfies the variable without any real credential.
+  supabase_archive_writer_key = "synthetic-archive-writer-fixture"
 }
 
 run "private_only_by_default" {
