@@ -244,6 +244,16 @@ def main():
                 line.split("=", 1) for line in (directory / "runtime.env").read_text().splitlines()
             )
         )
+        # Cold headless Chromium can exceed the renderer's 30 s budget on a fresh
+        # runner; take that cold start (and any missing-binary failure) here, with
+        # the renderer's own explanation, instead of inside the first PDF journey.
+        subprocess.run(
+            ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
+            cwd=ROOT,
+            env=env,
+            timeout=300,
+            check=True,
+        )
         env["AXIOM_EVIDENCE_STORAGE_ACCEPTANCE"] = "true"
         env["AXIOM_EVIDENCE_FIXTURE_DIRECTORY"] = str(directory)
         raw_report = directory / "private-playwright.json"
