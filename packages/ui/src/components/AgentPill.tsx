@@ -21,6 +21,8 @@ export interface AgentPillProps {
   agent: AgentName;
   state?: AgentIconState;
   showPersona?: boolean;
+  /** Overrides the icon tooltip, which otherwise names the agent and its state. */
+  title?: string;
   className?: string;
 }
 
@@ -28,6 +30,7 @@ export function AgentPill({
   agent,
   state = 'idle',
   showPersona = true,
+  title,
   className,
 }: AgentPillProps) {
   const accent = agentAccents[agent] || '#0FB5A5';
@@ -45,7 +48,13 @@ export function AgentPill({
         ...(state === 'working' ? { ringColor: accent } : {}),
       }}
     >
-      <AgentIcon agent={agent} state={state} size="xs" className="border-0 bg-transparent" />
+      <AgentIcon
+        agent={agent}
+        state={state}
+        size="xs"
+        className="border-0 bg-transparent"
+        {...(title !== undefined ? { title } : {})}
+      />
       <span className="font-heading capitalize text-slate-800">{agent}</span>
       {showPersona && <span className="text-slate-500 font-normal">· {persona?.persona}</span>}
     </span>

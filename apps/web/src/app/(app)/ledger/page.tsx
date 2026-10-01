@@ -9,6 +9,7 @@ import { LedgerFilters } from './ledger-filters';
 import { LedgerPagination } from './ledger-pagination';
 import { LedgerStreamView, type LedgerStreamEntry } from './ledger-stream-view';
 import type { AgentName } from '@axiom/design-tokens';
+import { ModuleContextFor } from '@/lib/module-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -239,13 +240,16 @@ export default async function LedgerPage({
               <h1 className="font-heading text-2xl md:text-[26px] font-bold text-white tracking-tight">
                 Audit Ledger
               </h1>
-              <span className="font-heading text-lg text-[#0FB5A5] font-normal">अंकेक्षण बही</span>
+              <span lang="hi" className="font-heading text-lg text-[#0FB5A5] font-normal">
+                अंकेक्षण बही
+              </span>
             </div>
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">
               Recorded audit events for this tenant. Inspect each entry and verify the hash chain;
               an event alone does not establish that a complete approval or execution lifecycle
               occurred.
             </p>
+            <ModuleContextFor module="ledger" tone="dark" omit={['hi']} className="mt-3" />
           </div>
 
           <div className="flex items-center gap-3">

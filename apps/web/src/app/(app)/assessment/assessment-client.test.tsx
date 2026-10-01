@@ -3,6 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AssessmentSnapshot } from '@axiom/types';
+import { moduleMeta } from '@/lib/module-meta';
 import { AssessmentClient } from './assessment-client';
 
 const state = vi.hoisted(() => ({ invoke: vi.fn(), refresh: vi.fn() }));
@@ -16,7 +17,10 @@ vi.mock('next/link', () => ({
     <a href={href}>{children}</a>
   ),
 }));
-vi.mock('@axiom/ui', () => ({ AgentIcon: () => <span aria-hidden="true" /> }));
+vi.mock('@axiom/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@axiom/ui')>()),
+  AgentIcon: () => <span aria-hidden="true" />,
+}));
 
 const snapshot: AssessmentSnapshot = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -111,4 +115,15 @@ it('keeps failed or ambiguous invocations unconfirmed and does not show a proof 
   expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('not-run');
   expect(screen.queryByRole('link', { name: /Ledger entry #/ })).toBeNull();
   expect(state.refresh).not.toHaveBeenCalled();
+});
+
+it('renders the shared module context outside the heading', () => {
+  render(<AssessmentClient snapshot={null} />);
+  const meta = moduleMeta('assessment');
+  expect(meta.moduleId).toBe('M0.3');
+  expect(screen.getByText(meta.hi)).toBeTruthy();
+  expect(screen.getByText(meta.moduleId ?? '')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Assessment pipeline' }).textContent).not.toContain(
+    meta.hi,
+  );
 });
