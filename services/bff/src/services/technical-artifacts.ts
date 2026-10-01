@@ -385,7 +385,12 @@ export class TechnicalArtifactService {
         timeoutMs: 30_000,
         documentDate: review.reviewed_at,
       });
-    } catch {
+    } catch (cause) {
+      // The client sees only the code; the operator needs the cause.
+      console.error(
+        '[TechnicalArtifacts] PDF renderer failed:',
+        cause instanceof Error ? cause.message : 'unknown',
+      );
       throw new EvidenceError('report_renderer_unavailable', 503);
     } finally {
       activeTechnicalRenders--;
