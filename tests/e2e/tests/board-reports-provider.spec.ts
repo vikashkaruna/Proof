@@ -63,6 +63,21 @@ async function database(path: string, body?: unknown) {
   return response.json() as Promise<unknown>;
 }
 
+async function fixturePatch(path: string, body: Record<string, unknown>) {
+  const response = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
+    method: 'PATCH',
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      apikey: state.publishableKey,
+      authorization: `Bearer ${state.serviceKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  expect(response.status).toBe(204);
+}
+
 async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const result = (await database(`rpc/${name}`, args)) as T & { error?: string };
   if (result.error) throw new Error(`${name}: ${result.error}`);
@@ -70,7 +85,10 @@ async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
 }
 
 /** Only source setup is inserted. Assessment, receipts and report state use their sanctioned RPCs. */
-async function finalizedAssessment(actorId: string) {
+async function finalizedAssessment(
+  actorId: string,
+  findingRationale = 'Synthetic board acceptance finding',
+) {
   localFixture();
   const suffix = crypto.randomUUID();
   const libraryVersion = `board-e2e-${suffix}`;
@@ -181,7 +199,7 @@ async function finalizedAssessment(actorId: string) {
         control_id: controlId,
         score: 61,
         risk_points: 10,
-        rationale: 'Synthetic board acceptance finding',
+        rationale: findingRationale,
       },
     ],
   };
@@ -481,6 +499,64 @@ test.describe('real-provider board report lifecycle', () => {
     }
   });
 
+  test('live authority revocation denies cached review and private report reads', async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(300_000);
+    const manager = await createMfaAccount('board-revoked-manager', { role: 'admin' });
+    const founderAccount = await createMfaAccount('board-revoked-founder', {
+      role: 'founder',
+      isInternal: true,
+      withFactor: true,
+    });
+    await signInAs(page, manager.email, manager.password);
+    await selectTenant(page, 'a');
+    const assessment = await finalizedAssessment(manager.id);
+    const request = await boardRequest(page, assessment);
+    const founderContext = await browser.newContext();
+    try {
+      const founder = await founderContext.newPage();
+      await signInAs(founder, founderAccount.email, founderAccount.password);
+      await selectTenant(founder, 'a');
+      await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
+      const generated = await post(founder, `/reports/board/${request.requestId}/generate`, {});
+      expect(generated.status()).toBe(200);
+      const { reportId } = (await generated.json()) as { reportId: string };
+      const report = await reportRow(reportId);
+      const path = `/reports/${reportId}/review`;
+      const body = { decision: 'approved', expectedContentHash: report.content_sha256 };
+      const key = crypto.randomUUID();
+      const review = () =>
+        founder.request.post(`/api/bff/v1${path}`, {
+          headers: { 'x-tenant-id': state.tenantA.id, 'idempotency-key': key },
+          data: body,
+        });
+      expect((await review()).status()).toBe(200);
+      await founder.goto('/reports');
+      const detail = founder.getByRole('region', { name: 'Report detail' });
+      await founder
+        .getByRole('region', { name: 'Recorded reports' })
+        .getByRole('button', { name: new RegExp(request.title) })
+        .click();
+      await expect(detail.getByRole('heading', { name: request.title, exact: true })).toBeVisible();
+      await fixturePatch(`users?id=eq.${founderAccount.id}`, { is_axiom_internal: false });
+      expect((await review()).status()).toBe(403);
+      expect((await founder.request.get(`/api/bff/v1/reports/${reportId}`)).status()).toBe(404);
+      await detail.getByRole('button', { name: 'Refresh report detail' }).click();
+      await expect(detail.getByRole('alert')).toBeVisible();
+      await expect(detail.getByRole('heading', { name: request.title, exact: true })).toHaveCount(
+        0,
+      );
+      await fixturePatch(`tenant_users?tenant_id=eq.${state.tenantA.id}&user_id=eq.${manager.id}`, {
+        role: 'viewer',
+      });
+      expect((await page.request.get(`/api/bff/v1/reports/${reportId}`)).status()).toBe(404);
+    } finally {
+      await founderContext.close();
+    }
+  });
+
   test('provider interruption leaves a pending build; founder explicitly retries missing versions', async ({
     page,
     browser,
@@ -576,7 +652,8 @@ test.describe('real-provider board report lifecycle', () => {
     const manager = await createMfaAccount('board-browser-manager', { role: 'admin' });
     await signInAs(page, manager.email, manager.password);
     await selectTenant(page, 'a');
-    const assessment = await finalizedAssessment(manager.id);
+    const unsafeText = '<img src=x onerror=alert(1)>';
+    const assessment = await finalizedAssessment(manager.id, unsafeText);
     await page.goto('/reports');
     const workflow = page.getByRole('region', { name: 'Board report workflow' });
     const requestForm = workflow.getByRole('form', { name: 'Request board report' });
@@ -613,6 +690,10 @@ test.describe('real-provider board report lifecycle', () => {
       await selected.getByRole('button', { name: 'Open report for review' }).click();
       const detail = founder.getByRole('region', { name: 'Report detail' });
       await expect(detail.getByRole('heading', { name: title, exact: true })).toBeVisible();
+      await detail.getByText('Exact recorded content', { exact: true }).click();
+      await expect(detail.locator('pre')).toContainText(unsafeText);
+      await expect(detail.locator('img')).toHaveCount(0);
+      await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
       await detail
         .getByRole('checkbox', {
           name: 'I reviewed the exact content and SHA-256 shown above.',

@@ -141,9 +141,6 @@ export async function accessFor(
   if (error) throw new EvidenceError('report_storage_unavailable', 503);
   const role = z.object({ role: z.enum(UserRole) }).safeParse(data);
   if (!role.success) throw new EvidenceError('forbidden', 403);
-  const manager = ([UserRole.FOUNDER, UserRole.OWNER, UserRole.ADMIN] as UserRole[]).includes(
-    role.data.role,
-  );
   let founder = false;
   if (role.data.role === UserRole.FOUNDER) {
     const profile = await db
@@ -155,6 +152,10 @@ export async function accessFor(
     if (profile.error) throw new EvidenceError('report_storage_unavailable', 503);
     founder = z.object({ is_axiom_internal: z.literal(true) }).safeParse(profile.data).success;
   }
+  // A founder's manager-equivalent access depends on the live internal fact.
+  // Otherwise revocation still leaves them able to read their private draft
+  // through the ordinary manager/creator branch.
+  const manager = role.data.role === UserRole.OWNER || role.data.role === UserRole.ADMIN || founder;
   return {
     actorId,
     tenantId,

@@ -182,6 +182,30 @@ describe('report and pack HTTP contracts', () => {
     expect((await app().request(`/v1/reports/${pack.report.id}`)).status).toBe(404);
     expect((await post('/evidence-packs', fixture.input)).status).toBe(403);
   });
+  it('revokes founder-derived manager reads when the live internal fact is removed', async () => {
+    const pack = await fixture.prepare();
+    // A founder-created draft used to remain readable through the manager
+    // creator branch after founder review authority was revoked.
+    fixture.base.rows('reports').find((r) => r.id === pack.report.id)!.created_by = fixture.founder;
+    const path = `/v1/reports/${pack.report.id}`;
+    expect((await app(fixture.founder, UserRole.FOUNDER).request(path)).status).toBe(200);
+    fixture.base.rows('users').find((u) => u.id === fixture.founder)!.is_axiom_internal = false;
+    expect((await app(fixture.founder, UserRole.FOUNDER).request(path)).status).toBe(404);
+    const list = await app(fixture.founder, UserRole.FOUNDER).request('/v1/reports');
+    expect(list.status).toBe(200);
+    expect((await payload(list)).meta.total).toBe(0);
+    expect(
+      (
+        await app(fixture.founder, UserRole.FOUNDER).request(
+          '/v1/evidence-packs/options/engagements',
+        )
+      ).status,
+    ).toBe(403);
+    // Null-created historical drafts were another manager-branch bypass.
+    fixture.base.rows('reports').find((r) => r.id === pack.report.id)!.created_by = null;
+    expect((await app(fixture.founder, UserRole.FOUNDER).request(path)).status).toBe(404);
+    expect((await app().request(path)).status).toBe(200);
+  });
   it.each([UserRole.OWNER, UserRole.ADMIN, UserRole.AXIOM_ANALYST, UserRole.VIEWER])(
     'refuses report review/release to %s',
     async (role) => {
@@ -346,7 +370,7 @@ describe('report authority before cached replay', () => {
     expect(
       (await instance.request(`/v1/evidence-packs/${pack.pack.id}/build`, { method: 'POST' }))
         .status,
-    ).toBe(404);
+    ).toBe(403);
     expect(cacheReached).toBe(false);
   });
 });
