@@ -2,7 +2,7 @@
  * Requires the combined ordered 0088–0094 migration chain and the owned provider.
  */
 import { createHash } from 'node:crypto';
-import { test, expect, type APIResponse, type Page } from '@playwright/test';
+import { test, expect, type APIResponse, type Page, type Route } from '@playwright/test';
 import {
   createMfaAccount,
   selectTenant,
@@ -334,8 +334,63 @@ for (const format of ['technical', 'dpb'] as const) {
       await card.getByRole('checkbox', { name: /I reviewed this source/ }).check();
       await card.getByRole('button', { name: 'Approve exact draft' }).click();
       await expect(card.getByRole('button', { name: 'Build retained versions' })).toBeVisible();
+      let staleReadCompleted = false;
+      const staleListMatch = (url: URL) =>
+        format === 'dpb' &&
+        url.pathname === '/api/bff/v1/reports/dpb/requests' &&
+        url.searchParams.get('limit') === '50';
+      const staleList = await founder.request.get(
+        `/api/bff/v1/reports/${format}/requests?limit=50`,
+        {
+          headers: { 'x-tenant-id': state.tenantA.id },
+        },
+      );
+      expect(staleList.status()).toBe(200);
+      const staleListBody = await staleList.text();
+      if (format === 'dpb') {
+        const snapshot = JSON.parse(staleListBody) as {
+          requests: Array<{ reportId: string; artifact: { status: string } | null }>;
+        };
+        expect(
+          snapshot.requests.find((request) => request.reportId === reportId)?.artifact?.status,
+        ).toBe('not_started');
+      }
+      const returnStaleList = async (route: Route) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await route.fulfill({ status: 200, contentType: 'application/json', body: staleListBody });
+        staleReadCompleted = true;
+      };
+      if (format === 'dpb') await founder.route(staleListMatch, returnStaleList);
+      const buildResponsePromise = founder.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          response.url().includes(`/reports/${format}/${reportId}/artifacts`),
+      );
       await card.getByRole('button', { name: 'Build retained versions' }).click();
-      await expect(card.getByText('Retained artifacts: settled')).toBeVisible();
+      const buildResponse = await buildResponsePromise;
+      expect(buildResponse.status(), await buildResponse.text()).toBe(200);
+      expect(((await buildResponse.json()) as { status: string }).status).toBe('settled');
+      if (format === 'dpb') await expect.poll(() => staleReadCompleted).toBe(true);
+      try {
+        await expect(card.getByText('Retained artifacts: settled')).toBeVisible();
+      } catch (cause) {
+        if (format === 'dpb') await founder.unroute(staleListMatch, returnStaleList);
+        const listResponse = await founder.request.get(
+          `/api/bff/v1/reports/${format}/requests?limit=50`,
+          {
+            headers: { 'x-tenant-id': state.tenantA.id },
+          },
+        );
+        const list = (await listResponse.json()) as {
+          requests?: Array<{ reportId: string; artifact?: { status: string } }>;
+        };
+        const observed = list.requests?.find((request) => request.reportId === reportId);
+        throw new Error(
+          `Settled card did not refresh: list HTTP ${listResponse.status()}, artifact ${observed?.artifact?.status ?? 'missing'}`,
+          { cause },
+        );
+      }
+      if (format === 'dpb') await founder.unroute(staleListMatch, returnStaleList);
       const builds = (await database(
         `${format}_artifact_builds?report_id=eq.${reportId}&select=id,status`,
       )) as Array<{ id: string; status: string }>;

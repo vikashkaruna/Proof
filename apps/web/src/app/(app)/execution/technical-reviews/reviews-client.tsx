@@ -4,19 +4,17 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import { reportRequest } from '../../reports/report-request';
+import {
+  applyRetainedBuild,
+  mergeRetainedRequests,
+  retainedArtifactSchema,
+  retainedBuildResultSchema,
+} from '../../reports/retained-artifact-state';
 
 export type TechnicalPlan = { id: string; title: string; status: string; created_at: string };
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
-const artifactSchema = z.object({
-  reportStatus: z.string(),
-  status: z.enum(['not_started', 'pending', 'settled']),
-  operationKey: z.uuid().nullable(),
-  lastErrorCode: z.string().nullable(),
-  pdf: z
-    .object({ sha256: digest, byteSize: z.number().int().positive(), retainUntil: z.string() })
-    .nullable(),
-});
+const artifactSchema = retainedArtifactSchema;
 const requestSchema = z.object({
   requestId: z.uuid(),
   planId: z.uuid(),
@@ -103,7 +101,7 @@ export function TechnicalReviewsClient({
         });
         const list = listSchema.parse(await response.json());
         if (controller.signal.aborted) return;
-        setRequests(list.requests);
+        setRequests((current) => mergeRetainedRequests(current, list.requests));
       } catch (cause) {
         if (!controller.signal.aborted) {
           setRequests([]);
@@ -114,16 +112,24 @@ export function TechnicalReviewsClient({
     return () => controller.abort();
   }, [tenantId, revision]);
 
-  async function act(path: string, body: unknown) {
+  async function act(path: string, body: unknown, artifactReportId?: string | null) {
     setBusy(true);
     setError('');
     setMessage('');
     try {
       const response = await reportRequest(tenantId, path, { body });
+      if (artifactReportId) {
+        const build = retainedBuildResultSchema.parse(await response.json());
+        if (build.reportId !== artifactReportId)
+          throw new Error('The retained build response does not match this report.');
+        setRequests((current) => applyRetainedBuild(current, build));
+      } else {
+        await response.arrayBuffer();
+      }
       setMessage(
         response.status === 202
           ? 'Storage is pending. Reconcile the recorded operation before retrying missing versions.'
-          : 'Action recorded. The state below has been refreshed.',
+          : 'Action recorded. Refreshing the recorded state.',
       );
       refresh();
     } catch (cause) {
@@ -398,9 +404,11 @@ export function TechnicalReviewsClient({
                         <button
                           disabled={busy}
                           onClick={() =>
-                            void act(`/reports/technical/${item.reportId}/artifacts`, {
-                              operationKey: crypto.randomUUID(),
-                            })
+                            void act(
+                              `/reports/technical/${item.reportId}/artifacts`,
+                              { operationKey: crypto.randomUUID() },
+                              item.reportId,
+                            )
                           }
                           className="rounded border px-3 py-1 text-sm disabled:opacity-50"
                         >
@@ -415,9 +423,11 @@ export function TechnicalReviewsClient({
                           <button
                             disabled={busy}
                             onClick={() =>
-                              void act(`/reports/technical/${item.reportId}/artifacts/reconcile`, {
-                                operationKey: artifact.operationKey,
-                              })
+                              void act(
+                                `/reports/technical/${item.reportId}/artifacts/reconcile`,
+                                { operationKey: artifact.operationKey },
+                                item.reportId,
+                              )
                             }
                             className="rounded border px-3 py-1 text-sm disabled:opacity-50"
                           >
@@ -428,9 +438,8 @@ export function TechnicalReviewsClient({
                             onClick={() =>
                               void act(
                                 `/reports/technical/${item.reportId}/artifacts/retry-missing`,
-                                {
-                                  operationKey: artifact.operationKey,
-                                },
+                                { operationKey: artifact.operationKey },
+                                item.reportId,
                               )
                             }
                             className="rounded border px-3 py-1 text-sm disabled:opacity-50"
