@@ -65,4 +65,13 @@ describe('retained artifact UI state', () => {
       mergeRetainedRequests(current, [request(otherReportId, 'not_started')])[0]?.artifact?.status,
     ).toBe('not_started');
   });
+
+  it('keeps a newer release status while preserving the exact settled PDF', () => {
+    const incoming = request(reportId, 'not_started');
+    incoming.reportStatus = 'published';
+    const result = mergeRetainedRequests([request(reportId, 'settled')], [incoming]);
+    expect(result[0]?.artifact?.status).toBe('settled');
+    expect(result[0]?.artifact?.reportStatus).toBe('published');
+    expect(result[0]?.artifact?.pdf).toEqual(pdf);
+  });
 });
