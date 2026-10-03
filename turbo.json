@@ -67,5 +67,6 @@
         "$TURBO_ROOT$/infra/supabase/migrations/*.sql"
       ]
     }
-  }
+  },
+  "agentGuidance": false
 }

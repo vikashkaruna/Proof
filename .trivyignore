@@ -1,0 +1,5 @@
+# Advisories Trivy may ignore, each with an expiry so an exception cannot outlive its review.
+# Keep in step with security/audit-allowlist.json, which carries the reason for each entry.
+# braces <=3.0.3 denial of service: no patched release exists; reached only through
+# tailwindcss's build-time glob handling with our own patterns.
+GHSA-vfj7-8cjw-p6xm exp:2026-11-02
