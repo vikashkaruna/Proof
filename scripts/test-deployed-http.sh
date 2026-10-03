@@ -14,7 +14,7 @@ fi
 parity_project=${AXIOM_PARITY_PROJECT_ID:-axiom-w0-parity}
 parity_network="supabase_network_${parity_project}"
 kong_container="supabase_kong_${parity_project}"
-docker network inspect "$parity_network" --format '{{range .Containers}}{{println .Name}}{{end}}' | rg -qx "$kong_container" || {
+docker network inspect "$parity_network" --format '{{range .Containers}}{{println .Name}}{{end}}' | grep -Fxq "$kong_container" || {
   echo 'Isolated Auth gateway is not on the expected private Docker network.' >&2
   exit 1
 }
