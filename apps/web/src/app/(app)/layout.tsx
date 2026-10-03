@@ -27,10 +27,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect('/login');
 
   // Tenant membership + role
-  const { data: memberships, error: membershipsError } = await supabase
-    .from('tenant_users')
-    .select('tenant_id, role, tenants:tenant_id(slug, name)')
-    .eq('user_id', user.id);
+  const readMemberships = () =>
+    supabase
+      .from('tenant_users')
+      .select('tenant_id, role, tenants:tenant_id(slug, name)')
+      .eq('user_id', user.id);
+  let { data: memberships, error: membershipsError } = await readMemberships();
+  if (
+    membershipsError?.code === 'PGRST303' &&
+    membershipsError.message === 'JWT issued at future'
+  ) {
+    // GoTrue and PostgREST can straddle a one-second clock boundary immediately
+    // after sign-in. Retry only that specific token-timing refusal, then fail closed.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    ({ data: memberships, error: membershipsError } = await readMemberships());
+  }
   if (membershipsError || !memberships) {
     throw new Error('Tenant memberships are unavailable');
   }

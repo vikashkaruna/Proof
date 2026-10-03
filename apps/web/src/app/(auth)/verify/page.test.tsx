@@ -51,6 +51,35 @@ it('binds verification to a recorded membership and refuses an external redirect
   expect(view).not.toContain('evil.example');
 });
 
+it.each(['//evil.example', '/\\evil.example', '/\nevil.example'])(
+  'keeps an unsafe redirect target on the dashboard: %s',
+  async (target) => {
+    const view = renderToStaticMarkup(
+      await VerifyPage({ searchParams: Promise.resolve({ redirect: target }) }),
+    );
+    expect(view).toContain('&quot;redirectTo&quot;:&quot;/dashboard&quot;');
+    expect(view).not.toContain('evil.example');
+  },
+);
+
+it('preserves a safe in-app redirect target', async () => {
+  const view = renderToStaticMarkup(
+    await VerifyPage({ searchParams: Promise.resolve({ redirect: '/settings/security' }) }),
+  );
+  expect(view).toContain('&quot;redirectTo&quot;:&quot;/settings/security&quot;');
+});
+
+it('falls back safely when the redirect query is repeated', async () => {
+  const view = renderToStaticMarkup(
+    await VerifyPage({
+      searchParams: Promise.resolve({
+        redirect: ['/dashboard', '//evil.example'] as unknown as string,
+      }),
+    }),
+  );
+  expect(view).toContain('&quot;redirectTo&quot;:&quot;/dashboard&quot;');
+});
+
 it('refuses missing authentication or factor enrolment', async () => {
   state.user = null;
   await expect(VerifyPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(

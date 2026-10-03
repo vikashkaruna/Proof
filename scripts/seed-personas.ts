@@ -29,11 +29,16 @@ import {
   type PersonaKey,
   type PersonaState,
 } from '../tests/e2e/personas.js';
-import { insertLocalFixtureRows } from './lib/local-fixture-db.js';
+import {
+  insertLocalFixtureRows,
+  remoteFixtureDatabaseUrl,
+  type FixtureTarget,
+} from './lib/local-fixture-db.js';
 
 async function main() {
   const target = loadAcceptanceTarget();
   if (target) await verifyAcceptanceTarget(target);
+  const remoteDatabaseUrl = target?.topology === 'remote' ? remoteFixtureDatabaseUrl(target) : null;
   const stateDir = process.env.AXIOM_PARITY_STATE_DIR ?? resolve('.axiom-runtime/parity');
   const status = (
     target
@@ -231,14 +236,20 @@ async function main() {
   const planA = { id: randomUUID(), title: `Persona plan A ${run}` };
   const planB = { id: randomUUID(), title: `Persona plan B ${run}` };
   // Plans and actions are not writable through the service credential (0099), so
-  // synthetic rows go in as the local database owner. A local-docker target is
-  // backed by the same loopback parity database; a remote target has no such
-  // connection and its plan fixtures must come from the operator database path.
-  if (target && target.topology !== 'local-docker')
-    throw new Error(
-      'Plan fixtures cannot be seeded into a remote target with the service credential (migration 0099); seed them through the operator database path.',
-    );
-  const fixtureTarget = { repoRoot: process.cwd(), stateDir };
+  // The remote path uses an operator-owned loopback tunnel. The owner database
+  // must contain BOTH engagements just created through the selected API.
+  const fixtureTarget: FixtureTarget = remoteDatabaseUrl
+    ? {
+        repoRoot: process.cwd(),
+        remote: {
+          databaseUrl: remoteDatabaseUrl,
+          proof: [
+            { tenantId: tenantA.id, engagementId: engagementA },
+            { tenantId: tenantB.id, engagementId: engagementB },
+          ],
+        },
+      }
+    : { repoRoot: process.cwd(), stateDir };
   await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
     {
       id: planA.id,

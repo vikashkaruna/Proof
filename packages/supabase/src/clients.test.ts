@@ -70,6 +70,20 @@ describe('Supabase deployed-client boundaries', () => {
     expect(set).toHaveBeenCalledWith('new-session', 'new', { httpOnly: true });
   });
 
+  it('ignores signup flow verifiers when selecting the real session cookie', async () => {
+    const cookies = [
+      { name: 'sb-project-auth-token-flow-abc-code-verifier', value: 'verifier' },
+      { name: 'sb-project-auth-token-code-verifier', value: 'verifier' },
+      { name: 'sb-project-auth-token.0', value: 'session-part' },
+    ];
+    mocks.cookies.mockResolvedValue({ getAll: () => cookies, get: () => undefined, set: vi.fn() });
+    const { createSupabaseServerClient } = await import('./server');
+    await createSupabaseServerClient();
+    expect(mocks.createServerClient.mock.calls[0]![2].cookieOptions).toEqual({
+      name: 'sb-project-auth-token',
+    });
+  });
+
   it('does not use the fixture after an explicit local logout and tolerates read-only cookies', async () => {
     mocks.webBypass.mockReturnValue(true);
     mocks.cookies.mockResolvedValue({

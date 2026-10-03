@@ -2,7 +2,12 @@ import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-t
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
-import { insertLocalFixtureRows, updateLocalFixtureRow } from './lib/local-fixture-db.js';
+import {
+  insertLocalFixtureRows,
+  remoteFixtureDatabaseUrl,
+  updateLocalFixtureRow,
+  type FixtureTarget,
+} from './lib/local-fixture-db.js';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { mintOfflineLicense } from '../packages/config/src/license.js';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
@@ -12,6 +17,7 @@ import { mintLocalPostgrestRoleKey } from '../packages/supabase/src/local-proof-
 
 async function main() {
   const target = loadAcceptanceTarget();
+  const remoteDatabaseUrl = target?.topology === 'remote' ? remoteFixtureDatabaseUrl(target) : null;
   const environment = process.argv[2] ?? target?.environment;
   if (target) {
     assert.equal(environment, target.environment, 'Target environment mismatch');
@@ -1060,14 +1066,17 @@ async function main() {
   const planId = randomUUID();
   const actionId = randomUUID();
   // Plans and actions are not writable through the service credential (0099), so
-  // these synthetic rows are written as the local database owner. A local-docker
-  // target shares the loopback parity database; a remote target has no such
-  // connection.
-  assert(
-    !target || target.topology === 'local-docker',
-    'Plan fixtures cannot be written to a remote target (migration 0099)',
-  );
-  const fixtureTarget = { repoRoot: process.cwd(), stateDir };
+  // A remote write is bound to the engagement created through the selected
+  // API; a tunnel accidentally pointing at another database fails closed.
+  const fixtureTarget: FixtureTarget = remoteDatabaseUrl
+    ? {
+        repoRoot: process.cwd(),
+        remote: {
+          databaseUrl: remoteDatabaseUrl,
+          proof: [{ tenantId: tenantB, engagementId: engagementB }],
+        },
+      }
+    : { repoRoot: process.cwd(), stateDir };
   await insertLocalFixtureRows(fixtureTarget, 'remediation_plans', [
     {
       id: planId,

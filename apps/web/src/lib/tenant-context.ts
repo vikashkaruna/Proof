@@ -2,6 +2,7 @@ import { selectTenantMembership } from './tenant-selection';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient, sessionIdFromAccessToken } from '@axiom/supabase';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Capability, authorize, can, type UserRole } from '@axiom/types';
 
@@ -183,19 +184,40 @@ export async function requireTenantContext(
 ): Promise<TenantContext> {
   const supabase = await createSupabaseServerClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser();
+  } catch {
+    throw new Error('Authentication service is temporarily unavailable');
+  }
+  if (isAuthRetryableFetchError(authResult.error)) {
+    throw new Error('Authentication service is temporarily unavailable');
+  }
+  const { user } = authResult.data;
   if (!user) redirect('/login');
 
   // RLS restricts this to the caller's own memberships, so the list is already
   // the set of tenants they may act in.
-  const { data: memberships } = await supabase
-    .from('tenant_users')
-    .select('tenant_id, role, approval_scopes, tenants:tenant_id(slug, name, is_demo)')
-    .eq('user_id', user.id);
+  const readMemberships = () =>
+    supabase
+      .from('tenant_users')
+      .select('tenant_id, role, approval_scopes, tenants:tenant_id(slug, name, is_demo)')
+      .eq('user_id', user.id);
+  let { data: memberships, error: membershipsError } = await readMemberships();
+  if (
+    membershipsError?.code === 'PGRST303' &&
+    membershipsError.message === 'JWT issued at future'
+  ) {
+    // GoTrue and PostgREST can straddle a one-second boundary just after
+    // sign-in. Retry that specific refusal; never interpret it as no tenant.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    ({ data: memberships, error: membershipsError } = await readMemberships());
+  }
+  if (membershipsError || !memberships) {
+    throw new Error('Tenant memberships are unavailable');
+  }
 
-  const rows = (memberships ?? []) as unknown as MembershipRow[];
+  const rows = memberships as unknown as MembershipRow[];
   const firstMembership = selectTenantMembership(rows);
   if (!firstMembership) redirect('/onboarding');
 

@@ -4,7 +4,7 @@ const state = vi.hoisted(() => ({
   signIn: vi.fn(),
   signUp: vi.fn(),
   signOut: vi.fn(),
-  upsert: vi.fn(),
+  bootstrap: vi.fn(),
   deletes: [] as string[],
   sets: [] as string[],
 }));
@@ -24,10 +24,7 @@ vi.mock('next/headers', () => ({
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
     auth: { signInWithPassword: state.signIn, signUp: state.signUp, signOut: state.signOut },
-    from: (table: string) => {
-      if (table !== 'users') throw new Error('unexpected privileged table');
-      return { upsert: state.upsert };
-    },
+    rpc: state.bootstrap,
   }),
 }));
 import { loginAction, logoutAction, signupAction } from './actions';
@@ -42,7 +39,8 @@ beforeEach(() => {
   state.signIn.mockReset();
   state.signUp.mockReset();
   state.signOut.mockReset();
-  state.upsert.mockReset();
+  state.bootstrap.mockReset();
+  state.bootstrap.mockResolvedValue({ data: 'user-1', error: null });
   state.deletes = [];
   state.sets = [];
 });
@@ -60,7 +58,7 @@ it('never grants a session when the identity provider is down', async () => {
   await expect(
     loginAction(form({ email: 'reader@example.invalid', password: 'password' })),
   ).rejects.toThrow('Authentication%20service%20is%20unreachable');
-  expect(state.upsert).not.toHaveBeenCalled();
+  expect(state.bootstrap).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });
 
@@ -75,7 +73,17 @@ it('redirects a valid login only after the provider returns an actual user', asy
     email: 'reader@example.invalid',
     password: 'password',
   });
-  expect(state.upsert).not.toHaveBeenCalled();
+  expect(state.bootstrap).toHaveBeenCalledWith('bootstrap_user_profile');
+});
+
+it('refuses to continue a login when the own-profile bootstrap is unavailable', async () => {
+  state.signIn.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
+  state.bootstrap.mockResolvedValue({ data: null, error: { code: '42501', message: 'denied' } });
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await expect(
+    loginAction(form({ email: 'reader@example.invalid', password: 'long-password-123' })),
+  ).rejects.toThrow('Profile%20setup%20is%20temporarily%20unavailable');
+  vi.restoreAllMocks();
 });
 
 it('refuses weak signup passwords without calling the provider', async () => {
@@ -90,7 +98,6 @@ it('creates only the caller profile after a real signup session', async () => {
     data: { user: { id: 'user-1' }, session: { access_token: 'jwt' } },
     error: null,
   });
-  state.upsert.mockResolvedValue({ error: null });
   await expect(
     signupAction(
       form({
@@ -100,11 +107,20 @@ it('creates only the caller profile after a real signup session', async () => {
       }),
     ),
   ).rejects.toThrow('redirect:/dashboard');
-  expect(state.upsert).toHaveBeenCalledWith({
-    id: 'user-1',
-    email: 'reader@example.invalid',
-    full_name: 'Ravi Sharma',
+  expect(state.bootstrap).toHaveBeenCalledWith('bootstrap_user_profile');
+});
+
+it('does not report a ready account when profile bootstrap fails after signup', async () => {
+  state.signUp.mockResolvedValue({
+    data: { user: { id: 'user-1' }, session: { access_token: 'jwt' } },
+    error: null,
   });
+  state.bootstrap.mockResolvedValue({ data: null, error: { code: '42501', message: 'denied' } });
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await expect(
+    signupAction(form({ email: 'reader@example.invalid', password: 'long-password-123' })),
+  ).rejects.toThrow('Account%20created%2C%20but%20profile%20setup');
+  vi.restoreAllMocks();
 });
 
 it('purges auth cookies and signs out before returning to the public site', async () => {

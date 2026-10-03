@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -57,6 +57,15 @@ const statusSchema = z.object({
   ),
 });
 
+// SSR shows the account's real factor state, but an enabled button cannot
+// handle a click until React hydrates it. The browser suite caught clicks
+// disappearing in that interval on a busy Next server. A stable external
+// store gives the server a disabled first paint and enables it after hydration
+// without a mount-time state effect.
+const subscribeHydration = () => () => {};
+const hydratedSnapshot = () => true;
+const serverSnapshot = () => false;
+
 /**
  * TOTP enrolment (W1 · SEC-8).
  *
@@ -72,6 +81,7 @@ export function MfaEnrolment({
   initialStatus,
   enrolmentRequired = false,
 }: Props) {
+  const hydrated = useSyncExternalStore(subscribeHydration, hydratedSnapshot, serverSnapshot);
   const [status, setStatus] = useState<MfaStatus>(initialStatus);
   const [statusVerified, setStatusVerified] = useState(true);
   const [pending, setPending] = useState<PendingEnrolment | null>(null);
@@ -547,7 +557,7 @@ export function MfaEnrolment({
               variant="accent"
               onClick={() => beginOrChallenge()}
               loading={busy}
-              disabled={!statusVerified}
+              disabled={!hydrated || !statusVerified}
             >
               {status.enrolled ? 'Replace authenticator' : 'Enrol an authenticator'}
             </Button>
@@ -555,7 +565,7 @@ export function MfaEnrolment({
               <Button
                 variant="ghost"
                 onClick={() => beginOrChallenge('factor_revocation')}
-                disabled={busy || !statusVerified}
+                disabled={!hydrated || busy || !statusVerified}
               >
                 Revoke authenticator
               </Button>

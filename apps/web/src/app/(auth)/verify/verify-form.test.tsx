@@ -4,11 +4,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { VerifyForm } from './verify-form';
 
-const router = vi.hoisted(() => ({ refresh: vi.fn(), replace: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => router }));
+const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock('./verified-navigation', () => ({ navigateAfterVerifiedMfa: navigation.replace }));
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 beforeEach(() => {
-  router.refresh.mockReset();
-  router.replace.mockReset();
+  navigation.replace.mockReset();
   let next = 0;
   vi.stubGlobal('crypto', { randomUUID: () => `uuid-${++next}` });
 });
@@ -32,10 +36,13 @@ it('opens a fresh single-use challenge and verifies code before redirecting', as
     .mockResolvedValueOnce(Response.json({ verified: true }));
   vi.stubGlobal('fetch', fetcher);
   renderForm();
+  expect(screen.getByRole('link', { name: 'Manage your authenticator' }).getAttribute('href')).toBe(
+    '/settings/security',
+  );
   expect(screen.getByRole('button', { name: 'Verify' }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(screen.getByLabelText('Authentication code'), { target: { value: ' 123456 ' } });
   fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
-  await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/dashboard'));
+  await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('/dashboard'));
   expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
     '/api/bff/v1/mfa/challenge',
     '/api/bff/v1/mfa/challenge/challenge-1/verify',
@@ -45,9 +52,6 @@ it('opens a fresh single-use challenge and verifies code before redirecting', as
     'Idempotency-Key': 'mfa-challenge-uuid-1',
   });
   expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ code: '123456' });
-  expect(router.refresh.mock.invocationCallOrder[0]).toBeLessThan(
-    router.replace.mock.invocationCallOrder[0]!,
-  );
 });
 
 it('refuses a failed challenge without sending a verification code or redirecting', async () => {
@@ -62,7 +66,7 @@ it('refuses a failed challenge without sending a verification code or redirectin
   fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
   await waitFor(() => expect(screen.getByText('Factor unavailable')).toBeTruthy());
   expect(fetcher).toHaveBeenCalledOnce();
-  expect(router.replace).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });
 
 it('does not treat a bad code as successful login', async () => {
@@ -75,5 +79,5 @@ it('does not treat a bad code as successful login', async () => {
   fireEvent.change(screen.getByLabelText('Authentication code'), { target: { value: '000000' } });
   fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
   await waitFor(() => expect(screen.getByText('Invalid code')).toBeTruthy());
-  expect(router.replace).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });

@@ -70,26 +70,35 @@ async function technicalSource() {
   // Plans and actions are not writable through the service credential (0099).
   const seed = insertLocalFixtureRow;
   const planId = crypto.randomUUID();
-  await seed('remediation_plans', {
-    id: planId,
-    tenant_id: state.tenantA.id,
-    engagement_id: state.engagementA,
-    library_version: state.libraryVersion,
-    title: `Synthetic technical plan ${planId}`,
-    status: 'draft',
-  });
-  await seed('remediation_actions', {
-    id: crypto.randomUUID(),
-    tenant_id: state.tenantA.id,
-    plan_id: planId,
-    sequence: 1,
-    action_type: 'data.mask',
-    parameters: { columns: ['synthetic_email'] },
-    description: 'Proposed mask of a synthetic email field; not executed.',
-    risk_score: 10,
-    rollback_definition: { restore: 'synthetic-snapshot' },
-    rollback_validated: false,
-  });
+  const proof = { tenantId: state.tenantA.id, engagementId: state.engagementA };
+  await seed(
+    'remediation_plans',
+    {
+      id: planId,
+      tenant_id: state.tenantA.id,
+      engagement_id: state.engagementA,
+      library_version: state.libraryVersion,
+      title: `Synthetic technical plan ${planId}`,
+      status: 'draft',
+    },
+    proof,
+  );
+  await seed(
+    'remediation_actions',
+    {
+      id: crypto.randomUUID(),
+      tenant_id: state.tenantA.id,
+      plan_id: planId,
+      sequence: 1,
+      action_type: 'data.mask',
+      parameters: { columns: ['synthetic_email'] },
+      description: 'Proposed mask of a synthetic email field; not executed.',
+      risk_score: 10,
+      rollback_definition: { restore: 'synthetic-snapshot' },
+      rollback_validated: false,
+    },
+    proof,
+  );
   return { sourceId: planId, title: `Technical register ${crypto.randomUUID()}` };
 }
 

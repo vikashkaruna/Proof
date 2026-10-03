@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Capability } from '@axiom/types';
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 
 const state = vi.hoisted(() => ({
   user: { id: 'user-1', email: 'reader@example.invalid' } as { id: string; email: string } | null,
@@ -30,13 +31,21 @@ const state = vi.hoisted(() => ({
   }>,
   session: { access_token: 'token' } as { access_token: string } | null,
   policyRoles: [] as string[],
+  membershipError: null as { code?: string; message: string } | null,
+  firstMembershipError: null as { code?: string; message: string } | null,
+  membershipReads: 0,
+  authError: null as Error | null,
+  authThrows: false,
 }));
 
 const database = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
     auth: {
-      getUser: async () => ({ data: { user: state.user } }),
+      getUser: async () => {
+        if (state.authThrows) throw new Error('provider unavailable');
+        return { data: { user: state.user }, error: state.authError };
+      },
       getSession: async () => ({ data: { session: state.session } }),
     },
     from: database.from,
@@ -82,6 +91,11 @@ beforeEach(() => {
   state.attestations = [{ expires_at: new Date(Date.now() + 60000).toISOString() }];
   state.session = { access_token: 'token' };
   state.policyRoles = [];
+  state.membershipError = null;
+  state.firstMembershipError = null;
+  state.membershipReads = 0;
+  state.authError = null;
+  state.authThrows = false;
 
   database.from.mockImplementation((table: string) => {
     const rows = () => {
@@ -103,8 +117,16 @@ beforeEach(() => {
               ? { mfa_required_roles: state.policyRoles }
               : null,
       }),
-      then: (resolve: (value: { data: unknown }) => unknown) =>
-        Promise.resolve(resolve({ data: rows() })),
+      then: (resolve: (value: { data: unknown; error: unknown }) => unknown) => {
+        if (table === 'tenant_users') state.membershipReads += 1;
+        const error =
+          table === 'tenant_users'
+            ? state.membershipReads === 1 && state.firstMembershipError
+              ? state.firstMembershipError
+              : state.membershipError
+            : null;
+        return Promise.resolve(resolve({ data: error ? null : rows(), error }));
+      },
     };
     return builder;
   });
@@ -116,9 +138,38 @@ it('redirects an unauthenticated caller before membership access', async () => {
   expect(database.from).not.toHaveBeenCalled();
 });
 
+it('reports a transient Auth failure without losing an existing session', async () => {
+  state.authThrows = true;
+  await expect(requireTenantContext()).rejects.toThrow(
+    'Authentication service is temporarily unavailable',
+  );
+  state.authThrows = false;
+  state.authError = new AuthRetryableFetchError('provider unavailable', 503);
+  await expect(requireTenantContext()).rejects.toThrow(
+    'Authentication service is temporarily unavailable',
+  );
+  expect(database.from).not.toHaveBeenCalled();
+});
+
 it('redirects a user with no tenant membership', async () => {
   state.memberships = [];
   await expect(requireTenantContext()).rejects.toThrow('redirect:/onboarding');
+});
+
+it('retries only a future-issued JWT membership refusal after sign-in', async () => {
+  state.firstMembershipError = { code: 'PGRST303', message: 'JWT issued at future' };
+  await expect(requireTenantContext()).resolves.toMatchObject({ tenantId: 'tenant-a' });
+  expect(state.membershipReads).toBe(2);
+});
+
+it('never treats a membership read failure as a user with no tenant', async () => {
+  state.membershipError = { code: 'PGRST301', message: 'provider unavailable' };
+  await expect(requireTenantContext()).rejects.toThrow('Tenant memberships are unavailable');
+  expect(state.membershipReads).toBe(1);
+  state.membershipReads = 0;
+  state.membershipError = { code: 'PGRST303', message: 'JWT issued at future' };
+  await expect(requireTenantContext()).rejects.toThrow('Tenant memberships are unavailable');
+  expect(state.membershipReads).toBe(2);
 });
 
 it('ignores a forged active-tenant cookie and returns only a verified membership', async () => {

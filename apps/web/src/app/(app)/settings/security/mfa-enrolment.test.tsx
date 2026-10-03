@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MfaEnrolment } from './mfa-enrolment';
@@ -25,6 +26,19 @@ beforeEach(() => vi.stubGlobal('crypto', { randomUUID: () => 'uuid-1' }));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it('keeps the initial enrolment and replacement controls disabled until hydration', () => {
+  const firstPaint = renderToStaticMarkup(<MfaEnrolment {...base} initialStatus={empty} />);
+  expect(firstPaint).toMatch(/<button[^>]*disabled=""[^>]*>Enrol an authenticator<\/button>/);
+  const replacementPaint = renderToStaticMarkup(<MfaEnrolment {...base} initialStatus={active} />);
+  expect(replacementPaint).toMatch(/<button[^>]*disabled=""[^>]*>Replace authenticator<\/button>/);
+  expect(replacementPaint).toMatch(/<button[^>]*disabled=""[^>]*>Revoke authenticator<\/button>/);
+
+  render(<MfaEnrolment {...base} initialStatus={empty} />);
+  expect(
+    screen.getByRole('button', { name: 'Enrol an authenticator' }).hasAttribute('disabled'),
+  ).toBe(false);
 });
 
 it('enrols a first authenticator, then shows recovery codes once after activation', async () => {

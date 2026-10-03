@@ -97,6 +97,46 @@ async function main() {
     console.log(`✓ Seeded ${seed.controls.length} controls (library v${seed.version})`);
   }
 
+  // On a fresh deployment the catalogue exists but onboarding refuses it
+  // until exactly one complete version is marked current. Never replace an
+  // operator-published different version as a side effect of re-seeding.
+  const { count: publishedCount, error: countError } = await supabase
+    .from('controls')
+    .select('*', { count: 'exact', head: true })
+    .eq('library_version', seed.version);
+  if (countError || publishedCount !== seed.controls.length) {
+    console.error(`Control library v${seed.version} is incomplete; publication refused.`);
+    process.exit(1);
+  }
+  const { data: current, error: currentError } = await supabase
+    .from('control_libraries')
+    .select('version')
+    .eq('is_current', true)
+    .maybeSingle();
+  if (currentError) {
+    console.error('Could not inspect the current control library:', currentError);
+    process.exit(1);
+  }
+  if (!current) {
+    const { data: published, error: publishError } = await supabase
+      .from('control_libraries')
+      .update({ is_current: true })
+      .eq('version', seed.version)
+      .eq('control_count', seed.controls.length)
+      .select('version')
+      .single();
+    if (publishError || published?.version !== seed.version) {
+      console.error('Could not publish the complete control library:', publishError);
+      process.exit(1);
+    }
+    console.log(`✓ Published control library v${seed.version} as current.`);
+  } else if (current.version !== seed.version) {
+    console.error(
+      `Current control library is v${current.version}; refusing to replace it implicitly.`,
+    );
+    process.exit(1);
+  }
+
   // Seed sector packs, frameworks, and mappings if publisher user exists
   const { data: publisher } = await supabase
     .from('users')

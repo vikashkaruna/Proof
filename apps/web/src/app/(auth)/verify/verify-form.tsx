@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button, Input, Label } from '@axiom/ui';
+import { navigateAfterVerifiedMfa } from './verified-navigation';
 
 interface Props {
   redirectTo: string;
@@ -41,7 +42,6 @@ function freshChallengeKey(): string {
 }
 
 export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
-  const router = useRouter();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,10 +77,10 @@ export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
         return;
       }
 
-      // `refresh()` first: the server components re-run and see the new
-      // attestation, so the destination does not bounce straight back here.
-      router.refresh();
-      router.replace(redirectTo);
+      // A client-router refresh and replace can race: the stale /verify tree
+      // wins even though the BFF has committed the attestation. A document
+      // navigation loads the destination against fresh server state.
+      navigateAfterVerifiedMfa(redirectTo);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Verification failed');
     } finally {
@@ -123,6 +123,9 @@ export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
         Lost your authenticator? A recovery code works here and can be used once. If you have none
         left, an administrator has to reset your enrolment.
       </p>
+      <Link href="/settings/security" className="text-sm font-medium text-teal-700 underline">
+        Manage your authenticator
+      </Link>
     </div>
   );
 }

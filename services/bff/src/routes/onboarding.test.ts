@@ -91,15 +91,18 @@ describe('atomic entitled onboarding', () => {
     });
   });
   it.each([
-    ['onboarding_not_entitled', 403],
-    ['tier_not_entitled', 403],
-    ['tenant_quota_exceeded', 409],
-    ['library_not_published', 503],
-  ] as const)('maps %s without creating partial records', async (error, status) => {
+    ['onboarding_not_entitled', 403, 'no active organization-creation grant'],
+    ['tier_not_entitled', 403, 'selected subscription tier'],
+    ['tenant_quota_exceeded', 409, 'organization limit has been reached'],
+    ['library_not_published', 503, 'control library is not published'],
+  ] as const)('maps %s without creating partial records', async (error, status, message) => {
     state.rpc
       .mockResolvedValueOnce({ data: { allowed: true, retry_after: 3600 }, error: null })
       .mockResolvedValueOnce({ data: { error }, error: null });
-    expect((await request()).status).toBe(status);
+    const response = await request();
+    expect(response.status).toBe(status);
+    const payload = (await response.json()) as { error: { code: string; message: string } };
+    expect(payload.error).toMatchObject({ code: error, message: expect.stringContaining(message) });
   });
   it('refuses before creation when the shared limit is reached', async () => {
     state.rpc.mockResolvedValueOnce({ data: { allowed: false, retry_after: 321 }, error: null });
