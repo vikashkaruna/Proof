@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
+import { renderToString } from 'react-dom/server';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PublicWebsiteClient } from './public-website-client';
@@ -9,7 +10,7 @@ const check = {
   requestedUrl: 'https://example.com/',
   finalUrl: 'https://example.com/privacy',
   checkedAt: '2026-10-04T00:00:00.000Z',
-  status: 'reachable',
+  status: 'checked',
   bytes: 1234,
   contentSha256: 'a'.repeat(64),
   title: 'Privacy',
@@ -20,6 +21,11 @@ const check = {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it('does not expose an active submit button before hydration', () => {
+  const html = renderToString(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Check public content<\/button>/);
 });
 
 it('lets viewers inspect recorded public content without a check action or unsafe external link', async () => {
@@ -70,7 +76,9 @@ it('retries an uncertain check with the same key and body, but clears a controll
     .fn()
     .mockResolvedValueOnce(Response.json({ data: [] }))
     .mockRejectedValueOnce(new Error('lost response'))
-    .mockResolvedValueOnce(Response.json({ error: { code: 'url_refused' } }, { status: 400 }));
+    .mockResolvedValueOnce(
+      Response.json({ error: { code: 'non_public_target' } }, { status: 400 }),
+    );
   vi.stubGlobal('fetch', fetcher);
   render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
   await waitFor(() =>
@@ -87,11 +95,46 @@ it('retries an uncertain check with the same key and body, but clears a controll
   );
   fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
   await waitFor(() =>
-    expect(screen.getByText('That URL is not an allowed public website address.')).toBeTruthy(),
+    expect(
+      screen.getByText('That address does not resolve to a permitted public website.'),
+    ).toBeTruthy(),
   );
   expect(fetcher.mock.calls[1]?.[1]?.headers['Idempotency-Key']).toBe(
     fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key'],
   );
   expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[2]?.[1]?.body);
+  expect(screen.getByRole('button', { name: 'Check public content' })).toBeTruthy();
+});
+
+it('preserves an in-progress request key but releases a completed upstream failure', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ data: [] }))
+    .mockResolvedValueOnce(
+      Response.json({ error: { code: 'idempotency_in_progress' } }, { status: 409 }),
+    )
+    .mockResolvedValueOnce(Response.json({ error: { code: 'unreachable' } }, { status: 502 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+  await waitFor(() =>
+    expect(screen.getByRole('textbox', { name: 'Public page URL' })).toBeTruthy(),
+  );
+  fireEvent.change(screen.getByRole('textbox', { name: 'Public page URL' }), {
+    target: { value: check.requestedUrl },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Check public content' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy(),
+  );
+  const firstKey = fetcher.mock.calls[1]?.[1]?.headers['Idempotency-Key'];
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        'The public website could not be retrieved. Check the address and try again.',
+      ),
+    ).toBeTruthy(),
+  );
+  expect(fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key']).toBe(firstKey);
   expect(screen.getByRole('button', { name: 'Check public content' })).toBeTruthy();
 });

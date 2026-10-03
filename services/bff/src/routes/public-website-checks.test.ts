@@ -75,6 +75,19 @@ describe('public website check API', () => {
     expect(await response.json()).toEqual({ data: [{ id: '2', ...check }] });
   });
 
+  it('fails closed on a malformed stored observation instead of showing partial evidence', async () => {
+    fake.seed('public_website_checks', {
+      id: '4',
+      tenant_id: TENANT,
+      status: 'checked',
+      checked_at: '2026-10-05',
+      result: { title: 'Partial' },
+    });
+    const response = await app(UserRole.VIEWER).request('/v1/public-website-checks');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: { code: 'website_checks_unavailable' } });
+  });
+
   it('records a human-triggered owner check and returns its exact metadata', async () => {
     const response = await post(UserRole.OWNER);
     expect(response.status).toBe(201);
@@ -111,6 +124,25 @@ describe('public website check API', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: 'non_public_target' } });
     expect(recorded).toHaveLength(0);
+  });
+
+  it('refuses an exhausted or unavailable shared budget before outbound fetch', async () => {
+    let probes = 0;
+    fake.onRpc('take_rate_limit', () => ({ allowed: false, retry_after: 60 }));
+    const limited = await post(UserRole.OWNER, async () => {
+      probes++;
+      return check;
+    });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('Retry-After')).toBe('60');
+    expect(probes).toBe(0);
+    fake.failNextRpc('take_rate_limit');
+    const unavailable = await post(UserRole.OWNER, async () => {
+      probes++;
+      return check;
+    });
+    expect(unavailable.status).toBe(503);
+    expect(probes).toBe(0);
   });
 
   it('fails closed when the human audit writer is unavailable', async () => {

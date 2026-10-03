@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { createMfaAccount, selectTenant, signIn, signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
+import { acceptanceTarget } from '../target';
+import { LIBRARY_VERSION } from '../../../packages/control-library/src';
 
 test('an assessment creator can start an intake and open its saved assessment', async ({
   page,
@@ -13,6 +15,23 @@ test('an assessment creator can start an intake and open its saved assessment', 
     Authorization: `Bearer ${state.serviceKey}`,
     'Content-Type': 'application/json',
   };
+  // The local parity seed publishes the library for report tests but does not
+  // choose a current version. This creation journey needs that operator
+  // prerequisite; never change a deployed acceptance target here.
+  if (!acceptanceTarget) {
+    const current = await fetch(
+      `${state.supabaseUrl}/rest/v1/control_libraries?is_current=eq.true&select=version`,
+      { headers },
+    );
+    expect(current.status).toBe(200);
+    if (((await current.json()) as unknown[]).length === 0) {
+      const published = await fetch(
+        `${state.supabaseUrl}/rest/v1/control_libraries?version=eq.${encodeURIComponent(LIBRARY_VERSION)}`,
+        { method: 'PATCH', headers, body: JSON.stringify({ is_current: true }) },
+      );
+      expect(published.status).toBe(204);
+    }
+  }
   const tenant = await fetch(`${state.supabaseUrl}/rest/v1/tenants`, {
     method: 'POST',
     headers,
@@ -45,6 +64,12 @@ test('an assessment creator can start an intake and open its saved assessment', 
   await page.getByRole('button', { name: 'Create assessment' }).click();
   const posted = (await createRequest).postDataJSON() as Record<string, unknown>;
   expect(posted.requestKey).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i);
+  expect((await createRequest).headers()['idempotency-key']).toBe(posted.requestKey);
+  // In dev, a late post-login refresh can replace the client success state.
+  // The saved engagement must still offer an assessment link in its table row.
+  const savedAssessment = page.locator(`a[href="/assessment?engagement=${posted.requestKey}"]`);
+  await expect(savedAssessment.first()).toBeVisible();
+  await savedAssessment.first().click();
   await expect(page).toHaveURL(/\/assessment\?engagement=[0-9a-f-]+$/);
   await expect(page.getByTestId('assessment-provenance')).toContainText('October source review');
   await expect(page.getByRole('button', { name: 'Run Parikshan' })).toBeEnabled();

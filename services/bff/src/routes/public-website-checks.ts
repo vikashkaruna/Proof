@@ -8,6 +8,26 @@ import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 
 const bodySchema = z.object({ url: z.string().trim().min(1).max(2048) }).strict();
+const checkSchema = z
+  .object({
+    requestedUrl: z.string().max(2048),
+    finalUrl: z.string().max(2048),
+    checkedAt: z.iso.datetime(),
+    status: z.literal('checked'),
+    httpStatus: z.literal(200),
+    bytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(512 * 1024),
+    contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    title: z.string().max(300),
+    headings: z.array(z.string().max(300)).max(12),
+    publicLinks: z
+      .array(z.object({ label: z.string().max(300), url: z.string().max(2048) }))
+      .max(12),
+  })
+  .strict();
 const statusByCode: Record<string, 400 | 422 | 502 | 504> = {
   invalid_url: 400,
   non_public_target: 400,
@@ -36,7 +56,12 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
       .order('checked_at', { ascending: false })
       .limit(20);
     if (error) return c.json({ error: { code: 'website_checks_unavailable' } }, 503);
-    return c.json({ data: (data ?? []).map((row) => ({ id: row.id, ...row.result })) });
+    const checked = (data ?? []).map((row) => checkSchema.safeParse(row.result));
+    if (checked.some((entry) => !entry.success))
+      return c.json({ error: { code: 'website_checks_unavailable' } }, 503);
+    return c.json({
+      data: checked.map((entry, index) => ({ id: data![index]!.id, ...entry.data })),
+    });
   });
 
   app.post('/public-website-checks', async (c) => {
@@ -45,6 +70,21 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
     c.header('Cache-Control', 'private, no-store');
     const parsed = bodySchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: { code: 'invalid_request' } }, 400);
+    const budgetResult = await createSupabaseAdmin().rpc('take_rate_limit', {
+      p_bucket: 'public-website-check',
+      p_subject: `${c.get('tenantId')}:${c.get('user').id}`,
+      p_limit: 30,
+      p_window_seconds: 3600,
+    });
+    const budget = z
+      .object({ allowed: z.boolean(), retry_after: z.number().int().positive() })
+      .safeParse(budgetResult.data);
+    if (budgetResult.error || !budget.success)
+      return c.json({ error: { code: 'rate_limit_unavailable' } }, 503);
+    if (!budget.data.allowed) {
+      c.header('Retry-After', String(budget.data.retry_after));
+      return c.json({ error: { code: 'rate_limited' } }, 429);
+    }
     const correlationId = randomUUID();
     let result: Awaited<ReturnType<Check>>;
     try {
@@ -57,6 +97,8 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
       const status = statusByCode[code] ?? 502;
       return c.json({ error: { code } }, status);
     }
+    if (!checkSchema.safeParse(result).success)
+      return c.json({ error: { code: 'website_check_invalid_result' } }, 503);
     const { data, error } = await createHumanActionWriter().rpc('record_public_website_check', {
       p_tenant_id: c.get('tenantId'),
       p_actor_id: c.get('user').id,

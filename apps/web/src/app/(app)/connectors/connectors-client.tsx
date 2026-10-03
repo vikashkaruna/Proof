@@ -221,6 +221,20 @@ export function ConnectorsClient({
       <PublicWebsiteClient tenantId={tenantId} canManage={canManage} />
       <section aria-label="Available connector options" className="space-y-3">
         <h2 className="text-lg font-semibold text-indigo-900">Available connector options</h2>
+        <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-sm">
+          <strong className="block text-indigo-900">Public website content · available now</strong>
+          <p className="mt-1 text-slate-700">
+            Checks one public HTML page and saves its title, headings, relevant links and content
+            hash. Owners and admins can run it; tenant members with posture access can read the
+            history. It does not crawl a site or certify compliance.
+          </p>
+          <a
+            href="#public-website-check"
+            className="mt-2 inline-block font-medium text-teal-800 underline"
+          >
+            Open public website check
+          </a>
+        </div>
         {catalogue === null && !catalogueError && <p role="status">Loading reviewed options…</p>}
         {catalogue?.length === 0 && <p>No reviewed connector options are available.</p>}
         {catalogue && catalogue.length > 0 && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { z } from 'zod';
 
 const checkSchema = z.object({
@@ -16,6 +16,9 @@ const checkSchema = z.object({
   publicLinks: z.array(z.object({ label: z.string(), url: z.string() })),
 });
 type WebsiteCheck = z.infer<typeof checkSchema>;
+const subscribeHydration = () => () => {};
+const hydratedSnapshot = () => true;
+const serverSnapshot = () => false;
 
 function CheckResult({ check }: { check: WebsiteCheck }) {
   return (
@@ -64,14 +67,36 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
 
 const errorText: Record<string, string> = {
   invalid_url: 'Enter a valid public HTTP or HTTPS URL.',
-  url_refused: 'That URL is not an allowed public website address.',
-  address_refused: 'That address does not resolve to a permitted public website.',
+  non_public_target: 'That address does not resolve to a permitted public website.',
+  dns_unavailable: 'The public website address could not be resolved. Try again later.',
   redirect_refused: 'The website redirected to an address that cannot be checked.',
-  fetch_failed: 'The public website could not be retrieved. Check the address and try again.',
+  unreachable: 'The public website could not be retrieved. Check the address and try again.',
+  http_status: 'The public website did not return a successful page response.',
   timeout: 'The website did not respond within the check time limit.',
   response_too_large: 'The page exceeds the check size limit.',
   unsupported_content_type: 'The URL did not return supported HTML content.',
+  unsupported_content_encoding: 'The website returned an unsupported compressed response.',
+  idempotency_in_progress: 'The previous check may still be running. Retry this same request.',
+  idempotency_expired: 'The earlier request expired. Review recent checks before starting another.',
+  rate_limited: 'Too many website checks. Wait before trying again.',
+  rate_limit_unavailable: 'The check limit could not be verified. Try again later.',
+  website_check_invalid_result: 'The retrieved result could not be validated. Try again later.',
 };
+const completedCheckErrors = new Set([
+  'invalid_url',
+  'non_public_target',
+  'dns_unavailable',
+  'redirect_refused',
+  'unreachable',
+  'http_status',
+  'timeout',
+  'response_too_large',
+  'unsupported_content_type',
+  'unsupported_content_encoding',
+  'rate_limit_unavailable',
+  'website_check_invalid_result',
+  'idempotency_unavailable',
+]);
 
 /** Public-content inventory only. No browser-side target fetch or credential input. */
 export function PublicWebsiteClient({
@@ -81,6 +106,7 @@ export function PublicWebsiteClient({
   tenantId: string;
   canManage: boolean;
 }) {
+  const hydrated = useSyncExternalStore(subscribeHydration, hydratedSnapshot, serverSnapshot);
   const [history, setHistory] = useState<WebsiteCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
@@ -143,15 +169,18 @@ export function PublicWebsiteClient({
       if (!response.ok) {
         const code = z.object({ error: z.object({ code: z.string() }) }).safeParse(payload);
         const name = code.success ? code.data.error.code : '';
-        setUncertain(response.status >= 500);
-        if (response.status < 500) pending.current = null;
+        const outcomeUncertain =
+          name === 'idempotency_in_progress' ||
+          name === 'idempotency_outcome_unknown' ||
+          name === 'website_check_record_unavailable' ||
+          (response.status >= 500 && !completedCheckErrors.has(name));
+        setUncertain(outcomeUncertain);
+        if (!outcomeUncertain) pending.current = null;
         const detail =
           errorText[name] ??
           'The website check could not be completed. Review the URL and try again.';
         setMessage(
-          response.status >= 500
-            ? `The result is uncertain. Retry the same request. ${detail}`
-            : detail,
+          outcomeUncertain ? `The result is uncertain. Retry the same request. ${detail}` : detail,
         );
         return;
       }
@@ -176,6 +205,7 @@ export function PublicWebsiteClient({
 
   return (
     <section
+      id="public-website-check"
       aria-label="Public website content check"
       className="space-y-4 rounded-lg border border-slate-200 bg-white p-5"
     >
@@ -203,7 +233,7 @@ export function PublicWebsiteClient({
           />
           <button
             type="submit"
-            disabled={busy}
+            disabled={!hydrated || busy}
             className="rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             {busy

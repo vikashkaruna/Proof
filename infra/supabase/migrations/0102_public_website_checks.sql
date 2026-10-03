@@ -18,6 +18,23 @@ create table public.public_website_checks (
     (status='checked' and jsonb_typeof(result)='object' and error_code is null and final_url is not null)
     or (status='failed' and result is null and error_code is not null)
   ),
+  check (
+    status='failed' or (
+      result ?& array['requestedUrl','finalUrl','checkedAt','status','httpStatus',
+        'bytes','contentSha256','title','headings','publicLinks']
+      and result->>'requestedUrl'=requested_url
+      and result->>'finalUrl'=final_url
+      and result->>'status'='checked'
+      and result->>'httpStatus'='200'
+      and result->>'contentSha256' ~ '^[a-f0-9]{64}$'
+      and jsonb_typeof(result->'bytes')='number'
+      and jsonb_typeof(result->'title')='string'
+      and case when jsonb_typeof(result->'headings')='array'
+        then jsonb_array_length(result->'headings')<=12 else false end
+      and case when jsonb_typeof(result->'publicLinks')='array'
+        then jsonb_array_length(result->'publicLinks')<=12 else false end
+    )
+  ),
   check (result is null or octet_length(result::text) <= 32768)
 );
 create index public_website_checks_recent on public.public_website_checks(tenant_id,checked_at desc);

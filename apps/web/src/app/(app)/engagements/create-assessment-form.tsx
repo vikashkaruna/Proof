@@ -1,17 +1,21 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { z } from 'zod';
 
 const createdSchema = z.object({ id: z.uuid() });
-const errorSchema = z.object({ error: z.object({ message: z.string() }) });
+const errorSchema = z.object({
+  error: z.object({ code: z.string().optional(), message: z.string() }),
+});
 
 interface Attempt {
   requestKey: string;
   title: string;
   estateId: string;
 }
+const subscribeHydration = () => () => {};
+const hydratedSnapshot = () => true;
+const serverSnapshot = () => false;
 
 export function CreateAssessmentForm({
   tenantId,
@@ -22,12 +26,13 @@ export function CreateAssessmentForm({
   libraryVersion: string;
   estates: Array<{ id: string; name: string }>;
 }) {
-  const router = useRouter();
+  const hydrated = useSyncExternalStore(subscribeHydration, hydratedSnapshot, serverSnapshot);
   const [title, setTitle] = useState('');
   const [estateId, setEstateId] = useState('');
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const inFlight = useRef(false);
   const attempt = useRef<Attempt | null>(null);
 
@@ -50,7 +55,11 @@ export function CreateAssessmentForm({
     try {
       const response = await fetch('/api/bff/v1/engagements', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': tenantId,
+          'Idempotency-Key': current.requestKey,
+        },
         body: JSON.stringify({
           title: current.title,
           libraryVersion,
@@ -63,13 +72,20 @@ export function CreateAssessmentForm({
         const created = createdSchema.safeParse(body);
         if (!created.success) throw new Error('unconfirmed_response');
         setUncertain(false);
-        setMessage('Assessment created. Opening its saved record…');
-        router.push(`/assessment?engagement=${encodeURIComponent(created.data.id)}`);
-        router.refresh();
+        setCreatedId(created.data.id);
+        setMessage('Assessment created. Open its saved record to continue.');
         return;
       }
-      if (response.status >= 500) throw new Error('unconfirmed_response');
       const parsed = errorSchema.safeParse(body);
+      if (
+        response.status >= 500 &&
+        (!parsed.success || parsed.data.error.code !== 'library_unavailable')
+      ) {
+        throw new Error('unconfirmed_response');
+      }
+      if (parsed.success && parsed.data.error.code === 'idempotency_in_progress') {
+        throw new Error('unconfirmed_response');
+      }
       setUncertain(false);
       attempt.current = null;
       setMessage(
@@ -103,7 +119,10 @@ export function CreateAssessmentForm({
           its assessment boundary is already declared.
         </p>
       </div>
-      <fieldset disabled={busy || uncertain} className="grid gap-3 sm:grid-cols-2">
+      <fieldset
+        disabled={busy || uncertain || Boolean(createdId)}
+        className="grid gap-3 sm:grid-cols-2"
+      >
         <label className="text-sm font-medium text-slate-700">
           Assessment title
           <input
@@ -136,9 +155,17 @@ export function CreateAssessmentForm({
           {message}
         </p>
       )}
+      {createdId && (
+        <a
+          href={`/assessment?engagement=${encodeURIComponent(createdId)}`}
+          className="inline-flex rounded-md border border-teal-700 px-4 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+        >
+          Open saved assessment
+        </a>
+      )}
       <button
         type="submit"
-        disabled={busy}
+        disabled={!hydrated || busy || Boolean(createdId)}
         className="rounded-md bg-[#0FB5A5] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
       >
         {busy ? 'Checking assessment…' : uncertain ? 'Retry same request' : 'Create assessment'}

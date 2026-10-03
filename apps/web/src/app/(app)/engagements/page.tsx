@@ -129,12 +129,12 @@ export default async function EngagementsListPage() {
                       >
                         Open
                       </Link>
-                      <Link
+                      <a
                         href={`/assessment?engagement=${e.id}`}
                         className="ml-2 rounded-md border border-teal-300 px-3 py-1 text-xs text-teal-800 hover:bg-teal-50"
                       >
                         View assessment
-                      </Link>
+                      </a>
                     </td>
                   </tr>
                 ))}

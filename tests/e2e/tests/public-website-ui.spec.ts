@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { signIn, selectTenant } from '../fixtures';
 
 const result = {
@@ -6,13 +6,24 @@ const result = {
   requestedUrl: 'https://example.com/privacy',
   finalUrl: 'https://example.com/privacy',
   checkedAt: '2026-10-04T00:00:00.000Z',
-  status: 'reachable',
+  status: 'checked',
   bytes: 712,
   contentSha256: 'a'.repeat(64),
   title: 'Privacy notice',
   headings: ['How we use data'],
   publicLinks: [{ label: 'Contact', url: 'https://example.com/contact' }],
 };
+
+async function openConnectors(page: Page) {
+  // A login redirect can still be committing when this page opens.
+  try {
+    await page.goto('/connectors', { waitUntil: 'domcontentloaded' });
+  } catch (cause) {
+    if (!(cause instanceof Error) || !cause.message.includes('net::ERR_ABORTED')) throw cause;
+    await page.waitForLoadState('domcontentloaded');
+    await page.goto('/connectors', { waitUntil: 'domcontentloaded' });
+  }
+}
 
 // The transport response is stubbed here to exercise the page and role flow.
 // The live server-side fetch, DNS and redirect boundary are verified by the
@@ -26,7 +37,7 @@ test('owner can check public content and inspect a recorded result', async ({ pa
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: [] }),
+        body: JSON.stringify({ data: submitted ? [result] : [] }),
       });
       return;
     }
@@ -39,7 +50,7 @@ test('owner can check public content and inspect a recorded result', async ({ pa
       body: JSON.stringify({ data: result }),
     });
   });
-  await page.goto('/connectors');
+  await openConnectors(page);
   const website = page.getByRole('region', { name: 'Public website content check' });
   await website.getByRole('textbox', { name: 'Public page URL' }).fill(result.requestedUrl);
   await website.getByRole('button', { name: 'Check public content' }).click();
@@ -63,7 +74,7 @@ test('viewer can read history but cannot start a public website check', async ({
       body: JSON.stringify({ data: [result] }),
     });
   });
-  await page.goto('/connectors');
+  await openConnectors(page);
   const website = page.getByRole('region', { name: 'Public website content check' });
   await expect(website.getByText('Privacy notice')).toBeVisible();
   await expect(website.getByRole('button', { name: 'Check public content' })).toHaveCount(0);
