@@ -33,6 +33,13 @@ test('only a loopback database is ever targeted', () => {
   ]) {
     assert.throws(() => localDatabaseUrl(stateWith({ DB_URL: url })), /non-loopback/);
   }
+  assert.throws(
+    () =>
+      localDatabaseUrl(
+        stateWith({ DB_URL: 'postgresql://postgres:x@127.0.0.1:5432/postgres?host=db.internal' }),
+      ),
+    /query parameters/,
+  );
   assert.throws(() => localDatabaseUrl(stateWith({})), /no DB_URL/);
 });
 
@@ -120,6 +127,16 @@ test('remote fixture credential is private, target-bound and tunnel-only', () =>
         remoteFile({ databaseUrl: 'postgresql://owner:secret@db.internal/postgres' }),
       ),
     /non-loopback/,
+  );
+  assert.throws(
+    () =>
+      remoteFixtureDatabaseUrl(
+        remoteTarget,
+        remoteFile({
+          databaseUrl: 'postgresql://owner:secret@127.0.0.1:15432/postgres?host=db.internal',
+        }),
+      ),
+    /query parameters/,
   );
   assert.throws(() => remoteFixtureDatabaseUrl(remoteTarget, remoteFile({}, 0o644)), /private/);
   assert.throws(

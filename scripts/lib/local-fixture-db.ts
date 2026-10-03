@@ -48,6 +48,10 @@ function loopbackDatabaseUrl(url: string): string {
     throw new Error('Fixture database URL must use PostgreSQL');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname))
     throw new Error('Refusing to write fixtures into a non-loopback database');
+  // node-postgres lets connection-string query parameters override the URL
+  // hostname (for example ?host=remote.example), so the URL must be bare.
+  if (parsed.search || parsed.hash)
+    throw new Error('Fixture database URL must not contain query parameters or a fragment');
   return url;
 }
 
