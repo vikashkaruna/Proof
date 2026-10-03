@@ -16,14 +16,27 @@ import json
 import os
 import secrets
 import shutil
-import subprocess
+import subprocess  # nosec B404 - test harness runs docker and pnpm with argv lists, no shell
 import tarfile
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+# http(s) only. A bare urlopen would also accept file: and other schemes; this
+# opener has no handler for them, and the scheme is checked explicitly as well.
+_OPENER = urllib.request.build_opener(urllib.request.HTTPHandler, urllib.request.HTTPSHandler)
+
+
+def _open(url, timeout):
+    if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+        raise ValueError(f"refusing non-http(s) URL: {url}")
+    return _OPENER.open(url, timeout=timeout)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a"
@@ -33,7 +46,7 @@ URL = f"https://codeload.github.com/minio/minio/tar.gz/{COMMIT}"
 
 
 def command(args, *, log=None, timeout=1800):
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - harness-built argv, no shell
         args,
         cwd=ROOT,
         stdout=log or subprocess.PIPE,
@@ -50,7 +63,7 @@ def build(directory: Path, run_id: str) -> str:
     archive = directory / "source.tar.gz"
     if not archive.exists():
         with (
-            urllib.request.urlopen(URL, timeout=60) as response,
+            _open(URL, timeout=60) as response,
             archive.open("wb") as output,
         ):
             shutil.copyfileobj(response, output)
@@ -105,7 +118,7 @@ def build(directory: Path, run_id: str) -> str:
                     log=log,
                 )
         finally:
-            subprocess.run(
+            subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
                 ["docker", "rm", "-f", builder_name],
                 check=False,
                 stdout=subprocess.DEVNULL,
@@ -138,7 +151,7 @@ def healthy(endpoint: str):
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"{endpoint}/minio/health/ready", timeout=2) as result:
+            with _open(f"{endpoint}/minio/health/ready", timeout=2) as result:
                 if result.status == 200:
                     return
         except Exception:
@@ -247,7 +260,7 @@ def main():
         # Cold headless Chromium can exceed the renderer's 30 s budget on a fresh
         # runner; take that cold start (and any missing-binary failure) here, with
         # the renderer's own explanation, instead of inside the first PDF journey.
-        subprocess.run(
+        subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
             ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
             cwd=ROOT,
             env=env,
@@ -265,7 +278,7 @@ def main():
             "outcomes": [],
         }
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed pnpm argv, no shell
                 [
                     "pnpm",
                     "--filter",
@@ -498,12 +511,12 @@ def main():
     finally:
         # Names include a random run ID and are owned exclusively by this harness.
         if not keep:
-            subprocess.run(
+            subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
                 ["docker", "rm", "-f", name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            subprocess.run(
+            subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
                 ["docker", "volume", "rm", volume],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

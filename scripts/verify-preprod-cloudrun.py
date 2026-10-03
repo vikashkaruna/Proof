@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import runpy
-import subprocess
+import subprocess  # nosec B404 - runs gcloud with a fixed argv, no shell
 import sys
 from pathlib import Path
 

@@ -3,7 +3,7 @@
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - runs docker compose with a fixed argv, no shell
 from pathlib import Path
 
 
@@ -47,7 +47,7 @@ for file in COMPOSE_FILES:
     # its own required variables, so supply a synthetic value for whatever it
     # reports missing and retry; the scoping assertions below do not read values.
     for _ in range(40):
-        rendered = subprocess.run(
+        rendered = subprocess.run(  # nosec B603 - argv built from constants and repository paths, no shell
             command,
             cwd=ROOT,
             env=env,

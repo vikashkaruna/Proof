@@ -68,16 +68,23 @@ def main() -> int:
     env.pop("APPROVAL_SIGNING_KEY", None)
     env.pop("SUPABASE_DB_URL", None)
     env["PGCONNECT_TIMEOUT"] = "10"
+    key_hex = key.encode("utf-8").hex()
+    # Both values land in COPY data. Refuse anything that is not exactly a scope
+    # name or hex, so no byte that could end the data block can ever reach psql.
+    if not re.fullmatch(r"global|tenant:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", scope) or not re.fullmatch(r"[0-9a-f]+", key_hex):
+        print("Invalid reconciliation key scope.", file=sys.stderr)
+        return 2
     # COPY sends the secret as data, not inside an SQL statement that a
     # statement logger could record. The temporary staging table disappears
     # at commit; the encrypted DB connection comes from libpq's PG* env.
-    sql = r"""
+    copy_head = r"""
 \set ON_ERROR_STOP on
 \set QUIET on
 begin;
 create temporary table reconciliation_key_stage(scope text,key_hex text) on commit drop;
 \copy reconciliation_key_stage(scope,key_hex) from stdin
-""" + f"{scope}\t{key.encode('utf-8').hex()}\n" + r"""\.
+"""
+    copy_tail = r"""\.
 insert into axiom_secrets.reconciliation_keys(scope,key_bytes)
 select scope,decode(key_hex,'hex') from reconciliation_key_stage
 on conflict(scope) do nothing;
@@ -86,6 +93,7 @@ select 1 / case when (select k.key_bytes=decode(s.key_hex,'hex')
   then 1 else 0 end;
 commit;
 """
+    sql = copy_head + f"{scope}\t{key_hex}\n" + copy_tail  # nosec B608 - COPY data, not SQL; scope and key_hex are validated above
     try:
         result = subprocess.run(  # nosec B603 - fixed psql argv, no shell
             command,
