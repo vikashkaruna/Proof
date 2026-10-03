@@ -36,6 +36,12 @@ test('owner registers a connector without claiming connectivity and manages its 
     { tenantId: state.tenantA.id, suffix },
   );
   await page.goto('/connectors');
+  await expect(page.getByRole('region', { name: 'Available connector options' })).toContainText(
+    'postgresql',
+  );
+  await expect(page.getByRole('region', { name: 'Connection setup' })).toContainText(
+    'broker credential',
+  );
   await expect(
     page.getByText('Connector execution is not yet available.', { exact: false }),
   ).toBeVisible();
@@ -64,6 +70,14 @@ test('owner registers a connector without claiming connectivity and manages its 
   const row = page.getByRole('region', { name: `Reference ${suffix}`, exact: true });
   await expect(row).toHaveCount(1);
   await expect(row.getByText('Health: Not checked', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Check setup status' }).click();
+  await expect(row.getByRole('list', { name: 'Connection setup checks' })).toContainText(
+    'Broker credential: not configured',
+  );
+  await expect(row.getByRole('list', { name: 'Connection setup checks' })).toContainText(
+    'Drishti read grant: not configured',
+  );
+  await expect(row).toContainText('A live connection test is not available from this screen');
   await expect(row.getByText('reference-mock · Non-production; writes prohibited')).toBeVisible();
   await row.getByRole('button', { name: 'Enable registration', exact: true }).click();
   await expect(row.getByText('Enabled registration', { exact: false })).toBeVisible();
@@ -71,11 +85,12 @@ test('owner registers a connector without claiming connectivity and manages its 
   await row.getByRole('button', { name: 'Disable registration', exact: true }).click();
   await expect(row.getByRole('button', { name: 'Save registration' })).toBeVisible();
   await row.getByRole('button', { name: 'Archive registration', exact: true }).click();
-  await expect(row.getByRole('button')).toHaveCount(0);
-  await selectTenant(page, 'b');
-  await page.goto('/connectors');
-  // This owner belongs only to A; a forged B preference must not grant membership.
-  await expect(row).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Check setup status' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Save registration' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Enable registration' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Disable registration' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Archive registration' })).toHaveCount(0);
+  // This owner belongs only to A; a forged B request must not grant membership.
   const foreign = await page.evaluate(async (tenantId) => {
     const response = await fetch('/api/bff/v1/connectors', {
       headers: { 'X-Tenant-Id': tenantId },

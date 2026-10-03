@@ -51,6 +51,77 @@ export function connectorRoutes() {
     if (error) return c.json({ error: { code: 'connector_unavailable' } }, 503);
     return c.json({ data });
   });
+  // A status refresh is read-only. In particular it never contacts a target,
+  // unwraps a credential, or represents a registration as a live connection.
+  app.get('/connectors/:id/readiness', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const refused = requireCapability(c, Capability.POSTURE_READ);
+    if (refused) return refused;
+    const id = c.req.param('id');
+    if (!z.uuid().safeParse(id).success) return c.json({ error: { code: 'invalid_id' } }, 400);
+    const db = createSupabaseAdmin();
+    const { data: connector, error: connectorError } = await db
+      .from('connectors')
+      .select('id,status')
+      .eq('tenant_id', c.get('tenantId'))
+      .eq('id', id)
+      .maybeSingle();
+    if (connectorError) return c.json({ error: { code: 'connector_unavailable' } }, 503);
+    if (!connector) return c.json({ error: { code: 'not_found' } }, 404);
+    const [credentials, grants, checks] = await Promise.all([
+      db
+        .from('connector_credentials')
+        .select('id,expires_at')
+        .eq('tenant_id', c.get('tenantId'))
+        .eq('connector_id', id)
+        .is('revoked_at', null),
+      db
+        .from('connector_grants')
+        .select('id,internal_scope,expires_at')
+        .eq('tenant_id', c.get('tenantId'))
+        .eq('connector_id', id)
+        .is('revoked_at', null),
+      db
+        .from('connector_health_checks')
+        .select('status,checked_at,error_code')
+        .eq('tenant_id', c.get('tenantId'))
+        .eq('connector_id', id)
+        .order('checked_at', { ascending: false })
+        .limit(1),
+    ]);
+    if (
+      credentials.error ||
+      grants.error ||
+      checks.error ||
+      !credentials.data ||
+      !grants.data ||
+      !checks.data
+    )
+      return c.json({ error: { code: 'connector_unavailable' } }, 503);
+    const now = Date.now();
+    const isCurrent = (expiresAt: string | null) =>
+      expiresAt === null || Date.parse(expiresAt) > now;
+    const credentialConfigured = credentials.data.some((row) => isCurrent(row.expires_at));
+    const readGrantConfigured = grants.data.some(
+      (row) => row.internal_scope === 'connector.read' && isCurrent(row.expires_at),
+    );
+    return c.json({
+      data: {
+        connectorId: id,
+        registrationStatus: connector.status,
+        credentialConfigured,
+        readGrantConfigured,
+        lastObservation: checks.data[0]
+          ? {
+              status: checks.data[0].status,
+              checked_at: checks.data[0].checked_at,
+              error_code: checks.data[0].error_code ?? null,
+            }
+          : null,
+        liveCheckAvailable: false,
+      },
+    });
+  });
   app.on(['POST', 'PATCH'], ['/connectors', '/connectors/:id'], async (c) => {
     const refused = requireCapability(c, Capability.CONNECTOR_MANAGE);
     if (refused) return refused;

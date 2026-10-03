@@ -19,7 +19,7 @@ beforeEach(() => {
   fake = createFakeDb({
     connectors: [
       { id: FOREIGN, tenant_id: FOREIGN, descriptor_id: DESCRIPTOR },
-      { id: USER, tenant_id: TENANT, descriptor_id: DESCRIPTOR },
+      { id: USER, tenant_id: TENANT, descriptor_id: DESCRIPTOR, status: 'active' },
     ],
   });
   db.current = fake;
@@ -136,5 +136,126 @@ describe('connector registration API', () => {
     expect(result.status).toBe(200);
     expect(await result.json()).toMatchObject({ executionAvailable: false });
     expect(calls).toHaveLength(0);
+  });
+  it('reports only current tenant setup metadata without exposing credential material or claiming a live check', async () => {
+    const expired = '2020-01-01T00:00:00.000Z';
+    const current = '2099-01-01T00:00:00.000Z';
+    fake.seed('connector_credentials', {
+      id: 'old',
+      tenant_id: TENANT,
+      connector_id: USER,
+      expires_at: expired,
+      revoked_at: null,
+      ciphertext: 'private-secret',
+    });
+    fake.seed('connector_credentials', {
+      id: 'current',
+      tenant_id: TENANT,
+      connector_id: USER,
+      expires_at: current,
+      revoked_at: null,
+      ciphertext: 'private-secret',
+    });
+    fake.seed('connector_credentials', {
+      id: 'foreign',
+      tenant_id: FOREIGN,
+      connector_id: USER,
+      expires_at: null,
+      revoked_at: null,
+      ciphertext: 'foreign-secret',
+    });
+    fake.seed('connector_grants', {
+      id: 'grant',
+      tenant_id: TENANT,
+      connector_id: USER,
+      internal_scope: 'connector.read',
+      expires_at: current,
+      revoked_at: null,
+    });
+    fake.seed('connector_health_checks', {
+      tenant_id: TENANT,
+      connector_id: USER,
+      status: 'degraded',
+      checked_at: '2026-10-03T12:00:00.000Z',
+      error_code: 'timeout',
+    });
+    const response = await app(UserRole.VIEWER).request(`/v1/connectors/${USER}/readiness`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    const body = await response.json();
+    expect(body).toEqual({
+      data: {
+        connectorId: USER,
+        registrationStatus: 'active',
+        credentialConfigured: true,
+        readGrantConfigured: true,
+        lastObservation: {
+          status: 'degraded',
+          checked_at: '2026-10-03T12:00:00.000Z',
+          error_code: 'timeout',
+        },
+        liveCheckAvailable: false,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain('private-secret');
+    expect(JSON.stringify(body)).not.toContain('foreign-secret');
+    expect(await (await app().request(`/v1/connectors/${FOREIGN}/readiness`)).json()).toMatchObject(
+      { error: { code: 'not_found' } },
+    );
+  });
+  it('does not treat expired or revoked setup as current', async () => {
+    fake.seed('connector_credentials', {
+      tenant_id: TENANT,
+      connector_id: USER,
+      expires_at: '2020-01-01T00:00:00.000Z',
+      revoked_at: null,
+    });
+    fake.seed('connector_grants', {
+      tenant_id: TENANT,
+      connector_id: USER,
+      internal_scope: 'connector.read',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      revoked_at: '2026-01-01T00:00:00.000Z',
+    });
+    const response = await app().request(`/v1/connectors/${USER}/readiness`);
+    expect(await response.json()).toMatchObject({
+      data: { credentialConfigured: false, readGrantConfigured: false, lastObservation: null },
+    });
+  });
+  it('ignores other tenants even when they reuse the same connector identifier', async () => {
+    fake.seed('connector_credentials', {
+      tenant_id: FOREIGN,
+      connector_id: USER,
+      expires_at: null,
+      revoked_at: null,
+    });
+    fake.seed('connector_grants', {
+      tenant_id: FOREIGN,
+      connector_id: USER,
+      internal_scope: 'connector.read',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      revoked_at: null,
+    });
+    fake.seed('connector_health_checks', {
+      tenant_id: FOREIGN,
+      connector_id: USER,
+      status: 'healthy',
+      checked_at: '2026-10-03T12:00:00.000Z',
+      error_code: null,
+    });
+    const response = await app().request(`/v1/connectors/${USER}/readiness`);
+    expect(await response.json()).toMatchObject({
+      data: { credentialConfigured: false, readGrantConfigured: false, lastObservation: null },
+    });
+  });
+  it('fails closed when setup storage is unavailable', async () => {
+    fake.failNext('connector_credentials');
+    const response = await app().request(`/v1/connectors/${USER}/readiness`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'connector_unavailable' } });
+  });
+  it('refuses readiness to roles without posture-read access and malformed connector ids', async () => {
+    expect((await app(UserRole.AGENT).request(`/v1/connectors/${USER}/readiness`)).status).toBe(403);
+    expect((await app().request('/v1/connectors/not-a-uuid/readiness')).status).toBe(400);
   });
 });
