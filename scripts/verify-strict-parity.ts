@@ -1,4 +1,8 @@
-import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-target.js';
+import {
+  canSelectSyntheticCurrentLibrary,
+  loadAcceptanceTarget,
+  verifyAcceptanceTarget,
+} from './lib/acceptance-target.js';
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
@@ -107,8 +111,8 @@ async function main() {
   }
   // The isolation fixture below deliberately has no controls and is not a
   // current assessment baseline. New assessments must use a complete current
-  // published library. A local disposable target may publish the seeded
-  // baseline; deployed acceptance must bring its own operator-selected one.
+  // published library. Only a disposable local target may select the seeded
+  // baseline; a remote target must bring its operator-selected current one.
   const currentLibraries = await apiRequest(
     '/rest/v1/control_libraries?is_current=eq.true&status=eq.published&select=version,control_count',
   );
@@ -118,7 +122,7 @@ async function main() {
     control_count: number;
   }>;
   assert(currentRows.length <= 1, 'More than one current published library');
-  if (currentRows.length === 0 && !target) {
+  if (currentRows.length === 0 && canSelectSyntheticCurrentLibrary(target)) {
     const published = await apiRequest(
       `/rest/v1/control_libraries?version=eq.${encodeURIComponent(LIBRARY_VERSION)}`,
       'PATCH',
