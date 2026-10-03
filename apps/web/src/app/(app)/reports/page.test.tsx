@@ -215,13 +215,12 @@ it('offers an honest assessment-derived auditor pack while keeping unsupported f
   expect(html).not.toContain('independent attestation');
   expect(html).not.toContain('Full sequence of automated mutations');
 });
-it('identifies the reports header and the board workflow heading with AgentLabel, static', async () => {
+it('identifies the reports agent in the shared header and keeps the board workflow label static', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const labels = [...doc.querySelectorAll('[data-testid="agent-label"]')];
-  const header = labels.find((l) => l.closest('header'));
-  expect(header?.getAttribute('data-agent')).toBe('prativedan');
-  expect(header?.getAttribute('data-state')).toBe('idle');
+  const related = doc.querySelector('header [data-testid="related-agents"]');
+  expect(related?.textContent).toContain('prativedan');
   const board = labels.find((l) => l.closest('section[aria-label="Board report workflow"]'));
   expect(board?.getAttribute('data-agent')).toBe('prativedan');
   expect(board?.getAttribute('data-state')).toBe('idle');

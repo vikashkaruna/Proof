@@ -161,14 +161,12 @@ export default async function MonitoringPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader
-          module={moduleBarProps('monitoring')}
-          title="Continuous Monitoring & Alerting"
-          description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
-        />
-        <DispatchAlertsButton tenantId={tenantId} canManage={canManage} />
-      </div>
+      <PageHeader
+        module={moduleBarProps('monitoring')}
+        title="Continuous Monitoring & Alerting"
+        description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
+        actions={<DispatchAlertsButton tenantId={tenantId} canManage={canManage} />}
+      />
 
       <StatGrid>
         <Stat

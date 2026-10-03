@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { DataPlaceholder } from '@axiom/ui';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { DataPlaceholder, PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
@@ -16,14 +16,11 @@ export default async function ApprovalPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-5" aria-label="Approval queue">
-      <header>
-        <h1 className="font-heading text-2xl font-semibold text-[#1E2A4A]">Approval queue</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Recorded actions awaiting human review. Open the source plan to inspect the dry-run,
-          rollback, scope, and approval authority before taking action.
-        </p>
-        <ModuleBarFor module="approval" className="mt-3" />
-      </header>
+      <PageHeader
+        module={moduleBarProps('approval')}
+        title="Approval queue"
+        description="Recorded actions awaiting human review. Open the source plan to inspect the dry-run, rollback, scope, and approval authority before taking action."
+      />
       {error || !actions ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
           Approval actions are unavailable. No approval status can be inferred.

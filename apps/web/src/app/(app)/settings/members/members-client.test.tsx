@@ -73,6 +73,10 @@ it('sends scoped invitation fields with a stable idempotency key and shows its s
     approvalScopes: ['plan.approve', 'evidence.read'],
   });
   expect((screen.getByTestId('invite-link') as HTMLInputElement).value).toContain('/invite#token=');
+  expect(screen.getByRole('button', { name: 'Copy link' })).toBeTruthy();
+  expect(
+    screen.getByText(/Open this link in a separate private browser session/).textContent,
+  ).toContain('approver@example.invalid');
   expect(refresh).toHaveBeenCalledOnce();
 });
 

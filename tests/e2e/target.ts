@@ -22,7 +22,9 @@ if (
   throw new Error('AXIOM_E2E_WEB_PORT must be an unprivileged TCP port');
 export const localWebPort = Number(requestedLocalPort);
 export const webOrigin = acceptanceTarget?.webUrl ?? `http://localhost:${localWebPort}`;
-export const marketingUrl = acceptanceTarget?.marketingUrl ?? 'http://localhost:3000';
+export const marketingUrl =
+  acceptanceTarget?.marketingUrl ??
+  `http://localhost:${process.env.AXIOM_E2E_MARKETING_PORT ?? '3000'}`;
 export function tenantCookie(slug: string) {
   return {
     name: 'axiom_active_tenant',

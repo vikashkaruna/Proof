@@ -502,9 +502,9 @@ export function AppShell({
           </button>
           <div className="flex-1 min-w-0">
             <div className="text-[11px] text-[#8a909b] truncate">{activeBreadcrumb}</div>
-            <h1 className="font-heading text-[17px] font-semibold leading-tight text-[#1E2A4A] truncate">
+            <p className="font-heading text-[17px] font-semibold leading-tight text-[#1E2A4A] truncate">
               {activeTitle}
-            </h1>
+            </p>
           </div>
 
           {/* Tenant Switcher */}
