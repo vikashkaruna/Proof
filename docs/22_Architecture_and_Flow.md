@@ -205,7 +205,7 @@ Indigo `#1E2A4A` trust; Teal `#0FB5A5` machine intelligence/approvals; Gold
 An owner/admin starts a one-page check in `/connectors`; the web app sends the
 tenant-scoped request and idempotency key to the BFF. The BFF permits only
 public DNS names over HTTP(S), rejects credential-bearing or query URLs,
-resolves and pins a public IPv4 address for every redirect hop, and bounds the
+resolves and pins a public IPv4 address with a fresh socket for every redirect hop, and bounds the
 fetch by time and size. It extracts limited page metadata, then the
 `human_action_writer` records a tenant-scoped observation and ledger event in
 one database transaction (0102). The UI reads the recent observations for the
