@@ -1,5 +1,6 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
 import { requireTenantContext } from '@/lib/tenant-context';
+import { DataPlaceholder } from '@axiom/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,7 @@ export default async function ClassificationPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'classification',
         title: 'Data Classification',
         hi: 'वर्गीकरण',
         phase: 'P1',
@@ -46,7 +48,7 @@ export default async function ClassificationPage() {
       {error || !data ? (
         <p role="alert">Classification ledger records are unavailable.</p>
       ) : events.length === 0 ? (
-        <p>No classification events recorded for this tenant.</p>
+        <DataPlaceholder title="No classification events recorded for this tenant." />
       ) : null}
     </GenericModuleView>
   );

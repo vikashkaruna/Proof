@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link';
 import { z } from 'zod';
 import { EvidenceType } from '@axiom/types';
+import { DataPlaceholder } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import { evidenceUploadBytes, verifyLocalFile } from './evidence-workflow';
 import {
@@ -357,7 +358,7 @@ export function EvidenceClient({
             <p>{meta.total} matching records</p>
           ) : null}
           {!loading && !recordsError && rows.length === 0 && (
-            <p>No evidence matches these filters.</p>
+            <DataPlaceholder title="No evidence matches these filters." />
           )}
           {rows.map((row) => (
             <button

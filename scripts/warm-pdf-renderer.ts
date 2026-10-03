@@ -8,11 +8,14 @@
  * the first PDF. Doing it once up front moves a cold start out of the journeys
  * and fails early, with the renderer's own explanation, if Chromium cannot run.
  */
-import { renderHtmlToPdf } from '../packages/report-kit/src/renderer.js';
+import { basename } from 'node:path';
+import { findChromiumExecutable, renderHtmlToPdf } from '../packages/report-kit/src/renderer.js';
 
 async function main() {
   const started = Date.now();
   try {
+    const executable = findChromiumExecutable();
+    console.log(`PDF renderer binary: ${executable ? basename(executable) : 'unavailable'}`);
     const result = await renderHtmlToPdf('<!doctype html><title>warm-up</title><p>warm-up</p>', {
       requireChromium: true,
       documentDate: '2026-01-01T00:00:00.000Z',

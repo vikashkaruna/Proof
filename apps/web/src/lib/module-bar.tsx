@@ -1,5 +1,16 @@
-import { ModuleBar } from '@axiom/ui';
+import { ModuleBar, type ModuleBarProps } from '@axiom/ui';
 import { moduleMeta, type ModuleKey } from './module-meta';
+
+export function moduleBarProps(module: ModuleKey): ModuleBarProps {
+  const meta = moduleMeta(module);
+  return {
+    crumb: meta.section,
+    titleHi: meta.hi,
+    phase: meta.phase,
+    moduleId: meta.moduleId,
+    agents: meta.agents,
+  };
+}
 
 /** The shared context line for a module: section, Hindi name, phase, id and related agents. */
 export function ModuleBarFor({
@@ -14,14 +25,12 @@ export function ModuleBarFor({
   omit?: readonly ('hi' | 'moduleId')[];
   className?: string;
 }) {
-  const meta = moduleMeta(module);
+  const context = moduleBarProps(module);
   return (
     <ModuleBar
-      crumb={meta.section}
-      titleHi={omit.includes('hi') ? undefined : meta.hi}
-      phase={meta.phase}
-      moduleId={omit.includes('moduleId') ? undefined : meta.moduleId}
-      agents={meta.agents}
+      {...context}
+      titleHi={omit.includes('hi') ? undefined : context.titleHi}
+      moduleId={omit.includes('moduleId') ? undefined : context.moduleId}
       tone={tone}
       className={className}
     />

@@ -55,6 +55,7 @@ def writer_key(role):
     unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
     return f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
 archive_writer_key=writer_key('approval_archive_writer')
+human_writer_key=writer_key('human_action_writer')
 def rpc_probe(name,body,bearer):
     request=urllib.request.Request(status['API_URL'].rstrip('/')+'/rest/v1/rpc/'+name,data=json.dumps(body).encode(),headers={'apikey':status['ANON_KEY'],'Authorization':'Bearer '+bearer,'Content-Type':'application/json'})
     try:
@@ -62,9 +63,13 @@ def rpc_probe(name,body,bearer):
             return response.status,json.load(response)
     except urllib.error.HTTPError as error:
         return error.code,None
-release_status,release_outcome=rpc_probe('release_approval_proof_archive',{'p_tenant_id':'00000000-0000-4000-8000-0000000000ff','p_actor_id':'00000000-0000-4000-8000-0000000000fe','p_archive_id':'00000000-0000-4000-8000-0000000000fd','p_source_sha256':'a'*64,'p_version_id':'v','p_correlation_id':'00000000-0000-4000-8000-0000000000fc'},archive_writer_key)
+release_body={'p_tenant_id':'00000000-0000-4000-8000-0000000000ff','p_actor_id':'00000000-0000-4000-8000-0000000000fe','p_archive_id':'00000000-0000-4000-8000-0000000000fd','p_source_sha256':'a'*64,'p_version_id':'v','p_correlation_id':'00000000-0000-4000-8000-0000000000fc'}
+release_status,release_outcome=rpc_probe('release_approval_proof_archive',release_body,human_writer_key)
 if release_status!=200 or (release_outcome or {}).get('error')!='founder_authority_required':
-    raise SystemExit('Dedicated archive writer did not reach the expected founder gate on release')
+    raise SystemExit('Human action writer did not reach the expected founder gate on release')
+archive_release_status,_=rpc_probe('release_approval_proof_archive',release_body,archive_writer_key)
+if archive_release_status not in (401,403):
+    raise SystemExit('Archive writer must not reach human-labelled archive release (0100)')
 moved_status,_=rpc_probe('record_approval_export',{'p_tenant_id':'00000000-0000-4000-8000-0000000000ff','p_actor_id':'00000000-0000-4000-8000-0000000000fe','p_plan_id':None,'p_format':'json','p_filter_params':{},'p_summary':{},'p_artifact_sha256':'a'*64,'p_artifact_bytes':1,'p_correlation_id':'00000000-0000-4000-8000-0000000000fd'},archive_writer_key)
 if moved_status not in (401,403):
     raise SystemExit('Archive writer must no longer reach human-labelled record_approval_export (0099)')

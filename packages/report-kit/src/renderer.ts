@@ -103,7 +103,7 @@ function normalizeChromiumPdfMetadata(bytes: Buffer, documentDate: string): Buff
 }
 
 /** Known locations for headless chromium / chrome-headless-shell */
-function findChromiumExecutable(): string | null {
+export function findChromiumExecutable(): string | null {
   if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
     return process.env.CHROME_PATH;
   }
@@ -127,9 +127,18 @@ function findChromiumExecutable(): string | null {
     ),
     join(
       home,
+      '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux-arm64/chrome-headless-shell',
+    ),
+    join(
+      home,
       '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux/chrome-headless-shell',
     ),
-    join(home, '.cache/ms-playwright/chromium-1243/chrome-linux/chrome'),
+    join(home, '.cache/ms-playwright/chromium-1243/chrome-linux64/chrome'),
+    join(home, '.cache/ms-playwright/chromium-1243/chrome-linux-arm64/chrome'),
     // System installations
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',

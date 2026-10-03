@@ -16,10 +16,10 @@ export default async function globalSetup() {
   if (existsSync(personaStatePath)) {
     const state = JSON.parse(readFileSync(personaStatePath, 'utf8'));
     assertPersonaTarget(state);
-    const writerKey = process.env.SUPABASE_ARCHIVE_WRITER_KEY;
-    if (!writerKey) throw new Error('BFF-only approval archive writer JWT is missing');
+    const writerKey = process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY;
+    if (!writerKey) throw new Error('BFF-only human action writer JWT is missing');
     // A non-existent tenant/actor makes this a read-only authority probe
-    // (release is the one archive RPC that stays on this writer after 0099). It proves
+    // (release moved to the human writer in 0100). It proves
     // that PostgREST accepted this exact key and reached the guarded RPC;
     // a wrong-target or generic service JWT cannot return this response.
     const response = await fetch(
@@ -50,7 +50,7 @@ export default async function globalSetup() {
       !('error' in result) ||
       result.error !== 'founder_authority_required'
     )
-      throw new Error('Archive writer JWT failed the exact PostgREST target and role probe');
+      throw new Error('Human writer JWT failed the exact PostgREST target and role probe');
     return;
   }
 

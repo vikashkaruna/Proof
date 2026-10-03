@@ -78,12 +78,12 @@ begin
       'archive writer retains moved '||v_signature);
   end loop;
 end $$;
--- release_approval_proof_archive is not a moved RPC; the archive writer keeps it.
+-- Release also writes a human-labelled event; 0100 moves it to the human writer.
 select pg_temp.ok(
-  has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
-  and not has_function_privilege('human_action_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+  not has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+  and has_function_privilege('human_action_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
   and not has_function_privilege('service_role','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE'),
-  'archive writer keeps release only');
+  'human writer alone can release an archive');
 
 -- ── fixtures ────────────────────────────────────────────────────────────
 insert into auth.users(id,email) values

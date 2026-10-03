@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 
 /**
  * Auth middleware for the web app.
@@ -76,14 +77,21 @@ export async function middleware(request: NextRequest) {
     },
   });
 
+  const unavailable = () =>
+    NextResponse.json(
+      { error: 'Authentication is temporarily unavailable. Please retry.' },
+      { status: 503, headers: { 'Retry-After': '5' } },
+    );
   let user = null;
   try {
     const {
       data: { user: authUser },
+      error,
     } = await supabase.auth.getUser();
+    if (isAuthRetryableFetchError(error)) return unavailable();
     user = authUser;
   } catch {
-    user = null;
+    return unavailable();
   }
 
   if (!user && !pathname.startsWith('/login')) {

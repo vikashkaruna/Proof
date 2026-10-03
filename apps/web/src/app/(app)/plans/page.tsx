@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { DataPlaceholder } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { ModuleBarFor } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,14 +22,13 @@ export default async function PlansListPage() {
           dry-run, rollback, and human approval gates.
         </p>
       </header>
+      <ModuleBarFor module="remediation" />
       {error || !plans ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
           Plans are unavailable. No plan readiness can be inferred.
         </p>
       ) : plans.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
-          No remediation plans recorded for this tenant.
-        </p>
+        <DataPlaceholder title="No remediation plans recorded for this tenant." />
       ) : (
         <ul className="space-y-3">
           {plans.map((plan) => (

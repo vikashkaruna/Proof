@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { capabilitiesFor, type UserRole } from '@axiom/types';
 import { logoutAction } from '../(auth)/login/actions';
 import { AppShell } from './app-shell';
@@ -12,9 +13,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const activeTenantSlug = cookieStore.get('axiom_active_tenant')?.value;
 
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let authResult;
+  try {
+    authResult = await supabase.auth.getUser();
+  } catch {
+    throw new Error('Authentication service is temporarily unavailable');
+  }
+  if (isAuthRetryableFetchError(authResult.error)) {
+    throw new Error('Authentication service is temporarily unavailable');
+  }
+  const { user } = authResult.data;
 
   if (!user) redirect('/login');
 

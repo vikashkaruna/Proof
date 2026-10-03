@@ -243,17 +243,15 @@ describe('approval proof archive', () => {
       status: 'released',
       versionId,
     });
-    // Human-labelled begin/settle/review go through the human action writer;
-    // only release stays on the dedicated archive writer.
+    // All human-labelled archive transitions use the human action writer.
     expect(humanWriterDb.rpc.mock.calls.map(([name]) => name)).toEqual([
       'begin_approval_proof_archive',
       'settle_approval_proof_archive',
+      'release_approval_proof_archive',
       'review_approval_proof_archive',
-    ]);
-    expect(archiveWriterDb.rpc.mock.calls.map(([name]) => name)).toEqual([
-      'release_approval_proof_archive',
       'release_approval_proof_archive',
     ]);
+    expect(archiveWriterDb.rpc).not.toHaveBeenCalled();
   });
 
   it('does not expose a pending archive to an owner before founder release', async () => {

@@ -250,7 +250,10 @@ export default async function LedgerPage({
           </div>
 
           <div className="flex items-center gap-3">
-            <LedgerRefresh runningCount={activeAgentRuns.length} />
+            <LedgerRefresh
+              runningCount={activeAgentRuns.length}
+              initialRefreshedAt={new Date().toISOString()}
+            />
             <VerifyButton tenantId={tenantId} />
           </div>
         </div>

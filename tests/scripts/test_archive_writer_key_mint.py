@@ -38,7 +38,7 @@ class ArchiveWriterMintTests(unittest.TestCase):
         self.assertIn("('human_action_writer','SUPABASE_HUMAN_ACTION_WRITER_KEY')", source)
         self.assertIn("('agent_ledger_writer','SUPABASE_AGENT_LEDGER_WRITER_KEY')", source)
         self.assertIn("'JWT_SECRET'", source)
-        # 0099: the archive writer keeps release only; its probe reaches the founder gate.
+        # 0100: the human writer reaches the release founder gate; archive writer is refused.
         self.assertIn("founder_authority_required", source)
         self.assertIn("record_approval_export", source)
         self.assertNotIn("'archiveWriterKey':", source)
@@ -66,6 +66,9 @@ class ArchiveWriterMintTests(unittest.TestCase):
         self.assertIn("SUPABASE_ARCHIVE_WRITER_KEY=//p' \"$state_dir/$environment.env\"", source)
         config = (ROOT / "tests/e2e/playwright.config.ts").read_text()
         self.assertIn("requires a BFF-only SUPABASE_ARCHIVE_WRITER_KEY", config)
+        self.assertIn("requires a BFF-only SUPABASE_HUMAN_ACTION_WRITER_KEY", config)
+        self.assertIn("process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY = bffHumanWriterKey", config)
+        self.assertIn("SUPABASE_HUMAN_ACTION_WRITER_KEY: bffHumanWriterKey", config)
 
     def test_minted_writer_is_signed_and_distinct_from_shared_service_role(self):
         result = subprocess.run(
