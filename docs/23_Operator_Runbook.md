@@ -91,7 +91,7 @@ failure send the failure (a migration checksum refusal, a `401` that is a
 
 ## 1a. Command line: CI, build, deploy, soft stop and start
 
-One entry point, `scripts/axiom-ops.sh`, drives all of it. Every value comes from `.env.<env>` (root symlink or `infra/docker/environments/.env.<env>`; root wins, and a warning is printed if both exist and differ); nothing is hard-coded. The environments are `local`, `staging` and `preprod`; `onprem` is accepted for `stop`, `start`, `status` and `env-check` only; `--env all` (stop, start, status) walks every non-production environment that has an env file (preprod, staging, local, onprem, in that order, skipping the rest). `production` is refused for every command and cannot be added by a flag.
+One entry point, `scripts/axiom-ops.sh`, drives all of it. Every value comes from `.env.<env>` (root symlink or `infra/docker/environments/.env.<env>`; root wins, and a warning is printed if both exist and differ); nothing is hard-coded. The environments are `local`, `staging` and `preprod` (all commands); `onprem` and `production` accept `stop`, `start`, `status` and `env-check` only (this tool never builds or deploys them); `--env all` (stop, start, status) walks the non-production environments that have an env file (preprod, staging, local, onprem, in that order, skipping the rest) and **never includes production**.
 
 **One-time setup per environment**
 
@@ -116,7 +116,15 @@ scripts/axiom-ops.sh env-check --env preprod
 
 Every mutating command takes `--dry-run` (shows the exact `gcloud` calls) and asks for confirmation unless `--yes` is given; without a terminal it refuses rather than guess. For `local` and `staging`, `build`/`deploy` run `dev-docker.sh` (`--build` for build), `stop` is `dev-docker.sh --down` and `status` is `--status`; local stop keeps containers and data (see section 1).
 
-**Soft stop covers every non-production environment.** `preprod` is the only GCP environment, handled by `scripts/softstop-gcp.py`; `local`, `staging` and `onprem` are Docker stacks, handled by `dev-docker.sh --down` (containers and data stay in place; `start` brings them back). `stop --env all --yes` does all of them; production is never included.
+**Soft stop covers every environment, production deliberately last and most guarded.**
+
+| Environment                  | Mechanism                                                                                                                           | Notes                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `local`, `staging`, `onprem` | `dev-docker.sh --down`: containers and data stay in place; `start` brings them back                                                 | on-prem is Docker here; it is treated like production for warmth (nothing scales to zero) but stopping it is allowed |
+| `preprod` (GCP)              | `scripts/softstop-gcp.py`: Cloud Run minimum instances, labelled VMs, Cloud SQL                                                     | scales to zero by default (D1); `--env all` includes it                                                              |
+| `production` (AWS EKS)       | `scripts/softstop-aws.py`: deployments to 0 replicas (previous count in an annotation), node groups to 0 (previous sizing in a tag) | needs `--confirm-production <cluster>` to stop; never in `--env all`; never run by any workflow                      |
+
+`stop --env all --yes` does the non-production set. Production is only ever addressed by name: preview with `scripts/axiom-ops.sh stop --env production --dry-run`, stop with `--yes --confirm-production <cluster name>` (typed exactly, every time, a bare `--yes` is refused), restore with `start --env production --yes`. **A production stop is a customer outage**; it saves cost only for planned windows. It cannot pause the EKS control plane, NAT gateways, ElastiCache, EBS volumes, the S3 evidence bucket and its KMS keys, or the managed Supabase project and Temporal Cloud (pause those in their own consoles if wanted). Stop order is deployments then node groups; start restores node groups, waits until ACTIVE, then deployments. The `production` env file needs `AXIOM_CLUSTER_NAME` and `AWS_REGION` (optionally `AXIOM_K8S_NAMESPACE`, default `axiom-proof`).
 
 **Cloud detail (`scripts/softstop-gcp.py`).** Nothing is deleted, so no object ID changes and no wiring has to be redone. It acts only on objects belonging to the environment (Cloud Run `axiom-*-<env>`, VMs `axiom-<env>-*`, Cloud SQL `axiom-proof-<env>-pg-*`):
 
@@ -130,6 +138,8 @@ State is on the objects (labels), so another laptop can run `start`; a record of
 
 **Not exercised against real cloud.** The soft-stop logic is tested against a fake `gcloud` that applies each change (round trip restores the original sizing exactly, other environments untouched, nothing deleted, five mutants killed), and `--dry-run` prints the real calls. It has not been run against a live project because none exists yet. Run `stop --dry-run` first on your first real deployment, then `stop`, `status`, `start`.
 
+**Nightly stop (opt-in).** See D1-D4 in section 2a: `.github/workflows/preprod-nightly-stop.yml`, off until `NIGHTLY_STOP_ENABLED=true`.
+
 **Manual cloud operations from GitHub (no laptop needed).** The workflow `Preprod operations (manual)` (`.github/workflows/ops-preprod.yml`) runs `axiom-ops.sh` for you: pick `status`, `deploy`, `stop` or `start`, an exact `revision` for deploy (must be on `main`), and `dry_run` (defaults to true). It has **no push, schedule or pull-request trigger**, so merging to main never deploys anything; it runs only when you start it, only from `main`, and waits for the required reviewer of the `preprod-ops` environment. One-time setup: create the GitHub environment `preprod-ops` with required reviewers; add the secret `AXIOM_ENV_PREPROD` (the whole `.env.preprod`); add the variables `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT` (keyless; never store a JSON key). **Not run yet:** it has been syntax-checked and its triggers and guards are tested, but a first dry-run `status` must prove the federation and the runner's Docker and Terraform steps before you trust a real deploy.
 
 ## 1b. Network design change: Direct VPC egress (decided 2026-10-03)
@@ -141,7 +151,7 @@ What you must know before the first deploy:
 1. `controller_source_ranges` for any runner firewall must be `10.10.16.0/24` (the example tfvars already say so).
 2. The egress subnet cannot be deleted for up to 20 minutes after its services are gone (Cloud Run holds the addresses); teardown handles it in the last network phase.
 3. Services use the second-generation execution environment (required); expect a slightly slower cold start.
-4. **Not proven on a real project.** Only `terraform validate`, `fmt` and the mocked tests ran. Your first `deploy --dry-run` is the real check; read the plan for the three services (bff, supabase auth, supabase rest) and the new `run-egress` subnet.
+4. **Not proven on a real project.** Only `terraform validate`, `fmt` and the mocked tests ran. Your first `deploy --dry-run` is the real check; read the plan for the services with a network interface (bff, agent-runtime, temporal-worker, supabase auth, supabase rest), the new `run-egress` subnet, the private `run.app` DNS zone and the per-caller invoker bindings.
 
 ## 2. Checklist index by workstream
 
@@ -175,12 +185,12 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 3. **P2-17** decided 2026-10-03: keep the expiring allowlist until a fixed `braces` release ships, then delete the entry (no migration to Tailwind 4, no package swap). Put a reminder for **2026-11-02**; the exception expires then and the security scan fails again by design.
 4. **P2-15 (b)** only 4 branches remain on purpose: `main`, `staging`, `chore/housekeeping-2026-10-03` (this session) and local-only `claude/axiom-proof-phase-gap-closure-b88105` (the earlier session's branch, fully merged, kept until that session is reinvoked; delete it then). Three extra detached worktrees (`dazzling-torvalds-37bc2e`, `phase-0-5-gap-closure-5fd349`, `.kilo/.../attractive-sandwich`) hold uncommitted regenerated files and a few real edits; their diffs are backed up in `~/axiom-proof-housekeeping-backup-20261003/extra-worktrees/`. Remove them when you are sure nothing in them is wanted.
 
-**Decisions engineering needs from you (answer in one pass; defaults in brackets)**
+**Decisions taken 2026-10-03 (all implemented in code, none applied to a real project yet)**
 
-- **D1 Preprod minimum instances.** Today web, BFF, agent runtime, GoTrue, PostgREST and the gateway keep one instance warm each. Set to 0 for near-zero idle cost (first request after idle takes seconds) or keep one warm? [keep one warm; use soft stop for long idle]
-- **D2 Automatic nightly soft stop.** An Actions schedule or Cloud Scheduler that stops preprod at night. It conflicts with "the operator is in control" and could interrupt a test run. [no schedule; revisit after the first real week]
-- **D3 Internal ingress for agent runtime and model gateway.** Replace public endpoints plus a token header with internal ingress and service-to-service identity. Stronger boundary; needs a prototype and touches the security design. [yes before production, not before the first preprod deploy]
-- **D4 Load balancer and Cloud Armor** in front of web and BFF (WAF, rate limits, stable IP, CDN). Fixed monthly cost. [production only]
+- **D1 Warm only where it matters.** Production and on-prem keep always-on services warm (Helm `replicaCount` and `minReplicas` are at least 1 for web, BFF, agent runtime and gateway; a test enforces this; production uses a managed Supabase project, so GoTrue and PostgREST there are the vendor's). Non-production does not: preprod services scale to zero (`AXIOM_RUN_MIN_INSTANCES=0`, range 0-2; startup CPU boost on). Expect the first request after idle to take seconds; set `1` if a demo needs it.
+- **D2 Nightly soft stop: on offer, opt-in.** `.github/workflows/preprod-nightly-stop.yml` stops preprod at 22:00 IST (cron `30 16 * * *` UTC) only if the repository variable `NIGHTLY_STOP_ENABLED` is `true`. It can only stop (never deploy, build or start) and deletes nothing. It needs the `preprod-nightly` environment (same secret and variables as `preprod-ops`, no required reviewer). Change the time by editing the cron; skip a night by setting the variable to `false`. Restart with the manual workflow or `axiom-ops.sh start --env preprod`.
+- **D3 Internal services are internal by design.** agent-runtime and model-gateway use internal ingress, per-caller IAM invokers, Google ID tokens (`X-Serverless-Authorization`) and a private `run.app` DNS route; the shared token header stays as a second check (`AXIOM_INTERNAL_SERVICES_PRIVATE=true`). **First-deploy check:** one BFF to agent-runtime call and one agent-runtime to model-gateway call must succeed. If routing misbehaves set it to `false` and redeploy to restore the earlier public-plus-token endpoints.
+- **D4 No edge protection in non-production; optional in production.** `AXIOM_ENABLE_EDGE_PROTECTION` (production env file, default `false`) creates an AWS WAF web ACL only when `true`. It protects nothing until the edge is an ALB or CloudFront (production ingress is nginx behind an NLB today): that production design choice is still open.
 
 **Tier B — prepare the target (still no billing)**
 

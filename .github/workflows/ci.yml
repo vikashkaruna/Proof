@@ -406,6 +406,9 @@ jobs:
           terraform -chdir=infra/terraform/modules/workload-vms init -backend=false -input=false
           terraform -chdir=infra/terraform/modules/workload-vms validate
           terraform -chdir=infra/terraform/modules/workload-vms test -no-color
+          terraform -chdir=infra/terraform/modules/edge-waf init -backend=false -input=false
+          terraform -chdir=infra/terraform/modules/edge-waf validate
+          terraform -chdir=infra/terraform/modules/edge-waf test -no-color
 
   # ─── W0.1 deployment manifests render ────────────────────────────
   # The Helm chart had never been rendered anywhere. No job invoked helm and

@@ -229,12 +229,12 @@ class OpsWrapperTests(unittest.TestCase):
         base = {k: v for k, v in os.environ.items() if k not in ("GCP_PROJECT_ID", "GCP_REGION", "ENVIRONMENT", "AXIOM_ENV_FILE")}
         return subprocess.run(["bash", str(OPS), *args], capture_output=True, text=True, env={**base, **(env or {})}, stdin=subprocess.DEVNULL)
 
-    def test_production_is_refused_for_every_command(self):
+    def test_production_is_never_built_or_deployed_by_the_tool(self):
         for name in ("production", "prod"):
-            for command in ("deploy", "build", "stop", "start", "status"):
+            for command in ("deploy", "build"):
                 result = self.ops(command, "--env", name)
                 self.assertNotEqual(result.returncode, 0, (name, command))
-                self.assertIn("not driven by this tool", result.stderr)
+                self.assertIn("supports only stop, start, status", result.stderr)
 
     def test_onprem_and_all_only_allow_the_soft_closure_commands(self):
         for name in ("onprem", "all"):
@@ -340,6 +340,42 @@ class OpsWorkflowTests(unittest.TestCase):
 
     def test_it_defaults_to_a_dry_run(self):
         self.assertRegex(self.text, r"dry_run:[\s\S]*?default: true")
+
+
+class NightlyStopWorkflowTests(unittest.TestCase):
+    """The nightly job may only stop, and only when the operator opted in."""
+
+    text = (ROOT / ".github" / "workflows" / "preprod-nightly-stop.yml").read_text()
+    body = text.split("jobs:", 1)[1]
+
+    def test_it_can_only_run_the_stop_command(self):
+        commands = [line for line in self.body.splitlines() if "axiom-ops.sh" in line]
+        self.assertEqual(len(commands), 1)
+        self.assertIn("axiom-ops.sh stop --env preprod", commands[0])
+        for forbidden in (" deploy", " build", " start"):
+            self.assertNotIn(forbidden, commands[0])
+
+    def test_it_is_opt_in_and_main_only(self):
+        self.assertIn("vars.NIGHTLY_STOP_ENABLED == 'true'", self.text)
+        self.assertIn("github.ref == 'refs/heads/main'", self.text)
+        self.assertIn("schedule:", self.text)
+
+    def test_the_manual_operations_workflow_still_has_no_schedule(self):
+        manual = (ROOT / ".github" / "workflows" / "ops-preprod.yml").read_text()
+        self.assertNotIn("schedule:", manual.split("permissions:", 1)[0])
+
+
+class EdgeProtectionTests(unittest.TestCase):
+    """Optional production edge protection stays off unless explicitly enabled."""
+
+    def test_default_off_and_creation_is_gated_on_the_switch(self):
+        prod = ROOT / "infra" / "terraform" / "envs" / "prod"
+        variables = (prod / "variables.tf").read_text()
+        block = variables.split('variable "enable_edge_protection"', 1)[1].split("}", 1)[0]
+        self.assertIn("default     = false", block)
+        self.assertIn("var.enable_edge_protection ? 1 : 0", (prod / "waf.tf").read_text())
+        example = (ROOT / "infra" / "docker" / "environments" / ".env.production.example").read_text()
+        self.assertIn("AXIOM_ENABLE_EDGE_PROTECTION=false", example)
 
 
 if __name__ == "__main__":

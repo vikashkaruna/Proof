@@ -11,6 +11,7 @@ resource "google_project_service" "apis" {
     "secretmanager.googleapis.com",
     "artifactregistry.googleapis.com",
     "compute.googleapis.com",
+    "dns.googleapis.com",
     "servicenetworking.googleapis.com",
   ], local.workload_kms_required ? ["cloudkms.googleapis.com"] : []))
   project            = var.project_id
@@ -59,6 +60,34 @@ locals {
   # match this range, not network tags: tags are caller-editable, which is why
   # the workload-vms module matches service accounts instead.
   run_egress_cidr = "10.10.16.0/24"
+}
+
+# Cloud Run to Cloud Run over the VPC. Services on internal ingress accept only
+# requests that arrive through the VPC. Resolving *.run.app to the
+# private.googleapis.com range (199.36.153.8/30) inside this VPC makes those
+# requests travel through the egress subnet while ordinary internet traffic
+# still goes out directly (PRIVATE_RANGES_ONLY). Needs Private Google Access on
+# the egress subnet, which is set above.
+resource "google_dns_managed_zone" "run_app" {
+  count      = var.internal_services_private ? 1 : 0
+  name       = "axiom-${var.environment}-run-app"
+  dns_name   = "run.app."
+  visibility = "private"
+  private_visibility_config {
+    networks {
+      network_url = google_compute_network.vpc.id
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_dns_record_set" "run_app" {
+  for_each     = var.internal_services_private ? toset(["run.app.", "*.run.app."]) : toset([])
+  managed_zone = google_dns_managed_zone.run_app[0].name
+  name         = each.key
+  type         = "A"
+  ttl          = 300
+  rrdatas      = ["199.36.153.8", "199.36.153.9", "199.36.153.10", "199.36.153.11"]
 }
 
 # Private Service Connection for Cloud SQL

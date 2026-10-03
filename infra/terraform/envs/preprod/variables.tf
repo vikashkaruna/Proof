@@ -348,3 +348,20 @@ variable "assessment_dispatch_retention_days" {
     error_message = "Assessment dispatch retention must be an integer from 1 to 36500 days."
   }
 }
+
+variable "min_instance_count" {
+  description = "Warm instances kept per always-on Cloud Run service. 0 scales to zero when idle (lowest cost, first request after idle is slower); raise it when latency matters."
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.min_instance_count >= 0 && var.min_instance_count <= 2 && floor(var.min_instance_count) == var.min_instance_count
+    error_message = "min_instance_count must be a whole number from 0 to 2."
+  }
+}
+
+variable "internal_services_private" {
+  description = "Keep agent-runtime and model-gateway off the public internet: internal ingress, IAM invoker limited to the calling services, and Google ID-token auth on every call. false restores the earlier public endpoints guarded only by the shared token."
+  type        = bool
+  default     = true
+}
+

@@ -14,6 +14,7 @@ from temporalio.exceptions import ApplicationError
 
 from .config import get_settings
 from .contracts import ProtocolRefused, validate_result
+from .service_auth import service_auth_headers
 
 
 @activity.defn
@@ -45,6 +46,12 @@ async def call_agent_runtime(
             or not settings.agent_runtime_internal_token
         ):
             raise ValueError("Invalid runtime configuration")
+        # Optional Cloud Run IAM ID token; {} when AXIOM_SERVICE_AUTH is unset.
+        # Raises (fail closed) before any request if a token cannot be minted.
+        headers = {
+            **settings.internal_headers,
+            **await service_auth_headers(settings.agent_runtime_url),
+        }
         async with (
             asyncio.timeout(65),
             httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client,
@@ -52,7 +59,7 @@ async def call_agent_runtime(
                 "POST",
                 f"{settings.agent_runtime_url.rstrip('/')}/agents/{agent}/invoke",
                 json={"correlation_id": correlation_id, "input": input},
-                headers=settings.internal_headers,
+                headers=headers,
             ) as response,
         ):
             if response.status_code != 200:

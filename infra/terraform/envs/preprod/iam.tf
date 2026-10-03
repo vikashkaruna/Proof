@@ -105,17 +105,49 @@ resource "google_cloud_run_v2_service_iam_member" "bff_public" {
 }
 
 resource "google_cloud_run_v2_service_iam_member" "agent_runtime_public" {
+  count    = var.internal_services_private ? 0 : 1
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.agent_runtime.name
   role     = "roles/run.invoker"
-  member   = "allUsers" # Internal service protected via X-Internal-Token header
+  member   = "allUsers" # Only when internal_services_private = false; protected by X-Internal-Token
 }
 
 resource "google_cloud_run_v2_service_iam_member" "model_gateway_public" {
+  count    = var.internal_services_private ? 0 : 1
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.model_gateway.name
   role     = "roles/run.invoker"
-  member   = "allUsers" # Internal gateway protected via bearer token
+  member   = "allUsers" # Only when internal_services_private = false; protected by bearer token
+}
+
+# ─── Internal services: only the named callers may invoke ─────────────────────
+# With internal_services_private (default) agent-runtime and model-gateway take
+# traffic only from inside the VPC and only from these runtime identities. The
+# shared token headers stay as a second check. Callers add a Google ID token in
+# X-Serverless-Authorization (see the service-auth helpers in each service).
+locals {
+  internal_invokers = {
+    agent_runtime = ["bff", "temporal_worker"]
+    model_gateway = ["agent_runtime"]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "agent_runtime_invoker" {
+  for_each = var.internal_services_private ? toset(local.internal_invokers.agent_runtime) : toset([])
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.agent_runtime.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.runtime[each.key].email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "model_gateway_invoker" {
+  for_each = var.internal_services_private ? toset(local.internal_invokers.model_gateway) : toset([])
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.model_gateway.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.runtime[each.key].email}"
 }

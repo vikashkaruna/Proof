@@ -66,7 +66,7 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
     }
 
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 2
     }
 
@@ -74,6 +74,7 @@ resource "google_cloud_run_v2_service" "supabase_auth" {
       image = local.supabase_auth_image
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"
           memory = "512Mi"
@@ -196,7 +197,7 @@ resource "google_cloud_run_v2_service" "supabase_rest" {
     }
 
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 3
     }
 
@@ -204,6 +205,7 @@ resource "google_cloud_run_v2_service" "supabase_rest" {
       image = local.supabase_rest_image
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"
           memory = "512Mi"
@@ -277,7 +279,7 @@ resource "google_cloud_run_v2_service" "supabase_gateway" {
     service_account = google_service_account.runtime["supabase_gateway"].email
 
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 2
     }
 
@@ -285,6 +287,7 @@ resource "google_cloud_run_v2_service" "supabase_gateway" {
       image = local.supabase_gateway_image
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"
           memory = "256Mi"
