@@ -56,6 +56,7 @@ export interface GenericModuleMeta {
 export function GenericModuleView({
   meta,
   isDemo = false,
+  canInvokeAgent = false,
   children,
 }: {
   meta: GenericModuleMeta;
@@ -71,6 +72,7 @@ export function GenericModuleView({
    * Opt-in per tenant (`tenants.is_demo`), and visibly labelled when on.
    */
   isDemo?: boolean;
+  canInvokeAgent?: boolean;
   children?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -84,7 +86,7 @@ export function GenericModuleView({
   } | null>(null);
 
   const handleRunAgent = async () => {
-    if (!meta.agentKey || isExecuting) return;
+    if (!meta.agentKey || !canInvokeAgent || isExecuting) return;
     setIsExecuting(true);
     setRunResult(null);
 
@@ -196,7 +198,7 @@ export function GenericModuleView({
               <span>⚡</span>
               <span>{meta.actionLabel || 'Review & Approve in Console →'}</span>
             </Link>
-          ) : meta.actionLabel && meta.agentKey ? (
+          ) : meta.actionLabel && meta.agentKey && canInvokeAgent ? (
             <button
               type="button"
               onClick={handleRunAgent}

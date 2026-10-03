@@ -63,6 +63,7 @@ it('runs only the selected read-only agent and shows a returned ledger reference
   state.invoke.mockResolvedValue({ latency_ms: 12, ledger_entry_ids: ['ledger-1'] });
   render(
     <GenericModuleView
+      canInvokeAgent
       meta={{
         ...meta,
         agent: 'Drishti',
@@ -85,6 +86,7 @@ it('leaves an ambiguous invocation unconfirmed without proof', async () => {
   state.invoke.mockRejectedValue(new Error('network interrupted'));
   render(
     <GenericModuleView
+      canInvokeAgent
       meta={{
         ...meta,
         agentKey: 'drishti',
@@ -108,6 +110,7 @@ it('keeps related agents static and shows run state only while a run is in fligh
   state.invoke.mockReturnValue(new Promise((r) => (finish = r)));
   render(
     <GenericModuleView
+      canInvokeAgent
       meta={{
         ...meta,
         agent: 'Vibhaag + Drishti',
@@ -127,4 +130,20 @@ it('keeps related agents static and shows run state only while a run is in fligh
   );
   finish({ latency_ms: 1, ledger_entry_ids: [] });
   await waitFor(() => expect(labels()).toHaveLength(0));
+});
+
+it('keeps discovery readable without offering invocation to a viewer', () => {
+  render(
+    <GenericModuleView
+      meta={{
+        ...meta,
+        agentKey: 'drishti',
+        actionLabel: 'Run discovery',
+        actionHref: undefined,
+        cards: [],
+      }}
+    />,
+  );
+  expect(screen.getByTestId('module-bar')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Run discovery/ })).toBeNull();
 });

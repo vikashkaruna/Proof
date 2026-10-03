@@ -62,7 +62,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 it('refuses invocation when saved assessment results are unavailable', () => {
-  render(<AssessmentClient snapshot={null} />);
+  render(<AssessmentClient snapshot={null} canInvokeAgent />);
   expect(screen.getByTestId('assessment-provenance').textContent).toContain('unavailable');
   expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByTestId('assessment-summary').textContent).toContain(
@@ -74,9 +74,14 @@ it('refuses invocation when saved assessment results are unavailable', () => {
 });
 
 it('shows saved controls without inventing an assessment or exposure when no engagement exists', () => {
-  render(<AssessmentClient snapshot={{ ...snapshot, engagement: null }} />);
+  render(
+    <AssessmentClient snapshot={{ ...snapshot, engagement: null }} canCreate canInvokeAgent />,
+  );
   expect(screen.getByTestId('assessment-provenance').textContent).toContain(
     'No saved assessment exists',
+  );
+  expect(screen.getByRole('link', { name: 'Create an assessment' }).getAttribute('href')).toBe(
+    '/engagements',
   );
   expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByTestId('assessment-summary').textContent).toContain('Not assessed');
@@ -87,7 +92,7 @@ it('shows saved controls without inventing an assessment or exposure when no eng
 
 it('invokes Parikshan only for the saved engagement and shows only a returned ledger reference', async () => {
   state.invoke.mockResolvedValue({ ledger_entry_ids: ['ledger-1'] });
-  render(<AssessmentClient snapshot={snapshot} />);
+  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
   fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
   await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
   expect(state.invoke).toHaveBeenCalledOnce();
@@ -105,7 +110,7 @@ it('invokes Parikshan only for the saved engagement and shows only a returned le
 
 it('keeps failed or ambiguous invocations unconfirmed and does not show a proof reference', async () => {
   state.invoke.mockRejectedValue(new Error('network failed'));
-  render(<AssessmentClient snapshot={snapshot} />);
+  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
   fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
   await waitFor(() =>
     expect(screen.getByTestId('assessment-invocation-error').textContent).toContain(
@@ -130,7 +135,7 @@ it('renders the shared module context outside the heading', () => {
 
 it('labels each pipeline stage through AgentLabel; a finished run is static, not animated', async () => {
   state.invoke.mockResolvedValue({ ledger_entry_ids: ['ledger-1'] });
-  render(<AssessmentClient snapshot={snapshot} />);
+  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
   const stage = (key: string) =>
     screen.getByTestId(`pipeline-${key}`).querySelector('[data-testid="agent-label"]');
   expect(stage('parikshan')?.getAttribute('data-agent')).toBe('parikshan');
@@ -138,4 +143,11 @@ it('labels each pipeline stage through AgentLabel; a finished run is static, not
   await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
   expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
   expect(stage('parikshan')?.getAttribute('data-state')).toBe('idle');
+});
+
+it('keeps the saved assessment readable without an invocation control for viewers', () => {
+  render(<AssessmentClient snapshot={snapshot} />);
+  expect(screen.getByTestId('assessment-provenance').textContent).toContain('Recorded review');
+  expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
+  expect(screen.queryByRole('button', { name: 'Run Parikshan' })).toBeNull();
 });
