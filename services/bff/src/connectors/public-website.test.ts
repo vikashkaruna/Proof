@@ -1,5 +1,5 @@
-import { createServer } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import http, { createServer } from 'node:http';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   checkPublicWebsite,
   fetchPinnedPage,
@@ -118,12 +118,14 @@ describe('public website target boundary', () => {
 describe('pinned HTTP transport', () => {
   const servers: ReturnType<typeof createServer>[] = [];
   afterEach(async () => {
+    vi.restoreAllMocks();
     await Promise.all(
       servers.splice(0).map((server) => new Promise<void>((done) => server.close(() => done()))),
     );
   });
 
   it('connects to the pinned address while preserving the original Host', async () => {
+    const request = vi.spyOn(http, 'request');
     let observedHost = '';
     const server = createServer((req, res) => {
       observedHost = req.headers.host ?? '';
@@ -141,6 +143,7 @@ describe('pinned HTTP transport', () => {
     );
     expect(page.body.toString()).toContain('Observed');
     expect(observedHost).toBe(`public.org:${address.port}`);
+    expect(request.mock.calls[0]?.[1]).toMatchObject({ agent: false });
   });
 
   it('cuts off oversized responses even without Content-Length', async () => {

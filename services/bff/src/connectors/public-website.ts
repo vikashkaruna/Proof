@@ -77,6 +77,9 @@ export function fetchPinnedPage(
           'user-agent': 'AxiomProof-PublicWebsiteCheck/1.0',
         },
         family: 4,
+        // A pooled socket can bypass this request's DNS lookup. Force a fresh
+        // connection so every hop uses the address validated immediately above.
+        agent: false,
         lookup: (_hostname, _options, callback) => callback(null, address, 4),
         timeout: TIMEOUT_MS,
         signal,
