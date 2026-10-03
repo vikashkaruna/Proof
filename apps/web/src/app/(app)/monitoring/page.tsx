@@ -165,7 +165,9 @@ export default async function MonitoringPage() {
         module={moduleBarProps('monitoring')}
         title="Continuous Monitoring & Alerting"
         description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
-        actions={<DispatchAlertsButton tenantId={tenantId} canManage={canManage} />}
+        actions={
+          canManage ? <DispatchAlertsButton tenantId={tenantId} canManage={canManage} /> : undefined
+        }
       />
 
       <StatGrid>
