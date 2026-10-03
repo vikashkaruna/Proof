@@ -13,7 +13,10 @@ export async function createSupabaseServerClient() {
 
   const authCookie = cookieStore
     .getAll()
-    .find((c) => c.name.startsWith('sb-') && c.name.includes('-auth-token') && c.value.length > 0);
+    // Signup also stores `sb-...-auth-token-flow-...-code-verifier` cookies.
+    // Selecting one of those as the session name makes a valid new session
+    // disappear on the following server render.
+    .find((c) => /^sb-.+-auth-token(?:\.\d+)?$/.test(c.name) && c.value.length > 0);
 
   const isLoggedOut = cookieStore.get('axiom_e2e_logged_out')?.value === 'true';
   const userEmail = cookieStore.get('axiom_user_email')?.value || 'founder@axiomminds.ai';
