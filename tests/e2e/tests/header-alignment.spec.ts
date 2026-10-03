@@ -46,6 +46,7 @@ test('module pages and report views use the branded header with one accessible p
       .poll(async () => header.evaluate((element) => getComputedStyle(element).backgroundImage))
       .toBe(referenceGradient);
     await expect(header.getByTestId('module-bar'), route).toBeVisible();
+    await expect(header.getByTestId('module-bar'), route).toContainText(/P[0-5]/);
     await expect(header.locator('[lang="hi"]'), route).toBeVisible();
   }
 

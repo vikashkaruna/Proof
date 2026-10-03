@@ -29,12 +29,6 @@ export function PageHeader({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          {module?.phase && (
-            <span className="inline-flex rounded bg-teal-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-teal-900">
-              <span className="sr-only">Delivery phase </span>
-              {module.phase}
-            </span>
-          )}
           <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h1 className="font-heading text-2xl font-bold tracking-tight text-white md:text-[26px]">
               {title}
@@ -48,7 +42,6 @@ export function PageHeader({
           {module && (
             <ModuleBar
               {...module}
-              phase={undefined}
               titleHi={undefined}
               moduleId={undefined}
               tone="dark"

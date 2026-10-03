@@ -77,6 +77,7 @@ describe('page header with module context', () => {
     expect(markup).toMatch(/<h1[^>]*>Approval queue<\/h1>/);
     expect(markup).toContain('data-testid="module-bar"');
     expect(markup.indexOf('</h1>')).toBeLessThan(markup.indexOf('module-bar'));
+    expect(markup.slice(markup.indexOf('data-testid="module-bar"'))).toContain('P3');
   });
 
   it('is unchanged for pages that give no module context', () => {
