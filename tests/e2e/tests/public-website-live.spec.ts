@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect } from '@playwright/test';
 import { signIn, selectTenant } from '../fixtures';
-import { repoRoot } from '../target';
+import { acceptanceTarget, repoRoot } from '../target';
 
 /** Explicit live-site journey; excluded from ordinary CI and container parity. */
 test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads it', async ({
@@ -10,6 +10,7 @@ test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads i
   browser,
 }) => {
   const reviewDir = resolve(repoRoot, '.axiom-runtime/review/public-website');
+  const label = acceptanceTarget?.environment ?? 'local';
   mkdirSync(reviewDir, { recursive: true, mode: 0o700 });
   await signIn(page, 'owner');
   await selectTenant(page, 'a');
@@ -45,9 +46,9 @@ test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads i
   expect(payload.data.observations.every((entry) => entry.status === 'retrieved')).toBe(true);
   await expect(website.getByText(payload.data.title).first()).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: resolve(reviewDir, 'owner-audit.png'), fullPage: true });
+  await page.screenshot({ path: resolve(reviewDir, `${label}-owner-audit.png`), fullPage: true });
   writeFileSync(
-    resolve(reviewDir, 'axiomminds-audit.json'),
+    resolve(reviewDir, `${label}-axiomminds-audit.json`),
     JSON.stringify(payload.data, null, 2),
     { mode: 0o600 },
   );
@@ -70,7 +71,7 @@ test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads i
   expect((await refusal.json()) as unknown).toEqual({ error: { code: 'invalid_url' } });
   await expect(persisted.getByText('Enter a valid public HTTP or HTTPS URL.')).toBeVisible();
   writeFileSync(
-    resolve(reviewDir, 'refusal.json'),
+    resolve(reviewDir, `${label}-refusal.json`),
     JSON.stringify({ target: 'http://127.0.0.1/', status: refusal.status(), code: 'invalid_url' }),
     { mode: 0o600 },
   );
@@ -84,7 +85,10 @@ test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads i
     await expect(viewerAudit.getByText(payload.data.title).first()).toBeVisible();
     await expect(viewerAudit.getByRole('button', { name: 'Audit public website' })).toHaveCount(0);
     await viewerPage.evaluate(() => window.scrollTo(0, 0));
-    await viewerPage.screenshot({ path: resolve(reviewDir, 'viewer-audit.png'), fullPage: true });
+    await viewerPage.screenshot({
+      path: resolve(reviewDir, `${label}-viewer-audit.png`),
+      fullPage: true,
+    });
   } finally {
     await viewerPage.close();
   }

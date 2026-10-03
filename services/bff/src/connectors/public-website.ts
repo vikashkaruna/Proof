@@ -153,8 +153,24 @@ const plain = (html: string) =>
       .trim(),
   ).slice(0, 300);
 
+function attribute(attributes: string, name: string): string | undefined {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(
+    attributes,
+  );
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
 function extract(html: string, base: URL) {
   const safeHtml = html.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  let documentBase = base;
+  const baseHref = attribute(/<base\b([^>]*)>/i.exec(safeHtml)?.[1] ?? '', 'href');
+  if (baseHref) {
+    try {
+      documentBase = new URL(decode(baseHref), base);
+    } catch {
+      // A malformed base is ignored by this limited extractor.
+    }
+  }
   const title = plain(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(safeHtml)?.[1] ?? '');
   const headings = [...safeHtml.matchAll(/<h[1-2]\b[^>]*>([\s\S]*?)<\/h[1-2]>/gi)]
     .slice(0, 12)
@@ -163,10 +179,10 @@ function extract(html: string, base: URL) {
   const links: { label: string; url: string }[] = [];
   const linksPerKind = new Map<AuditKind, number>();
   for (const match of safeHtml.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
-    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(match[1] ?? '')?.[1];
+    const href = attribute(match[1] ?? '', 'href');
     if (!href) continue;
     try {
-      const target = new URL(decode(href), base);
+      const target = new URL(decode(href), documentBase);
       if (!['http:', 'https:'].includes(target.protocol)) continue;
       const label = plain(match[2] ?? '');
       const kind = auditKind({ label, url: target.href });

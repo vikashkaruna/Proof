@@ -76,7 +76,7 @@ it('checks a public URL through the tenant-scoped BFF and shows the retrieved co
   await waitFor(() => expect(screen.getByText('How we use data')).toBeTruthy());
   expect(screen.getByText('Public website audit recorded.')).toBeTruthy();
   expect(screen.getByText(/limited public-content audit/)).toBeTruthy();
-  expect(screen.getByText(/no same-site link found on the starting page/)).toBeTruthy();
+  expect(screen.getByText(/no eligible same-site link found on the starting page/)).toBeTruthy();
   expect(screen.getByText(/Contact us/)).toBeTruthy();
   const request = fetcher.mock.calls[1];
   expect(request?.[0]).toBe('/api/bff/v1/public-website-checks');

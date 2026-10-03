@@ -76,7 +76,7 @@ test('owner can audit public content and inspect a recorded result after reload'
   await expect(website.getByText(/Contact: https:\/\/example.com\/contact/)).toBeVisible();
   await expect(website.getByText(/Content SHA-256/)).toBeVisible();
   await expect(website).toContainText('limited public-content audit');
-  await expect(website).toContainText('no same-site link found on the starting page');
+  await expect(website).toContainText('no eligible same-site link found on the starting page');
   expect(submitted).toBe(true);
   await expect(website.getByRole('link', { name: /Contact/ })).toHaveCount(0);
   await page.reload();

@@ -159,6 +159,37 @@ describe('public website target boundary', () => {
     expect(checked.observations[0]).toEqual({ kind: 'privacy', status: 'retrieved' });
   });
 
+  it('resolves unquoted links against the HTML base and ignores data-href lookalikes', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', signal, {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        return url.pathname === '/'
+          ? html(
+              '<base href="/legal/"><a data-href="/contact">Contact</a><a href=privacy>Privacy policy</a>',
+            )
+          : html('<title>Privacy</title>');
+      },
+    });
+    expect(requested).toEqual(['https://public.org/', 'https://public.org/legal/privacy']);
+    expect(checked.observations).toContainEqual({ kind: 'privacy', status: 'retrieved' });
+    expect(checked.observations).toContainEqual({ kind: 'contact', status: 'not_linked' });
+  });
+
+  it('does not follow relative links when an HTML base points off-site', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', signal, {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        return html('<base href="https://other.org/"><a href=privacy>Privacy</a>');
+      },
+    });
+    expect(requested).toEqual(['https://public.org/']);
+    expect(checked.observations[0]).toEqual({ kind: 'privacy', status: 'not_linked' });
+  });
+
   it('revalidates every redirect and never fetches a private destination', async () => {
     let requests = 0;
     await expect(

@@ -62,7 +62,7 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
                 {observation.status === 'retrieved'
                   ? 'retrieved from this site'
                   : observation.status === 'not_linked'
-                    ? 'no same-site link found on the starting page'
+                    ? 'no eligible same-site link found on the starting page'
                     : 'linked page could not be retrieved'}
               </li>
             ))}

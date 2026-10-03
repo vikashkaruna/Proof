@@ -255,7 +255,9 @@ describe('connector registration API', () => {
     expect(await response.json()).toMatchObject({ error: { code: 'connector_unavailable' } });
   });
   it('refuses readiness to roles without posture-read access and malformed connector ids', async () => {
-    expect((await app(UserRole.AGENT).request(`/v1/connectors/${USER}/readiness`)).status).toBe(403);
+    expect((await app(UserRole.AGENT).request(`/v1/connectors/${USER}/readiness`)).status).toBe(
+      403,
+    );
     expect((await app().request('/v1/connectors/not-a-uuid/readiness')).status).toBe(400);
   });
 });
