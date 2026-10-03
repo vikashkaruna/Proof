@@ -6,6 +6,7 @@ export default async function DataMapPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'datamap',
         title: 'Data Map & RoPA',
         hi: 'डेटा मानचित्र',
         phase: 'P1',

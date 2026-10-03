@@ -6,6 +6,7 @@ export default async function PartnerPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'partner',
         title: 'Partner / White-label Portal',
         hi: 'भागीदार एवं डेटा प्रोसेसर पोर्टल',
         phase: 'P4',

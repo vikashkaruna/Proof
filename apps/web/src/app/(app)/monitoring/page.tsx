@@ -14,6 +14,7 @@ import {
 } from '@axiom/ui';
 import { formatDateTime, relativeTime } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
+import { moduleBarProps } from '@/lib/module-bar';
 import { computeMonitoringHealth, isScheduleOverdue } from '@/lib/execution-view';
 import { DispatchAlertsButton, DismissAlertButton } from './alert-actions';
 
@@ -134,6 +135,7 @@ export default async function MonitoringPage() {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
+          module={moduleBarProps('monitoring')}
           title="Continuous Monitoring"
           description="Scheduled re-discovery, drift detections and the health of the monitoring itself."
         />
@@ -160,6 +162,7 @@ export default async function MonitoringPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <PageHeader
+          module={moduleBarProps('monitoring')}
           title="Continuous Monitoring & Alerting"
           description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
         />

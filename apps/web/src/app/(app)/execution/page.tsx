@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Capability } from '@axiom/types';
 import { PageHeader, Stat, StatGrid } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
+import { moduleBarProps } from '@/lib/module-bar';
 import { isBatchOpen, needsOperatorAttention } from '@/lib/execution-view';
 import {
   BatchCard,
@@ -102,6 +103,7 @@ export default async function ExecutionPage() {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
+          module={moduleBarProps('execution')}
           title="Execution & Rollback"
           description="Batches, per-action outcomes, rollback state and reconciliation verdicts, as recorded by the executor."
         />
@@ -141,6 +143,7 @@ export default async function ExecutionPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('execution')}
         title="Execution & Rollback"
         description="What Karya actually did: batches with per-action outcomes, halts and rollbacks, Parikshan's post-execution verification, and the signed maker-checker reconciliation. Actions execute only against a signed approval token — this page shows the recorded outcome."
         actions={

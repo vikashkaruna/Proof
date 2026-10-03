@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { ModuleBarFor } from '@/lib/module-bar';
 import {
   actionBody,
   availableActions,
@@ -116,6 +117,7 @@ export function DsarClient({
           )}
         </div>
       </header>
+      <ModuleBarFor module="dsar" />
       {!canManage && !loadError && (
         <p className="text-sm text-slate-600">
           Read-only access. Managing requests requires estate.manage permission.

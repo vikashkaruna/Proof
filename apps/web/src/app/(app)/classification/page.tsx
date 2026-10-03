@@ -29,6 +29,7 @@ export default async function ClassificationPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'classification',
         title: 'Data Classification',
         hi: 'वर्गीकरण',
         phase: 'P1',

@@ -16,6 +16,7 @@ import {
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
 import { AgentIcon, AgentLabel } from '@axiom/ui';
+import { ModuleBarFor } from '@/lib/module-bar';
 import { BoardWorkflow } from './board-workflow';
 import { AuditorWorkflow } from './auditor-workflow';
 
@@ -122,6 +123,7 @@ function TenantReportsClient(access: Access) {
           </p>
         </div>
       </header>
+      <ModuleBarFor module="reports" />
 
       <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
         {(access.canRelease || access.canRequestBoard) && (

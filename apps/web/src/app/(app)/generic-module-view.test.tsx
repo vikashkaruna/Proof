@@ -17,9 +17,10 @@ vi.mock('next/link', () => ({
 }));
 vi.mock('@axiom/ui', async () => {
   const real = await vi.importActual<typeof import('@axiom/ui')>('@axiom/ui');
-  return { AgentLabel: real.AgentLabel };
+  return { AgentLabel: real.AgentLabel, ModuleBar: real.ModuleBar };
 });
 const meta: GenericModuleMeta = {
+  moduleKey: 'discovery',
   title: 'Recorded module',
   hi: 'मॉड्यूल',
   phase: 'P1',
@@ -38,6 +39,7 @@ afterEach(cleanup);
 
 it('hides illustrative metrics for a real tenant and makes no unverified health or region claim', () => {
   render(<GenericModuleView meta={meta} />);
+  expect(screen.getByTestId('module-bar').textContent).toContain('Discover & Classify');
   expect(screen.getByRole('link', { name: /Open saved assessment/ }).getAttribute('href')).toBe(
     '/assessment',
   );
@@ -97,7 +99,7 @@ it('leaves an ambiguous invocation unconfirmed without proof', async () => {
   expect(state.refresh).not.toHaveBeenCalled();
 });
 
-it('shows the agent with AgentLabel, animated only while its own run is in flight', async () => {
+it('keeps related agents static and shows run state only while a run is in flight', async () => {
   let finish: (v: unknown) => void = () => {};
   state.invoke.mockReturnValue(new Promise((r) => (finish = r)));
   render(
@@ -112,15 +114,13 @@ it('shows the agent with AgentLabel, animated only while its own run is in fligh
       }}
     />,
   );
-  const labels = () => screen.getAllByTestId('agent-label');
-  expect(labels().map((l) => l.getAttribute('data-agent'))).toEqual(['vibhaag', 'drishti']);
-  expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']);
+  const labels = () => screen.queryAllByTestId('agent-label');
+  expect(screen.getByTestId('related-agents').textContent).toContain('Discovery');
+  expect(labels()).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: /Run it/ }));
   await waitFor(() =>
     expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['working', 'idle']),
   );
   finish({ latency_ms: 1, ledger_entry_ids: [] });
-  await waitFor(() =>
-    expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']),
-  );
+  await waitFor(() => expect(labels()).toHaveLength(0));
 });

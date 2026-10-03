@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ModuleBarFor } from '@/lib/module-bar';
 
 /**
  * W8.2 — breach operations, the real surface.
@@ -156,6 +157,7 @@ export function BreachWorkflowClient({
           </button>
         </div>
       </div>
+      <ModuleBarFor module="breach" />
 
       {error ? (
         <div

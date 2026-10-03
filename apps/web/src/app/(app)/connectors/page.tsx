@@ -1,6 +1,7 @@
 import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
+import { moduleBarProps } from '@/lib/module-bar';
 import { ConnectorsClient, type ConnectorRow, type ConnectorSystem } from './connectors-client';
 export const dynamic = 'force-dynamic';
 export default async function ConnectorsPage() {
@@ -26,6 +27,7 @@ export default async function ConnectorsPage() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('connectors')}
         title="Connectors"
         description="Register access paths for estate systems. Enabling a registration does not connect to a system or grant agent access."
       />

@@ -14,6 +14,7 @@ import {
 } from '@axiom/ui';
 import { formatDateTime, relativeTime, truncateHash } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +138,7 @@ export default async function PoliciesPage() {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
+          module={moduleBarProps('policies')}
           title="Standing Approval Policies"
           description="Human-authored, expiring policies the engine evaluates actions against — through the approval gate, never around it."
         />
@@ -160,6 +162,7 @@ export default async function PoliciesPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('policies')}
         title="Standing Approval Policies"
         description="A standing policy is authored by a human and approved by a different human, is bounded in scope, and expires. When the policy engine lands it will issue scoped approval tokens through the existing approval gate for in-policy actions and escalate everything else — it never bypasses the dry-run, rollback and token checks (BR-1/BR-2)."
       />

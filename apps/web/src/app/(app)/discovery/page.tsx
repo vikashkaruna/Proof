@@ -29,6 +29,7 @@ export default async function DiscoveryPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'discovery',
         title: 'Data Discovery',
         hi: 'डेटा खोज',
         phase: 'P1',

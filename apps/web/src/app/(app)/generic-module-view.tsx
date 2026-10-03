@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { AgentLabel } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
+import { ModuleBarFor } from '@/lib/module-bar';
+import type { ModuleKey } from '@/lib/module-meta';
 
 export interface ModuleCardRow {
   t: string;
@@ -33,6 +35,7 @@ export interface ModuleTelemetryEvent {
 }
 
 export interface GenericModuleMeta {
+  moduleKey: ModuleKey;
   title: string;
   hi: string;
   phase: string;
@@ -117,12 +120,9 @@ export function GenericModuleView({
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex-1 min-w-[280px]">
-            {/* Phase, Agent, Autonomy Badges */}
+            {/* The module bar carries phase and related agents; show live agent state only while running. */}
             <div className="mb-2.5 flex flex-wrap items-center gap-2">
-              <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-bold text-[#04322d] uppercase tracking-wider">
-                {meta.phase}
-              </span>
-              {meta.agent && (
+              {isExecuting && meta.agent && (
                 <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
                   <span>Agent ·</span>
                   {meta.agent.includes('+') ? (
@@ -170,6 +170,12 @@ export function GenericModuleView({
               </h1>
               <span className="font-heading text-lg text-[#0FB5A5] font-normal">{meta.hi}</span>
             </div>
+            <ModuleBarFor
+              module={meta.moduleKey}
+              tone="dark"
+              omit={['hi', 'moduleId']}
+              className="mt-3"
+            />
 
             {/* Description */}
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">{meta.desc}</p>

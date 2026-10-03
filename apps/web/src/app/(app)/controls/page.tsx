@@ -63,6 +63,7 @@ export default async function ControlLibraryPage({
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'controls',
         title: 'Control Library',
         hi: 'नियंत्रण संग्रह',
         phase: 'P0',
