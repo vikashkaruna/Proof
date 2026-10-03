@@ -576,17 +576,15 @@ it('keeps the working reports destination active for a reader who requests a hid
   const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
   expect(within(nav).queryByRole('link', { name: /Statutory Proof Dossiers/ })).toBeNull();
   expect(
-    within(nav).getByRole('link', { name: /Working Reports & Registers/ }).getAttribute(
-      'aria-current',
-    ),
+    within(nav)
+      .getByRole('link', { name: /Working Reports & Registers/ })
+      .getAttribute('aria-current'),
   ).toBe('page');
   expect(document.querySelector('header')?.textContent).toContain('Working Reports & Registers');
 });
 
 it.each([
   ['/portal', 'Operate', 'Client Portal'],
-  ['/engagements', 'Assess', 'Engagements'],
-  ['/engagements/recorded-id', 'Assess', 'Engagements'],
   ['/onboarding', 'Overview', 'Enterprise Onboarding'],
 ])('shows the %s route context in the shell header', (path, breadcrumb, title) => {
   state.pathname = path;
@@ -596,3 +594,20 @@ it.each([
   expect(within(header).getByText(title)).toBeTruthy();
   expect(within(header).queryByText('Dashboard')).toBeNull();
 });
+
+it.each(['/engagements', '/engagements/recorded-id'])(
+  'selects Engagements navigation and title for %s',
+  (path) => {
+    state.pathname = path;
+    render(<AppShell {...props} capabilities={['posture.read']} />);
+    const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
+    expect(
+      within(nav)
+        .getByRole('link', { name: /Engagements/ })
+        .getAttribute('aria-current'),
+    ).toBe('page');
+    const header = document.querySelector('header')!;
+    expect(within(header).getByText('Assess · Parikshan')).toBeTruthy();
+    expect(within(header).getByText('Engagements')).toBeTruthy();
+  },
+);

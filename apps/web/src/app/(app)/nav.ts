@@ -94,6 +94,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         capability: Capability.POSTURE_READ,
       },
       {
+        route: '/engagements',
+        en: 'Engagements',
+        hi: 'आकलन संलग्नताएँ',
+        phase: 'P0',
+        capability: Capability.POSTURE_READ,
+      },
+      {
         route: '/controls',
         en: 'Control Library',
         hi: 'नियंत्रण संग्रह',

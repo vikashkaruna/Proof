@@ -190,6 +190,14 @@ describe('every persona', () => {
     UserRole.PARTNER,
   ];
 
+  it('offers engagement records to every seated reader and to no agent', () => {
+    for (const role of personas) {
+      expect(routesFor(role), `${role} should see engagements`).toContain('/engagements');
+    }
+    expect(routesFor(UserRole.AGENT)).not.toContain('/engagements');
+    expect(visibleRoutes([])).not.toContain('/engagements');
+  });
+
   it('is offered settings, so a quarantined user can always reach enrolment', () => {
     for (const role of personas) {
       expect(routesFor(role), `${role} must reach /settings`).toContain('/settings');

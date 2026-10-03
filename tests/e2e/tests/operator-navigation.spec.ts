@@ -16,7 +16,9 @@ test('a viewer can inspect the approval queue without a Pramaan destination', as
     'aria-current',
     'page',
   );
-  await expect(page.locator('header').first().getByText('Working Reports & Registers')).toBeVisible();
+  await expect(
+    page.locator('header').first().getByText('Working Reports & Registers'),
+  ).toBeVisible();
 });
 
 test('an owner reaches Pramaan and standalone routes show their own shell titles', async ({
@@ -36,5 +38,11 @@ test('an owner reaches Pramaan and standalone routes show their own shell titles
   ] as const) {
     await page.goto(route);
     await expect(page.locator('header').first().getByText(title, { exact: true })).toBeVisible();
+    if (route === '/engagements') {
+      await expect(page.getByRole('link', { name: /Engagements/ }).first()).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    }
   }
 });
