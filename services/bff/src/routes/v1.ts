@@ -3806,11 +3806,21 @@ export function v1Routes(deps: Deps) {
       const code = outcome.data.error;
       const status =
         code === 'library_not_published' ? 503 : code === 'tenant_quota_exceeded' ? 409 : 403;
+      const messages = {
+        onboarding_not_entitled:
+          'Your account has no active organization-creation grant. Contact your administrator to request one.',
+        tier_not_entitled:
+          'The selected subscription tier is not enabled for your account. Contact your administrator.',
+        tenant_quota_exceeded:
+          'Your organization limit has been reached. Contact your administrator.',
+        library_not_published:
+          'Organization setup is temporarily unavailable because the control library is not published. Contact support.',
+      };
       return c.json(
         {
           error: {
             code,
-            message: 'The onboarding prerequisites are not satisfied. Contact your administrator.',
+            message: messages[code],
           },
         },
         status,

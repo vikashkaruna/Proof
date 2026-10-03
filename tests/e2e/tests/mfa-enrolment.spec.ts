@@ -285,10 +285,31 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
   const codes = await readRecoveryCodes(page);
   await page.getByRole('button', { name: /I have saved them/ }).click();
   const verifyRecovery = async (target: Page, code: string) => {
-    await target.goto('/verify');
+    // The server-rendered input can be visible before React attaches its
+    // handler. Clicking in that interval loses a one-use recovery code without
+    // making any request, so wait for hydration before filling it.
+    try {
+      await target.goto('/verify', { waitUntil: 'domcontentloaded' });
+    } catch (cause) {
+      if (!(cause instanceof Error) || !cause.message.includes('net::ERR_ABORTED')) throw cause;
+      await target.waitForLoadState('domcontentloaded');
+      await target.goto('/verify', { waitUntil: 'domcontentloaded' });
+    }
+    await target.locator('#code').waitFor({ state: 'visible' });
+    await target.waitForFunction(() => {
+      const input = document.querySelector('#code');
+      return input && Object.keys(input).some((key) => key.startsWith('__reactProps$'));
+    });
     await target.fill('#code', code);
-    await target.getByRole('button', { name: /^Verify$/ }).click();
-    // The dev-mode server action can exceed the default 5s on a cold compile.
+    const verifyButton = target.getByRole('button', { name: /^Verify$/ });
+    await expect(verifyButton).toBeEnabled();
+    const response = target.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === 'POST' &&
+        /\/api\/bff\/v1\/mfa\/challenge\/[^/]+\/verify$/.test(new URL(candidate.url()).pathname),
+    );
+    await verifyButton.click();
+    expect((await response).status()).toBe(200);
     await expect(target).toHaveURL(/\/dashboard/, { timeout: 20_000 });
   };
   const protectedApi = (target: Page) =>
