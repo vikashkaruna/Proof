@@ -71,3 +71,26 @@ run "malformed_runner_refused" {
   }
   expect_failures = [var.cloud_sql_authorized_networks]
 }
+
+run "cloud_run_uses_direct_vpc_egress" {
+  command = plan
+  assert {
+    condition = alltrue([
+      for svc in [
+        google_cloud_run_v2_service.bff,
+        google_cloud_run_v2_service.supabase_auth,
+        google_cloud_run_v2_service.supabase_rest,
+        ] : (
+        svc.template[0].execution_environment == "EXECUTION_ENVIRONMENT_GEN2" &&
+        length(svc.template[0].vpc_access[0].network_interfaces) == 1 &&
+        svc.template[0].vpc_access[0].egress == "PRIVATE_RANGES_ONLY" &&
+        svc.template[0].vpc_access[0].connector == null
+      )
+    ])
+    error_message = "Services that reach Cloud SQL must use Direct VPC egress on the dedicated subnet, gen2, private ranges only, and no connector."
+  }
+  assert {
+    condition     = google_compute_subnetwork.run_egress.private_ip_google_access == true && endswith(google_compute_subnetwork.run_egress.ip_cidr_range, "/24")
+    error_message = "The Cloud Run egress subnet must keep Private Google Access and a /24 of headroom."
+  }
+}

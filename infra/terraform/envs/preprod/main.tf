@@ -1,5 +1,5 @@
 # ==============================================================================
-# Axiom Proof — GCP Preprod Networking (VPC & Serverless Connector)
+# Axiom Proof — GCP Preprod Networking (VPC, Cloud Run Direct VPC egress)
 # ==============================================================================
 
 # Enable required Google APIs
@@ -10,7 +10,6 @@ resource "google_project_service" "apis" {
     "storage.googleapis.com",
     "secretmanager.googleapis.com",
     "artifactregistry.googleapis.com",
-    "vpcaccess.googleapis.com",
     "compute.googleapis.com",
     "servicenetworking.googleapis.com",
   ], local.workload_kms_required ? ["cloudkms.googleapis.com"] : []))
@@ -40,23 +39,26 @@ resource "google_compute_subnetwork" "subnet" {
   private_ip_google_access = true
 }
 
-# Serverless VPC Access Connector for Cloud Run to access Cloud SQL privately
-resource "google_vpc_access_connector" "connector" {
-  name          = "axiom-${var.environment}-conn"
-  region        = var.region
-  network       = google_compute_network.vpc.name
-  ip_cidr_range = "10.10.16.0/28"
-  min_instances = 2
-  max_instances = 5
-  machine_type  = "e2-micro"
-  depends_on    = [google_project_service.apis]
+# Dedicated subnet for Cloud Run Direct VPC egress. Replaces the Serverless VPC
+# Access connector: no connector instances to size, patch or pay for, lower
+# latency and higher throughput, and the same private path to Cloud SQL.
+# A /24 leaves room for rolling revisions: Cloud Run reserves addresses in
+# blocks of 16 per service and keeps a retired revision's addresses for up to 20
+# minutes. Private Google Access stays on so Cloud Run, Artifact Registry and
+# Secret Manager remain reachable without a public path.
+resource "google_compute_subnetwork" "run_egress" {
+  name                     = "axiom-${var.environment}-run-egress-${var.region}"
+  ip_cidr_range            = local.run_egress_cidr
+  region                   = var.region
+  network                  = google_compute_network.vpc.id
+  private_ip_google_access = true
+}
 
-  lifecycle {
-    ignore_changes = [
-      max_throughput,
-      min_throughput,
-    ]
-  }
+locals {
+  # Also the source range to allow in workload-VM controller firewalls. Rules
+  # match this range, not network tags: tags are caller-editable, which is why
+  # the workload-vms module matches service accounts instead.
+  run_egress_cidr = "10.10.16.0/24"
 }
 
 # Private Service Connection for Cloud SQL

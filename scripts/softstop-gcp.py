@@ -23,7 +23,8 @@ What it touches, and how it is reversed:
 
 Order: stop = Cloud Run, VMs, then SQL. start = SQL, VMs, then Cloud Run.
 
-It cannot pause the Serverless VPC Access connector, Artifact Registry images,
+Cloud Run uses Direct VPC egress (no connector), so nothing in the network layer
+bills while idle. It cannot pause Cloud SQL storage, Artifact Registry images,
 Secret Manager secrets or the S3 evidence bucket; `status` lists them as the
 residual cost. Production is refused outright.
 
@@ -47,7 +48,6 @@ LABEL_MIN = "axiom-softstop-min"
 LABEL_STOPPED = "axiom-softstopped"
 PROTECTED_ENVS = {"production", "prod"}
 RESIDUAL_COST = (
-    "Serverless VPC Access connector (cannot be paused)",
     "Cloud SQL storage and backups (instance is stopped, disk is kept)",
     "Compute disks of stopped VMs",
     "Artifact Registry images and Secret Manager secrets",

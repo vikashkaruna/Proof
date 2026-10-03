@@ -65,5 +65,20 @@ class AuditProdTests(unittest.TestCase):
             date.fromisoformat(entry["expires"])
 
 
+class TrivyIgnoreParityTests(unittest.TestCase):
+    def test_every_allowlisted_id_and_alias_is_in_trivyignore_with_the_same_expiry(self):
+        import json
+
+        allow = json.loads((ROOT / "security" / "audit-allowlist.json").read_text())["allowed"]
+        lines = {
+            line.split()[0]: line.split("exp:")[1].strip()
+            for line in (ROOT / ".trivyignore").read_text().splitlines()
+            if "exp:" in line and not line.startswith("#")
+        }
+        for entry in allow:
+            for ident in [entry["ghsa"], *entry.get("aliases", [])]:
+                self.assertEqual(lines.get(ident), entry["expires"], ident)
+
+
 if __name__ == "__main__":
     unittest.main()

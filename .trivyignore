@@ -3,3 +3,4 @@
 # braces <=3.0.3 denial of service: no patched release exists; reached only through
 # tailwindcss's build-time glob handling with our own patterns.
 GHSA-vfj7-8cjw-p6xm exp:2026-11-02
+CVE-2026-93687 exp:2026-11-02
