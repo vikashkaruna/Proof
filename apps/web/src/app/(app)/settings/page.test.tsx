@@ -31,6 +31,8 @@ vi.mock('next/link', () => ({
 it('shows only known identity and leaves deployment/storage assertions unverified', async () => {
   const view = renderToStaticMarkup(await SettingsPage());
   expect(view).toContain('reader@example.com');
+  expect(view).toContain('href="/settings/security"');
+  expect(view).toContain('Manage authenticator and recovery codes');
   expect(view).toContain('Not provided');
   expect(view).toContain('Unverified in this view');
   expect(view).toContain('Verify with the exact stored object version');

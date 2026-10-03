@@ -83,6 +83,12 @@ export default async function SettingsPage() {
               </span>
             </div>
           </div>
+          <Link
+            href="/settings/security"
+            className="mt-4 inline-flex text-sm font-medium text-teal-700 underline underline-offset-2 focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+          >
+            Manage authenticator and recovery codes
+          </Link>
         </div>
 
         {/* Security & Sovereignty Card */}

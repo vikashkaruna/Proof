@@ -35,6 +35,17 @@ import {
 
 const SECURITY_PAGE = '/settings/security';
 
+/** A redirect still committing after sign-in can abort the next document load. */
+async function openSecurity(page: Page): Promise<void> {
+  try {
+    await page.goto(SECURITY_PAGE, { waitUntil: 'domcontentloaded' });
+  } catch (cause) {
+    if (!(cause instanceof Error) || !cause.message.includes('net::ERR_ABORTED')) throw cause;
+    await page.waitForLoadState('domcontentloaded');
+    await page.goto(SECURITY_PAGE, { waitUntil: 'domcontentloaded' });
+  }
+}
+
 /** The setup key the enrolment panel shows, which is the new TOTP secret. */
 async function readSetupKey(page: Page): Promise<string> {
   const key = page.locator('#setupKey');
@@ -89,7 +100,7 @@ test.describe('enrolling a first authenticator', () => {
     const who = await createMfaAccount('enrol');
     await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
 
     // The starting state has to be real, or "enrolment succeeded" would also
     // be true of an account that was already enrolled.
@@ -116,7 +127,7 @@ test.describe('replacing an authenticator with the one you hold', () => {
     const who = await createMfaAccount('replace-wrong', { withFactor: true });
     await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
     await expect(page.locator('body')).toContainText('Active', { timeout: 20_000 });
 
     await submitReplacementCode(page, '000000');
@@ -132,7 +143,7 @@ test.describe('replacing an authenticator with the one you hold', () => {
     const who = await createMfaAccount('replace-totp', { withFactor: true });
     await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
 
     await submitReplacementCode(page, generateTotp(who.totpSecret!));
 
@@ -151,7 +162,7 @@ test.describe('replacing an authenticator with the one you hold', () => {
 
     // The retired authenticator must stop satisfying a step-up. This is the
     // assertion that distinguishes a replacement from adding a second device.
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
     await submitReplacementCode(page, generateTotp(who.totpSecret!));
     await expect(page.locator('#setupKey')).toHaveCount(0, { timeout: 20_000 });
   });
@@ -166,7 +177,7 @@ test.describe.serial('replacing an authenticator you have lost', () => {
     credentials = who;
     await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
 
     // Enrol through the UI, because recovery codes only exist in readable
     // form at activation — the seed cannot hand us one.
@@ -190,7 +201,7 @@ test.describe.serial('replacing an authenticator you have lost', () => {
   test('the spent recovery code cannot be used a second time', async ({ page }) => {
     await signInAs(page, credentials.email, credentials.password);
     await selectTenant(page, 'a');
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
 
     await submitReplacementCode(page, recoveryCodes[0]!);
 
@@ -205,7 +216,7 @@ test.describe('revocation and login quarantine', () => {
   test('wrong revocation proof keeps the authenticator active', async ({ page }) => {
     const who = await createMfaAccount('revoke-wrong', { withFactor: true });
     await signInAs(page, who.email, who.password);
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
     await page.getByRole('button', { name: /^Revoke authenticator$/ }).click();
     await expect(page.getByTestId('mfa-revoke-step-up')).toBeVisible();
     await page.fill('#stepUpCode', 'not-a-recovery-code');
@@ -220,7 +231,7 @@ test.describe('revocation and login quarantine', () => {
   }) => {
     const who = await createMfaAccount('revoke');
     await signInAs(page, who.email, who.password);
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
     await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
     await activateWith(page, await readSetupKey(page));
     const codes = await readRecoveryCodes(page);
@@ -279,7 +290,7 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
   const who = await createMfaAccount('recovery-sessions', { role: 'founder' });
   await signInAs(page, who.email, who.password);
   await selectTenant(page, 'a');
-  await page.goto(SECURITY_PAGE);
+  await openSecurity(page);
   await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
   await activateWith(page, await readSetupKey(page));
   const codes = await readRecoveryCodes(page);
@@ -323,7 +334,7 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
     await verifyRecovery(second, codes[1]!);
     expect((await protectedApi(page)).status()).toBe(200);
     expect((await protectedApi(second)).status()).toBe(200);
-    await page.goto(SECURITY_PAGE);
+    await openSecurity(page);
     await page.getByRole('button', { name: /^Replace authenticator$/ }).click();
     await expect(page.getByTestId('mfa-replace-step-up')).toContainText(
       'activating the replacement ends all existing MFA verifications',
