@@ -222,11 +222,14 @@ export function ConnectorsClient({
       <section aria-label="Available connector options" className="space-y-3">
         <h2 className="text-lg font-semibold text-indigo-900">Available connector options</h2>
         <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-sm">
-          <strong className="block text-indigo-900">Public website content · available now</strong>
+          <strong className="block text-indigo-900">Public website content · self-service</strong>
           <p className="mt-1 text-slate-700">
             Checks one public HTML page and saves its title, headings, relevant links and content
             hash. Owners and admins can run it; tenant members with posture access can read the
             history. It does not crawl a site or certify compliance.
+          </p>
+          <p className="mt-1 text-slate-700">
+            Requires permitted outbound access to the public website.
           </p>
           <a
             href="#public-website-check"
