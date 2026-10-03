@@ -206,7 +206,8 @@ class SoftStopTests(unittest.TestCase):
         self.run_softstop("stop")
         result = self.run_softstop("status")
         self.assertIn("State: SOFT-STOPPED", result.stdout)
-        self.assertIn("VPC Access connector", result.stdout)
+        self.assertIn("Cloud SQL storage and backups", result.stdout)
+        self.assertNotIn("connector", result.stdout.lower())
 
     def test_no_objects_for_the_environment_is_an_error_not_a_silent_success(self):
         result = self.run_softstop("stop", "nosuchenv")
@@ -228,12 +229,44 @@ class OpsWrapperTests(unittest.TestCase):
         base = {k: v for k, v in os.environ.items() if k not in ("GCP_PROJECT_ID", "GCP_REGION", "ENVIRONMENT", "AXIOM_ENV_FILE")}
         return subprocess.run(["bash", str(OPS), *args], capture_output=True, text=True, env={**base, **(env or {})}, stdin=subprocess.DEVNULL)
 
-    def test_production_and_onprem_are_refused_for_every_command(self):
-        for name in ("production", "prod", "onprem"):
-            for command in ("deploy", "build", "stop", "start"):
+    def test_production_is_refused_for_every_command(self):
+        for name in ("production", "prod"):
+            for command in ("deploy", "build", "stop", "start", "status"):
                 result = self.ops(command, "--env", name)
                 self.assertNotEqual(result.returncode, 0, (name, command))
                 self.assertIn("not driven by this tool", result.stderr)
+
+    def test_onprem_and_all_only_allow_the_soft_closure_commands(self):
+        for name in ("onprem", "all"):
+            for command in ("deploy", "build"):
+                result = self.ops(command, "--env", name)
+                self.assertNotEqual(result.returncode, 0, (name, command))
+        self.assertIn("only for stop, start and status", self.ops("deploy", "--env", "all").stderr)
+
+    def test_all_walks_every_nonprod_env_that_has_a_file_and_skips_the_rest(self):
+        root = self.tmpdir / "root"
+        root.mkdir()
+        (root / ".env.preprod").write_text("ENVIRONMENT=preprod\nGCP_PROJECT_ID=p\nGCP_REGION=asia-south1\n")
+        (root / ".env.staging").write_text("ENVIRONMENT=staging\n")
+        (root / ".env.production").write_text("ENVIRONMENT=production\nGCP_PROJECT_ID=prod-proj\nGCP_REGION=asia-south1\n")
+        stub = self.tmpdir / "gcloud"
+        stub.write_text(FAKE_GCLOUD)
+        stub.chmod(0o755)
+        state = self.tmpdir / "state.json"
+        state.write_text(json.dumps(initial_state()))
+        result = self.ops(
+            "stop", "--env", "all", "--dry-run",
+            env={"AXIOM_ENV_SEARCH_ROOT": str(root), "AXIOM_GCLOUD": str(stub), "STUB_STATE": str(state)},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        out = result.stdout
+        self.assertIn("== stop preprod", out)
+        self.assertIn("== stop staging", out)
+        self.assertIn("local: no env file, skipped", out)
+        self.assertIn("onprem: no env file, skipped", out)
+        self.assertNotIn("prod-proj", out)
+        self.assertNotIn("stop production", out)
+        self.assertNotIn("delete", " ".join(sum(json.loads(state.read_text())["log"], [])))
 
     def test_env_is_required_and_must_be_known(self):
         self.assertNotEqual(self.ops("deploy").returncode, 0)
@@ -285,6 +318,28 @@ class OpsWrapperTests(unittest.TestCase):
         for env in ("local", "staging", "preprod"):
             self.assertFalse(ignored(f".env.{env}.example"), f".env.{env}.example must be tracked")
             self.assertTrue((ROOT / f".env.{env}.example").is_file())
+
+
+class OpsWorkflowTests(unittest.TestCase):
+    """The cloud operations workflow must stay operator-triggered and main-only."""
+
+    text = (ROOT / ".github" / "workflows" / "ops-preprod.yml").read_text()
+
+    def test_only_a_manual_dispatch_can_start_it(self):
+        triggers = self.text.split("on:", 1)[1].split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", triggers)
+        for forbidden in ("push:", "pull_request", "schedule:", "workflow_run", "release:"):
+            self.assertNotIn(forbidden, triggers)
+
+    def test_it_runs_only_from_main_with_a_gated_environment_and_no_stored_key(self):
+        self.assertIn("if: github.ref == 'refs/heads/main'", self.text)
+        self.assertIn("environment: preprod-ops", self.text)
+        self.assertIn("git merge-base --is-ancestor", self.text)
+        self.assertIn("workload_identity_provider", self.text)
+        self.assertNotIn("credentials_json", self.text)
+
+    def test_it_defaults_to_a_dry_run(self):
+        self.assertRegex(self.text, r"dry_run:[\s\S]*?default: true")
 
 
 if __name__ == "__main__":

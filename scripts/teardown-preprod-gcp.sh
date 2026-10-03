@@ -6,7 +6,7 @@
 #   Phase 1 (services) : Cloud Run v2 microservices & IAM bindings
 #   Phase 2 (secrets)  : Secret Manager secret versions and secrets
 #   Phase 3 (db)       : Cloud SQL PostgreSQL (instance, database, user)
-#   Phase 4 (base)     : VPC Connector, Peering, Global IP, SAs, GCS HMAC
+#   Phase 4 (base)     : Peering, Global IP, SAs, GCS HMAC
 #   Phase 5 (storage)  : Evidence Vault GCS bucket (if not WORM-locked)
 #   Phase 6 (images)   : Artifact Registry repository (optional: --delete-images)
 #   Phase 7 (network)  : Subnet and VPC Network
@@ -59,7 +59,7 @@ Options:
                         services : Cloud Run v2 microservices & public IAM
                         secrets  : Secret Manager secrets & versions
                         db       : Cloud SQL PostgreSQL instance, db, user
-                        base     : VPC Connector, Peering, Global IP, SAs, HMAC
+                        base     : Egress subnet, Peering, Global IP, SAs, HMAC
                         storage  : Evidence Vault GCS bucket
                         images   : Artifact Registry repository & images
                         network  : VPC Network and regional Subnet
@@ -242,17 +242,17 @@ if should_run_phase "db"; then
   cd "$REPO_ROOT"
 fi
 
-# ─── Phase 4: Serverless VPC Connector, Peering & Base IAM ────────────────────
+# ─── Phase 4: Peering & Base IAM ────────────────────
 if should_run_phase "base"; then
-  step_header "4/7" "Destroying Serverless VPC Connector, Peering & Base IAM"
+  step_header "4/7" "Destroying Peering & Base IAM"
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
-    info "Dry-run: Planning destruction of VPC Connector and Peering..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
+    info "Dry-run: Planning destruction of Peering..."
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
   else
-    info "Destroying VPC Connector and Peering..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_vpc_access_connector.connector       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
-    pass "Serverless VPC connector and peering destroyed"
+    info "Destroying Peering..."
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_service_networking_connection.private_vpc_connection       -target=google_compute_global_address.private_ip_address       -target=google_service_account.runtime || true
+    pass "Peering destroyed"
   fi
   cd "$REPO_ROOT"
 fi
@@ -299,10 +299,10 @@ if should_run_phase "network"; then
   cd "$TF_DIR"
   if [ "$DRY_RUN" = true ]; then
     info "Dry-run: Planning destruction of VPC and Subnet..."
-    terraform plan -destroy "${TF_VARS[@]}"       -target=google_compute_subnetwork.subnet       -target=google_compute_network.vpc || true
+    terraform plan -destroy "${TF_VARS[@]}"       -target=google_compute_subnetwork.run_egress       -target=google_compute_subnetwork.subnet       -target=google_compute_network.vpc || true
   else
     info "Destroying VPC Network and Subnet..."
-    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_compute_subnetwork.subnet       -target=google_compute_network.vpc || true
+    terraform destroy -auto-approve "${TF_VARS[@]}"       -target=google_compute_subnetwork.run_egress       -target=google_compute_subnetwork.subnet       -target=google_compute_network.vpc || true
     pass "VPC Network and Subnet destroyed"
   fi
   cd "$REPO_ROOT"

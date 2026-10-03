@@ -29,6 +29,9 @@ stated in any older doc).
 
 ## 1. Headline status (2026-10-03, main `e477410`)
 
+- Operator tooling and network design (2026-10-03, later): `scripts/axiom-ops.sh` (CI, build, deploy, soft stop/start for every non-production
+  environment), a manual-only preprod operations workflow, and Cloud Run Direct VPC egress replacing the VPC connector. All verified offline only;
+  nothing has run against a real project. See runbook sections 1a and 1b and `22_Architecture_and_Flow.md` section 3.
 - No production deployment and no remote preprod acceptance run is recorded
   anywhere. Local Docker parity stack is engineering evidence only
   `[16][18][A91]`.

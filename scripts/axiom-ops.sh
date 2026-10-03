@@ -6,7 +6,7 @@
 # symlink or infra/docker/environments/; templates: `.env.<env>.example`).
 # Nothing is hard-coded here.
 #
-#   scripts/axiom-ops.sh <command> --env <local|staging|preprod> [options] [-- extra]
+#   scripts/axiom-ops.sh <command> --env <local|staging|preprod|onprem|all> [options] [-- extra]
 #
 # Commands
 #   env-check   find the env file and report which required keys are set
@@ -18,7 +18,8 @@
 #   status      what is running and what still costs money
 #
 # Options
-#   --env <name>       local | staging | preprod   (production/onprem refused)
+#   --env <name>       local | staging | preprod; onprem and `all` for stop/start/status only
+                     (`all` = every non-production env that has an env file; production refused)
 #   --env-file <path>  explicit env file (also AXIOM_ENV_FILE)
 #   --dry-run          show what would change; mutate nothing
 #   --yes, -y          do not ask for confirmation (needed when not on a TTY)
@@ -33,11 +34,14 @@
 #   scripts/axiom-ops.sh stop   --env preprod --dry-run
 #   scripts/axiom-ops.sh stop   --env preprod --yes
 #   scripts/axiom-ops.sh start  --env preprod --yes
+#   scripts/axiom-ops.sh stop   --env all --yes      # every non-production environment
 # ==============================================================================
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+# Where `.env.<env>` files are looked for (tests point this at a temp folder).
+ENV_ROOT="${AXIOM_ENV_SEARCH_ROOT:-$REPO_ROOT}"
 # shellcheck source=lib/ops-env.sh
 . "$REPO_ROOT/scripts/lib/ops-env.sh"
 
@@ -73,17 +77,41 @@ case "$COMMAND" in env-check|ci|build|deploy|stop|start|status) ;; *) die "unkno
 if [ -n "$ENV_NAME" ]; then
   case "$ENV_NAME" in
     local|staging|preprod) ;;
-    production|prod|onprem)
+    onprem)
+      case "$COMMAND" in
+        stop|start|status|env-check) ;;
+        *) die "'onprem' supports only stop, start, status and env-check here; deploying it follows docs/23_Operator_Runbook.md." ;;
+      esac ;;
+    all)
+      case "$COMMAND" in stop|start|status) ;; *) die "--env all is only for stop, start and status" ;; esac
+      [ -z "${AXIOM_ENV_FILE:-}" ] || die "--env all cannot be combined with --env-file" ;;
+    production|prod)
       die "'$ENV_NAME' is not driven by this tool. Nothing is deployed there; follow docs/23_Operator_Runbook.md." ;;
-    *) die "unknown environment '$ENV_NAME' (local | staging | preprod)" ;;
+    *) die "unknown environment '$ENV_NAME' (local | staging | preprod | onprem | all)" ;;
   esac
+fi
+
+# `--env all`: every non-production environment that has an env file, one after
+# another. Production is not in the list and cannot be added by a flag.
+if [ "$ENV_NAME" = all ]; then
+  failed=()
+  for e in preprod staging local onprem; do
+    if ! ops_find_env_file "$e" "$ENV_ROOT" >/dev/null 2>&1; then
+      printf '\n== %s: no env file, skipped\n' "$e"; continue
+    fi
+    printf '\n== %s %s\n' "$COMMAND" "$e"
+    flags=(); [ "$DRY_RUN" = true ] && flags+=(--dry-run); [ "$ASSUME_YES" = true ] && flags+=(--yes)
+    "$0" "$COMMAND" --env "$e" ${flags[@]+"${flags[@]}"} || failed+=("$e")
+  done
+  [ ${#failed[@]} -eq 0 ] || die "failed for: ${failed[*]}"
+  exit 0
 fi
 
 # Never reads a value that is already in the process environment from the file
 # (see ops_load_env_file), so a one-off override on the command line wins.
 ENV_FILE=""
 load_env() {
-  ENV_FILE="$(ops_find_env_file "$ENV_NAME" "$REPO_ROOT")" \
+  ENV_FILE="$(ops_find_env_file "$ENV_NAME" "$ENV_ROOT")" \
     || die "no env file for '$ENV_NAME'. Create it from the template:  cp infra/docker/environments/.env.${ENV_NAME}.example infra/docker/environments/.env.${ENV_NAME}  and fill it in."
   AXIOM_ENV_FILE="$ENV_FILE"; export AXIOM_ENV_FILE
   ops_load_env_file "$ENV_FILE"
@@ -110,7 +138,8 @@ confirm() {
 # keeps one real copy. It is untracked (gitignored) and never overwritten.
 link_docker_env() {
   local target="$REPO_ROOT/infra/docker/environments/.env.${ENV_NAME}"
-  if [ ! -e "$target" ] && [ "$ENV_FILE" != "$target" ]; then
+  [ "$DRY_RUN" = true ] && return 0
+  if [ ! -e "$target" ] && [ ! -L "$target" ] && [ "$ENV_FILE" != "$target" ]; then
     mkdir -p "$(dirname "$target")"
     ln -s "$ENV_FILE" "$target"
     printf 'linked %s -> %s\n' "${target#"$REPO_ROOT"/}" "$ENV_FILE"

@@ -8,7 +8,8 @@
       "added": "2026-10-03",
       "expires": "2026-11-02",
       "reason": "Denial of service through deeply nested brace patterns in braces <=3.0.3. No patched release exists (3.0.3 is the latest). It is reached only through tailwindcss's build-time glob handling (chokidar, fast-glob, micromatch), where the patterns are our own Tailwind content globs, never user input, and nothing at runtime expands untrusted patterns.",
-      "revisit": "Check `npm view braces version`; when a fixed release ships, update the lockfile and delete this entry."
+      "revisit": "Check `npm view braces version`; when a fixed release ships, update the lockfile and delete this entry.",
+      "aliases": ["CVE-2026-93687"]
     }
   ]
 }
