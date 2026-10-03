@@ -303,3 +303,7 @@ The PDF renderer's pinned Playwright Linux headless-shell candidate used the obs
 ### 2026-10-03 — Remote fixture tunnel URL override review
 
 - A source review of PR #155 found that `pg` honors `?host=remote.example` in a connection string even when its URL hostname is `127.0.0.1`. A live `pg.Client` configuration check confirmed the override. The fixture URL guard now rejects all query parameters and fragments for both local and remote paths, before connecting. The focused fixture suite passed 5/5, acceptance TypeScript and formatting passed, and disabling the new guard made the test fail. No remote tunnel or target was used. This correction must pass the final source, staging and main gates before P1-W9b can close.
+
+### 2026-10-03 — Release-number gate clarified
+
+- The repository has no Git release tags, and the workspace package versions are `0.1.0`. Exact main CI and local Docker parity justify a numbered source candidate (`v0.1.0-rc.1`) after PR #155 is promoted and checked. They do **not** close remote deployment acceptance. Reserve final `v0.1.0` for an operator-recorded remote preprod/deployment gate; this corrects the earlier runbook wording that would have tagged a locally tested build stable.
