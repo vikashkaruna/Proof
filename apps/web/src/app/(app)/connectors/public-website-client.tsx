@@ -14,6 +14,27 @@ const checkSchema = z.object({
   title: z.string().nullable(),
   headings: z.array(z.string()),
   publicLinks: z.array(z.object({ label: z.string(), url: z.string() })),
+  auditPages: z
+    .array(
+      z.object({
+        kind: z.enum(['privacy', 'contact', 'terms']),
+        requestedUrl: z.string(),
+        status: z.enum(['checked', 'unavailable']),
+        finalUrl: z.string().optional(),
+        title: z.string().optional(),
+        contentSha256: z.string().optional(),
+        errorCode: z.string().optional(),
+      }),
+    )
+    .optional(),
+  observations: z
+    .array(
+      z.object({
+        kind: z.enum(['privacy', 'contact', 'terms']),
+        status: z.enum(['retrieved', 'not_linked', 'unavailable']),
+      }),
+    )
+    .optional(),
 });
 type WebsiteCheck = z.infer<typeof checkSchema>;
 const subscribeHydration = () => () => {};
@@ -31,6 +52,48 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
       <p className="text-slate-600">
         Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
       </p>
+      {check.observations && (
+        <div>
+          <h4 className="font-medium text-indigo-900">Public notice observations</h4>
+          <ul className="list-inside list-disc">
+            {check.observations.map((observation) => (
+              <li key={observation.kind}>
+                <span className="capitalize">{observation.kind}</span>:{' '}
+                {observation.status === 'retrieved'
+                  ? 'retrieved from this site'
+                  : observation.status === 'not_linked'
+                    ? 'no same-site link found on the starting page'
+                    : 'linked page could not be retrieved'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {check.auditPages && check.auditPages.length > 0 && (
+        <div>
+          <h4 className="font-medium text-indigo-900">Linked pages checked</h4>
+          <ul className="space-y-2">
+            {check.auditPages.map((page) => (
+              <li
+                key={`${page.kind}:${page.requestedUrl}`}
+                className="break-all rounded-md border border-slate-200 bg-white p-2"
+              >
+                <span className="font-medium capitalize text-indigo-900">{page.kind}</span> ·{' '}
+                {page.status === 'checked' ? page.title || 'Untitled page' : 'Unavailable'}
+                <span className="block text-slate-700">{page.finalUrl ?? page.requestedUrl}</span>
+                {page.contentSha256 && (
+                  <span className="block text-xs text-slate-600">
+                    SHA-256: <code>{page.contentSha256}</code>
+                  </span>
+                )}
+                {page.errorCode && (
+                  <span className="block text-xs text-amber-800">Reason: {page.errorCode}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div>
         <h4 className="font-medium text-indigo-900">Headings found</h4>
         {check.headings.length ? (
@@ -44,7 +107,7 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
         )}
       </div>
       <div>
-        <h4 className="font-medium text-indigo-900">Privacy and contact links found</h4>
+        <h4 className="font-medium text-indigo-900">Relevant public links found</h4>
         {check.publicLinks.length ? (
           <ul className="list-inside list-disc">
             {check.publicLinks.map((link, index) => (
@@ -98,7 +161,7 @@ const completedCheckErrors = new Set([
   'idempotency_unavailable',
 ]);
 
-/** Public-content inventory only. No browser-side target fetch or credential input. */
+/** Bounded public audit only. No browser-side target fetch or credential input. */
 export function PublicWebsiteClient({
   tenantId,
   canManage,
@@ -192,7 +255,7 @@ export function PublicWebsiteClient({
       );
       setHistoryError(false);
       setLoading(false);
-      setMessage('Public content retrieved and recorded.');
+      setMessage('Public website audit recorded.');
     } catch {
       setUncertain(true);
       setMessage(
@@ -206,15 +269,15 @@ export function PublicWebsiteClient({
   return (
     <section
       id="public-website-check"
-      aria-label="Public website content check"
+      aria-label="Public website content audit"
       className="space-y-4 rounded-lg border border-slate-200 bg-white p-5"
     >
       <div>
-        <h2 className="text-lg font-semibold text-indigo-900">Public website content check</h2>
+        <h2 className="text-lg font-semibold text-indigo-900">Public website content audit</h2>
         <p className="text-sm text-slate-700">
-          Fetch a publicly available HTML page and record its title, headings, relevant public links
-          and content hash. This inventories static content; it does not crawl the whole site,
-          verify privacy practices or certify compliance.
+          Check a public HTML page and up to three same-site privacy, contact and terms pages linked
+          from it. Record retrievable pages and links that are missing or unavailable. This is a
+          limited public-content audit, not a full crawl or a legal compliance verdict.
         </p>
       </div>
       {canManage ? (
@@ -237,10 +300,10 @@ export function PublicWebsiteClient({
             className="rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             {busy
-              ? 'Checking public content…'
+              ? 'Auditing public website…'
               : uncertain
                 ? 'Retry same check'
-                : 'Check public content'}
+                : 'Audit public website'}
           </button>
           <p className="text-xs text-slate-600">
             Only a server-side public-page fetch is performed. Do not enter private addresses,

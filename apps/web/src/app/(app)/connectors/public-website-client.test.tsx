@@ -16,6 +16,21 @@ const check = {
   title: 'Privacy',
   headings: ['How we use data'],
   publicLinks: [{ label: 'Contact', url: 'https://example.com/contact' }],
+  auditPages: [
+    {
+      kind: 'contact',
+      requestedUrl: 'https://example.com/contact',
+      status: 'checked',
+      finalUrl: 'https://example.com/contact',
+      title: 'Contact us',
+      contentSha256: 'b'.repeat(64),
+    },
+  ],
+  observations: [
+    { kind: 'privacy', status: 'retrieved' },
+    { kind: 'contact', status: 'retrieved' },
+    { kind: 'terms', status: 'not_linked' },
+  ],
 };
 
 afterEach(() => {
@@ -25,7 +40,7 @@ afterEach(() => {
 
 it('does not expose an active submit button before hydration', () => {
   const html = renderToString(<PublicWebsiteClient tenantId="tenant-1" canManage />);
-  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Check public content<\/button>/);
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Audit public website<\/button>/);
 });
 
 it('lets viewers inspect recorded public content without a check action or unsafe external link', async () => {
@@ -34,7 +49,7 @@ it('lets viewers inspect recorded public content without a check action or unsaf
   render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} />);
   await waitFor(() => expect(screen.getByText('How we use data')).toBeTruthy());
   expect(screen.getByText(/Contact: https:\/\/example.com\/contact/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Check public content' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Audit public website' })).toBeNull();
   expect(screen.queryByRole('link', { name: /Contact/ })).toBeNull();
   expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
     cache: 'no-store',
@@ -57,10 +72,12 @@ it('checks a public URL through the tenant-scoped BFF and shows the retrieved co
   fireEvent.change(screen.getByRole('textbox', { name: 'Public page URL' }), {
     target: { value: check.requestedUrl },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Check public content' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
   await waitFor(() => expect(screen.getByText('How we use data')).toBeTruthy());
-  expect(screen.getByText('Public content retrieved and recorded.')).toBeTruthy();
-  expect(screen.getByText(/This inventories static content/)).toBeTruthy();
+  expect(screen.getByText('Public website audit recorded.')).toBeTruthy();
+  expect(screen.getByText(/limited public-content audit/)).toBeTruthy();
+  expect(screen.getByText(/no same-site link found on the starting page/)).toBeTruthy();
+  expect(screen.getByText(/Contact us/)).toBeTruthy();
   const request = fetcher.mock.calls[1];
   expect(request?.[0]).toBe('/api/bff/v1/public-website-checks');
   expect(request?.[1]).toMatchObject({
@@ -89,7 +106,7 @@ it('retries an uncertain check with the same key and body, but clears a controll
   fireEvent.change(screen.getByRole('textbox', { name: 'Public page URL' }), {
     target: { value: check.requestedUrl },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Check public content' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy(),
   );
@@ -103,7 +120,7 @@ it('retries an uncertain check with the same key and body, but clears a controll
     fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key'],
   );
   expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[2]?.[1]?.body);
-  expect(screen.getByRole('button', { name: 'Check public content' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Audit public website' })).toBeTruthy();
 });
 
 it('preserves an in-progress request key but releases a completed upstream failure', async () => {
@@ -122,7 +139,7 @@ it('preserves an in-progress request key but releases a completed upstream failu
   fireEvent.change(screen.getByRole('textbox', { name: 'Public page URL' }), {
     target: { value: check.requestedUrl },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Check public content' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy(),
   );
@@ -136,5 +153,5 @@ it('preserves an in-progress request key but releases a completed upstream failu
     ).toBeTruthy(),
   );
   expect(fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key']).toBe(firstKey);
-  expect(screen.getByRole('button', { name: 'Check public content' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Audit public website' })).toBeTruthy();
 });

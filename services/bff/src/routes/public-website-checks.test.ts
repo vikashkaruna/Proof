@@ -19,6 +19,21 @@ const check: WebsiteCheck = {
   title: 'Public notice',
   headings: ['Privacy'],
   publicLinks: [{ label: 'Privacy', url: 'https://public.org/privacy' }],
+  auditPages: [
+    {
+      kind: 'privacy',
+      requestedUrl: 'https://public.org/privacy',
+      status: 'checked',
+      finalUrl: 'https://public.org/privacy',
+      title: 'Privacy',
+      contentSha256: 'b'.repeat(64),
+    },
+  ],
+  observations: [
+    { kind: 'privacy', status: 'retrieved' },
+    { kind: 'contact', status: 'not_linked' },
+    { kind: 'terms', status: 'not_linked' },
+  ],
 };
 const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
 vi.mock('@axiom/supabase', () => ({

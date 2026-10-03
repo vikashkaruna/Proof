@@ -7,6 +7,8 @@ import { isIP } from 'node:net';
 const MAX_BYTES = 512 * 1024;
 const TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 3;
+const AUDIT_KINDS = ['privacy', 'contact', 'terms'] as const;
+type AuditKind = (typeof AUDIT_KINDS)[number];
 
 export class PublicWebsiteRefused extends Error {
   constructor(readonly code: string) {
@@ -159,6 +161,7 @@ function extract(html: string, base: URL) {
     .map((match) => plain(match[1] ?? ''))
     .filter(Boolean);
   const links: { label: string; url: string }[] = [];
+  const linksPerKind = new Map<AuditKind, number>();
   for (const match of safeHtml.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
     const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(match[1] ?? '')?.[1];
     if (!href) continue;
@@ -166,12 +169,23 @@ function extract(html: string, base: URL) {
       const target = new URL(decode(href), base);
       if (!['http:', 'https:'].includes(target.protocol)) continue;
       const label = plain(match[2] ?? '');
-      if (/privacy|contact|data protection|terms/i.test(`${label} ${target.pathname}`))
-        links.push({ label, url: target.origin + target.pathname });
+      const kind = auditKind({ label, url: target.href });
+      if (
+        kind &&
+        !target.search &&
+        !target.username &&
+        !target.password &&
+        target.origin === base.origin &&
+        target.href.length <= 512 &&
+        (linksPerKind.get(kind) ?? 0) < 2
+      ) {
+        links.push({ label: label.slice(0, 120), url: target.origin + target.pathname });
+        linksPerKind.set(kind, (linksPerKind.get(kind) ?? 0) + 1);
+      }
     } catch {
-      // Ignore malformed links; a website check never follows discovered links.
+      // Ignore malformed public links.
     }
-    if (links.length >= 12) break;
+    if (links.length >= 6) break;
   }
   return { title, headings, publicLinks: links };
 }
@@ -187,6 +201,31 @@ export interface WebsiteCheck {
   title: string;
   headings: string[];
   publicLinks: { label: string; url: string }[];
+  auditPages: AuditPage[];
+  observations: AuditObservation[];
+}
+
+export interface AuditPage {
+  kind: AuditKind;
+  requestedUrl: string;
+  status: 'checked' | 'unavailable';
+  finalUrl?: string;
+  title?: string;
+  contentSha256?: string;
+  errorCode?: string;
+}
+
+export interface AuditObservation {
+  kind: AuditKind;
+  status: 'retrieved' | 'not_linked' | 'unavailable';
+}
+
+function auditKind(link: { label: string; url: string }): AuditKind | undefined {
+  const value = `${link.label} ${new URL(link.url).pathname}`;
+  if (/privacy|data protection/i.test(value)) return 'privacy';
+  if (/contact/i.test(value)) return 'contact';
+  if (/terms/i.test(value)) return 'terms';
+  return undefined;
 }
 
 function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -207,17 +246,19 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-export async function checkPublicWebsite(
-  rawUrl: string,
+async function checkSinglePage(
+  requested: URL,
   signal: AbortSignal,
   deps: {
     resolve4?: (host: string) => Promise<string[]>;
     fetchPage?: (url: URL, address: string, signal: AbortSignal) => Promise<WebsitePage>;
-  } = {},
-): Promise<WebsiteCheck> {
-  const requested = parsePublicUrl(rawUrl);
+  },
+  allowedOrigin?: string,
+): Promise<Omit<WebsiteCheck, 'auditPages' | 'observations'>> {
   let current = requested;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    if (allowedOrigin && current.origin !== allowedOrigin)
+      throw new PublicWebsiteRefused('off_site_redirect');
     let addresses: string[];
     try {
       addresses = await abortable((deps.resolve4 ?? dns.resolve4)(current.hostname), signal);
@@ -257,4 +298,64 @@ export async function checkPublicWebsite(
     };
   }
   throw new PublicWebsiteRefused('redirect_refused');
+}
+
+/** Check the starting page and at most one same-origin public page per notice kind. */
+export async function checkPublicWebsite(
+  rawUrl: string,
+  signal: AbortSignal,
+  deps: {
+    resolve4?: (host: string) => Promise<string[]>;
+    fetchPage?: (url: URL, address: string, signal: AbortSignal) => Promise<WebsitePage>;
+  } = {},
+): Promise<WebsiteCheck> {
+  const root = await checkSinglePage(parsePublicUrl(rawUrl), signal, deps);
+  const origin = new URL(root.finalUrl).origin;
+  const auditPages: AuditPage[] = [];
+  const observations: AuditObservation[] = [];
+  const seen = new Set([root.finalUrl]);
+  for (const kind of AUDIT_KINDS) {
+    const rootKind = auditKind({ label: '', url: root.finalUrl });
+    if (rootKind === kind) {
+      observations.push({ kind, status: 'retrieved' });
+      continue;
+    }
+    const candidate = root.publicLinks.find((link) => {
+      if (auditKind(link) !== kind) return false;
+      try {
+        const url = parsePublicUrl(link.url);
+        return url.origin === origin && !seen.has(url.href);
+      } catch {
+        return false;
+      }
+    });
+    if (!candidate) {
+      observations.push({ kind, status: 'not_linked' });
+      continue;
+    }
+    const url = parsePublicUrl(candidate.url);
+    seen.add(url.href);
+    try {
+      const page = await checkSinglePage(url, signal, deps, origin);
+      auditPages.push({
+        kind,
+        requestedUrl: url.href,
+        status: 'checked',
+        finalUrl: page.finalUrl,
+        title: page.title,
+        contentSha256: page.contentSha256,
+      });
+      observations.push({ kind, status: 'retrieved' });
+    } catch (cause) {
+      if (signal.aborted) throw new PublicWebsiteRefused('timeout');
+      auditPages.push({
+        kind,
+        requestedUrl: url.href,
+        status: 'unavailable',
+        errorCode: cause instanceof PublicWebsiteRefused ? cause.code : 'unreachable',
+      });
+      observations.push({ kind, status: 'unavailable' });
+    }
+  }
+  return { ...root, auditPages, observations };
 }

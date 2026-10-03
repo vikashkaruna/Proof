@@ -63,18 +63,100 @@ describe('public website target boundary', () => {
       fetchPage: async (url, address) => {
         requested.push(url.href);
         expect(address).toBe('8.8.8.8');
+        if (url.pathname === '/contact') return html('<title>Contact us</title>');
         return html(`<html><title>Our &amp; Your Privacy</title><script>secret</script>
           <h1>Privacy Notice</h1><h2>What we collect</h2>
           <a href="/contact">Contact DPO</a><a href="javascript:alert(1)">Privacy</a></html>`);
       },
     });
-    expect(requested).toEqual(['https://public.org/privacy']);
+    expect(requested).toEqual(['https://public.org/privacy', 'https://public.org/contact']);
     expect(checked.title).toBe('Our & Your Privacy');
     expect(checked.headings).toEqual(['Privacy Notice', 'What we collect']);
     expect(checked.publicLinks).toEqual([
       { label: 'Contact DPO', url: 'https://public.org/contact' },
     ]);
     expect(checked.contentSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(checked.auditPages).toMatchObject([
+      { kind: 'contact', status: 'checked', title: 'Contact us' },
+    ]);
+    expect(checked.observations).toEqual([
+      { kind: 'privacy', status: 'retrieved' },
+      { kind: 'contact', status: 'retrieved' },
+      { kind: 'terms', status: 'not_linked' },
+    ]);
+  });
+
+  it('checks at most three same-site notice pages and records retrievability honestly', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', signal, {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        if (url.pathname === '/privacy') return html('<title>Privacy</title>');
+        if (url.pathname === '/contact') return html('Missing', 404);
+        if (url.pathname === '/terms') return html('Redirect', 302, 'https://other.org/terms');
+        return html(`<title>Home</title>
+          <a href="/privacy">Privacy</a><a href="/contact">Contact</a>
+          <a href="/terms">Terms</a><a href="https://other.org/privacy">Other privacy</a>
+          <a href="/privacy?token=private">Private query</a>`);
+      },
+    });
+    expect(requested).toEqual([
+      'https://public.org/',
+      'https://public.org/privacy',
+      'https://public.org/contact',
+      'https://public.org/terms',
+    ]);
+    expect(checked.auditPages).toMatchObject([
+      { kind: 'privacy', status: 'checked', title: 'Privacy' },
+      { kind: 'contact', status: 'unavailable', errorCode: 'http_status' },
+      { kind: 'terms', status: 'unavailable', errorCode: 'off_site_redirect' },
+    ]);
+    expect(checked.observations).toEqual([
+      { kind: 'privacy', status: 'retrieved' },
+      { kind: 'contact', status: 'unavailable' },
+      { kind: 'terms', status: 'unavailable' },
+    ]);
+    expect(JSON.stringify(checked)).not.toContain('token=private');
+  });
+
+  it('revalidates DNS on linked pages and refuses a rebound to private space', async () => {
+    let lookups = 0;
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', signal, {
+      resolve4: async () => (++lookups === 1 ? ['8.8.8.8'] : ['10.0.0.1']),
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        return html('<a href="/privacy">Privacy</a>');
+      },
+    });
+    expect(lookups).toBe(2);
+    expect(requested).toEqual(['https://public.org/']);
+    expect(checked.auditPages).toEqual([
+      {
+        kind: 'privacy',
+        requestedUrl: 'https://public.org/privacy',
+        status: 'unavailable',
+        errorCode: 'non_public_target',
+      },
+    ]);
+  });
+
+  it('does not let repeated contact links hide a later same-site privacy notice', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', signal, {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        return url.pathname === '/'
+          ? html(
+              `${'<a href="/contact">Contact</a>'.repeat(30)}<a href="/privacy">Privacy policy</a>`,
+            )
+          : html('<title>Privacy</title>');
+      },
+    });
+    expect(requested).toContain('https://public.org/privacy');
+    expect(checked.observations[0]).toEqual({ kind: 'privacy', status: 'retrieved' });
   });
 
   it('revalidates every redirect and never fetches a private destination', async () => {

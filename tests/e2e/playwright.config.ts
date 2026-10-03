@@ -153,8 +153,9 @@ export default defineConfig({
   // The dedicated storage job owns its real Object Lock fixture. General
   // deployed acceptance forbids skipped journeys, so do not discover that
   // fixture-only spec unless the explicit storage launcher enables it.
-  testIgnore:
-    process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
+  testIgnore: [
+    ...(process.env.AXIOM_PUBLIC_WEBSITE_LIVE === 'true' ? [] : ['**/public-website-live.spec.ts']),
+    ...(process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
       ? []
       : [
           '**/evidence-ingestion.spec.ts',
@@ -163,7 +164,8 @@ export default defineConfig({
           '**/board-reports-provider.spec.ts',
           '**/approval-archive-provider.spec.ts',
           '**/source-bound-formats-provider.spec.ts',
-        ],
+        ]),
+  ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**
    * Next compiles each route the first time it is requested, and several

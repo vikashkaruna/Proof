@@ -26,6 +26,36 @@ const checkSchema = z
     publicLinks: z
       .array(z.object({ label: z.string().max(300), url: z.string().max(2048) }))
       .max(12),
+    auditPages: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['privacy', 'contact', 'terms']),
+            requestedUrl: z.string().max(2048),
+            status: z.enum(['checked', 'unavailable']),
+            finalUrl: z.string().max(2048).optional(),
+            title: z.string().max(300).optional(),
+            contentSha256: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
+            errorCode: z.string().max(40).optional(),
+          })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
+    observations: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['privacy', 'contact', 'terms']),
+            status: z.enum(['retrieved', 'not_linked', 'unavailable']),
+          })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
   })
   .strict();
 const statusByCode: Record<string, 400 | 422 | 502 | 504> = {
@@ -90,7 +120,7 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
     try {
       result = await (deps.check ?? checkPublicWebsite)(
         parsed.data.url,
-        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(10_000)]),
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]),
       );
     } catch (cause) {
       const code = cause instanceof PublicWebsiteRefused ? cause.code : 'unreachable';

@@ -125,7 +125,7 @@ it('shows reviewed options even before an estate system exists and distinguishes
     ).toContain('postgresql'),
   );
   expect(screen.getByText('Reference only', { exact: false })).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Open public website check' }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: 'Open public website audit' }).getAttribute('href')).toBe(
     '#public-website-check',
   );
   expect(

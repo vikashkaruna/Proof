@@ -12,6 +12,21 @@ const result = {
   title: 'Privacy notice',
   headings: ['How we use data'],
   publicLinks: [{ label: 'Contact', url: 'https://example.com/contact' }],
+  auditPages: [
+    {
+      kind: 'contact',
+      requestedUrl: 'https://example.com/contact',
+      status: 'checked',
+      finalUrl: 'https://example.com/contact',
+      title: 'Contact us',
+      contentSha256: 'b'.repeat(64),
+    },
+  ],
+  observations: [
+    { kind: 'privacy', status: 'retrieved' },
+    { kind: 'contact', status: 'retrieved' },
+    { kind: 'terms', status: 'not_linked' },
+  ],
 };
 
 async function openConnectors(page: Page) {
@@ -28,7 +43,9 @@ async function openConnectors(page: Page) {
 // The transport response is stubbed here to exercise the page and role flow.
 // The live server-side fetch, DNS and redirect boundary are verified by the
 // BFF tests; this browser test does not claim external connectivity.
-test('owner can check public content and inspect a recorded result', async ({ page }) => {
+test('owner can audit public content and inspect a recorded result after reload', async ({
+  page,
+}) => {
   await signIn(page, 'owner');
   await selectTenant(page, 'a');
   let submitted = false;
@@ -51,16 +68,20 @@ test('owner can check public content and inspect a recorded result', async ({ pa
     });
   });
   await openConnectors(page);
-  const website = page.getByRole('region', { name: 'Public website content check' });
+  let website = page.getByRole('region', { name: 'Public website content audit' });
   await website.getByRole('textbox', { name: 'Public page URL' }).fill(result.requestedUrl);
-  await website.getByRole('button', { name: 'Check public content' }).click();
+  await website.getByRole('button', { name: 'Audit public website' }).click();
   await expect(website.getByText('Privacy notice')).toBeVisible();
   await expect(website.getByText('How we use data')).toBeVisible();
   await expect(website.getByText(/Contact: https:\/\/example.com\/contact/)).toBeVisible();
   await expect(website.getByText(/Content SHA-256/)).toBeVisible();
-  await expect(website).toContainText('does not crawl the whole site');
+  await expect(website).toContainText('limited public-content audit');
+  await expect(website).toContainText('no same-site link found on the starting page');
   expect(submitted).toBe(true);
   await expect(website.getByRole('link', { name: /Contact/ })).toHaveCount(0);
+  await page.reload();
+  website = page.getByRole('region', { name: 'Public website content audit' });
+  await expect(website.getByText('contact · Contact us', { exact: false })).toBeVisible();
 });
 
 test('viewer can read history but cannot start a public website check', async ({ page }) => {
@@ -75,8 +96,8 @@ test('viewer can read history but cannot start a public website check', async ({
     });
   });
   await openConnectors(page);
-  const website = page.getByRole('region', { name: 'Public website content check' });
+  const website = page.getByRole('region', { name: 'Public website content audit' });
   await expect(website.getByText('Privacy notice')).toBeVisible();
-  await expect(website.getByRole('button', { name: 'Check public content' })).toHaveCount(0);
+  await expect(website.getByRole('button', { name: 'Audit public website' })).toHaveCount(0);
   await expect(website.getByRole('textbox', { name: 'Public page URL' })).toHaveCount(0);
 });
