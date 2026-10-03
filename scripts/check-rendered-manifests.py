@@ -90,7 +90,7 @@ def main() -> int:
         for container in pod["spec"].get("containers") or []:
             if container.get("name") != "bff":
                 continue
-            mounts = [m for m in container.get("volumeMounts") or [] if m.get("mountPath") == "/tmp"]
+            mounts = [m for m in container.get("volumeMounts") or [] if m.get("mountPath") == "/tmp"]  # nosec B108 - compares a Kubernetes mountPath string; no temporary file is created
             mount = mounts[0] if len(mounts) == 1 else {}
             empty_dir = volumes.get(mount.get("name"), {}).get("emptyDir")
             if container.get("securityContext", {}).get("readOnlyRootFilesystem") is True and (

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
+import subprocess  # nosec B404 - runs gcloud with a fixed argv, no shell
 from pathlib import Path
 
 SERVICES = (
@@ -48,7 +48,7 @@ def validate(manifest: dict, sha: str, project: str, region: str) -> dict:
 def registry_digest(service: str, prefix: str, tag: str) -> str:
     name = service if service in {"gotrue", "postgrest"} else f"axiom-{service}"
     image = f"{prefix}{name}:{tag}"
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - gcloud argv; the image reference is validated before this call
         ["gcloud", "artifacts", "docker", "images", "describe", image,
          "--format=value(image_summary.fully_qualified_digest)"],
         check=True, capture_output=True, text=True,
@@ -69,7 +69,7 @@ def verify_registry(manifest: dict) -> None:
     for service, image in manifest["images"].items():
         name = image.split("@", 1)[0]
         for identity in (image, f"{name}:{tag}"):
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - gcloud argv; the image reference is validated before this call
                 ["gcloud", "artifacts", "docker", "images", "describe", identity,
                  "--format=value(image_summary.fully_qualified_digest)"],
                 check=False, capture_output=True, text=True,

@@ -9,7 +9,7 @@ pnpm 9.12 has no audit ignore option, which is why this wrapper exists.
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - runs pnpm with a fixed argv, no shell
 import sys
 from datetime import date
 from pathlib import Path
@@ -51,7 +51,7 @@ def evaluate(report: dict, allowed: dict[str, dict], today: date) -> tuple[list[
 
 
 def main() -> int:
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv list, no shell, no external input
         ["pnpm", "audit", "--prod", "--audit-level=high", "--json"],
         cwd=ROOT,
         capture_output=True,

@@ -38,7 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 - runs gcloud (AXIOM_GCLOUD) with an argv list, no shell
 import sys
 import time
 from datetime import datetime, timezone
@@ -68,7 +68,7 @@ class Gcloud:
         self.actions: list[dict] = []
 
     def _run(self, args: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run([self.binary, *args], capture_output=True, text=True)
+        return subprocess.run([self.binary, *args], capture_output=True, text=True)  # nosec B603 - binary is the operator's gcloud, arguments are built here, no shell
 
     def read_json(self, args: list[str]) -> list[dict]:
         result = self._run([*args, "--project", self.project, "--format=json"])
