@@ -7,6 +7,7 @@ import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
 import { connectorRoutes } from './connectors.js';
+import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
@@ -211,6 +212,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
   app.route('/', connectorRoutes());
+  app.route('/', publicWebsiteCheckRoutes());
   app.route('/', onboardingProposalRoutes());
   app.route('/', invitationRoutes());
   app.route('/', onboardingWizardRoutes());
