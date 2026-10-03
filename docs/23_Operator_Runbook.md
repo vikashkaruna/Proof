@@ -89,6 +89,45 @@ failure send the failure (a migration checksum refusal, a `401` that is a
 6. Cloud-session constraint: `registry.terraform.io` can be blocked, so
    Terraform validate/test and Helm render run only in CI there `[15]`.
 
+## 1a. Command line: CI, build, deploy, soft stop and start
+
+One entry point, `scripts/axiom-ops.sh`, drives all of it. Every value comes from `.env.<env>` (root symlink or `infra/docker/environments/.env.<env>`; root wins, and a warning is printed if both exist and differ); nothing is hard-coded. The environments are `local`, `staging` and `preprod`. `production` and `onprem` are refused (nothing is deployed there; follow this runbook).
+
+**One-time setup per environment**
+
+```bash
+cp infra/docker/environments/.env.preprod.example infra/docker/environments/.env.preprod
+ln -s infra/docker/environments/.env.preprod .env.preprod   # only if the root link is missing
+# an existing file from before: scripts/sync-env.sh preprod scaffold  (appends only missing keys)
+scripts/axiom-ops.sh env-check --env preprod
+```
+
+`.env.local`, `.env.staging`, `.env.preprod`, `.env.production` and `infra/docker/environments/.env.*` are all gitignored; only the `.env*.example` templates are tracked (the root ones are symlinks into `infra/docker/environments/`), and a test fails if that ever changes. The tool parses the file (it never sources it), so a `$(...)` in a value cannot run. A value already set in your shell wins for that run (`GCP_REGION=... scripts/axiom-ops.sh ...`). A file whose `ENVIRONMENT=` disagrees with its name is refused. Placeholders such as `<your-project>` count as missing.
+
+| Command                                   | What it does                                                                                                                                                                                                                         | Cost / risk                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `axiom-ops.sh env-check --env E`          | Finds the file, reports required keys present or missing (names only), runs the config audit for preprod.                                                                                                                            | none                                                                 |
+| `axiom-ops.sh ci [--env E]`               | The CI gates locally: config audit, frozen install, format, lint, typecheck, unit tests, script tests, control-count and tfvars gates, Python service tests, the security scan. Flags `--skip-security --skip-python --skip-config`. | none (local)                                                         |
+| `axiom-ops.sh build --env preprod --yes`  | Builds the nine images from the exact HEAD SHA and **pushes** them to Artifact Registry. Needs a clean tree.                                                                                                                         | registry storage; asks first                                         |
+| `axiom-ops.sh deploy --env preprod --yes` | Runs `deploy-preprod-gcp.sh` at the exact HEAD SHA with your env file. `--dry-run` is a Terraform plan only. Pass phases through: `-- --from-phase services`, `-- --phase db`.                                                       | **billing starts** (Cloud SQL, Cloud Run, VPC connector); asks first |
+| `axiom-ops.sh stop --env preprod --yes`   | Soft stop, see below.                                                                                                                                                                                                                | cuts idle cost; deletes nothing                                      |
+| `axiom-ops.sh start --env preprod --yes`  | Puts everything back exactly as it was.                                                                                                                                                                                              | restores the cost                                                    |
+| `axiom-ops.sh status --env preprod`       | What is running and what still costs money.                                                                                                                                                                                          | none                                                                 |
+
+Every mutating command takes `--dry-run` (shows the exact `gcloud` calls) and asks for confirmation unless `--yes` is given; without a terminal it refuses rather than guess. For `local` and `staging`, `build`/`deploy` run `dev-docker.sh` (`--build` for build), `stop` is `dev-docker.sh --down` and `status` is `--status`; local stop keeps containers and data (see section 1).
+
+**Soft stop (non-production cost saving, `scripts/softstop-gcp.py`).** Nothing is deleted, so no object ID changes and no wiring has to be redone. It acts only on objects belonging to the environment (Cloud Run `axiom-*-<env>`, VMs `axiom-<env>-*`, Cloud SQL `axiom-proof-<env>-pg-*`):
+
+1. **Cloud Run:** minimum instances set to 0; the old value is kept in the service label `axiom-softstop-min` and put back by `start`.
+2. **Compute VMs:** running ones are stopped and labelled `axiom-softstopped`; `start` starts exactly those. A VM you stopped yourself is never started for you.
+3. **Cloud SQL:** activation policy `NEVER` (stopped; disk and backups kept). `start` sets `ALWAYS` and waits until `RUNNABLE` before touching Cloud Run. A database stopped by someone else is left alone.
+
+State is on the objects (labels), so another laptop can run `start`; a record of each run is written to `.axiom-runtime/softstop/<env>.json`. Running `stop` twice is safe. If you run `deploy` while stopped, Terraform restores the original sizing and `start` becomes a no-op for Cloud Run. While stopped the app is down: the first request after `start` is slow because instances are cold.
+
+**Cost that continues while soft-stopped (it cannot be paused without recreating it):** the Serverless VPC Access connector (two always-on micro instances), Cloud SQL storage and backups, disks of stopped VMs, Artifact Registry images, Secret Manager secrets, the S3 evidence bucket (Object Lock), and the Temporal Cloud and Upstash subscriptions. `status` prints this list. If the connector cost matters, say so and engineering will look at Direct VPC egress as a separate change; that is a design change, not a switch.
+
+**Not exercised against real cloud.** The soft-stop logic is tested against a fake `gcloud` that applies each change (round trip restores the original sizing exactly, other environments untouched, nothing deleted, five mutants killed), and `--dry-run` prints the real calls. It has not been run against a live project because none exists yet. Run `stop --dry-run` first on your first real deployment, then `stop`, `status`, `start`.
+
 ## 2. Checklist index by workstream
 
 | Workstream                     | P0         | P1           | P2          |
@@ -118,16 +157,16 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 1. **P0-1** Decide the target: project, region, billing account, topology. Everything deployed waits on this.
 2. Answer the small policy questions engineering is waiting on: **P1-W2a** (legacy assignment), **P1-W3a/b** (estate taxonomy, system kinds), **P2-10** (BR-4 gap-scan exception), **P2-11** (mock-data line), **P0-14** (prod EKS CIDR), **P2-8** (sector pack order), **P2-5** (`saml2_bearer`).
-3. **P2-17** put a reminder for **2026-11-02** to review the audit allowlist for `braces` (the exception expires then and the security scan will fail again by design).
+3. **P2-17** decided 2026-10-03: keep the expiring allowlist until a fixed `braces` release ships, then delete the entry (no migration to Tailwind 4, no package swap). Put a reminder for **2026-11-02**; the exception expires then and the security scan fails again by design.
 4. **P2-15 (b)** when the phase-gap-closure session is finished, delete its worktree and branch.
 
 **Tier B — prepare the target (still no billing)**
 
-5. **P0-2** scaffold and mint config, **P0-3** dry-run review, **P0-12** backup and rollback plan, **P0-10** fresh secrets (this is also where the secret-rotation practice in **P0-9** applies), **P1-R3** configure the acceptance workflow and GitHub environments.
+5. Use the commands in section 1a for everything below: `scripts/axiom-ops.sh env-check --env preprod`, then `ci --env preprod`. **P0-2** scaffold and mint config, **P0-3** dry-run review, **P0-12** backup and rollback plan, **P0-10** fresh secrets (this is also where the secret-rotation practice in **P0-9** applies), **P1-R3** configure the acceptance workflow and GitHub environments.
 
 **Tier C — provision and prove (billing starts; explicit go-ahead)**
 
-6. **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
+6. First `scripts/axiom-ops.sh deploy --env preprod --dry-run`, then `build --env preprod --yes` and `deploy --env preprod --yes` (section 1a). **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
 
 **Tier D — verify each workstream on the deployed environment**
 
@@ -140,6 +179,8 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 **Engineering-owned, you only watch:** **P1-DS1** (15 remaining routes get the module bar), **P1-W8d** (renderer flake, root cause open), **P1-W9b**, **P1-0099b**, **P2-3/P2-4**.
 
 **Open and unproven (do not claim otherwise):** nothing is deployed or measured live (W9 numbers, W10 acceptance); the W8 first-PDF flake has no confirmed root cause (two theories refuted, the failing step's Chrome output points at first-launch work, it passes on re-run); the animated agent states (`thinking`, `working`) cannot be verified in still screenshots.
+
+**Cost saving between sessions (non-production):** `scripts/axiom-ops.sh stop --env preprod --yes` when you finish, `start` when you resume (section 1a). Nothing is deleted, so IDs and wiring survive.
 
 **Changelog of operator items closed on 2026-10-03:** P0-9 reclassified informative (rotation is a provisioning practice, not a blocker), P0-16 (stash and worktree cleanup, no loss), P1-DS2 (design library uploaded), P1-DS3 (status colours accepted), P1-DS4 (agents mirrored into claude.ai), P2-15 (a, c, d), P2-16 (turbo opt-out).
 
@@ -293,7 +334,7 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 - [ ] **P2-14 Gated Phase 5 items** (`[13]`) · Founder · SOC 2 Type 2 / ISO 27001 programme, Consent Manager registration, enterprise tier, split-plane, pack #2, policy-governed L4: each has its original external/revenue gate.
 - [ ] **P2-15 Cleanup leftovers** · Operator · Done 2026-10-03: (a) Dependabot PRs #130-#134 merged; (c) the three leftover codex worktree directories (`750f`, `human-proof-writers`, `statutory-source-bound`, 15 GB) were deleted after archiving their small non-regenerable evidence files (about 8,000 JSON/log files) to `~/axiom-proof-housekeeping-backup-20261003/`; (d) the main checkout was fast-forwarded. **Still open on purpose:** (b) the worktree `.claude/worktrees/axiom-proof-phase-gap-closure-b88105` and its local-only branch `claude/axiom-proof-phase-gap-closure-b88105` were kept until that session is reinvoked; its tip is already in main and its 8 uncommitted files are Prettier-only (backed up). Delete the branch and worktree when that session is finished · Closure: `git worktree list` shows no `axiom-proof-phase-gap-closure` entry.
 - [x] **P2-16 `turbo` writes to `AGENTS.md`** · Done 2026-10-03: `"agentGuidance": false` in the root `turbo.json`; verified that `turbo run lint` no longer touches `AGENTS.md`. If a block is ever present in the working tree it is the old managed block and should not be committed.
-- [ ] **P2-17 Review the expiring audit allowlist** · Operator/Engineering · a new advisory (`GHSA-vfj7-8cjw-p6xm`, `braces <=3.0.3`, denial of service through deeply nested brace patterns, high) appeared on 2026-10-03 with **no patched release** (3.0.3 is the latest). It is reached only through `tailwindcss`'s build-time glob handling with our own patterns. pnpm 9.12 has no audit ignore option, so `scripts/audit_prod.py` runs the same `pnpm audit --prod --audit-level=high` and allows only the entries in `security/audit-allowlist.json` (each needs a reason and an expiry; an expired entry fails again), plus `.trivyignore` with the same expiry. The exception expires **2026-11-02**: check `npm view braces version`; when a fixed release exists, upgrade and delete both entries; if none exists, re-review and renew with a new reason. Never allowlist an advisory that has a patched version · Closure: both entries removed, or renewed with a recorded reason.
+- [ ] **P2-17 Review the expiring audit allowlist** · Operator/Engineering · a new advisory (`GHSA-vfj7-8cjw-p6xm`, `braces <=3.0.3`, denial of service through deeply nested brace patterns, high) appeared on 2026-10-03 with **no patched release** (3.0.3 is the latest). It is reached only through `tailwindcss`'s build-time glob handling with our own patterns. pnpm 9.12 has no audit ignore option, so `scripts/audit_prod.py` runs the same `pnpm audit --prod --audit-level=high` and allows only the entries in `security/audit-allowlist.json` (each needs a reason and an expiry; an expired entry fails again), plus `.trivyignore` with the same expiry. **Decision 2026-10-03: option A** (keep the allowlist until a fix ships; rejected: Tailwind 4 migration, about 1-2 days of design-system work for a build-time-only advisory, and swapping `micromatch`/`braces` for an unvetted package). The exception expires **2026-11-02**: check `npm view braces version`; when a fixed release exists, upgrade and delete both entries; if none exists, re-review and renew with a new reason. Never allowlist an advisory that has a patched version · Closure: both entries removed, or renewed with a recorded reason.
 
 ## 7. Engineering blockers that gate operator steps (not operator tasks)
 

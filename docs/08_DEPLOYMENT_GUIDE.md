@@ -141,12 +141,12 @@ Executes a self-contained 5-stage verification pipeline before committing or pus
 
 ## 4. Environment Variables & Configuration Dictionary
 
-Environment templates live in `infra/docker/environments/`:
+Environment templates are the tracked `.env.<env>.example` files at the repository root; your real, gitignored copy is `.env.<env>` beside them (`infra/docker/environments/.env.<env>` is still read as the older location). Copy a template, fill it in, then drive everything through `scripts/axiom-ops.sh` (CI, build, deploy, soft stop and start). The command reference is section 1a of [`23_Operator_Runbook.md`](23_Operator_Runbook.md).
 
-- `infra/docker/environments/.env.local.example` (copy to `.env.local` for local development)
-- `infra/docker/environments/.env.staging.example` (for staging clusters)
-- `infra/docker/environments/.env.preprod.example` (for preprod mirrors)
-- `infra/docker/environments/.env.production.example` (for AWS production reference)
+- `.env.local.example` (copy to `.env.local` for local development)
+- `.env.staging.example` (for staging clusters)
+- `.env.preprod.example` (for the GCP preprod environment)
+- `.env.production.example` (for the AWS production reference; not driven by the tool)
 
 ### 4.1 Master Environment Variable Reference
 
