@@ -32,7 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 - runs aws and kubectl with argv lists, no shell
 import sys
 import time
 from datetime import datetime, timezone
@@ -66,7 +66,7 @@ class Runner:
         return [self.kubectl, *(["--context", self.context] if self.context else [])]
 
     def _run(self, argv: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run(argv, capture_output=True, text=True)
+        return subprocess.run(argv, capture_output=True, text=True)  # nosec B603 - argv is built in this file from validated names, no shell
 
     def aws_json(self, args: list[str]) -> dict:
         r = self._run([self.aws, *args, "--region", self.region, "--output", "json"])
