@@ -16,14 +16,6 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-[1120px] space-y-5 animate-fade-in">
-      {can(Capability.USER_MANAGE, { role }) && (
-        <Link
-          href="/settings/members"
-          className="inline-block text-sm font-medium text-teal-700 underline"
-        >
-          Manage members and invitations
-        </Link>
-      )}
       {/* Design System Hero Banner */}
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] to-[#243356] p-6 sm:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
@@ -49,6 +41,32 @@ export default async function SettingsPage() {
           <span>Module M0.1</span>
         </div>
       </div>
+
+      {can(Capability.USER_MANAGE, { role }) && (
+        <section
+          aria-labelledby="members-settings-heading"
+          className="flex flex-col gap-4 rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6"
+        >
+          <div className="max-w-2xl">
+            <h2
+              id="members-settings-heading"
+              className="font-heading text-base font-semibold text-[#1E2A4A]"
+            >
+              Members &amp; invitations
+            </h2>
+            <p className="mt-1 text-sm leading-relaxed text-[#5b6270]">
+              Invite people, review who has access, and manage pending invitations for this
+              organisation.
+            </p>
+          </div>
+          <Link
+            href="/settings/members"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+          >
+            Manage members and invitations
+          </Link>
+        </section>
+      )}
 
       {/* 2 Main Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -83,6 +101,12 @@ export default async function SettingsPage() {
               </span>
             </div>
           </div>
+          <Link
+            href="/settings/security"
+            className="mt-4 inline-flex text-sm font-medium text-teal-700 underline underline-offset-2 focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+          >
+            Manage authenticator and recovery codes
+          </Link>
         </div>
 
         {/* Security & Sovereignty Card */}

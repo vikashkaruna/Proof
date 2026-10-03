@@ -6,6 +6,20 @@ import { cookies } from 'next/headers';
 import { createSupabaseServerClient } from '@axiom/supabase';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 
+async function bootstrapUserProfile(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+) {
+  let result = await supabase.rpc('bootstrap_user_profile');
+  if (result.error?.code === 'PGRST303' && result.error.message === 'JWT issued at future') {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    result = await supabase.rpc('bootstrap_user_profile');
+  }
+  if (result.error) {
+    console.warn('[profileBootstrap] RPC refused:', result.error.code, result.error.message);
+  }
+  return !result.error;
+}
+
 export async function loginAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim();
   const password = String(formData.get('password') ?? '');
@@ -20,10 +34,11 @@ export async function loginAction(formData: FormData) {
 
   let authenticatedUser: { id: string } | null = null;
   let authError: string | null = null;
+  let authClient: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    authClient = await createSupabaseServerClient();
+    const { data, error } = await authClient.auth.signInWithPassword({ email, password });
     if (!error && data?.user) {
       authenticatedUser = data.user;
     } else if (error) {
@@ -61,6 +76,20 @@ export async function loginAction(formData: FormData) {
       : authError || 'Invalid email or password.';
 
     redirect(`/login?error=${encodeURIComponent(errorMessage)}`);
+  }
+
+  // Repair Auth accounts created before the profile bootstrap migration too.
+  // The function binds the row to auth.uid() and cannot assign tenant rights.
+  let profileReady = false;
+  try {
+    if (authClient) profileReady = await bootstrapUserProfile(authClient);
+  } catch (err) {
+    console.warn('[loginAction] Profile bootstrap notice:', err);
+  }
+  if (!profileReady) {
+    redirect(
+      `/login?force=true&error=${encodeURIComponent('Profile setup is temporarily unavailable. Please sign in again shortly.')}`,
+    );
   }
 
   // A "tenant membership sync" block stood here. If the signing-in user held
@@ -106,10 +135,11 @@ export async function signupAction(formData: FormData) {
   let signupUser: { id: string } | null = null;
   let signupError: string | null = null;
   let hasSession = false;
+  let authClient: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.auth.signUp({
+    authClient = await createSupabaseServerClient();
+    const { data, error } = await authClient.auth.signUp({
       email,
       password,
       options: {
@@ -146,29 +176,25 @@ export async function signupAction(formData: FormData) {
     redirect(`/login?mode=signup&error=${encodeURIComponent(errorMessage)}`);
   }
 
-  // Mirror the auth user into public.users.
+  // Mirror the Auth user into public.users through a fixed, self-bound RPC.
   //
   // The automatic grant of `owner` on the oldest tenant that used to follow
   // this is removed — see the note in loginAction. Signup creates an account
   // and nothing else; tenant membership comes from onboarding or an invitation.
   //
-  // This runs with the user's OWN session rather than the service-role client:
-  // the `users_insert_self` RLS policy (migration 0001) permits a user to
-  // insert exactly their own row, which is all this needs. SEC-3's invariant
-  // holds — the web app never needs the service-role key.
+  // This runs with the user's own session and never gives the web app a
+  // service-role key or direct INSERT privilege on the profile table.
   if (signupUser && hasSession) {
+    let profileReady = false;
     try {
-      const supabase = await createSupabaseServerClient();
-      const { error: mirrorError } = await supabase.from('users').upsert({
-        id: signupUser.id,
-        email,
-        full_name: fullName,
-      });
-      if (mirrorError) {
-        console.warn('[signupAction] Profile mirror notice:', mirrorError.message);
-      }
+      if (authClient) profileReady = await bootstrapUserProfile(authClient);
     } catch (mirrorErr) {
       console.warn('[signupAction] Profile mirror notice:', mirrorErr);
+    }
+    if (!profileReady) {
+      redirect(
+        `/login?force=true&error=${encodeURIComponent('Account created, but profile setup is temporarily unavailable. Please sign in again shortly.')}`,
+      );
     }
   }
 
