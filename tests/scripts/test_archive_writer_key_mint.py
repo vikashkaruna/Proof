@@ -38,7 +38,7 @@ class ArchiveWriterMintTests(unittest.TestCase):
         self.assertIn("('human_action_writer','SUPABASE_HUMAN_ACTION_WRITER_KEY')", source)
         self.assertIn("('agent_ledger_writer','SUPABASE_AGENT_LEDGER_WRITER_KEY')", source)
         self.assertIn("'JWT_SECRET'", source)
-        # 0099: the archive writer keeps release only; its probe reaches the founder gate.
+        # 0100: the human writer reaches the release founder gate; archive writer is refused.
         self.assertIn("founder_authority_required", source)
         self.assertIn("record_approval_export", source)
         self.assertNotIn("'archiveWriterKey':", source)

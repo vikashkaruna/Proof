@@ -23,11 +23,12 @@ select pg_temp.assert_true(
  and not has_function_privilege('approval_archive_writer','public.settle_approval_proof_archive(uuid,uuid,uuid,jsonb,uuid)','EXECUTE')
  and has_function_privilege('human_action_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
  and not has_function_privilege('approval_archive_writer','public.review_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
- and has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and has_function_privilege('human_action_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
+ and not has_function_privilege('approval_archive_writer','public.release_approval_proof_archive(uuid,uuid,uuid,text,text,uuid)','EXECUTE')
  and not pg_has_role('service_role','approval_archive_writer','MEMBER')
  and exists (select 1 from pg_roles where rolname='approval_archive_writer'
    and not rolcanlogin and not rolinherit and not rolbypassrls),
- 'human-labelled archive RPCs belong only to the human writer (0099); the archive writer keeps release only');
+ 'human-labelled archive RPCs belong only to the human writer (0100)');
 
 insert into auth.users(id,email) values
  ('10000000-0000-4000-8000-000000000001','archive-founder@example.invalid'),
@@ -222,12 +223,18 @@ do $$ begin
       '10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000099','{}'::jsonb,gen_random_uuid());
     raise exception 'ASSERTION FAILED: archive writer still settles';
   exception when insufficient_privilege then null; end;
-  if (public.release_approval_proof_archive('10000000-0000-4000-8000-000000000010',
-    '10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000099',repeat('a',64),'v',gen_random_uuid())->>'error')
-    is distinct from 'archive_not_found' then
-    raise exception 'ASSERTION FAILED: archive writer release unavailable';
-  end if;
+  begin
+    perform public.release_approval_proof_archive('10000000-0000-4000-8000-000000000010',
+      '10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000099',repeat('a',64),'v',gen_random_uuid());
+    raise exception 'ASSERTION FAILED: archive writer still releases';
+  exception when insufficient_privilege then null; end;
 end $$;
+reset role;
+set local role human_action_writer;
+select pg_temp.assert_eq((public.release_approval_proof_archive(
+ '10000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-000000000001',
+ '10000000-0000-4000-8000-000000000099',repeat('a',64),'v',gen_random_uuid())->>'error'),
+ 'archive_not_found','human writer reaches release gate');
 reset role;
 select pg_temp.assert_eq((select public.release_approval_proof_archive(
  '10000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-000000000001',

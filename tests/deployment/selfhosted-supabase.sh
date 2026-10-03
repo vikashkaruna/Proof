@@ -237,7 +237,7 @@ expect_json_error() { # label expected response
 
 # The shared agent/service JWT cannot forge an exported ledger receipt or an
 # archive transition. Only the BFF human action writer reaches them, and the
-# 0090 archive writer now keeps release only.
+# 0100 moved release to the human writer; the archive writer retains no release path.
 EXPORT_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_plan_id":null,"p_format":"json","p_filter_params":{},"p_summary":{},"p_artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_artifact_bytes":1,"p_correlation_id":"00000000-0000-4000-8000-0000000000fd"}'
 expect_refused 'shared service key reached approval export recorder' "$SUPABASE_SERVICE_KEY" record_approval_export "$EXPORT_BODY"
 expect_refused 'archive writer still reaches the moved export recorder' "$SUPABASE_ARCHIVE_WRITER_KEY" record_approval_export "$EXPORT_BODY"
@@ -251,10 +251,10 @@ expect_json_error 'human writer did not reach the archive founder gate' founder_
   "$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" begin_approval_proof_archive "$ARCHIVE_BODY")"
 RELEASE_BODY='{"p_tenant_id":"00000000-0000-4000-8000-0000000000ff","p_actor_id":"00000000-0000-4000-8000-0000000000fe","p_archive_id":"00000000-0000-4000-8000-0000000000fd","p_source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","p_version_id":"probe","p_correlation_id":"00000000-0000-4000-8000-0000000000fc"}'
 expect_refused 'shared service key reached archive release' "$SUPABASE_SERVICE_KEY" release_approval_proof_archive "$RELEASE_BODY"
-expect_refused 'human writer reached archive release' "$SUPABASE_HUMAN_ACTION_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY"
-expect_json_error 'archive writer did not reach the release founder gate' founder_authority_required \
-  "$(rpc_body "$SUPABASE_ARCHIVE_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY")"
-echo '  ✓ Archive RPCs: service denied; human writer reaches begin; archive writer reaches release only'
+expect_refused 'archive writer reached archive release' "$SUPABASE_ARCHIVE_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY"
+expect_json_error 'human writer did not reach the release founder gate' founder_authority_required \
+  "$(rpc_body "$SUPABASE_HUMAN_ACTION_WRITER_KEY" release_approval_proof_archive "$RELEASE_BODY")"
+echo '  ✓ Archive RPCs: service and archive writer denied; human writer reaches begin and release'
 
 # Exercise the same apikey/Authorization split that the BFF's supabase-js
 # client sends through the HTTP gateway, not just hand-crafted curl headers.
