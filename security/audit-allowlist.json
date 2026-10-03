@@ -1,0 +1,15 @@
+{
+  "comment": "Advisories the production dependency audit may ignore. Each entry needs a reason and an expiry; an expired entry fails the audit again so it cannot rot. Remove an entry as soon as a fixed release exists. Do not add an advisory that has a patched version: upgrade or add a pnpm override instead.",
+  "allowed": [
+    {
+      "ghsa": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "severity": "high",
+      "added": "2026-10-03",
+      "expires": "2026-11-02",
+      "reason": "Denial of service through deeply nested brace patterns in braces <=3.0.3. No patched release exists (3.0.3 is the latest). It is reached only through tailwindcss's build-time glob handling (chokidar, fast-glob, micromatch), where the patterns are our own Tailwind content globs, never user input, and nothing at runtime expands untrusted patterns.",
+      "revisit": "Check `npm view braces version`; when a fixed release ships, update the lockfile and delete this entry.",
+      "aliases": ["CVE-2026-93687"]
+    }
+  ]
+}

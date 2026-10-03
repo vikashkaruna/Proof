@@ -4,7 +4,7 @@
 # ==============================================================================
 # Progressive, parameterized, and self-healing deployment orchestrator:
 #   Phase 1 (prep)     : Pre-flight prerequisites & Google APIs
-#   Phase 2 (base)     : VPC, Subnet, Peering, VPC Connector, Artifact Registry, IAM
+#   Phase 2 (base)     : VPC, Subnets (incl. Cloud Run Direct VPC egress), Peering, Artifact Registry, IAM
 #   Phase 3 (db)       : Cloud SQL PostgreSQL (with automatic state healing) & Secret Manager
 #   Phase 4 (images)   : Build & push exact-source container images
 #   Phase 5 (services) : Cloud Run v2 microservices (BFF, Web, Runtime, Model Gateway, Temporal)
@@ -72,7 +72,7 @@ Options:
   --env-file <path>   Explicit path to preprod environment configuration file
   --phase <name>      Execute ONLY a specific phase:
                         prep     : Prerequisites and GCP API enablement
-                        base     : Networking (VPC/Peering/Connector), IAM & Artifact Registry
+                        base     : Networking (VPC/Peering/egress subnet), IAM & Artifact Registry
                         db       : Cloud SQL PostgreSQL (with self-healing) & Secret Manager
                         images   : Build & push container images
                         services : Cloud Run v2 microservices & IAM
@@ -459,7 +459,6 @@ if should_run_phase "prep"; then
     "run.googleapis.com"
     "secretmanager.googleapis.com"
     "artifactregistry.googleapis.com"
-    "vpcaccess.googleapis.com"
     "storage.googleapis.com"
   )
   # `|| true` here meant a failure to enable an API surfaced three phases later
@@ -479,7 +478,7 @@ if should_run_phase "prep"; then
 fi
 
 
-# ─── Phase 2: Base Infrastructure (VPC, Subnet, Peering, Connector, GCS, AR) ──
+# ─── Phase 2: Base Infrastructure (VPC, Subnets, Peering, GCS, AR) ──
 if should_run_phase "base"; then
   step_header "2/8" "Foundational Networking, Identity & Storage"
   cd "infra/terraform/envs/preprod"
@@ -499,19 +498,19 @@ if should_run_phase "base"; then
       -target=google_compute_subnetwork.subnet \
       -target=google_compute_global_address.private_ip_address \
       -target=google_service_networking_connection.private_vpc_connection \
-      -target=google_vpc_access_connector.connector \
+      -target=google_compute_subnetwork.run_egress \
       -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
       -target=google_artifact_registry_repository.docker_repo
   else
-    info "Applying Base Infrastructure (VPC, Peering, Connector, Storage, Artifact Registry)..."
+    info "Applying Base Infrastructure (VPC, Peering, Cloud Run egress subnet, Storage, Artifact Registry)..."
     terraform apply -auto-approve $TF_VARS \
       -target=google_project_service.apis \
       -target=google_compute_network.vpc \
       -target=google_compute_subnetwork.subnet \
       -target=google_compute_global_address.private_ip_address \
       -target=google_service_networking_connection.private_vpc_connection \
-      -target=google_vpc_access_connector.connector \
+      -target=google_compute_subnetwork.run_egress \
       -target=google_service_account.runtime \
       -target=google_service_account.storage_sa \
       -target=google_artifact_registry_repository.docker_repo

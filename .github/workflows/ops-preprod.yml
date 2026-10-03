@@ -1,0 +1,92 @@
+name: Preprod operations (manual)
+# Runs ONLY when an operator starts it. There is no push, schedule or PR trigger,
+# so merging to main never deploys anything. Once started, a run is automatic:
+# it calls the same `scripts/axiom-ops.sh` an operator runs by hand.
+#
+# One-time setup (see docs/23_Operator_Runbook.md, section 1a):
+#   - GitHub environment `preprod-ops` with required reviewers (a second pair of eyes).
+#   - Environment secret AXIOM_ENV_PREPROD: the complete contents of .env.preprod.
+#   - Environment variables GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT
+#     (keyless auth; no JSON key is ever stored).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do to the preprod environment
+        required: true
+        type: choice
+        options: [status, deploy, stop, start]
+      revision:
+        description: For deploy only, the exact commit (40-character SHA, must be on main)
+        required: false
+        type: string
+      dry_run:
+        description: Show what would change and change nothing
+        required: true
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: preprod-ops
+  cancel-in-progress: false
+jobs:
+  run:
+    name: ${{ inputs.action }} preprod
+    # The workflow file itself must come from main, so a branch cannot carry its own deploy logic.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: preprod-ops
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Select and verify the exact revision
+        env:
+          ACTION: ${{ inputs.action }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" = deploy ]; then
+            [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo "deploy needs an exact 40-character SHA"; exit 1; }
+            git merge-base --is-ancestor "$REVISION" origin/main || { echo "$REVISION is not on main"; exit 1; }
+            git checkout --detach "$REVISION"
+          fi
+          echo "Running ${ACTION} at $(git rev-parse HEAD)"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: ${{ inputs.action == 'deploy' }}
+      - uses: hashicorp/setup-terraform@v3
+        if: ${{ inputs.action == 'deploy' }}
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Materialize the private environment file
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.AXIOM_ENV_PREPROD }}
+        run: |
+          umask 077
+          printf '%s\n' "$ENV_FILE_CONTENT" > .env.preprod
+      - name: Run the operation
+        env:
+          ACTION: ${{ inputs.action }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=("$ACTION" --env preprod --yes)
+          [ "$DRY_RUN" = true ] && args+=(--dry-run)
+          # A deploy builds and pushes the exact-SHA images itself (phase `images`).
+          scripts/axiom-ops.sh "${args[@]}"
+      - name: Remove the private environment file
+        if: always()
+        run: rm -f .env.preprod

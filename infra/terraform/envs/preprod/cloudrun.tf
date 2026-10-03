@@ -42,9 +42,15 @@ resource "google_cloud_run_v2_service" "bff" {
   template {
     service_account = google_service_account.runtime["bff"].email
 
+    # Direct VPC egress needs the second-generation execution environment.
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
     vpc_access {
-      connector = google_vpc_access_connector.connector.id
-      egress    = "PRIVATE_RANGES_ONLY"
+      network_interfaces {
+        network    = google_compute_network.vpc.id
+        subnetwork = google_compute_subnetwork.run_egress.id
+      }
+      egress = "PRIVATE_RANGES_ONLY"
     }
 
     scaling {

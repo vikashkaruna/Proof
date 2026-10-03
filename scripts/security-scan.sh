@@ -45,8 +45,8 @@ fi
 echo "security-scan: eslint"
 pnpm turbo run lint --output-logs=errors-only
 
-echo "security-scan: pnpm audit (production dependencies)"
-pnpm audit --prod --audit-level=high
+echo "security-scan: pnpm audit (production dependencies, expiring allowlist in security/audit-allowlist.json)"
+python3 scripts/audit_prod.py
 
 if command -v uv >/dev/null 2>&1 && command -v uvx >/dev/null 2>&1; then
   echo "security-scan: pip-audit (Python locked runtime dependencies)"
