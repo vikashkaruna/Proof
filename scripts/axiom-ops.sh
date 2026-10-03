@@ -6,7 +6,7 @@
 # symlink or infra/docker/environments/; templates: `.env.<env>.example`).
 # Nothing is hard-coded here.
 #
-#   scripts/axiom-ops.sh <command> --env <local|staging|preprod|onprem|all> [options] [-- extra]
+#   scripts/axiom-ops.sh <command> --env <local|staging|preprod|onprem|production|all> [options] [-- extra]
 #
 # Commands
 #   env-check   find the env file and report which required keys are set
@@ -18,8 +18,10 @@
 #   status      what is running and what still costs money
 #
 # Options
-#   --env <name>       local | staging | preprod; onprem and `all` for stop/start/status only
-                     (`all` = every non-production env that has an env file; production refused)
+#                      stop/start/status only. `all` = every NON-production env that has an
+#                      env file; production is never in it.
+#   --confirm-production <cluster>   required to stop production (type the cluster name)
+#  --confirm-production <cluster>   required to stop production (type the cluster name)
 #   --env-file <path>  explicit env file (also AXIOM_ENV_FILE)
 #   --dry-run          show what would change; mutate nothing
 #   --yes, -y          do not ask for confirmation (needed when not on a TTY)
@@ -35,6 +37,8 @@
 #   scripts/axiom-ops.sh stop   --env preprod --yes
 #   scripts/axiom-ops.sh start  --env preprod --yes
 #   scripts/axiom-ops.sh stop   --env all --yes      # every non-production environment
+#   scripts/axiom-ops.sh stop   --env production --dry-run
+#   scripts/axiom-ops.sh stop   --env production --confirm-production <cluster> --yes
 # ==============================================================================
 set -euo pipefail
 
@@ -54,13 +58,14 @@ case "$COMMAND" in
 esac
 shift
 
-ENV_NAME=""; DRY_RUN=false; ASSUME_YES=false; EXTRA=()
+ENV_NAME=""; DRY_RUN=false; ASSUME_YES=false; EXTRA=(); CONFIRM_PRODUCTION=""
 SKIP_SECURITY=false; SKIP_PYTHON=false; SKIP_CONFIG=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:-}"; shift 2 ;;
     --env-file) AXIOM_ENV_FILE="${2:-}"; export AXIOM_ENV_FILE; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --confirm-production) CONFIRM_PRODUCTION="${2:-}"; shift 2 ;;
     --yes|-y) ASSUME_YES=true; shift ;;
     --skip-security) SKIP_SECURITY=true; shift ;;
     --skip-python) SKIP_PYTHON=true; shift ;;
@@ -86,8 +91,12 @@ if [ -n "$ENV_NAME" ]; then
       case "$COMMAND" in stop|start|status) ;; *) die "--env all is only for stop, start and status" ;; esac
       [ -z "${AXIOM_ENV_FILE:-}" ] || die "--env all cannot be combined with --env-file" ;;
     production|prod)
-      die "'$ENV_NAME' is not driven by this tool. Nothing is deployed there; follow docs/23_Operator_Runbook.md." ;;
-    *) die "unknown environment '$ENV_NAME' (local | staging | preprod | onprem | all)" ;;
+      ENV_NAME=production
+      case "$COMMAND" in
+        stop|start|status|env-check) ;;
+        *) die "production supports only stop, start, status and env-check here. Nothing is deployed or built by this tool; follow docs/23_Operator_Runbook.md." ;;
+      esac ;;
+    *) die "unknown environment '$ENV_NAME' (local | staging | preprod | onprem | production | all)" ;;
   esac
 fi
 
@@ -162,6 +171,7 @@ cmd_env_check() {
   local required=() key
   case "$ENV_NAME" in
     preprod) required=(GCP_PROJECT_ID GCP_REGION ENVIRONMENT AXIOM_TF_STATE_BUCKET UPSTREAM_GOTRUE_IMAGE UPSTREAM_POSTGREST_IMAGE) ;;
+    production) required=(AXIOM_CLUSTER_NAME ENVIRONMENT) ;;
     *) required=(ENVIRONMENT) ;;
   esac
   local bad=0
@@ -237,7 +247,23 @@ cmd_deploy() {
 
 cmd_softstop() { # stop | start | status
   load_env
-  if [ "$ENV_NAME" = preprod ]; then
+  if [ "$ENV_NAME" = production ]; then
+    ops_require_value AXIOM_CLUSTER_NAME
+    local region="${AWS_REGION:-${AXIOM_REGION:-}}"
+    [ -n "$region" ] || die "AWS_REGION (or AXIOM_REGION) is not set in the environment file"
+    local args=("$COMMAND" --env production --cluster "$AXIOM_CLUSTER_NAME" --region "$region" --namespace "${AXIOM_K8S_NAMESPACE:-axiom-proof}")
+    [ "$DRY_RUN" = true ] && args+=(--dry-run)
+    if [ "$COMMAND" = stop ] && [ "$DRY_RUN" != true ]; then
+      # Production is never stopped by a habit or a stray --yes: the cluster name
+      # must be typed back, every time.
+      [ "$CONFIRM_PRODUCTION" = "$AXIOM_CLUSTER_NAME" ] \
+        || die "stopping PRODUCTION needs --confirm-production $AXIOM_CLUSTER_NAME (typed exactly). Use --dry-run to preview."
+      confirm "Stop PRODUCTION cluster ${AXIOM_CLUSTER_NAME}? Customers will see an outage. (nothing is deleted)"
+    elif [ "$COMMAND" = start ]; then
+      confirm "Start PRODUCTION cluster ${AXIOM_CLUSTER_NAME}?"
+    fi
+    python3 scripts/softstop-aws.py "${args[@]}"
+  elif [ "$ENV_NAME" = preprod ]; then
     gcp_params
     local args=("$COMMAND" --env "$ENV_NAME" --project "$PROJECT_ID" --region "$REGION")
     [ "$DRY_RUN" = true ] && args+=(--dry-run)

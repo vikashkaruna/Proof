@@ -229,12 +229,12 @@ class OpsWrapperTests(unittest.TestCase):
         base = {k: v for k, v in os.environ.items() if k not in ("GCP_PROJECT_ID", "GCP_REGION", "ENVIRONMENT", "AXIOM_ENV_FILE")}
         return subprocess.run(["bash", str(OPS), *args], capture_output=True, text=True, env={**base, **(env or {})}, stdin=subprocess.DEVNULL)
 
-    def test_production_is_refused_for_every_command(self):
+    def test_production_is_never_built_or_deployed_by_the_tool(self):
         for name in ("production", "prod"):
-            for command in ("deploy", "build", "stop", "start", "status"):
+            for command in ("deploy", "build"):
                 result = self.ops(command, "--env", name)
                 self.assertNotEqual(result.returncode, 0, (name, command))
-                self.assertIn("not driven by this tool", result.stderr)
+                self.assertIn("supports only stop, start, status", result.stderr)
 
     def test_onprem_and_all_only_allow_the_soft_closure_commands(self):
         for name in ("onprem", "all"):
