@@ -200,6 +200,19 @@ Indigo `#1E2A4A` trust; Teal `#0FB5A5` machine intelligence/approvals; Gold
 `#C9A227` **reserved for sealed evidence and attestations only**; Ember
 `#D9534F` gaps/risks; Slate/Mist neutrals.
 
+### 2.6 Public website content check (source candidate `8f4edcb`)
+
+An owner/admin starts a one-page check in `/connectors`; the web app sends the
+tenant-scoped request and idempotency key to the BFF. The BFF permits only
+public DNS names over HTTP(S), rejects credential-bearing or query URLs,
+resolves and pins a public IPv4 address for every redirect hop, and bounds the
+fetch by time and size. It extracts limited page metadata, then the
+`human_action_writer` records a tenant-scoped observation and ledger event in
+one database transaction (0102). The UI reads the recent observations for the
+same tenant. Raw HTML is discarded. This path needs neither a private broker
+credential nor a connector grant; registered private-system connectors remain
+separate and cannot claim live reachability from their saved setup state.
+
 ## 3. Deployed architecture: GCP preprod (finalised design, 2026-10-03)
 
 Nothing here is deployed yet. This is the target the Terraform in `infra/terraform/envs/preprod` and the scripts in `scripts/` build, and it is what `scripts/axiom-ops.sh deploy --env preprod` creates. Production (AWS EKS, `infra/terraform/envs/prod`) follows the same logical design and is not covered here. Source tags: `[tf]` the Terraform file named, `[ops]` runbook section 1a.
