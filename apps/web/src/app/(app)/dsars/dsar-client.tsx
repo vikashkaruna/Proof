@@ -2,6 +2,8 @@
 
 import React, { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { ModuleBarFor } from '@/lib/module-bar';
+import { DataPlaceholder } from '@axiom/ui';
 import {
   actionBody,
   availableActions,
@@ -116,6 +118,7 @@ export function DsarClient({
           )}
         </div>
       </header>
+      <ModuleBarFor module="dsar" />
       {!canManage && !loadError && (
         <p className="text-sm text-slate-600">
           Read-only access. Managing requests requires estate.manage permission.
@@ -201,11 +204,7 @@ export function DsarClient({
           </fieldset>
         </form>
       )}
-      {!loadError && rows.length === 0 && (
-        <p className="rounded-lg border border-dashed p-6 text-slate-600">
-          No rights requests recorded.
-        </p>
-      )}
+      {!loadError && rows.length === 0 && <DataPlaceholder title="No rights requests recorded." />}
       {!loadError && hasMore && (
         <p role="status" className="text-sm text-slate-600">
           Showing the first 200 requests by deadline. More requests exist; these counts are not

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DataPlaceholder } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 
@@ -28,9 +29,7 @@ export default async function ApprovalPage() {
           Approval actions are unavailable. No approval status can be inferred.
         </p>
       ) : actions.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
-          No recorded actions await approval.
-        </p>
+        <DataPlaceholder title="No recorded actions await approval." />
       ) : (
         <ul className="space-y-3">
           {actions.map((action) => (

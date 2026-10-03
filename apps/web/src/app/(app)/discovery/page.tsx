@@ -1,5 +1,6 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
 import { requireTenantContext } from '@/lib/tenant-context';
+import { DataPlaceholder } from '@axiom/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,7 @@ export default async function DiscoveryPage() {
   return (
     <GenericModuleView
       meta={{
+        moduleKey: 'discovery',
         title: 'Data Discovery',
         hi: 'डेटा खोज',
         phase: 'P1',
@@ -46,7 +48,7 @@ export default async function DiscoveryPage() {
       {error || !data ? (
         <p role="alert">Discovery ledger records are unavailable.</p>
       ) : events.length === 0 ? (
-        <p>No discovery events recorded for this tenant.</p>
+        <DataPlaceholder title="No discovery events recorded for this tenant." />
       ) : null}
     </GenericModuleView>
   );

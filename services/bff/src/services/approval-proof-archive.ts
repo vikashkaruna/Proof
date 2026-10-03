@@ -100,6 +100,7 @@ const HUMAN_WRITER_RPCS: ReadonlySet<string> = new Set([
   'begin_approval_proof_archive',
   'settle_approval_proof_archive',
   'review_approval_proof_archive',
+  'release_approval_proof_archive',
 ]);
 
 export class ApprovalProofArchiveService {
@@ -150,8 +151,7 @@ export class ApprovalProofArchiveService {
   }
 
   private mutationRpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    // begin/settle/review append a human-labelled event: human writer only.
-    // release stays on the dedicated archive writer (not a moved RPC).
+    // Every archive transition appends a human-labelled event: human writer only.
     const target = HUMAN_WRITER_RPCS.has(name) ? this.writer() : this.archiveWriterDb;
     return this.rpcOn(target, name, args, signal);
   }

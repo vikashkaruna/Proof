@@ -3,9 +3,11 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentLabel } from '@axiom/ui';
+import { AgentLabel, DataPlaceholder } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
+import { ModuleBarFor } from '@/lib/module-bar';
+import type { ModuleKey } from '@/lib/module-meta';
 
 export interface ModuleCardRow {
   t: string;
@@ -33,6 +35,7 @@ export interface ModuleTelemetryEvent {
 }
 
 export interface GenericModuleMeta {
+  moduleKey: ModuleKey;
   title: string;
   hi: string;
   phase: string;
@@ -117,12 +120,9 @@ export function GenericModuleView({
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex-1 min-w-[280px]">
-            {/* Phase, Agent, Autonomy Badges */}
+            {/* The module bar carries phase and related agents; show live agent state only while running. */}
             <div className="mb-2.5 flex flex-wrap items-center gap-2">
-              <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-bold text-[#04322d] uppercase tracking-wider">
-                {meta.phase}
-              </span>
-              {meta.agent && (
+              {isExecuting && meta.agent && (
                 <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
                   <span>Agent ·</span>
                   {meta.agent.includes('+') ? (
@@ -170,6 +170,12 @@ export function GenericModuleView({
               </h1>
               <span className="font-heading text-lg text-[#0FB5A5] font-normal">{meta.hi}</span>
             </div>
+            <ModuleBarFor
+              module={meta.moduleKey}
+              tone="dark"
+              omit={['hi', 'moduleId']}
+              className="mt-3"
+            />
 
             {/* Description */}
             <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">{meta.desc}</p>
@@ -301,15 +307,10 @@ export function GenericModuleView({
       </div>
 
       {!isDemo && meta.cards.length > 0 && (
-        <div className="rounded-2xl border border-dashed border-[#e4e8ee] bg-[#fafbfc] p-8 text-center">
-          <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
-            Nothing measured yet
-          </h2>
-          <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[#8a909b]">
-            This page has no measured results for your estate. Check the recorded workflows and
-            audit ledger for completed work.
-          </p>
-        </div>
+        <DataPlaceholder
+          title="Nothing measured yet"
+          description="This page has no measured results for your estate. Check the recorded workflows and audit ledger for completed work."
+        />
       )}
 
       {children}
@@ -377,23 +378,19 @@ export function GenericModuleView({
       )}
 
       {/* ============================================================ */}
-      {/* 4. Navigation to the recorded ledger and agent workbench. */}
+      {/* 4. Tenant-scoped recorded activity is available to every signed-in member. */}
       {/* ============================================================ */}
       <div className="rounded-xl border border-teal-200 bg-[#E5FAF7] p-4 text-xs text-[#0a6b61] flex flex-wrap items-center justify-between gap-3 shadow-2xs">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
           <span>
-            View recorded ledger entries and agent runs in their dedicated workspaces. This page
-            does not verify service health or deployment region.
+            View tenant-scoped recorded activity in the Client Portal. This page does not verify
+            service health or deployment region.
           </span>
         </div>
         <div className="flex items-center gap-3 font-medium text-[11px]">
-          <Link href="/ledger" className="underline hover:text-teal-950">
-            Audit Ledger ↗
-          </Link>
-          <span>·</span>
-          <Link href="/workbench" className="underline hover:text-teal-950">
-            Agent Workbench ↗
+          <Link href="/portal" className="underline hover:text-teal-950">
+            Client Portal ↗
           </Link>
         </div>
       </div>

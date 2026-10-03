@@ -5,12 +5,15 @@ import { useRouter } from 'next/navigation';
 
 interface LedgerRefreshProps {
   runningCount: number;
+  initialRefreshedAt: string;
 }
 
-export function LedgerRefresh({ runningCount }: LedgerRefreshProps) {
+export function LedgerRefresh({ runningCount, initialRefreshedAt }: LedgerRefreshProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  // The server supplies the initial instant; format it in UTC so server and
+  // browser render exactly the same first HTML regardless of local timezone.
+  const [lastRefreshed, setLastRefreshed] = useState(initialRefreshedAt);
   // Default to Off (0 = off)
   const [intervalSeconds, setIntervalSeconds] = useState<number>(0);
 
@@ -22,7 +25,7 @@ export function LedgerRefresh({ runningCount }: LedgerRefreshProps) {
     const timer = setInterval(() => {
       startTransition(() => {
         router.refresh();
-        setLastRefreshed(new Date());
+        setLastRefreshed(new Date().toISOString());
       });
     }, activeInterval * 1000);
 
@@ -32,7 +35,7 @@ export function LedgerRefresh({ runningCount }: LedgerRefreshProps) {
   function handleManualRefresh() {
     startTransition(() => {
       router.refresh();
-      setLastRefreshed(new Date());
+      setLastRefreshed(new Date().toISOString());
     });
   }
 
@@ -94,14 +97,9 @@ export function LedgerRefresh({ runningCount }: LedgerRefreshProps) {
       {/* Subtle Timestamp */}
       <span
         className="hidden sm:inline-block text-[11px] text-slate-400"
-        title={`Last updated at ${lastRefreshed.toISOString()}`}
+        title={`Last updated at ${lastRefreshed}`}
       >
-        Updated{' '}
-        {lastRefreshed.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        })}
+        Updated {lastRefreshed.slice(11, 19)} UTC
       </span>
     </div>
   );

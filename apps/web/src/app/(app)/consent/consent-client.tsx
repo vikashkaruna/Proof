@@ -1,5 +1,7 @@
 'use client';
 
+import { ModuleBarFor } from '@/lib/module-bar';
+
 import {
   cloneElement,
   useId,
@@ -164,6 +166,7 @@ export function ConsentClient({ tenantId, canManage }: { tenantId: string; canMa
           Refresh records
         </button>
       </header>
+      <ModuleBarFor module="consent" />
       {error && (
         <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-red-800">
           {error}

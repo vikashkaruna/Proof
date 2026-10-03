@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectorManifestSchema, type ConnectorManifest } from '@axiom/types';
+import { DataPlaceholder } from '@axiom/ui';
 import { MutationForm } from '../estate/estate-client';
 
 export interface ConnectorRow {
@@ -148,7 +149,9 @@ export function ConnectorsClient({
           </MutationForm>
         </section>
       )}
-      {connectors.length === 0 && <p>No connectors registered in this tenant.</p>}
+      {connectors.length === 0 && (
+        <DataPlaceholder title="No connectors registered in this tenant." />
+      )}
       {connectors.map((row) => {
         const system = systems.find((s) => s.id === row.system_id);
         const descriptor = catalogue?.find((d) => d.id === row.descriptor_id);
