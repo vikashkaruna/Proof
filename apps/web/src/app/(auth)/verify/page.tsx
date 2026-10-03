@@ -28,11 +28,17 @@ export default async function VerifyPage({ searchParams }: PageProps) {
 
   const { redirect: target } = await searchParams;
 
-  // Only same-origin paths are honoured. A `redirect` parameter is attacker-
-  // controllable, and an open redirect on the page that follows authentication
-  // is how a phishing flow borrows your domain for its landing page.
+  // Only same-origin paths are honoured. URL parsers treat `/\\host` like
+  // `//host`, so checking for two forward slashes alone permits an external
+  // redirect after the browser completes MFA verification.
   const safeTarget =
-    target && target.startsWith('/') && !target.startsWith('//') ? target : '/dashboard';
+    typeof target === 'string' &&
+    target.startsWith('/') &&
+    !target.startsWith('//') &&
+    !target.includes('\\') &&
+    !/[\u0000-\u001f\u007f]/.test(target)
+      ? target
+      : '/dashboard';
 
   // Someone who reaches this page with no factor cannot satisfy anything here.
   const { data: factors, error: factorsError } = await supabase
