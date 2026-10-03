@@ -1,6 +1,7 @@
 'use client';
 
-import { ModuleBarFor } from '@/lib/module-bar';
+import { moduleBarProps } from '@/lib/module-bar';
+import { PageHeader } from '@axiom/ui';
 
 import {
   cloneElement,
@@ -147,26 +148,24 @@ export function ConsentClient({ tenantId, canManage }: { tenantId: string; canMa
   const purpose = snapshot?.purposes.find((p) => p.id === selectedPurpose);
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#1E2A4A]">Consent register</h1>
-          <p className="text-sm text-slate-600">
-            Reviewed notices, recorded consent and withdrawal follow-up for this tenant.
-          </p>
-        </div>
-        <button
-          className={button}
-          disabled={disabled}
-          onClick={() => {
-            setHistory(null);
-            setLoading(true);
-            void load();
-          }}
-        >
-          Refresh records
-        </button>
-      </header>
-      <ModuleBarFor module="consent" />
+      <PageHeader
+        module={moduleBarProps('consent')}
+        title="Consent register"
+        description="Reviewed notices, recorded consent and withdrawal follow-up for this tenant."
+        actions={
+          <button
+            className={button}
+            disabled={disabled}
+            onClick={() => {
+              setHistory(null);
+              setLoading(true);
+              void load();
+            }}
+          >
+            Refresh records
+          </button>
+        }
+      />
       {error && (
         <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-red-800">
           {error}

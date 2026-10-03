@@ -32,7 +32,13 @@ async function invite(page: Page, email: string, role = 'viewer') {
   await expect(page.getByRole('status')).toContainText('Email not configured');
   const link = await page.getByTestId('invite-link').inputValue();
   expect(link).toMatch(/\/invite#token=[A-Za-z0-9_-]{43}$/);
-  return link;
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByRole('button', { name: 'Copy link' }).click();
+  await expect(page.getByText('Invitation link copied.')).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toBe(link);
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  return copied;
 }
 
 async function openAsInvitee(
@@ -86,6 +92,39 @@ test('an admin invites a person who accepts after signing in as the invited addr
   await page.reload();
   await expect(page.getByTestId(`invitation-state-${invitee.email}`)).toContainText('Accepted');
   await expect(page.getByTestId('member-list')).toContainText(invitee.email);
+});
+
+test('an invited person can sign up in a separate browser session and accept the copied link', async ({
+  page,
+  browser,
+}) => {
+  const admin = await createMfaAccount('invite-signup', { role: 'admin' });
+  await signInAs(page, admin.email, admin.password);
+  await selectTenant(page, 'a');
+  const email = `invitee-signup-${crypto.randomUUID().slice(0, 8)}@example.invalid`;
+  const password = `Pw-${crypto.randomUUID()}`;
+  const link = await invite(page, email);
+
+  const context = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  const invited = await context.newPage();
+  try {
+    await invited.goto('/login?mode=signup');
+    await invited.getByLabel('Full name').fill('Invitation Test');
+    await invited.getByLabel('Email').fill(email);
+    await invited.getByLabel('Password').fill(password);
+    await invited.getByRole('button', { name: /create account/i }).click();
+    await expect(invited).not.toHaveURL(/\/login\?mode=signup/);
+
+    await invited.goto(link);
+    await expect(invited).toHaveURL(/\/invite$/);
+    await invited.getByRole('button', { name: 'Accept invitation' }).click();
+    await expect(invited).toHaveURL(/\/dashboard/, { timeout: 20_000 });
+    const tenants = await invited.request.get('/api/bff/v1/user/tenants');
+    expect(tenants.status()).toBe(200);
+    expect(JSON.stringify(await tenants.json())).toContain(state.tenantA.id);
+  } finally {
+    await context.close();
+  }
 });
 
 test('another account cannot accept, and a revoked invitation grants nothing', async ({

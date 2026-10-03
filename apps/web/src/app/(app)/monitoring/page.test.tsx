@@ -45,6 +45,7 @@ it('renders empty bounded monitoring lists without claiming full tenant health',
   expect(view).toContain('none active in the loaded page');
   expect(view).toContain('none overdue in the loaded page');
   expect(view).not.toContain('all alerts acknowledged');
+  expect(view).not.toContain('rounded-xl bg-white p-1 text-slate-800 shadow-sm');
   expect(state.calls).toContainEqual(['monitoring_alerts', 'tenant_id', 'tenant-1']);
 });
 

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link';
 import { z } from 'zod';
 import { EvidenceType } from '@axiom/types';
-import { DataPlaceholder } from '@axiom/ui';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { DataPlaceholder, PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 import { evidenceUploadBytes, verifyLocalFile } from './evidence-workflow';
 import {
   evidenceRowSchema,
@@ -302,14 +302,11 @@ export function EvidenceClient({
   }
   return (
     <div className="space-y-5 text-slate-800">
-      <header>
-        <h1 className="text-2xl font-semibold text-[#1E2A4A]">Evidence vault</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Inspect recorded evidence, check exact stored versions, or compare a local file against
-          its recorded SHA-256.
-        </p>
-        <ModuleBarFor module="evidence" tone="light" className="mt-3" />
-      </header>
+      <PageHeader
+        module={moduleBarProps('evidence')}
+        title="Evidence vault"
+        description="Inspect recorded evidence, check exact stored versions, or compare a local file against its recorded SHA-256."
+      />
       {error && (
         <p role="alert" className="rounded border border-red-200 bg-red-50 p-3">
           {error}

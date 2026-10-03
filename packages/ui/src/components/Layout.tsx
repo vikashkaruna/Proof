@@ -21,20 +21,51 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <header className={cn('flex flex-col gap-4 border-b border-slate-200 pb-6', className)}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-indigo-500">
-            {title}
-          </h1>
-          {description && (
-            <div className="mt-1 max-w-3xl text-sm text-slate-600">{description}</div>
+    <header
+      className={cn(
+        'rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 text-white shadow-sm md:p-7',
+        className,
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="font-heading text-2xl font-bold tracking-tight text-white md:text-[26px]">
+              {title}
+            </h1>
+            {module?.titleHi && (
+              <span lang="hi" className="font-heading text-lg text-[#0FB5A5]">
+                {module.titleHi}
+              </span>
+            )}
+          </div>
+          {module && (
+            <ModuleBar
+              {...module}
+              titleHi={undefined}
+              moduleId={undefined}
+              tone="dark"
+              className="mt-2"
+            />
           )}
+          {description && (
+            <div className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">
+              {description}
+            </div>
+          )}
+          {module?.moduleId && (
+            <div className="mt-4 inline-flex rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white">
+              Module {module.moduleId}
+            </div>
+          )}
+          {meta && <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div>}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-1 text-slate-800 shadow-sm">
+            {actions}
+          </div>
+        )}
       </div>
-      {module && <ModuleBar {...module} />}
-      {meta && <div className="flex flex-wrap items-center gap-2">{meta}</div>}
     </header>
   );
 }
