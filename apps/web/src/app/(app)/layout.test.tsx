@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   user: null as unknown,
   memberships: null as unknown,
   error: null as Error | null,
+  firstError: null as Error | null,
+  membershipReads: 0,
   authError: null as Error | null,
   authThrows: false,
 }));
@@ -28,7 +30,13 @@ vi.mock('@axiom/supabase', () => ({
     from: () => {
       const query = {
         select: () => query,
-        eq: async () => ({ data: state.memberships, error: state.error }),
+        eq: async () => {
+          state.membershipReads += 1;
+          return {
+            data: state.memberships,
+            error: state.membershipReads === 1 && state.firstError ? state.firstError : state.error,
+          };
+        },
       };
       return query;
     },
@@ -47,6 +55,8 @@ beforeEach(() => {
   state.user = null;
   state.memberships = null;
   state.error = null;
+  state.firstError = null;
+  state.membershipReads = 0;
   state.authError = null;
   state.authThrows = false;
 });
@@ -73,6 +83,18 @@ it('fails closed when tenant membership read is unavailable', async () => {
   await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow(
     'Tenant memberships are unavailable',
   );
+  expect(state.membershipReads).toBe(1);
+});
+
+it('retries only PostgREST JWT issued-at-future after a fresh sign-in', async () => {
+  state.user = { id: 'user-1' };
+  state.memberships = [
+    { tenant_id: 'tenant-beta', role: 'viewer', tenants: { name: 'Beta', slug: 'beta' } },
+  ];
+  state.firstError = Object.assign(new Error('JWT issued at future'), { code: 'PGRST303' });
+  const view = renderToStaticMarkup(await AppLayout({ children: <p>Protected</p> }));
+  expect(view).toContain('Beta');
+  expect(state.membershipReads).toBe(2);
 });
 
 it('passes only recorded tenant memberships into the shell', async () => {
