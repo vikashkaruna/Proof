@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ConnectorManifestSchema, type ConnectorManifest } from '@axiom/types';
 import { DataPlaceholder } from '@axiom/ui';
 import { MutationForm } from '../estate/estate-client';
+import { PublicWebsiteClient } from './public-website-client';
 
 export interface ConnectorRow {
   id: string;
@@ -217,6 +218,7 @@ export function ConnectorsClient({
           </li>
         </ol>
       </section>
+      <PublicWebsiteClient tenantId={tenantId} canManage={canManage} />
       <section aria-label="Available connector options" className="space-y-3">
         <h2 className="text-lg font-semibold text-indigo-900">Available connector options</h2>
         {catalogue === null && !catalogueError && <p role="status">Loading reviewed options…</p>}

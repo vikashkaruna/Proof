@@ -14,6 +14,9 @@ vi.mock('../estate/estate-client', () => ({
     <form aria-label={label}>{children}</form>
   ),
 }));
+vi.mock('./public-website-client', () => ({
+  PublicWebsiteClient: () => <section aria-label="Public website content check" />,
+}));
 const system: ConnectorSystem = {
   id: 'system-1',
   name: 'Payroll',
