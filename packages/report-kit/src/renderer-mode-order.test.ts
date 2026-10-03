@@ -1,8 +1,26 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderHtmlToPdf } from './renderer';
+import { findChromiumExecutable, renderHtmlToPdf } from './renderer';
+
+it('selects the pinned Playwright Linux headless shell before system Chrome', () => {
+  const home = mkdtempSync(join(tmpdir(), 'playwright-shell-'));
+  const shell = join(
+    home,
+    '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell',
+  );
+  mkdirSync(dirname(shell), { recursive: true });
+  writeFileSync(shell, '');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('CHROME_PATH', '');
+  vi.stubEnv('PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH', '');
+  try {
+    expect(findChromiumExecutable()).toBe(shell);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 
 /** A stand-in browser: logs the headless mode it was given, then fails or writes a PDF. */
 function fakeChrome(failModes: string[]) {
