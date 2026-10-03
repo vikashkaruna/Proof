@@ -555,7 +555,7 @@ it('scopes shell reads to a verified membership when a preferred slug is forged'
 it('marks only the selected report tab as the current navigation destination', () => {
   state.pathname = '/reports';
   state.search = 'tab=pramaan';
-  render(<AppShell {...props} capabilities={['report.read']} />);
+  render(<AppShell {...props} capabilities={['report.read']} canViewClosureDossiers />);
   const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
   expect(
     within(nav)
@@ -567,4 +567,32 @@ it('marks only the selected report tab as the current navigation destination', (
       .getByRole('link', { name: /Working Reports & Registers/ })
       .getAttribute('aria-current'),
   ).toBeNull();
+});
+
+it('keeps the working reports destination active for a reader who requests a hidden tab URL', () => {
+  state.pathname = '/reports';
+  state.search = 'tab=pramaan';
+  render(<AppShell {...props} capabilities={['report.read']} />);
+  const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
+  expect(within(nav).queryByRole('link', { name: /Statutory Proof Dossiers/ })).toBeNull();
+  expect(
+    within(nav).getByRole('link', { name: /Working Reports & Registers/ }).getAttribute(
+      'aria-current',
+    ),
+  ).toBe('page');
+  expect(document.querySelector('header')?.textContent).toContain('Working Reports & Registers');
+});
+
+it.each([
+  ['/portal', 'Operate', 'Client Portal'],
+  ['/engagements', 'Assess', 'Engagements'],
+  ['/engagements/recorded-id', 'Assess', 'Engagements'],
+  ['/onboarding', 'Overview', 'Enterprise Onboarding'],
+])('shows the %s route context in the shell header', (path, breadcrumb, title) => {
+  state.pathname = path;
+  render(<AppShell {...props} />);
+  const header = document.querySelector('header')!;
+  expect(within(header).getByText(breadcrumb)).toBeTruthy();
+  expect(within(header).getByText(title)).toBeTruthy();
+  expect(within(header).queryByText('Dashboard')).toBeNull();
 });

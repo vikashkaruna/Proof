@@ -116,11 +116,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
       },
       {
         route: '/approval',
-        en: 'Approval Console',
-        hi: 'अनुमोदन कंसोल',
+        en: 'Approval Queue',
+        hi: 'अनुमोदन कतार',
         phase: 'P3',
         star: true,
-        capability: Capability.PLAN_APPROVE,
+        // This route lists recorded pending actions and links to readable
+        // plans. Approval authority is checked on each plan action.
+        capability: Capability.PLAN_READ,
       },
       {
         route: '/execution',
@@ -282,14 +284,26 @@ export const APP_NAV_GROUPS: NavGroup[] = [
 export function visibleNavGroups(
   capabilities: readonly string[],
   groups: NavGroup[] = APP_NAV_GROUPS,
+  canViewClosureDossiers = false,
 ): NavGroup[] {
   const held = new Set(capabilities);
   return groups
-    .map((group) => ({ ...group, items: group.items.filter((i) => held.has(i.capability)) }))
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (i) =>
+          held.has(i.capability) && (i.route !== '/reports?tab=pramaan' || canViewClosureDossiers),
+      ),
+    }))
     .filter((group) => group.items.length > 0);
 }
 
 /** Every route reachable by a persona, for tests and for breadcrumbs. */
-export function visibleRoutes(capabilities: readonly string[]): string[] {
-  return visibleNavGroups(capabilities).flatMap((g) => g.items.map((i) => i.route));
+export function visibleRoutes(
+  capabilities: readonly string[],
+  canViewClosureDossiers = false,
+): string[] {
+  return visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers).flatMap((g) =>
+    g.items.map((i) => i.route),
+  );
 }

@@ -2,7 +2,8 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
-import { capabilitiesFor, type UserRole } from '@axiom/types';
+import { capabilitiesFor, UserRole } from '@axiom/types';
+import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
 import { logoutAction } from '../(auth)/login/actions';
 import { AppShell } from './app-shell';
 
@@ -76,6 +77,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const active =
     tenants.find((t) => t.slug === activeTenantSlug || t.id === activeTenantSlug) ?? tenants[0];
   const capabilities = active ? capabilitiesFor(active.role as UserRole) : [];
+  let founderIsInternal = false;
+  if (active?.role === UserRole.FOUNDER) {
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('is_axiom_internal')
+      .eq('id', user.id)
+      .maybeSingle();
+    founderIsInternal = !profileError && profile?.is_axiom_internal === true;
+  }
+  const canViewClosureDossiers = active
+    ? canAccessClosureDossiers(active.role as UserRole, founderIsInternal)
+    : false;
 
   return (
     <AppShell
@@ -83,6 +96,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       tenants={tenants}
       activeTenantSlug={activeTenantSlug}
       capabilities={capabilities}
+      canViewClosureDossiers={canViewClosureDossiers}
       logoutAction={logoutAction}
     >
       {children}

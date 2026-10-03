@@ -2,10 +2,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { UserRole } from '@axiom/types';
-const state = vi.hoisted(() => ({ role: 'admin' as string, internal: false }));
+const state = vi.hoisted(() => ({ role: 'admin' as string, internal: false, search: '' }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(state.search),
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async () => ({
@@ -21,6 +21,7 @@ import { detailSchema } from './report-contract';
 beforeEach(() => {
   state.role = UserRole.ADMIN;
   state.internal = false;
+  state.search = '';
 });
 it('refuses an agent and presents no mutation or fake output to a viewer', async () => {
   state.role = UserRole.AGENT;
@@ -40,6 +41,27 @@ it('shows closure dossiers to reporting managers and founder release to internal
   state.internal = true;
   expect(renderToStaticMarkup(await ReportsPage())).toContain('Closure dossiers');
 });
+it.each([
+  [UserRole.FOUNDER, true, true],
+  [UserRole.FOUNDER, false, false],
+  [UserRole.OWNER, false, true],
+  [UserRole.ADMIN, false, true],
+  [UserRole.AXIOM_ANALYST, true, false],
+  [UserRole.APPROVER, false, false],
+  [UserRole.REVIEWER, false, false],
+  [UserRole.VIEWER, false, false],
+  [UserRole.PARTNER, false, false],
+])(
+  'renders the Pramaan tab for %s with internal=%s only when usable',
+  async (role, internal, visible) => {
+    state.role = role;
+    state.internal = internal;
+    state.search = 'tab=pramaan';
+    const html = renderToStaticMarkup(await ReportsPage());
+    expect(html.includes('Closure dossiers')).toBe(visible);
+    expect(html.includes('Working reports and registers')).toBe(true);
+  },
+);
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading available evidence');

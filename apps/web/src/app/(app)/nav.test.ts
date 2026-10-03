@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Capability, UserRole, capabilitiesFor } from '@axiom/types';
 import { APP_NAV_GROUPS, visibleNavGroups, visibleRoutes } from './nav';
+import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
 
 /**
  * W1 · SEC-9 — persona render gating.
@@ -19,7 +20,8 @@ import { APP_NAV_GROUPS, visibleNavGroups, visibleRoutes } from './nav';
  * failure rather than as two lists quietly disagreeing.
  */
 
-const routesFor = (role: UserRole) => visibleRoutes(capabilitiesFor(role));
+const routesFor = (role: UserRole) =>
+  visibleRoutes(capabilitiesFor(role), canAccessClosureDossiers(role, role === UserRole.FOUNDER));
 
 describe('nav configuration', () => {
   it('gives every item a capability, with no visible-to-everyone escape hatch', () => {
@@ -52,8 +54,8 @@ describe('visibleNavGroups', () => {
 describe('the viewer persona', () => {
   const routes = routesFor(UserRole.VIEWER);
 
-  it('is not offered the approval console', () => {
-    expect(routes).not.toContain('/approval');
+  it('can read the approval queue, but has no approval authority', () => {
+    expect(routes).toContain('/approval');
   });
 
   it('is not offered execution, connectors, policies, workbench or the partner portal', () => {
@@ -87,17 +89,17 @@ describe('the viewer persona', () => {
 describe('the reviewer persona', () => {
   const routes = routesFor(UserRole.REVIEWER);
 
-  it('reads plans but is not offered the approval console', () => {
+  it('reads plans and the approval queue without approval authority', () => {
     // BR-1's maker-checker property: a reviewer comments, an approver decides.
     expect(routes).toContain('/plans');
-    expect(routes).not.toContain('/approval');
+    expect(routes).toContain('/approval');
   });
 });
 
 describe('the approver persona', () => {
   const routes = routesFor(UserRole.APPROVER);
 
-  it('is offered the approval console', () => {
+  it('is offered the approval queue', () => {
     expect(routes).toContain('/approval');
   });
 
@@ -114,9 +116,9 @@ describe('the approver persona', () => {
 describe('the partner persona', () => {
   const routes = routesFor(UserRole.PARTNER);
 
-  it('is offered the partner portal and nothing that changes a client estate', () => {
+  it('is offered the partner portal and no routes that change a client estate', () => {
     expect(routes).toContain('/partner');
-    expect(routes).not.toContain('/approval');
+    expect(routes).toContain('/approval');
     expect(routes).not.toContain('/execution');
     expect(routes).not.toContain('/connectors');
   });
@@ -140,12 +142,12 @@ describe('internal surfaces', () => {
     }
   });
 
-  it('offers an analyst no approval console and no execution', () => {
+  it('offers an analyst a read-only approval queue and no execution', () => {
     // Render gating agreeing with the matrix: Axiom prepares, the client
     // authorises. An analyst seeing an Approve button would be the first sign
     // that boundary had slipped.
     const routes = routesFor(UserRole.AXIOM_ANALYST);
-    expect(routes).not.toContain('/approval');
+    expect(routes).toContain('/approval');
     expect(routes).not.toContain('/execution');
     expect(routes).toContain('/plans');
   });
@@ -153,6 +155,26 @@ describe('internal surfaces', () => {
   it('gives the agent identity no navigation at all', () => {
     // An agent's authority comes from its approval token, never from a seat.
     expect(routesFor(UserRole.AGENT)).toEqual([]);
+  });
+
+  it('offers the Pramaan route only where the dossier tab can render', () => {
+    for (const role of [
+      UserRole.FOUNDER,
+      UserRole.AXIOM_ANALYST,
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.APPROVER,
+      UserRole.REVIEWER,
+      UserRole.VIEWER,
+      UserRole.PARTNER,
+    ]) {
+      expect(routesFor(role).includes('/reports?tab=pramaan')).toBe(
+        canAccessClosureDossiers(role, role === UserRole.FOUNDER),
+      );
+    }
+    expect(visibleRoutes(capabilitiesFor(UserRole.FOUNDER), false)).not.toContain(
+      '/reports?tab=pramaan',
+    );
   });
 });
 
