@@ -76,8 +76,20 @@ function archiveWriterKey() {
   return key;
 }
 
+function humanWriterKey() {
+  if (!acceptanceTarget) return localWriterKey('human_action_writer');
+  const key = process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY;
+  if (!key)
+    throw new Error(
+      'Deployed browser acceptance requires a BFF-only SUPABASE_HUMAN_ACTION_WRITER_KEY',
+    );
+  return key;
+}
+
 const bffArchiveWriterKey = archiveWriterKey();
 if (bffArchiveWriterKey) process.env.SUPABASE_ARCHIVE_WRITER_KEY = bffArchiveWriterKey;
+const bffHumanWriterKey = humanWriterKey();
+if (bffHumanWriterKey) process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY = bffHumanWriterKey;
 
 const BFF_PORT = '4000';
 
@@ -112,7 +124,7 @@ const bffEnv = {
   SUPABASE_STATUTORY_PROOF_WRITER_KEY: localWriterKey('statutory_proof_writer'),
   // Issued separately for this PostgREST target and kept out of browser persona state.
   SUPABASE_ARCHIVE_WRITER_KEY: bffArchiveWriterKey,
-  SUPABASE_HUMAN_ACTION_WRITER_KEY: localWriterKey('human_action_writer'),
+  SUPABASE_HUMAN_ACTION_WRITER_KEY: bffHumanWriterKey,
   SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: localWriterKey('evidence_ingestion_writer'),
   SUPABASE_AGENT_LEDGER_WRITER_KEY: localWriterKey('agent_ledger_writer'),
   NODE_ENV: 'development',
