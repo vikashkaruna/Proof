@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serviceAuthHeaders } from './service-auth.js';
 
 /**
  * W5 · M3.2 — dispatch one dry-run to the agent runtime.
@@ -58,7 +59,11 @@ export async function dispatchDryRun(
   try {
     const response = await fetch(`${runtimeUrl}/internal/dry-run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Internal-Token': internalToken },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Token': internalToken,
+        ...(await serviceAuthHeaders(runtimeUrl)),
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });

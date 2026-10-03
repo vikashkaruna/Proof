@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serviceAuthHeaders } from './service-auth.js';
 
 export interface RollbackDispatchOutcome {
   status: 'accepted' | 'failed' | 'unknown';
@@ -45,7 +46,11 @@ export async function dispatchRollback(
   try {
     const response = await fetch(`${runtimeUrl}/internal/rollback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Internal-Token': internalToken },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Token': internalToken,
+        ...(await serviceAuthHeaders(runtimeUrl)),
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });

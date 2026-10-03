@@ -26,6 +26,7 @@ import httpx
 
 from .canonicalise import sha256_hex
 from .config import Settings, get_settings
+from .service_auth import ServiceAuthError, service_auth_headers
 
 
 TaskKind = Literal[
@@ -81,6 +82,10 @@ class ModelGateway:
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
 
+    async def _auth_headers(self) -> dict[str, str]:
+        # {} unless AXIOM_SERVICE_AUTH=gcp-id-token; raises (fail closed) if no token.
+        return await service_auth_headers(self._url)
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         """Call the model gateway.
 
@@ -108,7 +113,9 @@ class ModelGateway:
         }
         t0 = time.monotonic()
         try:
-            r = await self._http.post("/v1/complete", json=body)
+            r = await self._http.post(
+                "/v1/complete", json=body, headers=await self._auth_headers()
+            )
             r.raise_for_status()
         except httpx.HTTPStatusError as e:
             raise ModelGatewayError(
@@ -133,9 +140,9 @@ class ModelGateway:
 
     async def health(self) -> bool:
         try:
-            r = await self._http.get("/health")
+            r = await self._http.get("/health", headers=await self._auth_headers())
             return r.status_code == 200
-        except httpx.HTTPError:
+        except (httpx.HTTPError, ServiceAuthError):
             return False
 
     async def aclose(self) -> None:

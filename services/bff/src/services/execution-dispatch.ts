@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serviceAuthHeaders } from './service-auth.js';
 
 export interface DispatchOutcome {
   status: 'accepted' | 'failed' | 'unknown';
@@ -50,7 +51,11 @@ export async function dispatchExecution(
   try {
     const response = await fetch(`${runtimeUrl}/internal/execute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Internal-Token': internalToken },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Token': internalToken,
+        ...(await serviceAuthHeaders(runtimeUrl)),
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });

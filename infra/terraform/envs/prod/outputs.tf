@@ -39,3 +39,8 @@ output "secrets_arns" {
     temporal = aws_secretsmanager_secret.temporal.arn
   }
 }
+
+output "edge_waf_acl_arn" {
+  description = "Null unless enable_edge_protection is true. Attach to an ALB or CloudFront distribution."
+  value       = var.enable_edge_protection ? module.edge_waf[0].arn : null
+}

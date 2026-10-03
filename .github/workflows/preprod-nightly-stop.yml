@@ -1,0 +1,46 @@
+name: Preprod nightly soft stop
+# Cuts idle preprod cost. It can ONLY stop, never deploy, build or start, and a
+# stop deletes nothing (Cloud Run minimum instances, labelled VMs and Cloud SQL
+# are stopped; every object keeps its ID). Start again with the manual
+# `Preprod operations` workflow or `scripts/axiom-ops.sh start --env preprod`.
+#
+# Off until you opt in: set the repository variable NIGHTLY_STOP_ENABLED to
+# `true`. Change the time by editing the cron below (UTC; 16:30 UTC = 22:00 IST).
+# Skip one night by setting the variable back to `false`. It uses its own
+# environment `preprod-nightly` (same secret and variables as `preprod-ops`, but
+# no required reviewer, because nobody is awake to approve it).
+on:
+  schedule:
+    - cron: '30 16 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: preprod-ops
+  cancel-in-progress: false
+jobs:
+  stop:
+    name: stop preprod
+    if: github.ref == 'refs/heads/main' && vars.NIGHTLY_STOP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: preprod-nightly
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Materialize the private environment file
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.AXIOM_ENV_PREPROD }}
+        run: |
+          umask 077
+          printf '%s\n' "$ENV_FILE_CONTENT" > .env.preprod
+      - name: Soft stop
+        run: scripts/axiom-ops.sh stop --env preprod --yes
+      - name: Remove the private environment file
+        if: always()
+        run: rm -f .env.preprod
