@@ -10,6 +10,8 @@ import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 
 export interface AssessmentClientProps {
   snapshot: AssessmentSnapshot | null;
+  canCreate?: boolean;
+  canInvokeAgent?: boolean;
 }
 
 export interface PipelineStage {
@@ -58,7 +60,11 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   },
 ];
 
-export function AssessmentClient({ snapshot }: AssessmentClientProps) {
+export function AssessmentClient({
+  snapshot,
+  canCreate = false,
+  canInvokeAgent = false,
+}: AssessmentClientProps) {
   const router = useRouter();
   const controls = snapshot?.controls ?? [];
   const passCount = snapshot?.summary.pass ?? 0;
@@ -92,7 +98,7 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
   const inFlight = useRef(false);
 
   const runAssessment = async () => {
-    if (inFlight.current || !snapshot?.engagement) return;
+    if (inFlight.current || !snapshot?.engagement || !canInvokeAgent) return;
     inFlight.current = true;
     setAssessRunning(true);
     setHasCompleted(false);
@@ -139,8 +145,15 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
           </p>
         ) : !snapshot.engagement ? (
           <p>
-            No saved assessment exists for this tenant. Controls and exposure are not assessed.
-            Create an assessment before running Parikshan.
+            No saved assessment exists for this tenant. Controls and exposure are not assessed.{' '}
+            {canCreate ? (
+              <Link href="/engagements" className="font-semibold text-teal-700 underline">
+                Create an assessment
+              </Link>
+            ) : (
+              'Ask an assessment owner to create one'
+            )}{' '}
+            before running Parikshan.
           </p>
         ) : (
           <p>
@@ -167,18 +180,20 @@ export function AssessmentClient({ snapshot }: AssessmentClientProps) {
             <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
           </div>
 
-          <button
-            type="button"
-            onClick={runAssessment}
-            disabled={assessRunning || !snapshot?.engagement}
-            className={`rounded-[9px] px-[18px] py-[10px] text-[12.5px] font-bold text-white transition-all shadow-xs ${
-              assessRunning || !snapshot?.engagement
-                ? 'cursor-default bg-white/15 opacity-80'
-                : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
-            }`}
-          >
-            {assessRunning ? 'Running Parikshan…' : 'Run Parikshan'}
-          </button>
+          {canInvokeAgent && (
+            <button
+              type="button"
+              onClick={runAssessment}
+              disabled={assessRunning || !snapshot?.engagement}
+              className={`rounded-[9px] px-[18px] py-[10px] text-[12.5px] font-bold text-white transition-all shadow-xs ${
+                assessRunning || !snapshot?.engagement
+                  ? 'cursor-default bg-white/15 opacity-80'
+                  : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
+              }`}
+            >
+              {assessRunning ? 'Running Parikshan…' : 'Run Parikshan'}
+            </button>
+          )}
         </div>
 
         {/* 5-Stage Stepper Pipeline Row */}

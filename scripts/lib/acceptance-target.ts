@@ -17,6 +17,10 @@ export interface AcceptanceTarget {
   serviceKey: string;
   expectedRevision: string;
 }
+/** Only disposable local acceptance may select its synthetic assessment baseline. */
+export function canSelectSyntheticCurrentLibrary(target: AcceptanceTarget | null): boolean {
+  return target === null || target.topology === 'local-docker';
+}
 const environments = ['staging', 'preprod', 'production', 'onprem'];
 const originKeys = ['bffUrl', 'webUrl', 'marketingUrl', 'supabaseUrl'] as const;
 const keys = [

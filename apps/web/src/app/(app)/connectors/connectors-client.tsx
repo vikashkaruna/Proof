@@ -1,9 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { z } from 'zod';
 import { ConnectorManifestSchema, type ConnectorManifest } from '@axiom/types';
 import { DataPlaceholder } from '@axiom/ui';
 import { MutationForm } from '../estate/estate-client';
+import { PublicWebsiteClient } from './public-website-client';
 
 export interface ConnectorRow {
   id: string;
@@ -28,6 +30,93 @@ export interface HealthRow {
   checked_at: string;
 }
 const inputClass = 'block w-full rounded border p-2';
+const readinessSchema = z.object({
+  data: z.object({
+    connectorId: z.uuid(),
+    registrationStatus: z.enum(['draft', 'active', 'disabled', 'archived']),
+    credentialConfigured: z.boolean(),
+    readGrantConfigured: z.boolean(),
+    lastObservation: z
+      .object({
+        status: z.enum(['healthy', 'degraded', 'unreachable']),
+        checked_at: z.string(),
+        error_code: z.string().nullable(),
+      })
+      .nullable(),
+    liveCheckAvailable: z.literal(false),
+  }),
+});
+type Readiness = z.infer<typeof readinessSchema>['data'];
+
+function SetupStatus({ tenantId, connectorId }: { tenantId: string; connectorId: string }) {
+  const [status, setStatus] = useState<Readiness | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  async function refresh() {
+    if (busy) return;
+    setBusy(true);
+    setError(false);
+    try {
+      const response = await fetch(`/api/bff/v1/connectors/${connectorId}/readiness`, {
+        headers: { 'X-Tenant-Id': tenantId },
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error('Readiness unavailable');
+      const parsed = readinessSchema.parse(await response.json());
+      if (parsed.data.connectorId !== connectorId) throw new Error('Unexpected connector');
+      setStatus(parsed.data);
+    } catch {
+      setStatus(null);
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-semibold text-indigo-900">Connection setup status</h3>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={busy}
+          className="rounded-md border border-teal-700 px-3 py-2 font-medium text-teal-800 hover:bg-teal-50 disabled:opacity-50"
+        >
+          {busy ? 'Checking setup…' : 'Check setup status'}
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="mt-2 text-ember-700">
+          Setup status could not be loaded. Try again.
+        </p>
+      )}
+      {status && (
+        <ul className="mt-3 list-inside list-disc space-y-1" aria-label="Connection setup checks">
+          <li>
+            Registration:{' '}
+            {status.registrationStatus === 'active' ? 'enabled' : status.registrationStatus}
+          </li>
+          <li>
+            Broker credential: {status.credentialConfigured ? 'configured' : 'not configured'}
+          </li>
+          <li>
+            Drishti read grant: {status.readGrantConfigured ? 'configured' : 'not configured'}
+          </li>
+          <li>
+            Last recorded observation:{' '}
+            {status.lastObservation
+              ? `${status.lastObservation.status} at ${status.lastObservation.checked_at}`
+              : 'none'}
+          </li>
+        </ul>
+      )}
+      <p className="mt-3 text-slate-600">
+        This refresh checks saved setup records only. A live connection test is not available from
+        this screen; a prior health observation does not prove current reachability.
+      </p>
+    </div>
+  );
+}
 function RegistrationFields({ row }: { row?: ConnectorRow }) {
   return (
     <>
@@ -99,9 +188,87 @@ export function ConnectorsClient({
   );
   return (
     <>
-      <Link href="/estate" className="text-teal-700 underline">
-        Manage estate inventory
-      </Link>
+      <section
+        aria-label="Connection setup"
+        className="space-y-4 rounded-lg border border-slate-200 bg-white p-5"
+      >
+        <h2 className="text-lg font-semibold text-indigo-900">Set up a connection path</h2>
+        <ol className="list-inside list-decimal space-y-2 text-sm text-slate-700">
+          <li>
+            <Link href="/estate" className="text-teal-700 underline">
+              Add an active estate and system
+            </Link>
+            .
+          </li>
+          <li>Choose a reviewed descriptor and register a non-secret endpoint reference below.</li>
+          <li>
+            Have the operator configure the private endpoint and broker credential for that
+            reference. Never enter a connection URL, password, token, or secret here.
+          </li>
+          <li>
+            Enable the registration, then{' '}
+            <Link href="/estate/setup" className="text-teal-700 underline">
+              review agent access in estate setup
+            </Link>
+            . A grant is a separate recorded human action.
+          </li>
+          <li>
+            Use “Check setup status” on the registration to inspect recorded configuration. A live
+            transport check needs the private workload and broker.
+          </li>
+        </ol>
+      </section>
+      <PublicWebsiteClient tenantId={tenantId} canManage={canManage} />
+      <section aria-label="Available connector options" className="space-y-3">
+        <h2 className="text-lg font-semibold text-indigo-900">Available connector options</h2>
+        <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-sm">
+          <strong className="block text-indigo-900">Public website audit · self-service</strong>
+          <p className="mt-1 text-slate-700">
+            Checks a public HTML page and up to three same-site privacy, contact and terms pages.
+            Owners and admins can run it; tenant members with posture access can read the history.
+            It reports only retrieved public content and does not certify compliance.
+          </p>
+          <p className="mt-1 text-slate-700">
+            Requires permitted outbound access to the public website.
+          </p>
+          <a
+            href="#public-website-check"
+            className="mt-2 inline-block font-medium text-teal-800 underline"
+          >
+            Open public website audit
+          </a>
+        </div>
+        {catalogue === null && !catalogueError && <p role="status">Loading reviewed options…</p>}
+        {catalogue?.length === 0 && <p>No reviewed connector options are available.</p>}
+        {catalogue && catalogue.length > 0 && (
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {catalogue.map((descriptor) => (
+              <li
+                key={descriptor.id}
+                className="rounded-lg border border-slate-200 bg-white p-4 text-sm"
+              >
+                <strong className="block text-indigo-900">
+                  {descriptor.target} · {descriptor.version}
+                </strong>
+                <span className="block">
+                  {descriptor.transport.toUpperCase()} ·{' '}
+                  {descriptor.targetBinding === 'production'
+                    ? 'Production · operator setup required'
+                    : 'Reference only'}{' '}
+                  · {descriptor.auth.replaceAll('_', ' ')}
+                </span>
+                <span className="mt-1 block text-slate-600">
+                  {descriptor.provenance === 'vendor-verified'
+                    ? 'Vendor verified'
+                    : descriptor.targetBinding === 'production'
+                      ? 'Requires private network, broker credential and workload verification before use.'
+                      : 'Reference descriptor; not proof of vendor connectivity'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       {catalogueError && (
         <p role="alert">
           The reviewed connector catalogue could not be loaded. Refresh to try again.
@@ -188,6 +355,7 @@ export function ConnectorsClient({
               Descriptor:{' '}
               {descriptor ? `${descriptor.target} ${descriptor.version}` : row.descriptor_id}
             </p>
+            <SetupStatus tenantId={tenantId} connectorId={row.id} />
             {canManage && row.status !== 'archived' && (
               <>
                 {row.status !== 'active' && parentActive && (

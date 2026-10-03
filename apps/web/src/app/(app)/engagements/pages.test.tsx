@@ -1,16 +1,20 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { UserRole } from '@axiom/types';
 import EngagementsListPage from './page';
 import EngagementDetailPage from './[id]/page';
 
 const state = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: Error | null }>,
   calls: [] as Array<[string, string, unknown]>,
+  role: 'viewer' as UserRole,
 }));
 vi.mock('@/lib/tenant-context', () => ({
+  Capability: { POSTURE_READ: 'posture.read', ENGAGEMENT_CREATE: 'engagement.create' },
   requireTenantContext: async () => ({
     tenantId: 'tenant-1',
+    role: state.role,
     supabase: {
       from: (table: string) => {
         const result = () =>
@@ -23,6 +27,27 @@ vi.mock('@/lib/tenant-context', () => ({
           },
           order: () => query,
           single: async () => result(),
+          maybeSingle: async () => result(),
+          then: (resolve: (value: unknown) => unknown) => Promise.resolve(result()).then(resolve),
+        };
+        return query;
+      },
+    },
+  }),
+  requireCapabilityContext: async () => ({
+    tenantId: 'tenant-1',
+    role: state.role,
+    supabase: {
+      from: (table: string) => {
+        const result = () => state.results[table] ?? { data: [], error: null };
+        const query = {
+          select: () => query,
+          eq: (field: string, value: unknown) => {
+            state.calls.push([table, field, value]);
+            return query;
+          },
+          order: () => query,
+          maybeSingle: async () => result(),
           then: (resolve: (value: unknown) => unknown) => Promise.resolve(result()).then(resolve),
         };
         return query;
@@ -31,6 +56,7 @@ vi.mock('@/lib/tenant-context', () => ({
   }),
 }));
 vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   notFound: () => {
     throw new Error('NOT_FOUND');
   },
@@ -44,6 +70,22 @@ vi.mock('next/link', () => ({
 beforeEach(() => {
   state.results = {};
   state.calls = [];
+  state.role = 'viewer';
+});
+
+it('offers assessment creation only to a creator with a verified current library', async () => {
+  state.results.engagements = { data: [], error: null };
+  state.results.control_libraries = { data: { version: '0.1.1' }, error: null };
+  state.results.estates = { data: [], error: null };
+  state.role = UserRole.OWNER;
+  const owner = renderToStaticMarkup(await EngagementsListPage());
+  expect(owner).toContain('Create assessment');
+  expect(owner).toContain('published control library 0.1.1');
+  expect(state.calls).toContainEqual(['control_libraries', 'status', 'published']);
+  state.role = UserRole.VIEWER;
+  const viewer = renderToStaticMarkup(await EngagementsListPage());
+  expect(viewer).not.toContain('<form');
+  expect(viewer).toContain('Ask an assessment owner to start one');
 });
 
 it('binds the engagement list to the active tenant and reports source failure', async () => {

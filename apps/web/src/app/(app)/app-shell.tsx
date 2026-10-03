@@ -81,6 +81,7 @@ interface AppShellProps {
    * decides — the same module the BFF enforces with.
    */
   capabilities: readonly string[];
+  canViewClosureDossiers?: boolean;
   logoutAction: () => Promise<void>;
 }
 
@@ -90,6 +91,7 @@ export function AppShell({
   tenants,
   activeTenantSlug,
   capabilities,
+  canViewClosureDossiers = false,
   logoutAction,
 }: AppShellProps) {
   const router = useRouter();
@@ -104,7 +106,7 @@ export function AppShell({
       return pathname === itemPath && currentTab === params.get('tab');
     }
     if (itemRoute === '/reports') {
-      return pathname === '/reports' && currentTab !== 'pramaan';
+      return pathname === '/reports' && (currentTab !== 'pramaan' || !canViewClosureDossiers);
     }
     return pathname === itemRoute || (itemRoute !== '/dashboard' && pathname.startsWith(itemRoute));
   };
@@ -141,7 +143,7 @@ export function AppShell({
   }, [pathname]);
 
   const held = new Set(capabilities);
-  const navGroups = visibleNavGroups(capabilities);
+  const navGroups = visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers);
 
   // Halting a client's automation is an authority, not a convenience. A viewer
   // was previously shown this button; the BFF refused, so all it taught them
@@ -305,6 +307,19 @@ export function AppShell({
   // Find active group and item for breadcrumb
   let activeBreadcrumb = 'Overview';
   let activeTitle = 'Dashboard';
+
+  const standaloneRouteContext: Record<string, { breadcrumb: string; title: string }> = {
+    '/portal': { breadcrumb: 'Operate', title: 'Client Portal' },
+    '/engagements': { breadcrumb: 'Assess', title: 'Engagements' },
+    '/onboarding': { breadcrumb: 'Overview', title: 'Enterprise Onboarding' },
+  };
+  const standalone =
+    standaloneRouteContext[pathname] ??
+    (pathname.startsWith('/engagements/') ? standaloneRouteContext['/engagements'] : undefined);
+  if (standalone) {
+    activeBreadcrumb = standalone.breadcrumb;
+    activeTitle = standalone.title;
+  }
 
   for (const group of navGroups) {
     for (const item of group.items) {

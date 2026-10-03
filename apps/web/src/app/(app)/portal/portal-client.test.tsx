@@ -28,6 +28,15 @@ afterEach(() => {
   push.mockReset();
 });
 
+it('offers the Pramaan portal link only when the dossier tab is available', () => {
+  const view = render(<PortalClient {...props} />);
+  expect(screen.queryByRole('link', { name: /Proof Dossiers/ })).toBeNull();
+  view.rerender(<PortalClient {...props} canViewClosureDossiers />);
+  expect(screen.getByRole('link', { name: /Proof Dossiers/ }).getAttribute('href')).toBe(
+    '/reports?tab=pramaan',
+  );
+});
+
 it('shows absence and partial-load states without invented compliance figures', () => {
   render(<PortalClient {...props} assessmentUnavailable loadError />);
   expect(screen.getByTestId('portal-posture').textContent).toBe('—');

@@ -50,7 +50,7 @@ it('binds both inventories to the active tenant and keeps a viewer read-only', a
   expect(view).toContain('Client tenant-1 manage false');
   expect(state.calls).toContainEqual(['connectors', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['estate_systems', 'tenant_id', 'tenant-1']);
-  expect(view).toContain('Connector execution is not yet available');
+  expect(view).toContain('Private system connector execution is not yet available');
 });
 
 it('refuses to render a partial inventory when either query fails', async () => {

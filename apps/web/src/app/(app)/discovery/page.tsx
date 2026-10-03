@@ -1,11 +1,12 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { can } from '@axiom/types';
 import { DataPlaceholder } from '@axiom/ui';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DiscoveryPage() {
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
   const { data, error } = await supabase
     .from('audit_ledger')
     .select('sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result')
@@ -29,6 +30,7 @@ export default async function DiscoveryPage() {
         }));
   return (
     <GenericModuleView
+      canInvokeAgent={can(Capability.AGENT_INVOKE, { role })}
       meta={{
         moduleKey: 'discovery',
         title: 'Data Discovery',

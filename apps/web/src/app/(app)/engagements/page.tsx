@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { can } from '@axiom/types';
 import {
   PageHeader,
   Card,
@@ -10,26 +11,69 @@ import {
   PostureScore,
 } from '@axiom/ui';
 import { formatDate, formatINR } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
+import { CreateAssessmentForm } from './create-assessment-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EngagementsListPage() {
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const canCreate = can(Capability.ENGAGEMENT_CREATE, { role });
 
-  const { data: engagements, error } = await supabase
-    .from('engagements')
-    .select(
-      'id, title, status, posture_score, estimated_exposure_inr, started_at, completed_at, tenant_id, library_version, tenants:tenant_id(name)',
-    )
-    .eq('tenant_id', tenantId)
-    .order('started_at', { ascending: false });
+  const [engagementResult, libraryResult, estateResult] = await Promise.all([
+    supabase
+      .from('engagements')
+      .select(
+        'id, title, status, posture_score, estimated_exposure_inr, started_at, completed_at, tenant_id, library_version, tenants:tenant_id(name)',
+      )
+      .eq('tenant_id', tenantId)
+      .order('started_at', { ascending: false }),
+    canCreate
+      ? supabase
+          .from('control_libraries')
+          .select('version')
+          .eq('is_current', true)
+          .eq('status', 'published')
+          .maybeSingle()
+      : Promise.resolve(null),
+    canCreate
+      ? supabase
+          .from('estates')
+          .select('id, name')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .order('name')
+      : Promise.resolve(null),
+  ]);
+  const { data: engagements, error } = engagementResult;
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('assessment')}
         title="Engagements"
         description="An engagement is a (tenant × library-version) assessment run. Each flows through discovery → classification → assessment → planning → approval → execution → verification."
       />
+
+      {canCreate &&
+        (libraryResult?.error ||
+        !libraryResult?.data ||
+        estateResult?.error ||
+        !estateResult?.data ? (
+          <p
+            role="alert"
+            className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          >
+            Assessment setup is unavailable because the current published library or estate choices
+            could not be verified. Refresh to try again.
+          </p>
+        ) : (
+          <CreateAssessmentForm
+            tenantId={tenantId}
+            libraryVersion={libraryResult.data.version}
+            estates={estateResult.data}
+          />
+        ))}
 
       <Card>
         <CardContent className="p-0">
@@ -56,7 +100,10 @@ export default async function EngagementsListPage() {
               {!error && (engagements ?? []).length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
-                    No engagements yet.
+                    No engagements yet.{' '}
+                    {canCreate
+                      ? 'Use Create assessment above to start one.'
+                      : 'Ask an assessment owner to start one.'}
                   </td>
                 </tr>
               )}
@@ -82,6 +129,12 @@ export default async function EngagementsListPage() {
                       >
                         Open
                       </Link>
+                      <a
+                        href={`/assessment?engagement=${e.id}`}
+                        className="ml-2 rounded-md border border-teal-300 px-3 py-1 text-xs text-teal-800 hover:bg-teal-50"
+                      >
+                        View assessment
+                      </a>
                     </td>
                   </tr>
                 ))}

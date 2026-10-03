@@ -89,6 +89,7 @@ export interface LedgerSummary {
 }
 
 export interface PortalClientProps {
+  canViewClosureDossiers?: boolean;
   tenants: TenantSummary[];
   activeTenant: TenantSummary;
   engagement: EngagementSummary | null;
@@ -120,6 +121,7 @@ function formatBlastRadius(value: unknown): string {
 }
 
 export function PortalClient({
+  canViewClosureDossiers = false,
   tenants,
   activeTenant,
   engagement,
@@ -241,7 +243,7 @@ export function PortalClient({
               href="/approval"
               className="rounded-[9px] bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold py-2.5 px-4 shadow-sm transition-all text-center"
             >
-              Approval Console →
+              Approval Queue →
             </Link>
           </div>
         </div>
@@ -581,19 +583,21 @@ export function PortalClient({
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
                 </Link>
 
-                <Link
-                  href="/reports?tab=pramaan"
-                  className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
-                >
-                  <div>
-                    <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
-                      <span>Proof Dossiers</span>
-                      <span className="text-teal-600 text-xs">★</span>
+                {canViewClosureDossiers && (
+                  <Link
+                    href="/reports?tab=pramaan"
+                    className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
+                        <span>Proof Dossiers</span>
+                        <span className="text-teal-600 text-xs">★</span>
+                      </div>
+                      <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                     </div>
-                    <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
-                  </div>
-                  <span className="text-teal-700 text-xs font-bold">Seal →</span>
-                </Link>
+                    <span className="text-teal-700 text-xs font-bold">Seal →</span>
+                  </Link>
+                )}
               </div>
             </div>
           ) : (
@@ -727,19 +731,21 @@ export function PortalClient({
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
                 </Link>
 
-                <Link
-                  href="/reports?tab=pramaan"
-                  className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
-                >
-                  <div>
-                    <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
-                      <span>Proof Dossiers</span>
-                      <span className="text-teal-600 text-xs">★</span>
+                {canViewClosureDossiers && (
+                  <Link
+                    href="/reports?tab=pramaan"
+                    className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-teal-800 flex items-center gap-1">
+                        <span>Proof Dossiers</span>
+                        <span className="text-teal-600 text-xs">★</span>
+                      </div>
+                      <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                     </div>
-                    <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
-                  </div>
-                  <span className="text-teal-700 text-xs font-bold">Seal →</span>
-                </Link>
+                    <span className="text-teal-700 text-xs font-bold">Seal →</span>
+                  </Link>
+                )}
               </div>
             </div>
           )}
@@ -780,7 +786,7 @@ export function PortalClient({
               </p>
             </div>
             <Link href="/approval" className="text-xs font-bold text-[#0FB5A5] hover:underline">
-              Open Full Approval Console →
+              Open Full Approval Queue →
             </Link>
           </div>
 
@@ -843,7 +849,7 @@ export function PortalClient({
                     href={`/approval?plan=${plan.id}`}
                     className="rounded-lg bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold px-3 py-1.5 transition-all"
                   >
-                    Review & Sign →
+                    Inspect source plan →
                   </Link>
                 </div>
 

@@ -1,7 +1,12 @@
-import { loadAcceptanceTarget, verifyAcceptanceTarget } from './lib/acceptance-target.js';
+import {
+  canSelectSyntheticCurrentLibrary,
+  loadAcceptanceTarget,
+  verifyAcceptanceTarget,
+} from './lib/acceptance-target.js';
 /** Real GoTrue + PostgREST + the complete BFF middleware chain. No auth mocks. */
 import assert from 'node:assert/strict';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
+import { LIBRARY_VERSION } from '../packages/control-library/src/index.js';
 import {
   insertLocalFixtureRows,
   remoteFixtureDatabaseUrl,
@@ -104,6 +109,43 @@ async function main() {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   }
+  // The isolation fixture below deliberately has no controls and is not a
+  // current assessment baseline. New assessments must use a complete current
+  // published library. Only a disposable local target may select the seeded
+  // baseline; a remote target must bring its operator-selected current one.
+  const currentLibraries = await apiRequest(
+    '/rest/v1/control_libraries?is_current=eq.true&status=eq.published&select=version,control_count',
+  );
+  assert.equal(currentLibraries.status, 200, 'Cannot inspect current control library');
+  let currentRows = (await currentLibraries.json()) as Array<{
+    version: string;
+    control_count: number;
+  }>;
+  assert(currentRows.length <= 1, 'More than one current published library');
+  if (currentRows.length === 0 && canSelectSyntheticCurrentLibrary(target)) {
+    const published = await apiRequest(
+      `/rest/v1/control_libraries?version=eq.${encodeURIComponent(LIBRARY_VERSION)}`,
+      'PATCH',
+      { is_current: true },
+    );
+    assert.equal(published.status, 200, 'Cannot select local current control library');
+    currentRows = (await published.json()) as typeof currentRows;
+  }
+  assert.equal(
+    currentRows.length,
+    1,
+    'A current published library is required for assessment acceptance',
+  );
+  const assessmentLibrary = currentRows[0]!.version;
+  const libraryControls = await apiRequest(
+    `/rest/v1/controls?library_version=eq.${encodeURIComponent(assessmentLibrary)}&select=id`,
+  );
+  assert.equal(libraryControls.status, 200, 'Cannot inspect current library controls');
+  assert(
+    currentRows[0]!.control_count > 0 &&
+      ((await libraryControls.json()) as unknown[]).length === currentRows[0]!.control_count,
+    'Current published library must contain its declared controls',
+  );
   async function createUser() {
     const email = `parity-${randomUUID()}@example.invalid`;
     const password = randomBytes(24).toString('base64url');
@@ -735,14 +777,14 @@ async function main() {
     'create_estate_engagement',
     '/v1/engagements',
     201,
-    ownerPost({ libraryVersion: library, title: 'Scoped assessment', estateId: estateB }),
+    ownerPost({ libraryVersion: assessmentLibrary, title: 'Scoped assessment', estateId: estateB }),
   );
   assert.equal(((await linkedEngagement.json()) as { estate_id: string }).estate_id, estateB);
   await check(
     'refuse_foreign_estate_engagement',
     '/v1/engagements',
     422,
-    ownerPost({ libraryVersion: library, title: 'Wrong scope', estateId: estateA }),
+    ownerPost({ libraryVersion: assessmentLibrary, title: 'Wrong scope', estateId: estateA }),
   );
 
   const estateIntent = ownerPost({ slug: 'managed-estate', name: 'Managed estate' });
@@ -791,7 +833,7 @@ async function main() {
     'estate_unassigned_intake',
     '/v1/engagements',
     201,
-    ownerPost({ libraryVersion: library, title: 'Unstarted scope' }),
+    ownerPost({ libraryVersion: assessmentLibrary, title: 'Unstarted scope' }),
   );
   const intakeId = ((await emptyAssessment.json()) as { id: string }).id;
   await check(
@@ -930,7 +972,11 @@ async function main() {
     'estate_archived_assessment_refused',
     '/v1/engagements',
     409,
-    ownerPost({ libraryVersion: library, title: 'Late assessment', estateId: managed.id }),
+    ownerPost({
+      libraryVersion: assessmentLibrary,
+      title: 'Late assessment',
+      estateId: managed.id,
+    }),
   );
 
   await check(
