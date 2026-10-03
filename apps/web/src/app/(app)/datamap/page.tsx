@@ -1,4 +1,5 @@
 import { GenericModuleView } from '../generic-module-view';
+import { DataPlaceholder } from '@axiom/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,13 +19,10 @@ export default async function DataMapPage() {
         cards: [],
       }}
     >
-      <p
-        role="status"
-        className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
-      >
-        No source-bound processing map is available. Discovery and classification records alone do
-        not establish lawful basis, processor contracts, transfer safeguards, or residency.
-      </p>
+      <DataPlaceholder
+        title="No source-bound processing map is available."
+        description="Discovery and classification records alone do not establish lawful basis, processor contracts, transfer safeguards, or residency."
+      />
     </GenericModuleView>
   );
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DataPlaceholder } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
 
@@ -150,7 +151,7 @@ export default async function DashboardPage() {
         {runs.error || !runs.data ? (
           <p className="mt-3 text-sm text-slate-600">Agent runs are unavailable.</p>
         ) : runs.data.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-600">No agent runs recorded for this tenant.</p>
+          <DataPlaceholder className="mt-3" title="No agent runs recorded for this tenant." />
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
             {runs.data.map((run) => (

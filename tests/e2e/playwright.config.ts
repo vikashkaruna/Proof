@@ -4,6 +4,7 @@ import {
   webOrigin,
   repoRoot,
   assertPersonaTarget,
+  localWebPort,
 } from './target';
 import type { PersonaState } from './personas';
 import { readFileSync } from 'node:fs';
@@ -191,8 +192,8 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: 'pnpm --filter @axiom/web exec next dev --webpack --port 3001',
-          port: 3001,
+          command: `pnpm --filter @axiom/web exec next dev --webpack --port ${localWebPort}`,
+          port: localWebPort,
           cwd: repoRoot,
           env: webEnv,
           reuseExistingServer: false,

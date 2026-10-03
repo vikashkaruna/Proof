@@ -10,6 +10,7 @@ import {
   StatGrid,
   StatusBadge,
   SeverityChip,
+  DataPlaceholder,
   type StatusKind,
 } from '@axiom/ui';
 import { formatDateTime, relativeTime } from '@axiom/ui';
@@ -213,12 +214,10 @@ export default async function MonitoringPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {alerts.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No alerts in the loaded page</p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-                Alerts recorded for this tenant will appear here and in the alert tray.
-              </p>
-            </div>
+            <DataPlaceholder
+              title="No alerts in the loaded page"
+              description="Alerts recorded for this tenant will appear here and in the alert tray."
+            />
           ) : (
             <div className="flex flex-col divide-y divide-slate-100">
               {alerts.map((a) => {
@@ -275,13 +274,10 @@ export default async function MonitoringPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {schedules.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">No schedules in the loaded page</p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-                An estate manager registers re-discovery, re-assessment or drift-check schedules per
-                estate. Nothing is sampled here until a schedule exists.
-              </p>
-            </div>
+            <DataPlaceholder
+              title="No schedules in the loaded page"
+              description="An estate manager registers re-discovery, re-assessment or drift-check schedules per estate. Nothing is sampled here until a schedule exists."
+            />
           ) : (
             <div className="overflow-x-auto rounded-md border border-slate-200">
               <table className="w-full text-left text-xs">
@@ -363,16 +359,10 @@ export default async function MonitoringPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {driftEvents.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-mist-50 p-6 text-center">
-              <p className="text-sm font-medium text-indigo-500">
-                No drift events in the loaded page
-              </p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-                When a drift check finds the estate has moved — a new system, a lost connection, a
-                control that no longer holds — the detection is recorded here and stays open until
-                acknowledged.
-              </p>
-            </div>
+            <DataPlaceholder
+              title="No drift events in the loaded page"
+              description="When a drift check finds the estate has moved — a new system, a lost connection, a control that no longer holds — the detection is recorded here and stays open until acknowledged."
+            />
           ) : (
             <div className="flex flex-col divide-y divide-slate-100">
               {driftEvents.map((e) => {

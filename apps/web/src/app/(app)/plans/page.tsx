@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DataPlaceholder } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { ModuleBarFor } from '@/lib/module-bar';
 
@@ -27,9 +28,7 @@ export default async function PlansListPage() {
           Plans are unavailable. No plan readiness can be inferred.
         </p>
       ) : plans.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600">
-          No remediation plans recorded for this tenant.
-        </p>
+        <DataPlaceholder title="No remediation plans recorded for this tenant." />
       ) : (
         <ul className="space-y-3">
           {plans.map((plan) => (

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Capability } from '@axiom/types';
-import { PageHeader, Stat, StatGrid } from '@axiom/ui';
+import { DataPlaceholder, PageHeader, Stat, StatGrid } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { isBatchOpen, needsOperatorAttention } from '@/lib/execution-view';
@@ -188,18 +188,14 @@ export default async function ExecutionPage() {
       </StatGrid>
 
       {batches.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-mist-50 p-10 text-center">
-          <h2 className="font-heading text-sm font-semibold text-indigo-500">
-            No execution batches yet
-          </h2>
-          <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
-            A batch appears here when approved actions are executed through the execution gate.
-            Until then there is nothing to show — deliberately: this page records what ran, never
-            what might.
-          </p>
+        <div className="space-y-3">
+          <DataPlaceholder
+            title="No execution batches yet"
+            description="A batch appears here when approved actions are executed through the execution gate. Until then there is nothing to show — deliberately: this page records what ran, never what might."
+          />
           <Link
             href="/approval"
-            className="mt-3 inline-block text-xs font-medium text-teal-700 underline"
+            className="inline-block text-xs font-medium text-teal-700 underline"
           >
             Go to the approval console →
           </Link>

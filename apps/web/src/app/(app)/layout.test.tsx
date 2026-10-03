@@ -1,12 +1,15 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import AppLayout from './layout';
 
 const state = vi.hoisted(() => ({
   user: null as unknown,
   memberships: null as unknown,
   error: null as Error | null,
+  authError: null as Error | null,
+  authThrows: false,
 }));
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'beta' }) }) }));
 vi.mock('next/navigation', () => ({
@@ -16,7 +19,12 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: state.user } }) },
+    auth: {
+      getUser: async () => {
+        if (state.authThrows) throw new Error('provider unavailable');
+        return { data: { user: state.user }, error: state.authError };
+      },
+    },
     from: () => {
       const query = {
         select: () => query,
@@ -39,10 +47,24 @@ beforeEach(() => {
   state.user = null;
   state.memberships = null;
   state.error = null;
+  state.authError = null;
+  state.authThrows = false;
 });
 
 it('does not render protected content without an authenticated user', async () => {
   await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow('REDIRECT /login');
+});
+
+it('reports provider failure without treating a valid cookie as a missing session', async () => {
+  state.authThrows = true;
+  await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow(
+    'Authentication service is temporarily unavailable',
+  );
+  state.authThrows = false;
+  state.authError = new AuthRetryableFetchError('provider unavailable', 503);
+  await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow(
+    'Authentication service is temporarily unavailable',
+  );
 });
 
 it('fails closed when tenant membership read is unavailable', async () => {

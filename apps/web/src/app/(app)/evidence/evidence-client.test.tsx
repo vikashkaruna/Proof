@@ -281,7 +281,9 @@ it('retries an ambiguous upload with the same operation key in body and header',
   fireEvent.submit(form!);
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('connection lost'));
   fireEvent.submit(form!);
-  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Upload pending'));
+  await waitFor(() =>
+    expect(screen.getByText(/Upload pending/).closest('[role="status"]')).not.toBeNull(),
+  );
   const mutations = fetcher.mock.calls.filter(([, init]) => init.method === 'POST');
   expect(mutations).toHaveLength(2);
   expect(mutations[0]![1].headers['idempotency-key']).toBe(operationKey);
@@ -370,9 +372,9 @@ it('reconciles a pending operation without uploading a second object', async () 
   expect(document.body.textContent).toContain('No matching uploaded object was found');
   fireEvent.click(screen.getByRole('button', { name: 'Reconcile upload' }));
   await waitFor(() =>
-    expect(screen.getByRole('status').textContent).toContain(
-      'Still pending: object_version_not_found',
-    ),
+    expect(
+      screen.getByText('Still pending: object_version_not_found.').closest('[role="status"]'),
+    ).not.toBeNull(),
   );
   const posts = fetcher.mock.calls.filter(([, init]) => init.method === 'POST');
   expect(posts).toHaveLength(1);

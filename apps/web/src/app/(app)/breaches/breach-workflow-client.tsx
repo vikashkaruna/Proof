@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { DataPlaceholder } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 
 /**
@@ -221,11 +222,7 @@ export function BreachWorkflowClient({
         </form>
       ) : null}
 
-      {breaches.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-          No incidents recorded.
-        </p>
-      ) : null}
+      {breaches.length === 0 ? <DataPlaceholder title="No incidents recorded." /> : null}
 
       {breaches.map((breach) => {
         const next = NEXT_STATUS[breach.status];

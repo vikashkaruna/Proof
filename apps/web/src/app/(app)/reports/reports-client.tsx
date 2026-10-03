@@ -15,7 +15,7 @@ import {
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
-import { AgentIcon, AgentLabel } from '@axiom/ui';
+import { AgentIcon, AgentLabel, DataPlaceholder } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import { BoardWorkflow } from './board-workflow';
 import { AuditorWorkflow } from './auditor-workflow';
@@ -343,7 +343,7 @@ function TenantReportsClient(access: Access) {
               <>
                 <p className="text-sm text-slate-600">{total} visible reports</p>
                 {reports.length === 0 ? (
-                  <p>No reports recorded for this view.</p>
+                  <DataPlaceholder title="No reports recorded for this view." />
                 ) : (
                   <ul className="space-y-2">
                     {reports.map((report) => (

@@ -13,7 +13,15 @@ if (
 )
   throw new Error('Browser base URL differs from the acceptance target');
 export const personaStatePath = acceptanceStatePath(acceptanceTarget, repoRoot);
-export const webOrigin = acceptanceTarget?.webUrl ?? 'http://localhost:3001';
+const requestedLocalPort = process.env.AXIOM_E2E_WEB_PORT ?? '3001';
+if (
+  !/^\d{4,5}$/.test(requestedLocalPort) ||
+  Number(requestedLocalPort) < 1024 ||
+  Number(requestedLocalPort) > 65535
+)
+  throw new Error('AXIOM_E2E_WEB_PORT must be an unprivileged TCP port');
+export const localWebPort = Number(requestedLocalPort);
+export const webOrigin = acceptanceTarget?.webUrl ?? `http://localhost:${localWebPort}`;
 export const marketingUrl = acceptanceTarget?.marketingUrl ?? 'http://localhost:3000';
 export function tenantCookie(slug: string) {
   return {

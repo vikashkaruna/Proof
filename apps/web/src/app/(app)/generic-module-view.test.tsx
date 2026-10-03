@@ -17,7 +17,11 @@ vi.mock('next/link', () => ({
 }));
 vi.mock('@axiom/ui', async () => {
   const real = await vi.importActual<typeof import('@axiom/ui')>('@axiom/ui');
-  return { AgentLabel: real.AgentLabel, ModuleBar: real.ModuleBar };
+  return {
+    AgentLabel: real.AgentLabel,
+    ModuleBar: real.ModuleBar,
+    DataPlaceholder: real.DataPlaceholder,
+  };
 });
 const meta: GenericModuleMeta = {
   moduleKey: 'discovery',

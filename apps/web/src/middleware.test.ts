@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { middleware } from './middleware';
 
 const state = vi.hoisted(() => ({
@@ -7,12 +8,14 @@ const state = vi.hoisted(() => ({
   createServerClient: vi.fn(),
   next: vi.fn(),
   redirect: vi.fn(),
+  json: vi.fn(),
 }));
 vi.mock('@supabase/ssr', () => ({ createServerClient: state.createServerClient }));
 vi.mock('next/server', () => ({
   NextResponse: {
     next: state.next,
     redirect: state.redirect,
+    json: state.json,
   },
 }));
 
@@ -39,6 +42,7 @@ beforeEach(() => {
   state.redirect
     .mockReset()
     .mockImplementation((url: URL) => ({ kind: 'redirect', url: url.toString() }));
+  state.json.mockReset().mockImplementation((_body, options) => ({ kind: 'json', ...options }));
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -67,10 +71,15 @@ it('does not accept an E2E bypass cookie as an authenticated session', async () 
   expect(state.getUser).toHaveBeenCalledOnce();
 });
 
-it('redirects when the auth provider fails, and admits a validated user', async () => {
+it('fails closed without discarding the session when the auth provider fails', async () => {
   state.getUser.mockRejectedValueOnce(new Error('provider unavailable'));
-  expect(await middleware(request('/ledger'))).toMatchObject({ kind: 'redirect' });
+  expect(await middleware(request('/ledger'))).toMatchObject({ kind: 'json', status: 503 });
+  expect(state.redirect).not.toHaveBeenCalled();
+  state.getUser.mockResolvedValueOnce({
+    data: { user: null },
+    error: new AuthRetryableFetchError('provider unavailable', 503),
+  });
+  expect(await middleware(request('/ledger'))).toMatchObject({ kind: 'json', status: 503 });
   state.getUser.mockResolvedValueOnce({ data: { user: { id: 'user-1' } } });
   expect(await middleware(request('/ledger'))).toMatchObject({ kind: 'next' });
-  expect(state.redirect).toHaveBeenCalledOnce();
 });
