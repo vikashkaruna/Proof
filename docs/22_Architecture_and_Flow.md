@@ -200,18 +200,21 @@ Indigo `#1E2A4A` trust; Teal `#0FB5A5` machine intelligence/approvals; Gold
 `#C9A227` **reserved for sealed evidence and attestations only**; Ember
 `#D9534F` gaps/risks; Slate/Mist neutrals.
 
-### 2.6 Public website content check (source candidate `8f4edcb`)
+### 2.6 Public website content audit (PR #162 candidate)
 
-An owner/admin starts a one-page check in `/connectors`; the web app sends the
+An owner/admin starts an audit in `/connectors`; the web app sends the
 tenant-scoped request and idempotency key to the BFF. The BFF permits only
-public DNS names over HTTP(S), rejects credential-bearing or query URLs,
-resolves and pins a public IPv4 address with a fresh socket for every redirect hop, and bounds the
-fetch by time and size. It extracts limited page metadata, then the
-`human_action_writer` records a tenant-scoped observation and ledger event in
-one database transaction (0102). The UI reads the recent observations for the
-same tenant. Raw HTML is discarded. This path needs neither a private broker
-credential nor a connector grant; registered private-system connectors remain
-separate and cannot claim live reachability from their saved setup state.
+public DNS names over HTTP(S), rejects credential-bearing and query URLs,
+resolves and pins a public IPv4 address with a fresh socket for every redirect
+hop, and bounds each fetch by time and size. From the starting page it follows
+at most one eligible same-site link for each of privacy, contact and terms,
+revalidating DNS and redirect origin for every page. It records bounded titles,
+SHA-256 hashes and explicit retrievability states; no raw HTML is retained. The
+`human_action_writer` records the tenant observation and ledger event in one
+database transaction (0102). The UI reads that tenant's recent observations.
+This observation does not become sealed evidence or an agent conclusion without
+the separate review, approval and evidence controls. Private-system connectors
+remain separate and cannot claim live reachability from saved setup state.
 
 ## 3. Deployed architecture: GCP preprod (finalised design, 2026-10-03)
 
