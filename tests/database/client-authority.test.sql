@@ -53,9 +53,12 @@ select pg_temp.assert_true(not public.has_tenant_role('00000000-0000-0000-0000-0
 -- Signup remains functional without granting authority fields.
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000013","role":"authenticated"}';
 select pg_temp.denied($q$insert into users(id,email,is_axiom_internal) values(auth.uid(),'new@test.invalid',true)$q$);
-insert into users(id,email,full_name) values(auth.uid(),'new@test.invalid','New user');
+select pg_temp.denied($q$insert into users(id,email,full_name) values(auth.uid(),'new@test.invalid','New user')$q$);
+select pg_temp.assert_true(public.bootstrap_user_profile()=auth.uid(), 'profile bootstrap binds to Auth identity');
 update users set full_name='Updated profile' where id=auth.uid();
 select pg_temp.assert_true((select not is_axiom_internal from users where id=auth.uid()), 'new profile not internal');
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000099","role":"authenticated"}';
+select pg_temp.denied($q$select public.bootstrap_user_profile()$q$);
 
 reset role;
 set local role service_role;
