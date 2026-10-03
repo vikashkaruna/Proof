@@ -21,6 +21,7 @@ import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
+import { serviceAuthHeaders } from '../services/service-auth.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -4025,6 +4026,7 @@ export function v1Routes(deps: Deps) {
         headers: {
           'Content-Type': 'application/json',
           'X-Internal-Token': runtimeToken,
+          ...(await serviceAuthHeaders(runtimeUrl)),
         },
         body: JSON.stringify({ correlation_id: correlationId, input }),
       });

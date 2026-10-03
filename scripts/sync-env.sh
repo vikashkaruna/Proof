@@ -349,6 +349,11 @@ tfvar_value() {
     vpc_cidr)                   get_val "AXIOM_VPC_CIDR" "10.10.0.0/16" ;;
     kubernetes_version)         get_val "AXIOM_KUBERNETES_VERSION" "1.29" ;;
     domain_name)                get_val "AXIOM_DOMAIN_NAME" "axiomproof.ai" ;;
+    enable_edge_protection)     get_val "AXIOM_ENABLE_EDGE_PROTECTION" "false" ;;
+
+    # Cloud Run sizing and the private-internal-services switch (preprod).
+    min_instance_count)         get_val "AXIOM_RUN_MIN_INSTANCES" "0" ;;
+    internal_services_private)  get_val "AXIOM_INTERNAL_SERVICES_PRIVATE" "true" ;;
 
     # Private dispatch inputs/proofs; independent from sealed evidence.
     assessment_dispatch_retention_days) get_val "AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS" "90" ;;
@@ -420,7 +425,15 @@ tfvar_value() {
 # `type = number` variable.
 tfvar_is_number() {
   case "$1" in
-    cloud_sql_disk_size_gb|assessment_dispatch_retention_days) return 0 ;;
+    cloud_sql_disk_size_gb|assessment_dispatch_retention_days|min_instance_count) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# `bool` variables are written as bare true/false.
+tfvar_is_bool() {
+  case "$1" in
+    internal_services_private|enable_edge_protection) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -496,6 +509,9 @@ do_terraform() {
         fail "${name} must be name=cidr[,name=cidr] using only letters, digits, . _ - and CIDR characters."
         return 1
       fi
+      body+="$(printf '%-28s = %s\n' "$name" "$value")"
+    elif tfvar_is_bool "$name"; then
+      [[ "$value" =~ ^(true|false)$ ]] || { fail "${name} must be true or false"; return 1; }
       body+="$(printf '%-28s = %s\n' "$name" "$value")"
     elif tfvar_is_number "$name"; then
       [[ "$value" =~ ^[0-9]+$ ]] || { fail "${name} must be a nonnegative integer"; return 1; }

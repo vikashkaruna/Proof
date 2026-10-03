@@ -459,6 +459,7 @@ if should_run_phase "prep"; then
     "run.googleapis.com"
     "secretmanager.googleapis.com"
     "artifactregistry.googleapis.com"
+    "dns.googleapis.com"
     "storage.googleapis.com"
   )
   # `|| true` here meant a failure to enable an API surfaced three phases later

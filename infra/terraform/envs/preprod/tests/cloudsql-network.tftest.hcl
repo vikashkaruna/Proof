@@ -94,3 +94,88 @@ run "cloud_run_uses_direct_vpc_egress" {
     error_message = "The Cloud Run egress subnet must keep Private Google Access and a /24 of headroom."
   }
 }
+
+run "internal_services_are_private_by_default" {
+  command = plan
+  assert {
+    condition = (
+      google_cloud_run_v2_service.agent_runtime.ingress == "INGRESS_TRAFFIC_INTERNAL_ONLY" &&
+      google_cloud_run_v2_service.model_gateway.ingress == "INGRESS_TRAFFIC_INTERNAL_ONLY" &&
+      length(google_cloud_run_v2_service_iam_member.agent_runtime_public) == 0 &&
+      length(google_cloud_run_v2_service_iam_member.model_gateway_public) == 0
+    )
+    error_message = "agent-runtime and model-gateway must be internal-only with no allUsers invoker by default."
+  }
+  assert {
+    condition = (
+      toset(keys(google_cloud_run_v2_service_iam_member.agent_runtime_invoker)) == toset(["bff", "temporal_worker"]) &&
+      toset(keys(google_cloud_run_v2_service_iam_member.model_gateway_invoker)) == toset(["agent_runtime"])
+    )
+    error_message = "Only the named calling services may invoke the internal services."
+  }
+  assert {
+    condition     = length(google_dns_managed_zone.run_app) == 1 && length(google_dns_record_set.run_app) == 2
+    error_message = "Internal routing needs the private run.app zone and both records."
+  }
+  assert {
+    condition = alltrue([
+      for svc in [
+        google_cloud_run_v2_service.agent_runtime,
+        google_cloud_run_v2_service.temporal_worker,
+      ] : length(svc.template[0].vpc_access[0].network_interfaces) == 1
+    ])
+    error_message = "Callers of internal services need the VPC path."
+  }
+}
+
+run "internal_services_can_be_reopened" {
+  command = plan
+  variables {
+    internal_services_private = false
+  }
+  assert {
+    condition = (
+      google_cloud_run_v2_service.agent_runtime.ingress == "INGRESS_TRAFFIC_ALL" &&
+      length(google_cloud_run_v2_service_iam_member.agent_runtime_public) == 1 &&
+      length(google_cloud_run_v2_service_iam_member.agent_runtime_invoker) == 0 &&
+      length(google_dns_managed_zone.run_app) == 0
+    )
+    error_message = "internal_services_private = false must restore the public endpoints and drop the private routing."
+  }
+}
+
+run "non_production_scales_to_zero_by_default" {
+  command = plan
+  assert {
+    condition = alltrue([
+      for svc in [
+        google_cloud_run_v2_service.bff,
+        google_cloud_run_v2_service.web,
+        google_cloud_run_v2_service.agent_runtime,
+        google_cloud_run_v2_service.supabase_auth,
+        google_cloud_run_v2_service.supabase_rest,
+        google_cloud_run_v2_service.supabase_gateway,
+      ] : svc.template[0].scaling[0].min_instance_count == 0
+    ])
+    error_message = "Preprod services must scale to zero by default."
+  }
+}
+
+run "warm_instances_are_a_parameter" {
+  command = plan
+  variables {
+    min_instance_count = 1
+  }
+  assert {
+    condition     = google_cloud_run_v2_service.bff.template[0].scaling[0].min_instance_count == 1
+    error_message = "min_instance_count must reach the services."
+  }
+}
+
+run "out_of_range_min_instances_refused" {
+  command = plan
+  variables {
+    min_instance_count = 5
+  }
+  expect_failures = [var.min_instance_count]
+}

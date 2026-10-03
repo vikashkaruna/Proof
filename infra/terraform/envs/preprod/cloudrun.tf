@@ -54,7 +54,7 @@ resource "google_cloud_run_v2_service" "bff" {
     }
 
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 2
     }
 
@@ -62,6 +62,7 @@ resource "google_cloud_run_v2_service" "bff" {
       image = local.release_manifest.images.bff
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"   # "2"
           memory = "1Gi" # "2Gi"
@@ -72,6 +73,10 @@ resource "google_cloud_run_v2_service" "bff" {
         container_port = 4000
       }
 
+      env {
+        name  = "AXIOM_SERVICE_AUTH"
+        value = var.internal_services_private ? "gcp-id-token" : ""
+      }
       env {
         name  = "NODE_ENV"
         value = "production"
@@ -363,7 +368,7 @@ resource "google_cloud_run_v2_service" "web" {
     service_account = google_service_account.runtime["web"].email
 
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 2
     }
 
@@ -371,6 +376,7 @@ resource "google_cloud_run_v2_service" "web" {
       image = local.release_manifest.images.web
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "2"
           memory = "2Gi"
@@ -458,13 +464,24 @@ resource "google_cloud_run_v2_service" "web" {
 resource "google_cloud_run_v2_service" "agent_runtime" {
   name     = "axiom-agent-runtime-${var.environment}"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL" # Invoked by BFF
+  ingress  = var.internal_services_private ? "INGRESS_TRAFFIC_INTERNAL_ONLY" : "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.runtime["agent_runtime"].email
 
+    # Direct VPC egress needs the second-generation execution environment.
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.vpc.id
+        subnetwork = google_compute_subnetwork.run_egress.id
+      }
+      egress = "PRIVATE_RANGES_ONLY"
+    }
+
     scaling {
-      min_instance_count = 1
+      min_instance_count = var.min_instance_count
       max_instance_count = 2
     }
 
@@ -472,6 +489,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
       image = local.release_manifest.images["agent-runtime"]
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"   # "2"
           memory = "2Gi" # "4Gi"
@@ -482,6 +500,10 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         container_port = 8000
       }
 
+      env {
+        name  = "AXIOM_SERVICE_AUTH"
+        value = var.internal_services_private ? "gcp-id-token" : ""
+      }
       env {
         name  = "ENVIRONMENT"
         value = var.environment
@@ -646,7 +668,7 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
 resource "google_cloud_run_v2_service" "model_gateway" {
   name     = "axiom-model-gateway-${var.environment}"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.internal_services_private ? "INGRESS_TRAFFIC_INTERNAL_ONLY" : "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.runtime["model_gateway"].email
@@ -660,6 +682,7 @@ resource "google_cloud_run_v2_service" "model_gateway" {
       image = local.release_manifest.images["model-gateway"]
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"   # "2"
           memory = "2Gi" # "4Gi"
@@ -772,6 +795,17 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
   template {
     service_account = google_service_account.runtime["temporal_worker"].email
 
+    # Direct VPC egress needs the second-generation execution environment.
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.vpc.id
+        subnetwork = google_compute_subnetwork.run_egress.id
+      }
+      egress = "PRIVATE_RANGES_ONLY"
+    }
+
     scaling {
       min_instance_count = 0 # 1
       max_instance_count = 2 # 3
@@ -781,6 +815,7 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
       image = local.release_manifest.images["temporal-worker"]
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"   # "1"
           memory = "1Gi" # "2Gi"
@@ -791,6 +826,10 @@ resource "google_cloud_run_v2_service" "temporal_worker" {
         container_port = 8080
       }
 
+      env {
+        name  = "AXIOM_SERVICE_AUTH"
+        value = var.internal_services_private ? "gcp-id-token" : ""
+      }
       env {
         name  = "ENVIRONMENT"
         value = var.environment
@@ -876,6 +915,7 @@ resource "google_cloud_run_v2_service" "marketing" {
       image = local.release_manifest.images.marketing
 
       resources {
+        startup_cpu_boost = true
         limits = {
           cpu    = "1"     # "1"
           memory = "512Mi" # "1Gi"      
