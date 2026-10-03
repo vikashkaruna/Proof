@@ -5,13 +5,17 @@
  * simulate a scan: a fabricated legal change could cause a real control or
  * remediation decision.
  */
-import { ModuleBarFor } from '@/lib/module-bar';
+import { PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export function RegWatchClient() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-      <h1 className="font-heading text-2xl font-semibold text-indigo-500">Regulatory Watch</h1>
-      <ModuleBarFor module="regwatch" className="mt-3" />
+      <PageHeader
+        module={moduleBarProps('regwatch')}
+        title="Regulatory Watch"
+        description="Verified statutory updates and their recorded impact on controls."
+      />
       <p className="mt-3 text-sm text-slate-700" role="status" data-testid="regwatch-unavailable">
         No verified regulatory feed is connected. Statutory updates, source citations, and control
         impact assessments are unavailable until an authoritative feed and review workflow are

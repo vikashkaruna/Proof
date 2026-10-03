@@ -55,6 +55,8 @@ export function MembersClient({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [link, setLink] = useState<string | null>(null);
+  const [invitedEmail, setInvitedEmail] = useState('');
+  const [copyMessage, setCopyMessage] = useState('');
   const [role, setRole] = useState('viewer');
 
   async function invite(event: FormEvent<HTMLFormElement>) {
@@ -78,6 +80,7 @@ export function MembersClient({
     setBusy(true);
     setMessage('');
     setLink(null);
+    setCopyMessage('');
     try {
       const res = await fetch('/api/bff/v1/tenant/invitations', {
         method: 'POST',
@@ -101,13 +104,30 @@ export function MembersClient({
       pending.current = null;
       setMessage(`Invitation created. ${deliveryLabel[body.data.delivery_status]}.`);
       // Shown once: the server keeps only a hash of this token.
-      if (body.token) setLink(`${window.location.origin}/invite#token=${body.token}`);
+      if (body.token) {
+        setLink(`${window.location.origin}/invite#token=${body.token}`);
+        setInvitedEmail(
+          String(form.get('email') ?? '')
+            .trim()
+            .toLowerCase(),
+        );
+      }
       event.currentTarget?.reset?.();
       router.refresh();
     } catch {
       setMessage('The result is unknown. Submit again; the same request is safely retried.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyLink() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopyMessage('Invitation link copied.');
+    } catch {
+      setCopyMessage('Clipboard unavailable. Select the link above and copy it manually.');
     }
   }
 
@@ -159,9 +179,31 @@ export function MembersClient({
             </p>
           )}
           {link && (
-            <div className="mt-3 space-y-1">
+            <div className="mt-3 space-y-2">
               <Label htmlFor="invite-link">Invitation link (shown once)</Label>
-              <Input id="invite-link" readOnly value={link} data-testid="invite-link" />
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id="invite-link"
+                  readOnly
+                  value={link}
+                  data-testid="invite-link"
+                  className="min-w-0 flex-1"
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button type="button" onClick={copyLink}>
+                  Copy link
+                </Button>
+              </div>
+              {copyMessage && (
+                <p role="status" className="text-sm text-slate-600">
+                  {copyMessage}
+                </p>
+              )}
+              <p className="text-sm text-slate-600">
+                Open this link in a separate private browser session. Sign up or sign in there as{' '}
+                <strong>{invitedEmail}</strong>, then accept the invitation. Opening it in your
+                current session will use your own account instead.
+              </p>
             </div>
           )}
         </CardContent>

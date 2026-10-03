@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { DataPlaceholder } from '@axiom/ui';
+import { DataPlaceholder, PageHeader } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,14 +15,11 @@ export default async function PlansListPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-5" aria-label="Remediation plans">
-      <header>
-        <h1 className="font-heading text-2xl font-semibold text-[#1E2A4A]">Remediation plans</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Plans recorded for this tenant. A plan is a proposal until its actions pass the required
-          dry-run, rollback, and human approval gates.
-        </p>
-      </header>
-      <ModuleBarFor module="remediation" />
+      <PageHeader
+        module={moduleBarProps('remediation')}
+        title="Remediation plans"
+        description="Plans recorded for this tenant. A plan is a proposal until its actions pass the required dry-run, rollback, and human approval gates."
+      />
       {error || !plans ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
           Plans are unavailable. No plan readiness can be inferred.

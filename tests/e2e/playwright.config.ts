@@ -92,7 +92,16 @@ if (bffArchiveWriterKey) process.env.SUPABASE_ARCHIVE_WRITER_KEY = bffArchiveWri
 const bffHumanWriterKey = humanWriterKey();
 if (bffHumanWriterKey) process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY = bffHumanWriterKey;
 
-const BFF_PORT = '4000';
+const BFF_PORT = process.env.AXIOM_E2E_BFF_PORT ?? '4000';
+if (!/^\d{4,5}$/.test(BFF_PORT) || Number(BFF_PORT) < 1024 || Number(BFF_PORT) > 65535)
+  throw new Error('AXIOM_E2E_BFF_PORT must be an unprivileged TCP port');
+const MARKETING_PORT = process.env.AXIOM_E2E_MARKETING_PORT ?? '3000';
+if (
+  !/^\d{4,5}$/.test(MARKETING_PORT) ||
+  Number(MARKETING_PORT) < 1024 ||
+  Number(MARKETING_PORT) > 65535
+)
+  throw new Error('AXIOM_E2E_MARKETING_PORT must be an unprivileged TCP port');
 
 /** Shared by both servers so the ring key and the Supabase target cannot drift. */
 const commonEnv = {
@@ -215,8 +224,8 @@ export default defineConfig({
           // public-surface specs do, and dropping it from here turned four
           // dormant specs into ECONNREFUSED the moment the suite could run at
           // all.
-          command: 'pnpm --filter @axiom/marketing exec next dev --webpack --port 3000',
-          port: 3000,
+          command: `pnpm --filter @axiom/marketing exec next dev --webpack --port ${MARKETING_PORT}`,
+          port: Number(MARKETING_PORT),
           cwd: repoRoot,
           env: webEnv,
           reuseExistingServer: false,

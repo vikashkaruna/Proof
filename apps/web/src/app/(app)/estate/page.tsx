@@ -31,6 +31,7 @@ export default async function EstatePage() {
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
       <PageHeader
+        module={{ crumb: 'Discover & Classify', titleHi: 'क्लाइंट एस्टेट', phase: 'P1' }}
         title="Client estate"
         description="Declare the systems in each assessment boundary. Inventory declarations do not establish connectivity or authorize agent execution."
       />

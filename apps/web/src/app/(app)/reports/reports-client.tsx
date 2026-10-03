@@ -15,8 +15,8 @@ import {
 } from './report-contract';
 import { reportRequest, readReleasedArchive } from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
-import { AgentIcon, AgentLabel, DataPlaceholder } from '@axiom/ui';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { AgentIcon, DataPlaceholder, PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 import { BoardWorkflow } from './board-workflow';
 import { AuditorWorkflow } from './auditor-workflow';
 
@@ -110,20 +110,14 @@ function TenantReportsClient(access: Access) {
   }
   return (
     <div className="min-w-0 space-y-6">
-      <header>
-        <div className="space-y-2">
-          <AgentLabel agent="prativedan" />
-          <h1 className="text-2xl font-semibold text-[#1E2A4A]">Reports and evidence</h1>
-          <p className="text-sm text-slate-600">
-            Review recorded reports and evidence packs. A content hash alone does not establish a
-            retained PDF, source provenance, or a released proof artifact.
-          </p>
-          <p className="text-sm text-slate-600">
-            Report email dispatch is unavailable while source-bound delivery is being rebuilt.
-          </p>
-        </div>
-      </header>
-      <ModuleBarFor module="reports" />
+      <PageHeader
+        module={{
+          ...moduleBarProps('reports'),
+          agents: activeTab === 'pramaan' ? ['pramaan'] : ['prativedan'],
+        }}
+        title="Reports and evidence"
+        description="Review recorded reports and evidence packs. A content hash alone does not establish a retained PDF, source provenance, or a released proof artifact. Report email dispatch is unavailable while source-bound delivery is being rebuilt."
+      />
 
       <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
         {(access.canRelease || access.canRequestBoard) && (

@@ -2,8 +2,8 @@
 
 import React, { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ModuleBarFor } from '@/lib/module-bar';
-import { DataPlaceholder } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
+import { DataPlaceholder, PageHeader } from '@axiom/ui';
 import {
   actionBody,
   availableActions,
@@ -85,40 +85,38 @@ export function DsarClient({
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#1E2A4A]">Data subject requests</h1>
-          <p className="text-sm text-slate-600">
-            Recorded identity checks, fulfilment and deadlines for this tenant.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={disabled}
-            onClick={() => startTransition(() => router.refresh())}
-          >
-            Refresh records
-          </button>
-          {canManage && (
+      <PageHeader
+        module={moduleBarProps('dsar')}
+        title="Data subject requests"
+        description="Recorded identity checks, fulfilment and deadlines for this tenant."
+        actions={
+          <>
             <button
               type="button"
               className={buttonClass}
               disabled={disabled}
-              onClick={() => {
-                setIntakeOpen(!intakeOpen);
-                setEditor(null);
-                setError(null);
-              }}
+              onClick={() => startTransition(() => router.refresh())}
             >
-              {' '}
-              {intakeOpen ? 'Close intake' : 'Record request'}
+              Refresh records
             </button>
-          )}
-        </div>
-      </header>
-      <ModuleBarFor module="dsar" />
+            {canManage && (
+              <button
+                type="button"
+                className={buttonClass}
+                disabled={disabled}
+                onClick={() => {
+                  setIntakeOpen(!intakeOpen);
+                  setEditor(null);
+                  setError(null);
+                }}
+              >
+                {' '}
+                {intakeOpen ? 'Close intake' : 'Record request'}
+              </button>
+            )}
+          </>
+        }
+      />
       {!canManage && !loadError && (
         <p className="text-sm text-slate-600">
           Read-only access. Managing requests requires estate.manage permission.
