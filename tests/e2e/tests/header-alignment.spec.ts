@@ -115,6 +115,11 @@ test('module pages and report views use the branded header with one accessible p
       frame!.contentWidth - 2,
     );
     expect(Math.abs(frame!.pageLeft - frame!.contentLeft), `${route} left margin`).toBeLessThan(2);
+    if (route === '/regwatch' && process.env.AXIOM_LAYOUT_REVIEW === 'true') {
+      const reviewDir = resolve(repoRoot, '.axiom-runtime/review/layout');
+      mkdirSync(reviewDir, { recursive: true, mode: 0o700 });
+      await page.screenshot({ path: resolve(reviewDir, 'regwatch-desktop.png'), fullPage: false });
+    }
   }
 
   await page.goto('/assessment');
