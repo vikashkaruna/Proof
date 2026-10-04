@@ -11,7 +11,10 @@ export function PublicFormFacts({
   unavailable?: boolean;
 }) {
   return (
-    <section aria-label={`${pageLabel} static HTML forms`} className="space-y-1 text-slate-700">
+    <section
+      aria-label={`${pageLabel} static HTML forms`}
+      className="space-y-1 break-normal text-slate-700"
+    >
       <h4 className="font-medium text-indigo-900">Static HTML forms</h4>
       {unavailable ? (
         <p>Form inspection unavailable: this page could not be retrieved.</p>
