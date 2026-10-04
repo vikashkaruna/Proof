@@ -72,8 +72,8 @@ race() {
 }
 issue="select generic_run_race.start(jsonb_build_object('correlation',generic_run_race.id(101)))"
 race "$issue" "$issue"
-rg -q '"created": true' "$results/first"
-rg -q '"created": false' "$results/second"
+grep -q '"created": true' "$results/first"
+grep -q '"created": false' "$results/second"
 [ "$(sql -c "select count(*) from public.agent_runs where tenant_id=generic_run_race.id(11) and correlation_id=generic_run_race.id(101)")" = 1 ]
 [ "$(sql -c "select count(*) from public.audit_ledger where tenant_id=generic_run_race.id(11) and correlation_id=generic_run_race.id(101) and action_type='agent.invocation.requested'")" = 1 ]
 setup() {
@@ -87,19 +87,19 @@ finish="select generic_run_race.finish(run_id,receipts) from generic_run_race.st
 cancel="update public.agent_runs set status='cancelled',completed_at=clock_timestamp() where id=(select run_id from generic_run_race.state) and status='running'"
 setup
 race "$cancel" "$finish"
-rg -q terminal_conflict "$results/second"
+grep -q terminal_conflict "$results/second"
 [ "$(sql -c 'select status from public.agent_runs where id=(select run_id from generic_run_race.state)')" = cancelled ]
 setup
 race "$finish" "$finish"
-rg -q '"replayed": true' "$results/second"
+grep -q '"replayed": true' "$results/second"
 [ "$(sql -c "select count(*) from public.audit_ledger where target_ref=(select run_id::text from generic_run_race.state) and action_type='agent.invocation.settled'")" = 1 ]
 setup
 race "$finish" "$cancel"
 [ "$(sql -c 'select status from public.agent_runs where id=(select run_id from generic_run_race.state)')" = succeeded ]
 race "delete from public.tenant_users where tenant_id=generic_run_race.id(11) and user_id=generic_run_race.id(1)" 'select generic_run_race.start()'
-rg -q forbidden "$results/second"
+grep -q forbidden "$results/second"
 race "update public.users set is_axiom_internal=false where id=generic_run_race.id(4)" "select generic_run_race.start(jsonb_build_object('actor',generic_run_race.id(4)))"
-rg -q forbidden "$results/second"
+grep -q forbidden "$results/second"
 [ "$(sql -c "select count(*) from public.agent_runs where tenant_id=generic_run_race.id(11) and metadata->>'requested_by'=generic_run_race.id(4)::text")" = 0 ]
 [ "$(sql -c "select count(*) from public.audit_ledger where tenant_id=generic_run_race.id(11) and actor_id=generic_run_race.id(4)::text")" = 0 ]
 sql -c 'drop schema generic_run_race cascade' >/dev/null 2>&1
