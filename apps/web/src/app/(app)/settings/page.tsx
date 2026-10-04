@@ -15,7 +15,7 @@ export default async function SettingsPage() {
   if (!user) redirect('/login');
 
   return (
-    <div className="mx-auto max-w-[1120px] space-y-5 animate-fade-in">
+    <div className="w-full min-w-0 space-y-5 animate-fade-in">
       {/* Design System Hero Banner */}
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] to-[#243356] p-6 sm:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2.5 mb-2.5">

@@ -55,7 +55,7 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
   };
 
   return (
-    <div className="mx-auto flex max-w-[900px] flex-col gap-6 animate-fade-in">
+    <div className="flex w-full min-w-0 flex-col gap-6 animate-fade-in">
       <PageHeader
         title="Account security"
         description="Your second factor. Required before you can issue an approval token, and re-checked at the moment of every approval."

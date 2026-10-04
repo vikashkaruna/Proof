@@ -133,36 +133,7 @@ export function AssessmentClient({
     : 'Parikshan invocation completed. Saved results are refreshed separately.';
 
   return (
-    <div className="mx-auto max-w-[1180px] animate-in fade-in-0 duration-200">
-      <div
-        data-testid="assessment-provenance"
-        className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
-      >
-        {!snapshot ? (
-          <p role="alert">
-            Saved assessment results are unavailable for this selection. Check the assessment or try
-            again.
-          </p>
-        ) : !snapshot.engagement ? (
-          <p>
-            No saved assessment exists for this tenant. Controls and exposure are not assessed.{' '}
-            {canCreate ? (
-              <Link href="/engagements" className="font-semibold text-teal-700 underline">
-                Create an assessment
-              </Link>
-            ) : (
-              'Ask an assessment owner to create one'
-            )}{' '}
-            before running Parikshan.
-          </p>
-        ) : (
-          <p>
-            {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
-            {snapshot.engagement.status}. Showing saved findings only; missing results are
-            unassessed. Score bands retain the existing 80/40 presentation thresholds.
-          </p>
-        )}
-      </div>
+    <div className="min-w-0 w-full animate-in fade-in-0 duration-200">
       {/* ============================================================ */}
       {/* 1. RUN PIPELINE HERO CARD (EXACT AXIOM PROOF APP DESIGN)     */}
       {/* ============================================================ */}
@@ -197,7 +168,12 @@ export function AssessmentClient({
         </div>
 
         {/* 5-Stage Stepper Pipeline Row */}
-        <div className="relative my-2 flex items-center gap-0">
+        <div
+          className="relative my-2 flex w-full min-w-0 items-center gap-0 overflow-x-auto pb-2"
+          role="region"
+          aria-label="Assessment pipeline stages"
+          tabIndex={0}
+        >
           {PIPELINE_STAGES.map((p, i) => {
             const isCompleted = p.agentKey === 'parikshan' && hasCompleted;
             const isActive = p.agentKey === 'parikshan' && assessRunning;
@@ -210,7 +186,7 @@ export function AssessmentClient({
                 key={p.agent}
                 data-testid={`pipeline-${p.agentKey}`}
                 data-state={isCompleted ? 'completed' : isActive ? 'running' : 'not-run'}
-                className="group relative flex flex-1 flex-col items-center text-center"
+                className="group relative flex min-w-[110px] flex-1 flex-col items-center text-center"
               >
                 {/* Horizontal connector line to next step */}
                 {i < PIPELINE_STAGES.length - 1 && (
@@ -278,6 +254,36 @@ export function AssessmentClient({
               </Link>
             )}
           </div>
+        )}
+      </div>
+
+      <div
+        data-testid="assessment-provenance"
+        className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700"
+      >
+        {!snapshot ? (
+          <p role="alert">
+            Saved assessment results are unavailable for this selection. Check the assessment or try
+            again.
+          </p>
+        ) : !snapshot.engagement ? (
+          <p>
+            No saved assessment exists for this tenant. Controls and exposure are not assessed.{' '}
+            {canCreate ? (
+              <Link href="/engagements" className="font-semibold text-teal-700 underline">
+                Create an assessment
+              </Link>
+            ) : (
+              'Ask an assessment owner to create one'
+            )}{' '}
+            before running Parikshan.
+          </p>
+        ) : (
+          <p>
+            {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
+            {snapshot.engagement.status}. Showing saved findings only; missing results are
+            unassessed. Score bands retain the existing 80/40 presentation thresholds.
+          </p>
         )}
       </div>
 
@@ -381,9 +387,14 @@ export function AssessmentClient({
       {/* ============================================================ */}
       {/* 4. CONTROL TABLE (DYNAMIC CONTROLS & FINDINGS)               */}
       {/* ============================================================ */}
-      <div className="overflow-hidden rounded-2xl border border-[#e4e8ee] bg-white shadow-2xs">
+      <div
+        className="w-full overflow-x-auto rounded-2xl border border-[#e4e8ee] bg-white shadow-2xs"
+        role="region"
+        aria-label="Saved control results"
+        tabIndex={0}
+      >
         {/* Table Header */}
-        <div className="grid grid-cols-[90px_1fr_150px_110px_90px_70px] gap-2.5 border-b border-[#e4e8ee] bg-[#F4F6F8] px-[18px] py-[11px] text-[10px] font-semibold tracking-[0.04em] uppercase text-[#8a909b]">
+        <div className="grid min-w-[700px] grid-cols-[90px_1fr_150px_110px_90px_70px] gap-2.5 border-b border-[#e4e8ee] bg-[#F4F6F8] px-[18px] py-[11px] text-[10px] font-semibold tracking-[0.04em] uppercase text-[#8a909b]">
           <span>Control</span>
           <span>Requirement</span>
           <span>Domain</span>
@@ -429,7 +440,7 @@ export function AssessmentClient({
               <div
                 key={c.id}
                 data-testid={`assessment-control-${c.id}`}
-                className="grid grid-cols-[90px_1fr_150px_110px_90px_70px] items-center gap-2.5 px-[18px] py-3 hover:bg-[#F4F6F8]/60 transition-colors"
+                className="grid min-w-[700px] grid-cols-[90px_1fr_150px_110px_90px_70px] items-center gap-2.5 px-[18px] py-3 hover:bg-[#F4F6F8]/60 transition-colors"
               >
                 {/* Control ID with Link to Controls */}
                 <Link

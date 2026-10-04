@@ -73,7 +73,7 @@ export default async function EstateGraphPage() {
     })),
   };
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         title="Estate graph"
         description="Estates, systems, connector registrations and data categories, with agent access drawn only from active grants in this view. Other estates or filters may have additional grants."

@@ -1,5 +1,8 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { createMfaAccount, selectTenant, signInAs } from '../fixtures';
+import { repoRoot } from '../target';
 
 const routes = [
   '/estate',
@@ -61,7 +64,91 @@ test('module pages and report views use the branded header with one accessible p
   await expect(page.getByRole('heading', { level: 1, name: 'Reports and evidence' })).toBeVisible();
   await expect(page.getByTestId('related-agents')).toContainText('pramaan');
 
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  for (const route of [
+    '/dashboard',
+    '/assessment',
+    '/estate',
+    '/plans',
+    '/approval',
+    '/execution',
+    '/evidence',
+    '/connectors',
+    '/settings',
+    '/settings/members',
+    '/settings/security',
+    '/dsars',
+    '/consent',
+    '/breaches',
+    '/monitoring',
+    '/regwatch',
+    '/reports',
+    '/reports?tab=pramaan',
+    '/policies',
+    '/portal',
+  ]) {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { level: 1 }), `${route} page title`).toBeVisible();
+    const frame = await page
+      .locator('main')
+      .first()
+      .evaluate((main) => {
+        const child = main.firstElementChild;
+        if (!child) return null;
+        const content = main.getBoundingClientRect();
+        const page = child.getBoundingClientRect();
+        const style = getComputedStyle(main);
+        return {
+          contentWidth:
+            content.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+          contentLeft: content.left + parseFloat(style.paddingLeft),
+          paddingLeft: parseFloat(style.paddingLeft),
+          paddingRight: parseFloat(style.paddingRight),
+          pageWidth: page.width,
+          pageLeft: page.left,
+        };
+      });
+    expect(frame, `${route} has a page frame`).not.toBeNull();
+    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(24);
+    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(24);
+    expect(frame!.pageWidth, `${route} fills the content width`).toBeGreaterThanOrEqual(
+      frame!.contentWidth - 2,
+    );
+    expect(Math.abs(frame!.pageLeft - frame!.contentLeft), `${route} left margin`).toBeLessThan(2);
+    if (route === '/regwatch' && process.env.AXIOM_LAYOUT_REVIEW === 'true') {
+      const reviewDir = resolve(repoRoot, '.axiom-runtime/review/layout');
+      mkdirSync(reviewDir, { recursive: true, mode: 0o700 });
+      await page.screenshot({ path: resolve(reviewDir, 'regwatch-desktop.png'), fullPage: false });
+    }
+  }
+
+  await page.goto('/assessment');
+  const heading = page.getByRole('heading', { level: 1, name: 'Assessment pipeline' });
+  const provenance = page.getByTestId('assessment-provenance');
+  await expect(provenance).toBeVisible();
+  const headerBeforeStatus = await heading.evaluate((element) => {
+    const status = document.querySelector('[data-testid="assessment-provenance"]');
+    return Boolean(
+      status && element.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  expect(headerBeforeStatus).toBe(true);
+  if (process.env.AXIOM_LAYOUT_REVIEW === 'true') {
+    const reviewDir = resolve(repoRoot, '.axiom-runtime/review/layout');
+    mkdirSync(reviewDir, { recursive: true, mode: 0o700 });
+    await page.screenshot({ path: resolve(reviewDir, 'assessment-desktop.png'), fullPage: true });
+    await page.screenshot({ path: resolve(reviewDir, 'assessment-desktop-viewport.png') });
+  }
+
   await page.setViewportSize({ width: 390, height: 844 });
+  const mobilePadding = await page
+    .locator('main')
+    .first()
+    .evaluate((main) => {
+      const style = getComputedStyle(main);
+      return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight)];
+    });
+  expect(mobilePadding).toEqual([12, 12]);
   for (const route of ['/estate', '/breaches', '/consent', '/reports?tab=pramaan']) {
     await page.goto(route);
     const header = page.locator('header').filter({ has: page.getByRole('heading', { level: 1 }) });
@@ -70,5 +157,20 @@ test('module pages and report views use the branded header with one accessible p
       await header.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
       `${route} header content fits mobile width`,
     ).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+      `${route} keeps horizontal scrolling inside its content`,
+    ).toBe(true);
+  }
+  await page.goto('/assessment');
+  await expect(page.getByRole('heading', { level: 1, name: 'Assessment pipeline' })).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true);
+  if (process.env.AXIOM_LAYOUT_REVIEW === 'true') {
+    await page.screenshot({
+      path: resolve(repoRoot, '.axiom-runtime/review/layout/assessment-mobile.png'),
+      fullPage: false,
+    });
   }
 });
