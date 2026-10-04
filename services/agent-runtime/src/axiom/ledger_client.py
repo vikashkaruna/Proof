@@ -13,12 +13,13 @@ via the RPC, which is enforced at the DB role level too.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -109,7 +110,7 @@ class LedgerClient:
         self._mem_chains: dict[str, dict[str, str | int]] = {}
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> "LedgerClient":
+    def from_settings(cls, settings: Settings | None = None) -> LedgerClient:
         s = settings or get_settings()
         try:
             target = urlsplit(s.supabase_url)
@@ -156,12 +157,75 @@ class LedgerClient:
             raise RuntimeError("Audit ledger configuration was refused") from None
 
     @classmethod
-    def in_memory(cls) -> "LedgerClient":
+    def in_memory(cls) -> LedgerClient:
         return cls(in_memory=True)
 
     @property
     def in_memory_mode(self) -> bool:
         return self._in_memory
+
+    async def load_public_source_dispatch(
+        self, *, tenant_id: str, run_id: str, agent: str, correlation_id: str
+    ) -> Any:
+        """Read only the stored source for a currently authorized, recorded run.
+
+        The scoped writer may execute this restricted SQL loader. Public work
+        never falls back to fabricated or in-memory source facts.
+        """
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Public source dispatch configuration was refused")
+        client = self._client
+
+        def read() -> Any:
+            return (
+                client.rpc(
+                    "get_public_source_dispatch_input",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_run_id": run_id,
+                        "p_agent": agent,
+                        "p_correlation_id": correlation_id,
+                    },
+                )
+                .execute()
+                .data
+            )
+
+        return await asyncio.to_thread(read)
+
+    async def claim_public_source_dispatch(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        agent: str,
+        correlation_id: str,
+        dispatch_id: str,
+        request_hash: str,
+    ) -> Any:
+        """Atomically permit one execution; an ambiguous attempt cannot be reclaimed."""
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Public source dispatch configuration was refused")
+        client = self._client
+
+        def claim() -> Any:
+            return (
+                client.rpc(
+                    "claim_public_source_dispatch",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_run_id": run_id,
+                        "p_agent": agent,
+                        "p_correlation_id": correlation_id,
+                        "p_dispatch_id": dispatch_id,
+                        "p_request_hash": request_hash,
+                    },
+                )
+                .execute()
+                .data
+            )
+
+        return await asyncio.to_thread(claim)
 
     @property
     def memory_entries(self) -> list[dict]:
@@ -180,7 +244,6 @@ class LedgerClient:
 
     def _append_in_memory(self, input: AppendInput) -> AppendResult:
         from datetime import datetime as _dt
-        from datetime import timezone as _tz
 
         from .canonicalise import canonical_json as _cj
 
@@ -191,7 +254,7 @@ class LedgerClient:
         chain = self._mem_chains.setdefault(input.tenant_id, {"last_seq": 0, "last_hash": None})
         seq = int(chain["last_seq"]) + 1
         prev_hash = chain["last_hash"]
-        ts = _dt.now(_tz.utc).isoformat()
+        ts = _dt.now(UTC).isoformat()
         payload = "|".join(
             [
                 str(seq),
@@ -291,7 +354,7 @@ class LedgerClient:
             valid = False
         if not valid:
             raise RuntimeError("Audit ledger append was not confirmed")
-        return AppendResult(id=str(receipt), occurred_at=datetime.now(timezone.utc))
+        return AppendResult(id=str(receipt), occurred_at=datetime.now(UTC))
 
     @property
     def _reader(self) -> Client | None:

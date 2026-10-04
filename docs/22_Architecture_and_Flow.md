@@ -13,11 +13,12 @@ here: [20_Plan.md](20_Plan.md) section 3. Source tags: `[G]` = the
 live-functional-flow guide, `[19]` = the Samadhan/Pramaan spec, `[16]` =
 operator runbook, `[08]` = deployment guide.
 
-> **Status caveat.** The flow below is the **intended** end-to-end flow. As of
-> 2026-10-01 the production connector write path, the source-bound statutory
-> and approval-proof stages, and any deployment are not delivered or accepted
-> (see `20_Plan.md`). The staging flow script exercises local Docker/staging
-> stacks, not production.
+> **Status caveat.** The complete flow below remains the intended target. As of
+> 2026-10-05, source-bound statutory and approval-proof code is promoted;
+> selected local RC.2 has bounded acceptance. The production connector write
+> path, remote/cloud deployment and complete twelve-agent chain remain
+> unaccepted (see `20_Plan.md`). The staging flow script exercises local
+> Docker/staging stacks, not production.
 
 ## 1. Functional flow
 
@@ -93,6 +94,38 @@ curl -s -X POST http://localhost:4000/v1/ledger/verify \
 
 Must return `{"intact": true}`; on tampering the first break and sequence
 number are reported.
+
+### 1.4 Recorded public-website observations (isolated candidate)
+
+The public website connector retains bounded safe HTML metadata and content
+digests. A human operator selects an existing engagement and records an
+immutable source binding; a historical engagement without an estate keeps
+that null estate. The database derives source facts from the stored check.
+Callers cannot supply inventory, private facts or a replacement projection.
+
+For the dedicated Drishti/Vibhaag flow, the BFF records the existing generic
+human invocation request, then persists the exact canonical input bytes and
+source association. Internal transport carries tenant, run and correlation
+identifiers only. Runtime loads the authorized recorded dispatch through its
+restricted writer, verifies the normalized input hash and obtains a once-only
+immutable execution claim before actual agent work. A lost or uncertain
+claim outcome cannot authorize another execution.
+
+BFF settlement verifies the actual runtime start/completion receipts. Only
+then may the human writer retain an immutable observation whose canonical
+output bytes, digest and completion/settlement receipts all agree. Drishti
+observes the retained public pages; Vibhaag consumes its persisted observation
+and identifies potential email/tel collection from structural form metadata.
+Private hosting, backend personal data and cross-border processing remain
+unknown, and human review remains required. This path does not call a model
+provider for structural extraction or reopen generic public invocations.
+
+Candidate bd62b391 passed actual authenticated BFF/runtime/PostgREST execution
+and readback for these two agents, with independent receipt/hash/claim checks.
+Durable operator navigation, interrupted-request reconciliation and
+source-bound human corrections remain in progress; the complete agent chain
+and remote release are not accepted. Evidence is recorded in
+`21_Progress.md`; operator closure is P1-W2-public in `23_Operator_Runbook.md`.
 
 ## 2. Technical architecture
 

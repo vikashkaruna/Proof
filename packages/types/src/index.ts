@@ -13,3 +13,4 @@ export * from './connector-contracts';
 export * from './assessment';
 export * from './public-form-metadata';
 export * from './public-source';
+export * from './public-source-agents';

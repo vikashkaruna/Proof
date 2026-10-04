@@ -220,6 +220,16 @@ describe('agent invocation authority', () => {
 });
 
 describe('scoped generic lifecycle boundary', () => {
+  it('preserves the successful HTTP body without exposing internal lifecycle metadata', async () => {
+    const response = await request(UserRole.OWNER, 'drishti', {});
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual(success(transport.mock.calls[0]![1]));
+    expect(body).not.toHaveProperty('run');
+    expect(body).not.toHaveProperty('requestHash');
+    expect(body).not.toHaveProperty('responseHash');
+  });
+
   it('does not replay a recorded dispatch with the same correlation', async () => {
     const body = { correlation_id: ENGAGEMENT };
     expect((await request(UserRole.OWNER, 'drishti', body)).status).toBe(200);
