@@ -26,9 +26,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Generic, TypeVar
+from uuid import UUID
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..canonicalise import canonical_json, sha256_hex
 from ..config import Settings, get_settings
@@ -47,6 +48,14 @@ class AutonomyLevel(str, Enum):
     L2 = "L2"  # Agent-executes-on-approval
     L3 = "L3"  # Continuous with exception review
     L4 = "L4"  # Policy-governed autonomy
+
+
+class DispatchContext(BaseModel):
+    """BFF-authorized transport context, never read from agent business input."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    run_id: UUID
+    request_hash: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
 
 
 class AgentName(str, Enum):
@@ -135,6 +144,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         raw_input: dict[str, Any] | InputT,
         *,
         correlation_id: str | None = None,
+        dispatch_context: DispatchContext | None = None,
     ) -> AgentRunResult:
         """Validate input, run, log to ledger. Top-level entry point."""
         correlation_id = correlation_id or new_correlation_id()
@@ -148,6 +158,11 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 raw_input.model_dump(mode="python")
                 if isinstance(raw_input, BaseModel)
                 else (raw_input or {})
+            )
+            context = (
+                DispatchContext.model_validate(dispatch_context).model_dump(mode="json")
+                if dispatch_context is not None
+                else {}
             )
             input_obj = self.input_schema().model_validate(payload)
             input_hash = sha256_hex(canonical_json(input_obj.model_dump(mode="json")))
@@ -176,7 +191,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                     target_ref=engagement_id,
                     result="pending",
                     input_hash=input_hash,
-                    detail={"phase": "started"},
+                    detail={"phase": "started", **context},
                 )
             )
             entry_ids.append(r.id)
@@ -218,7 +233,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                         result="success",
                         input_hash=input_hash,
                         output_hash=output_hash,
-                        detail={"phase": "completed", "started_entry": entry_ids[0]},
+                        detail={"phase": "completed", "started_entry": entry_ids[0], **context},
                     )
                 )
                 entry_ids.append(r2.id)
@@ -262,6 +277,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                             "phase": "failed",
                             "started_entry": entry_ids[0],
                             "failure_code": failure_code,
+                            **context,
                         },
                     )
                 )

@@ -164,7 +164,9 @@ def _jwt(role: str, exp: int | None = None) -> str:
     def part(value: dict) -> str:
         return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
 
-    return f"{part({'alg': 'HS256'})}.{part({'role': role, 'exp': exp or int(time.time()) + 600})}.sig"
+    return (
+        f"{part({'alg': 'HS256'})}.{part({'role': role, 'exp': exp or int(time.time()) + 600})}.sig"
+    )
 
 
 def _strict_settings(environment: str, **overrides):
@@ -333,9 +335,7 @@ async def test_verify_and_query_use_the_read_client_and_appends_use_only_the_wri
     ledger = LedgerClient(writer, read_client=reader)
 
     assert (await ledger.verify("t1")) == {"intact": True}
-    reader.rpc.assert_called_once_with(
-        "verify_ledger", {"p_tenant_id": "t1", "p_from_sequence": 1}
-    )
+    reader.rpc.assert_called_once_with("verify_ledger", {"p_tenant_id": "t1", "p_from_sequence": 1})
     assert await ledger.query(tenant_id="t1") == [{"sequence_no": 1}]
     reader.table.assert_called_once_with("audit_ledger")
     # The writer credential cannot verify or read; it must never be asked to.
@@ -363,3 +363,35 @@ def test_strict_environment_without_a_service_key_for_reads_fails_closed(monkeyp
     monkeypatch.setattr("axiom.ledger_client.create_client", create)
     with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_authorized_transport_context_binds_both_receipts_without_raw_input(fixture, fails):
+    from axiom.agents.base import DispatchContext
+
+    agent, append, payload = fixture
+    agent.fail = fails
+    context = DispatchContext(run_id="47470000-0000-4000-8000-000000000099", request_hash="d" * 64)
+    # A business-input lookalike is not transport authority.
+    payload["dispatch_context"] = {"run_id": TENANT, "request_hash": "e" * 64}
+    result = await agent.invoke(payload, dispatch_context=context)
+    assert result.status == ("failed" if fails else "succeeded")
+    entries = [asdict(call.args[0]) for call in append.call_args_list]
+    assert len(entries) == 2
+    for entry in entries:
+        assert entry["detail"]["run_id"] == str(context.run_id)
+        assert entry["detail"]["request_hash"] == "d" * 64
+        assert PRIVATE not in json.dumps(entry)
+    assert entries[1]["detail"]["started_entry"] == RECEIPT
+    assert entries[0]["input_hash"] != context.request_hash
+
+
+@pytest.mark.asyncio
+async def test_invalid_transport_context_refuses_before_execution_or_audit(fixture):
+    agent, append, payload = fixture
+    result = await agent.invoke(payload, dispatch_context={"run_id": "bad", "request_hash": "x"})
+    assert result.status == "failed"
+    assert result.error == "validation_failed"
+    assert agent.invocations == 0
+    append.assert_not_awaited()
