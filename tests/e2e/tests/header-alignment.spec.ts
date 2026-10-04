@@ -102,11 +102,15 @@ test('module pages and report views use the branded header with one accessible p
           contentWidth:
             content.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
           contentLeft: content.left + parseFloat(style.paddingLeft),
+          paddingLeft: parseFloat(style.paddingLeft),
+          paddingRight: parseFloat(style.paddingRight),
           pageWidth: page.width,
           pageLeft: page.left,
         };
       });
     expect(frame, `${route} has a page frame`).not.toBeNull();
+    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(24);
+    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(24);
     expect(frame!.pageWidth, `${route} fills the content width`).toBeGreaterThanOrEqual(
       frame!.contentWidth - 2,
     );
@@ -132,6 +136,14 @@ test('module pages and report views use the branded header with one accessible p
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
+  const mobilePadding = await page
+    .locator('main')
+    .first()
+    .evaluate((main) => {
+      const style = getComputedStyle(main);
+      return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight)];
+    });
+  expect(mobilePadding).toEqual([12, 12]);
   for (const route of ['/estate', '/breaches', '/consent', '/reports?tab=pramaan']) {
     await page.goto(route);
     const header = page.locator('header').filter({ has: page.getByRole('heading', { level: 1 }) });
