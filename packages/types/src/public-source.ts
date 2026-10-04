@@ -6,7 +6,7 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const receipt = z.string().regex(/^[1-9][0-9]*$/);
 
 /** Database projection hashes use UTF-8 PostgreSQL JSONB::text, codec version 1.
- * They are opaque authority tokens, not TS/Python canonical JSON hashes. */
+ * They are opaque integrity digests, not TS/Python canonical JSON hashes. */
 export const publicSourceBindingSchema = z
   .object({
     tenant_id: uuid,
