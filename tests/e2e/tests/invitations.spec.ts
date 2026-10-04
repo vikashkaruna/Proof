@@ -77,7 +77,12 @@ test('an admin invites a person who accepts after signing in as the invited addr
   const origin = new URL(page.url()).origin;
   const { context, page: invited } = await openAsInvitee(browser, origin, link, invitee);
   try {
+    const acceptanceRequest = invited.waitForRequest(
+      (request) => request.url().includes('/api/bff/v1/invitations/accept'),
+      { timeout: 10_000 },
+    );
     await invited.getByRole('button', { name: 'Accept invitation' }).click();
+    await acceptanceRequest;
     await expect(invited).toHaveURL(/\/dashboard/, { timeout: 20_000 });
     const tenants = await invited.request.get('/api/bff/v1/user/tenants');
     expect(tenants.status()).toBe(200);
