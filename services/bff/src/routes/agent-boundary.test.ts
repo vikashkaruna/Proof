@@ -47,12 +47,17 @@ function success(init?: RequestInit, overrides: Record<string, unknown> = {}) {
 const transport = vi.fn<typeof fetch>();
 const broadcast = vi.fn();
 
-async function request(role: UserRole, agent: string, body: Record<string, unknown>) {
+async function request(
+  role: UserRole,
+  agent: string,
+  body: Record<string, unknown>,
+  options: { tenantId?: string; headers?: Record<string, string> } = {},
+) {
   const { v1Routes } = await import('./v1.js');
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {
     c.set('user', { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } as never);
-    c.set('tenantId', A as never);
+    c.set('tenantId', (options.tenantId ?? A) as never);
     c.set('role', role);
     c.set('approvalScopes', []);
     await next();
@@ -69,7 +74,7 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
   );
   return app.request(`/agents/${agent}/run`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...options.headers },
     body: JSON.stringify(body),
   });
 }
@@ -253,6 +258,65 @@ describe('scoped generic lifecycle boundary', () => {
       expect(state.db!.rows('agent_runs')[0]!.status).toBe('failed');
     },
   );
+});
+
+describe('canonical generic dispatch identifiers', () => {
+  const tenant = 'abcdefab-cdef-4cde-8fde-abcdefabcdea';
+  const engagement = 'abcdefab-cdef-4cde-8fde-abcdefabcdeb';
+  const correlation = 'abcdefab-cdef-4cde-8fde-abcdefabcdec';
+  it.each(['body', 'header'])(
+    'accepts valid uppercase UUIDs with correlation in %s',
+    async (source) => {
+      state.db!.seed('engagements', { id: engagement, tenant_id: tenant });
+      const body = {
+        tenant_id: tenant.toUpperCase(),
+        tenantId: tenant.toUpperCase(),
+        engagement_id: engagement.toUpperCase(),
+        ...(source === 'body' ? { correlation_id: correlation.toUpperCase() } : {}),
+      };
+      const response = await request(UserRole.OWNER, 'drishti', body, {
+        tenantId: tenant.toUpperCase(),
+        headers:
+          source === 'header' ? { 'x-correlation-id': correlation.toUpperCase() } : undefined,
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ correlation_id: correlation });
+      const envelope = JSON.parse(String(transport.mock.calls[0]![1]!.body));
+      expect(envelope.input).toMatchObject({
+        tenant_id: tenant,
+        tenantId: tenant,
+        engagement_id: engagement,
+      });
+      expect(envelope.correlation_id).toBe(correlation);
+      const row = state.db!.rows('agent_runs')[0]!;
+      expect(row.tenant_id).toBe(tenant);
+      expect(row.engagement_id).toBe(engagement);
+      expect(envelope.dispatch_context.request_hash).toBe(
+        await sha256(canonicalJson(envelope.input)),
+      );
+    },
+  );
+  it('does not redispatch the same valid UUID under different casing', async () => {
+    state.db!.seed('engagements', { id: engagement, tenant_id: tenant });
+    const body = {
+      engagement_id: engagement.toUpperCase(),
+      correlation_id: correlation.toUpperCase(),
+    };
+    expect(
+      (await request(UserRole.OWNER, 'drishti', body, { tenantId: tenant.toUpperCase() })).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(
+          UserRole.OWNER,
+          'drishti',
+          { engagement_id: engagement, correlation_id: correlation },
+          { tenantId: tenant },
+        )
+      ).status,
+    ).toBe(409);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('confirmed runtime completion', () => {

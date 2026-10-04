@@ -4001,7 +4001,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'agent_not_found', message: `Unknown agent: ${name}` } }, 404);
     }
 
-    const tenantId = c.get('tenantId');
+    const tenantId = c.get('tenantId').toLowerCase();
     const parsed = z
       .object({
         tenant_id: z.uuid().optional(),
@@ -4015,6 +4015,12 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid agent input.' } }, 400);
     }
     const body = parsed.data;
+    // PostgreSQL UUIDs have canonical lower-case text; runtime string schemas
+    // otherwise retain valid upper-case IDs in ledger target references.
+    for (const key of ['tenant_id', 'tenantId', 'engagement_id', 'correlation_id'] as const) {
+      const value = body[key];
+      if (value !== undefined) body[key] = value.toLowerCase();
+    }
     if (
       (body.tenant_id && body.tenant_id !== tenantId) ||
       (body.tenantId && body.tenantId !== tenantId)
@@ -4044,7 +4050,7 @@ export function v1Routes(deps: Deps) {
         400,
       );
     }
-    const correlationId = requestedCorrelation ?? randomUUID();
+    const correlationId = requestedCorrelation?.toLowerCase() ?? randomUUID();
     const admin = createSupabaseAdmin();
     if (body.engagement_id) {
       const { data: engagement, error } = await admin
