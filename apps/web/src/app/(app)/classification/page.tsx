@@ -2,18 +2,30 @@ import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { can } from '@axiom/types';
 import { DataPlaceholder } from '@axiom/ui';
+import { loadClassificationReviewHistory } from '@/lib/classification-reviews';
+import { ClassificationReviewHistoryView } from './review-history';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ClassificationPage() {
+export default async function ClassificationPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ reviewPage?: string | string[] }>;
+} = {}) {
   const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
-  const { data, error } = await supabase
-    .from('audit_ledger')
-    .select('sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result')
-    .eq('tenant_id', tenantId)
-    .eq('actor_id', 'vibhaag')
-    .order('sequence_no', { ascending: false })
-    .limit(6);
+  const reviewPage = (await searchParams)?.reviewPage;
+  const [{ data, error }, history] = await Promise.all([
+    supabase
+      .from('audit_ledger')
+      .select(
+        'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+      )
+      .eq('tenant_id', tenantId)
+      .eq('actor_id', 'vibhaag')
+      .order('sequence_no', { ascending: false })
+      .limit(6),
+    loadClassificationReviewHistory(supabase, tenantId, reviewPage),
+  ]);
   const events: ModuleTelemetryEvent[] =
     error || !data
       ? []
@@ -61,6 +73,7 @@ export default async function ClassificationPage() {
             : 'Ask an estate manager to prepare the source inventory for review.'}
         </p>
       </section>
+      <ClassificationReviewHistoryView history={history} />
       {error || !data ? (
         <p role="alert">Classification ledger records are unavailable.</p>
       ) : events.length === 0 ? (

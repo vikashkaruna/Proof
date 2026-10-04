@@ -24,6 +24,8 @@ vi.mock('@/lib/tenant-context', () => ({
           },
           order: () => query,
           limit: () => query,
+          range: () => query,
+          abortSignal: () => query,
           then: (resolve: (value: unknown) => unknown) =>
             Promise.resolve({ data: state.data, error: state.error }).then(resolve),
         };
