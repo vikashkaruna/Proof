@@ -39,7 +39,7 @@ from .agents.base import AgentName, AgentRunResult, DispatchContext
 from .config import Settings, get_settings, setup_logging
 from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
 from .evidence_client import EvidenceVault
-from .ledger_client import LedgerClient
+from .ledger_client import LedgerClient, new_correlation_id
 from .model_gateway import ModelGateway
 
 AGENTS: dict[AgentName, Any] = {
@@ -211,6 +211,26 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
     # boundary. Board reports enter through the BFF's persisted workflow only.
     if agent_enum is AgentName.PRATIVEDAN:
         raise HTTPException(status_code=403, detail="board_report_workflow_required")
+
+    # Public facts require a dedicated BFF route loading the actual stored check
+    # and authenticated engagement. Generic input is not source authority. Keep
+    # the known failed-result contract until that composition exists.
+    if (
+        agent_enum in (AgentName.DRISHTI, AgentName.VIBHAAG)
+        and request.input.get("mode") == "public_website"
+    ):
+        return InvokeResponse(
+            agent=agent_enum.value,
+            correlation_id=request.correlation_id or new_correlation_id(),
+            status="failed",
+            latency_ms=0,
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=0,
+            error="public_source_workflow_required",
+            output=None,
+            ledger_entry_ids=[],
+        )
 
     agent = app.state.agents.get(agent_enum)
     if not agent:

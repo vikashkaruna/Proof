@@ -14,11 +14,29 @@ inventory rows but cannot mutate client systems.
 from __future__ import annotations
 
 import re
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    Field,
+    RootModel,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 from .base import AgentName, AutonomyLevel, BaseAgent
+from .public_source import (
+    CheckedPublicObservationPage,
+    DrishtiPublicInput,
+    DrishtiPublicOutput,
+    PublicWebsiteObservation,
+    UnavailablePublicObservationPage,
+    UnknownPrivateFacts,
+    invocation_mode,
+    reject_public_fields_in_legacy,
+)
 
 INDIAN_REGIONS: set[str] = {
     # AWS India
@@ -49,16 +67,25 @@ INDIAN_REGIONS: set[str] = {
     "on-premises",
 }
 
-NON_INDIAN_REGION_PATTERNS: list[re.Pattern] = [
+NON_INDIAN_REGION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(us-(?:east|west)-\d+)\b", re.IGNORECASE),
     re.compile(r"\b(eu-(?:west|central|north|south)-\d+)\b", re.IGNORECASE),
     re.compile(r"\b(ap-(?:southeast|northeast|east)-\d+)\b", re.IGNORECASE),
-    re.compile(r"\b(ca-central-\d+|sa-east-\d+|me-south-\d+|me-central-\d+|af-south-\d+|il-central-\d+)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(ca-central-\d+|sa-east-\d+|me-south-\d+|me-central-\d+|af-south-\d+|il-central-\d+)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(us-(?:central|east|west)\d+)\b", re.IGNORECASE),
     re.compile(r"\b(europe-(?:west|north|central|south)\d+)\b", re.IGNORECASE),
     re.compile(r"\b(asia-(?:east|northeast|southeast)\d+)\b", re.IGNORECASE),
-    re.compile(r"\b(eastus\d*|westus\d*|centralus|northeurope|westeurope|eastasia|southeastasia)\b", re.IGNORECASE),
-    re.compile(r"\b(united states|usa|virginia|ohio|oregon|california|frankfurt|germany|ireland|dublin|london|tokyo|japan|singapore|sydney|australia)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(eastus\d*|westus\d*|centralus|northeurope|westeurope|eastasia|southeastasia)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(united states|usa|virginia|ohio|oregon|california|frankfurt|germany|ireland|dublin|london|tokyo|japan|singapore|sydney|australia)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -119,6 +146,7 @@ class SystemRecord(BaseModel):
 
 
 class DrishtiInput(BaseModel):
+    mode: Literal["legacy_inventory"] = Field(default="legacy_inventory", exclude=True)
     tenant_id: str
     engagement_id: str
     interview: dict[str, Any] = Field(
@@ -126,6 +154,11 @@ class DrishtiInput(BaseModel):
         description="Structured answers from the discovery interview",
     )
     systems: list[SystemRecord] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def public_facts_require_explicit_mode(cls, value: Any) -> Any:
+        return reject_public_fields_in_legacy(value, {"source", "source_binding", "observation"})
 
     @field_validator("interview")
     @classmethod
@@ -153,7 +186,37 @@ class DrishtiOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
+class DrishtiInvocationInput(
+    RootModel[
+        Annotated[
+            Annotated[DrishtiInput, Tag("legacy_inventory")]
+            | Annotated[DrishtiPublicInput, Tag("public_website")],
+            Discriminator(invocation_mode),
+        ]
+    ]
+):
+    @property
+    def tenant_id(self) -> str:
+        return self.root.tenant_id
+
+    @property
+    def engagement_id(self) -> str:
+        return self.root.engagement_id
+
+
+class DrishtiInvocationOutput(
+    RootModel[
+        Annotated[
+            Annotated[DrishtiOutput, Tag("legacy_inventory")]
+            | Annotated[DrishtiPublicOutput, Tag("public_website")],
+            Discriminator(invocation_mode),
+        ]
+    ]
+):
+    pass
+
+
+class DrishtiAgent(BaseAgent[DrishtiInvocationInput, DrishtiInvocationOutput]):
     name: ClassVar[AgentName] = AgentName.DRISHTI
     writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Build a system inventory from interview data or live connectors."
@@ -163,21 +226,44 @@ class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
     default_task_kind: ClassVar[Any] = "structural"
     default_pii_redact: ClassVar[bool] = False  # structural only — no values
 
-    def input_schema(self) -> type[DrishtiInput]:
-        return DrishtiInput
+    def input_schema(self) -> type[DrishtiInvocationInput]:
+        return DrishtiInvocationInput
 
-    def output_schema(self) -> type[DrishtiOutput]:
-        return DrishtiOutput
+    def output_schema(self) -> type[DrishtiInvocationOutput]:
+        return DrishtiInvocationOutput
 
     async def _run(
-        self, *, correlation_id: str, input: DrishtiInput, **deps: Any
-    ) -> DrishtiOutput:
+        self, *, correlation_id: str, input: DrishtiInvocationInput, **deps: Any
+    ) -> DrishtiInvocationOutput:
+        source_input = input.root
+        if isinstance(source_input, DrishtiPublicInput):
+            # Public attributes cannot establish private hosting or processing.
+            pages = [
+                UnavailablePublicObservationPage(
+                    page=page.page, status="unavailable", form_state="unavailable"
+                )
+                if page.status == "unavailable"
+                else CheckedPublicObservationPage(
+                    **page.model_dump(),
+                    form_state="observed" if page.form_metadata is not None else "unexamined",
+                )
+                for page in source_input.source.pages
+            ]
+            return DrishtiInvocationOutput(
+                root=DrishtiPublicOutput(
+                    mode="public_website",
+                    observation=PublicWebsiteObservation(
+                        version=1,
+                        binding=source_input.source.binding,
+                        pages=pages,
+                        private_facts=UnknownPrivateFacts(),
+                        requires_human_review=True,
+                    ),
+                )
+            )
+        legacy_input = source_input
         # If interview is provided, normalise it; otherwise use the explicit systems
-        if input.systems:
-            inventory = input.systems
-        else:
-            # Light normalisation of free-text interview answers
-            inventory = self._from_interview(input.interview)
+        inventory = legacy_input.systems or self._from_interview(legacy_input.interview)
 
         # Normalize and evaluate residency and cross-border indicators
         for s in inventory:
@@ -200,7 +286,9 @@ class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
             categories = {category.lower() for category in s.data_categories}
             if "health" in categories:
                 escalate = True
-                escalation_reason = escalation_reason or f"discovers_health_data: system '{s.name}' flagged"
+                escalation_reason = (
+                    escalation_reason or f"discovers_health_data: system '{s.name}' flagged"
+                )
                 break
         # Escalate if any cross-border transfer was discovered
         if any(s.cross_border for s in inventory):
@@ -219,16 +307,18 @@ class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
         if all_warnings:
             summary += f" ({len(all_warnings)} statutory residency warning(s) flagged)"
 
-        return DrishtiOutput(
-            system_count=len(inventory),
-            personal_data_systems=len(personal_data),
-            cross_border_systems=len(cross_border),
-            inventory=inventory,
-            summary=summary,
-            needs_live_connector=len(inventory) >= 3,
-            escalate=escalate,
-            escalation_reason=escalation_reason,
-            warnings=all_warnings,
+        return DrishtiInvocationOutput(
+            root=DrishtiOutput(
+                system_count=len(inventory),
+                personal_data_systems=len(personal_data),
+                cross_border_systems=len(cross_border),
+                inventory=inventory,
+                summary=summary,
+                needs_live_connector=len(inventory) >= 3,
+                escalate=escalate,
+                escalation_reason=escalation_reason,
+                warnings=all_warnings,
+            )
         )
 
     def _from_interview(self, interview: dict[str, Any]) -> list[SystemRecord]:
