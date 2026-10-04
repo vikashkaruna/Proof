@@ -70,7 +70,7 @@ revoke all on function public.public_source_form_metadata_valid(jsonb,text) from
 
 create table public.public_source_bindings (
  id uuid primary key default gen_random_uuid(),tenant_id uuid not null,
- engagement_id uuid not null,estate_id uuid not null,check_id uuid not null,
+ engagement_id uuid not null,estate_id uuid,check_id uuid not null,
  projection_version integer not null check(projection_version=1),
  root_content_sha256 text not null check(root_content_sha256 ~ '^[a-f0-9]{64}$'),
  projection jsonb not null check(jsonb_typeof(projection)='object' and octet_length(projection::text)<=32768),
@@ -79,6 +79,7 @@ create table public.public_source_bindings (
  correlation_id uuid not null,creation_receipt bigint not null,
  created_at timestamptz not null default clock_timestamp(),
  unique(tenant_id,id),unique(tenant_id,engagement_id,check_id,projection_version),unique(tenant_id,correlation_id),
+ constraint public_source_binding_tenant_engagement_fk foreign key(tenant_id,engagement_id) references public.engagements(tenant_id,id) on delete restrict,
  foreign key(tenant_id,engagement_id,estate_id) references public.engagements(tenant_id,id,estate_id) on delete restrict,
  foreign key(tenant_id,estate_id) references public.estates(tenant_id,id) on delete restrict,
  foreign key(tenant_id,check_id) references public.public_website_checks(tenant_id,id) on delete restrict,
@@ -104,10 +105,12 @@ begin
  or (role_name in ('founder','axiom_analyst') and internal is distinct from true)
  then return jsonb_build_object('error','forbidden');end if;
  select * into e from public.engagements where tenant_id=p_tenant_id and id=p_engagement_id and status<>'cancelled' for share;
- if e.id is null or e.estate_id is null or not exists(select 1 from public.estates where tenant_id=p_tenant_id and id=e.estate_id)
- then return jsonb_build_object('error','context_refused');end if;
- perform 1 from public.estates where tenant_id=p_tenant_id and id=e.estate_id for share;
- if not found then return jsonb_build_object('error','context_refused');end if;
+ if e.id is null then return jsonb_build_object('error','context_refused');end if;
+ -- Intake may have no assigned estate. Capture that absence, never infer one.
+ if e.estate_id is not null then
+  perform 1 from public.estates where tenant_id=p_tenant_id and id=e.estate_id for share;
+  if not found then return jsonb_build_object('error','context_refused');end if;
+ end if;
  select * into s from public.public_website_checks where tenant_id=p_tenant_id and id=p_check_id and status='checked' for share;
  if s.id is null then return jsonb_build_object('error','source_refused');end if;
  digest:=s.result->>'contentSha256';
@@ -168,9 +171,11 @@ begin
  select is_axiom_internal into internal from public.users where id=p_actor_id for share;
  if not found or (role_name in ('founder','axiom_analyst') and internal is distinct from true) then return jsonb_build_object('error','forbidden');end if;
  select * into e from public.engagements where tenant_id=p_tenant_id and id=p_engagement_id and status<>'cancelled' for share;
- if e.id is null or e.estate_id is null then return jsonb_build_object('error','context_refused');end if;
- perform 1 from public.estates where tenant_id=p_tenant_id and id=e.estate_id for share;
- if not found then return jsonb_build_object('error','context_refused');end if;
+ if e.id is null then return jsonb_build_object('error','context_refused');end if;
+ if e.estate_id is not null then
+  perform 1 from public.estates where tenant_id=p_tenant_id and id=e.estate_id for share;
+  if not found then return jsonb_build_object('error','context_refused');end if;
+ end if;
  perform 1 from public.public_website_checks where tenant_id=p_tenant_id and id=p_check_id for share;
  if not found then return jsonb_build_object('error','source_refused');end if;
  preview:=public.get_public_source_projection(p_tenant_id,p_actor_id,p_engagement_id,p_check_id);

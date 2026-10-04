@@ -13,7 +13,8 @@ insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(21),pg_temp
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('public-source-test',now(),'test','Synthetic fixture',0);
 insert into public.engagements(id,tenant_id,estate_id,library_version,title) values
 (pg_temp.id(31),pg_temp.id(11),pg_temp.id(21),'public-source-test','A'),(pg_temp.id(32),pg_temp.id(12),pg_temp.id(22),'public-source-test','B'),
-(pg_temp.id(33),pg_temp.id(11),pg_temp.id(21),'public-source-test','Another A');
+(pg_temp.id(33),pg_temp.id(11),pg_temp.id(21),'public-source-test','Another A'),
+(pg_temp.id(34),pg_temp.id(11),null,'public-source-test','Unassigned intake A'),(pg_temp.id(35),pg_temp.id(12),null,'public-source-test','Unassigned intake B');
 create function pg_temp.result(o jsonb default '{}') returns jsonb language sql as $$select jsonb_build_object('requestedUrl','https://example.invalid/','finalUrl','https://example.invalid/','checkedAt',now(),'status','checked','httpStatus',200,'bytes',3,'contentSha256',repeat('a',64),'title','Private-looking title discarded','headings',jsonb_build_array('Discarded heading'),'publicLinks','[]'::jsonb)||o$$;
 insert into public.public_website_checks(id,tenant_id,actor_id,correlation_id,requested_url,final_url,status,result) values
 (pg_temp.id(41),pg_temp.id(11),pg_temp.id(1),pg_temp.id(141),'https://example.invalid/','https://example.invalid/','checked',pg_temp.result()),
@@ -163,6 +164,30 @@ do $$declare prior text:=current_user;begin
 set local role agent_ledger_writer;
 begin perform public.append_agent_ledger(pg_temp.id(11),gen_random_uuid(),'system','fake',null,null,null,'public_source.bound',null,null,null,null,null,null,null,'success','{}');raise exception 'producer forged action';exception when insufficient_privilege then null;end;
 execute format('set local role %I',prior);end$$;
+-- Missing estate is an observed intake context, never inferred or assigned.
+do $$declare v jsonb;a jsonb;b jsonb;r public.public_source_bindings;begin
+v:=pg_temp.preview(jsonb_build_object('engagement',pg_temp.id(34)));
+perform pg_temp.ok(not v?'error' and not(v->'runtime_binding')?'estate_id','null estate preview without invented estate');
+perform pg_temp.ok(pg_temp.preview(jsonb_build_object('engagement',pg_temp.id(35)))->>'error'='context_refused','foreign null estate context refused');
+perform pg_temp.ok(pg_temp.bind(jsonb_build_object('engagement',pg_temp.id(35),'correlation',pg_temp.id(105)))->>'error'='context_refused','foreign null estate creation refused');
+a:=pg_temp.bind(jsonb_build_object('engagement',pg_temp.id(34),'correlation',pg_temp.id(104)));
+b:=pg_temp.bind(jsonb_build_object('engagement',pg_temp.id(34),'correlation',pg_temp.id(104)));
+perform pg_temp.ok(a->>'created'='true' and b->>'replayed'='true' and a->>'creation_receipt'=b->>'creation_receipt','null estate creation and exact replay');
+select * into strict r from public.public_source_bindings where id=(a->>'binding_id')::uuid;
+perform pg_temp.ok(r.estate_id is null and (select estate_id is null from public.engagements where id=pg_temp.id(34)),'no estate assignment or forged verification');
+-- A nullable triple FK must never replace independent tenant+engagement safety.
+begin
+insert into public.public_source_bindings(id,tenant_id,engagement_id,estate_id,check_id,projection_version,root_content_sha256,projection,projection_sha256,actor_id,correlation_id,creation_receipt)
+values(pg_temp.id(201),r.tenant_id,pg_temp.id(35),null,r.check_id,r.projection_version,r.root_content_sha256,r.projection,r.projection_sha256,r.actor_id,pg_temp.id(205),r.creation_receipt);
+raise exception 'ASSERTION: independent tenant engagement FK missing';
+exception when foreign_key_violation then null;end;
+begin update public.public_source_bindings set estate_id=pg_temp.id(21) where id=r.id;raise exception 'snapshot estate rewritten';exception when insufficient_privilege then perform pg_temp.ok(sqlerrm='evidence_receipt_immutable','null estate snapshot immutable');end;
+-- Later explicit same-tenant assignment cannot rewrite historical absence.
+update public.engagements set estate_id=pg_temp.id(21) where id=pg_temp.id(34);
+perform pg_temp.ok(pg_temp.preview(jsonb_build_object('engagement',pg_temp.id(34)))->>'binding_id'=r.id::text and (select estate_id is null from public.public_source_bindings where id=r.id),'historical null estate preserved');
+perform pg_temp.ok(pg_temp.bind(jsonb_build_object('engagement',pg_temp.id(34),'correlation',pg_temp.id(104)))->>'replayed'='true','historical null estate replay remains exact');
+perform pg_temp.ok((select count(*)=2 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='public_source.bound'),'null estate has one human creation receipt');
+end$$;
 -- Ledger failure cannot leave an unreceipted snapshot.
 create function pg_temp.block_audit() returns trigger language plpgsql as $$begin if new.action_type::text='public_source.bound' then raise exception 'deliberate source audit failure';end if;return new;end$$;
 create trigger source_test_failure before insert on public.audit_ledger for each row execute function pg_temp.block_audit();
