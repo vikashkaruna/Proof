@@ -243,6 +243,7 @@ export const LedgerActionType = {
   ONBOARDING_PROPOSAL_REJECTED: 'onboarding.proposal.rejected',
   CONNECTOR_REGISTERED: 'connector.registered',
   CONNECTOR_UPDATED: 'connector.updated',
+  CONNECTOR_WEBSITE_CHECKED: 'connector.website.checked',
   CONNECTOR_CREDENTIAL_CHANGED: 'connector.credential_changed',
   CONNECTOR_TOKEN_REQUESTED: 'connector.token_requested',
   CONNECTOR_TOKEN_ACQUIRED: 'connector.token_acquired',

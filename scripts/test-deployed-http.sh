@@ -11,6 +11,13 @@ if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
   exit 2
 fi
 ./scripts/start-parity-supabase.sh
+parity_project=${AXIOM_PARITY_PROJECT_ID:-axiom-w0-parity}
+parity_network="supabase_network_${parity_project}"
+kong_container="supabase_kong_${parity_project}"
+docker network inspect "$parity_network" --format '{{range .Containers}}{{println .Name}}{{end}}' | grep -Fxq "$kong_container" || {
+  echo 'Isolated Auth gateway is not on the expected private Docker network.' >&2
+  exit 1
+}
 revision=$(git rev-parse HEAD)
 image="axiom-acceptance-bff:${revision:0:12}"
 docker build --build-arg "AXIOM_RELEASE_SHA=$revision" -f infra/docker/Dockerfile.bff -t "$image" .
@@ -30,7 +37,7 @@ trap cleanup EXIT
 for environment in preprod production; do
   if [ "$environment" = preprod ]; then port=57400; web_port=57410; marketing_port=57420; else port=57401; web_port=57411; marketing_port=57421; fi
   container="axiom-http-${environment}-$$"
-  python3 - "$state_dir" "$environment" "$port" "$revision" "$web_port" "$marketing_port" <<'PY'
+  python3 - "$state_dir" "$environment" "$port" "$revision" "$web_port" "$marketing_port" "http://${kong_container}:8000" <<'PY'
 from pathlib import Path
 from urllib.parse import urlparse
 import base64,hashlib,hmac,json,sys,secrets,os,time,urllib.request,urllib.error
@@ -78,7 +85,9 @@ def scoped_writer(role):
     writer_claims={'iss':claims.get('iss','supabase'),'role':role,'iat':now,'exp':min(claims['exp'],now+3600)}
     unsigned=f"{b64(json.dumps({'alg':'HS256','typ':'JWT'},separators=(',',':')).encode())}.{b64(json.dumps(writer_claims,separators=(',',':')).encode())}"
     return f'{unsigned}.{b64(hmac.new(secret,unsigned.encode(),hashlib.sha256).digest())}'
-env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':f'http://host.docker.internal:{api.port}','SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
+# Server-to-Auth traffic stays on the isolated project's private network.
+# Browser and host-side fixture traffic still use the validated loopback URL.
+env={'NODE_ENV':'production','ENVIRONMENT':environment,'AXIOM_AUTH_MODE':'strict','AXIOM_RELEASE_SHA':revision,'SUPABASE_URL':sys.argv[7],'SUPABASE_ANON_KEY':status['PUBLISHABLE_KEY'],'SUPABASE_SERVICE_KEY':status['SECRET_KEY'],'APPROVAL_SIGNING_KEY':secrets.token_hex(32),'AXIOM_MFA_ENCRYPTION_KEY':secrets.token_hex(32),'AGENT_RUNTIME_INTERNAL_TOKEN':secrets.token_hex(32),'AGENT_RUNTIME_URL':'http://unused-runtime.invalid','MODEL_GATEWAY_API_KEY':secrets.token_hex(32),'AXIOM_REGION':'ap-south-1','LOG_LEVEL':'error'}
 for role,key in [('statutory_proof_writer','SUPABASE_STATUTORY_PROOF_WRITER_KEY'),('approval_archive_writer','SUPABASE_ARCHIVE_WRITER_KEY'),('human_action_writer','SUPABASE_HUMAN_ACTION_WRITER_KEY'),('evidence_ingestion_writer','SUPABASE_EVIDENCE_INGESTION_WRITER_KEY'),('agent_ledger_writer','SUPABASE_AGENT_LEDGER_WRITER_KEY')]:
     env[key]=scoped_writer(role)
 (root/f'{environment}.env').write_text(''.join(f'{k}={v}\n' for k,v in env.items()))
@@ -92,6 +101,7 @@ web['BFF_PUBLIC_URL']=f'http://bff-{environment}:4000'
 PY
   containers+=("$container")
   docker run -d --name "$container" --network "$network_id" --network-alias "bff-$environment" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment.env" -p "127.0.0.1:$port:4000" "$image" >/dev/null
+  docker network connect "$parity_network" "$container"
   ready=false
   for attempt in $(seq 1 60); do
     if curl --silent --fail "http://127.0.0.1:$port/health" >/dev/null; then ready=true; break; fi
@@ -104,6 +114,7 @@ PY
       containers+=("$app_container")
       if [ "$app" = web ]; then app_port=$web_port; internal_port=3001; else app_port=$marketing_port; internal_port=3000; fi
       docker run -d --name "$app_container" --network "$network_id" --add-host=host.docker.internal:host-gateway --env-file "$state_dir/$environment-web.env" -p "127.0.0.1:$app_port:$internal_port" "axiom-acceptance-${app}:local" >/dev/null
+      docker network connect "$parity_network" "$app_container"
       # Check the internal hop explicitly. Host-side API success cannot prove
       # a container can reach the BFF (loopback publishing differs on Linux).
       docker exec "$app_container" node --input-type=module -e '

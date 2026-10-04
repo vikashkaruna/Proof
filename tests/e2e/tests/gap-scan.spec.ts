@@ -9,6 +9,7 @@
  *   5. Step 4: submit → report
  */
 
+import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 
 import { marketingUrl } from '../target';
@@ -49,11 +50,12 @@ test.describe('Public gap-scan funnel', () => {
   test('the contact page persists an inquiry through the BFF and reports delivery honestly', async ({
     page,
   }) => {
+    const syntheticEmail = `aarav+${randomUUID()}@example.invalid`;
     await page.goto(`${marketingUrl}/contact`);
     await expect(page.getByRole('heading', { name: /Talk to the founder/i })).toBeVisible();
 
     await page.locator('#contact-name').fill('Aarav Mehta');
-    await page.locator('#contact-email').fill('aarav@fintechbharat.in');
+    await page.locator('#contact-email').fill(syntheticEmail);
     await page.locator('#contact-company').fill('Fintech Bharat Pvt Ltd');
     await page
       .locator('#contact-message')
@@ -73,7 +75,7 @@ test.describe('Public gap-scan funnel', () => {
       /saved for .* founder to review/i,
     );
     await expect(page.getByText(/Message sent successfully/i)).toHaveCount(0);
-    await expect(page.getByText(/aarav@fintechbharat.in/i)).toBeVisible();
+    await expect(page.getByText(syntheticEmail)).toBeVisible();
   });
 });
 

@@ -25,15 +25,16 @@ export default async function ConnectorsPage() {
       .returns<ConnectorSystem[]>(),
   ]);
   return (
-    <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         module={moduleBarProps('connectors')}
         title="Connectors"
-        description="Register access paths for estate systems. Enabling a registration does not connect to a system or grant agent access."
+        description="Check public website content or register access paths for estate systems. A registration does not grant agent access."
       />
       <p className="rounded border p-4 text-sm">
-        Connector execution is not yet available. Credentials, live access grants and transport
-        verification are separate steps.
+        Private system connector execution is not yet available. The public website check below
+        fetches public HTML only; private credentials, live access grants and transport verification
+        remain separate steps.
       </p>
       {connectors.error ||
       systems.error ||

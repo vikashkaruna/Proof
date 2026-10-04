@@ -29,7 +29,7 @@ export default async function EstatePage() {
       .returns<IntakeRow[]>(),
   ]);
   return (
-    <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         module={{ crumb: 'Discover & Classify', titleHi: 'क्लाइंट एस्टेट', phase: 'P1' }}
         title="Client estate"

@@ -57,7 +57,9 @@ async function buildApp(role: UserRole = UserRole.OWNER) {
 }
 
 beforeEach(() => {
-  fake = createFakeDb({});
+  fake = createFakeDb({
+    control_libraries: [{ version: 'v1', status: 'published', is_current: true }],
+  });
   db.current = fake;
 });
 const create = (app: Awaited<ReturnType<typeof buildApp>>, body: Record<string, unknown>) =>
@@ -97,6 +99,35 @@ describe('engagement estate linkage', () => {
       estateId: ESTATE,
     });
     expect(res.status).toBe(403);
+    expect(fake.rows('engagements')).toHaveLength(0);
+  });
+  it('resolves a repeated request key to the original assessment without a second row', async () => {
+    const app = await buildApp();
+    const requestKey = '33333333-3333-4333-8333-333333333333';
+    const body = { libraryVersion: 'v1', title: 'Scoped assessment', estateId: ESTATE, requestKey };
+    const first = await create(app, body);
+    const replay = await create(app, body);
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(200);
+    expect(((await replay.json()) as { id: string }).id).toBe(requestKey);
+    expect(fake.rows('engagements')).toHaveLength(1);
+  });
+  it('refuses a request key reused for a changed assessment', async () => {
+    const app = await buildApp();
+    const requestKey = '33333333-3333-4333-8333-333333333333';
+    await create(app, { libraryVersion: 'v1', title: 'First assessment', requestKey });
+    const changed = await create(app, {
+      libraryVersion: 'v1',
+      title: 'Changed assessment',
+      requestKey,
+    });
+    expect(changed.status).toBe(409);
+    expect(fake.rows('engagements')).toHaveLength(1);
+  });
+  it('requires the current published library before creating an assessment', async () => {
+    const app = await buildApp();
+    const unavailable = await create(app, { libraryVersion: 'old', title: 'Assessment' });
+    expect(unavailable.status).toBe(422);
     expect(fake.rows('engagements')).toHaveLength(0);
   });
 });

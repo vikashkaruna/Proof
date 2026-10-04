@@ -115,7 +115,7 @@ const commonEnv = {
 
 const webEnv = {
   ...commonEnv,
-  NODE_ENV: 'development',
+  NODE_ENV: 'production',
   NEXT_PUBLIC_SUPABASE_URL: state?.supabaseUrl ?? 'http://127.0.0.1:56321',
   NEXT_PUBLIC_SUPABASE_ANON_KEY: state?.anonKey ?? '',
   // Where the browser-to-BFF bridge forwards to. Without a BFF the approval
@@ -153,8 +153,9 @@ export default defineConfig({
   // The dedicated storage job owns its real Object Lock fixture. General
   // deployed acceptance forbids skipped journeys, so do not discover that
   // fixture-only spec unless the explicit storage launcher enables it.
-  testIgnore:
-    process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
+  testIgnore: [
+    ...(process.env.AXIOM_PUBLIC_WEBSITE_LIVE === 'true' ? [] : ['**/public-website-live.spec.ts']),
+    ...(process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
       ? []
       : [
           '**/evidence-ingestion.spec.ts',
@@ -163,7 +164,8 @@ export default defineConfig({
           '**/board-reports-provider.spec.ts',
           '**/approval-archive-provider.spec.ts',
           '**/source-bound-formats-provider.spec.ts',
-        ],
+        ]),
+  ],
   globalSetup: require.resolve('./global-setup.ts'),
   /**
    * Next compiles each route the first time it is requested, and several
@@ -201,7 +203,11 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: `pnpm --filter @axiom/web exec next dev --webpack --port ${localWebPort}`,
+          // Build once with the exact strict-auth fixture target, then serve
+          // the same production runtime as the release container. Next dev's
+          // first-route Fast Refresh can replace an in-flight server-action
+          // redirect or a newly mounted invitation form under concurrency.
+          command: `pnpm --filter @axiom/web build && pnpm --filter @axiom/web exec next start --port ${localWebPort}`,
           port: localWebPort,
           cwd: repoRoot,
           env: webEnv,
@@ -220,11 +226,10 @@ export default defineConfig({
           timeout: 120_000,
         },
         {
-          // The marketing site. The persona journeys do not touch it, but the
-          // public-surface specs do, and dropping it from here turned four
-          // dormant specs into ECONNREFUSED the moment the suite could run at
-          // all.
-          command: `pnpm --filter @axiom/marketing exec next dev --webpack --port ${MARKETING_PORT}`,
+          // Public-surface specs need the marketing site too. Serve its built
+          // runtime to avoid first-route compiler failures while the persona
+          // journeys run concurrently.
+          command: `pnpm --filter @axiom/marketing build && pnpm --filter @axiom/marketing exec next start --port ${MARKETING_PORT}`,
           port: Number(MARKETING_PORT),
           cwd: repoRoot,
           env: webEnv,

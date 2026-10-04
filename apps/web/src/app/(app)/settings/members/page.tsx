@@ -34,7 +34,7 @@ export default async function MembersPage() {
     };
   });
   return (
-    <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         title="Members and invitations"
         description={`Invite people to ${ctx.tenantName}. An invitation grants its role only when accepted by the invited, signed-in email address.`}

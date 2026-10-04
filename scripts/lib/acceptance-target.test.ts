@@ -4,6 +4,7 @@ import {
   validateAcceptanceTarget,
   acceptanceStatePath,
   verifyAcceptanceTarget,
+  canSelectSyntheticCurrentLibrary,
 } from './acceptance-target.js';
 const valid = () => ({
   schemaVersion: 1,
@@ -47,7 +48,11 @@ test('loopback HTTP needs explicit local Docker provenance', () => {
     marketingUrl: 'http://localhost:5300',
     supabaseUrl: 'http://localhost:56321',
   };
-  assert.equal(validateAcceptanceTarget(target).topology, 'local-docker');
+  const local = validateAcceptanceTarget(target);
+  assert.equal(local.topology, 'local-docker');
+  assert.equal(canSelectSyntheticCurrentLibrary(local), true);
+  assert.equal(canSelectSyntheticCurrentLibrary(null), true);
+  assert.equal(canSelectSyntheticCurrentLibrary(validateAcceptanceTarget(valid())), false);
   assert.throws(() => validateAcceptanceTarget({ ...target, bffUrl: 'http://outside.invalid' }));
 });
 test('preflight refuses wrong revision before contacting marketing', async (t) => {

@@ -245,7 +245,7 @@ export function DpbReviewsClient({
   const breachById = new Map(breaches.map((item) => [item.id, item]));
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 p-6">
+    <main className="w-full min-w-0 space-y-6">
       <nav>
         <Link className="text-sm text-teal-700 underline" href="/breaches">
           ← Breach operations

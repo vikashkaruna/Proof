@@ -373,11 +373,19 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     let rowOffset = 0;
     let exactCount = false;
     let ordering: { column: string; ascending: boolean } | null = null;
-    let settled: { data: unknown; error: { message: string } | null; count?: number } | null = null;
+    let settled: {
+      data: unknown;
+      error: { message: string; code?: string } | null;
+      count?: number;
+    } | null = null;
 
     const matched = () => table(name).filter((row) => filters.every((f) => f(row)));
 
-    function run(): { data: unknown; error: { message: string } | null; count?: number } {
+    function run(): {
+      data: unknown;
+      error: { message: string; code?: string } | null;
+      count?: number;
+    } {
       if (settled) return settled;
 
       if (failing.has(name)) {
@@ -389,6 +397,18 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       let data: unknown = null;
       if (mode === 'insert') {
         const incoming = Array.isArray(payload) ? payload : [payload as Row];
+        // Engagement creation uses a caller-held UUID as its retry key. Model
+        // the real table's primary key so route tests exercise replay handling.
+        if (
+          name === 'engagements' &&
+          incoming.some((row) => row?.['id'] && table(name).some((old) => old['id'] === row['id']))
+        ) {
+          settled = {
+            data: null,
+            error: { code: '23505', message: 'duplicate engagement primary key' },
+          };
+          return settled;
+        }
         const created = incoming.map((row) => ({
           id: randomUUID(),
           created_at: new Date().toISOString(),

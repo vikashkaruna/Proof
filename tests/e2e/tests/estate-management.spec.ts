@@ -56,6 +56,19 @@ test('owner declares, edits and archives an estate and system', async ({ page })
   await page.reload();
   await expect(estate.getByText('database · archived')).toBeVisible();
   const intakeTitle = `Scope confirmation ${suffix}`;
+  const currentLibrary = await fetch(
+    `${state.supabaseUrl}/rest/v1/control_libraries?is_current=eq.true&status=eq.published&select=version`,
+    {
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        apikey: state.publishableKey,
+        Authorization: `Bearer ${state.serviceKey}`,
+      },
+    },
+  );
+  expect(currentLibrary.status).toBe(200);
+  const currentVersions = (await currentLibrary.json()) as { version: string }[];
+  expect(currentVersions).toHaveLength(1);
   const created = await page.evaluate(
     async ({ tenantId, libraryVersion, title }) => {
       const res = await fetch('/api/bff/v1/engagements', {
@@ -69,7 +82,11 @@ test('owner declares, edits and archives an estate and system', async ({ page })
       });
       return { status: res.status, id: (await res.json()).id };
     },
-    { tenantId: state.tenantA.id, libraryVersion: state.libraryVersion, title: intakeTitle },
+    {
+      tenantId: state.tenantA.id,
+      libraryVersion: currentVersions[0]!.version,
+      title: intakeTitle,
+    },
   );
   expect(created.status).toBe(201);
   await page.reload();

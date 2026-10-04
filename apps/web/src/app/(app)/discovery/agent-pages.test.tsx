@@ -10,8 +10,10 @@ const state = vi.hoisted(() => ({
   calls: [] as Array<[string, unknown]>,
 }));
 vi.mock('@/lib/tenant-context', () => ({
-  requireTenantContext: async () => ({
+  Capability: { POSTURE_READ: 'posture.read' },
+  requireCapabilityContext: async () => ({
     tenantId: 'tenant-1',
+    role: 'owner',
     supabase: {
       from: () => {
         const query = {
