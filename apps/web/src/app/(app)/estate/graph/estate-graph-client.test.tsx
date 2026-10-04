@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest';
 import { EstateGraph } from './estate-graph-client';
 import type { GraphInput } from '@/lib/estate-graph';
+import { serializeEstateGraph } from '@/lib/estate-graph-export';
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -72,6 +73,222 @@ it('renders only active grants and exposes a selected node through keyboard acce
   expect(container.querySelectorAll('[data-edge="write"]')).toHaveLength(1);
   fireEvent.keyDown(screen.getByRole('button', { name: 'agent Sudhaar' }), { key: 'Enter' });
   expect(screen.getByTestId('no-relationships').textContent).toContain('None in this view');
+});
+
+function crossesBoxInterior(line: Element, box: Element) {
+  return segmentCrossesBoxInterior(
+    ['x1', 'y1', 'x2', 'y2'].map((name) => Number(line.getAttribute(name))) as [
+      number,
+      number,
+      number,
+      number,
+    ],
+    box,
+  );
+}
+
+function segmentCrossesBoxInterior([x, y, x2, y2]: [number, number, number, number], box: Element) {
+  const value = (element: Element, name: string) => Number(element.getAttribute(name));
+  const dx = x2 - x;
+  const dy = y2 - y;
+  const inset = 0.001; // Border contact alone does not intersect the box interior.
+  const left = value(box, 'x') + inset;
+  const right = value(box, 'x') + value(box, 'width') - inset;
+  const top = value(box, 'y') + inset;
+  const bottom = value(box, 'y') + value(box, 'height') - inset;
+  let entering = 0;
+  let leaving = 1;
+  const boundaries: [number, number][] = [
+    [-dx, x - left],
+    [dx, right - x],
+    [-dy, y - top],
+    [dy, bottom - y],
+  ];
+  for (const [direction, distance] of boundaries) {
+    if (direction === 0) {
+      if (distance < 0) return false;
+    } else if (direction < 0) entering = Math.max(entering, distance / direction);
+    else leaving = Math.min(leaving, distance / direction);
+  }
+  return entering <= leaving;
+}
+
+it.each(['write', 'read'] as const)(
+  'keeps the rendered %s grant between columns without crossing ungranted agent boxes',
+  (access) => {
+    const multipleAgents: GraphInput = {
+      ...input,
+      agents: [
+        ...Array.from({ length: 9 }, (_, index) => ({
+          name: `ungranted-${index}`,
+          displayName: `No grant ${index}`,
+        })),
+        input.agents[0]!,
+      ],
+      connectors: [
+        input.connectors[0]!,
+        ...Array.from({ length: 9 }, (_, index) => ({
+          ...input.connectors[0]!,
+          id: `ungranted-connector-${index}`,
+          name: `No grant connector ${index}`,
+        })),
+      ],
+      grants: [{ ...input.grants[0]!, scope: `connector.${access}` }],
+    };
+    const { container } = render(<EstateGraph snapshot={snapshot} input={multipleAgents} />);
+    const line = container.querySelector(`[data-edge="${access}"] line`)!;
+    expect(line).not.toBeNull();
+    expect(container.querySelectorAll('[data-edge="write"]')).toHaveLength(
+      access === 'write' ? 1 : 0,
+    );
+    const agentBox = screen.getByRole('button', { name: 'agent Karya' }).querySelector('rect')!;
+    const connectorBox = screen
+      .getByRole('button', { name: 'connector Payroll connector' })
+      .querySelector('rect')!;
+    const ungrantedBoxes = Array.from(
+      container.querySelectorAll('[data-node="agent"] rect'),
+    ).filter((box) => box !== agentBox);
+    expect(ungrantedBoxes).toHaveLength(9);
+    for (const box of ungrantedBoxes) {
+      expect(crossesBoxInterior(line, box), 'a grant line crosses an ungranted agent').toBe(false);
+    }
+    const ungrantedConnectors = Array.from(
+      container.querySelectorAll('[data-node="connector"] rect'),
+    ).filter((box) => box !== connectorBox);
+    expect(ungrantedConnectors).toHaveLength(9);
+    for (const box of ungrantedConnectors) {
+      expect(crossesBoxInterior(line, box), 'a grant line crosses an ungranted connector').toBe(
+        false,
+      );
+    }
+    expect(Number(line.getAttribute('x1'))).toBe(
+      Number(agentBox.getAttribute('x')) + Number(agentBox.getAttribute('width')),
+    );
+    expect(Number(line.getAttribute('x2'))).toBe(Number(connectorBox.getAttribute('x')));
+    expect(Number(line.getAttribute('y1'))).toBe(
+      Number(agentBox.getAttribute('y')) + Number(agentBox.getAttribute('height')) / 2,
+    );
+    expect(Number(line.getAttribute('y2'))).toBe(
+      Number(connectorBox.getAttribute('y')) + Number(connectorBox.getAttribute('height')) / 2,
+    );
+    if (access === 'write') {
+      const marker = container.querySelector('[data-edge="write"] text')!;
+      const center = Number(marker.getAttribute('x'));
+      const width = Number(marker.getAttribute('textLength'));
+      expect(marker.textContent).toContain('WRITE');
+      expect(marker.getAttribute('text-anchor')).toBe('middle');
+      expect(width).toBeGreaterThan(0);
+      expect(center - width / 2).toBeGreaterThan(Number(line.getAttribute('x1')));
+      expect(center + width / 2).toBeLessThan(Number(line.getAttribute('x2')));
+    }
+    const visible = container.querySelector('svg')!;
+    const exported = new DOMParser().parseFromString(
+      serializeEstateGraph(visible, snapshot, 'All agents').source,
+      'image/svg+xml',
+    );
+    const exportedLine = exported.querySelector(`[data-edge="${access}"] line`)!;
+    for (const coordinate of ['x1', 'y1', 'x2', 'y2']) {
+      expect(exportedLine.getAttribute(coordinate)).toBe(line.getAttribute(coordinate));
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'agent No grant 4' }));
+    expect(screen.getByTestId('no-relationships').textContent).toContain('None in this view');
+  },
+);
+
+const manyRows: GraphInput = {
+  ...input,
+  systems: [
+    input.systems[0]!,
+    ...Array.from({ length: 9 }, (_, index) => ({
+      ...input.systems[0]!,
+      id: `other-system-${index}`,
+      name: `Other system ${index}`,
+    })),
+  ],
+  connectors: [
+    input.connectors[0]!,
+    ...Array.from({ length: 9 }, (_, index) => ({
+      ...input.connectors[0]!,
+      id: `other-connector-${index}`,
+      name: `Other connector ${index}`,
+    })),
+  ],
+};
+
+it('keeps reverse containment and mismatched adjacent rows outside unrelated node boxes', () => {
+  const { container } = render(<EstateGraph snapshot={snapshot} input={manyRows} />);
+  const lines = container.querySelectorAll('[data-edge="contains"] line');
+  expect(lines).toHaveLength(20);
+  const cases = [
+    {
+      line: lines[9]!,
+      source: screen
+        .getByRole('button', { name: 'estate Production estate' })
+        .querySelector('rect')!,
+      target: screen.getByRole('button', { name: 'system Other system 8' }).querySelector('rect')!,
+    },
+    {
+      line: lines[19]!,
+      source: screen.getByRole('button', { name: 'system Payroll' }).querySelector('rect')!,
+      target: screen
+        .getByRole('button', { name: 'connector Other connector 8' })
+        .querySelector('rect')!,
+    },
+  ];
+  for (const { line, source, target } of cases) {
+    for (const box of container.querySelectorAll('[data-node] rect')) {
+      if (box === source || box === target) continue;
+      expect(crossesBoxInterior(line, box), 'containment crosses an unrelated node').toBe(false);
+    }
+    // Both recorded relationship directions here travel right-to-left.
+    expect(Number(line.getAttribute('x1'))).toBe(Number(source.getAttribute('x')));
+    expect(Number(line.getAttribute('x2'))).toBe(
+      Number(target.getAttribute('x')) + Number(target.getAttribute('width')),
+    );
+    expect(line.getAttribute('stroke-dasharray')).toBe('4 4');
+  }
+});
+
+it('routes declarations below nodes without suggesting an intermediate estate relationship', () => {
+  const { container } = render(<EstateGraph snapshot={snapshot} input={manyRows} />);
+  const svg = container.querySelector('svg')!;
+  const boxes = Array.from(container.querySelectorAll('[data-node] rect'));
+  const bottom = Math.max(
+    ...boxes.map((box) => Number(box.getAttribute('y')) + Number(box.getAttribute('height'))),
+  );
+  const declarations = container.querySelectorAll('[data-edge="declares"] polyline');
+  expect(declarations).toHaveLength(10);
+  for (const declaration of declarations) {
+    const points = declaration
+      .getAttribute('points')!
+      .trim()
+      .split(/\s+/)
+      .map((point) => point.split(',').map(Number) as [number, number]);
+    for (let index = 1; index < points.length; index++) {
+      const from = points[index - 1]!;
+      const to = points[index]!;
+      for (const box of boxes) {
+        expect(
+          segmentCrossesBoxInterior([from[0], from[1], to[0], to[1]], box),
+          'declaration crosses a node instead of using the empty lane',
+        ).toBe(false);
+      }
+    }
+    expect(points).toHaveLength(6);
+    expect(points[2]![1]).toBeGreaterThan(bottom);
+    expect(points[3]![1]).toBe(points[2]![1]);
+    expect(points[2]![1]).toBeLessThan(Number(svg.getAttribute('height')));
+  }
+  const exported = new DOMParser().parseFromString(
+    serializeEstateGraph(svg, snapshot, 'All active estates').source,
+    'image/svg+xml',
+  );
+  expect(
+    Array.from(exported.querySelectorAll('[data-edge="declares"] polyline'), (edge) =>
+      edge.getAttribute('points'),
+    ),
+  ).toEqual(Array.from(declarations, (edge) => edge.getAttribute('points')));
+  expect(exported.querySelectorAll('[data-edge="contains"]')).toHaveLength(20);
 });
 
 it('filters to the selected agent and access type without inventing write authority', () => {
