@@ -4,6 +4,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql <<'SQL'
 create schema assessment_race;
 create function assessment_race.id(n int) returns uuid language sql immutable as $$select ('52520000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
@@ -33,23 +34,9 @@ grant usage on schema assessment_race to service_role;
 grant execute on all functions in schema assessment_race to service_role;
 select assessment_race.start_tool();
 SQL
-barrier() {
-  for attempt in $(seq 1 80); do
-    if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
-    sleep 0.05
-  done
-  echo 'Assessment concurrency barrier not reached'; exit 1
-}
 race() {
  echo 'Checking assessment lock ordering'
- sql -c "set application_name='assessment-first'; begin; $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
- local first_pid=$!
- barrier assessment-first wait_event PgSleep
- sql -c "set application_name='assessment-second'; $2;" > "$result_dir/second" 2>&1 &
- local second_pid=$!
- barrier assessment-second wait_event_type Lock
- wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
- wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
+ race_run "$1" "$2" "$result_dir/first" "$result_dir/second" "${3:-blocked}"
 }
 refused() {
  if ! grep -q 'task_refused' "$result_dir/second"; then
@@ -76,7 +63,10 @@ race "update public.estates set status='archived' where id=assessment_race.id(22
 refused
 sql -c "update public.estates set status='active' where id=assessment_race.id(22)"
 # Identity expires while waiting on the engagement lock: no stale commit.
-race "select id from public.engagements where id=assessment_race.id(21) for update" "set role service_role; select assessment_race.finish_tool(assessment_race.result(),clock_timestamp()+interval '1 second')"
+race "select id from public.engagements where id=assessment_race.id(21) for update" "set role service_role;
+select clock_timestamp()+interval '1 second' as race_identity_deadline \gset
+select 'RACE_DEADLINE=' || :'race_identity_deadline';
+select assessment_race.finish_tool(assessment_race.result(), :'race_identity_deadline'::timestamptz)" expires
 refused
 # Two identical completions serialize into one result and one audit event.
 race "set local role service_role; select assessment_race.finish_tool()" "set role service_role; select assessment_race.finish_tool()"

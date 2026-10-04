@@ -35,7 +35,7 @@ from .agents import (
     SudhaarAgent,
     VibhaagAgent,
 )
-from .agents.base import AgentName, AgentRunResult
+from .agents.base import AgentName, AgentRunResult, DispatchContext
 from .config import Settings, get_settings, setup_logging
 from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
 from .evidence_client import EvidenceVault
@@ -140,6 +140,7 @@ async def require_onprem_license(request: Request, call_next):
 class InvokeRequest(BaseModel):
     correlation_id: str | None = None
     input: dict[str, Any]
+    dispatch_context: DispatchContext | None = None
 
 
 class InvokeResponse(BaseModel):
@@ -217,7 +218,13 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 
     t0 = time.monotonic()
     result: AgentRunResult = await agent.invoke(
-        request.input, correlation_id=request.correlation_id
+        request.input,
+        correlation_id=request.correlation_id,
+        **(
+            {"dispatch_context": request.dispatch_context}
+            if request.dispatch_context is not None
+            else {}
+        ),
     )
     latency_ms = int((time.monotonic() - t0) * 1000)
 

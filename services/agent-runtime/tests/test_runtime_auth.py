@@ -77,7 +77,10 @@ def test_authentication_precedes_agent_lookup(monkeypatch):
 def test_generic_prativedan_cannot_bypass_report_workflow(monkeypatch):
     invoke = AsyncMock()
     monkeypatch.setattr(
-        app.state, "settings", SimpleNamespace(internal_token="canonical-fixture-token"), raising=False
+        app.state,
+        "settings",
+        SimpleNamespace(internal_token="canonical-fixture-token"),
+        raising=False,
     )
     monkeypatch.setattr(
         app.state,
@@ -94,3 +97,58 @@ def test_generic_prativedan_cannot_bypass_report_workflow(monkeypatch):
     assert response.status_code == 403
     assert response.json() == {"detail": "board_report_workflow_required"}
     invoke.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"run_id": "bad", "request_hash": "a" * 64},
+        {"run_id": "47470000-0000-4000-8000-000000000099", "request_hash": "short"},
+        {
+            "run_id": "47470000-0000-4000-8000-000000000099",
+            "request_hash": "a" * 64,
+            "tenant_id": "other",
+        },
+    ],
+)
+def test_invalid_dispatch_context_cannot_enter_runtime(monkeypatch, context):
+    invoke = AsyncMock()
+    monkeypatch.setattr(
+        app.state, "settings", SimpleNamespace(internal_token="context-fixture"), raising=False
+    )
+    monkeypatch.setattr(
+        app.state, "agents", {AgentName.DRISHTI: SimpleNamespace(invoke=invoke)}, raising=False
+    )
+    response = TestClient(app).post(
+        "/agents/drishti/invoke",
+        json={"input": {}, "dispatch_context": context},
+        headers={"X-Internal-Token": "context-fixture"},
+    )
+    assert response.status_code == 422
+    invoke.assert_not_called()
+
+
+def test_valid_context_is_passed_separately_from_business_input(monkeypatch):
+    invoke = AsyncMock(
+        return_value=AgentRunResult(
+            agent=AgentName.DRISHTI, correlation_id="fixture", status="failed"
+        )
+    )
+    monkeypatch.setattr(
+        app.state, "settings", SimpleNamespace(internal_token="context-fixture"), raising=False
+    )
+    monkeypatch.setattr(
+        app.state,
+        "agents",
+        {AgentName.DRISHTI: SimpleNamespace(name=AgentName.DRISHTI, invoke=invoke)},
+        raising=False,
+    )
+    context = {"run_id": "47470000-0000-4000-8000-000000000099", "request_hash": "a" * 64}
+    response = TestClient(app).post(
+        "/agents/drishti/invoke",
+        json={"input": {"dispatch_context": {"run_id": "untrusted"}}, "dispatch_context": context},
+        headers={"X-Internal-Token": "context-fixture"},
+    )
+    assert response.status_code == 200
+    assert invoke.await_args.kwargs["dispatch_context"].model_dump(mode="json") == context
+    assert invoke.await_args.args[0] == {"dispatch_context": {"run_id": "untrusted"}}

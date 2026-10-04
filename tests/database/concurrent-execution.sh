@@ -6,29 +6,15 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql < tests/database/execution-fixture.sql
 sql -c "update public.approval_tokens set action_ids = array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[] where nonce = 'nonce-2';"
-claim() {
-  sql -c "set application_name = 'execution-race-$1'; begin; set local role service_role;
-    select public.claim_plan_execution('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3',
-      '00000000-0000-0000-0000-0000000000e$1',
-      array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[], 'race-$1')->>'decision';
-    select pg_sleep($2); commit;"
+claim_sql() {
+  printf "set local role service_role; select public.claim_plan_execution('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3',
+      '00000000-0000-0000-0000-0000000000e%s',
+      array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[], 'race-%s')->>'decision'" "$1" "$1"
 }
-claim 1 3 > "$result_dir/first" &
-first=$!
-ready=false
-for attempt in $(seq 1 50); do
-  if [ "$(sql -c "select count(*) from pg_stat_activity where application_name = 'execution-race-1' and wait_event = 'PgSleep'")" = 1 ]; then
-    ready=true; break
-  fi
-  sleep 0.05
-done
-[ "$ready" = true ] || { echo 'First claim did not reach the race barrier'; exit 1; }
-claim 2 0 > "$result_dir/second" &
-second=$!
-wait "$first"
-wait "$second"
+race_run "$(claim_sql 1)" "begin; $(claim_sql 2); commit" "$result_dir/first" "$result_dir/second"
 python3 - "$result_dir" <<'PY'
 from pathlib import Path
 import sys

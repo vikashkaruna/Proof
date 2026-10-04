@@ -4,6 +4,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql <<'SQL'
 insert into auth.users(id,email) values ('e0000000-0000-4000-8000-000000000001','proposal-staff@test.invalid'),('e0000000-0000-4000-8000-000000000002','proposal-owner@test.invalid');
 insert into public.users(id,email) values ('e0000000-0000-4000-8000-000000000001','proposal-staff@test.invalid'),('e0000000-0000-4000-8000-000000000002','proposal-owner@test.invalid');
@@ -16,24 +17,7 @@ SQL
 proposal_id=$(sql -c "select id from public.onboarding_proposals where tenant_id='e0000000-0000-4000-8000-000000000011'")
 proposal_digest=$(sql -c "select content_sha256 from public.onboarding_proposals where id='$proposal_id'")
 review="select public.review_onboarding_proposal('e0000000-0000-4000-8000-000000000011','e0000000-0000-4000-8000-000000000002','$proposal_id','$proposal_digest','approved','Reviewed',gen_random_uuid())"
-sql -c "set application_name='proposal-first'; begin; set local role human_action_writer; $review; select pg_sleep(3); commit;" > "$result_dir/first" 2>&1 &
-first_pid=$!
-ready=false
-for attempt in $(seq 1 50); do
- if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='proposal-first' and wait_event='PgSleep'")" = 1 ]; then ready=true; break; fi
- sleep 0.05
-done
-[ "$ready" = true ] || { echo 'Proposal race missed barrier'; cat "$result_dir/first"; exit 1; }
-sql -c "set application_name='proposal-second'; set role human_action_writer; $review;" > "$result_dir/second" 2>&1 &
-second_pid=$!
-blocked=false
-for attempt in $(seq 1 30); do
- if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='proposal-second' and wait_event_type='Lock'")" = 1 ]; then blocked=true; break; fi
- sleep 0.05
-done
-[ "$blocked" = true ] || { echo 'Proposal race did not contend'; cat "$result_dir/second"; exit 1; }
-wait "$first_pid"
-wait "$second_pid"
+race_run "set local role human_action_writer; $review" "set role human_action_writer; $review" "$result_dir/first" "$result_dir/second"
 grep -q 'already_reviewed' "$result_dir/second"
 [ "$(sql -c "select count(*) from public.estate_systems where tenant_id='e0000000-0000-4000-8000-000000000011'")" = 1 ]
 [ "$(sql -c "select count(*) from public.audit_ledger where tenant_id='e0000000-0000-4000-8000-000000000011' and action_type='onboarding.proposal.approved'")" = 1 ]

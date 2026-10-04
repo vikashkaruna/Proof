@@ -19,6 +19,7 @@ const state = vi.hoisted(() => {
   return { db: null as FakeDb | null, adminCalls: 0 };
 });
 vi.mock('@axiom/supabase', () => ({
+  createHumanActionWriter: () => state.db!.client,
   createSupabaseAdmin: () => {
     state.adminCalls++;
     return state.db!.client;
@@ -46,12 +47,17 @@ function success(init?: RequestInit, overrides: Record<string, unknown> = {}) {
 const transport = vi.fn<typeof fetch>();
 const broadcast = vi.fn();
 
-async function request(role: UserRole, agent: string, body: Record<string, unknown>) {
+async function request(
+  role: UserRole,
+  agent: string,
+  body: Record<string, unknown>,
+  options: { tenantId?: string; headers?: Record<string, string> } = {},
+) {
   const { v1Routes } = await import('./v1.js');
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {
-    c.set('user', { id: 'test-user' } as never);
-    c.set('tenantId', A as never);
+    c.set('user', { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } as never);
+    c.set('tenantId', (options.tenantId ?? A) as never);
     c.set('role', role);
     c.set('approvalScopes', []);
     await next();
@@ -68,7 +74,7 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
   );
   return app.request(`/agents/${agent}/run`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...options.headers },
     body: JSON.stringify(body),
   });
 }
@@ -76,6 +82,51 @@ async function request(role: UserRole, agent: string, body: Record<string, unkno
 beforeEach(() => {
   state.db = createFakeDb();
   state.adminCalls = 0;
+  state.db.onRpc('record_generic_agent_run_start', (args) => {
+    const prior = state
+      .db!.rows('agent_runs')
+      .find(
+        (r) =>
+          r.tenant_id === args.p_tenant_id &&
+          r.agent === args.p_agent &&
+          r.correlation_id === args.p_correlation_id,
+      );
+    if (prior) return { run_id: prior.id, created: false, status: prior.status };
+    const row = state.db!.seed('agent_runs', {
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      tenant_id: args.p_tenant_id,
+      agent: args.p_agent,
+      engagement_id: args.p_engagement_id,
+      correlation_id: args.p_correlation_id,
+      status: 'running',
+      input_redacted_hash: args.p_request_hash,
+      metadata: {
+        requested_by: args.p_actor_id,
+        lifecycle_writer: 'generic_agent_rpc_v1',
+        request_input_hash: args.p_request_hash,
+      },
+    });
+    return { run_id: row.id, created: true, status: 'running' };
+  });
+  state.db.onRpc('record_generic_agent_run_finish', (args) => {
+    const row = state
+      .db!.rows('agent_runs')
+      .find(
+        (r) =>
+          r.id === args.p_run_id &&
+          r.tenant_id === args.p_tenant_id &&
+          r.agent === args.p_agent &&
+          r.correlation_id === args.p_correlation_id &&
+          r.status === 'running',
+      );
+    if (!row) return { error: 'terminal_conflict' };
+    row.status = args.p_status;
+    row.error = args.p_error_code;
+    row.output_redacted_hash = args.p_status === 'succeeded' ? 'c'.repeat(64) : null;
+    row.response_output_hash = args.p_response_hash;
+    return { run_id: row.id, status: row.status, replayed: false };
+  });
+
   transport.mockReset();
   transport.mockImplementation(async (_url, init) => new Response(JSON.stringify(success(init))));
   broadcast.mockReset();
@@ -142,27 +193,136 @@ describe('agent invocation authority', () => {
     const call = transport.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(call[1].body)).input.tenant_id).toBe(A);
     const row = state.db!.rows('agent_runs')[0]!;
-    expect(row.metadata).toEqual({ requested_by: 'test-user' });
+    expect(row.metadata).toEqual({
+      requested_by: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      lifecycle_writer: 'generic_agent_rpc_v1',
+      request_input_hash: row.input_redacted_hash,
+    });
     expect(row.engagement_id).toBe(ENGAGEMENT);
     expect(row.status).toBe('succeeded');
     expect(row.input_redacted_hash).toBe(
       await sha256(canonicalJson(JSON.parse(String(call[1].body)).input)),
     );
-    expect(row.output_redacted_hash).toBe(await sha256(canonicalJson({ inventory: [] })));
+    expect(row.output_redacted_hash).toBe('c'.repeat(64));
+    expect(row.response_output_hash).toBe(await sha256(canonicalJson({ inventory: [] })));
+    expect(JSON.parse(String(call[1].body)).dispatch_context).toEqual({
+      run_id: row.id,
+      request_hash: row.input_redacted_hash,
+    });
     expect(call[1].redirect).toBe('error');
     expect(call[1].signal).toBeInstanceOf(AbortSignal);
   });
   it('fails closed when it cannot persist the invocation', async () => {
-    state.db!.failNext('agent_runs');
+    state.db!.failNextRpc('record_generic_agent_run_start');
     expect((await request(UserRole.OWNER, 'drishti', {})).status).toBe(503);
     expect(transport).not.toHaveBeenCalled();
+  });
+});
+
+describe('scoped generic lifecycle boundary', () => {
+  it('does not replay a recorded dispatch with the same correlation', async () => {
+    const body = { correlation_id: ENGAGEMENT };
+    expect((await request(UserRole.OWNER, 'drishti', body)).status).toBe(200);
+    const repeat = await request(UserRole.OWNER, 'drishti', body);
+    expect(repeat.status).toBe(409);
+    expect(await repeat.json()).toMatchObject({ error: { code: 'agent_dispatch_exists' } });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(state.db!.rows('agent_runs')).toHaveLength(1);
+  });
+  it('binds dispatch context outside caller-controlled input', async () => {
+    await request(UserRole.OWNER, 'drishti', {
+      dispatch_context: { run_id: B, request_hash: '0'.repeat(64) },
+    });
+    const envelope = JSON.parse(String(transport.mock.calls[0]![1]!.body));
+    expect(envelope.dispatch_context.run_id).toBe(state.db!.rows('agent_runs')[0]!.id);
+    expect(envelope.dispatch_context.run_id).not.toBe(B);
+    expect(envelope.dispatch_context.request_hash).toBe(
+      await sha256(canonicalJson(envelope.input)),
+    );
+  });
+  it('does not publish success for genuine-looking receipts refused by the database', async () => {
+    state.db!.onRpc('record_generic_agent_run_finish', () => ({ error: 'receipts_unconfirmed' }));
+    const response = await request(UserRole.OWNER, 'drishti', {});
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain('inventory');
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+  it.each(['mem-1', '01', '0', '9223372036854775808', '1e2'])(
+    'cannot establish success with receipt %s',
+    async (id) => {
+      transport.mockImplementation(
+        async (_url, init) =>
+          new Response(JSON.stringify(success(init, { ledger_entry_ids: [id, '2'] }))),
+      );
+      expect((await request(UserRole.OWNER, 'drishti', {})).status).toBe(502);
+      expect(state.db!.rows('agent_runs')[0]!.status).toBe('failed');
+    },
+  );
+});
+
+describe('canonical generic dispatch identifiers', () => {
+  const tenant = 'abcdefab-cdef-4cde-8fde-abcdefabcdea';
+  const engagement = 'abcdefab-cdef-4cde-8fde-abcdefabcdeb';
+  const correlation = 'abcdefab-cdef-4cde-8fde-abcdefabcdec';
+  it.each(['body', 'header'])(
+    'accepts valid uppercase UUIDs with correlation in %s',
+    async (source) => {
+      state.db!.seed('engagements', { id: engagement, tenant_id: tenant });
+      const body = {
+        tenant_id: tenant.toUpperCase(),
+        tenantId: tenant.toUpperCase(),
+        engagement_id: engagement.toUpperCase(),
+        ...(source === 'body' ? { correlation_id: correlation.toUpperCase() } : {}),
+      };
+      const response = await request(UserRole.OWNER, 'drishti', body, {
+        tenantId: tenant.toUpperCase(),
+        headers:
+          source === 'header' ? { 'x-correlation-id': correlation.toUpperCase() } : undefined,
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ correlation_id: correlation });
+      const envelope = JSON.parse(String(transport.mock.calls[0]![1]!.body));
+      expect(envelope.input).toMatchObject({
+        tenant_id: tenant,
+        tenantId: tenant,
+        engagement_id: engagement,
+      });
+      expect(envelope.correlation_id).toBe(correlation);
+      const row = state.db!.rows('agent_runs')[0]!;
+      expect(row.tenant_id).toBe(tenant);
+      expect(row.engagement_id).toBe(engagement);
+      expect(envelope.dispatch_context.request_hash).toBe(
+        await sha256(canonicalJson(envelope.input)),
+      );
+    },
+  );
+  it('does not redispatch the same valid UUID under different casing', async () => {
+    state.db!.seed('engagements', { id: engagement, tenant_id: tenant });
+    const body = {
+      engagement_id: engagement.toUpperCase(),
+      correlation_id: correlation.toUpperCase(),
+    };
+    expect(
+      (await request(UserRole.OWNER, 'drishti', body, { tenantId: tenant.toUpperCase() })).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(
+          UserRole.OWNER,
+          'drishti',
+          { engagement_id: engagement, correlation_id: correlation },
+          { tenantId: tenant },
+        )
+      ).status,
+    ).toBe(409);
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('confirmed runtime completion', () => {
   it('returns no output or success event when the completion write fails', async () => {
     transport.mockImplementation(async (_url, init) => {
-      state.db!.failNext('agent_runs');
+      state.db!.failNextRpc('record_generic_agent_run_finish');
       return new Response(JSON.stringify(success(init)));
     });
     const res = await request(UserRole.OWNER, 'drishti', {});
@@ -223,7 +383,7 @@ describe('confirmed runtime completion', () => {
     expect(await res.text()).not.toContain('private-runtime-error');
     expect(state.db!.rows('agent_runs')[0]?.status).toBe('failed');
     expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_invocation_failed');
-    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.failed');
+    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.outcome_unconfirmed');
   });
   it('returns a non-success HTTP status for a runtime-reported failure and strips its payload', async () => {
     transport.mockImplementation(
@@ -245,6 +405,11 @@ describe('confirmed runtime completion', () => {
     expect(body).toMatchObject({ error: { code: 'agent_reported_failure' } });
     expect(JSON.stringify(body)).not.toMatch(/private-|output|ledger_entry_ids/);
     expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_reported_failure');
+    expect(broadcast.mock.calls.at(-1)?.[0]).toMatchObject({
+      step: 'drishti.runtime_reported_failure',
+      message: 'The runtime reported failure for agent drishti.',
+    });
+    expect(broadcast.mock.calls.at(-1)?.[0].message).not.toBe('Agent drishti failed');
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
   });
   it.each(['http', 'network', 'json'])(
@@ -263,6 +428,17 @@ describe('confirmed runtime completion', () => {
       expect(await res.text()).not.toContain('private-');
       expect(JSON.stringify(state.db!.rows('agent_runs'))).not.toContain('private-');
       expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
+      expect(broadcast.mock.calls.at(-1)?.[0]).toMatchObject({
+        step: 'drishti.outcome_unconfirmed',
+        message: expect.stringContaining('unconfirmed'),
+      });
+      expect(broadcast.mock.calls.at(-1)?.[0].message).not.toBe('Agent drishti failed');
+      expect(
+        broadcast.mock.calls.some(
+          ([event]) => event.step === 'drishti.failed' || event.step === 'drishti.succeeded',
+        ),
+      ).toBe(false);
+      expect(state.db!.rows('agent_runs')[0]?.status).toBe('failed');
     },
   );
   it('does not forward unknown top-level runtime fields on success', async () => {

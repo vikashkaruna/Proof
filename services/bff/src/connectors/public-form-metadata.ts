@@ -1,27 +1,13 @@
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
-import { z } from 'zod';
+import {
+  PUBLIC_FORM_MAX_FORMS as MAX_FORMS,
+  PUBLIC_FORM_MAX_CONTROLS as MAX_CONTROLS,
+  PUBLIC_FORM_INPUT_TYPES as inputTypes,
+  type PublicFormMetadata,
+} from '@axiom/types';
 
-const MAX_FORMS = 3;
-const MAX_CONTROLS = 12;
-// The checker accepts at most 512KiB of HTML; no count can exceed its byte bound.
-const MAX_COUNT = 512 * 1024;
-const inputTypes = [
-  'text',
-  'email',
-  'tel',
-  'url',
-  'search',
-  'number',
-  'date',
-  'datetime-local',
-  'time',
-  'month',
-  'week',
-  'color',
-  'range',
-  'checkbox',
-  'radio',
-] as const;
+export { publicFormMetadataSchema, type PublicFormMetadata } from '@axiom/types';
+
 const excludedInputTypes = new Set([
   'hidden',
   'password',
@@ -31,59 +17,6 @@ const excludedInputTypes = new Set([
   'reset',
   'button',
 ]);
-const count = z.number().int().min(0).max(MAX_COUNT);
-const controlSchema = z
-  .object({
-    ordinal: z.number().int().min(1).max(MAX_COUNT),
-    element: z.enum(['input', 'select', 'textarea']),
-    inputType: z.enum(inputTypes).optional(),
-    requiredAttribute: z.boolean(),
-    disabledAttribute: z.boolean(),
-  })
-  .strict()
-  .refine((control) => (control.element === 'input') === (control.inputType !== undefined));
-const formSchema = z
-  .object({
-    ordinal: z.number().int().min(1).max(MAX_FORMS),
-    method: z.enum(['get', 'post', 'dialog']),
-    observedControlCount: count,
-    excludedControlCount: count,
-    controlsTruncated: z.boolean(),
-    controls: z.array(controlSchema).max(MAX_CONTROLS),
-  })
-  .strict()
-  .refine((form) => {
-    const eligible = form.observedControlCount - form.excludedControlCount;
-    return (
-      eligible >= 0 &&
-      form.controls.length === Math.min(eligible, MAX_CONTROLS) &&
-      form.controlsTruncated === eligible > MAX_CONTROLS &&
-      form.controls.every(
-        (control, i) =>
-          control.ordinal <= form.observedControlCount &&
-          (i === 0 || control.ordinal > form.controls[i - 1]!.ordinal),
-      )
-    );
-  });
-
-/** Only source-bound static attributes; never values, labels, identifiers or submission targets. */
-export const publicFormMetadataSchema = z
-  .object({
-    version: z.literal(1),
-    scope: z.literal('static_html_form_descendants'),
-    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
-    observedFormCount: count,
-    formsTruncated: z.boolean(),
-    forms: z.array(formSchema).max(MAX_FORMS),
-  })
-  .strict()
-  .refine(
-    (metadata) =>
-      metadata.forms.length === Math.min(metadata.observedFormCount, MAX_FORMS) &&
-      metadata.formsTruncated === metadata.observedFormCount > MAX_FORMS &&
-      metadata.forms.every((form, index) => form.ordinal === index + 1),
-  );
-export type PublicFormMetadata = z.infer<typeof publicFormMetadataSchema>;
 type Node = DefaultTreeAdapterMap['node'];
 export type PublicHtmlDocument = DefaultTreeAdapterMap['document'];
 export const parsePublicHtml = (html: string): PublicHtmlDocument => parse(html);

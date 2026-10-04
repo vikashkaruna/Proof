@@ -4,6 +4,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
 import { APP_NAV_GROUPS, visibleRoutes } from './nav';
+import DashboardPage from './dashboard/page';
+import ApprovalPage from './approval/page';
+import PlansPage from './plans/page';
+import RegWatchPage from './regwatch/page';
+import { DpbReviewsClient } from './breaches/dpb-reviews/reviews-client';
+import { TechnicalReviewsClient } from './execution/technical-reviews/reviews-client';
 
 const state = vi.hoisted(() => ({
   push: vi.fn(),
@@ -29,6 +35,31 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(state.search),
 }));
 vi.mock('./tenant-actions', () => ({ switchTenantAction: state.switchTenant }));
+vi.mock('@/lib/tenant-context', () => {
+  const context = {
+    tenantId: 'tenant-alpha',
+    tenantName: 'Alpha Org',
+    supabase: {
+      from: () => {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => ({ data: null, error: null }),
+          then: (resolve: (value: unknown) => unknown) =>
+            Promise.resolve({ data: [], count: 0, error: null }).then(resolve),
+        };
+        return query;
+      },
+    },
+  };
+  return {
+    Capability: { PLAN_READ: 'plan.read' },
+    requireTenantContext: async () => context,
+    requireCapabilityContext: async () => context,
+  };
+});
 vi.mock('./sidebar-agent-panel', () => ({
   SidebarAgentPanel: ({ capabilities }: { capabilities: readonly string[] }) => {
     state.panelCapabilities = capabilities;
@@ -41,7 +72,7 @@ const tenants = [
   { id: 'tenant-beta', name: 'Beta Org', slug: 'beta', role: 'owner' },
 ];
 const props = {
-  children: <main>Tenant content</main>,
+  children: <section>Tenant content</section>,
   user: { id: 'user-1', email: 'reader@example.invalid' },
   tenants,
   activeTenantSlug: 'alpha',
@@ -64,7 +95,9 @@ beforeEach(() => {
         Response.json(
           url.includes('kill-switch')
             ? { engaged: false }
-            : { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } },
+            : url.includes('/reports/')
+              ? { requests: [], total: 0 }
+              : { data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } },
         ),
       ),
     ),
@@ -683,5 +716,53 @@ it.each(['/engagements', '/engagements/recorded-id'])(
     const header = document.querySelector('header')!;
     expect(within(header).getByText('Assess · Parikshan')).toBeTruthy();
     expect(within(header).getByText('Engagements')).toBeTruthy();
+  },
+);
+
+it.each([
+  ['/dashboard', 'Alpha Org', DashboardPage, 'Tenant dashboard'],
+  ['/plans', 'Remediation plans', PlansPage, 'Remediation plans'],
+  ['/approval', 'Approval queue', ApprovalPage, 'Approval queue'],
+  ['/regwatch', 'Regulatory Watch', RegWatchPage, null],
+  [
+    '/breaches/dpb-reviews',
+    'DPB notification review packs',
+    async () => (
+      <DpbReviewsClient
+        tenantId="tenant-alpha"
+        breaches={[]}
+        notifications={[]}
+        canRequest={false}
+        founder={false}
+      />
+    ),
+    null,
+  ],
+  [
+    '/execution/technical-reviews',
+    'Recorded technical remediation registers',
+    async () => (
+      <TechnicalReviewsClient
+        tenantId="tenant-alpha"
+        plans={[]}
+        canRequest={false}
+        founder={false}
+      />
+    ),
+    null,
+  ],
+] as const)(
+  'provides one primary content landmark for the actual %s page inside the shell',
+  async (path, title, page, regionName) => {
+    state.pathname = path;
+    await act(async () => {
+      render(<AppShell {...props}>{await page()}</AppShell>);
+    });
+    const landmarks = screen.getAllByRole('main');
+    expect(landmarks).toHaveLength(1);
+    expect(within(landmarks[0]!).getByRole('heading', { level: 1, name: title })).toBeTruthy();
+    if (regionName) {
+      expect(within(landmarks[0]!).getByRole('region', { name: regionName })).toBeTruthy();
+    }
   },
 );

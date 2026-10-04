@@ -11,3 +11,4 @@ export * from './connectors';
 
 export * from './connector-contracts';
 export * from './assessment';
+export * from './public-form-metadata';
