@@ -2,18 +2,30 @@ import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { can } from '@axiom/types';
 import { DataPlaceholder } from '@axiom/ui';
+import { loadClassificationReviewHistory } from '@/lib/classification-reviews';
+import { ClassificationReviewHistoryView } from './review-history';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ClassificationPage() {
+export default async function ClassificationPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ reviewPage?: string | string[] }>;
+} = {}) {
   const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
-  const { data, error } = await supabase
-    .from('audit_ledger')
-    .select('sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result')
-    .eq('tenant_id', tenantId)
-    .eq('actor_id', 'vibhaag')
-    .order('sequence_no', { ascending: false })
-    .limit(6);
+  const reviewPage = (await searchParams)?.reviewPage;
+  const [{ data, error }, history] = await Promise.all([
+    supabase
+      .from('audit_ledger')
+      .select(
+        'sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result',
+      )
+      .eq('tenant_id', tenantId)
+      .eq('actor_id', 'vibhaag')
+      .order('sequence_no', { ascending: false })
+      .limit(6),
+    loadClassificationReviewHistory(supabase, tenantId, reviewPage),
+  ]);
   const events: ModuleTelemetryEvent[] =
     error || !data
       ? []
@@ -30,7 +42,6 @@ export default async function ClassificationPage() {
         }));
   return (
     <GenericModuleView
-      canInvokeAgent={can(Capability.AGENT_INVOKE, { role })}
       meta={{
         moduleKey: 'classification',
         title: 'Data Classification',
@@ -40,13 +51,29 @@ export default async function ClassificationPage() {
         agentKey: 'vibhaag',
         autonomy: 'L1',
         moduleId: 'M2.3',
-        desc: 'Run classification against a connected estate. Recorded activity appears below; field counts and categories require an actual assessment source.',
-        actionLabel: 'Run Classification Scan',
+        desc: 'Review recorded classification activity. Field counts and categories require observed source data.',
+        actionLabel: 'Review estate setup',
+        actionHref: can(Capability.ESTATE_MANAGE, { role }) ? '/estate/setup' : undefined,
         cards: [],
         recentEvents: events,
         telemetryTitle: 'Recorded Classification Events',
       }}
     >
+      <section
+        aria-label="Prepare classification"
+        className="rounded-xl bg-white p-4 text-sm text-slate-600"
+      >
+        <p>
+          Vibhaag needs a selected engagement and observed inventory or field hints. An interactive
+          classification run form is not yet available.
+        </p>
+        <p className="mt-2">
+          {can(Capability.ESTATE_MANAGE, { role })
+            ? 'Review estate setup to record the systems you have confirmed. Setup does not start classification.'
+            : 'Ask an estate manager to prepare the source inventory for review.'}
+        </p>
+      </section>
+      <ClassificationReviewHistoryView history={history} />
       {error || !data ? (
         <p role="alert">Classification ledger records are unavailable.</p>
       ) : events.length === 0 ? (

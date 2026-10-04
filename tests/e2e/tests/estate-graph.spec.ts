@@ -23,7 +23,7 @@ async function service(path: string, row: Record<string, unknown>) {
 
 test('the estate graph derives agent access from grants and isolates Karya write authority', async ({
   page,
-}) => {
+}, testInfo) => {
   const suffix = crypto.randomUUID().slice(0, 8);
   await signIn(page, 'owner');
   await selectTenant(page, 'a');
@@ -49,12 +49,13 @@ test('the estate graph derives agent access from grants and isolates Karya write
   expect(created.status()).toBe(201);
   const connectorId = ((await created.json()) as { data: { id: string } }).data.id;
   const expires = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  let writeGrant = '';
   for (const [agent, scope] of [
     ['drishti', 'connector.read'],
     ['karya', 'connector.write'],
   ] as const) {
     const identity = await registerWorkload(agent, `graph-${suffix}`);
-    await service('connector_grants', {
+    const id = await service('connector_grants', {
       tenant_id: state.tenantA.id,
       connector_id: connectorId,
       workload_identity_id: identity,
@@ -62,6 +63,7 @@ test('the estate graph derives agent access from grants and isolates Karya write
       internal_scope: scope,
       expires_at: expires,
     });
+    if (agent === 'karya') writeGrant = id;
   }
 
   await page.goto('/estate/graph');
@@ -84,6 +86,60 @@ test('the estate graph derives agent access from grants and isolates Karya write
   ] as const) {
     const download = page.waitForEvent('download');
     await graph.getByRole('button', { name: button }).click();
-    expect((await download).suggestedFilename()).toBe(file);
+    const artifact = await download;
+    expect(artifact.suggestedFilename()).toBe(file);
+    await artifact.saveAs(testInfo.outputPath(file));
+    const stream = await artifact.createReadStream();
+    expect(stream).not.toBeNull();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    if (file.endsWith('.svg')) {
+      const exported = await page.evaluate((source) => {
+        const svg = new DOMParser().parseFromString(source, 'image/svg+xml');
+        return {
+          error: svg.querySelector('parsererror')?.textContent,
+          text: svg.documentElement.textContent,
+          writes: svg.querySelectorAll('[data-edge="write"]').length,
+          reads: svg.querySelectorAll('[data-edge="read"]').length,
+        };
+      }, bytes.toString('utf8'));
+      expect(exported.error).toBeUndefined();
+      expect(exported.text).toContain('AXIOM PROOF');
+      expect(exported.text).toContain(`View: ${estateName} · Karya · Write only`);
+      expect(exported.text).toMatch(/Snapshot: \d{4}-\d{2}-\d{2}T/);
+      expect(exported.text).toContain('Write grant');
+      expect(exported.writes).toBe(1);
+      expect(exported.reads).toBe(0);
+    } else {
+      const size = await page.evaluate(
+        async (url) => {
+          const image = new Image();
+          await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error('PNG cannot be decoded'));
+            image.src = url;
+          });
+          return { width: image.naturalWidth, height: image.naturalHeight };
+        },
+        `data:image/png;base64,${bytes.toString('base64')}`,
+      );
+      expect(size.width).toBe(2000);
+      expect(size.height).toBeGreaterThan(400);
+    }
   }
+  const revoked = await fetch(`${state.supabaseUrl}/rest/v1/connector_grants?id=eq.${writeGrant}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: state.publishableKey,
+      Authorization: `Bearer ${state.serviceKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+  });
+  expect(revoked.status).toBe(204);
+  await graph.getByRole('button', { name: 'Refresh graph' }).click();
+  await expect(graph.locator('[data-edge="write"]')).toHaveCount(0);
+  await expect(graph.getByLabel('Estate filter', { exact: true })).toHaveValue(estate.data.id);
+  await expect(graph.getByLabel('Agent filter', { exact: true })).toHaveValue('karya');
 });

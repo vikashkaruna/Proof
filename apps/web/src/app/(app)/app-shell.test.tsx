@@ -3,6 +3,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
+import { APP_NAV_GROUPS, visibleRoutes } from './nav';
 
 const state = vi.hoisted(() => ({
   push: vi.fn(),
@@ -10,14 +11,30 @@ const state = vi.hoisted(() => ({
   switchTenant: vi.fn(),
   pathname: '/dashboard',
   search: '',
+  panelCapabilities: [] as readonly string[],
+  linkOptions: [] as { href: string; prefetch: boolean | 'auto' | null | undefined }[],
 }));
+vi.mock('next/link', async () => {
+  const { default: Link } = await vi.importActual<typeof import('next/link')>('next/link');
+  return {
+    default: (props: React.ComponentProps<typeof Link>) => {
+      state.linkOptions.push({ href: String(props.href), prefetch: props.prefetch });
+      return <Link {...props} />;
+    },
+  };
+});
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push, refresh: state.refresh }),
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }));
 vi.mock('./tenant-actions', () => ({ switchTenantAction: state.switchTenant }));
-vi.mock('./sidebar-agent-panel', () => ({ SidebarAgentPanel: () => null }));
+vi.mock('./sidebar-agent-panel', () => ({
+  SidebarAgentPanel: ({ capabilities }: { capabilities: readonly string[] }) => {
+    state.panelCapabilities = capabilities;
+    return null;
+  },
+}));
 
 const tenants = [
   { id: 'tenant-alpha', name: 'Alpha Org', slug: 'alpha', role: 'viewer' },
@@ -38,6 +55,8 @@ beforeEach(() => {
   state.switchTenant.mockReset();
   state.pathname = '/dashboard';
   state.search = '';
+  state.panelCapabilities = [];
+  state.linkOptions = [];
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) =>
@@ -80,6 +99,13 @@ it('shows a viewer only verified memberships and no mutating kill-switch authori
   expect(screen.getAllByText('Beta Org').length).toBeGreaterThan(0);
   expect(document.body.textContent).not.toContain('Meridian Pay');
   expect(screen.getByText('Tenant content')).toBeTruthy();
+  expect(state.panelCapabilities).toEqual(props.capabilities);
+});
+
+it('passes the active tenant capabilities to agent controls', () => {
+  const capabilities = ['agent.invoke', 'workbench.access'];
+  render(<AppShell {...props} capabilities={capabilities} />);
+  expect(state.panelCapabilities).toEqual(capabilities);
 });
 
 it('switches tenant only after the server action verifies membership', async () => {
@@ -463,6 +489,54 @@ it('keeps mobile navigation keyboard focus inside its dialog', () => {
   expect(document.activeElement).toBe(controls[0]);
   fireEvent.click(screen.getByRole('button', { name: 'Close navigation', hidden: true }));
   expect(HTMLDialogElement.prototype.close).toHaveBeenCalled();
+});
+
+it('loads protected shell destinations only on selection, including opened header trays', () => {
+  const capabilities = APP_NAV_GROUPS.flatMap((group) =>
+    group.items.map((item) => item.capability),
+  );
+  render(<AppShell {...props} capabilities={capabilities} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
+  const expected = visibleRoutes(capabilities);
+  expect(expected.length).toBeGreaterThan(20);
+  expect(new Set(state.linkOptions.map((link) => link.href))).toEqual(
+    new Set([...expected, '/dashboard', '/onboarding', '/monitoring']),
+  );
+  // Verify the Next Link contract; actual production request counts are checked
+  // in the browser, where Next aliases Link to its App Router implementation.
+  expect(state.linkOptions.every((link) => link.prefetch === false)).toBe(true);
+});
+
+it('preserves module URLs, active state and the mobile navigation close action', () => {
+  const capabilities = APP_NAV_GROUPS.flatMap((group) =>
+    group.items.map((item) => item.capability),
+  );
+  state.pathname = '/reports';
+  render(<AppShell {...props} capabilities={capabilities} />);
+  const navigation = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true });
+  for (const nav of navigation) {
+    expect(
+      within(nav)
+        .getAllByRole('link', { hidden: true })
+        .map((link) => link.getAttribute('href')),
+    ).toEqual(visibleRoutes(capabilities));
+    expect(
+      within(nav)
+        .getByRole('link', { name: /^Working Reports/, hidden: true })
+        .getAttribute('aria-current'),
+    ).toBe('page');
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }));
+  const dialog = screen.getByRole('dialog', { name: 'Application navigation', hidden: true });
+  expect(dialog.hasAttribute('open')).toBe(true);
+  const estate = within(dialog).getByRole('link', { name: /^Client Estate/, hidden: true });
+  expect(estate.getAttribute('href')).toBe('/estate');
+  // A modified click keeps real Next Link/native browser URL handling in this
+  // unit environment while exercising the shell's actual drawer handler.
+  estate.addEventListener('click', (event) => event.preventDefault(), { once: true });
+  fireEvent.click(estate, { ctrlKey: true });
+  expect(dialog.hasAttribute('open')).toBe(false);
 });
 
 it('does not request a tenant switch when the current membership is selected', async () => {
