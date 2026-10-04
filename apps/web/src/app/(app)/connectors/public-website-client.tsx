@@ -2,40 +2,56 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { z } from 'zod';
+import { publicFormMetadataSchema } from '@axiom/types';
+import { PublicFormFacts } from './public-form-facts';
 
-const checkSchema = z.object({
-  id: z.uuid(),
-  requestedUrl: z.string(),
-  finalUrl: z.string(),
-  checkedAt: z.string(),
-  status: z.string().min(1).max(40),
-  bytes: z.number().int().nonnegative(),
-  contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  title: z.string().nullable(),
-  headings: z.array(z.string()),
-  publicLinks: z.array(z.object({ label: z.string(), url: z.string() })),
-  auditPages: z
-    .array(
-      z.object({
-        kind: z.enum(['privacy', 'contact', 'terms']),
-        requestedUrl: z.string(),
-        status: z.enum(['checked', 'unavailable']),
-        finalUrl: z.string().optional(),
-        title: z.string().optional(),
-        contentSha256: z.string().optional(),
-        errorCode: z.string().optional(),
-      }),
-    )
-    .optional(),
-  observations: z
-    .array(
-      z.object({
-        kind: z.enum(['privacy', 'contact', 'terms']),
-        status: z.enum(['retrieved', 'not_linked', 'unavailable']),
-      }),
-    )
-    .optional(),
-});
+const checkSchema = z
+  .object({
+    id: z.uuid(),
+    requestedUrl: z.string(),
+    finalUrl: z.string(),
+    checkedAt: z.string(),
+    status: z.string().min(1).max(40),
+    bytes: z.number().int().nonnegative(),
+    contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    formMetadata: publicFormMetadataSchema.optional(),
+    title: z.string().nullable(),
+    headings: z.array(z.string()),
+    publicLinks: z.array(z.object({ label: z.string(), url: z.string() })),
+    auditPages: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['privacy', 'contact', 'terms']),
+            requestedUrl: z.string(),
+            status: z.enum(['checked', 'unavailable']),
+            finalUrl: z.string().optional(),
+            title: z.string().optional(),
+            contentSha256: z.string().optional(),
+            errorCode: z.string().optional(),
+            formMetadata: publicFormMetadataSchema.optional(),
+          })
+          .refine(
+            (page) =>
+              !page.formMetadata ||
+              (page.status === 'checked' && page.formMetadata.sourceSha256 === page.contentSha256),
+          ),
+      )
+      .optional(),
+    observations: z
+      .array(
+        z.object({
+          kind: z.enum(['privacy', 'contact', 'terms']),
+          status: z.enum(['retrieved', 'not_linked', 'unavailable']),
+        }),
+      )
+      .optional(),
+  })
+  .refine(
+    (check) =>
+      !check.formMetadata ||
+      (check.status === 'checked' && check.formMetadata.sourceSha256 === check.contentSha256),
+  );
 type WebsiteCheck = z.infer<typeof checkSchema>;
 const subscribeHydration = () => () => {};
 const hydratedSnapshot = () => true;
@@ -52,6 +68,7 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
       <p className="text-slate-600">
         Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
       </p>
+      <PublicFormFacts metadata={check.formMetadata} pageLabel="Starting page" />
       {check.observations && (
         <div>
           <h4 className="font-medium text-indigo-900">Public notice observations</h4>
@@ -89,6 +106,11 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
                 {page.errorCode && (
                   <span className="block text-xs text-amber-800">Reason: {page.errorCode}</span>
                 )}
+                <PublicFormFacts
+                  metadata={page.formMetadata}
+                  pageLabel={page.kind}
+                  unavailable={page.status === 'unavailable'}
+                />
               </li>
             ))}
           </ul>
