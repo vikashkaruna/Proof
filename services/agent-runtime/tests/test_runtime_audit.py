@@ -235,6 +235,58 @@ def test_missing_or_wrong_writer_credential_fails_closed_without_fallback(
     create.assert_not_called()
 
 
+@pytest.mark.parametrize("environment", ["development", "test"])
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "[::1]"])
+def test_configured_loopback_writer_uses_scoped_rpc_clients(monkeypatch, environment, host):
+    settings = _strict_settings(environment, supabase_url=f"http://{host}:54321")
+    create = Mock(return_value=Mock())
+    monkeypatch.setattr("axiom.ledger_client.create_client", create)
+
+    assert LedgerClient.from_settings(settings).in_memory_mode is False
+    writer_call, read_call = create.call_args_list
+    assert writer_call.args == (settings.supabase_url, "synthetic-anon")
+    assert writer_call.kwargs["options"].headers == {
+        "Authorization": f"Bearer {settings.supabase_agent_ledger_writer_key}"
+    }
+    assert settings.supabase_service_key not in str(writer_call)
+    assert read_call.args == (settings.supabase_url, settings.supabase_service_key)
+    assert settings.supabase_agent_ledger_writer_key not in str(read_call)
+
+    create.reset_mock()
+    create.side_effect = RuntimeError(PRIVATE)
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
+        LedgerClient.from_settings(settings)
+    assert create.call_count == 1
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"supabase_agent_ledger_writer_key": ""},
+        {"supabase_agent_ledger_writer_key": "synthetic-service"},
+        {"supabase_agent_ledger_writer_key": "not-a-jwt"},
+        {"supabase_agent_ledger_writer_key": _jwt("service_role")},
+        {"supabase_agent_ledger_writer_key": _jwt("human_action_writer")},
+        {"supabase_agent_ledger_writer_key": _jwt("agent_ledger_writer", exp=1)},
+        {"supabase_anon_key": None},
+        {"supabase_service_key": None},
+    ],
+)
+def test_configured_loopback_writer_cannot_fall_back(monkeypatch, environment, overrides):
+    settings = _strict_settings(environment, **overrides)
+    create = Mock()
+    monkeypatch.setattr("axiom.ledger_client.create_client", create)
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
+        LedgerClient.from_settings(settings)
+    if "supabase_service_key" in overrides:
+        # The existing factory creates the append client before validating the
+        # separate read credential, but still refuses to return any ledger.
+        assert create.call_count == 1
+    else:
+        create.assert_not_called()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("in_memory", [True, False])
 async def test_human_labelled_events_are_refused_by_the_agent_ledger(in_memory):
@@ -267,8 +319,13 @@ def test_remote_development_configuration_also_cannot_silently_fall_back(monkeyp
 
 
 @pytest.mark.parametrize("environment", ["development", "test"])
-def test_explicit_loopback_development_and_tests_retain_memory_ledger(environment):
+@pytest.mark.parametrize("writer_absent", [True, False])
+def test_unconfigured_loopback_development_and_tests_retain_memory_ledger(
+    environment, writer_absent
+):
     settings = SimpleNamespace(environment=environment, supabase_url="http://localhost:54321")
+    if not writer_absent:
+        settings.supabase_agent_ledger_writer_key = None
     assert LedgerClient.from_settings(settings).in_memory_mode is True
 
 
