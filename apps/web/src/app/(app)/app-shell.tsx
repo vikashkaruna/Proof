@@ -335,7 +335,7 @@ export function AppShell({
     <>
       {/* Brand Header */}
       <div className="flex h-16 shrink-0 items-center px-5 border-b border-white/10">
-        <Link href="/dashboard" className="flex items-center gap-3">
+        <Link href="/dashboard" prefetch={false} className="flex items-center gap-3">
           <AxiomLogo size="md" theme="dark" showSubtitle={true} />
         </Link>
       </div>
@@ -381,6 +381,8 @@ export function AppShell({
                 <Link
                   key={item.route}
                   href={item.route}
+                  // Protected pages verify auth and tenant context; load them on navigation.
+                  prefetch={false}
                   title={item.agentRole ? `${item.en} (${item.agentRole})` : item.en}
                   aria-current={isActive ? 'page' : undefined}
                   onClick={() => mobileNav.current?.close()}
@@ -458,7 +460,7 @@ export function AppShell({
       {/* ============ SIDEBAR ============ */}
       <aside className="sticky top-0 z-30 hidden h-screen w-[266px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10 lg:flex">
         {sidebarContent}
-        <SidebarAgentPanel />
+        <SidebarAgentPanel capabilities={capabilities} />
       </aside>
       <dialog
         id="mobile-navigation"
@@ -604,6 +606,7 @@ export function AppShell({
                 <div className="mt-1 border-t border-[#eef1f5] pt-1">
                   <Link
                     href="/onboarding"
+                    prefetch={false}
                     onClick={() => setTenantsOpen(false)}
                     className="flex items-center justify-center gap-1.5 w-full rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition-colors"
                   >
@@ -645,6 +648,7 @@ export function AppShell({
                   <span className="text-xs font-semibold text-[#1E2A4A]">Continuous Alerts</span>
                   <Link
                     href="/monitoring"
+                    prefetch={false}
                     onClick={() => setAlertsOpen(false)}
                     className="text-[11px] font-medium text-[#0FB5A5] hover:underline"
                   >

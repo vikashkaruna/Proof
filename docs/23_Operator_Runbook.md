@@ -266,6 +266,7 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 - [ ] **P1-W2a Legacy assignment policy** (W2-1) · Operator · decide: assign existing unassigned engagements to an estate by hand, or leave unassigned until reviewed (never infer scope) · Closure: the policy.
 - [ ] **P1-W2b Apply each migration batch to the deployed DB** (W2-2) · Operator · order is commit, then apply, never the reverse · Verify: same command as P0-5; also apply 0033 (creates seven empty connector tables; do not insert real credentials) · Closure: applied count and last migration name per batch.
+- [ ] **P1-W2c Operator workflow integration** · Engineering · Migration 0076 already delivers the four previously named schema gaps and BFF routes. Candidate f198ab1 exposes bounded human-recorded classification review history; it does not verify agent observations or perform source corrections. Next persist immutable observations bound to tenant, engagement, source digest and agent run, then wire human review/correction, RoPA, policy-draft review and playbooks. Do not infer scope from telemetry or invent processing facts. Candidate 0103 fixes absent-membership authority at the database boundary; apply only after exact release gates. · Closure: authorized operator actions, persistence/reload, viewer/foreign-tenant refusal, ledger provenance and end-to-end evidence.
 
 ### W3 Estate
 
@@ -367,7 +368,7 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 - [ ] **P2-4 Follow-up hardening** (`[14]`) · Engineering · five web screens still fabricate values with `Math.random`; Bandit medium findings in test-harness SQL; CodeQL flags on world-readable SPIRE health files (deliberate) and a URL built in `verify-controller-issuance.py`.
 - [ ] **P2-5 `saml2_bearer` decision** (W4.7) · Operator · TODO, not a blocker; needs an XML-DSig dependency and a review decision.
 - [ ] **P2-6 Vendor-verified descriptors** (W4.7) · Operator · need real client tenants.
-- [ ] **P2-7 W3.5 lineage model** · Operator + Engineering · derivation edges need a data-lineage model; live updates and branded export open.
+- [ ] **P2-7 W3.5 lineage model** · Operator + Engineering · derivation edges need a reviewed data-lineage model. Graph refresh, grant expiry and branded SVG/PNG export have local regression and browser evidence on the operator gap-closure candidate; release gates remain pending. Closure: approved lineage model, implemented derivation edges and source-bound browser evidence.
 - [ ] **P2-8 Sector pack order** (W7) · Operator · BFSI pack #1 delivered; Healthcare then Tech next `[17B]`; pack #2 is gated `[13]`.
 - [ ] **P2-9 Authoritative provider/retention equivalence record and marketing/API boundary reconciliation** (`[12]`) · Operator.
 - [ ] **P2-10 BR-4 gap-scan exception** (`[12]`) · Operator · introduce the founder review gate or record an explicit, precisely scoped exception.

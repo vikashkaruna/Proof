@@ -13,9 +13,11 @@ never executes. This is the separation of duties.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from .base import AgentName, AutonomyLevel, BaseAgent
 
 
 class ActionType(str, Enum):
@@ -41,9 +43,6 @@ class ActionType(str, Enum):
     CONNECTOR_SCAN = "connector.scan"
     CONNECTOR_CLASSIFY = "connector.classify"
     CUSTOM = "custom"
-
-
-from .base import AgentName, AutonomyLevel, BaseAgent
 
 
 # Map control remediation patterns to default action types
@@ -86,11 +85,35 @@ class SudhaarAction(BaseModel):
     closes_finding_id: str
     risk_class: str  # 'low' | 'medium' | 'high' | 'critical'
     risk_score: float  # 0-100
-    records_affected: int
+    records_affected: int | None
     systems_affected: list[str] = Field(default_factory=list)
-    environment: str = "production"  # 'production' | 'staging' | 'development' | 'n/a'
+    environment: str | None
+    scope_status: Literal["declared", "incomplete"]
     rollback: dict[str, Any]
     depends_on: list[int] = Field(default_factory=list)
+
+
+class DeclaredActionScope(BaseModel):
+    """Human/source declarations for a proposal, never proof of a live measurement.
+
+    Missing counts stay unknown. A complete declaration does not replace the
+    persisted dry-run, rollback validation or human approval execution requires.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    records_affected: int | None = Field(default=None, strict=True, ge=0, le=10**12)
+    systems_affected: list[
+        Annotated[
+            str,
+            StringConstraints(
+                strip_whitespace=True,
+                min_length=1,
+                max_length=200,
+                pattern=r"^[A-Za-z0-9_. -]+$",
+            ),
+        ]
+    ] = Field(default_factory=list, max_length=100)
+    environment: Literal["production", "staging", "development", "n/a"] | None = None
 
 
 class SudhaarInput(BaseModel):
@@ -98,13 +121,17 @@ class SudhaarInput(BaseModel):
     engagement_id: str
     title: str = "Remediation plan"
     findings: list[dict[str, Any]] = Field(default_factory=list)
+    scope_hints: dict[str, DeclaredActionScope] = Field(
+        default_factory=dict,
+        description="Declared scope keyed by finding ID; missing facts require human review",
+    )
     blast_radius_cap_records: int = 50_000  # tenant-set cap
 
 
 class SudhaarOutput(BaseModel):
     title: str
     actions: list[SudhaarAction]
-    aggregate_records_affected: int
+    aggregate_records_affected: int | None
     aggregate_systems: list[str]
     escalate: bool = False
     escalation_reason: str | None = None
@@ -117,7 +144,11 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
     one_liner: ClassVar[str] = "I propose the fix. You decide."
     # A plan proposal is returned to the caller; Sudhaar has no persistence
     # scope and cannot mutate a tenant's plan or any external system.
-    tool_scopes: ClassVar[tuple[str, ...]] = ("findings.read", "control_library.read", "plan.propose")
+    tool_scopes: ClassVar[tuple[str, ...]] = (
+        "findings.read",
+        "control_library.read",
+        "plan.propose",
+    )
     autonomy: ClassVar[AutonomyLevel] = AutonomyLevel.L1
     # Per ADR-3, Sudhaar holds NO write credentials
     can_mutate: ClassVar[bool] = False
@@ -129,11 +160,10 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
     def output_schema(self) -> type[SudhaarOutput]:
         return SudhaarOutput
 
-    async def _run(
-        self, *, correlation_id: str, input: SudhaarInput, **deps: Any
-    ) -> SudhaarOutput:
+    async def _run(self, *, correlation_id: str, input: SudhaarInput, **deps: Any) -> SudhaarOutput:
         actions: list[SudhaarAction] = []
         aggregate_records = 0
+        all_counts_declared = True
         aggregate_systems: set[str] = set()
         escalate = False
         escalation_reason: str | None = None
@@ -153,8 +183,24 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
             risk_score = float(finding.get("risk_points", 0))
             risk_class = severity if severity in {"low", "medium", "high", "critical"} else "medium"
 
-            records_affected = int(risk_score * 100)  # heuristic
-            systems_affected = ["crm-prod"] if records_affected > 0 else []
+            # Risk points measure priority, not estate size. Only preserve
+            # supplied scope facts; unknown is neither zero nor production.
+            scope = input.scope_hints.get(finding.get("id", "")) or DeclaredActionScope()
+            records_affected = scope.records_affected
+            systems_affected = list(dict.fromkeys(scope.systems_affected))
+            scope_complete = (
+                records_affected is not None
+                and bool(systems_affected)
+                and scope.environment is not None
+            )
+            if records_affected is None:
+                all_counts_declared = False
+            if not scope_complete:
+                escalate = True
+                escalation_reason = (
+                    escalation_reason
+                    or f"blast_radius_unconfirmed: action #{i} needs declared scope"
+                )
 
             # Build the rollback plan
             inv = inverse_action(action_type)
@@ -174,7 +220,7 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
                 ],
                 "estimatedRollbackTimeSeconds": 300,
                 "preconditions": [
-                    f"pre_state snapshot exists for action {{action.id}}",
+                    "pre_state snapshot exists for action {action.id}",
                     "no concurrent mutations on the same target",
                 ],
                 "validatedExecutable": False,  # set true after dry-run
@@ -194,16 +240,22 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
                     risk_score=min(100.0, risk_score),
                     records_affected=records_affected,
                     systems_affected=systems_affected,
-                    environment="production" if records_affected > 0 else "n/a",
+                    environment=scope.environment,
+                    scope_status="declared" if scope_complete else "incomplete",
                     rollback=rollback,
                 )
             )
 
-            aggregate_records += records_affected
+            if records_affected is not None:
+                aggregate_records += records_affected
             aggregate_systems.update(systems_affected)
 
             # Per-action escalation: high-risk actions get a flag
-            if risk_class in {"high", "critical"} and records_affected > 10_000:
+            if (
+                risk_class in {"high", "critical"}
+                and records_affected is not None
+                and records_affected > 10_000
+            ):
                 escalate = True
                 escalation_reason = (
                     escalation_reason
@@ -213,15 +265,18 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
         # Tenant-level blast-radius cap check
         if aggregate_records > input.blast_radius_cap_records:
             escalate = True
+            cap_reason = (
+                f"blast_radius_exceeded: declared scope affects {aggregate_records} records "
+                f"> cap {input.blast_radius_cap_records}"
+            )
             escalation_reason = (
-                escalation_reason
-                or f"blast_radius_exceeded: plan affects {aggregate_records} records > cap {input.blast_radius_cap_records}"
+                f"{cap_reason}; {escalation_reason}" if escalation_reason else cap_reason
             )
 
         return SudhaarOutput(
             title=input.title,
             actions=actions,
-            aggregate_records_affected=aggregate_records,
+            aggregate_records_affected=aggregate_records if all_counts_declared else None,
             aggregate_systems=sorted(aggregate_systems),
             escalate=escalate,
             escalation_reason=escalation_reason,

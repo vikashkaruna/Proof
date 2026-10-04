@@ -42,7 +42,9 @@ export default async function EstateGraphPage() {
     !Array.isArray(systems.data) ||
     !Array.isArray(connectors.data) ||
     !Array.isArray(grants.data);
+  const capturedAt = new Date().toISOString();
   const input: GraphInput = {
+    now: new Date(capturedAt),
     agents: Object.values(AGENT_CONTRACTS).map((a) => ({
       name: a.name,
       displayName: a.displayName,
@@ -75,6 +77,7 @@ export default async function EstateGraphPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
+        module={{ crumb: 'Discover & Classify', titleHi: 'क्लाइंट एस्टेट', phase: 'P1' }}
         title="Estate graph"
         description="Estates, systems, connector registrations and data categories, with agent access drawn only from active grants in this view. Other estates or filters may have additional grants."
       />
@@ -84,7 +87,11 @@ export default async function EstateGraphPage() {
       {failed ? (
         <p role="alert">The estate graph could not be loaded. Refresh to try again.</p>
       ) : (
-        <EstateGraph input={input} />
+        <EstateGraph
+          key={tenant}
+          input={input}
+          snapshot={{ tenantName: ctx.tenantName, capturedAt }}
+        />
       )}
     </div>
   );
