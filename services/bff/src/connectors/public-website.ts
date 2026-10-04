@@ -3,6 +3,14 @@ import { promises as dns } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import { isIP } from 'node:net';
+import {
+  extractPublicFormMetadata,
+  parsePublicHtml,
+  publicHtmlElements,
+  publicHtmlText,
+  type PublicHtmlDocument,
+  type PublicFormMetadata,
+} from './public-form-metadata.js';
 
 const MAX_BYTES = 512 * 1024;
 const TIMEOUT_MS = 8_000;
@@ -130,61 +138,38 @@ export function fetchPinnedPage(
   });
 }
 
-const codePoint = (value: number) =>
-  Number.isInteger(value) && value > 0 && value <= 0x10ffff && (value < 0xd800 || value > 0xdfff)
-    ? String.fromCodePoint(value)
-    : '\ufffd';
-const decode = (text: string) =>
-  text
-    .replace(/&#(\d+);/g, (_, value: string) => codePoint(Number(value)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, value: string) => codePoint(parseInt(value, 16)))
-    .replace(
-      /&(amp|lt|gt|quot|apos|nbsp);/gi,
-      (_, name: string) =>
-        ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' })[
-          name.toLowerCase() as 'amp' | 'lt' | 'gt' | 'quot' | 'apos' | 'nbsp'
-        ],
-    );
-const plain = (html: string) =>
-  decode(
-    html
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim(),
-  ).slice(0, 300);
-
-function attribute(attributes: string, name: string): string | undefined {
-  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(
-    attributes,
-  );
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
-function extract(html: string, base: URL) {
-  const safeHtml = html.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+function extract(document: PublicHtmlDocument, base: URL) {
+  // Only genuine public DOM nodes contribute summaries; controls and inert
+  // subtrees cannot turn stored values or quoted markup into public evidence.
+  const elements = [...publicHtmlElements(document, true)];
   let documentBase = base;
-  const baseHref = attribute(/<base\b([^>]*)>/i.exec(safeHtml)?.[1] ?? '', 'href');
+  const baseHref = elements
+    .find((element) => element.tagName === 'base')
+    ?.attrs.find((attribute) => attribute.name === 'href')?.value;
   if (baseHref) {
     try {
-      documentBase = new URL(decode(baseHref), base);
+      documentBase = new URL(baseHref, base);
     } catch {
       // A malformed base is ignored by this limited extractor.
     }
   }
-  const title = plain(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(safeHtml)?.[1] ?? '');
-  const headings = [...safeHtml.matchAll(/<h[1-2]\b[^>]*>([\s\S]*?)<\/h[1-2]>/gi)]
+  const titleElement = elements.find((element) => element.tagName === 'title');
+  const title = titleElement ? publicHtmlText(titleElement) : '';
+  const headings = elements
+    .filter((element) => element.tagName === 'h1' || element.tagName === 'h2')
     .slice(0, 12)
-    .map((match) => plain(match[1] ?? ''))
+    .map(publicHtmlText)
     .filter(Boolean);
   const links: { label: string; url: string }[] = [];
   const linksPerKind = new Map<AuditKind, number>();
-  for (const match of safeHtml.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
-    const href = attribute(match[1] ?? '', 'href');
+  for (const element of elements) {
+    if (element.tagName !== 'a') continue;
+    const href = element.attrs.find((attribute) => attribute.name === 'href')?.value;
     if (!href) continue;
     try {
-      const target = new URL(decode(href), documentBase);
+      const target = new URL(href, documentBase);
       if (!['http:', 'https:'].includes(target.protocol)) continue;
-      const label = plain(match[2] ?? '');
+      const label = publicHtmlText(element);
       const kind = auditKind({ label, url: target.href });
       if (
         kind &&
@@ -219,6 +204,7 @@ export interface WebsiteCheck {
   publicLinks: { label: string; url: string }[];
   auditPages: AuditPage[];
   observations: AuditObservation[];
+  formMetadata?: PublicFormMetadata;
 }
 
 export interface AuditPage {
@@ -229,6 +215,7 @@ export interface AuditPage {
   title?: string;
   contentSha256?: string;
   errorCode?: string;
+  formMetadata?: PublicFormMetadata;
 }
 
 export interface AuditObservation {
@@ -301,7 +288,8 @@ async function checkSinglePage(
     if (!/^text\/html(?:\s*;|$)/i.test(page.contentType))
       throw new PublicWebsiteRefused('unsupported_content_type');
     if (page.body.length > MAX_BYTES) throw new PublicWebsiteRefused('response_too_large');
-    const html = page.body.toString('utf8');
+    const document = parsePublicHtml(page.body.toString('utf8'));
+    const contentSha256 = createHash('sha256').update(page.body).digest('hex');
     return {
       requestedUrl: requested.href,
       finalUrl: current.href,
@@ -309,8 +297,9 @@ async function checkSinglePage(
       status: 'checked',
       httpStatus: 200,
       bytes: page.body.length,
-      contentSha256: createHash('sha256').update(page.body).digest('hex'),
-      ...extract(html, current),
+      contentSha256,
+      formMetadata: extractPublicFormMetadata(document, contentSha256),
+      ...extract(document, current),
     };
   }
   throw new PublicWebsiteRefused('redirect_refused');
@@ -360,6 +349,7 @@ export async function checkPublicWebsite(
         finalUrl: page.finalUrl,
         title: page.title,
         contentSha256: page.contentSha256,
+        formMetadata: page.formMetadata,
       });
       observations.push({ kind, status: 'retrieved' });
     } catch (cause) {

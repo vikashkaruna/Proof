@@ -167,3 +167,91 @@ describe('public website check API', () => {
     expect(await response.json()).toEqual({ error: { code: 'website_check_record_unavailable' } });
   });
 });
+
+describe('versioned public form metadata storage boundary', () => {
+  const metadata = {
+    version: 1 as const,
+    scope: 'static_html_form_descendants' as const,
+    sourceSha256: check.contentSha256,
+    observedFormCount: 0,
+    formsTruncated: false,
+    forms: [],
+  };
+  it('preserves optional per-page metadata through the human writer and tenant list', async () => {
+    const observed = {
+      ...check,
+      formMetadata: metadata,
+      auditPages: check.auditPages.map((page) => ({
+        ...page,
+        formMetadata: { ...metadata, sourceSha256: page.contentSha256! },
+      })),
+    };
+    const response = await post(UserRole.OWNER, async () => observed);
+    expect(response.status).toBe(201);
+    expect(recorded[0]?.p_result).toEqual(observed);
+    fake.seed('public_website_checks', {
+      id: 'metadata-check',
+      tenant_id: TENANT,
+      status: 'checked',
+      checked_at: '2026-10-05',
+      result: observed,
+    });
+    const history = await app(UserRole.VIEWER).request('/v1/public-website-checks');
+    expect(history.status).toBe(200);
+    expect(await history.json()).toMatchObject({
+      data: expect.arrayContaining([{ id: 'metadata-check', ...observed }]),
+    });
+  });
+
+  it.each([
+    { ...check, formMetadata: { ...metadata, sourceSha256: 'c'.repeat(64) } },
+    { ...check, formMetadata: { ...metadata, rawValue: 'not permitted' } },
+    { ...check, formMetadata: { ...metadata, observedFormCount: 1 } },
+    { ...check, auditPages: [{ ...check.auditPages[0], formMetadata: metadata }] },
+    {
+      ...check,
+      auditPages: [
+        {
+          kind: 'contact',
+          requestedUrl: 'https://public.org/contact',
+          status: 'unavailable',
+          formMetadata: metadata,
+        },
+      ],
+    },
+  ])(
+    'refuses malformed or unbound page metadata before recording and on list %#',
+    async (observed) => {
+      const response = await post(UserRole.OWNER, async () => observed as WebsiteCheck);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: { code: 'website_check_invalid_result' } });
+      expect(recorded).toHaveLength(0);
+      fake.seed('public_website_checks', {
+        id: 'invalid-metadata',
+        tenant_id: TENANT,
+        status: 'checked',
+        checked_at: '2026-10-05',
+        result: observed,
+      });
+      const history = await app(UserRole.VIEWER).request('/v1/public-website-checks');
+      expect(history.status).toBe(503);
+      expect(await history.json()).toEqual({ error: { code: 'website_checks_unavailable' } });
+    },
+  );
+
+  it('refuses excessive UTF-8 total results even when each bounded string is valid', async () => {
+    const observed = {
+      ...check,
+      formMetadata: metadata,
+      headings: Array.from({ length: 12 }, () => '界'.repeat(300)),
+      publicLinks: Array.from({ length: 12 }, () => ({
+        label: '界'.repeat(300),
+        url: 'https://public.org/' + 'a'.repeat(1800),
+      })),
+    };
+    expect(Buffer.byteLength(JSON.stringify(observed), 'utf8')).toBeGreaterThan(32_768);
+    const response = await post(UserRole.OWNER, async () => observed);
+    expect(response.status).toBe(503);
+    expect(recorded).toHaveLength(0);
+  });
+});
