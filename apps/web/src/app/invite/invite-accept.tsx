@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card } from '@axiom/ui';
 
@@ -42,7 +42,19 @@ export function InviteAccept() {
   const ready = token !== undefined;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [accepted, setAccepted] = useState(false);
   const key = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!accepted) return;
+    // A client transition can fail after the membership write. Keep a native
+    // navigation fallback so the person is never stranded on a tokenless page.
+    const fallback = window.setTimeout(() => {
+      if (window.location.pathname === '/invite')
+        window.location.assign(new URL('/dashboard', window.location.origin).href);
+    }, 1_500);
+    return () => window.clearTimeout(fallback);
+  }, [accepted]);
 
   async function accept() {
     if (!token || busy) return;
@@ -78,6 +90,7 @@ export function InviteAccept() {
       }
       // Membership is verified server-side on every request; this only selects it.
       document.cookie = `axiom_active_tenant=${body.data.tenantId}; path=/; max-age=31536000; SameSite=Lax`;
+      setAccepted(true);
       router.push('/dashboard');
     } catch {
       setMessage('The result is unknown. Select Accept again; it is safe to retry.');
@@ -89,7 +102,15 @@ export function InviteAccept() {
   return (
     <Card className="w-full max-w-md p-6" data-testid="invite-accept">
       <h1 className="font-heading text-xl font-semibold text-slate-900">Accept your invitation</h1>
-      {!ready ? null : token ? (
+      {accepted ? (
+        <p className="mt-2 text-sm text-slate-700">
+          Invitation accepted.{' '}
+          <a className="underline" href="/dashboard">
+            Open dashboard
+          </a>
+          .
+        </p>
+      ) : !ready ? null : token ? (
         <>
           <p className="mt-2 text-sm text-slate-600">
             You must be signed in with the email address the invitation was sent to. Accepting adds
