@@ -17,9 +17,26 @@ export interface GenericAgentInvocationContext {
   readonly input: Readonly<Record<string, unknown>>;
 }
 
+/** Trusted server-side preparation receives only the recorded immutable dispatch.
+ * Its canonical bytes must be persisted verbatim, never reserialized for hashing.
+ */
+export interface GenericAgentPreparationContext {
+  readonly agent: string;
+  readonly tenantId: string;
+  readonly actorId: string;
+  readonly engagementId: string | null;
+  readonly correlationId: string;
+  readonly runId: string;
+  readonly requestHash: string;
+  readonly canonicalInput: string;
+}
+
 export interface GenericAgentInvocationDeps {
   readonly runtimeUrl: string;
   readonly runtimeToken: string;
+  readonly prepareDispatch?: (
+    context: GenericAgentPreparationContext,
+  ) => Promise<{ readonly kind: 'public_source' }>;
   readonly realtime: Pick<RealtimeService, 'broadcast'>;
   readonly writerFactory?: () => Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   readonly fetchImpl?: typeof fetch;
@@ -68,12 +85,13 @@ export async function invokeGenericAgent(
   deps: GenericAgentInvocationDeps,
 ): Promise<GenericAgentInvocationOutcome> {
   const { agent, tenantId, actorId, engagementId, correlationId, input } = context;
-  const { runtimeUrl, runtimeToken } = deps;
+  const { runtimeUrl, runtimeToken, prepareDispatch } = deps;
   const log = deps.logger ?? logger;
   // Snapshot wire input before the first await. The request hash still uses
   // the original canonical domain, including its existing undefined semantics.
   const wireInput = JSON.stringify(input);
-  const requestHash = await sha256(canonicalJson(input));
+  const canonicalInput = canonicalJson(input);
+  const requestHash = await sha256(canonicalInput);
   let runId: string;
   let writer: Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   try {
@@ -162,7 +180,39 @@ export async function invokeGenericAgent(
   let result: RuntimeResult | null = null;
   let failureCode = 'agent_invocation_failed';
   try {
-    const res = await (deps.fetchImpl ?? fetch)(`${runtimeUrl}/agents/${agent}/invoke`, {
+    let path = `/agents/${agent}/invoke`;
+    let transportBody: Record<string, unknown> = {
+      correlation_id: correlationId,
+      input: JSON.parse(wireInput),
+      dispatch_context: { run_id: runId, request_hash: requestHash },
+    };
+    if (prepareDispatch) {
+      if (
+        (agent !== 'drishti' && agent !== 'vibhaag') ||
+        JSON.parse(wireInput).mode !== 'public_website'
+      )
+        throw new Error('preparation_mode_refused');
+      const prepared = await prepareDispatch(
+        Object.freeze({
+          agent,
+          tenantId,
+          actorId,
+          engagementId,
+          correlationId,
+          runId,
+          requestHash,
+          canonicalInput,
+        }),
+      );
+      z.object({ kind: z.literal('public_source') })
+        .strict()
+        .parse(prepared);
+      // The dedicated peer must load the stored dispatch. Never transport
+      // public source facts, preparation-controlled URLs, headers or context.
+      path = `/public-source/agents/${agent}/invoke`;
+      transportBody = { tenant_id: tenantId, run_id: runId, correlation_id: correlationId };
+    }
+    const res = await (deps.fetchImpl ?? fetch)(`${runtimeUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
       signal: AbortSignal.timeout(120_000),
@@ -171,11 +221,7 @@ export async function invokeGenericAgent(
         'X-Internal-Token': runtimeToken,
         ...(await (deps.authHeaders ?? serviceAuthHeaders)(runtimeUrl)),
       },
-      body: JSON.stringify({
-        correlation_id: correlationId,
-        input: JSON.parse(wireInput),
-        dispatch_context: { run_id: runId, request_hash: requestHash },
-      }),
+      body: JSON.stringify(transportBody),
     });
     if (!res.ok) {
       await res.body?.cancel();

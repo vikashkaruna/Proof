@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import { createFakeDb } from '../test/fake-postgrest.js';
-import { invokeGenericAgent, type GenericAgentInvocationDeps } from './generic-agent-invocation.js';
+import {
+  invokeGenericAgent,
+  type GenericAgentInvocationDeps,
+  type GenericAgentPreparationContext,
+} from './generic-agent-invocation.js';
 
 const state = vi.hoisted(() => {
   Object.assign(process.env, {
@@ -479,4 +483,272 @@ describe('shared proof-bound lifecycle', () => {
       expect(f.fetchImpl).toHaveBeenCalledTimes(kind === 'auth' ? 0 : 1);
     },
   );
+});
+
+function publicContext(agent = 'drishti') {
+  return {
+    ...context(),
+    agent,
+    input: {
+      mode: 'public_website',
+      tenant_id: TENANT,
+      engagement_id: ENGAGEMENT,
+      synthetic_unicode: 'Café 字',
+      absent: undefined,
+    },
+  };
+}
+
+function expectNoDispatch(
+  f: ReturnType<typeof fixture>,
+  result: Awaited<ReturnType<typeof invokeGenericAgent>>,
+) {
+  expect(result).not.toHaveProperty('run');
+  expect(f.authHeaders).not.toHaveBeenCalled();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(f.broadcast.mock.calls.map(([event]) => event.step)).toEqual([
+    'drishti.started',
+    'drishti.outcome_unconfirmed',
+  ]);
+  expect(f.rpc.mock.calls[1]![1]).toMatchObject({
+    p_status: 'failed',
+    p_error_code: 'agent_invocation_failed',
+    p_started_receipt: null,
+    p_completed_receipt: null,
+    p_response_hash: null,
+  });
+}
+
+describe('trusted source dispatch preparation', () => {
+  it.each(['drishti', 'vibhaag'])(
+    'prepares %s after recorded start and sends only fixed lookup identifiers',
+    async (agent) => {
+      const f = fixture();
+      const input = publicContext(agent);
+      const canonicalInput = canonicalJson(input.input);
+      const requestHash = await sha256(canonicalInput);
+      const prepareDispatch = vi.fn(async (dispatch: GenericAgentPreparationContext) => {
+        expect(f.db.rows('agent_runs')[0]).toMatchObject({ id: RUN, status: 'running' });
+        expect(f.rpc.mock.calls).toHaveLength(1);
+        expect(f.fetchImpl).not.toHaveBeenCalled();
+        expect(f.authHeaders).not.toHaveBeenCalled();
+        expect(Object.isFrozen(dispatch)).toBe(true);
+        expect(Reflect.set(dispatch, 'tenantId', FOREIGN)).toBe(false);
+        expect(dispatch).toEqual({
+          agent,
+          tenantId: TENANT,
+          actorId: ACTOR,
+          engagementId: ENGAGEMENT,
+          correlationId: CORRELATION,
+          runId: RUN,
+          requestHash,
+          canonicalInput,
+        });
+        expect(await sha256(dispatch.canonicalInput)).toBe(dispatch.requestHash);
+        return { kind: 'public_source' as const };
+      });
+      f.fetchImpl.mockImplementation(
+        async (_url, init) => new Response(JSON.stringify(runtimeResult(init, { agent }))),
+      );
+      const result = await invokeGenericAgent(input, { ...f.deps, prepareDispatch });
+      expect(result.status).toBe(200);
+      if (result.status !== 200) throw new Error('Confirmed source dispatch expected');
+      expect(result.run).toMatchObject({ runId: RUN, requestHash });
+      expect(prepareDispatch).toHaveBeenCalledTimes(1);
+      expect(f.fetchImpl.mock.calls).toHaveLength(1);
+      const [url, options] = f.fetchImpl.mock.calls[0]!;
+      expect(url).toBe(`http://runtime.invalid/public-source/agents/${agent}/invoke`);
+      expect(JSON.parse(String(options!.body))).toEqual({
+        tenant_id: TENANT,
+        run_id: RUN,
+        correlation_id: CORRELATION,
+      });
+      expect(options).toMatchObject({
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+          'X-Internal-Token': 'synthetic-runtime-token',
+          'X-Serverless-Authorization': 'synthetic-auth',
+        },
+      });
+      expect(f.authHeaders).toHaveBeenCalledWith('http://runtime.invalid');
+    },
+  );
+
+  it('snapshots preparation callback, mode and canonical UTF8 input before asynchronous work', async () => {
+    const f = fixture();
+    const input = publicContext();
+    const original = structuredClone(input);
+    const prepareDispatch = vi.fn(async (_dispatch: GenericAgentPreparationContext) => ({
+      kind: 'public_source' as const,
+    }));
+    const deps = { ...f.deps, prepareDispatch };
+    const pending = invokeGenericAgent(input, deps);
+    input.agent = 'sudhaar';
+    input.tenantId = FOREIGN;
+    input.actorId = FOREIGN;
+    input.engagementId = FOREIGN;
+    input.correlationId = FOREIGN;
+    input.input.mode = 'legacy_inventory';
+    input.input.tenant_id = FOREIGN;
+    input.input.synthetic_unicode = 'changed';
+    deps.prepareDispatch = vi.fn(async () => {
+      throw new Error('Replaced callback must not run');
+    });
+    const result = await pending;
+    expect(result.status).toBe(200);
+    expect(prepareDispatch).toHaveBeenCalledTimes(1);
+    expect(deps.prepareDispatch).not.toHaveBeenCalled();
+    expect(prepareDispatch.mock.calls[0]![0]).toMatchObject({
+      agent: 'drishti',
+      tenantId: TENANT,
+      actorId: ACTOR,
+      engagementId: ENGAGEMENT,
+      correlationId: CORRELATION,
+      canonicalInput: canonicalJson(original.input),
+      requestHash: await sha256(canonicalJson(original.input)),
+    });
+    expect(JSON.parse(prepareDispatch.mock.calls[0]![0].canonicalInput)).toMatchObject({
+      absent: null,
+      synthetic_unicode: 'Café 字',
+    });
+    expect(JSON.parse(String(f.fetchImpl.mock.calls[0]![1]!.body))).toEqual({
+      tenant_id: TENANT,
+      run_id: RUN,
+      correlation_id: CORRELATION,
+    });
+  });
+
+  it.each(['refused', 'commit_then_disconnect'])(
+    'preparation %s never transports or claims runtime-reported failure',
+    async (kind) => {
+      const f = fixture();
+      let preparationWasCommitted = false;
+      const prepareDispatch = vi.fn(async () => {
+        preparationWasCommitted = kind === 'commit_then_disconnect';
+        throw new Error('private-source-binding credential and output');
+      });
+      const result = await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+      expect(result).toMatchObject({
+        status: 502,
+        body: { error: { code: 'agent_invocation_failed', runtimeOutcome: 'unconfirmed' } },
+      });
+      expect(preparationWasCommitted).toBe(kind === 'commit_then_disconnect');
+      expect(prepareDispatch).toHaveBeenCalledTimes(1);
+      expect(f.rpc).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(result)).not.toContain('private-');
+      expect(JSON.stringify(f.log.error.mock.calls)).not.toContain('private-');
+      expectNoDispatch(f, result);
+    },
+  );
+
+  it('keeps preparation failure unconfirmed when settlement also cannot be confirmed', async () => {
+    const f = fixture();
+    f.db.failNextRpc('record_generic_agent_run_finish');
+    const prepareDispatch = vi.fn(async () => {
+      throw new Error('private-preparation');
+    });
+    const result = await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+    expect(result).toMatchObject({
+      status: 503,
+      body: { error: { code: 'agent_completion_unconfirmed' } },
+    });
+    expect(result).not.toHaveProperty('run');
+    expect(f.fetchImpl).not.toHaveBeenCalled();
+    expect(f.authHeaders).not.toHaveBeenCalled();
+    expect(prepareDispatch).toHaveBeenCalledTimes(1);
+    expect(f.rpc).toHaveBeenCalledTimes(2);
+    expect(f.broadcast.mock.calls.map(([event]) => event.step)).toEqual(['drishti.started']);
+  });
+
+  it('does not prepare an existing invocation on duplicate dispatch', async () => {
+    const f = fixture();
+    const prepareDispatch = vi.fn(async () => ({ kind: 'public_source' as const }));
+    await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+    f.broadcast.mockClear();
+    const result = await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+    expect(result).toMatchObject({
+      status: 409,
+      body: { error: { code: 'agent_dispatch_exists' } },
+    });
+    expect(prepareDispatch).toHaveBeenCalledTimes(1);
+    expect(f.fetchImpl).toHaveBeenCalledTimes(1);
+    expect(f.broadcast).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('run');
+  });
+
+  it.each(['forbidden', 'cancelled', 'unconfirmed'])(
+    'does not prepare a start that is %s',
+    async (kind) => {
+      const f = fixture();
+      if (kind === 'forbidden')
+        f.db.onRpc('record_generic_agent_run_start', () => ({ error: 'forbidden' }));
+      else if (kind === 'cancelled')
+        f.db.onRpc('record_generic_agent_run_start', () => ({
+          run_id: RUN,
+          created: true,
+          status: 'cancelled',
+        }));
+      else f.db.failNextRpc('record_generic_agent_run_start');
+      const prepareDispatch = vi.fn(async () => ({ kind: 'public_source' as const }));
+      const result = await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+      expect(result.status).toBe(kind === 'forbidden' ? 403 : 503);
+      expect(prepareDispatch).not.toHaveBeenCalled();
+      expect(f.fetchImpl).not.toHaveBeenCalled();
+      expect(f.authHeaders).not.toHaveBeenCalled();
+      expect(f.rpc).toHaveBeenCalledTimes(1);
+      expect(f.broadcast).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { agent: 'sudhaar', mode: 'public_website' },
+    { agent: 'drishti', mode: 'legacy_inventory' },
+    { agent: 'vibhaag', mode: undefined },
+  ])(
+    'refuses source preparation for unsupported agent/mode $agent/$mode',
+    async ({ agent, mode }) => {
+      const f = fixture();
+      const input = { ...publicContext(agent), input: { tenant_id: TENANT, mode } };
+      const prepareDispatch = vi.fn(async () => ({ kind: 'public_source' as const }));
+      const result = await invokeGenericAgent(input, { ...f.deps, prepareDispatch });
+      expect(result).toMatchObject({
+        status: 502,
+        body: { error: { code: 'agent_invocation_failed', runtimeOutcome: 'unconfirmed' } },
+      });
+      expect(prepareDispatch).not.toHaveBeenCalled();
+      expect(f.fetchImpl).not.toHaveBeenCalled();
+      expect(f.authHeaders).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty('run');
+      expect(f.broadcast.mock.calls.at(-1)![0].step).toBe(`${agent}.outcome_unconfirmed`);
+    },
+  );
+
+  it.each([
+    null,
+    { kind: 'generic' },
+    { kind: 'public_source', path: 'https://foreign.invalid' },
+    { kind: 'public_source', body: { tenant_id: FOREIGN } },
+    { kind: 'public_source', headers: { Authorization: 'private-token' } },
+  ])('rejects a malformed or expanded preparation selector %j', async (selector) => {
+    const f = fixture();
+    const prepareDispatch = vi.fn(async () => selector as unknown as { kind: 'public_source' });
+    const result = await invokeGenericAgent(publicContext(), { ...f.deps, prepareDispatch });
+    expect(result).toMatchObject({
+      status: 502,
+      body: { error: { runtimeOutcome: 'unconfirmed' } },
+    });
+    expect(prepareDispatch).toHaveBeenCalledTimes(1);
+    expectNoDispatch(f, result);
+  });
+
+  it('keeps public-mode requests on the generic transport without trusted preparation', async () => {
+    const f = fixture();
+    await invokeGenericAgent(publicContext(), f.deps);
+    expect(f.fetchImpl.mock.calls[0]![0]).toBe('http://runtime.invalid/agents/drishti/invoke');
+    expect(JSON.parse(String(f.fetchImpl.mock.calls[0]![1]!.body))).toMatchObject({
+      input: { mode: 'public_website' },
+      dispatch_context: { run_id: RUN },
+    });
+  });
 });
