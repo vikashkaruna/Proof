@@ -6,6 +6,7 @@ import { Capability } from '@axiom/types';
 import { checkPublicWebsite, PublicWebsiteRefused } from '../connectors/public-website.js';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
+import { publicFormMetadataSchema } from '../connectors/public-form-metadata.js';
 
 const bodySchema = z.object({ url: z.string().trim().min(1).max(2048) }).strict();
 const checkSchema = z
@@ -21,6 +22,7 @@ const checkSchema = z
       .min(0)
       .max(512 * 1024),
     contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    formMetadata: publicFormMetadataSchema.optional(),
     title: z.string().max(300),
     headings: z.array(z.string().max(300)).max(12),
     publicLinks: z
@@ -40,8 +42,14 @@ const checkSchema = z
               .regex(/^[a-f0-9]{64}$/)
               .optional(),
             errorCode: z.string().max(40).optional(),
+            formMetadata: publicFormMetadataSchema.optional(),
           })
-          .strict(),
+          .strict()
+          .refine(
+            (page) =>
+              !page.formMetadata ||
+              (page.status === 'checked' && page.contentSha256 === page.formMetadata.sourceSha256),
+          ),
       )
       .max(3)
       .optional(),
@@ -57,7 +65,10 @@ const checkSchema = z
       .max(3)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((check) => !check.formMetadata || check.formMetadata.sourceSha256 === check.contentSha256)
+  // Bound UTF-8 result bytes; the existing JSONB storage cap is also enforced on writes.
+  .refine((check) => Buffer.byteLength(JSON.stringify(check), 'utf8') <= 32_768);
 const statusByCode: Record<string, 400 | 422 | 502 | 504> = {
   invalid_url: 400,
   non_public_target: 400,

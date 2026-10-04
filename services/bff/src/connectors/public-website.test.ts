@@ -274,3 +274,66 @@ describe('pinned HTTP transport', () => {
     ).rejects.toMatchObject({ code: 'response_too_large' });
   });
 });
+
+describe('public form observations remain bound to the fetched page', () => {
+  it('records root and contact controls with their own digests and never follows form actions', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', AbortSignal.timeout(5_000), {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        return url.pathname === '/contact'
+          ? html(
+              '<form action="http://169.254.169.254/private"><input type=tel value="private-phone"></form>',
+            )
+          : html(
+              '<a href="/contact">Contact</a><form action="https://other.org/submit"><input type=email value="private-email"></form>',
+            );
+      },
+    });
+    expect(requested).toEqual(['https://public.org/', 'https://public.org/contact']);
+    expect(checked.formMetadata?.sourceSha256).toBe(checked.contentSha256);
+    expect(checked.formMetadata?.forms[0]?.controls[0]?.inputType).toBe('email');
+    expect(checked.auditPages[0]?.formMetadata?.sourceSha256).toBe(
+      checked.auditPages[0]?.contentSha256,
+    );
+    expect(checked.auditPages[0]?.formMetadata?.sourceSha256).not.toBe(checked.contentSha256);
+    expect(checked.auditPages[0]?.formMetadata?.forms[0]?.controls[0]?.inputType).toBe('tel');
+    expect(JSON.stringify(checked)).not.toContain('private-phone');
+    expect(JSON.stringify(checked)).not.toContain('private-email');
+    expect(JSON.stringify(checked)).not.toContain('other.org');
+    expect(JSON.stringify(checked)).not.toContain('169.254');
+  });
+});
+
+describe('public page summaries exclude raw form content', () => {
+  it('does not treat quoted form values or control/inert content as public markup', async () => {
+    const requested: string[] = [];
+    const checked = await checkPublicWebsite('https://public.org/', AbortSignal.timeout(5_000), {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        requested.push(url.href);
+        if (url.pathname !== '/') return html('<title>Privacy</title>');
+        return html(`<title>Public &amp; Honest</title>
+          <input value="<base href='https://other.org/'><h1>private-default</h1><a href='/terms'>Terms private</a>">
+          <base href="/legal/"><h1>Public privacy &amp; terms</h1><h2>Public <strong>contact</strong></h2>
+          <form><label><h2>private-label</h2></label>
+            <textarea><h1>private-message</h1><a href="/contact">Contact private</a></textarea>
+            <select><option>private-option</option></select><a href="/terms">Terms private form link</a>
+          </form>
+          <!-- <h1>private-comment</h1><a href="/contact">Contact private</a> -->
+          <template><h1>private-template</h1><a href="/terms">Terms private</a></template>
+          <script>const markup = '<h1>private-script</h1><a href="/terms">Terms private</a>';</script>
+          <svg><title>private-svg-title</title></svg><a href=privacy>Privacy policy</a>`);
+      },
+    });
+    expect(checked.title).toBe('Public & Honest');
+    expect(checked.headings).toEqual(['Public privacy & terms', 'Public contact']);
+    expect(checked.publicLinks).toEqual([
+      { label: 'Privacy policy', url: 'https://public.org/legal/privacy' },
+    ]);
+    expect(requested).toEqual(['https://public.org/', 'https://public.org/legal/privacy']);
+    expect(JSON.stringify(checked)).not.toContain('private');
+    expect(JSON.stringify(checked)).not.toContain('other.org');
+  });
+});

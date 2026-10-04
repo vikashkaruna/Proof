@@ -13,6 +13,7 @@ import {
 import { serializeEstateGraph, type GraphSnapshot } from '@/lib/estate-graph-export';
 
 const WIDTH = 1000;
+const NODE_WIDTH = 160;
 const TEAL = '#0FB5A5';
 const INDIGO = '#1E2A4A';
 const GREY = '#94A3B8';
@@ -240,19 +241,53 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
               const b = positions.get(e.to);
               if (!a || !b) return null;
               const access = e.kind === 'read' || e.kind === 'write';
+              const direction = Math.sign(b.x - a.x);
+              const x1 = a.x + (direction * NODE_WIDTH) / 2;
+              const x2 = b.x - (direction * NODE_WIDTH) / 2;
+              const stroke = e.kind === 'read' ? TEAL : e.kind === 'write' ? INDIGO : GREY;
               return (
                 <g key={e.id} data-edge={e.kind}>
-                  <line
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={e.kind === 'read' ? TEAL : e.kind === 'write' ? INDIGO : GREY}
-                    strokeWidth={access ? 2.5 : 1}
-                    strokeDasharray={e.kind === 'contains' ? '4 4' : undefined}
-                  />
+                  {e.kind === 'declares' ? (
+                    // This existing relationship skips the Estate column. Route
+                    // below every node so it does not suggest an Estate link.
+                    <polyline
+                      points={[
+                        [x1, a.y],
+                        [a.x + WIDTH / COLUMNS.length / 2, a.y],
+                        [a.x + WIDTH / COLUMNS.length / 2, height - 20],
+                        [b.x - WIDTH / COLUMNS.length / 2, height - 20],
+                        [b.x - WIDTH / COLUMNS.length / 2, b.y],
+                        [x2, b.y],
+                      ]
+                        .map((point) => point.join(','))
+                        .join(' ')}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={1}
+                    />
+                  ) : (
+                    // Adjacent-column relationships stay in their gutter, in
+                    // either direction, rather than crossing unrelated nodes.
+                    <line
+                      x1={x1}
+                      y1={a.y}
+                      x2={x2}
+                      y2={b.y}
+                      stroke={stroke}
+                      strokeWidth={access ? 2.5 : 1}
+                      strokeDasharray={e.kind === 'contains' ? '4 4' : undefined}
+                    />
+                  )}
                   {e.kind === 'write' && (
-                    <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} fontSize={10} fill={INDIGO}>
+                    <text
+                      x={(x1 + x2) / 2}
+                      y={(a.y + b.y) / 2 - 4}
+                      textAnchor="middle"
+                      textLength={Math.abs(x2 - x1) - 4}
+                      lengthAdjust="spacingAndGlyphs"
+                      fontSize={10}
+                      fill={INDIGO}
+                    >
                       🔒 WRITE
                     </text>
                   )}
@@ -274,9 +309,9 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
                   style={{ cursor: 'pointer' }}
                 >
                   <rect
-                    x={p.x - 80}
+                    x={p.x - NODE_WIDTH / 2}
                     y={p.y - 16}
-                    width={160}
+                    width={NODE_WIDTH}
                     height={32}
                     rx={6}
                     fill="white"
