@@ -174,3 +174,54 @@ test('module pages and report views use the branded header with one accessible p
     });
   }
 });
+
+test('generic module pages fill desktop width and fit a narrow mobile viewport', async ({
+  page,
+}) => {
+  test.setTimeout(2 * 60_000);
+  const account = await createMfaAccount('generic-layout-review', { role: 'viewer' });
+  await signInAs(page, account.email, account.password);
+  await selectTenant(page, 'a');
+  for (const width of [1920, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const route of ['/controls', '/discovery', '/classification', '/datamap', '/partner']) {
+      await page.goto(route);
+      const heading = page.getByRole('heading', { level: 1 });
+      await expect(heading, `${route} title at ${width}px`).toBeVisible();
+      const frame = await page
+        .locator('main')
+        .first()
+        .evaluate((main) => {
+          const child = main.firstElementChild;
+          if (!child) return null;
+          const content = main.getBoundingClientRect();
+          const page = child.getBoundingClientRect();
+          const style = getComputedStyle(main);
+          return {
+            availableWidth:
+              content.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+            contentLeft: content.left + parseFloat(style.paddingLeft),
+            width: page.width,
+            left: page.left,
+          };
+        });
+      expect(frame, `${route} frame at ${width}px`).not.toBeNull();
+      expect(frame!.width, `${route} fills available width at ${width}px`).toBeGreaterThanOrEqual(
+        frame!.availableWidth - 2,
+      );
+      expect(
+        Math.abs(frame!.left - frame!.contentLeft),
+        `${route} aligns at ${width}px`,
+      ).toBeLessThan(2);
+      const banner = page.locator('[class*="bg-gradient-to-br"]').filter({ has: heading });
+      expect(
+        await banner.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+        `${route} banner fits at ${width}px`,
+      ).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        `${route} stays inside the ${width}px viewport`,
+      ).toBe(true);
+    }
+  }
+});

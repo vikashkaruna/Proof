@@ -227,11 +227,12 @@ it('exports only the filtered, visible graph to a local SVG download', async () 
   expect(source).toContain('Payroll');
   const exported = new DOMParser().parseFromString(source, 'image/svg+xml');
   expect(exported.querySelector('parsererror')).toBeNull();
-  expect(exported.documentElement.textContent).toContain('AXIOM PROOF');
-  expect(exported.documentElement.textContent).toContain(snapshot.tenantName);
+  const visibleText = Array.from(exported.querySelectorAll('text'), (node) => node.textContent);
+  expect(visibleText).toContain('AXIOM PROOF');
+  expect(visibleText).toContain(snapshot.tenantName);
   expect(exported.querySelector('[onload]')).toBeNull();
-  expect(source).toContain(`Snapshot: ${snapshot.capturedAt}`);
-  expect(source).toContain('View: Production estate · All agents · Read and write');
+  expect(visibleText).toContain(`Snapshot: ${snapshot.capturedAt}`);
+  expect(visibleText).toContain('View: Production estate · All agents · Read and write');
   expect(source).toContain('Read grant');
   expect(source).toContain('Write grant');
   expect(source).not.toContain('Other payroll');

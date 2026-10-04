@@ -115,13 +115,13 @@ export function GenericModuleView({
   };
 
   return (
-    <div className="mx-auto max-w-[1140px] space-y-5 animate-in fade-in-0 duration-200">
+    <div className="w-full min-w-0 space-y-5 animate-in fade-in-0 duration-200">
       {/* ============================================================ */}
       {/* 1. HERO BANNER WITH LIVE ACTION CONTROLS                     */}
       {/* ============================================================ */}
       <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-[280px]">
+          <div className="flex-1 min-w-0">
             {/* The module bar carries phase and related agents; show live agent state only while running. */}
             <div className="mb-2.5 flex flex-wrap items-center gap-2">
               {isExecuting && meta.agent && (
@@ -166,7 +166,7 @@ export function GenericModuleView({
             </div>
 
             {/* Title & Indic Transliteration */}
-            <div className="flex items-baseline gap-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h1 className="font-heading text-2xl md:text-[26px] font-bold text-white tracking-tight">
                 {meta.title}
               </h1>
