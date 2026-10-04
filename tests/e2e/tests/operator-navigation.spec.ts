@@ -9,7 +9,8 @@ test('a viewer can inspect the approval queue without a Pramaan destination', as
   await expect(page.getByRole('link', { name: /Statutory Proof Dossiers/ })).toHaveCount(0);
   await page.getByRole('link', { name: /Awaiting approval/ }).click();
   await expect(page).toHaveURL(/\/approval$/);
-  await expect(page.getByRole('main', { name: 'Approval queue' })).toBeVisible();
+  await expect(page.getByRole('main')).toHaveCount(1);
+  await expect(page.getByRole('region', { name: 'Approval queue' })).toBeVisible();
   await page.goto('/reports?tab=pramaan');
   await expect(page.getByRole('button', { name: 'Closure dossiers' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Working reports and registers' })).toHaveAttribute(
