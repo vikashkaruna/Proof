@@ -4,8 +4,24 @@ set -euo pipefail
 container="${1:?test container required}"
 database="${2:-axiom_policy_test}"
 results=$(mktemp -d)
-cleanup() { rm -rf "$results"; }
+first_pid=''
+second_pid=''
+barrier_open=false
+cleanup() {
+ if [ "$barrier_open" = true ]; then
+  printf 'rollback;\n\\q\n' >&3 2>/dev/null || true
+  exec 3>&-
+ fi
+ for worker_pid in "$first_pid" "$second_pid"; do
+  if [ -n "$worker_pid" ]; then
+   kill "$worker_pid" 2>/dev/null || true
+   wait "$worker_pid" 2>/dev/null || true
+  fi
+ done
+ rm -rf "$results"
+}
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 sql() { docker exec -i "$container" psql -X -U postgres -d "$database" -v ON_ERROR_STOP=1 -qAt "$@"; }
 # Share the lifecycle fixtures without weakening tested RPCs or writing claims.
 python3 - <<'PY' | sql
@@ -17,22 +33,42 @@ print(fixture.replace('pg_temp.', 'generic_run_race.').replace('99100400-', '991
 print('grant usage on schema generic_run_race to human_action_writer,agent_ledger_writer;')
 print('create table generic_run_race.state(run_id uuid,receipts jsonb);')
 PY
-barrier() {
- for attempt in $(seq 1 100); do
-  if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
+race() {
+ local input="$results/first-input"
+ local ready=false blocked=false first_backend_pid='' deadline
+ mkfifo "$input"
+ sql < "$input" > "$results/first" 2>&1 &
+ first_pid=$!
+ exec 3> "$input"
+ barrier_open=true
+ printf "set application_name='generic-first';begin;%s;\n" "$1" >&3
+ # Hold the transaction until its actual contender is observed. VM load
+ # cannot make the first transaction commit before the race begins.
+ deadline=$((SECONDS + 90))
+ while [ "$SECONDS" -lt "$deadline" ]; do
+  first_backend_pid="$(sql -c "select pid from pg_stat_activity where application_name='generic-first' and datname=current_database() and state='idle in transaction'")"
+  if [[ "$first_backend_pid" =~ ^[0-9]+$ ]]; then ready=true;break;fi
+  if ! kill -0 "$first_pid" 2>/dev/null;then break;fi
   sleep 0.05
  done
- echo 'Generic lifecycle concurrency barrier was not reached';exit 1
-}
-race() {
- sql -c "set application_name='generic-first';begin;$1;select pg_sleep(2);commit;" > "$results/first" 2>&1 &
- local first=$!
- barrier generic-first wait_event PgSleep
- sql -c "set application_name='generic-second';$2;" > "$results/second" 2>&1 &
- local second=$!
- barrier generic-second wait_event_type Lock
- wait "$first" || { cat "$results/first";exit 1; }
- wait "$second" || { cat "$results/second";exit 1; }
+ [ "$ready" = true ] || { echo 'First generic lifecycle transaction did not reach its barrier.' >&2;cat "$results/first";exit 1; }
+ sql -c "set application_name='generic-second';$2;" 3>&- > "$results/second" 2>&1 &
+ second_pid=$!
+ deadline=$((SECONDS + 90))
+ while [ "$SECONDS" -lt "$deadline" ]; do
+  if [ "$(sql -c "select count(*) from pg_stat_activity contender where application_name='generic-second' and datname=current_database() and wait_event_type='Lock' and $first_backend_pid=any(pg_blocking_pids(contender.pid))")" = 1 ]; then blocked=true;break;fi
+  if ! kill -0 "$second_pid" 2>/dev/null;then break;fi
+  sleep 0.05
+ done
+ [ "$blocked" = true ] || { echo 'Generic lifecycle contender did not wait for the first transaction.' >&2;cat "$results/second";exit 1; }
+ printf 'commit;\n\\q\n' >&3
+ exec 3>&-
+ barrier_open=false
+ wait "$first_pid" || { cat "$results/first";exit 1; }
+ first_pid=''
+ wait "$second_pid" || { cat "$results/second";exit 1; }
+ second_pid=''
+ rm "$input"
 }
 issue="select generic_run_race.start(jsonb_build_object('correlation',generic_run_race.id(101)))"
 race "$issue" "$issue"
