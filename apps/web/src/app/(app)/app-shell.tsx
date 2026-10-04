@@ -458,7 +458,7 @@ export function AppShell({
       {/* ============ SIDEBAR ============ */}
       <aside className="sticky top-0 z-30 hidden h-screen w-[266px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10 lg:flex">
         {sidebarContent}
-        <SidebarAgentPanel />
+        <SidebarAgentPanel capabilities={capabilities} />
       </aside>
       <dialog
         id="mobile-navigation"

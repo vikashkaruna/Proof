@@ -30,7 +30,6 @@ export default async function ClassificationPage() {
         }));
   return (
     <GenericModuleView
-      canInvokeAgent={can(Capability.AGENT_INVOKE, { role })}
       meta={{
         moduleKey: 'classification',
         title: 'Data Classification',
@@ -40,13 +39,28 @@ export default async function ClassificationPage() {
         agentKey: 'vibhaag',
         autonomy: 'L1',
         moduleId: 'M2.3',
-        desc: 'Run classification against a connected estate. Recorded activity appears below; field counts and categories require an actual assessment source.',
-        actionLabel: 'Run Classification Scan',
+        desc: 'Review recorded classification activity. Field counts and categories require observed source data.',
+        actionLabel: 'Review estate setup',
+        actionHref: can(Capability.ESTATE_MANAGE, { role }) ? '/estate/setup' : undefined,
         cards: [],
         recentEvents: events,
         telemetryTitle: 'Recorded Classification Events',
       }}
     >
+      <section
+        aria-label="Prepare classification"
+        className="rounded-xl bg-white p-4 text-sm text-slate-600"
+      >
+        <p>
+          Vibhaag needs a selected engagement and observed inventory or field hints. An interactive
+          classification run form is not yet available.
+        </p>
+        <p className="mt-2">
+          {can(Capability.ESTATE_MANAGE, { role })
+            ? 'Review estate setup to record the systems you have confirmed. Setup does not start classification.'
+            : 'Ask an estate manager to prepare the source inventory for review.'}
+        </p>
+      </section>
       {error || !data ? (
         <p role="alert">Classification ledger records are unavailable.</p>
       ) : events.length === 0 ? (

@@ -3,6 +3,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ALL_AGENTS, SidebarAgentPanel } from './sidebar-agent-panel';
+import { capabilitiesFor, Capability, UserRole } from '@axiom/types';
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
@@ -43,6 +44,8 @@ it('routes source-bound and approval-gated agents to dedicated workflows', async
   render(<SidebarAgentPanel />);
   await waitFor(() => expect(screen.getByText('No active agent runs reported')).toBeTruthy());
   for (const [name, path] of [
+    ['drishti', '/discovery'],
+    ['vibhaag', '/classification'],
     ['parikshan', '/assessment'],
     ['saakshi', '/evidence'],
     ['karya', '/approval'],
@@ -57,7 +60,61 @@ it('routes source-bound and approval-gated agents to dedicated workflows', async
     expect(screen.getByRole('link', { name: new RegExp(label) }).getAttribute('href')).toBe(path);
   }
   expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(mocks.invoke).not.toHaveBeenCalled();
 });
+
+it.each([UserRole.FOUNDER, UserRole.OWNER, UserRole.VIEWER])(
+  'offers recorded activity without sending an invalid discovery/classification run for %s',
+  async (role) => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ active_runs: [] }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<SidebarAgentPanel capabilities={capabilitiesFor(role)} />);
+    await waitFor(() => expect(screen.getByText('No active agent runs reported')).toBeTruthy());
+    for (const [name, label, path, prerequisite] of [
+      ['drishti', 'View discovery activity', '/discovery', 'source inventory or interview answers'],
+      [
+        'vibhaag',
+        'View classification activity',
+        '/classification',
+        'observed inventory or field hints',
+      ],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') }));
+      expect(screen.getByRole('link', { name: new RegExp(label) }).getAttribute('href')).toBe(path);
+      expect(document.body.textContent).toContain(prerequisite);
+      expect(document.body.textContent).toContain('An interactive run form is not yet available.');
+      expect(screen.queryByRole('button', { name: /Run Discovery|Run Classification/ })).toBeNull();
+      if (role === UserRole.FOUNDER) {
+        expect(screen.getByRole('link', { name: /Workbench/ }).getAttribute('href')).toBe(
+          `/workbench?agent=${name}`,
+        );
+      } else {
+        expect(screen.queryByRole('link', { name: /Workbench/ })).toBeNull();
+      }
+    }
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(
+      fetcher.mock.calls.every(
+        ([url, init]) => url === '/api/bff/v1/agents/runs/active' && !init?.method,
+      ),
+    ).toBe(true);
+  },
+);
+
+it.each([
+  { capabilities: [] },
+  { capabilities: [Capability.AGENT_INVOKE] },
+  { capabilities: [Capability.WORKBENCH_ACCESS] },
+])(
+  'hides direct verification unless both invocation and workbench permissions exist (%j)',
+  async ({ capabilities }) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [] })));
+    render(<SidebarAgentPanel capabilities={capabilities} />);
+    fireEvent.click(screen.getByRole('button', { name: /lekha/i }));
+    expect(screen.queryByRole('button', { name: /Verify Ledger Chain/ })).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  },
+);
 
 it('marks unreadable agent-run status unavailable instead of claiming no active runs', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
@@ -157,11 +214,11 @@ it.each([
 it('shows ledger proof only after a confirmed direct invocation', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [] })));
   mocks.invoke.mockResolvedValue({ latency_ms: 21, ledger_entry_ids: ['ledger-1', 'ledger-2'] });
-  render(<SidebarAgentPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /drishti/i }));
-  fireEvent.click(screen.getByRole('button', { name: /Run Discovery Scan/ }));
+  render(<SidebarAgentPanel capabilities={capabilitiesFor(UserRole.FOUNDER)} />);
+  fireEvent.click(screen.getByRole('button', { name: /lekha/i }));
+  fireEvent.click(screen.getByRole('button', { name: /Verify Ledger Chain/ }));
   await waitFor(() => expect(screen.getByText('✓ Succeeded')).toBeTruthy());
-  expect(mocks.invoke).toHaveBeenCalledWith('drishti', { scope: 'manual_trigger' });
+  expect(mocks.invoke).toHaveBeenCalledWith('lekha', { scope: 'manual_trigger' });
   expect(screen.getByRole('link', { name: /#ledger-1, #ledger-2/ }).getAttribute('href')).toBe(
     '/ledger?q=ledger-1',
   );
@@ -171,9 +228,9 @@ it('shows ledger proof only after a confirmed direct invocation', async () => {
 it('keeps an ambiguous direct invocation as an error without invented proof', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ active_runs: [] })));
   mocks.invoke.mockRejectedValue(new Error('private transport detail'));
-  render(<SidebarAgentPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /drishti/i }));
-  fireEvent.click(screen.getByRole('button', { name: /Run Discovery Scan/ }));
+  render(<SidebarAgentPanel capabilities={capabilitiesFor(UserRole.FOUNDER)} />);
+  fireEvent.click(screen.getByRole('button', { name: /lekha/i }));
+  fireEvent.click(screen.getByRole('button', { name: /Verify Ledger Chain/ }));
   await waitFor(() => expect(screen.getByText('✕ Error')).toBeTruthy());
   expect(document.body.textContent).toContain('Could not confirm the agent outcome.');
   expect(document.body.textContent).not.toContain('private transport detail');

@@ -30,7 +30,6 @@ export default async function DiscoveryPage() {
         }));
   return (
     <GenericModuleView
-      canInvokeAgent={can(Capability.AGENT_INVOKE, { role })}
       meta={{
         moduleKey: 'discovery',
         title: 'Data Discovery',
@@ -40,13 +39,28 @@ export default async function DiscoveryPage() {
         agentKey: 'drishti',
         autonomy: 'L1',
         moduleId: 'M2.2',
-        desc: 'Run discovery against a registered estate. Recorded activity appears below; inventory size, residency, and storage assurance require observed source data.',
-        actionLabel: 'Run Discovery Scan',
+        desc: 'Review recorded discovery activity. Inventory size, residency, and storage assurance require observed source data.',
+        actionLabel: 'Review estate setup',
+        actionHref: can(Capability.ESTATE_MANAGE, { role }) ? '/estate/setup' : undefined,
         cards: [],
         recentEvents: events,
         telemetryTitle: 'Recorded Discovery Events',
       }}
     >
+      <section
+        aria-label="Prepare discovery"
+        className="rounded-xl bg-white p-4 text-sm text-slate-600"
+      >
+        <p>
+          Drishti needs a selected engagement and source inventory or interview answers. An
+          interactive discovery run form is not yet available.
+        </p>
+        <p className="mt-2">
+          {can(Capability.ESTATE_MANAGE, { role })
+            ? 'Review estate setup to record the systems you have confirmed. Setup does not start a discovery scan.'
+            : 'Ask an estate manager to prepare the source inventory for review.'}
+        </p>
+      </section>
       {error || !data ? (
         <p role="alert">Discovery ledger records are unavailable.</p>
       ) : events.length === 0 ? (

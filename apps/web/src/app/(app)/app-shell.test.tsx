@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   switchTenant: vi.fn(),
   pathname: '/dashboard',
   search: '',
+  panelCapabilities: [] as readonly string[],
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push, refresh: state.refresh }),
@@ -17,7 +18,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(state.search),
 }));
 vi.mock('./tenant-actions', () => ({ switchTenantAction: state.switchTenant }));
-vi.mock('./sidebar-agent-panel', () => ({ SidebarAgentPanel: () => null }));
+vi.mock('./sidebar-agent-panel', () => ({
+  SidebarAgentPanel: ({ capabilities }: { capabilities: readonly string[] }) => {
+    state.panelCapabilities = capabilities;
+    return null;
+  },
+}));
 
 const tenants = [
   { id: 'tenant-alpha', name: 'Alpha Org', slug: 'alpha', role: 'viewer' },
@@ -38,6 +44,7 @@ beforeEach(() => {
   state.switchTenant.mockReset();
   state.pathname = '/dashboard';
   state.search = '';
+  state.panelCapabilities = [];
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) =>
@@ -80,6 +87,13 @@ it('shows a viewer only verified memberships and no mutating kill-switch authori
   expect(screen.getAllByText('Beta Org').length).toBeGreaterThan(0);
   expect(document.body.textContent).not.toContain('Meridian Pay');
   expect(screen.getByText('Tenant content')).toBeTruthy();
+  expect(state.panelCapabilities).toEqual(props.capabilities);
+});
+
+it('passes the active tenant capabilities to agent controls', () => {
+  const capabilities = ['agent.invoke', 'workbench.access'];
+  render(<AppShell {...props} capabilities={capabilities} />);
+  expect(state.panelCapabilities).toEqual(capabilities);
 });
 
 it('switches tenant only after the server action verifies membership', async () => {

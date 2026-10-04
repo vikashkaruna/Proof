@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { AgentName } from '@axiom/types';
+import { Capability, type AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import { AgentIcon, type AgentIconState, Badge } from '@axiom/ui';
 import { agentAccents } from '@axiom/design-tokens';
@@ -30,12 +30,12 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 1 · Discovery',
     description:
-      'Inspects registered systems through authorized discovery connectors and records observed findings.',
+      'Builds discovery proposals from supplied system inventory or interview answers. Review recorded discovery activity here.',
     statutoryBoundary:
       'Deployment region and data flows must be verified from the connected estate.',
     modulePath: '/discovery',
     moduleLabel: 'Data Discovery',
-    actionLabel: 'Run Discovery Scan',
+    actionLabel: 'View discovery activity',
   },
   {
     name: 'vibhaag',
@@ -44,12 +44,12 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 1 · Classification',
     description:
-      'Classifies observed personal-data fields using configured patterns and records review needs.',
+      'Produces field classifications from supplied inventory or field hints and flags review needs.',
     statutoryBoundary:
       'A classification is a recorded finding; legal interpretation requires human review.',
     modulePath: '/classification',
     moduleLabel: 'Data Classification',
-    actionLabel: 'Run Classification',
+    actionLabel: 'View classification activity',
   },
   {
     name: 'parikshan',
@@ -193,13 +193,14 @@ export const ALL_AGENTS: AgentActionMeta[] = [
   },
 ];
 
-const DIRECT_AGENT_NAMES = new Set<AgentName>(['drishti', 'vibhaag', 'lekha']);
+const DIRECT_AGENT_NAMES = new Set<AgentName>(['lekha']);
 
 export interface SidebarAgentPanelProps {
   transparent?: boolean;
   systemMessage?: string;
   className?: string;
   showSystemMessage?: boolean;
+  capabilities?: readonly string[];
 }
 
 export function SidebarAgentPanel({
@@ -207,11 +208,14 @@ export function SidebarAgentPanel({
   systemMessage,
   className = '',
   showSystemMessage = true,
+  capabilities = [],
 }: SidebarAgentPanelProps = {}) {
   const router = useRouter();
   const [activeAgentNames, setActiveAgentNames] = useState<Set<string> | null>(null);
   const [activeRunCount, setActiveRunCount] = useState(0);
   const [selectedAgent, setSelectedAgent] = useState<AgentActionMeta | null>(null);
+  const canUseWorkbench = capabilities.includes(Capability.WORKBENCH_ACCESS);
+  const canInvokeDirect = canUseWorkbench && capabilities.includes(Capability.AGENT_INVOKE);
 
   // Execution state tracking
   const [isExecuting, setIsExecuting] = useState(false);
@@ -298,7 +302,7 @@ export function SidebarAgentPanel({
 
   // Run agent action via BFF API
   const handleRunAgent = async (agent: AgentActionMeta) => {
-    if (isExecuting || !DIRECT_AGENT_NAMES.has(agent.name)) return;
+    if (isExecuting || !DIRECT_AGENT_NAMES.has(agent.name) || !canInvokeDirect) return;
     setIsExecuting(true);
     setLastRunResult(null);
 
@@ -507,6 +511,15 @@ export function SidebarAgentPanel({
 
           {/* Action Buttons Suite */}
           <div className="mt-2.5 flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+            {['drishti', 'vibhaag'].includes(selectedAgent.name) && (
+              <p className="text-[10px] leading-relaxed text-slate-600">
+                {selectedAgent.name === 'drishti'
+                  ? 'Discovery needs an engagement and source inventory or interview answers.'
+                  : 'Classification needs an engagement and observed inventory or field hints.'}{' '}
+                An interactive run form is not yet available. Open recorded activity for setup
+                guidance.
+              </p>
+            )}
             {!DIRECT_AGENT_NAMES.has(selectedAgent.name) ? (
               <Link
                 href={selectedAgent.modulePath}
@@ -514,7 +527,7 @@ export function SidebarAgentPanel({
               >
                 <span>{selectedAgent.actionLabel} →</span>
               </Link>
-            ) : (
+            ) : canInvokeDirect ? (
               <button
                 type="button"
                 onClick={() => handleRunAgent(selectedAgent)}
@@ -524,6 +537,11 @@ export function SidebarAgentPanel({
                 <span>⚡</span>
                 <span>{isExecuting ? 'Executing…' : selectedAgent.actionLabel}</span>
               </button>
+            ) : (
+              <p className="text-[10px] leading-relaxed text-slate-600">
+                Ledger verification requires internal workbench access and agent invocation
+                permission.
+              </p>
             )}
 
             <div className="flex items-center justify-between gap-1 text-[10px] text-slate-500 font-medium pt-0.5">
@@ -533,13 +551,17 @@ export function SidebarAgentPanel({
               >
                 {selectedAgent.moduleLabel} →
               </Link>
-              <span className="text-slate-300">·</span>
-              <Link
-                href={`/workbench?agent=${selectedAgent.name}`}
-                className="hover:text-indigo-600 hover:underline"
-              >
-                Workbench ↗
-              </Link>
+              {canUseWorkbench && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <Link
+                    href={`/workbench?agent=${selectedAgent.name}`}
+                    className="hover:text-indigo-600 hover:underline"
+                  >
+                    Workbench ↗
+                  </Link>
+                </>
+              )}
               <span className="text-slate-300">·</span>
               <Link
                 href={`/ledger?agent=${selectedAgent.name}`}
