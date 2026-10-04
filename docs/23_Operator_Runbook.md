@@ -266,6 +266,7 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 - [ ] **P1-W2a Legacy assignment policy** (W2-1) · Operator · decide: assign existing unassigned engagements to an estate by hand, or leave unassigned until reviewed (never infer scope) · Closure: the policy.
 - [ ] **P1-W2b Apply each migration batch to the deployed DB** (W2-2) · Operator · order is commit, then apply, never the reverse · Verify: same command as P0-5; also apply 0033 (creates seven empty connector tables; do not insert real credentials) · Closure: applied count and last migration name per batch.
+- [ ] **P1-W2c Operator workflow integration** · Engineering · Migration 0076 already delivers the four previously named schema gaps and BFF routes. Wire source-bound classification review/correction first, then RoPA, policy-draft review and playbooks. Do not infer scope from telemetry or invent processing facts. Candidate 0103 fixes absent-membership authority at the database boundary; apply only after exact release gates. · Closure: authorized operator actions, persistence/reload, viewer/foreign-tenant refusal, ledger provenance and end-to-end evidence.
 
 ### W3 Estate
 
