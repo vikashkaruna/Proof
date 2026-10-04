@@ -39,7 +39,8 @@ test('module pages and report views use the branded header with one accessible p
   expect(referenceGradient).toContain('gradient');
 
   for (const route of routes) {
-    await page.goto(route);
+    const response = await page.goto(route);
+    expect(response?.status(), `${route} navigation response`).toBe(200);
     await expect(page).toHaveURL(new RegExp(route.split('?')[0]!));
     const heading = page.getByRole('heading', { level: 1 });
     await expect(heading, route).toHaveCount(1);

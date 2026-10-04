@@ -44,7 +44,9 @@ test('saved human classification reviews survive reload with viewer and tenant b
 
   async function recordReview(page: Page, body: typeof declaration | typeof foreignDeclaration) {
     const response = await page.request.post(endpoint, { data: body });
-    expect(response.status()).toBe(201);
+    expect(response.status(), response.status() === 201 ? undefined : await response.text()).toBe(
+      201,
+    );
     const recorded = (await response.json()) as { reviewId: string; decision: string };
     expect(recorded.reviewId).toMatch(/^[0-9a-f-]{36}$/);
     expect(recorded.decision).toBe(body.decision);
