@@ -10,7 +10,7 @@ import { moduleBarProps } from '@/lib/module-bar';
 
 export function RegWatchClient() {
   return (
-    <main className="w-full min-w-0 space-y-6">
+    <section className="w-full min-w-0 space-y-6">
       <PageHeader
         module={moduleBarProps('regwatch')}
         title="Regulatory Watch"
@@ -25,6 +25,6 @@ export function RegWatchClient() {
         Check the official authority publications directly before making a legal or compliance
         decision.
       </p>
-    </main>
+    </section>
   );
 }

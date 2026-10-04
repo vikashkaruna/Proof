@@ -14,7 +14,7 @@ export default async function PlansListPage() {
     .order('created_at', { ascending: false });
 
   return (
-    <main className="w-full min-w-0 space-y-5" aria-label="Remediation plans">
+    <section className="w-full min-w-0 space-y-5" aria-label="Remediation plans">
       <PageHeader
         module={moduleBarProps('remediation')}
         title="Remediation plans"
@@ -49,6 +49,6 @@ export default async function PlansListPage() {
           ))}
         </ul>
       )}
-    </main>
+    </section>
   );
 }

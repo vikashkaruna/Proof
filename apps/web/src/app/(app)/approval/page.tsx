@@ -15,7 +15,7 @@ export default async function ApprovalPage() {
     .order('sequence', { ascending: true });
 
   return (
-    <main className="w-full min-w-0 space-y-5" aria-label="Approval queue">
+    <section className="w-full min-w-0 space-y-5" aria-label="Approval queue">
       <PageHeader
         module={moduleBarProps('approval')}
         title="Approval queue"
@@ -47,6 +47,6 @@ export default async function ApprovalPage() {
           ))}
         </ul>
       )}
-    </main>
+    </section>
   );
 }

@@ -107,7 +107,7 @@ export default async function DashboardPage() {
   ];
 
   return (
-    <main className="w-full min-w-0 space-y-6" aria-label="Tenant dashboard">
+    <section className="w-full min-w-0 space-y-6" aria-label="Tenant dashboard">
       <header className="rounded-2xl bg-[#1E2A4A] p-6 text-white">
         <p className="text-sm text-teal-300">Tenant dashboard</p>
         <h1 className="mt-1 font-heading text-2xl font-semibold">{tenantName}</h1>
@@ -166,6 +166,6 @@ export default async function DashboardPage() {
           </ul>
         )}
       </section>
-    </main>
+    </section>
   );
 }
