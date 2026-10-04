@@ -12,7 +12,7 @@ create function public.record_generic_agent_run_start(
  p_tenant_id uuid,p_actor_id uuid,p_agent text,p_engagement_id uuid,
  p_correlation_id uuid,p_request_hash text
 ) returns jsonb language plpgsql security definer set search_path='' as $$
-declare v_role public.user_role; v_run public.agent_runs; v_receipt bigint;
+declare v_role public.user_role; v_internal boolean; v_run public.agent_runs; v_receipt bigint;
 begin
  if p_tenant_id is null or p_actor_id is null or p_correlation_id is null
   or p_agent is null or p_agent not in ('drishti','vibhaag','parikshan','saakshi','sudhaar','lekha','nazar','sanket')
@@ -24,8 +24,9 @@ begin
  if v_role is null or v_role not in ('owner','admin','founder','axiom_analyst')
   or (p_agent in ('lekha','nazar','sanket') and v_role not in ('founder','axiom_analyst'))
  then return jsonb_build_object('error','forbidden'); end if;
- perform 1 from public.users where id=p_actor_id for share;
- if not found then return jsonb_build_object('error','forbidden'); end if;
+ select is_axiom_internal into v_internal from public.users where id=p_actor_id for share;
+ if not found or (v_role in ('founder','axiom_analyst') and v_internal is distinct from true)
+ then return jsonb_build_object('error','forbidden'); end if;
  if p_engagement_id is not null then
   perform 1 from public.engagements where tenant_id=p_tenant_id and id=p_engagement_id
    and status<>'cancelled' for share;

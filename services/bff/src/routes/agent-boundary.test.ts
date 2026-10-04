@@ -319,7 +319,7 @@ describe('confirmed runtime completion', () => {
     expect(await res.text()).not.toContain('private-runtime-error');
     expect(state.db!.rows('agent_runs')[0]?.status).toBe('failed');
     expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_invocation_failed');
-    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.failed');
+    expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.outcome_unconfirmed');
   });
   it('returns a non-success HTTP status for a runtime-reported failure and strips its payload', async () => {
     transport.mockImplementation(
@@ -341,6 +341,11 @@ describe('confirmed runtime completion', () => {
     expect(body).toMatchObject({ error: { code: 'agent_reported_failure' } });
     expect(JSON.stringify(body)).not.toMatch(/private-|output|ledger_entry_ids/);
     expect(state.db!.rows('agent_runs')[0]?.error).toBe('agent_reported_failure');
+    expect(broadcast.mock.calls.at(-1)?.[0]).toMatchObject({
+      step: 'drishti.runtime_reported_failure',
+      message: 'The runtime reported failure for agent drishti.',
+    });
+    expect(broadcast.mock.calls.at(-1)?.[0].message).not.toBe('Agent drishti failed');
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
   });
   it.each(['http', 'network', 'json'])(
@@ -359,6 +364,17 @@ describe('confirmed runtime completion', () => {
       expect(await res.text()).not.toContain('private-');
       expect(JSON.stringify(state.db!.rows('agent_runs'))).not.toContain('private-');
       expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('private-');
+      expect(broadcast.mock.calls.at(-1)?.[0]).toMatchObject({
+        step: 'drishti.outcome_unconfirmed',
+        message: expect.stringContaining('unconfirmed'),
+      });
+      expect(broadcast.mock.calls.at(-1)?.[0].message).not.toBe('Agent drishti failed');
+      expect(
+        broadcast.mock.calls.some(
+          ([event]) => event.step === 'drishti.failed' || event.step === 'drishti.succeeded',
+        ),
+      ).toBe(false);
+      expect(state.db!.rows('agent_runs')[0]?.status).toBe('failed');
     },
   );
   it('does not forward unknown top-level runtime fields on success', async () => {

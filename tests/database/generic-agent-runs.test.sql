@@ -2,12 +2,13 @@
 begin;
 create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('99100400-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m; end if; end$$;
-insert into auth.users(id,email) select pg_temp.id(n),'generic-sql-'||n||'@example.invalid' from generate_series(1,6) n;
-insert into public.users(id,email,is_axiom_internal) select pg_temp.id(n),'generic-sql-'||n||'@example.invalid',n in (4,5,6) from generate_series(1,6) n;
+insert into auth.users(id,email) select pg_temp.id(n),'generic-sql-'||n||'@example.invalid' from generate_series(1,8) n;
+insert into public.users(id,email,is_axiom_internal) select pg_temp.id(n),'generic-sql-'||n||'@example.invalid',n in (4,5,6) from generate_series(1,8) n;
 insert into public.tenants(id,slug,name) values(pg_temp.id(11),'generic-a','A'),(pg_temp.id(12),'generic-b','B');
 insert into public.tenant_users(tenant_id,user_id,role) values
  (pg_temp.id(11),pg_temp.id(1),'owner'),(pg_temp.id(11),pg_temp.id(2),'admin'),
- (pg_temp.id(11),pg_temp.id(3),'viewer'),(pg_temp.id(11),pg_temp.id(4),'founder'),(pg_temp.id(11),pg_temp.id(5),'axiom_analyst');
+ (pg_temp.id(11),pg_temp.id(3),'viewer'),(pg_temp.id(11),pg_temp.id(4),'founder'),(pg_temp.id(11),pg_temp.id(5),'axiom_analyst'),
+ (pg_temp.id(11),pg_temp.id(7),'founder'),(pg_temp.id(11),pg_temp.id(8),'axiom_analyst');
 insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(21),pg_temp.id(11),'generic-a','A'),(pg_temp.id(22),pg_temp.id(12),'generic-b','B');
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('generic-test',now(),'test','Synthetic lifecycle fixture',0);
 insert into public.engagements(id,tenant_id,estate_id,library_version,title) values
@@ -86,6 +87,34 @@ select pg_temp.ok(pg_temp.start('{"agent":"samadhan"}')->>'error'='invalid_recor
 select pg_temp.ok(pg_temp.start('{"agent":"lekha"}')->>'error'='forbidden','customer internal agent refused');
 select pg_temp.ok(pg_temp.start(jsonb_build_object('agent','lekha','actor',pg_temp.id(5),'engagement',null))->>'created'='true','internal analyst admitted without invented context');
 select pg_temp.ok(pg_temp.start('{"hash":"bad"}')->>'error'='invalid_record','hash refused');
+
+-- Role names cannot substitute for the independently revocable internal flag.
+do $$declare actor int;agent text;before_runs bigint;before_ledger bigint;r jsonb;begin
+ foreach actor in array array[7,8] loop
+  foreach agent in array array['drishti','lekha'] loop
+   select count(*) into before_runs from public.agent_runs;
+   select count(*) into before_ledger from public.audit_ledger;
+   r:=pg_temp.start(jsonb_build_object('actor',pg_temp.id(actor),'agent',agent));
+   perform pg_temp.ok(r->>'error'='forbidden','false internal flag refused '||actor||' '||agent);
+   perform pg_temp.ok((select count(*)=before_runs from public.agent_runs),'flag refusal creates zero runs');
+   perform pg_temp.ok((select count(*)=before_ledger from public.audit_ledger),'flag refusal creates zero ledger receipts');
+  end loop;
+ end loop;
+ foreach actor in array array[4,5] loop
+  perform pg_temp.ok(pg_temp.start(jsonb_build_object('actor',pg_temp.id(actor)))->>'created'='true','true internal flag ordinary agent allowed');
+  perform pg_temp.ok(pg_temp.start(jsonb_build_object('actor',pg_temp.id(actor),'agent','lekha'))->>'created'='true','true internal flag internal agent allowed');
+  update public.users set is_axiom_internal=false where id=pg_temp.id(actor);
+  select count(*) into before_runs from public.agent_runs;
+  select count(*) into before_ledger from public.audit_ledger;
+  perform pg_temp.ok(pg_temp.start(jsonb_build_object('actor',pg_temp.id(actor)))->>'error'='forbidden','revoked internal flag refused');
+  perform pg_temp.ok((select count(*)=before_runs from public.agent_runs),'revoked flag creates zero runs');
+  perform pg_temp.ok((select count(*)=before_ledger from public.audit_ledger),'revoked flag creates zero ledger receipts');
+  update public.users set is_axiom_internal=true where id=pg_temp.id(actor);
+ end loop;
+ foreach actor in array array[1,2] loop
+  perform pg_temp.ok(pg_temp.start(jsonb_build_object('actor',pg_temp.id(actor)))->>'created'='true','ordinary owner/admin needs no internal flag');
+ end loop;
+end$$;
 
 -- The producer credential cannot invent authorization/controller receipts.
 do $$declare event text;prior text:=current_user;begin

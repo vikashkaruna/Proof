@@ -4241,14 +4241,23 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    const outcomeStep = succeeded
+      ? 'succeeded'
+      : failureCode === 'agent_reported_failure'
+        ? 'runtime_reported_failure'
+        : 'outcome_unconfirmed';
     deps.realtime.broadcast({
       type: 'agent.progress',
       agent: name,
       correlationId,
       runId,
-      step: `${name}.${terminalStatus}`,
+      step: `${name}.${outcomeStep}`,
       progress: 1,
-      message: `Agent ${name} ${terminalStatus}`,
+      message: succeeded
+        ? `Agent ${name} succeeded`
+        : outcomeStep === 'outcome_unconfirmed'
+          ? `The runtime outcome for agent ${name} is unconfirmed. Inspect this run before retrying.`
+          : `The runtime reported failure for agent ${name}.`,
       occurredAt: new Date().toISOString(),
     });
     if (!succeeded)
