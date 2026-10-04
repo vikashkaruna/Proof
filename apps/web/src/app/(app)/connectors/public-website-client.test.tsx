@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PublicWebsiteClient } from './public-website-client';
+import type { PublicFormMetadata } from '@axiom/types';
 
 const check = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -33,6 +34,192 @@ const check = {
   ],
 };
 
+const metadata: PublicFormMetadata = {
+  version: 1,
+  scope: 'static_html_form_descendants',
+  sourceSha256: check.contentSha256,
+  observedFormCount: 1,
+  formsTruncated: false,
+  forms: [
+    {
+      ordinal: 1,
+      method: 'post',
+      observedControlCount: 3,
+      excludedControlCount: 1,
+      controlsTruncated: false,
+      controls: [
+        {
+          ordinal: 2,
+          element: 'input',
+          inputType: 'email',
+          requiredAttribute: true,
+          disabledAttribute: false,
+        },
+        { ordinal: 3, element: 'textarea', requiredAttribute: false, disabledAttribute: true },
+      ],
+    },
+  ],
+};
+
+it('shows source-bound starting and linked page form facts to viewers', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json({
+        data: [
+          {
+            ...check,
+            formMetadata: metadata,
+            auditPages: [
+              {
+                ...check.auditPages[0],
+                formMetadata: { ...metadata, sourceSha256: 'b'.repeat(64) },
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} />);
+  const root = await screen.findByRole('region', { name: 'Starting page static HTML forms' });
+  const contact = screen.getByRole('region', { name: 'contact static HTML forms' });
+  expect(within(root).getByText('1 form observed in retrieved static HTML.')).toBeTruthy();
+  expect(within(contact).getByText('1 form observed in retrieved static HTML.')).toBeTruthy();
+  fireEvent.click(within(root).getByText('Inspect recorded form attributes'));
+  expect(root.querySelector('details')?.open).toBe(true);
+  expect(
+    within(root).getByText(/3 controls observed · 1 excluded · 2 control details recorded/),
+  ).toBeTruthy();
+  expect(
+    within(root).getByText(
+      /Control 2: input \(email\) · Required attribute: present · Disabled attribute: absent/,
+    ),
+  ).toBeTruthy();
+  expect(
+    within(root).getByText(
+      /Control 3: textarea · Required attribute: absent · Disabled attribute: present/,
+    ),
+  ).toBeTruthy();
+  expect(
+    within(root).getByText(/backend storage and processing locations are unverified/),
+  ).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Audit public website' })).toBeNull();
+});
+
+it('distinguishes observed zero, legacy unexamined and unavailable pages', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json({
+        data: [
+          {
+            ...check,
+            formMetadata: { ...metadata, observedFormCount: 0, forms: [] },
+            auditPages: [
+              ...check.auditPages,
+              { kind: 'terms', requestedUrl: 'https://example.com/terms', status: 'unavailable' },
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} />);
+  const root = await screen.findByRole('region', { name: 'Starting page static HTML forms' });
+  expect(within(root).getByText('0 forms observed in retrieved static HTML.')).toBeTruthy();
+  expect(within(root).queryByText('Inspect recorded form attributes')).toBeNull();
+  expect(
+    within(screen.getByRole('region', { name: 'contact static HTML forms' })).getByText(
+      'Static HTML forms were not examined in this saved check.',
+    ),
+  ).toBeTruthy();
+  const unavailable = screen.getByRole('region', { name: 'terms static HTML forms' });
+  expect(
+    within(unavailable).getByText('Form inspection unavailable: this page could not be retrieved.'),
+  ).toBeTruthy();
+  expect(unavailable.textContent).not.toContain('0 forms');
+});
+
+it('makes form and control truncation visible without implying complete inventory', async () => {
+  const truncated: PublicFormMetadata = {
+    ...metadata,
+    observedFormCount: 4,
+    formsTruncated: true,
+    forms: [1, 2, 3].map((ordinal) => ({
+      ordinal,
+      method: 'get',
+      observedControlCount: 14,
+      excludedControlCount: 1,
+      controlsTruncated: true,
+      controls: Array.from({ length: 12 }, (_, index) => ({
+        ordinal: index + 2,
+        element: 'input',
+        inputType: 'text',
+        requiredAttribute: false,
+        disabledAttribute: false,
+      })),
+    })),
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(Response.json({ data: [{ ...check, formMetadata: truncated }] })),
+  );
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} />);
+  const root = await screen.findByRole('region', { name: 'Starting page static HTML forms' });
+  expect(
+    within(root).getByText('Form details are truncated: 3 of 4 observed forms are recorded.'),
+  ).toBeTruthy();
+  fireEvent.click(within(root).getByText('Inspect recorded form attributes'));
+  expect(
+    within(root).getAllByText(
+      'Control details are truncated; additional eligible controls were observed.',
+    ),
+  ).toHaveLength(3);
+  expect(root.querySelectorAll('details li li')).toHaveLength(36);
+});
+
+it.each([
+  { ...check, status: 'failed', formMetadata: metadata },
+  { ...check, formMetadata: { ...metadata, sourceSha256: 'c'.repeat(64) } },
+  { ...check, formMetadata: { ...metadata, rawValue: 'private-sentinel' } },
+  {
+    ...check,
+    formMetadata: {
+      ...metadata,
+      forms: [
+        {
+          ...metadata.forms[0],
+          controls: [
+            { ...metadata.forms[0]!.controls[0], label: 'private-sentinel' },
+            metadata.forms[0]!.controls[1],
+          ],
+        },
+      ],
+    },
+  },
+  { ...check, auditPages: [{ ...check.auditPages[0], formMetadata: metadata }] },
+  {
+    ...check,
+    auditPages: [
+      {
+        ...check.auditPages[0],
+        status: 'unavailable',
+        formMetadata: { ...metadata, sourceSha256: 'b'.repeat(64) },
+      },
+    ],
+  },
+])('fails closed rather than dropping invalid recorded form metadata %#', async (invalid) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: [invalid] })));
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} />);
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'Recent checks could not be loaded.',
+  );
+  expect(screen.queryByText('Privacy')).toBeNull();
+  expect(document.body.textContent).not.toContain('private-sentinel');
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -61,7 +248,9 @@ it('checks a public URL through the tenant-scoped BFF and shows the retrieved co
   const fetcher = vi
     .fn()
     .mockResolvedValueOnce(Response.json({ data: [] }))
-    .mockResolvedValueOnce(Response.json({ data: check }, { status: 201 }));
+    .mockResolvedValueOnce(
+      Response.json({ data: { ...check, formMetadata: metadata } }, { status: 201 }),
+    );
   vi.stubGlobal('fetch', fetcher);
   render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
   await waitFor(() =>
@@ -75,6 +264,11 @@ it('checks a public URL through the tenant-scoped BFF and shows the retrieved co
   fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
   await waitFor(() => expect(screen.getByText('How we use data')).toBeTruthy());
   expect(screen.getByText('Public website audit recorded.')).toBeTruthy();
+  expect(
+    within(screen.getByRole('region', { name: 'Starting page static HTML forms' })).getByText(
+      '1 form observed in retrieved static HTML.',
+    ),
+  ).toBeTruthy();
   expect(screen.getByText(/limited public-content audit/)).toBeTruthy();
   expect(screen.getByText(/no eligible same-site link found on the starting page/)).toBeTruthy();
   expect(screen.getByText(/Contact us/)).toBeTruthy();
