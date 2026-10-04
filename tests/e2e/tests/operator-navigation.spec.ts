@@ -32,6 +32,7 @@ test('an owner reaches Pramaan and standalone routes show their own shell titles
     'aria-current',
     'page',
   );
+  await expect(page.getByRole('main')).toHaveCount(1);
   for (const [route, title] of [
     ['/portal', 'Client Portal'],
     ['/engagements', 'Engagements'],
@@ -39,6 +40,7 @@ test('an owner reaches Pramaan and standalone routes show their own shell titles
   ] as const) {
     await page.goto(route);
     await expect(page.locator('header').first().getByText(title, { exact: true })).toBeVisible();
+    await expect(page.getByRole('main')).toHaveCount(1);
     if (route === '/engagements') {
       await expect(page.getByRole('link', { name: /Engagements/ }).first()).toHaveAttribute(
         'aria-current',
