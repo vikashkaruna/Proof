@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { publicFormMetadataSchema } from './public-form-metadata.js';
+import { publicFormMetadataSchema } from './public-form-metadata';
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
