@@ -36,11 +36,17 @@ from .agents import (
     VibhaagAgent,
 )
 from .agents.base import AgentName, AgentRunResult, DispatchContext
+from .canonicalise import canonical_json, sha256_hex
 from .config import Settings, get_settings, setup_logging
 from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
 from .evidence_client import EvidenceVault
 from .ledger_client import LedgerClient, new_correlation_id
 from .model_gateway import ModelGateway
+from .public_source_dispatch import (
+    PublicSourceAlreadyClaimedError,
+    PublicSourceInvokeRequest,
+    prepare_public_source_input,
+)
 
 AGENTS: dict[AgentName, Any] = {
     AgentName.DRISHTI: DrishtiAgent,
@@ -253,6 +259,49 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
         correlation_id=result.correlation_id,
         status=result.status,
         latency_ms=latency_ms,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        error=result.error,
+        output=result.output,
+        ledger_entry_ids=result.ledger_entry_ids,
+    )
+
+
+@app.post("/public-source/agents/{agent_name}/invoke", response_model=InvokeResponse)
+async def invoke_public_source_agent(
+    agent_name: str, request: PublicSourceInvokeRequest, req: Request
+):
+    require_internal_caller(req)
+    if agent_name not in {"drishti", "vibhaag"}:
+        raise HTTPException(status_code=404, detail="public_source_agent_refused")
+    agent_enum = AgentName(agent_name)
+    agent = app.state.agents.get(agent_enum)
+    if not agent:
+        raise HTTPException(status_code=503, detail="public_source_agent_unavailable")
+    try:
+        agent_input = await prepare_public_source_input(app.state.ledger, request, agent_name)
+    except PublicSourceAlreadyClaimedError:
+        raise HTTPException(
+            status_code=409, detail="public_source_dispatch_already_claimed"
+        ) from None
+    except Exception:
+        # Never disclose provider responses, source data or writer credentials.
+        raise HTTPException(status_code=503, detail="public_source_dispatch_unconfirmed") from None
+    t0 = time.monotonic()
+    result: AgentRunResult = await agent.invoke(
+        agent_input,
+        correlation_id=request.correlation_id,
+        dispatch_context={
+            "run_id": request.run_id,
+            "request_hash": sha256_hex(canonical_json(agent_input)),
+        },
+    )
+    return InvokeResponse(
+        agent=agent.name.value,
+        correlation_id=result.correlation_id,
+        status=result.status,
+        latency_ms=int((time.monotonic() - t0) * 1000),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         cost_usd=result.cost_usd,

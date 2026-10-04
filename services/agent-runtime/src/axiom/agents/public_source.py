@@ -2,7 +2,7 @@
 
 The dedicated BFF composition must load the actual tenant-owned check and
 engagement. These models check transport consistency only. projection_sha256
-is opaque database authority; it is not a Python canonical JSON digest.
+is an opaque database integrity digest; it is not a Python canonical JSON digest.
 """
 
 # ruff: noqa: N815 -- Preserve the existing shared public form metadata wire names.
