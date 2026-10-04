@@ -80,7 +80,7 @@ export default async function OnboardingProposalsPage() {
     }
   }
   return (
-    <div className="mx-auto flex max-w-[1100px] flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         title="Onboarding proposals"
         description="Axiom staff prepare the inventory. A client owner or admin reviews the original intake and proposed mappings before systems are added."

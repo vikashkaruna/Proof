@@ -125,12 +125,14 @@ it('keeps failed or ambiguous invocations unconfirmed and does not show a proof 
 it('renders the shared module context outside the heading', () => {
   render(<AssessmentClient snapshot={null} />);
   const meta = moduleMeta('assessment');
+  const heading = screen.getByRole('heading', { name: 'Assessment pipeline' });
+  const provenance = screen.getByTestId('assessment-provenance');
   expect(meta.moduleId).toBe('M0.3');
   expect(screen.getByText(meta.hi)).toBeTruthy();
   expect(screen.getByText(meta.moduleId ?? '')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Assessment pipeline' }).textContent).not.toContain(
-    meta.hi,
-  );
+  expect(heading.textContent).not.toContain(meta.hi);
+  expect(heading.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(4);
+  expect(screen.getByRole('region', { name: 'Saved control results' })).toBeTruthy();
 });
 
 it('labels each pipeline stage through AgentLabel; a finished run is static, not animated', async () => {

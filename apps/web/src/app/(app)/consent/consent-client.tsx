@@ -147,7 +147,7 @@ export function ConsentClient({ tenantId, canManage }: { tenantId: string; canMa
   const disabled = loading || busy;
   const purpose = snapshot?.purposes.find((p) => p.id === selectedPurpose);
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="w-full min-w-0 space-y-6">
       <PageHeader
         module={moduleBarProps('consent')}
         title="Consent register"

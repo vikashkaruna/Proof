@@ -200,7 +200,7 @@ export default async function LedgerPage({
   }));
 
   return (
-    <div className="mx-auto max-w-[1180px] space-y-5 animate-in fade-in-0 duration-200">
+    <div className="w-full min-w-0 space-y-5 animate-in fade-in-0 duration-200">
       {/* ============================================================ */}
       {/* 1. HERO BANNER (Design System)                               */}
       {/* ============================================================ */}
