@@ -5,6 +5,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 tenant='99749999-0000-4000-8000-000000000010'
 owner='99749999-0000-4000-8000-000000000001'
 founder='99749999-0000-4000-8000-000000000002'
@@ -31,21 +32,7 @@ end \$\$;
 SQL
 race() {
  local label="$1" first="$2" second="$3" first_role="${4:-statutory_proof_writer}" second_role="${5:-statutory_proof_writer}"
- sql -c "set application_name='$label-first'; begin; set local role $first_role; $first; select pg_sleep(8); commit;" > "$result_dir/$label-first" 2>&1 &
- local first_pid=$! ready=false blocked=false
- for attempt in $(seq 1 60); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
-  sleep 0.05
- done
- [ "$ready" = true ] || { echo "Race $label did not reach the first writer hold" >&2; cat "$result_dir/$label-first"; exit 1; }
- sql -c "set application_name='$label-second'; set role $second_role; $second;" > "$result_dir/$label-second" 2>&1 &
- local second_pid=$!
- for attempt in $(seq 1 40); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
-  sleep 0.05
- done
- [ "$blocked" = true ] || { echo "Race $label did not block the second writer" >&2; cat "$result_dir/$label-second"; exit 1; }
- wait "$first_pid"; wait "$second_pid"
+ race_run "set local role $first_role; $first" "set role $second_role; $second" "$result_dir/$label-first" "$result_dir/$label-second"
 }
 member=$(sql -c "select id from public.evidence_object_versions where tenant_id='$tenant'")
 prepare="select public.prepare_evidence_pack('$tenant','$owner','$key','Raced pack','$engagement',null,array['$member'::uuid],gen_random_uuid())"

@@ -5,6 +5,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 tenant='99739999-0000-4000-8000-000000000010'
 owner='99739999-0000-4000-8000-000000000001'
 key='99739999-0000-4000-8000-000000000030'
@@ -17,21 +18,7 @@ SQL
 request=$(sql -c "select jsonb_build_object('content_hash',repeat('b',64),'byte_size',3,'mime_type','text/plain','evidence_type','document','control_ids','[]'::jsonb,'engagement_id',null,'collected_by_agent','human','provider','s3-compatible','bucket','axiom-test-vault','object_key','tenants/$tenant/evidence-ingestions/$key/'||repeat('b',64),'retention_policy','seven_years','legal_hold',false)")
 race() {
  local label="$1" first="$2" second="$3" role_name="${4:-evidence_ingestion_writer}"
- sql -c "set application_name='$label-first'; begin; set local role $role_name; $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
- local first_pid=$! ready=false blocked=false
- for attempt in $(seq 1 60); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
-  sleep 0.05
- done
- [ "$ready" = true ] || { cat "$result_dir/$label-first"; exit 1; }
- sql -c "set application_name='$label-second'; set role evidence_ingestion_writer; $second;" > "$result_dir/$label-second" 2>&1 &
- local second_pid=$!
- for attempt in $(seq 1 40); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
-  sleep 0.05
- done
- [ "$blocked" = true ] || { cat "$result_dir/$label-second"; exit 1; }
- wait "$first_pid"; wait "$second_pid"
+ race_run "set local role $role_name; $first" "set role evidence_ingestion_writer; $second" "$result_dir/$label-first" "$result_dir/$label-second"
 }
 begin="select public.begin_evidence_ingest('$tenant','$owner','$key','$request',gen_random_uuid())"
 race evidence-begin "$begin" "$begin"

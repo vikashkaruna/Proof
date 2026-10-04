@@ -4,25 +4,12 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql -c 'create schema dispatch_race'
 sed '/set local role service_role/,$d' tests/database/assessment-dispatch.test.sql | sed '/^begin;$/d;s/pg_temp/dispatch_race/g' | sql
 sql -c 'grant usage on schema dispatch_race to service_role; grant execute on all functions in schema dispatch_race to service_role;'
-barrier() {
- for attempt in $(seq 1 80); do
-  if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
-  sleep 0.05
- done
- echo 'Dispatch concurrency barrier not reached'; exit 1
-}
 race() {
- sql -c "set application_name='dispatch-first'; begin; $1; select pg_sleep(4); commit;" > "$result_dir/first" 2>&1 &
- local first_pid=$!
- barrier dispatch-first wait_event PgSleep
- sql -c "set application_name='dispatch-second'; $2;" > "$result_dir/second" 2>&1 &
- local second_pid=$!
- barrier dispatch-second wait_event_type Lock
- wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
- wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
+ race_run "$1" "$2" "$result_dir/first" "$result_dir/second" "${3:-blocked}"
 }
 race 'set local role service_role; select dispatch_race.enqueue()' 'set role service_role; select dispatch_race.enqueue()'
 [ "$(sql -c 'select count(*) from public.agent_runs where tenant_id=dispatch_race.id(11)')" = 1 ]
