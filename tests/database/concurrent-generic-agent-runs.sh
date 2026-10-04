@@ -98,5 +98,9 @@ race "$finish" "$cancel"
 [ "$(sql -c 'select status from public.agent_runs where id=(select run_id from generic_run_race.state)')" = succeeded ]
 race "delete from public.tenant_users where tenant_id=generic_run_race.id(11) and user_id=generic_run_race.id(1)" 'select generic_run_race.start()'
 rg -q forbidden "$results/second"
+race "update public.users set is_axiom_internal=false where id=generic_run_race.id(4)" "select generic_run_race.start(jsonb_build_object('actor',generic_run_race.id(4)))"
+rg -q forbidden "$results/second"
+[ "$(sql -c "select count(*) from public.agent_runs where tenant_id=generic_run_race.id(11) and metadata->>'requested_by'=generic_run_race.id(4)::text")" = 0 ]
+[ "$(sql -c "select count(*) from public.audit_ledger where tenant_id=generic_run_race.id(11) and actor_id=generic_run_race.id(4)::text")" = 0 ]
 sql -c 'drop schema generic_run_race cascade' >/dev/null 2>&1
-echo 'Generic lifecycle concurrency: one dispatch, one settlement, cancellation and revocation serialized.'
+echo 'Generic lifecycle concurrency: one dispatch, one settlement, cancellation, membership and internal-flag revocation serialized.'
