@@ -5,17 +5,18 @@ import { useRouter } from 'next/navigation';
 import { Button, Card } from '@axiom/ui';
 
 const STORAGE_KEY = 'axiom_invitation_token';
+const ACCEPTED_KEY = 'axiom_invitation_accepted_at';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 let captured: string | null | undefined;
 
 /** Moves a fragment token into session storage once; stable across renders. */
 function captureToken(): string | null {
-  if (captured !== undefined) return captured;
   const fromHash = new URLSearchParams(window.location.hash.slice(1)).get('token');
   if (fromHash && TOKEN.test(fromHash)) {
     try {
       sessionStorage.setItem(STORAGE_KEY, fromHash);
+      sessionStorage.removeItem(ACCEPTED_KEY);
     } catch {
       // Storage can be unavailable; the token is still usable in this page view.
     }
@@ -24,6 +25,7 @@ function captureToken(): string | null {
     captured = fromHash;
     return captured;
   }
+  if (captured !== undefined) return captured;
   let stored: string | null = null;
   try {
     stored = sessionStorage.getItem(STORAGE_KEY);
@@ -33,16 +35,26 @@ function captureToken(): string | null {
   captured = stored && TOKEN.test(stored) ? stored : null;
   return captured;
 }
+function recentlyAccepted(): boolean {
+  try {
+    const at = Number(sessionStorage.getItem(ACCEPTED_KEY));
+    return at > 0 && Date.now() - at < 10 * 60_000;
+  } catch {
+    return false;
+  }
+}
 const subscribe = () => () => {};
 
 export function InviteAccept() {
   const router = useRouter();
   // undefined while server rendering; the token is read only in the browser.
   const token = useSyncExternalStore(subscribe, captureToken, () => undefined);
+  const acceptedFromStore = useSyncExternalStore(subscribe, recentlyAccepted, () => false);
   const ready = token !== undefined;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [accepted, setAccepted] = useState(false);
+  const [acceptedNow, setAcceptedNow] = useState(false);
+  const accepted = acceptedNow || acceptedFromStore;
   const key = useRef<string | null>(null);
 
   useEffect(() => {
@@ -85,12 +97,13 @@ export function InviteAccept() {
       captured = null;
       try {
         sessionStorage.removeItem(STORAGE_KEY);
+        sessionStorage.setItem(ACCEPTED_KEY, String(Date.now()));
       } catch {
         // Nothing to clean up.
       }
       // Membership is verified server-side on every request; this only selects it.
       document.cookie = `axiom_active_tenant=${body.data.tenantId}; path=/; max-age=31536000; SameSite=Lax`;
-      setAccepted(true);
+      setAcceptedNow(true);
       router.push('/dashboard');
     } catch {
       setMessage('The result is unknown. Select Accept again; it is safe to retry.');

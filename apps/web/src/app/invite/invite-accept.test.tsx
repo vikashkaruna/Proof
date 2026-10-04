@@ -9,6 +9,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   push.mockReset();
@@ -24,7 +25,7 @@ it('hides a fragment token, redirects a signed-out caller, and accepts only a re
   vi.stubGlobal('fetch', fetcher);
   vi.stubGlobal('crypto', { randomUUID: () => 'uuid-1' });
   const fallbackTimer = vi.spyOn(window, 'setTimeout');
-  render(<InviteAccept />);
+  const view = render(<InviteAccept />);
   const button = await screen.findByRole('button', { name: 'Accept invitation' });
   expect(window.location.hash).toBe('');
   expect(sessionStorage.getItem('axiom_invitation_token')).toBe(token);
@@ -41,4 +42,14 @@ it('hides a fragment token, redirects a signed-out caller, and accepts only a re
   expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ token });
   expect(document.cookie).toContain('axiom_active_tenant=tenant-1');
   expect(sessionStorage.getItem('axiom_invitation_token')).toBeNull();
+  view.unmount();
+  render(<InviteAccept />);
+  expect(screen.getByRole('link', { name: 'Open dashboard' })).toBeTruthy();
+  expect(screen.queryByText(/no invitation token/i)).toBeNull();
+
+  cleanup();
+  window.history.replaceState(null, '', `/invite#token=${'b'.repeat(43)}`);
+  render(<InviteAccept />);
+  expect(await screen.findByRole('button', { name: 'Accept invitation' })).toBeTruthy();
+  expect(sessionStorage.getItem('axiom_invitation_accepted_at')).toBeNull();
 });
