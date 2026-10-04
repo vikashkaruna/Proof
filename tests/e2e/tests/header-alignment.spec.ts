@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { createMfaAccount, selectTenant, signInAs } from '../fixtures';
+import { createMfaAccount, selectTenant, signIn, signInAs } from '../fixtures';
 import { repoRoot } from '../target';
 
 const routes = [
@@ -179,8 +179,7 @@ test('generic module pages fill desktop width and fit a narrow mobile viewport',
   page,
 }) => {
   test.setTimeout(2 * 60_000);
-  const account = await createMfaAccount('generic-layout-review', { role: 'viewer' });
-  await signInAs(page, account.email, account.password);
+  await signIn(page, 'viewer');
   await selectTenant(page, 'a');
   for (const width of [1920, 320]) {
     await page.setViewportSize({ width, height: 900 });
