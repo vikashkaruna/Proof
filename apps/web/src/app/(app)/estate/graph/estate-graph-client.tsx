@@ -1,5 +1,6 @@
 'use client';
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { AgentIcon, Button, Card, CardContent } from '@axiom/ui';
 import {
   buildEstateGraph,
@@ -9,6 +10,7 @@ import {
   type GraphInput,
   type GraphNode,
 } from '@/lib/estate-graph';
+import { serializeEstateGraph, type GraphSnapshot } from '@/lib/estate-graph-export';
 
 const WIDTH = 1000;
 const TEAL = '#0FB5A5';
@@ -17,11 +19,44 @@ const GREY = '#94A3B8';
 const COLUMN_LABELS = ['Agents', 'Connectors', 'Systems', 'Estates', 'Data categories'];
 const fieldClass = 'rounded-md border border-input bg-background p-2 text-sm';
 
-export function EstateGraph({ input }: { input: GraphInput }) {
+export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: GraphSnapshot }) {
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
+  const refresh = useCallback(() => startRefresh(() => router.refresh()), [router]);
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const timer = window.setInterval(refreshVisible, 60_000);
+    window.addEventListener('focus', refreshVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshVisible);
+    };
+  }, [refresh]);
   const [filter, setFilter] = useState<GraphFilter>({ access: 'all' });
+  const [currentTime, setCurrentTime] = useState(() => new Date(snapshot.capturedAt));
+  const effectiveTime = Math.max(currentTime.getTime(), Date.parse(snapshot.capturedAt));
+  useEffect(() => {
+    const now = Date.now();
+    const expiries = input.grants
+      .filter((g) => g.revokedAt === null)
+      .map((g) => Date.parse(g.expiresAt))
+      .filter((expiry) => Number.isFinite(expiry) && expiry > effectiveTime);
+    if (!expiries.length) return;
+    const timer = window.setTimeout(
+      () => setCurrentTime(new Date()),
+      Math.max(1, Math.min(Math.min(...expiries) - now + 1, 2_147_483_647)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [input.grants, effectiveTime]);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
-  const graph = useMemo(() => buildEstateGraph(input, filter), [input, filter]);
+  const graph = useMemo(
+    () => buildEstateGraph({ ...input, now: new Date(effectiveTime) }, filter),
+    [input, filter, effectiveTime],
+  );
   const { positions, height } = useMemo(() => layout(graph.nodes, WIDTH), [graph.nodes]);
   const node = graph.nodes.find((n) => n.id === selected) ?? null;
   const related = graph.edges.filter((e) => e.from === selected || e.to === selected);
@@ -36,8 +71,9 @@ export function EstateGraph({ input }: { input: GraphInput }) {
 
   function exportSvg() {
     if (!svg.current) return;
-    const text = new XMLSerializer().serializeToString(svg.current);
-    const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    setExportError(null);
+    const { source } = exportedGraph();
+    const url = URL.createObjectURL(new Blob([source], { type: 'image/svg+xml' }));
     download(url, 'estate-graph.svg');
     URL.revokeObjectURL(url);
   }
@@ -46,13 +82,14 @@ export function EstateGraph({ input }: { input: GraphInput }) {
    * only names already visible on the page; nothing leaves the browser. */
   function exportPng() {
     if (!svg.current) return;
-    const text = new XMLSerializer().serializeToString(svg.current);
-    const source = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    setExportError(null);
+    const artifact = exportedGraph();
+    const source = URL.createObjectURL(new Blob([artifact.source], { type: 'image/svg+xml' }));
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = WIDTH * 2;
-      canvas.height = height * 2;
+      canvas.width = artifact.width * 2;
+      canvas.height = artifact.height * 2;
       const context = canvas.getContext('2d');
       if (context) {
         context.fillStyle = '#ffffff';
@@ -60,16 +97,36 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         context.scale(2, 2);
         context.drawImage(image, 0, 0);
         canvas.toBlob((blob) => {
-          if (!blob) return;
+          if (!blob) {
+            setExportError('The PNG could not be created. Try the SVG export.');
+            return;
+          }
           const url = URL.createObjectURL(blob);
           download(url, 'estate-graph.png');
           URL.revokeObjectURL(url);
         }, 'image/png');
-      }
+      } else setExportError('The PNG could not be created. Try the SVG export.');
       URL.revokeObjectURL(source);
     };
-    image.onerror = () => URL.revokeObjectURL(source);
+    image.onerror = () => {
+      URL.revokeObjectURL(source);
+      setExportError('The PNG could not be created. Try the SVG export.');
+    };
     image.src = source;
+  }
+
+  function exportedGraph() {
+    const estate =
+      input.estates.find((e) => e.id === filter.estateId)?.name ?? 'All active estates';
+    const agent =
+      input.agents.find((a) => a.name === filter.agentName)?.displayName ?? 'All agents';
+    const access =
+      filter.access === 'read'
+        ? 'Read only'
+        : filter.access === 'write'
+          ? 'Write only'
+          : 'Read and write';
+    return serializeEstateGraph(svg.current!, snapshot, `${estate} · ${agent} · ${access}`);
   }
 
   return (
@@ -136,14 +193,27 @@ export function EstateGraph({ input }: { input: GraphInput }) {
         <Button type="button" onClick={exportPng}>
           Export PNG
         </Button>
+        <Button type="button" onClick={refresh} disabled={refreshing}>
+          {refreshing ? 'Refreshing graph…' : 'Refresh graph'}
+        </Button>
       </div>
+      <p className="text-sm text-muted-foreground" role="status">
+        Snapshot: <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>. Refreshes every
+        minute while this page is visible and when you return to it.
+      </p>
+      {exportError && <p role="alert">{exportError}</p>}
       <p className="text-sm" data-testid="graph-summary">
         {graph.edges.filter((e) => e.kind === 'read').length} read grants ·{' '}
         {graph.edges.filter((e) => e.kind === 'write').length} write grants in this view. Other
         estates or filters may have additional grants.
       </p>
       <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="overflow-x-auto rounded-md border">
+        <div
+          className="min-w-0 flex-1 overflow-x-auto rounded-md border"
+          role="region"
+          aria-label="Estate graph canvas"
+          tabIndex={0}
+        >
           <svg
             ref={svg}
             xmlns="http://www.w3.org/2000/svg"
