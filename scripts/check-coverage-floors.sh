@@ -33,20 +33,20 @@ if [ "$TS_ONLY" = false ]; then
 echo "[1/4] Verifying Python service coverage floors (>= 80%)..."
 
 echo "  -> services/agent-runtime..."
-(cd services/agent-runtime && uv run pytest --cov --cov-fail-under=80 -q) || {
+(cd services/agent-runtime && uv run --locked --extra dev pytest --cov --cov-fail-under=80 -q) || {
   echo "[!] Error: services/agent-runtime failed coverage floor (80%)"
   EXIT_CODE=1
 }
 
 echo "  -> services/temporal-workers..."
-(cd services/temporal-workers && uv run pytest --cov --cov-fail-under=80 -q) || \
-(sleep 2 && cd services/temporal-workers && uv run pytest --cov --cov-fail-under=80 -q) || {
+(cd services/temporal-workers && uv run --locked --extra dev pytest --cov --cov-fail-under=80 -q) || \
+(sleep 2 && cd services/temporal-workers && uv run --locked --extra dev pytest --cov --cov-fail-under=80 -q) || {
   echo "[!] Error: services/temporal-workers failed coverage floor (80%)"
   EXIT_CODE=1
 }
 
 echo "  -> services/model-gateway..."
-(cd services/model-gateway && uv run pytest --cov --cov-fail-under=80 -q) || {
+(cd services/model-gateway && uv run --locked --extra dev pytest --cov --cov-fail-under=80 -q) || {
   echo "[!] Error: services/model-gateway failed coverage floor (80%)"
   EXIT_CODE=1
 }

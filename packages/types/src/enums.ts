@@ -252,6 +252,8 @@ export const LedgerActionType = {
   WORKLOAD_TASK_DELEGATED: 'workload.task_delegated',
   WORKLOAD_TASK_REVOKED: 'workload.task_revoked',
   WORKLOAD_TASK_COMPLETED: 'workload.task_completed',
+  AGENT_INVOCATION_REQUESTED: 'agent.invocation.requested',
+  AGENT_INVOCATION_SETTLED: 'agent.invocation.settled',
   WORKLOAD_DISPATCH_SCHEDULED: 'workload.dispatch_scheduled',
   WORKLOAD_DISPATCH_SCHEDULE_REVIEW: 'workload.dispatch_schedule_review',
   WORKLOAD_DISPATCH_POLICY_PUBLISHED: 'workload.dispatch_policy_published',

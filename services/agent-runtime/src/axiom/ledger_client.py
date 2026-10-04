@@ -120,9 +120,14 @@ class LedgerClient:
             }
         except ValueError:
             raise RuntimeError("Audit ledger configuration was refused") from None
-        if s.environment in {"development", "test"} and is_loopback:
-            # Explicit local development/test only. Strict environments always
-            # use the real append_agent_ledger RPC, including isolated local stacks.
+        if (
+            s.environment in {"development", "test"}
+            and is_loopback
+            and getattr(s, "supabase_agent_ledger_writer_key", None) is None
+        ):
+            # Legacy local development/test without a writer remains in memory.
+            # A configured writer must use the real RPC, even on loopback, and
+            # empty or invalid credentials must fail closed below.
             return cls(in_memory=True)
         try:
             # Scoped writer identity: public gateway apikey + writer Bearer.

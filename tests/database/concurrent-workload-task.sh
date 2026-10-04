@@ -5,6 +5,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql <<'SQL'
 create schema task_race;
 create function task_race.id(n int) returns uuid language sql immutable as $$select ('48480000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
@@ -21,24 +22,8 @@ create function task_race.revoke() returns jsonb language sql security definer a
 grant usage on schema task_race to human_action_writer;
 grant execute on all functions in schema task_race to human_action_writer;
 SQL
-barrier() {
-  local name="$1" column="$2" event="$3"
-  for attempt in $(seq 1 80); do
-    if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$name' and $column='$event'")" = 1 ]; then return; fi
-    sleep 0.05
-  done
-  echo 'Task concurrency barrier not reached'; exit 1
-}
 race() {
- local first="$1" second="$2"
- sql -c "set application_name='task-first'; begin; $first; select pg_sleep(4); commit;" > "$result_dir/first" 2>&1 &
- local first_pid=$!
- barrier task-first wait_event PgSleep
- sql -c "set application_name='task-second'; $second;" > "$result_dir/second" 2>&1 &
- local second_pid=$!
- barrier task-second wait_event_type Lock
- wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
- wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
+ race_run "$1" "$2" "$result_dir/first" "$result_dir/second" "${3:-blocked}"
 }
 # Demotion holds the membership lock first: issuance must re-check after waiting.
 race "update public.tenant_users set role='viewer' where user_id=task_race.id(1)" "set role human_action_writer; select task_race.issue()"

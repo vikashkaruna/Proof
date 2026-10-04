@@ -5,6 +5,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 tenant='99729999-0000-4000-8000-000000000010'
 owner='99729999-0000-4000-8000-000000000001'
 sql <<SQL
@@ -17,22 +18,7 @@ SQL
 purpose=$(sql -c "select id from public.consent_purposes where tenant_id='$tenant'")
 race() {
   local label="$1" first="$2" second="$3" role_name="${4:-human_action_writer}"
-  sql -c "set application_name='$label-first'; begin; set local role $role_name; select $first; select pg_sleep(3); commit;" > "$result_dir/$label-first" 2>&1 &
-  local first_pid=$! ready=false blocked=false
-  for attempt in $(seq 1 60); do
-    [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
-    sleep 0.05
-  done
-  [ "$ready" = true ] || { echo "$label missed barrier"; cat "$result_dir/$label-first"; exit 1; }
-  sql -c "set application_name='$label-second'; set role human_action_writer; select $second;" > "$result_dir/$label-second" 2>&1 &
-  local second_pid=$!
-  for attempt in $(seq 1 40); do
-    [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$label-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
-    sleep 0.05
-  done
-  [ "$blocked" = true ] || { echo "$label did not contend"; cat "$result_dir/$label-second"; exit 1; }
-  wait "$first_pid"
-  wait "$second_pid"
+  race_run "set local role $role_name; select $first" "set role human_action_writer; select $second" "$result_dir/$label-first" "$result_dir/$label-second"
 }
 publish="public.publish_consent_notice('$tenant','$purpose',1,'Notice two','सूचना दो',true,'$owner',gen_random_uuid())"
 capture="public.record_consent('$tenant','$purpose',1,'cookie_id','stale-race-cookie','en','cookie',null,'$owner',gen_random_uuid())"
@@ -56,24 +42,7 @@ grep -q 'purpose_inactive' "$result_dir/consent-deactivate-first-second"
 # A trusted BFF authorization check cannot outlive a committed demotion.
 consent=$(sql -c "select id from public.consent_records where tenant_id='$tenant'")
 # PostgreSQL holds the membership row until commit; the manager check waits.
-sql -c "set application_name='consent-demote-first'; begin; update public.tenant_users set role='viewer' where tenant_id='$tenant' and user_id='$owner'; select pg_sleep(3); commit;" > "$result_dir/demote-first" 2>&1 &
-first_pid=$!
-ready=false
-for attempt in $(seq 1 60); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='consent-demote-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
-  sleep 0.05
-done
-[ "$ready" = true ] || { cat "$result_dir/demote-first"; exit 1; }
-sql -c "set application_name='consent-demote-second'; set role human_action_writer; select public.set_consent_legal_hold('$tenant','$consent',true,'$owner',gen_random_uuid());" > "$result_dir/demote-second" 2>&1 &
-second_pid=$!
-blocked=false
-for attempt in $(seq 1 40); do
-  [ "$(sql -c "select count(*) from pg_stat_activity where application_name='consent-demote-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
-  sleep 0.05
-done
-[ "$blocked" = true ] || { cat "$result_dir/demote-second"; exit 1; }
-wait "$first_pid"
-wait "$second_pid"
+race_run "update public.tenant_users set role='viewer' where tenant_id='$tenant' and user_id='$owner'" "set role human_action_writer; select public.set_consent_legal_hold('$tenant','$consent',true,'$owner',gen_random_uuid())" "$result_dir/demote-first" "$result_dir/demote-second"
 grep -q forbidden "$result_dir/demote-second"
 [ "$(sql -c "select legal_hold from public.consent_records where tenant_id='$tenant'")" = f ]
 echo 'Concurrent consent notice: publication/capture/deactivation serialize; stale notice refused; retained capture matches immutable reviewed bytes.'

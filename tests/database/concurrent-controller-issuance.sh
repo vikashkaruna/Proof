@@ -5,6 +5,8 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+race_database_user=supabase_admin
+source tests/database/lib/concurrency-barrier.sh
 sql <<'SQL'
 create schema issuer_race;
 create function issuer_race.id(n int) returns uuid language sql immutable as $$select ('74750000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
@@ -25,25 +27,12 @@ grant execute on all functions in schema issuer_race to axiom_controller_issuer;
 set role axiom_controller_issuer;
 select issuer_race.issue(10),issuer_race.issue(20),issuer_race.issue(30);
 SQL
-barrier() {
- for attempt in $(seq 1 100); do
-  if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
-  sleep 0.05
- done
- echo 'Issuer concurrency barrier not reached'; exit 1
-}
 race() {
- sql -c "set application_name='issuer-first'; begin; set local role axiom_controller_issuer; $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
- local first_pid=$!
- barrier issuer-first wait_event PgSleep
- sql -c "set application_name='issuer-second'; set role axiom_controller_issuer; $2;" > "$result_dir/second" 2>&1 &
- local second_pid=$!
- barrier issuer-second wait_event_type Lock
- wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
- if [ "$3" = success ]; then
-  wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
- else
-  if wait "$second_pid"; then echo 'Forbidden concurrent issuance accepted'; exit 1; fi
+ local expectation=success
+ if [ "$3" != success ]; then expectation=error; fi
+ race_run "set local role axiom_controller_issuer; $1" "set role axiom_controller_issuer; $2" "$result_dir/first" "$result_dir/second" blocked "$expectation"
+ if [ "$3" != success ]; then
+  [ "$race_second_status" != 0 ] || { echo 'Forbidden concurrent issuance accepted'; exit 1; }
   grep -q "$3" "$result_dir/second"
  fi
 }

@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .base import AgentName, AutonomyLevel, BaseAgent
 
@@ -127,6 +127,19 @@ class DrishtiInput(BaseModel):
     )
     systems: list[SystemRecord] = Field(default_factory=list)
 
+    @field_validator("interview")
+    @classmethod
+    def validate_interview_booleans(cls, interview: dict[str, Any]) -> dict[str, Any]:
+        # The interview remains extensible, but declarations used for discovery
+        # must be actual JSON booleans. Python truthiness turns "false" into True.
+        for answer in interview.values():
+            if not isinstance(answer, dict):
+                continue
+            for field in ("hosts_personal_data", "cross_border"):
+                if field in answer and not isinstance(answer[field], bool):
+                    raise ValueError("Interview data declarations must be booleans")
+        return interview
+
 
 class DrishtiOutput(BaseModel):
     system_count: int
@@ -230,9 +243,9 @@ class DrishtiAgent(BaseAgent[DrishtiInput, DrishtiOutput]):
                     name=val.get("name", key),
                     type=val.get("type", "unknown"),
                     description=val.get("description", ""),
-                    hosts_personal_data=bool(val.get("hosts_personal_data", False)),
+                    hosts_personal_data=val.get("hosts_personal_data", False),
                     data_categories=val.get("data_categories", []) or [],
-                    cross_border=bool(val.get("cross_border", False)),
+                    cross_border=val.get("cross_border", False),
                     processor=val.get("processor"),
                     evidence_refs=val.get("evidence_refs", []) or [],
                     region=val.get("region", "ap-south-1"),

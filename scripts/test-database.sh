@@ -2,6 +2,7 @@
 # Disposable, real PostgreSQL integration tests. Never connects to an existing DB.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+python3 -W error::ResourceWarning -m unittest discover -s tests/database/lib -p 'test_*.py'
 container="axiom-db-test-$$"
 image="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
 # Public ECR can throttle clean CI runners. Prefer Docker Hub; a pinned mirror
@@ -58,6 +59,7 @@ bash tests/database/concurrent-proposal.sh "$container"
 bash tests/database/concurrent-workload-task.sh "$container"
 bash tests/database/concurrent-workload-assessment.sh "$container"
 bash tests/database/concurrent-assessment-confirmation.sh "$container"
+bash tests/database/concurrent-generic-agent-runs.sh "$container"
 bash tests/database/concurrent-assessment-dispatch.sh "$container"
 bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"

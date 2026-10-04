@@ -4,6 +4,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 sql <<'SQL'
 create schema confirmation_race;
 create function confirmation_race.id(n int) returns uuid language sql immutable as $$select ('54540000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
@@ -36,23 +37,9 @@ select confirmation_race.finish_tool();
 create function confirmation_race.confirm_tool() returns jsonb language sql as $$select public.confirm_workload_assessment(confirmation_race.id(11),(select run_id from confirmation_race.issued))$$;
 grant execute on function confirmation_race.confirm_tool() to service_role;
 SQL
-barrier() {
-  for attempt in $(seq 1 80); do
-    if [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1' and $2='$3'")" = 1 ]; then return; fi
-    sleep 0.05
-  done
-  echo 'Confirmation concurrency barrier not reached'; exit 1
-}
 race() {
  echo 'Checking confirmation lock ordering'
- sql -c "set application_name='confirmation-first'; begin; $1; select pg_sleep(2); commit;" > "$result_dir/first" 2>&1 &
- local first_pid=$!
- barrier confirmation-first wait_event PgSleep
- sql -c "set application_name='confirmation-second'; $2;" > "$result_dir/second" 2>&1 &
- local second_pid=$!
- barrier confirmation-second wait_event_type Lock
- wait "$first_pid" || { cat "$result_dir/first"; exit 1; }
- wait "$second_pid" || { cat "$result_dir/second"; exit 1; }
+ race_run "$1" "$2" "$result_dir/first" "$result_dir/second" "${3:-blocked}"
 }
 race "update public.agent_runs set status='cancelled',completed_at=clock_timestamp() where id=(select run_id from confirmation_race.issued) and status='running'" "set role service_role; select confirmation_race.confirm_tool()"
 grep -q terminal_conflict "$result_dir/second"

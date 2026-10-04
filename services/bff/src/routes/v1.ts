@@ -4001,7 +4001,7 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'agent_not_found', message: `Unknown agent: ${name}` } }, 404);
     }
 
-    const tenantId = c.get('tenantId');
+    const tenantId = c.get('tenantId').toLowerCase();
     const parsed = z
       .object({
         tenant_id: z.uuid().optional(),
@@ -4015,6 +4015,12 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid agent input.' } }, 400);
     }
     const body = parsed.data;
+    // PostgreSQL UUIDs have canonical lower-case text; runtime string schemas
+    // otherwise retain valid upper-case IDs in ledger target references.
+    for (const key of ['tenant_id', 'tenantId', 'engagement_id', 'correlation_id'] as const) {
+      const value = body[key];
+      if (value !== undefined) body[key] = value.toLowerCase();
+    }
     if (
       (body.tenant_id && body.tenant_id !== tenantId) ||
       (body.tenantId && body.tenantId !== tenantId)
@@ -4044,7 +4050,7 @@ export function v1Routes(deps: Deps) {
         400,
       );
     }
-    const correlationId = requestedCorrelation ?? randomUUID();
+    const correlationId = requestedCorrelation?.toLowerCase() ?? randomUUID();
     const admin = createSupabaseAdmin();
     if (body.engagement_id) {
       const { data: engagement, error } = await admin
@@ -4066,31 +4072,49 @@ export function v1Routes(deps: Deps) {
     }
     // Assign the authority last; untrusted input never overrides it.
     const input = { ...body, tenant_id: tenantId };
-    let runId: string | null = null;
-
+    const requestHash = await sha256(canonicalJson(input));
+    let runId: string;
+    let writer: ReturnType<typeof createHumanActionWriter>;
     try {
-      const { data: runRow, error: runError } = await admin
-        .from('agent_runs')
-        .insert({
-          tenant_id: tenantId,
-          agent: name,
-          engagement_id: body.engagement_id ?? null,
-          correlation_id: correlationId,
-          input_redacted_hash: await sha256(canonicalJson(input)),
-          status: 'running',
-          started_at: new Date().toISOString(),
-          metadata: { requested_by: c.get('user').id },
-        })
-        .select('id')
-        .maybeSingle();
-
-      if (runError || !runRow?.id) {
-        return c.json(
-          { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
-          503,
-        );
+      writer = createHumanActionWriter();
+      const { data, error } = await writer.rpc('record_generic_agent_run_start', {
+        p_tenant_id: tenantId,
+        p_actor_id: c.get('user').id,
+        p_agent: name,
+        p_engagement_id: body.engagement_id ?? null,
+        p_correlation_id: correlationId,
+        p_request_hash: requestHash,
+      });
+      if (error) throw new Error('start_unconfirmed');
+      const parsed = z
+        .object({ run_id: z.uuid(), created: z.boolean(), status: z.string() })
+        .safeParse(data);
+      if (!parsed.success) {
+        const refusal = z
+          .object({ error: z.enum(['forbidden', 'context_refused', 'dispatch_conflict']) })
+          .safeParse(data);
+        if (refusal.success)
+          return c.json(
+            { error: { code: refusal.data.error, message: 'Agent dispatch was refused.' } },
+            refusal.data.error === 'forbidden' ? 403 : 409,
+          );
+        throw new Error('start_unconfirmed');
       }
-      runId = runRow.id;
+      runId = parsed.data.run_id;
+      if (!parsed.data.created)
+        return c.json(
+          {
+            error: {
+              code: 'agent_dispatch_exists',
+              message:
+                'This invocation is already recorded. Inspect the existing run before retrying.',
+              runId,
+              correlationId,
+            },
+          },
+          409,
+        );
+      if (parsed.data.status !== 'running') throw new Error('start_unconfirmed');
     } catch {
       logger.error({ agent: name, correlationId }, 'could not record initial agent_run row');
       return c.json(
@@ -4122,7 +4146,14 @@ export function v1Routes(deps: Deps) {
       cost_usd: z.number().nonnegative().max(9999.999999),
       error: z.string().max(256).nullable(),
       output: z.record(z.string(), z.unknown()).nullable(),
-      ledger_entry_ids: z.array(z.string().min(1).max(128)).max(1000),
+      ledger_entry_ids: z
+        .array(
+          z
+            .string()
+            .regex(/^[1-9][0-9]{0,18}$/)
+            .refine((id) => BigInt(id) <= 9223372036854775807n),
+        )
+        .max(2),
     });
     type RuntimeResult = z.infer<typeof resultSchema>;
     let result: RuntimeResult | null = null;
@@ -4137,7 +4168,11 @@ export function v1Routes(deps: Deps) {
           'X-Internal-Token': runtimeToken,
           ...(await serviceAuthHeaders(runtimeUrl)),
         },
-        body: JSON.stringify({ correlation_id: correlationId, input }),
+        body: JSON.stringify({
+          correlation_id: correlationId,
+          input,
+          dispatch_context: { run_id: runId, request_hash: requestHash },
+        }),
       });
       if (!res.ok) {
         await res.body?.cancel();
@@ -4148,7 +4183,7 @@ export function v1Routes(deps: Deps) {
         parsedResult.status === 'succeeded' &&
         (parsedResult.error !== null ||
           parsedResult.output === null ||
-          parsedResult.ledger_entry_ids.length < 2 ||
+          parsedResult.ledger_entry_ids.length !== 2 ||
           new Set(parsedResult.ledger_entry_ids).size !== parsedResult.ledger_entry_ids.length)
       )
         throw new Error('runtime_result_refused');
@@ -4165,29 +4200,32 @@ export function v1Routes(deps: Deps) {
     const succeeded = result?.status === 'succeeded';
     const terminalStatus = succeeded ? 'succeeded' : 'failed';
     try {
-      const { data: recorded, error } = await admin
-        .from('agent_runs')
-        .update({
-          status: terminalStatus,
-          completed_at: new Date().toISOString(),
-          latency_ms: result?.latency_ms ?? null,
-          input_tokens: result?.input_tokens ?? null,
-          output_tokens: result?.output_tokens ?? null,
-          total_tokens: result ? result.input_tokens + result.output_tokens : null,
-          cost_usd: result?.cost_usd ?? null,
-          error: succeeded ? null : failureCode,
-          output_redacted_hash:
-            succeeded && result ? await sha256(canonicalJson(result.output)) : null,
+      const { data: recorded, error } = await writer.rpc('record_generic_agent_run_finish', {
+        p_tenant_id: tenantId,
+        p_actor_id: c.get('user').id,
+        p_run_id: runId,
+        p_agent: name,
+        p_engagement_id: body.engagement_id ?? null,
+        p_correlation_id: correlationId,
+        p_request_hash: requestHash,
+        p_status: terminalStatus,
+        p_error_code: succeeded ? null : failureCode,
+        p_latency_ms: result?.latency_ms ?? null,
+        p_input_tokens: result?.input_tokens ?? null,
+        p_output_tokens: result?.output_tokens ?? null,
+        p_cost_usd: result?.cost_usd ?? null,
+        p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
+        p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
+        p_response_hash: succeeded && result ? await sha256(canonicalJson(result.output)) : null,
+      });
+      const confirmed = z
+        .object({
+          run_id: z.literal(runId),
+          status: z.literal(terminalStatus),
+          replayed: z.boolean(),
         })
-        .eq('id', runId)
-        .eq('tenant_id', tenantId)
-        .eq('agent', name)
-        .eq('correlation_id', correlationId)
-        .eq('status', 'running')
-        .select('id,status')
-        .maybeSingle();
-      if (error || recorded?.id !== runId || recorded?.status !== terminalStatus)
-        throw new Error('completion_not_confirmed');
+        .safeParse(recorded);
+      if (error || !confirmed.success) throw new Error('completion_not_confirmed');
     } catch {
       // An ambiguous commit is not proof of failure or rollback. Do not write
       // over a concurrently cancelled/terminal row, retry dispatch or publish
@@ -4209,14 +4247,23 @@ export function v1Routes(deps: Deps) {
       );
     }
 
+    const outcomeStep = succeeded
+      ? 'succeeded'
+      : failureCode === 'agent_reported_failure'
+        ? 'runtime_reported_failure'
+        : 'outcome_unconfirmed';
     deps.realtime.broadcast({
       type: 'agent.progress',
       agent: name,
       correlationId,
       runId,
-      step: `${name}.${terminalStatus}`,
+      step: `${name}.${outcomeStep}`,
       progress: 1,
-      message: `Agent ${name} ${terminalStatus}`,
+      message: succeeded
+        ? `Agent ${name} succeeded`
+        : outcomeStep === 'outcome_unconfirmed'
+          ? `The runtime outcome for agent ${name} is unconfirmed. Inspect this run before retrying.`
+          : `The runtime reported failure for agent ${name}.`,
       occurredAt: new Date().toISOString(),
     });
     if (!succeeded)
@@ -4224,7 +4271,14 @@ export function v1Routes(deps: Deps) {
         {
           error: {
             code: failureCode,
-            message: `Could not complete agent ${name}.`,
+            message:
+              failureCode === 'agent_invocation_failed'
+                ? 'The runtime outcome is unconfirmed. Inspect this run before retrying.'
+                : `Could not complete agent ${name}.`,
+            runtimeOutcome:
+              failureCode === 'agent_invocation_failed'
+                ? 'unconfirmed'
+                : 'runtime_reported_failure',
             runId,
             correlationId,
           },

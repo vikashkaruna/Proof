@@ -6,6 +6,7 @@ container="$1"
 result_dir=$(mktemp -d)
 trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
+source tests/database/lib/concurrency-barrier.sh
 tenant='00000000-0000-4000-8000-00000000c1e2'
 owner='00000000-0000-4000-8000-00000000c1e1'
 invitee='00000000-0000-4000-8000-00000000c1e3'
@@ -17,22 +18,8 @@ insert into public.tenant_users(tenant_id,user_id,role) values ('$tenant','$owne
 SQL
 hash() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
 
-race() { # $1 label, $2 statement run by both sessions; the first holds its transaction open
-  sql -c "set application_name='$1-first'; begin; set local role human_action_writer; select $2; select pg_sleep(3); commit;" > "$result_dir/$1-first" 2>&1 &
-  local first_pid=$! ready=false blocked=false
-  for attempt in $(seq 1 60); do
-    [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1-first' and wait_event='PgSleep'")" = 1 ] && { ready=true; break; }
-    sleep 0.05
-  done
-  [ "$ready" = true ] || { echo "$1 race missed barrier"; cat "$result_dir/$1-first"; exit 1; }
-  sql -c "set application_name='$1-second'; set role human_action_writer; select $2;" > "$result_dir/$1-second" 2>&1 &
-  local second_pid=$!
-  for attempt in $(seq 1 40); do
-    [ "$(sql -c "select count(*) from pg_stat_activity where application_name='$1-second' and wait_event_type='Lock'")" = 1 ] && { blocked=true; break; }
-    sleep 0.05
-  done
-  [ "$blocked" = true ] || { echo "$1 race did not contend"; cat "$result_dir/$1-second"; exit 1; }
-  wait "$first_pid"; wait "$second_pid"
+race() {
+  race_run "set local role human_action_writer; select $2" "set role human_action_writer; select $2" "$result_dir/$1-first" "$result_dir/$1-second"
 }
 
 create="public.create_tenant_invitation('$tenant','$owner','invite-race@test.invalid','viewer','{}',encode(gen_random_bytes(32),'hex'),72,false,gen_random_uuid())"
