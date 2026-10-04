@@ -88,6 +88,7 @@ failure send the failure (a migration checksum refusal, a `401` that is a
    JSON `[15]`. Restore generated `next-env.d.ts` before commits `[15]`.
 6. Cloud-session constraint: `registry.terraform.io` can be blocked, so
    Terraform validate/test and Helm render run only in CI there `[15]`.
+7. Local release candidate `v0.1.0-rc.1` is pinned to main `c960ed728f7660e24dfadcfc4245eba4a83adcb1` (2026-10-04). The selected Docker app is at `http://localhost:3001`; marketing is at `http://localhost:3000` and BFF health at `http://localhost:4000/health`. Selected Auth API is 60321, with migration 0102 applied. Protected persona credentials are in the ignored local review directory, never in this runbook. The signed-in owner public-website audit and viewer read-only smoke passed; do not interpret this as remote clearance or private connector execution.
 
 ## 1a. Command line: CI, build, deploy, soft stop and start
 
