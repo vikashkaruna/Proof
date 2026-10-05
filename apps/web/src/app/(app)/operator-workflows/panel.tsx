@@ -23,6 +23,9 @@ import {
 import {
   readJournal,
   JOURNAL_CHANGED,
+  JOURNAL_SAVED,
+  journalSchema,
+  notifySavedJournal,
   retainJournal,
   clearJournal,
   workflowFetch,
@@ -112,6 +115,9 @@ function Panel({
   const [rows, setRows] = useState<WorkflowRecord[]>([]);
   const [reviews, setReviews] = useState<WorkflowRecord[]>([]);
   const [ropas, setRopas] = useState<WorkflowRecord[]>([]);
+  const [sourceOffset, setSourceOffset] = useState(0);
+  const [sourceMore, setSourceMore] = useState(false);
+  const [selectedRopa, setSelectedRopa] = useState<WorkflowRecord | null>(null);
   const [offset, setOffset] = useState(0);
   const [more, setMore] = useState(false);
   const [pending, setPending] = useState<Journal | null>(null);
@@ -126,6 +132,7 @@ function Panel({
   const alive = useRef(true);
   const lock = useRef(false);
   const draftForm = useRef<HTMLFormElement>(null);
+  const reviewForms = useRef(new Map<string, HTMLFormElement>());
   async function task(work: () => Promise<void>) {
     if (lock.current) return;
     lock.current = true;
@@ -194,18 +201,33 @@ function Panel({
       );
       history = perDraft.flat();
       if (alive.current) setReviewErrors(failures);
-      const sources = workflowPageResponseSchema.parse(
-        await workflowFetch(tenantId, '/operator-workflows/records?kind=ropa&limit=50&offset=0'),
-      );
-      if (sources.data.some((r) => r.kind !== 'ropa'))
-        throw new WorkflowError('Processing sources could not be validated.');
-      if (alive.current) setRopas(sources.data.map((r) => validateRecorded(r, tenantId)));
+      await loadSources(sourceOffset);
     }
     if (alive.current) {
       setRows(next);
       setOffset(page);
       setMore(result.meta.hasMore);
       setReviews(history);
+    }
+  }
+  async function loadSources(page: number) {
+    const sources = workflowPageResponseSchema.parse(
+      await workflowFetch(
+        tenantId,
+        `/operator-workflows/records?kind=ropa&limit=50&offset=${page}`,
+      ),
+    );
+    if (
+      sources.meta.limit !== 50 ||
+      sources.meta.offset !== page ||
+      sources.data.some((r) => r.kind !== 'ropa')
+    )
+      throw new WorkflowError('Processing sources could not be validated.');
+    const validated = sources.data.map((r) => validateRecorded(r, tenantId));
+    if (alive.current) {
+      setRopas(validated);
+      setSourceOffset(page);
+      setSourceMore(sources.meta.hasMore);
     }
   }
   useEffect(() => {
@@ -223,6 +245,13 @@ function Panel({
     };
     window.addEventListener(JOURNAL_CHANGED, syncJournal);
     window.addEventListener('storage', syncJournal);
+    const savedJournal = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const parsed = journalSchema.safeParse(event.detail);
+      if (parsed.success && parsed.data.tenantId === tenantId && parsed.data.actorId === actorId)
+        resetSavedForm(parsed.data);
+    };
+    window.addEventListener(JOURNAL_SAVED, savedJournal);
     void task(async () => {
       try {
         const journal = readJournal(sessionStorage, tenantId, actorId);
@@ -242,11 +271,40 @@ function Panel({
       alive.current = false;
       window.removeEventListener(JOURNAL_CHANGED, syncJournal);
       window.removeEventListener('storage', syncJournal);
+      window.removeEventListener(JOURNAL_SAVED, savedJournal);
     };
     // Scope changes remount the keyed component and never reuse another tenant's state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  async function confirmed(journal: Journal) {
+  function resetSavedForm(journal: Journal, form?: HTMLFormElement) {
+    if (!alive.current) return;
+    const savedForm =
+      form ??
+      (journal.request.kind === kind
+        ? draftForm.current
+        : journal.request.kind === 'policy_review' && kind === 'policy_draft'
+          ? reviewForms.current.get(journal.request.payload.draftId)
+          : null);
+    savedForm?.reset();
+    if (journal.request.kind === kind) {
+      setGeneratedFrom(null);
+      setGenerationChanged(false);
+      setSelectedRopa(null);
+    }
+  }
+  async function refreshAfterOutcome(outcome: 'save' | 'cancellation' = 'save') {
+    try {
+      await load();
+    } catch {
+      if (alive.current)
+        setError(
+          outcome === 'save'
+            ? 'The saved record was confirmed, but records could not be refreshed. Use Refresh records to read it; do not submit it again.'
+            : 'Cancellation was confirmed, but records could not be refreshed. Use Refresh records to read current state.',
+        );
+    }
+  }
+  async function confirmed(journal: Journal, form?: HTMLFormElement) {
     const result = workflowRecordedResponseSchema.parse(
       await workflowFetch(
         tenantId,
@@ -257,12 +315,14 @@ function Panel({
     );
     validateRecorded(result.data, tenantId, journal.request, actorId);
     clearJournal(sessionStorage, journal);
+    resetSavedForm(journal, form);
+    notifySavedJournal(journal);
     if (alive.current) {
       setPending(null);
       setNotFound(false);
       setNotice('Saved with a human audit receipt. Reload reads the retained record.');
     }
-    await load();
+    await refreshAfterOutcome();
   }
   function submit(event: FormEvent<HTMLFormElement>, requestKind: WorkflowKind = kind) {
     event.preventDefault();
@@ -340,10 +400,7 @@ function Panel({
       setPending(journal);
       setNotFound(false);
       setNotice('');
-      await confirmed(journal);
-      form.reset();
-      setGeneratedFrom(null);
-      setGenerationChanged(false);
+      await confirmed(journal, form);
     });
   }
   async function recover() {
@@ -368,10 +425,12 @@ function Panel({
       }
       validateRecorded(response.data, tenantId, journal.request, actorId);
       clearJournal(sessionStorage, journal);
+      resetSavedForm(journal);
+      notifySavedJournal(journal);
       setPending(null);
       setNotFound(false);
       setNotice('The interrupted request was already saved. No duplicate was submitted.');
-      await load();
+      await refreshAfterOutcome();
     });
   }
   async function cancel() {
@@ -398,6 +457,10 @@ function Panel({
         );
       if (!result.cancelled) validateRecorded(result.data, tenantId, journal.request, actorId);
       clearJournal(sessionStorage, journal);
+      if (!result.cancelled) {
+        resetSavedForm(journal);
+        notifySavedJournal(journal);
+      }
       setPending(null);
       setNotFound(false);
       setNotice(
@@ -405,7 +468,7 @@ function Panel({
           ? 'Cancellation recorded. This request cannot be saved by a late response; you can correct the form and submit a new request.'
           : 'The request was already saved. Its recorded result was recovered; nothing was cancelled.',
       );
-      await load();
+      await refreshAfterOutcome(result.cancelled ? 'cancellation' : 'save');
     });
   }
   const writable = kind === 'policy_review' ? canReview : canWrite;
@@ -554,8 +617,8 @@ function Panel({
             onSubmit={submit}
             className="mt-4"
             onChange={(event) => {
-              if (!generatedFrom) return;
               const element = event.target;
+              if (!generatedFrom) return;
               if (
                 element instanceof HTMLSelectElement &&
                 (element.name === 'sourceRopaId' || element.name === 'category')
@@ -700,8 +763,26 @@ function Panel({
                     />
                   </label>
                   <Field name="sourceRopaId" label="Saved processing activity">
-                    <select className={input} name="sourceRopaId" defaultValue="">
+                    <select
+                      className={input}
+                      name="sourceRopaId"
+                      value={selectedRopa?.id ?? ''}
+                      onChange={(event) =>
+                        setSelectedRopa(
+                          ropas.find((r) => r.id === event.currentTarget.value) ??
+                            (selectedRopa?.id === event.currentTarget.value ? selectedRopa : null),
+                        )
+                      }
+                    >
                       <option value="">No linked activity (manual draft)</option>
+                      {selectedRopa && !ropas.some((r) => r.id === selectedRopa.id) && (
+                        <option value={selectedRopa.id}>
+                          {selectedRopa.kind === 'ropa'
+                            ? selectedRopa.payload.system
+                            : selectedRopa.id}{' '}
+                          · {selectedRopa.id.slice(0, 8)} (selected activity)
+                        </option>
+                      )}
                       {ropas.map((r) => (
                         <option key={r.id} value={r.id}>
                           {r.kind === 'ropa' ? r.payload.system : r.id} · {r.id.slice(0, 8)}
@@ -710,6 +791,27 @@ function Panel({
                     </select>
                   </Field>
                   <div className="md:col-span-2">
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        className={button}
+                        disabled={busy || sourceOffset === 0}
+                        onClick={() => void task(() => loadSources(Math.max(0, sourceOffset - 50)))}
+                      >
+                        Previous activities
+                      </button>
+                      <span className="text-xs text-slate-500">
+                        Showing up to 50 activities from {sourceOffset + 1}
+                      </span>
+                      <button
+                        type="button"
+                        className={button}
+                        disabled={busy || !sourceMore || sourceOffset >= 100_000}
+                        onClick={() => void task(() => loadSources(sourceOffset + 50))}
+                      >
+                        Next activities
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className={button}
@@ -719,9 +821,9 @@ function Panel({
                       Generate draft from selected activity
                     </button>
                     <p className="mt-2 text-xs text-slate-500">
-                      Uses the latest 50 saved activities. Generation replaces this editor with a
-                      reviewable privacy notice, consent notice, retention policy or agreement
-                      template.{' '}
+                      Browse saved activities using the activity page controls. Generation replaces
+                      this editor with a reviewable privacy notice, consent notice, retention policy
+                      or agreement template.{' '}
                       <Link href="/datamap" className="text-teal-700 underline">
                         Record processing facts
                       </Link>{' '}
@@ -819,6 +921,45 @@ function Panel({
             <p className="mt-1 break-all text-xs text-slate-500">
               Record {row.id} · audit receipt {row.receipt_id} · {row.created_at}
             </p>
+            {row.kind !== 'policy_review' && (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm text-teal-700">
+                  Retained provenance
+                </summary>
+                <dl className="mt-2 grid gap-2 text-sm">
+                  <div>
+                    <dt className="text-slate-500">Engagement ID</dt>
+                    <dd className="break-all">
+                      {row.payload.engagementId ?? 'No engagement assigned'}
+                    </dd>
+                  </div>
+                  {row.kind === 'policy_draft' && (
+                    <div>
+                      <dt className="text-slate-500">Processing activity ID</dt>
+                      <dd className="break-all">
+                        {row.payload.sourceRopaId ?? 'No processing activity linked'}
+                      </dd>
+                    </div>
+                  )}
+                  {(row.kind === 'ropa' || row.kind === 'policy_draft') && (
+                    <>
+                      <div>
+                        <dt className="text-slate-500">Retained observation ID</dt>
+                        <dd className="break-all">
+                          {row.payload.source?.observationId ?? 'No public observation bound'}
+                        </dd>
+                      </div>
+                      {row.payload.source && (
+                        <div>
+                          <dt className="text-slate-500">Exact observation output SHA-256</dt>
+                          <dd className="break-all">{row.payload.source.outputSha256}</dd>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </dl>
+              </details>
+            )}
             {row.kind === 'ropa' && (
               <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                 {[
@@ -904,7 +1045,14 @@ function Panel({
                   !reviews.some(
                     (r) => r.kind === 'policy_review' && r.payload.draftId === row.id,
                   ) && (
-                    <form className="mt-4 grid gap-3" onSubmit={(e) => submit(e, 'policy_review')}>
+                    <form
+                      className="mt-4 grid gap-3"
+                      ref={(form) => {
+                        if (form) reviewForms.current.set(row.id, form);
+                        else reviewForms.current.delete(row.id);
+                      }}
+                      onSubmit={(e) => submit(e, 'policy_review')}
+                    >
                       <input type="hidden" name="draftId" value={row.id} />
                       <input type="hidden" name="expectedHash" value={row.content_sha256 ?? ''} />
                       <Field name="decision" label={`Decision for ${row.payload.title}`}>

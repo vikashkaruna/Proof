@@ -8,6 +8,7 @@ import {
 
 export class WorkflowError extends Error {}
 export const JOURNAL_CHANGED = 'axiom:operator-workflow-journal-changed';
+export const JOURNAL_SAVED = 'axiom:operator-workflow-journal-saved';
 function notifyJournal() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOURNAL_CHANGED));
 }
@@ -19,6 +20,11 @@ export const journalSchema = z
   })
   .strict();
 export type Journal = z.infer<typeof journalSchema>;
+export function notifySavedJournal(journal: Journal) {
+  const detail = journalSchema.parse(journal);
+  if (typeof window !== 'undefined')
+    window.dispatchEvent(new CustomEvent(JOURNAL_SAVED, { detail }));
+}
 export function journalKey(tenant: string, actor: string) {
   return `axiom.operator-workflow.v1:${tenant}:${actor}`;
 }

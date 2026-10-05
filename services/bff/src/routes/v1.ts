@@ -6,6 +6,7 @@ import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
+import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
@@ -216,6 +217,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
+  app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());
   app.route('/', publicSourceBindingRoutes());

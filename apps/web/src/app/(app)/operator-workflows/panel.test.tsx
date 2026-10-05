@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { WorkflowPanel } from './panel';
 import { workflowRequestSchema, type WorkflowRecord } from '@axiom/types';
+import { JOURNAL_SAVED } from './request';
 const tenant = '99111000-0000-4000-8000-000000000001',
   actor = '99111000-0000-4000-8000-000000000002',
   id = '99111000-0000-4000-8000-000000000003';
@@ -403,9 +404,342 @@ it('keeps select names exact after options load so assistive tools can find docu
   render(<WorkflowPanel tenantId={tenant} actorId={actor} kind="policy_draft" canWrite />);
   await openForm('Create policy or notice draft');
   expect(screen.getByLabelText('Saved processing activity', { exact: true })).toBe(
-    screen.getByRole('combobox', { name: 'Saved processing activity', exact: true }),
+    screen.getByRole('combobox', { name: 'Saved processing activity' }),
   );
   expect(screen.getByLabelText('Document type', { exact: true })).toBe(
-    screen.getByRole('combobox', { name: 'Document type', exact: true }),
+    screen.getByRole('combobox', { name: 'Document type' }),
+  );
+});
+
+it('clears the confirmed form before a failed refresh and cannot resubmit its stale values', async () => {
+  const normalFetch = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options?: RequestInit) => {
+      if (saved && options?.method !== 'POST' && url.includes('/records?')) {
+        calls.push({ url, options });
+        throw new Error('read unavailable after confirmed save');
+      }
+      return normalFetch(url, options);
+    }),
+  );
+  await processingForm();
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await screen.findByText(/The saved record was confirmed, but records could not be refreshed/);
+  expect(sessionStorage.length).toBe(0);
+  expect(saved?.payload).toEqual(payload);
+  expect((screen.getByLabelText('System or processing activity') as HTMLInputElement).value).toBe(
+    '',
+  );
+  expect(
+    (screen.getByLabelText('Source and reason for this record') as HTMLInputElement).value,
+  ).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  expect(calls.filter((c) => c.options?.method === 'POST')).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Check retained request' })).toBeNull();
+});
+
+it('clears recovered saved inputs even if the subsequent records refresh fails', async () => {
+  interrupted = true;
+  await processingForm();
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await screen.findByRole('alert');
+  const normalFetch = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options?: RequestInit) => {
+      if (url.includes('/records?')) throw new Error('read unavailable');
+      return normalFetch(url, options);
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await screen.findByText(/The saved record was confirmed, but records could not be refreshed/);
+  expect(sessionStorage.length).toBe(0);
+  expect((screen.getByLabelText('System or processing activity') as HTMLInputElement).value).toBe(
+    '',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  expect(calls.filter((c) => c.options?.method === 'POST')).toHaveLength(1);
+});
+
+it('generates from an older activity page and preserves the selected source while browsing', async () => {
+  const olderId = '99111000-0000-4000-8000-000000000004';
+  const older = {
+    ...record,
+    id: olderId,
+    payload: { ...payload, system: 'Older website activity' },
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options?: RequestInit) => {
+      calls.push({ url, options });
+      if (url.includes('/policy-preview?'))
+        return new Response(
+          JSON.stringify({
+            data: {
+              title: 'Older source notice',
+              category: 'privacy_notice',
+              content: 'Unpublished older activity notice. Unknown facts require review.',
+              sourceRopaId: olderId,
+              engagementId: null,
+              sourceNote: 'Retained older source',
+            },
+          }),
+          { status: 200 },
+        );
+      const query = new URL(url, 'http://localhost').searchParams;
+      const offset = Number(query.get('offset'));
+      const sources = query.get('kind') === 'ropa';
+      return new Response(
+        JSON.stringify({
+          data: sources ? [offset === 0 ? record : older] : [],
+          meta: { limit: sources ? 50 : 20, offset, hasMore: sources && offset === 0 },
+        }),
+        { status: 200 },
+      );
+    }),
+  );
+  render(<WorkflowPanel tenantId={tenant} actorId={actor} kind="policy_draft" canWrite />);
+  await openForm('Create policy or notice draft');
+  expect(screen.queryByRole('option', { name: /Older website activity/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Next activities' }));
+  await screen.findByRole('option', { name: /Older website activity/ });
+  expect(calls.some((c) => c.url.includes('kind=ropa&limit=50&offset=50'))).toBe(true);
+  expect(screen.getByRole('button', { name: 'Next activities' }).hasAttribute('disabled')).toBe(
+    true,
+  );
+  fireEvent.change(screen.getByLabelText('Saved processing activity'), {
+    target: { value: olderId },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Generate draft from selected activity' }));
+  await screen.findByText(/Draft generated from the retained processing activity/);
+  expect(calls.some((c) => c.url.includes(`policy-preview?ropaId=${olderId}`))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Previous activities' }));
+  await screen.findByRole('option', { name: /Older website activity.*selected activity/ });
+  expect((screen.getByLabelText('Saved processing activity') as HTMLSelectElement).value).toBe(
+    olderId,
+  );
+  expect(screen.getByRole('button', { name: 'Save draft' }).hasAttribute('disabled')).toBe(false);
+  expect(screen.queryByText(/The generated draft uses a different source/)).toBeNull();
+  expect(
+    screen
+      .getAllByRole('option')
+      .filter((option) => option.parentElement?.getAttribute('name') === 'sourceRopaId'),
+  ).toHaveLength(3);
+});
+
+it.each(['tenant', 'offset', 'limit', 'kind'])(
+  'refuses a mismatched activity page (%s) without replacing validated choices',
+  async (mismatch) => {
+    const normalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options?: RequestInit) => {
+        if (url.includes('kind=ropa')) {
+          const next = url.includes('offset=50');
+          return new Response(
+            JSON.stringify({
+              data: [
+                next && mismatch === 'kind'
+                  ? {
+                      ...record,
+                      kind: 'delivery_task',
+                      payload: {
+                        taskName: 'Wrong activity kind',
+                        source: 'Recorded time',
+                        durationMinutes: 1,
+                        repetitions: 1,
+                        engagementId: null,
+                        notes: '',
+                      },
+                    }
+                  : next && mismatch === 'tenant'
+                    ? {
+                        ...record,
+                        tenant_id: actor,
+                        payload: { ...payload, system: 'Foreign activity' },
+                      }
+                    : record,
+              ],
+              meta: {
+                limit: next && mismatch === 'limit' ? 49 : 50,
+                offset: next ? (mismatch === 'offset' ? 0 : 50) : 0,
+                hasMore: !next,
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return normalFetch(url, options);
+      }),
+    );
+    render(<WorkflowPanel tenantId={tenant} actorId={actor} kind="policy_draft" canWrite />);
+    await openForm('Create policy or notice draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Next activities' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('option', { name: /Foreign activity/ })).toBeNull();
+    expect(screen.getByRole('option', { name: /Public website/ })).toBeTruthy();
+    expect(screen.getByText('Showing up to 50 activities from 1')).toBeTruthy();
+  },
+);
+
+it('allows read-only users to inspect exact retained source provenance without putting IDs in summaries', async () => {
+  const engagementId = '99111000-0000-4000-8000-000000000004';
+  const observationId = '99111000-0000-4000-8000-000000000005';
+  const outputSha256 = 'b'.repeat(64);
+  rows = [
+    {
+      ...record,
+      payload: { ...payload, engagementId, source: { observationId, outputSha256 } },
+    },
+  ];
+  render(<WorkflowPanel tenantId={tenant} actorId={actor} kind="ropa" canWrite={false} />);
+  const summary = await screen.findByText('Retained provenance');
+  const provenance = summary.parentElement!;
+  expect(provenance.tagName).toBe('DETAILS');
+  expect(provenance.hasAttribute('open')).toBe(false);
+  expect(summary.textContent).toBe('Retained provenance');
+  fireEvent.click(summary);
+  expect(within(provenance).getByText(engagementId)).toBeTruthy();
+  expect(within(provenance).getByText(observationId)).toBeTruthy();
+  expect(within(provenance).getByText(outputSha256)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Save processing activity' })).toBeNull();
+});
+
+it.each(['recovery', 'saved cancellation'])(
+  'clears the originating form when a sibling panel confirms its saved request via %s',
+  async (path) => {
+    interrupted = true;
+    const normalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options?: RequestInit) => {
+        if (url.includes('kind=delivery_task'))
+          return new Response(
+            JSON.stringify({ data: [], meta: { limit: 20, offset: 0, hasMore: false } }),
+            { status: 200 },
+          );
+        return normalFetch(url, options);
+      }),
+    );
+    render(
+      <>
+        <WorkflowPanel tenantId={tenant} actorId={actor} kind="ropa" canWrite />
+        <WorkflowPanel tenantId={tenant} actorId={actor} kind="delivery_task" canWrite />
+      </>,
+    );
+    const ropa = within(screen.getByRole('region', { name: 'Processing activities' }));
+    const tasks = within(screen.getByRole('region', { name: 'Delivery task capture' }));
+    await waitFor(() => {
+      expect(ropa.getByRole('button', { name: 'Refresh records' }).hasAttribute('disabled')).toBe(
+        false,
+      );
+      expect(tasks.getByRole('button', { name: 'Refresh records' }).hasAttribute('disabled')).toBe(
+        false,
+      );
+    });
+    fireEvent.click(ropa.getByText('Record processing activity'));
+    fireEvent.change(ropa.getByLabelText('System or processing activity'), {
+      target: { value: 'Public website' },
+    });
+    fireEvent.change(ropa.getByLabelText('Source and reason for this record'), {
+      target: { value: payload.sourceNote },
+    });
+    fireEvent.click(ropa.getByRole('button', { name: 'Save processing activity' }));
+    await ropa.findByRole('alert');
+    expect(sessionStorage.length).toBe(1);
+    fireEvent.click(
+      tasks.getByRole('button', {
+        name:
+          path === 'recovery'
+            ? 'Check retained request'
+            : 'Cancel retained request or recover saved result',
+      }),
+    );
+    await tasks.findByText(
+      path === 'recovery'
+        ? 'The interrupted request was already saved. No duplicate was submitted.'
+        : 'The request was already saved. Its recorded result was recovered; nothing was cancelled.',
+    );
+    expect(sessionStorage.length).toBe(0);
+    expect((ropa.getByLabelText('System or processing activity') as HTMLInputElement).value).toBe(
+      '',
+    );
+    expect(
+      (ropa.getByLabelText('Source and reason for this record') as HTMLInputElement).value,
+    ).toBe('');
+    const count = calls.filter((c) => c.options?.method === 'POST').length;
+    fireEvent.click(ropa.getByRole('button', { name: 'Save processing activity' }));
+    expect(calls.filter((c) => c.options?.method === 'POST')).toHaveLength(count);
+  },
+);
+
+it('leaves correction inputs intact when a sibling panel confirms genuine cancellation', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options?: RequestInit) => {
+      calls.push({ url, options });
+      if (url.endsWith('/cancel'))
+        return new Response(JSON.stringify({ data: null, cancelled: true }), { status: 200 });
+      if (options?.method === 'POST')
+        return new Response(JSON.stringify({ error: { code: 'source_refused' } }), { status: 404 });
+      return new Response(
+        JSON.stringify({ data: [], meta: { limit: 20, offset: 0, hasMore: false } }),
+        { status: 200 },
+      );
+    }),
+  );
+  render(
+    <>
+      <WorkflowPanel tenantId={tenant} actorId={actor} kind="ropa" canWrite />
+      <WorkflowPanel tenantId={tenant} actorId={actor} kind="delivery_task" canWrite />
+    </>,
+  );
+  const ropa = within(screen.getByRole('region', { name: 'Processing activities' }));
+  const tasks = within(screen.getByRole('region', { name: 'Delivery task capture' }));
+  await waitFor(() =>
+    expect(ropa.getByRole('button', { name: 'Refresh records' }).hasAttribute('disabled')).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(ropa.getByText('Record processing activity'));
+  fireEvent.change(ropa.getByLabelText('System or processing activity'), {
+    target: { value: 'Correctable activity' },
+  });
+  fireEvent.change(ropa.getByLabelText('Source and reason for this record'), {
+    target: { value: 'Retained human reason' },
+  });
+  fireEvent.click(ropa.getByRole('button', { name: 'Save processing activity' }));
+  await ropa.findByRole('alert');
+  fireEvent.click(
+    tasks.getByRole('button', { name: 'Cancel retained request or recover saved result' }),
+  );
+  await tasks.findByText(/Cancellation recorded/);
+  expect(sessionStorage.length).toBe(0);
+  expect((ropa.getByLabelText('System or processing activity') as HTMLInputElement).value).toBe(
+    'Correctable activity',
+  );
+  expect((ropa.getByLabelText('Source and reason for this record') as HTMLInputElement).value).toBe(
+    'Retained human reason',
+  );
+});
+
+it('does not clear local form inputs for another actor or tenant saved event', async () => {
+  await processingForm();
+  for (const scope of [
+    { tenantId: actor, actorId: actor },
+    { tenantId: tenant, actorId: id },
+  ]) {
+    window.dispatchEvent(
+      new CustomEvent(JOURNAL_SAVED, {
+        detail: {
+          ...scope,
+          request: { operationKey: id, kind: 'ropa', payload },
+        },
+      }),
+    );
+  }
+  expect((screen.getByLabelText('System or processing activity') as HTMLInputElement).value).toBe(
+    'Public website',
   );
 });

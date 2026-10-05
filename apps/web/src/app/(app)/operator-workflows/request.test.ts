@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearJournal,
+  JOURNAL_SAVED,
+  notifySavedJournal,
   readJournal,
   retainJournal,
   validateRecorded,
@@ -45,6 +47,17 @@ function storage(): Storage {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('durable browser workflow requests', () => {
+  it('notifies sibling forms of a schema-valid confirmed journal only', () => {
+    const target = new EventTarget();
+    vi.stubGlobal('window', target);
+    const listener = vi.fn();
+    target.addEventListener(JOURNAL_SAVED, listener);
+    notifySavedJournal(journal);
+    expect(listener).toHaveBeenCalledOnce();
+    expect((listener.mock.calls[0]![0] as CustomEvent).detail).toEqual(journal);
+    expect(() => notifySavedJournal({ ...journal, actorId: 'invalid' })).toThrow();
+    expect(listener).toHaveBeenCalledOnce();
+  });
   it('recovers exact bytes only in the same tenant and account', () => {
     const s = storage();
     retainJournal(s, journal);
