@@ -97,6 +97,7 @@ it('renders retained static attributes with truncation and excluded-control limi
       'Control details are truncated; additional eligible controls were observed.',
     ),
   ).toHaveLength(3);
+  // axiom-count-ok: this fixture counts HTML form controls, not compliance-library controls.
   expect(
     screen.getAllByText(/14 controls observed · 1 excluded · 12 control details recorded/),
   ).toHaveLength(3);
