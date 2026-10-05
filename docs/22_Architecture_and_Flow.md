@@ -95,7 +95,7 @@ curl -s -X POST http://localhost:4000/v1/ledger/verify \
 Must return `{"intact": true}`; on tampering the first break and sequence
 number are reported.
 
-### 1.4 Recorded public-website observations (isolated candidate)
+### 1.5 Recorded public-website observations and operator recovery
 
 The public website connector retains bounded safe HTML metadata and content
 digests. A human operator selects an existing engagement and records an
@@ -122,9 +122,7 @@ provider for structural extraction or reopen generic public invocations.
 
 Candidate bd62b391 passed actual authenticated BFF/runtime/PostgREST execution
 and readback for these two agents, with independent receipt/hash/claim checks.
-Durable operator navigation, interrupted-request reconciliation and
-source-bound human corrections remain in progress; the complete agent chain
-and remote release are not accepted. Evidence is recorded in
+Integrated 6ef987ec also passed the actual operator browser flow: select an existing saved check/binding, run Drishti, recover its completed result after a lost response, then run Vibhaag on that persisted observation. Engagement choices and observation history are posture-readable, paginated by microsecond timestamp and UUID. Reconciliation is actor-scoped and read-only. The browser retains the exact operation UUID/body in tenant/actor-scoped storage before dispatch; uncertain results keep the journal and disable new work. Only a proven not-found outcome exposes an exact retained retry; retained success is read back and validated before clearing the journal. Viewer access exposes saved facts, receipts and hashes without mutation controls. Human classification review events are refused to agent/system producer credentials by migration 0108. Source-bound human corrections remain the next increment; the complete agent chain and remote release are not accepted. Evidence is recorded in
 `21_Progress.md`; operator closure is P1-W2-public in `23_Operator_Runbook.md`.
 
 ## 2. Technical architecture
