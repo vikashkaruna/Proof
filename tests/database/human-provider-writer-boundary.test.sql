@@ -25,9 +25,11 @@ begin
     'create_ropa_record','create_policy_draft','create_playbook_entry',
     'begin_evidence_ingest','settle_evidence_ingest','note_evidence_ingest_failure'
   ] loop
-    select p.oid::regprocedure::text into strict v_signature from pg_proc p
+    perform pg_temp.ok(exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname=v_name), 'missing scoped function '||v_name);
+    for v_signature in select p.oid::regprocedure::text from pg_proc p
       join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='public' and p.proname=v_name;
+      where n.nspname='public' and p.proname=v_name loop
     v_other:=case when v_name in ('begin_evidence_ingest','settle_evidence_ingest',
       'note_evidence_ingest_failure') then 'evidence_ingestion_writer' else 'human_action_writer' end;
     perform pg_temp.ok(not has_function_privilege('service_role',v_signature,'EXECUTE')
@@ -40,6 +42,7 @@ begin
       case when v_other='human_action_writer' then 'evidence_ingestion_writer'
         else 'human_action_writer' end,v_signature,'EXECUTE'),
       'restricted roles overlap at '||v_signature);
+    end loop;
   end loop;
 end $$;
 select pg_temp.ok(not (select rolinherit or rolcanlogin or rolbypassrls from pg_roles

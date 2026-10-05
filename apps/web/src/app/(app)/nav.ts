@@ -262,10 +262,10 @@ export const APP_NAV_GROUPS: NavGroup[] = [
       },
       {
         route: '/policies',
-        en: 'Standing Policies',
+        en: 'Policies & Notices',
         hi: 'स्थायी नीतियाँ',
         phase: 'P4',
-        capability: Capability.TENANT_SETTINGS_WRITE,
+        capability: Capability.POSTURE_READ,
       },
       {
         route: '/settings',

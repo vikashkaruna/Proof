@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Capability } from '@axiom/types';
+import { Capability, UserRole, can } from '@axiom/types';
 import {
   Badge,
   Card,
@@ -15,6 +15,7 @@ import {
 import { formatDateTime, relativeTime, truncateHash } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
+import { WorkflowPanel } from '../operator-workflows/panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,14 +103,34 @@ function ScopeSummary({ scope }: { scope: Record<string, unknown> | null }) {
  * W6 standing-policy surface: the human-authored, human-approved, expiring
  * policies and what the policy engine did with them.
  *
- * The standing-policy engine itself (which issues scoped approval tokens
- * through the existing gate or escalates) has not landed — its BFF routes do
- * not exist yet — so this page is deliberately read-only: it shows the
- * policies recorded in `standing_approval_policies` and the decisions in
- * `policy_evaluations` (migration 0065), through the user-scoped client.
+ * Document drafting is a separate human-review lifecycle. Standing execution
+ * policies remain scoped to settings authority and use the existing gate.
  */
 export default async function PoliciesPage() {
-  const { supabase, tenantId } = await requireCapabilityContext(Capability.TENANT_SETTINGS_WRITE);
+  const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
+    Capability.POSTURE_READ,
+  );
+  const documents = (
+    <WorkflowPanel
+      tenantId={tenantId}
+      actorId={userId}
+      kind="policy_draft"
+      canWrite={can(Capability.ESTATE_MANAGE, { role })}
+      canReview={role === UserRole.FOUNDER && isAxiomInternal}
+    />
+  );
+  if (!can(Capability.TENANT_SETTINGS_WRITE, { role })) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          module={moduleBarProps('policies')}
+          title="Policies & Notices"
+          description="Review exact policy drafts, their sources and recorded human decisions."
+        />
+        {documents}
+      </div>
+    );
+  }
 
   const [policiesRes, evaluationsRes] = await Promise.all([
     supabase
@@ -139,9 +160,10 @@ export default async function PoliciesPage() {
       <div className="flex flex-col gap-6">
         <PageHeader
           module={moduleBarProps('policies')}
-          title="Standing Approval Policies"
-          description="Human-authored, expiring policies the engine evaluates actions against — through the approval gate, never around it."
+          title="Policies & Notices"
+          description="Review policy documents and scoped standing approvals."
         />
+        {documents}
         <p
           role="alert"
           className="rounded-md border border-ember-500 bg-ember-50 p-4 text-sm text-ember-700"
@@ -163,9 +185,10 @@ export default async function PoliciesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         module={moduleBarProps('policies')}
-        title="Standing Approval Policies"
-        description="A standing policy is authored by a human and approved by a different human, is bounded in scope, and expires. When the policy engine lands it will issue scoped approval tokens through the existing approval gate for in-policy actions and escalate everything else — it never bypasses the dry-run, rollback and token checks (BR-1/BR-2)."
+        title="Policies & Notices"
+        description="Review policy documents with source records and reasons. Standing execution approvals stay bounded in scope and pass the dry-run, rollback and token checks."
       />
+      {documents}
 
       <StatGrid>
         <Stat label="Policies" value={String(policies.length)} hint={`${active.length} active`} />
@@ -194,8 +217,7 @@ export default async function PoliciesPage() {
               <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">
                 No policy has been authored for this tenant yet. Every action therefore takes the
                 normal path: dry-run, validated rollback, a recorded human approval per instance,
-                and execution under a signed token. The authoring surface arrives with the
-                standing-policy engine.
+                and execution under a signed token.
               </p>
             </div>
           ) : (
@@ -230,8 +252,8 @@ export default async function PoliciesPage() {
         <CardContent className="flex flex-col gap-2">
           {evaluations.length === 0 ? (
             <p className="rounded-md bg-mist-50 p-3 text-xs text-slate-500">
-              No evaluations recorded. Evaluations appear once the standing-policy engine is live
-              and has judged a plan against one of these policies.
+              No evaluations recorded. Evaluations appear when the standing-policy engine judges a
+              plan against one of these policies.
             </p>
           ) : (
             <div className="overflow-x-auto rounded-md border border-slate-200">

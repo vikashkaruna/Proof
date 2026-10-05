@@ -58,14 +58,14 @@ describe('the viewer persona', () => {
     expect(routes).toContain('/approval');
   });
 
-  it('is not offered execution, connectors, policies, workbench or the partner portal', () => {
-    for (const route of ['/execution', '/connectors', '/policies', '/workbench', '/partner']) {
+  it('is not offered execution, connectors, workbench or the partner portal', () => {
+    for (const route of ['/execution', '/connectors', '/workbench', '/partner']) {
       expect(routes, `viewer should not see ${route}`).not.toContain(route);
     }
   });
 
   it('can still read plans, evidence, the ledger and their own settings', () => {
-    for (const route of ['/plans', '/evidence', '/ledger', '/settings']) {
+    for (const route of ['/plans', '/evidence', '/ledger', '/settings', '/policies']) {
       expect(routes, `viewer should see ${route}`).toContain(route);
     }
   });
@@ -109,7 +109,8 @@ describe('the approver persona', () => {
 
   it('is not offered tenant configuration', () => {
     expect(routes).not.toContain('/connectors');
-    expect(routes).not.toContain('/policies');
+    expect(routes).not.toContain('/integrations');
+    expect(routes).toContain('/policies');
   });
 });
 

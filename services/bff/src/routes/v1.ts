@@ -22,6 +22,8 @@ import { approvalExportRoutes } from './approval-exports.js';
 import { approvalProofArchiveRoutes } from './approval-proof-archive.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
+import { operatorWorkflowRoutes } from './operator-workflows.js';
+import { policyPreviewRoutes } from './policy-preview.js';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
@@ -236,6 +238,8 @@ export function v1Routes(deps: Deps) {
   app.route('/', approvalProofArchiveRoutes({ approvalEngine: deps.approvalEngine }));
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
+  app.route('/', operatorWorkflowRoutes());
+  app.route('/', policyPreviewRoutes());
   app.route('/', sovereignLicenseRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────

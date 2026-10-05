@@ -46,6 +46,8 @@ for suite in tests/database/*.test.sql; do
     sql < "$suite"
   fi
 done
+bash tests/database/operator-workflows-public-source.sh "$container"
+bash tests/database/concurrent-operator-workflows.sh "$container"
 bash tests/database/concurrent-idempotency.sh "$container"
 bash tests/database/concurrent-onboarding.sh "$container"
 bash tests/database/concurrent-execution.sh "$container"

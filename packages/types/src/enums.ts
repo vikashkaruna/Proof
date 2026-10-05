@@ -318,6 +318,7 @@ export const LedgerActionType = {
   EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
   ROPA_RECORDED: 'ropa.recorded',
+  OPERATOR_REQUEST_CANCELLED: 'operator.request.cancelled',
   POLICY_DRAFTED: 'policy.drafted',
   POLICY_REVIEWED: 'policy.reviewed',
   PLAYBOOK_CREATED: 'playbook.created',
