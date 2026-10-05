@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { buildLibrarySeed } from '../packages/control-library/src/seed.js';
-import { composeAssessmentProducer } from '../services/bff/src/workloads/assessment-producer.js';
+import { loadAssessmentHttpModules } from './lib/assessment-http-loader.js';
 import {
   AssessmentSnapshotSchema,
   AssessmentRequestReceiptSchema,
@@ -991,8 +991,10 @@ except Exception as error:
   };
   const ownerToken = await signIn(created.user!.email!, ownerPassword);
   const viewerToken = await signIn(viewer.email!, viewerPassword);
+  const { producer: producerModule, application: applicationModule } =
+    await loadAssessmentHttpModules();
   const ring = keyPolicy.snapshot().get(tenantId as TenantId)!;
-  const producer = await composeAssessmentProducer(
+  const producer = await producerModule.composeAssessmentProducer(
     {
       schemaVersion: 1,
       tenants: [
@@ -1007,7 +1009,7 @@ except Exception as error:
     db,
     { awsKms: kms, writer: () => humanWriter },
   );
-  const normalApp = (await import('../services/bff/src/app.js')).createApp({
+  const normalApp = applicationModule.createApp({
     assessmentRequests: producer,
   });
   // Standard Node HTTP transport only; every application request goes through
