@@ -2,6 +2,7 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
+import { loadParityFixture, guardedParitySql } from './lib/parity-fixture-target.js';
 import { createServer } from 'node:http';
 import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
@@ -67,6 +68,7 @@ import { AssessmentTools } from '../services/bff/src/workloads/assessment-tools.
 import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.js';
 let phase = 'setup';
 const outcomes: Record<string, boolean> = {};
+let finalizedHttpProof: Record<string, unknown> | undefined;
 async function main() {
   const input = z
     .object({
@@ -89,18 +91,9 @@ async function main() {
     })
     .strict()
     .parse(JSON.parse(readFileSync(0, 'utf8')));
-  const status = JSON.parse(readFileSync('.axiom-runtime/parity/status.json', 'utf8')) as Record<
-    string,
-    string
-  >;
-  const url = new URL(status.API_URL!);
-  assert(
-    url.protocol === 'http:' &&
-      ['localhost', '127.0.0.1'].includes(url.hostname) &&
-      url.port === '56321' &&
-      !url.username &&
-      !url.password,
-  );
+  const selectedParity = loadParityFixture();
+  const status = selectedParity.status;
+  const url = new URL(selectedParity.apiOrigin);
   const db = createClient(url.origin, status.SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -815,27 +808,9 @@ except Exception as error:
           outcomes['retention-preserves-recent-confirmation'] = true;
           // Synthetic local fixture only: advance its confirmation age. No
           // production clock override or backend write route is introduced.
-          execFileSync(
-            'docker',
-            [
-              'exec',
-              '-i',
-              'supabase_db_axiom-w0-parity',
-              'psql',
-              '-X',
-              '-U',
-              'postgres',
-              '-d',
-              'postgres',
-              '-v',
-              'ON_ERROR_STOP=1',
-              '-q',
-            ],
-            {
-              input: `update public.workload_assessment_packets set finalized_at=clock_timestamp()-interval '91 days' where tenant_id='${tenantId}' and run_id='${task.runId}';`,
-              stdio: ['pipe', 'pipe', 'pipe'],
-              timeout: 10000,
-            },
+          guardedParitySql(
+            `update public.workload_assessment_packets set finalized_at=clock_timestamp()-interval '91 days' where tenant_id='${tenantId}' and run_id='${task.runId}';`,
+            'postgres',
           );
           const receipt = await retention.purgeNext();
           assert.equal(receipt.status, 'purged');
@@ -1101,6 +1076,11 @@ except Exception as error:
     headers: { ...headers, 'content-type': 'application/json', 'idempotency-key': operationKey },
     body: JSON.stringify(body),
   });
+  // The outer Python harness consumes stdout as one allowlisted JSON result.
+  // Suppress only console request tracing while exercising the unchanged full
+  // middleware chain. Auth/MFA/controller assertions and private errors remain.
+  const originalConsoleLog = console.log;
+  console.log = () => {};
   try {
     await request('/v1/assessment', 403, { headers: ownerHeaders });
     phase = 'normal-auth-mfa-enrol';
@@ -1339,35 +1319,18 @@ except Exception as error:
     const actual = check(
       await db
         .from('workload_assessment_packets')
-        .select('result,result_digest,library_digest,finalized_receipt')
+        .select(
+          'result,result_digest,library_digest,started_receipt,completed_receipt,finalized_receipt',
+        )
         .eq('tenant_id', tenantId)
         .eq('run_id', accepted.runId)
         .single(),
     );
     assert(actual?.finalized_receipt);
     assert.equal(actual.result_digest, finalized.finalization.resultDigest);
-    const sqlHash = execFileSync(
-      'docker',
-      [
-        'exec',
-        '-i',
-        'supabase_db_axiom-w0-parity',
-        'psql',
-        '-X',
-        '-U',
-        'postgres',
-        '-d',
-        'postgres',
-        '-v',
-        'ON_ERROR_STOP=1',
-        '-Atq',
-      ],
-      {
-        input: `select p.result_digest=encode(sha256(convert_to(p.result::text,'UTF8')),'hex') and r.output_redacted_hash=p.result_digest from public.workload_assessment_packets p join public.agent_runs r on r.id=p.run_id and r.tenant_id=p.tenant_id where p.tenant_id='${tenantId}' and p.run_id='${accepted.runId}';`,
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 10000,
-      },
+    const sqlHash = guardedParitySql(
+      `select p.result_digest=encode(sha256(convert_to(p.result::text,'UTF8')),'hex') and r.output_redacted_hash=p.result_digest from public.workload_assessment_packets p join public.agent_runs r on r.id=p.run_id and r.tenant_id=p.tenant_id where p.tenant_id='${tenantId}' and p.run_id='${accepted.runId}';`,
+      'postgres',
     ).trim();
     assert.equal(sqlHash, 't');
     const humanRequests = check(
@@ -1432,11 +1395,46 @@ except Exception as error:
     outcomes['normal-auth-finalized-library011-46-controls-65-unknown-no-confirmed-compliance'] =
       true;
     outcomes['normal-auth-full-jsonb-packet-hash-one-human-request-zero-chain-violations'] = true;
+    finalizedHttpProof = {
+      kind: 'isolated-normal-auth-finalized-assessment',
+      projectId: selectedParity.projectId,
+      stateDirectory: selectedParity.stateDirectory,
+      databaseId: selectedParity.databaseId,
+      apiOrigin: selectedParity.apiOrigin,
+      tenantId,
+      actorId,
+      engagementId,
+      jobId,
+      runId: accepted.runId,
+      inputHash: expectedInputHash,
+      libraryVersion: acceptanceLibrary.version,
+      libraryDigest: actual.library_digest,
+      resultDigest: actual.result_digest,
+      receipts: {
+        started: String(actual.started_receipt),
+        completed: String(actual.completed_receipt),
+        finalized: String(actual.finalized_receipt),
+      },
+      knownBooleanQuestions: 65,
+      unknownDeclarations: 65,
+      controlCount: 46,
+      estimates: 'provisional',
+      privateCompanyFactsConfirmed: false,
+      fullJsonbHashVerified: true,
+      ledgerViolations: 0,
+      kms: 'synthetic-local-aes-gcm-port',
+      cloudKmsOrIamAccepted: false,
+      allAgentEndToEndAccepted: false,
+    };
   } finally {
-    httpServer.closeAllConnections?.();
-    await new Promise<void>((resolve, reject) =>
-      httpServer.close((error) => (error ? reject(error) : resolve())),
-    );
+    try {
+      httpServer.closeAllConnections?.();
+      await new Promise<void>((resolve, reject) =>
+        httpServer.close((error) => (error ? reject(error) : resolve())),
+      );
+    } finally {
+      console.log = originalConsoleLog;
+    }
   }
 
   phase = 'vm-controller-integration';
@@ -1905,27 +1903,9 @@ except Exception as error:
             // Acceptance fixture only: advance the persisted lease deadline after
             // a lost start response, avoiding a three-minute test wall-clock wait.
             // No task lifetime, claim or execution authority is changed.
-            execFileSync(
-              'docker',
-              [
-                'exec',
-                '-i',
-                'supabase_db_axiom-w0-parity',
-                'psql',
-                '-X',
-                '-U',
-                'postgres',
-                '-d',
-                'postgres',
-                '-v',
-                'ON_ERROR_STOP=1',
-                '-q',
-              ],
-              {
-                input: `update public.assessment_dispatch_jobs set scheduling_lease_until=clock_timestamp()-interval '1 second',scheduling_next_at=clock_timestamp()-interval '1 day' where id='${scheduledJobs[0]!.jobId}' and scheduling_status='pending';`,
-                stdio: ['pipe', 'pipe', 'pipe'],
-                timeout: 10000,
-              },
+            guardedParitySql(
+              `update public.assessment_dispatch_jobs set scheduling_lease_until=clock_timestamp()-interval '1 second',scheduling_next_at=clock_timestamp()-interval '1 day' where id='${scheduledJobs[0]!.jobId}' and scheduling_status='pending';`,
+              'postgres',
             );
           }
           return scheduling.reserve();
@@ -2307,6 +2287,18 @@ print('parent-death-clean')`;
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }));
   if (process.env.CI === 'true') assert(!dirty);
+  assert(finalizedHttpProof);
+  // Separate protected review evidence, outside the allowlisted result/CI
+  // artifact directories. No session/password/MFA recovery material is stored.
+  const privateProofDirectory = '.axiom-runtime/review/all-agent-acceptance';
+  mkdirSync(privateProofDirectory, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    `${privateProofDirectory}/actual-finalized-http-${revision.slice(0, 12)}-${Date.now()}.private.json`,
+    JSON.stringify({ ...finalizedHttpProof, revision, dirty, harnessComplete: true }, null, 2) +
+      '\n',
+    { mode: 0o600 },
+  );
+
   mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
   writeFileSync(
     '.axiom-runtime/workload-assessment/results.json',

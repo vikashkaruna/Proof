@@ -11,3 +11,4 @@ export * from './consumer-reports';
 export * from './renderer';
 export * from './archive';
 export * from './pramaan-archive';
+export * from './assessment-interpretation';

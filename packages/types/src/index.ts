@@ -18,3 +18,4 @@ export * from './public-source-reads';
 export * from './public-source-reviews';
 export * from './operator-workflows';
 export * from './assessment-request';
+export * from './assessment-provenance';

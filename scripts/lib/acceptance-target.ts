@@ -121,7 +121,18 @@ export function loadAcceptanceTarget(
   return validateAcceptanceTarget(value);
 }
 /** Bind fixtures/results to the selected deployment; never reuse the local persona file. */
-export function acceptanceStatePath(target: AcceptanceTarget | null, root = process.cwd()): string {
+export function acceptanceStatePath(
+  target: AcceptanceTarget | null,
+  root = process.cwd(),
+  localRun = process.env.AXIOM_LOCAL_PERSONA_RUN,
+): string {
+  if (localRun !== undefined) {
+    if (target || !/^[a-z][a-z0-9-]{0,63}$/.test(localRun))
+      throw new Error(
+        'A named local persona run requires an isolated local target and a safe run name',
+      );
+    return resolve(root, `.axiom-runtime/personas/${localRun}/state.json`);
+  }
   return resolve(
     root,
     target

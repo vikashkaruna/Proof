@@ -5,7 +5,11 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BoardReportContentV1, renderBoardReportHtml } from '@axiom/report-kit/board-report';
+import { BoardReportContentV2, renderBoardReportHtml } from '@axiom/report-kit/board-report';
+import {
+  interpretAssessmentReport,
+  assessmentReviewRecommendation,
+} from '@axiom/report-kit/assessment-interpretation';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 
 export interface BoardReportServiceDependencies {
@@ -321,11 +325,11 @@ export class BoardReportService {
         controls: z
           .array(
             z.object({
-              id: z.string().min(1),
-              title: z.string().min(1),
-              domain: z.string().min(1),
+              id: z.string().min(1).max(100),
+              title: z.string().min(1).max(300),
+              domain: z.string().min(1).max(50),
               severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
-              remediation_patterns: z.array(z.string()).optional(),
+              remediation_patterns: z.array(z.string().max(2000)).optional(),
             }),
           )
           .min(1)
@@ -337,9 +341,9 @@ export class BoardReportService {
           findings: z
             .array(
               z.object({
-                control_id: z.string().min(1),
+                control_id: z.string().min(1).max(100),
                 score: z.number().finite().min(0).max(100),
-                rationale: z.string().min(1),
+                rationale: z.string().min(1).max(4000),
               }),
             )
             .min(1)
@@ -369,31 +373,38 @@ export class BoardReportService {
     ) {
       throw new EvidenceError('assessment_source_conflict', 409);
     }
-    const postureScore = packet.result.posture_score;
-    const exposureInr = packet.result.estimated_exposure_inr;
+    let interpreted: ReturnType<typeof interpretAssessmentReport>;
+    try {
+      interpreted = interpretAssessmentReport(
+        result,
+        frozenControls,
+        frozen.data.controls_sha256,
+        requestRow.title,
+      );
+    } catch {
+      throw new EvidenceError('assessment_provenance_refused', 409);
+    }
+    const interpretations = new Map(
+      interpreted.findings.map((finding) => [finding.control_id, finding]),
+    );
     const findings = packet.result.findings.map((finding) => {
       const control = controls.get(finding.control_id)!;
+      const interpretation = interpretations.get(finding.control_id)!;
       return {
-        control_id: finding.control_id,
+        ...interpretation,
         domain: control.domain,
         severity: control.severity,
         title: control.title,
         score: finding.score,
         gap_summary: finding.rationale,
-        remediation_recommendation:
-          control.remediation_patterns?.[0] ||
-          'No remediation pattern is recorded in the frozen control library.',
+        remediation_recommendation: assessmentReviewRecommendation(
+          interpretation.display_state,
+          control.remediation_patterns,
+        ),
       };
     });
-
-    const criticalCount = findings.filter((f) => f.score < 80 && f.severity === 'critical').length;
-    const highCount = findings.filter((f) => f.score < 80 && f.severity === 'high').length;
-    const totalControls = packet.controls.length;
-    const passedControls = findings.filter((f) => f.score >= 80).length;
-
-    // Construct BoardReportContentV1 payload
-    const contentPayload: BoardReportContentV1 = {
-      schema_version: 1,
+    const contentPayload: BoardReportContentV2 = {
+      schema_version: 2,
       kind: 'board_report',
       title: requestRow.title,
       tenant_id: tenantId,
@@ -409,18 +420,8 @@ export class BoardReportService {
         company: 'Axiom Minds Private Limited',
         company_url: 'https://axiomminds.ai',
       },
-      executive_summary: {
-        posture_score: postureScore,
-        total_controls: totalControls,
-        passed_controls: passedControls,
-        failed_controls: totalControls - passedControls,
-        critical_gaps: criticalCount,
-        high_gaps: highCount,
-        medium_gaps: findings.filter((f) => f.score < 80 && f.severity === 'medium').length,
-        low_gaps: findings.filter((f) => f.score < 80 && f.severity === 'low').length,
-        estimated_exposure_inr: exposureInr,
-        narrative: `This report summarizes the recorded assessment for ${requestRow.title}. The computed posture score is ${postureScore}%. Evidence requirements in the control library do not establish that evidence was collected or independently verified.`,
-      },
+      questionnaire_interpretation: interpreted.interpretation,
+      executive_summary: interpreted.summary,
       key_findings: findings,
       action_plan: [],
       signatures: {

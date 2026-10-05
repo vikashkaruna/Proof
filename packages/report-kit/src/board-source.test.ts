@@ -190,3 +190,93 @@ describe('reviewed board source binding', () => {
     expect(() => renderReviewedBoardHtml(input)).toThrow();
   });
 });
+
+import { boardV2Fixture, packetHash, refreshReview } from './board-v2.fixture';
+describe('version 2 source interpretation', () => {
+  it('renders 44 unknown and two non-Boolean controls with neutral labels and actual immutable review', () => {
+    const input = boardV2Fixture();
+    const html = renderReviewedBoardHtml(input);
+    for (let i = 1; i <= 46; i++) expect(html).toContain(`C-${i}`);
+    expect(html).toContain('Unknown answers or applicability');
+    expect(html).toContain('No Boolean assessment questions');
+    expect(html).toContain('Provisional Posture Score');
+    expect(html).toContain('Synthetic Founder');
+    const rows = html.match(/<tr class="finding-row">[\s\S]*?<\/tr>/g)!;
+    expect(rows).toHaveLength(46);
+    expect(rows.every((row) => row.includes('background-color: #64748B'))).toBe(true);
+    expect(html).not.toContain('Critical &amp; High Gaps');
+    expect(html).not.toContain('Failed Controls');
+    expect(html).not.toContain('Delete');
+  });
+  it('keeps legacy source generation explicitly provenance unavailable', () => {
+    const input = boardV2Fixture(true);
+    expect(renderReviewedBoardHtml(input)).toContain('Questionnaire provenance unavailable');
+    expect(JSON.parse(input.documentText).executive_summary.provenance_unavailable_controls).toBe(
+      46,
+    );
+  });
+  it.each(['summary', 'state', 'recommendation', 'declaration', 'applicability'])(
+    'refuses rehashed interpretation tampering: %s',
+    (mode) => {
+      const input = boardV2Fixture();
+      const doc = JSON.parse(input.documentText);
+      if (mode === 'applicability') doc.key_findings[0].applicability_state = 'unknown';
+      if (mode === 'summary') doc.executive_summary.posture_score = 99;
+      if (mode === 'recommendation')
+        doc.key_findings[0].remediation_recommendation = 'Delete all personal records immediately.';
+      if (mode === 'state') {
+        doc.key_findings[0].display_state = 'declared_not_applicable_unverified';
+        doc.key_findings[0].applicability_state = 'caller_declared_not_applicable_unverified';
+        doc.executive_summary.unknown_controls--;
+        doc.executive_summary.not_applicable_controls++;
+      }
+      if (mode === 'declaration') {
+        doc.key_findings[0].answer_state = 'caller_declared_unverified';
+        doc.key_findings[0].answer_counts = { known: 2, affirmed: 2, denied: 0, unknown: 0 };
+        doc.key_findings[0].display_state = 'provisional_score_band';
+        doc.key_findings[0].score_band = 'under_40';
+        doc.executive_summary.unknown_controls--;
+        doc.executive_summary.provisional_score_bands.under_40++;
+      }
+      input.documentText = JSON.stringify(doc);
+      refreshReview(input);
+      expect(() => renderReviewedBoardHtml(input)).toThrow('Board document differs');
+    },
+  );
+  it('refuses V1 downgrade even when source, document and review hashes are internally consistent', () => {
+    const input = fixture(),
+      v2 = boardV2Fixture();
+    const legacySource = JSON.parse(input.sourceText),
+      structuredSource = JSON.parse(v2.sourceText);
+    const result = JSON.parse(legacySource.result_text);
+    result.questionnaire_provenance = JSON.parse(
+      structuredSource.result_text,
+    ).questionnaire_provenance;
+    legacySource.result_text = JSON.stringify(result);
+    legacySource.result_sha256 = packetHash(legacySource.result_text);
+    input.sourceText = JSON.stringify(legacySource);
+    input.sourceSha256 = packetHash(input.sourceText);
+    const doc = JSON.parse(input.documentText);
+    doc.source_sha256 = input.sourceSha256;
+    doc.assessment_result_digest = legacySource.result_sha256;
+    input.documentText = JSON.stringify(doc);
+    refreshReview(input);
+    expect(() => renderReviewedBoardHtml(input)).toThrow('provenance downgrade');
+  });
+  it('refuses removing metadata from frozen source even after rehashing the full source envelope', () => {
+    const input = boardV2Fixture();
+    const source = JSON.parse(input.sourceText),
+      result = JSON.parse(source.result_text);
+    delete result.questionnaire_provenance;
+    source.result_text = JSON.stringify(result);
+    source.result_sha256 = packetHash(source.result_text);
+    input.sourceText = JSON.stringify(source);
+    input.sourceSha256 = packetHash(input.sourceText);
+    const doc = JSON.parse(input.documentText);
+    doc.source_sha256 = input.sourceSha256;
+    doc.assessment_result_digest = source.result_sha256;
+    input.documentText = JSON.stringify(doc);
+    refreshReview(input);
+    expect(() => renderReviewedBoardHtml(input)).toThrow('Board document differs');
+  });
+});

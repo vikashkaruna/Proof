@@ -129,3 +129,33 @@ test('preflight refuses report delivery before creating anonymous reports', asyn
   );
   assert.equal(n, 3);
 });
+
+test('named local browser fixtures cannot overwrite retained default persona state', () => {
+  assert.equal(
+    acceptanceStatePath(null, '/isolated-review', 'assessment-request'),
+    '/isolated-review/.axiom-runtime/personas/assessment-request/state.json',
+  );
+  assert.notEqual(
+    acceptanceStatePath(null, '/isolated-review', 'assessment-request'),
+    acceptanceStatePath(null, '/isolated-review'),
+  );
+  assert.notEqual(
+    acceptanceStatePath(null, '/isolated-review', 'assessment-request'),
+    acceptanceStatePath(null, '/isolated-review', 'another-review'),
+  );
+});
+test('rejects unsafe local persona names instead of escaping protected fixture state', () => {
+  for (const name of ['', '../retained', '/absolute', 'path/name', 'name.with.dot', 'x'.repeat(65)])
+    assert.throws(() => acceptanceStatePath(null, '/isolated-review', name), /safe run name/);
+});
+test('deployed target cannot use a local persona override', () => {
+  assert.throws(
+    () =>
+      acceptanceStatePath(
+        validateAcceptanceTarget(valid()),
+        '/isolated-review',
+        'assessment-request',
+      ),
+    /isolated local target/,
+  );
+});

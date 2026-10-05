@@ -339,6 +339,9 @@ importers:
 
   packages/report-kit:
     dependencies:
+      '@axiom/types':
+        specifier: workspace:*
+        version: link:../types
       fflate:
         specifier: 0.8.3
         version: 0.8.3
