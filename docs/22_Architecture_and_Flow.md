@@ -122,8 +122,22 @@ provider for structural extraction or reopen generic public invocations.
 
 Candidate bd62b391 passed actual authenticated BFF/runtime/PostgREST execution
 and readback for these two agents, with independent receipt/hash/claim checks.
-Integrated 6ef987ec also passed the actual operator browser flow: select an existing saved check/binding, run Drishti, recover its completed result after a lost response, then run Vibhaag on that persisted observation. Engagement choices and observation history are posture-readable, paginated by microsecond timestamp and UUID. Reconciliation is actor-scoped and read-only. The browser retains the exact operation UUID/body in tenant/actor-scoped storage before dispatch; uncertain results keep the journal and disable new work. Only a proven not-found outcome exposes an exact retained retry; retained success is read back and validated before clearing the journal. Viewer access exposes saved facts, receipts and hashes without mutation controls. Human classification review events are refused to agent/system producer credentials by migration 0108. Source-bound human corrections remain the next increment; the complete agent chain and remote release are not accepted. Evidence is recorded in
+Integrated 6ef987ec also passed the actual operator browser flow: select an existing saved check/binding, run Drishti, recover its completed result after a lost response, then run Vibhaag on that persisted observation. Engagement choices and observation history are posture-readable, paginated by microsecond timestamp and UUID. Reconciliation is actor-scoped and read-only. The browser retains the exact operation UUID/body in tenant/actor-scoped storage before dispatch; uncertain results keep the journal and disable new work. Only a proven not-found outcome exposes an exact retained retry; retained success is read back and validated before clearing the journal. Viewer access exposes saved facts, receipts and hashes without mutation controls. Human classification review events are refused to agent/system producer credentials by migration 0108. Source-bound human correction API/UI integration remains in progress; the complete agent chain and remote release are not accepted. Evidence is recorded in
 `21_Progress.md`; operator closure is P1-W2-public in `23_Operator_Runbook.md`.
+
+The SQL candidate b1aaf55c adds separate immutable `public_source_reviews`;
+legacy classification declarations retain their original meaning. A human
+acknowledges or disputes the whole saved observation or an exact Vibhaag
+indicator, with a required justification. The database derives source, run,
+digest and receipt provenance, validates current review authority and appends
+one human receipt. Corrections reference their predecessor; uniqueness and
+same-target constraints prevent branching. `is_current` follows the chain
+leaf even when timestamps move backward. Replay preserves the original
+justification and revalidates current authority before returning a retained
+decision. This does not establish private facts, approve execution or complete
+an assessment. The disposable SQL gate passed; migration 0109 is not yet in
+the retained fixture or selected local release, and real API/UI review
+acceptance remains required.
 
 ## 2. Technical architecture
 
