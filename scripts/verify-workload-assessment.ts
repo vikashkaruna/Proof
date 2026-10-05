@@ -3,6 +3,7 @@
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
 import { loadParityFixture, guardedParitySql } from './lib/parity-fixture-target.js';
+import { acceptanceHttpFailure } from './lib/acceptance-http-failure.js';
 import { createServer } from 'node:http';
 import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
@@ -69,6 +70,7 @@ import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.j
 let phase = 'setup';
 const outcomes: Record<string, boolean> = {};
 let finalizedHttpProof: Record<string, unknown> | undefined;
+let httpFailure: ReturnType<typeof acceptanceHttpFailure> | undefined;
 async function main() {
   const input = z
     .object({
@@ -1064,6 +1066,20 @@ except Exception as error:
       redirect: 'error',
       signal: AbortSignal.timeout(30000),
     });
+    if (response.status !== expected) {
+      // The application response is not retained: only predefined error codes
+      // and HTTP status integers can enter the protected failure receipt.
+      const raw = await response.clone().text();
+      let body: unknown;
+      if (Buffer.byteLength(raw, 'utf8') <= 64 * 1024) {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          /* non-JSON carries no diagnostic */
+        }
+      }
+      httpFailure = acceptanceHttpFailure(expected, response.status, body);
+    }
     assert.equal(response.status, expected, phase);
     return response;
   };
@@ -1112,6 +1128,7 @@ except Exception as error:
       post(ownerHeaders, { code: recovery.recoveryCodes[0] }),
     );
     outcomes['normal-auth-owner-password-and-persisted-mfa'] = true;
+    phase = 'normal-auth-assessment-fixture';
     const engagementId = randomUUID(),
       foreignEngagementId = randomUUID(),
       foreignTenantId = randomUUID(),
@@ -1145,8 +1162,10 @@ except Exception as error:
       answers: {},
       applicability: { sdfSelfAttested: null, processesChildren: null, processesHealth: null },
     };
+    phase = 'normal-auth-viewer-refusal';
     await request('/v1/assessment/jobs', 403, post(viewerHeaders, intent, jobId));
     const foreignEngagementOperation = randomUUID();
+    phase = 'normal-auth-foreign-engagement-refusal';
     await request(
       '/v1/assessment/jobs',
       404,
@@ -1157,6 +1176,7 @@ except Exception as error:
       ),
     );
     const foreignOperation = randomUUID();
+    phase = 'normal-auth-foreign-tenant-refusal';
     await request(
       '/v1/assessment/jobs',
       403,
@@ -2323,6 +2343,16 @@ main().catch((error: unknown) => {
     error instanceof Error &&
     /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
   if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
+  if (httpFailure) {
+    const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const directory = '.axiom-runtime/review/all-agent-acceptance';
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      `${directory}/actual-http-failure-${revision.slice(0, 12)}-${Date.now()}.private.json`,
+      JSON.stringify({ revision, phase, ...httpFailure, accepted: false }, null, 2) + '\n',
+      { mode: 0o600 },
+    );
+  }
   process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);
   process.exitCode = 1;
 });
