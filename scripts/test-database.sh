@@ -46,6 +46,8 @@ for suite in tests/database/*.test.sql; do
     sql < "$suite"
   fi
 done
+bash tests/database/operator-workflows-public-source.sh "$container"
+bash tests/database/concurrent-operator-workflows.sh "$container"
 bash tests/database/concurrent-idempotency.sh "$container"
 bash tests/database/concurrent-onboarding.sh "$container"
 bash tests/database/concurrent-execution.sh "$container"
@@ -63,6 +65,7 @@ bash tests/database/concurrent-generic-agent-runs.sh "$container"
 bash tests/database/concurrent-public-source-bindings.sh "$container"
 bash tests/database/concurrent-public-source-observations.sh "$container"
 bash tests/database/concurrent-public-source-reads.sh "$container"
+bash tests/database/concurrent-public-source-reviews.sh "$container"
 bash tests/database/concurrent-assessment-dispatch.sh "$container"
 bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"

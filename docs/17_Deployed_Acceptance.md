@@ -1,3 +1,0 @@
-# Deployed acceptance: API and browser parity (stub)
-
-**Superseded stub (consolidated 2026-10-01).** The deployed-acceptance procedure is section 5 of the operator runbook. The current, single source is [23_Operator_Runbook.md](23_Operator_Runbook.md). The full original text of this file, including its dated revision history, is preserved in git: `git show 41b70b6:docs/17_Deployed_Acceptance.md`. Do not add new content here; follow the `axiom-docs-increment` skill (`.agents/skills/axiom-docs-increment/SKILL.md`): append dated entries to [21_Progress.md](21_Progress.md), update the status table in [20_Plan.md](20_Plan.md), and tick items in [23_Operator_Runbook.md](23_Operator_Runbook.md).

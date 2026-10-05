@@ -27,6 +27,7 @@ import {
   SourceWorkflowError,
 } from './source-request';
 import { SourceProjectionView, SourceResultView } from './source-result';
+import { SourceReview } from './source-review';
 
 const checksSchema = z.object({
   data: z
@@ -52,6 +53,7 @@ export function PublicSourceWorkflow(props: {
   tenantId: string;
   actorId: string;
   canInvoke: boolean;
+  canReview?: boolean;
 }) {
   return <Workflow key={`${props.tenantId}/${props.actorId}`} {...props} />;
 }
@@ -59,11 +61,14 @@ function Workflow({
   tenantId,
   actorId,
   canInvoke,
+  canReview = false,
 }: {
   tenantId: string;
   actorId: string;
   canInvoke: boolean;
+  canReview?: boolean;
 }) {
+  const [reviewLocked, setReviewLocked] = useState(true);
   const [choices, setChoices] = useState<Choices | null>(null);
   const [checks, setChecks] = useState<Checks>([]);
   const [engagementId, setEngagement] = useState('');
@@ -289,7 +294,7 @@ function Workflow({
   }
   function start(kind: SourceOperation['kind']) {
     void task(async () => {
-      if (!canInvoke || !storageReady || pending || !preview)
+      if (!canInvoke || reviewLocked || !storageReady || pending || !preview)
         throw new SourceWorkflowError('Select a source and reconcile any retained request first.');
       if (kind !== 'bind' && !preview.binding_id)
         throw new SourceWorkflowError('Record the source binding first.');
@@ -416,8 +421,9 @@ function Workflow({
       </div>
       {!canInvoke && (
         <p className="text-sm">
-          Read-only access: review retained source facts and results. Ask an authorized operator to
-          start a run.
+          {canReview
+            ? 'Human review is available. Ask an authorized operator to start a run.'
+            : 'Read-only access: inspect retained source facts and results. Ask an authorized operator to start a run.'}
         </p>
       )}
       {busy && (
@@ -546,7 +552,7 @@ function Workflow({
           <button type="button" className={button} disabled={busy} onClick={reconcile}>
             Reconcile retained request
           </button>
-          {canRetry && canInvoke && (
+          {canRetry && canInvoke && !reviewLocked && (
             <button
               type="button"
               className={`${button} ml-2`}
@@ -568,7 +574,7 @@ function Workflow({
           <button
             type="button"
             className={button}
-            disabled={locked || !storageReady || !preview || !!preview.binding_id}
+            disabled={locked || reviewLocked || !storageReady || !preview || !!preview.binding_id}
             onClick={() => start('bind')}
           >
             Record source binding
@@ -576,7 +582,7 @@ function Workflow({
           <button
             type="button"
             className={button}
-            disabled={locked || !storageReady || !preview?.binding_id}
+            disabled={locked || reviewLocked || !storageReady || !preview?.binding_id}
             onClick={() => start('drishti')}
           >
             Run Drishti on saved source
@@ -586,6 +592,7 @@ function Workflow({
             className={button}
             disabled={
               locked ||
+              reviewLocked ||
               !storageReady ||
               !preview?.binding_id ||
               selectedDrishti?.agent !== 'drishti'
@@ -654,6 +661,13 @@ function Workflow({
         </section>
       )}
       {observation && <SourceResultView observation={observation} />}
+      <SourceReview
+        tenantId={tenantId}
+        actorId={actorId}
+        canReview={canReview}
+        observation={observation}
+        onWriteLock={setReviewLocked}
+      />
     </section>
   );
 }

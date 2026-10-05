@@ -3,7 +3,6 @@ name = "axiom-proof-agent-runtime"
 version = "0.1.0"
 description = "Axiom Proof agent runtime — 10 named agents that discover, classify, assess, collect evidence, plan, execute, audit, watch, report, and signal."
 authors = [{ name = "Axiom Minds Private Limited" }]
-readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "Proprietary" }
 

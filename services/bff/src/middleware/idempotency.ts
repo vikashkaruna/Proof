@@ -25,6 +25,20 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     return next();
   }
 
+  const durableSourceReview =
+    c.req.method === 'POST' &&
+    /^\/v1\/public-source-bindings\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/observations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/reviews$/.test(
+      c.req.path,
+    );
+  const durableOperatorWorkflow =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/operator-workflows/records' ||
+      /^\/v1\/operator-workflows\/requests\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      ));
+  if (durableSourceReview || durableOperatorWorkflow)
+    c.header('Cache-Control', 'private, no-store');
+
   // SEC-13 row 3: a missing key used to be auto-generated in development,
   // local, preprod, staging and any container without NODE_ENV. Every
   // generated key is unique by construction, so the retry-safety FR-8.3
@@ -56,6 +70,14 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       },
       400,
     );
+  }
+
+  // These exact routes use their locked, actor/body-scoped SQL operation ledger.
+  // Cached responses would skip live authority/context and cancellation checks
+  // or freeze structural-review currency. Keep key checks above.
+  if (durableSourceReview || durableOperatorWorkflow) {
+    c.set('idempotencyKey', key);
+    return next();
   }
 
   const user = c.get('user');

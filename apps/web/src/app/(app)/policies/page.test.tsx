@@ -17,6 +17,9 @@ beforeEach(() => {
   state.calls = [];
   state.capability.mockReset().mockImplementation(async () => ({
     tenantId: 'tenant-1',
+    userId: '99111000-0000-4000-8000-000000000002',
+    role: 'owner',
+    isAxiomInternal: false,
     supabase: {
       from: (table: string) => {
         const query = {
@@ -87,4 +90,14 @@ it('shows only recorded scope and approval identities', async () => {
   expect(view).toContain('backup.create');
   expect(view).toContain('staging');
   expect(view).not.toContain('delete.records');
+});
+
+it('lets a viewer read document drafts without exposing standing-policy configuration', async () => {
+  const context = await state.capability();
+  state.capability.mockResolvedValue({ ...context, role: 'viewer' });
+  const view = renderToStaticMarkup(await PoliciesPage());
+  expect(view).toContain('Policy and notice drafts');
+  expect(view).not.toContain('Create policy or notice draft');
+  expect(view).not.toContain('Standing policies');
+  expect(state.calls).toEqual([]);
 });

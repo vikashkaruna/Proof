@@ -20,12 +20,12 @@ class RopaRecord(BaseModel):
     system: str
     purpose: str
     data_items: list[str]
-    data_categories: list[str]
+    data_categories: list[str] | None
     lawful_basis: str
     retention_period: str
-    processors: list[str] = Field(default_factory=list)
-    region: str = "ap-south-1"
-    cross_border: bool = False
+    processors: list[str] | None = None
+    region: str = "Unknown — residency evidence required"
+    cross_border: bool | None = None
     transfer_safeguards: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     review_required: bool = True
@@ -59,20 +59,49 @@ def build_ropa_records(
         name = str(system.get("name") or f"system-{index}")
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or f"system-{index}"
         fields = list(dict.fromkeys(by_system.get(name, [])))
-        categories = set(str(value).lower() for value in system.get("data_categories", []) or [])
-        categories.update(categories_by_system.get(name, set()))
-        processors = [str(system["processor"])] if system.get("processor") else []
-        purpose = str(system.get("description") or "Purpose to be confirmed by the Data Fiduciary")
-        review_required = not bool(fields and system.get("description"))
-        cross_border = bool(system.get("cross_border", False))
+        categories = {str(value).lower() for value in system.get("data_categories", []) or []}
+        categories.update(value.lower() for value in categories_by_system.get(name, set()))
+        supplied_processors = system.get("processors", system.get("processor"))
+        if isinstance(supplied_processors, str):
+            supplied_processors = [supplied_processors]
+        processors = (
+            list(
+                dict.fromkeys(
+                    value.strip()
+                    for value in supplied_processors
+                    if isinstance(value, str) and value.strip()
+                )
+            )
+            or None
+            if isinstance(supplied_processors, list)
+            else None
+        )
+        # A discovered system description is an observation, not an attested
+        # processing purpose. Even a complete field inventory requires review.
+        purpose = "Purpose to be confirmed by the Data Fiduciary"
+        public_source = any(
+            isinstance(system.get(key), str)
+            and system.get(key) in {"public_website", "public_html"}
+            for key in ("mode", "source_type", "source_scope")
+        )
+        cross_border = (
+            system.get("cross_border") if isinstance(system.get("cross_border"), bool) else None
+        )
         region = str(system.get("region") or "").strip()
+        if public_source:
+            # Public HTML cannot establish a private processor or hosting region.
+            processors = None
+            fields = []
+            categories = set()
+            region = ""
+            cross_border = None
         if not cross_border and region and region.lower() not in INDIAN_REGIONS:
             cross_border = True
 
         safeguards = None
         if cross_border:
             if region and region.lower() not in INDIAN_REGIONS:
-                safeguards = f"Mandatory cross-border transfer safeguards required under DPDPA §16 (Destination: {region})"
+                safeguards = f"Transfer restrictions and safeguards to be reviewed (Stated destination: {region})"
             else:
                 safeguards = "To be documented"
 
@@ -82,15 +111,15 @@ def build_ropa_records(
                 system=name,
                 purpose=purpose,
                 data_items=fields or ["Unspecified — field inventory required"],
-                data_categories=sorted(categories),
+                data_categories=sorted(categories) or None,
                 lawful_basis="To be confirmed by the Data Fiduciary",
                 retention_period="To be confirmed by the retention schedule",
                 processors=processors,
-                region=region or "ap-south-1",
+                region=region or "Unknown — residency evidence required",
                 cross_border=cross_border,
                 transfer_safeguards=safeguards,
                 evidence_refs=[str(ref) for ref in system.get("evidence_refs", []) or []],
-                review_required=review_required or cross_border,
+                review_required=True,
             )
         )
     return RopaOutput(records=records, review_required=True)

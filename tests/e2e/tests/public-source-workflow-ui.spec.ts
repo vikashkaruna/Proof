@@ -10,6 +10,7 @@ import {
   publicAgentObservationSchema,
   publicSourceObservationHistoryResponseSchema,
   publicSourceEngagementOptionsResponseSchema,
+  publicSourceReviewHistoryResponseSchema,
   type PublicAgentObservation,
 } from '../../../packages/types/src/index';
 import { canonicalJson } from '../../../packages/ledger/src/canonicalise';
@@ -185,6 +186,7 @@ async function sourceApi(
     stored.set(vibhaagId, classification);
   }
   const posts: { agent: string; key: string; body: string }[] = [];
+  const historyReads: string[] = [];
   let routeError: unknown;
   await page.route('**/api/bff/v1/**', async (route) => {
     const request = route.request(),
@@ -235,6 +237,28 @@ async function sourceApi(
         await route.fulfill({
           json: publicSourceObservationHistoryResponseSchema.parse({
             data: Array.from(stored.values(), summary),
+            meta: { limit: 20, hasMore: false, nextCursor: null },
+          }),
+        });
+      } else if (
+        /^\/api\/bff\/v1\/public-source-bindings\/[^/]+\/observations\/[^/]+\/reviews$/.test(path)
+      ) {
+        expect(request.method()).toBe('GET');
+        const parts = path.split('/');
+        expect(parts[5]).toBe(bindingId);
+        const row = stored.get(parts[7]!);
+        expect(row).toBeDefined();
+        expect(row!.binding_id).toBe(bindingId);
+        expect(parts[7]).toBe(row!.observation_id);
+        expect(Array.from(url.searchParams.keys()).sort()).toEqual(['engagementId', 'limit']);
+        expect(url.searchParams.get('engagementId')).toBe(state.engagementA);
+        expect(url.searchParams.get('limit')).toBe('20');
+        historyReads.push(`${path}${url.search}`);
+        // This synthetic protocol fixture has no human judgments. Returning
+        // empty history does not manufacture a review or establish compliance.
+        await route.fulfill({
+          json: publicSourceReviewHistoryResponseSchema.parse({
+            data: [],
             meta: { limit: 20, hasMore: false, nextCursor: null },
           }),
         });
@@ -302,13 +326,24 @@ async function sourceApi(
             status: 201,
             json: { data: agent === 'drishti' ? discovery : classification },
           });
-      } else throw new Error('Unexpected synthetic source request');
+      } else throw new Error(`Unexpected synthetic source request: ${request.method()} ${path}`);
     } catch (error) {
       routeError = error;
       await route.abort().catch(() => undefined);
     }
   });
-  return { posts, stored, assertRoutes: () => expect(routeError).toBeUndefined() };
+  return {
+    posts,
+    stored,
+    assertRoutes: () => expect(routeError).toBeUndefined(),
+    assertHistory: async () => {
+      expect(historyReads.length).toBeGreaterThan(0);
+      await test.info().attach('validated-synthetic-review-history-reads', {
+        body: JSON.stringify(historyReads),
+        contentType: 'application/json',
+      });
+    },
+  };
 }
 async function keyboardReceipts(page: Page, expected: PublicAgentObservation) {
   const result = page.getByRole('region', { name: 'Retained agent result', exact: true });
@@ -380,6 +415,7 @@ test('owner recovers a lost source response after reload with the same request a
   await keyboardReceipts(page, classification);
   await mobile(page);
   api.assertRoutes();
+  await api.assertHistory();
 });
 
 test('viewer reads retained source receipts and static attributes using keyboard without mutation controls', async ({
@@ -423,6 +459,7 @@ test('viewer reads retained source receipts and static attributes using keyboard
   await mobile(page);
   expect(api.posts).toHaveLength(0);
   api.assertRoutes();
+  await api.assertHistory();
 });
 
 test('refuses an unwrapped source preview before exposing run controls', async ({ page }) => {
@@ -473,4 +510,5 @@ test('explicit retry after not-found reconciliation preserves the original opera
     expect(row.body).toBe(original!.bodyUtf8);
   }
   api.assertRoutes();
+  await api.assertHistory();
 });

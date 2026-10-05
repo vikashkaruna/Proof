@@ -88,3 +88,24 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Consolidated local documentation; never tracked or published
+/private-docs/
+/docs
+/.design-sync/NOTES.md
+/.design-sync/conventions.md
+/.github/branch-protection.md
+/Axiom Proof App/README.md
+/Axiom Proof Handoff Map/README.md
+/Axiom Proof Site/README.md
+/Axiom-Proof_Readiness_Matrix.md
+/VK_QUICK_REF_PROOF_MODULES_SETUP.md
+/design-system/README.md
+/infra/credential-issuer/README.md
+/infra/helm/axiom-proof/ci/README.md
+/infra/terraform/modules/workload-vms/README.md
+/infra/workload/CONTROLLER_TRANSITIONS.md
+/infra/workload/README.md
+/packages/report-kit/README.md
+/services/agent-runtime/README.md
+/services/model-gateway/README.md

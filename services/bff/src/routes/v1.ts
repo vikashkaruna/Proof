@@ -6,11 +6,13 @@ import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
 import { assessmentRoutes } from './assessment.js';
+import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
 import { publicSourceReadRoutes } from './public-source-reads.js';
+import { publicSourceReviewRoutes } from './public-source-reviews.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
@@ -21,6 +23,8 @@ import { approvalExportRoutes } from './approval-exports.js';
 import { approvalProofArchiveRoutes } from './approval-proof-archive.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
+import { operatorWorkflowRoutes } from './operator-workflows.js';
+import { policyPreviewRoutes } from './policy-preview.js';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
@@ -213,10 +217,12 @@ export function v1Routes(deps: Deps) {
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRoutes());
+  app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());
   app.route('/', publicSourceBindingRoutes());
   app.route('/', publicSourceReadRoutes());
+  app.route('/', publicSourceReviewRoutes());
   app.route(
     '/',
     publicSourceAgentRoutes({
@@ -234,6 +240,8 @@ export function v1Routes(deps: Deps) {
   app.route('/', approvalProofArchiveRoutes({ approvalEngine: deps.approvalEngine }));
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
+  app.route('/', operatorWorkflowRoutes());
+  app.route('/', policyPreviewRoutes());
   app.route('/', sovereignLicenseRoutes());
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────

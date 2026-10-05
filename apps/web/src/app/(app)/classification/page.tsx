@@ -65,6 +65,10 @@ export default async function ClassificationPage({
       <PublicSourceWorkflow
         tenantId={tenantId}
         actorId={userId}
+        canReview={
+          can(Capability.ASSESSMENT_RUN, { role }) &&
+          ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)
+        }
         canInvoke={
           can(Capability.AGENT_INVOKE, { role }) &&
           ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)

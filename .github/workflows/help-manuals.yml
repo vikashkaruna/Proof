@@ -1,0 +1,28 @@
+name: Documentation tools and private tracking boundary
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  help:
+    name: Maintenance regressions and ignored documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s tests/scripts -p 'test_help_manuals.py'
+      - run: python3 -m unittest discover -s tests/scripts -p 'test_private_docs_guard.py'
+      - run: bash scripts/check-private-docs.sh
+      # Documentation, receipts and exports are local and Git-ignored.
+      # The maintainer runs help:check:private before a feature checkpoint.
+      # No documentation artifacts are built, uploaded or published here.
