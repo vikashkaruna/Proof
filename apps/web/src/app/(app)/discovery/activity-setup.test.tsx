@@ -12,6 +12,14 @@ const state = vi.hoisted(() => ({
   required: [] as Capability[],
   reviews: [] as unknown[],
   range: vi.fn(),
+  internal: false,
+  workflow: vi.fn(),
+}));
+vi.mock('../public-source-workflow/source-workflow', () => ({
+  PublicSourceWorkflow: (props: unknown) => {
+    state.workflow(props);
+    return <section aria-label="Public website workflow" />;
+  },
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('next/link', () => ({
@@ -32,6 +40,8 @@ vi.mock('@/lib/tenant-context', async () => {
       if (!can(capability, { role: state.role })) throw new Error('forbidden');
       return {
         tenantId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        isAxiomInternal: state.internal,
         role: state.role,
         supabase: {
           from: (table: string) => {
@@ -65,6 +75,8 @@ afterEach(() => {
   state.required = [];
   state.reviews = [];
   state.range.mockReset();
+  state.workflow.mockReset();
+  state.internal = false;
 });
 
 it.each(Object.values(UserRole).filter((role) => role !== UserRole.AGENT))(
@@ -73,30 +85,20 @@ it.each(Object.values(UserRole).filter((role) => role !== UserRole.AGENT))(
     state.role = role;
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    for (const [page, guidance, unavailable, empty] of [
-      [DiscoveryPage, 'Prepare discovery', 'discovery run form', 'No discovery events recorded'],
-      [
-        ClassificationPage,
-        'Prepare classification',
-        'classification run form',
-        'No classification events recorded',
-      ],
+    for (const [page, empty] of [
+      [DiscoveryPage, 'No discovery events recorded'],
+      [ClassificationPage, 'No classification events recorded'],
     ] as const) {
       const view = render(await page());
-      expect(screen.getByRole('region', { name: guidance }).textContent).toContain(unavailable);
-      expect(document.body.textContent).toContain('not yet available');
+      expect(screen.getByRole('region', { name: 'Public website workflow' })).toBeTruthy();
       expect(document.body.textContent).toContain(empty);
-      expect(screen.queryByRole('button', { name: /Run Discovery|Run Classification/ })).toBeNull();
-      expect(screen.queryAllByRole('button')).toHaveLength(0);
-      if (can(Capability.ESTATE_MANAGE, { role })) {
-        expect(screen.getByRole('link', { name: /Review estate setup/ }).getAttribute('href')).toBe(
-          '/estate/setup',
-        );
-        expect(document.body.textContent).toContain('Setup does not start');
-      } else {
-        expect(screen.queryByRole('link', { name: /Review estate setup/ })).toBeNull();
-        expect(document.body.textContent).toContain('Ask an estate manager');
-      }
+      expect(state.workflow).toHaveBeenLastCalledWith({
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        actorId: '22222222-2222-4222-8222-222222222222',
+        canInvoke:
+          can(Capability.AGENT_INVOKE, { role }) &&
+          ![UserRole.FOUNDER, UserRole.AXIOM_ANALYST].includes(role as 'founder' | 'axiom_analyst'),
+      });
       view.unmount();
     }
     expect(state.invoke).not.toHaveBeenCalled();
@@ -152,3 +154,13 @@ it('never renders a returned foreign tenant review on the classification page', 
   ).toBeNull();
   expect(document.body.textContent).not.toContain(humanReview.justification);
 });
+
+it.each([UserRole.FOUNDER, UserRole.AXIOM_ANALYST])(
+  'permits %s only with internal authority',
+  async (role) => {
+    state.role = role;
+    state.internal = true;
+    render(await DiscoveryPage());
+    expect(state.workflow).toHaveBeenLastCalledWith(expect.objectContaining({ canInvoke: true }));
+  },
+);

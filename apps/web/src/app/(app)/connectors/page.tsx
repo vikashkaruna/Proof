@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
@@ -36,6 +37,22 @@ export default async function ConnectorsPage() {
         fetches public HTML only; private credentials, live access grants and transport verification
         remain separate steps.
       </p>
+      <section
+        aria-label="Continue a saved public check"
+        className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4"
+      >
+        <h2 className="font-semibold text-[#1E2A4A]">Continue with saved public HTML</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Select an engagement and retained check in Discovery, then review the source-bound Drishti
+          and Vibhaag results.
+        </p>
+        <Link
+          href="/discovery"
+          className="mt-2 inline-block text-sm font-medium text-teal-700 underline"
+        >
+          Open public website agent workflow
+        </Link>
+      </section>
       {connectors.error ||
       systems.error ||
       !Array.isArray(connectors.data) ||

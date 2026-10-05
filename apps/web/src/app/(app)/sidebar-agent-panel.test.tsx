@@ -71,18 +71,18 @@ it.each([UserRole.FOUNDER, UserRole.OWNER, UserRole.VIEWER])(
     render(<SidebarAgentPanel capabilities={capabilitiesFor(role)} />);
     await waitFor(() => expect(screen.getByText('No active agent runs reported')).toBeTruthy());
     for (const [name, label, path, prerequisite] of [
-      ['drishti', 'View discovery activity', '/discovery', 'source inventory or interview answers'],
+      ['drishti', 'Open public website discovery', '/discovery', 'saved public HTML check'],
       [
         'vibhaag',
-        'View classification activity',
+        'Open public website classification',
         '/classification',
-        'observed inventory or field hints',
+        'retained Drishti observation',
       ],
     ] as const) {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') }));
       expect(screen.getByRole('link', { name: new RegExp(label) }).getAttribute('href')).toBe(path);
       expect(document.body.textContent).toContain(prerequisite);
-      expect(document.body.textContent).toContain('An interactive run form is not yet available.');
+      expect(document.body.textContent).toContain('retained source facts');
       expect(screen.queryByRole('button', { name: /Run Discovery|Run Classification/ })).toBeNull();
       if (role === UserRole.FOUNDER) {
         expect(screen.getByRole('link', { name: /Workbench/ }).getAttribute('href')).toBe(

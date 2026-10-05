@@ -1,6 +1,7 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
-import { can } from '@axiom/types';
+import { can, UserRole } from '@axiom/types';
+import { PublicSourceWorkflow } from '../public-source-workflow/source-workflow';
 import { DataPlaceholder } from '@axiom/ui';
 import { loadClassificationReviewHistory } from '@/lib/classification-reviews';
 import { ClassificationReviewHistoryView } from './review-history';
@@ -12,7 +13,9 @@ export default async function ClassificationPage({
 }: {
   searchParams?: Promise<{ reviewPage?: string | string[] }>;
 } = {}) {
-  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
+    Capability.POSTURE_READ,
+  );
   const reviewPage = (await searchParams)?.reviewPage;
   const [{ data, error }, history] = await Promise.all([
     supabase
@@ -59,20 +62,14 @@ export default async function ClassificationPage({
         telemetryTitle: 'Recorded Classification Events',
       }}
     >
-      <section
-        aria-label="Prepare classification"
-        className="rounded-xl bg-white p-4 text-sm text-slate-600"
-      >
-        <p>
-          Vibhaag needs a selected engagement and observed inventory or field hints. An interactive
-          classification run form is not yet available.
-        </p>
-        <p className="mt-2">
-          {can(Capability.ESTATE_MANAGE, { role })
-            ? 'Review estate setup to record the systems you have confirmed. Setup does not start classification.'
-            : 'Ask an estate manager to prepare the source inventory for review.'}
-        </p>
-      </section>
+      <PublicSourceWorkflow
+        tenantId={tenantId}
+        actorId={userId}
+        canInvoke={
+          can(Capability.AGENT_INVOKE, { role }) &&
+          ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)
+        }
+      />
       <ClassificationReviewHistoryView history={history} />
       {error || !data ? (
         <p role="alert">Classification ledger records are unavailable.</p>
