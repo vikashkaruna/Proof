@@ -1,0 +1,37 @@
+name: Help manuals and confidentiality
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  help:
+    name: Manual freshness, coverage and safe external exports
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s tests/scripts -p test_help_manuals.py
+      - run: python3 scripts/help-manuals.py check
+      - name: Build approved shareable audiences only
+        run: |
+          python3 scripts/help-manuals.py export --audience client --output .axiom-runtime/help-share/client
+          python3 scripts/help-manuals.py export --audience partner --output .axiom-runtime/help-share/partner
+      - uses: actions/upload-artifact@v7
+        with:
+          name: external-help-manuals
+          path: |
+            .axiom-runtime/help-share/client/client-help.html
+            .axiom-runtime/help-share/partner/partner-help.html
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

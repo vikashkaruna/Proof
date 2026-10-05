@@ -38,6 +38,48 @@ permission to deploy, enable cloud APIs, rotate credentials or stop a service.
 
 ---
 
+## Persona manuals and complete manual acceptance catalogue
+
+[Help index and maintenance instructions](help/README.md) link the shareable
+[Partner guide](help/external/partner.md) and
+[Client organization guide](help/external/client.md). The internal Founder
+manual and detailed QA catalogue are protected under
+`.axiom-runtime/help-private/`; this repository is public, so they must never
+be committed or attached to a public PR. The Founder guide includes full stack
+operations; the external guides cover user tasks and role boundaries.
+
+The catalogue specifies **243 cases**, covering all **49 route variants**
+(39 Web pages, the Pramaan query tab, nine marketing pages), all 49 roadmap
+modules plus Delivery Playbook M1.8, all 12 agents, eight PRD B.10 criteria,
+12 NFRs and end-to-end/UX/invitation/delivery cases. Each includes personas,
+requirements, prerequisites, steps, expected results and evidence to retain.
+Every initial result is **not_run**. Availability distinguishes current,
+staged, candidate, conditional and blocked functionality; it is not a pass.
+
+For an acceptance session:
+
+1. Identify the exact target/release, role, source and approved fixture.
+   Resolve section 2b readiness before testing a staged or candidate feature.
+2. Open the private manual-testing catalogue, select eligible case IDs and
+   confirm prerequisites. For blocked functionality, record the unmet
+   prerequisite; never infer success from a screen label or earlier unit tests.
+3. Execute the documented steps and compare every expected result. Retain
+   sanitized observations and screenshots privately; append a dated result
+   referencing the catalogue digest, target and case IDs.
+4. Report failures with reproduction and evidence; Engineering fixes and
+   rechecks them before acceptance. Preserve earlier results. Cloud, restore,
+   delivery and private-write tests retain their separate approvals.
+5. Confirm the tested scope and untested cases. Record the milestone in this
+   progress log; only independently observed eligible cases can pass.
+
+Illustrated sample screens use fictional data and are explicitly **not live
+acceptance screenshots**. Navigation/permission references regenerate from
+source, and the help CI job rejects unreviewed relevant changes. Prose and test
+expectations need review as explained in the help index. Keep a private backup
+of the ignored manuals before moving or archiving the worktree; Git cannot
+recover them. These manuals add no deployment permission and do not close the
+remaining engineering or remote acceptance items below.
+
 ## 0. Standing constraints `[16 §0][18]`
 
 - Implementing agents do not create, modify or bill cloud resources:

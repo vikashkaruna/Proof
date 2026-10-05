@@ -148,3 +148,22 @@ terraform init && terraform plan && terraform apply
 | What is the functional flow / how built? | `docs/22_Architecture_and_Flow.md` (links to `docs/04_Solution_Architecture.md`)                |
 | What must the operator do next?          | `docs/23_Operator_Runbook.md`                                                                   |
 | How do I record a checkpoint?            | `.agents/skills/axiom-docs-increment/SKILL.md`                                                  |
+
+## Persona help and manual acceptance maintenance
+
+When a screen, route, role, workflow, agent output, user-visible error, configuration
+or deployment procedure changes, update its related help and manual cases in the
+same increment. Follow docs/help/README.md. Navigation/role references regenerate
+with `pnpm help:sync --review-reason "Meaningful explanation of the review"`;
+`pnpm help:check:private` verifies the protected local manuals, and public CI
+checks source freshness, route coverage, confidentiality and external exports.
+Do not update review hashes without reviewing content and release availability.
+
+The repository is public. Founder instructions and internal QA procedures/results
+belong only under ignored `.axiom-runtime/help-private/` (0700 directory,0600
+files), never tracked docs, application public assets or CI artifacts. Preserve
+them in operator-controlled private storage before moving/archiving a worktree.
+Only approved Partner/Client manuals and fictional illustrations may be shared.
+The sharing tool rejects internal audiences. Manuals describe authority; they
+never grant it or weaken any hard rule above. New help manuals are user-requested
+product documentation, not additional project runbooks/progress/handoff files.

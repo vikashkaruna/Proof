@@ -1,0 +1,53 @@
+<svg
+  font-family="Arial, Helvetica, sans-serif"
+  xmlns="http://www.w3.org/2000/svg"
+  width="1000"
+  height="600"
+  viewBox="0 0 1000 600"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">Illustrative screen: Members and invitations</title>
+  <desc id="desc">
+    Fictional simplified example. Not a live screenshot or evidence of a working feature.
+  </desc>
+  <rect width="1000" height="600" fill="#f1f5f9" />
+  <rect width="210" height="600" fill="#1e2a4a" />
+  <text x="24" y="54" font-size="24" fill="#ffffff">Axiom Proof</text>
+  <text x="24" y="88" font-size="13" fill="#99dacf">Client workspace</text>
+  <text x="25" y="155" font-size="15" fill="#ffffff">Dashboard</text>
+  <text x="25" y="191" font-size="15" fill="#ffffff">Client Estate</text>
+  <text x="25" y="227" font-size="15" fill="#ffffff">Assessment</text>
+  <text x="25" y="263" font-size="15" fill="#ffffff">Plans</text>
+  <text x="25" y="299" font-size="15" fill="#ffffff">Evidence</text>
+  <text x="25" y="335" font-size="15" fill="#ffffff">Reports</text>
+  <text x="25" y="371" font-size="15" fill="#ffffff">Settings</text>
+  <rect x="230" y="22" width="740" height="118" rx="12" fill="#ffffff" stroke="#dbe2ea" />
+  <rect x="230" y="22" width="8" height="118" fill="#0fb5a5" />
+  <text x="252" y="63" font-size="28" fill="#1e2a4a">Members and invitations</text>
+  <text x="252" y="95" font-size="15" fill="#475569">Fictional role labels · no real accounts</text>
+  <g>
+    <rect x="250" y="182" width="690" height="64" rx="8" fill="#ffffff" stroke="#dbe2ea" />
+    <text x="270" y="207" font-size="17" fill="#1e2a4a">Organization owner</text>
+    <text x="270" y="231" font-size="14" fill="#475569">Active · organization administration</text>
+  </g>
+  <g>
+    <rect x="250" y="260" width="690" height="64" rx="8" fill="#ffffff" stroke="#dbe2ea" />
+    <text x="270" y="285" font-size="17" fill="#1e2a4a">Privacy reviewer</text>
+    <text x="270" y="309" font-size="14" fill="#475569">Active · review responsibility</text>
+  </g>
+  <g>
+    <rect x="250" y="338" width="690" height="64" rx="8" fill="#ffffff" stroke="#dbe2ea" />
+    <text x="270" y="363" font-size="17" fill="#1e2a4a">Scoped approver</text>
+    <text x="270" y="387" font-size="14" fill="#475569">Active · approval only within scope</text>
+  </g>
+  <g>
+    <rect x="250" y="416" width="690" height="64" rx="8" fill="#ffffff" stroke="#dbe2ea" />
+    <text x="270" y="441" font-size="17" fill="#1e2a4a">Read-only stakeholder</text>
+    <text x="270" y="465" font-size="14" fill="#475569">Active · inspect permitted outputs</text>
+  </g>
+  <rect x="230" y="535" width="740" height="44" rx="8" fill="#e7f5f3" />
+  <text x="250" y="563" font-size="14" fill="#087f77">
+    Illustrative screen — fictional data; controls vary by release and permission.
+  </text>
+</svg>

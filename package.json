@@ -55,7 +55,11 @@
     "gate:controls": "./scripts/check-control-count.sh",
     "gate:controls:drift": "./scripts/check-controls-drift.sh",
     "build:controls-json": "tsx scripts/build-controls-json.mjs",
-    "security:scan": "bash scripts/security-scan.sh"
+    "security:scan": "bash scripts/security-scan.sh",
+    "help:check": "python3 scripts/help-manuals.py check",
+    "help:check:private": "python3 scripts/help-manuals.py check --require-private",
+    "help:sync": "python3 scripts/help-manuals.py sync",
+    "help:export": "python3 scripts/help-manuals.py export"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.117.2",

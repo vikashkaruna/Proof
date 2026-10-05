@@ -322,3 +322,13 @@ For production deployment to AWS `ap-south-1` (EKS + S3 + ElastiCache
 Proprietary. © 2026 Axiom Minds Private Limited.
 
 For partnership / commercial licensing: hello@axiomminds.ai.
+
+## Product help and manual acceptance
+
+See [persona manuals and maintenance](docs/help/README.md) for the shareable
+[Partner guide](docs/help/external/partner.md) and
+[Client guide](docs/help/external/client.md). Founder and detailed QA guidance
+stay in protected ignored storage because this repository is public. The
+manual QA catalogue covers every current route and roadmap module; documented
+cases are distinct from executed acceptance. CI checks source freshness and
+exports only reviewed external audiences.
