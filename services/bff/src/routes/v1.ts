@@ -5,6 +5,8 @@ import { dpbReportRoutes } from './dpb-reports.js';
 import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
+import { assessmentRequestRoutes } from './assessment-request.js';
+import type { AssessmentRequestProducer } from '../workloads/assessment-producer.js';
 import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
@@ -45,7 +47,7 @@ import {
   LedgerResult,
 } from '@axiom/types';
 import type { ApprovalEngine } from '../services/approval.js';
-import type { KillSwitchService } from '../services/kill-switch.js';
+import { KillSwitchStateUnavailable, type KillSwitchService } from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
 import type { MfaService } from '../services/mfa.js';
 import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
@@ -199,6 +201,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  assessmentRequests?: AssessmentRequestProducer;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -216,6 +219,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', dpbReportRoutes());
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
+  app.route('/', assessmentRequestRoutes(deps.assessmentRequests));
   app.route('/', assessmentRoutes());
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
@@ -3545,7 +3549,22 @@ export function v1Routes(deps: Deps) {
   });
 
   app.get('/kill-switch/status', async (c) => {
-    return c.json(await deps.killSwitch.state(c.get('tenantId')));
+    c.header('Cache-Control', 'private, no-store');
+    try {
+      return c.json(await deps.killSwitch.state(c.get('tenantId')));
+    } catch (error) {
+      if (!(error instanceof KillSwitchStateUnavailable)) throw error;
+      return c.json(
+        {
+          error: {
+            code: 'kill_switch_status_unavailable',
+            message:
+              'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
+          },
+        },
+        503,
+      );
+    }
   });
 
   // ─── Ledger ──────────────────────────────────────────────────────

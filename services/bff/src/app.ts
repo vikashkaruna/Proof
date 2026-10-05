@@ -19,6 +19,7 @@ import { createKillSwitchService } from './services/kill-switch.js';
 import { createLedgerService } from './services/ledger.js';
 import { createMfaService } from './services/mfa.js';
 import { workloadToolsRoutes } from './routes/workload-tools.js';
+import type { AssessmentRequestProducer } from './workloads/assessment-producer.js';
 import type { AssessmentTools } from './workloads/assessment-tools.js';
 import { startRealtimeChannel } from './services/realtime.js';
 import { offlineLicenseGate } from './middleware/offline-license.js';
@@ -38,6 +39,7 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
 export function createApp(
   options: {
     assessmentTools?: AssessmentTools;
+    assessmentRequests?: AssessmentRequestProducer;
     discovery?: Pick<DiscoveryService, 'run'>;
     licensePublicKeyPem?: string;
   } = {},
@@ -61,7 +63,14 @@ export function createApp(
     cors({
       origin: env.BFF_CORS_ORIGINS.split(',').map((o) => o.trim()),
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Idempotency-Key',
+        'X-Request-Id',
+        'X-Tenant-Id',
+        'X-Expected-Actor-Id',
+      ],
       credentials: true,
     }),
   );
@@ -116,7 +125,17 @@ export function createApp(
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
 
-  app.route('/v1', v1Routes({ approvalEngine, killSwitch, ledger, mfa, realtime }));
+  app.route(
+    '/v1',
+    v1Routes({
+      approvalEngine,
+      killSwitch,
+      ledger,
+      mfa,
+      realtime,
+      assessmentRequests: options.assessmentRequests,
+    }),
+  );
 
   return app;
 }

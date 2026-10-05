@@ -139,56 +139,91 @@ test('assessment waits for confirmation and never invents score improvements or 
     title: 'Invocation UI fixture',
   });
   let release: (() => void) | undefined;
-  let mode: 'failure' | 'success' = 'failure';
-  await page.route('**/api/bff/v1/agents/parikshan/run', async (route) => {
+  let mode: 'failure' | 'accepted' = 'failure';
+  let original: Record<string, unknown> | null = null;
+  let posts = 0;
+  const runId = crypto.randomUUID();
+  await page.route('**/api/bff/v1/assessment/jobs', async (route) => {
+    posts++;
     const input = route.request().postDataJSON() as Record<string, unknown>;
-    expect(input.engagement_id).toBe(engagement);
-    expect(input.library_version).toBe(library);
+    expect(input.engagementId).toBe(engagement);
+    expect(input.answers).toEqual({});
+    expect(input.applicability).toEqual({
+      sdfSelfAttested: null,
+      processesChildren: null,
+      processesHealth: null,
+    });
+    expect(route.request().headers()['idempotency-key']).toBe(input.operationKey);
+    expect(route.request().headers()['x-expected-actor-id']).toMatch(/^[0-9a-f-]{36}$/);
+    if (original) expect(input).toEqual(original);
+    else original = input;
     if (mode === 'failure') {
       await new Promise<void>((resolve) => {
         release = resolve;
       });
       await route.fulfill({
         status: 503,
-        json: {
-          error: {
-            code: 'agent_completion_unconfirmed',
-            message: 'Inspect this run before retrying.',
-          },
-        },
+        json: { error: { code: 'assessment_request_unconfirmed' } },
       });
     } else
       await route.fulfill({
-        status: 200,
+        status: 202,
         json: {
-          agent: 'parikshan',
-          correlation_id: input.correlation_id,
-          status: 'succeeded',
-          error: null,
-          output: {},
-          latency_ms: 1,
-          ledger_entry_ids: ['1', '2'],
+          jobId: input.operationKey,
+          runId,
+          expiresAt: new Date(Date.now() + 300000).toISOString(),
+          status: 'accepted',
+          statusUrl: `/api/bff/v1/assessment/jobs/${input.operationKey}`,
         },
       });
+  });
+  await page.route('**/api/bff/v1/assessment/jobs/*', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    expect(original).not.toBeNull();
+    await route.fulfill({
+      status: 200,
+      json: {
+        jobId: original!.operationKey,
+        runId,
+        engagementId: engagement,
+        correlationId: original!.operationKey,
+        libraryVersion: library,
+        recordedRunStatus: 'queued',
+        schedulingStatus: 'pending',
+        createdAt: new Date().toISOString(),
+        claimedAt: null,
+        allAgentEndToEndAccepted: false,
+        status: 'unconfirmed',
+        phase: 'queued',
+        finalization: null,
+      },
+    });
   });
   await page.goto(`/assessment?engagement=${engagement}`);
   const summary = await page.getByTestId('assessment-summary').innerText();
   await page.clock.install();
-  await page.getByRole('button', { name: 'Run Parikshan', exact: true }).click();
+  await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
+  await page
+    .getByRole('button', { name: 'Request unknown-answer assessment', exact: true })
+    .click();
   await expect.poll(() => Boolean(release)).toBe(true);
   await page.clock.fastForward(7000);
-  await expect(page.getByTestId('pipeline-parikshan')).toHaveAttribute('data-state', 'running');
-  await expect(page.getByText('Parikshan invocation completed.', { exact: false })).toHaveCount(0);
-  expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
-  release!();
-  await expect(page.getByTestId('assessment-invocation-error')).toContainText(
-    'Inspect this run before retrying.',
-  );
   await expect(page.getByTestId('pipeline-parikshan')).toHaveAttribute('data-state', 'not-run');
   expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
-  mode = 'success';
-  await page.getByRole('button', { name: 'Run Parikshan', exact: true }).click();
-  await expect(page.getByTestId('pipeline-parikshan')).toHaveAttribute('data-state', 'completed');
+  release!();
+  const requestPanel = page.getByRole('region', { name: 'Request a saved assessment' });
+  await expect(requestPanel.getByRole('alert')).toContainText('assessment_request_unconfirmed');
+  expect(posts).toBe(1);
+  await page.reload();
+  await expect(requestPanel.getByRole('button', { name: 'Check retained request' })).toBeVisible();
+  expect(posts).toBe(1);
+  await requestPanel.getByRole('button', { name: 'Check retained request' }).click();
+  await expect(requestPanel.getByRole('status')).toContainText('Completion is not yet confirmed');
+  mode = 'accepted';
+  await requestPanel.getByRole('button', { name: 'Retry original request' }).click();
+  await expect(requestPanel.getByRole('status')).toContainText('Original request accepted');
+  expect(posts).toBe(2);
+  await expect(page.getByTestId('pipeline-parikshan')).toHaveAttribute('data-state', 'not-run');
   for (const agent of ['drishti', 'vibhaag', 'saakshi', 'prativedan'])
     await expect(page.getByTestId(`pipeline-${agent}`)).toHaveAttribute('data-state', 'not-run');
   expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);

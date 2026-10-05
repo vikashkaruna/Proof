@@ -2,6 +2,15 @@
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
+import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
+import { buildLibrarySeed } from '../packages/control-library/src/seed.js';
+import { composeAssessmentProducer } from '../services/bff/src/workloads/assessment-producer.js';
+import {
+  AssessmentSnapshotSchema,
+  AssessmentRequestReceiptSchema,
+} from '../packages/types/src/index.js';
 import {
   controllerCredentialFixture,
   verifyControllerCredentialScope,
@@ -116,7 +125,9 @@ async function main() {
   const tenantId = randomUUID();
   const scheduleTenants = { unix: randomUUID(), https: randomUUID() };
   const workloadId = randomUUID();
+  const ownerPassword = randomBytes(32).toString('base64url');
   const createdResponse = await db.auth.admin.createUser({
+    password: ownerPassword,
     email: `worker-${randomUUID()}@example.invalid`,
     email_confirm: true,
   });
@@ -569,12 +580,14 @@ except Exception as error:
       correlationId,
       inputHash,
     };
-    const first = await new AssessmentDispatch(db, wrapper, policyRevisions).enqueue(
-      context,
-      inputJson,
-    );
+    const first = await new AssessmentDispatch(
+      db,
+      wrapper,
+      policyRevisions,
+      () => humanWriter,
+    ).enqueue(context, inputJson);
     const rotating = keyPolicy.primary(tenantId as TenantId) === firstKeyRef;
-    const staleDispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
+    const staleDispatcher = new AssessmentDispatch(db, wrapper, policyRevisions, () => humanWriter);
     keyPolicy = keyPolicy.withPrimary(tenantId as TenantId, rotatedRef);
     if (rotating) {
       const published = await policyStore.publish(
@@ -616,7 +629,7 @@ except Exception as error:
     wrapper = new AwsDispatchKeyWrapper(new DispatchKeyPolicy('aws', keyPolicy.snapshot()), kms);
     // Reconstruct the controller after a discarded response: stable job/run,
     // preserved ciphertext/proof, no new run or delegation audit.
-    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions, () => humanWriter);
     const repeated = await dispatcher.enqueue(context, inputJson);
     assert.deepEqual(repeated, first);
     const stored = check(
@@ -923,6 +936,509 @@ except Exception as error:
   });
   trustCurrent = true;
 
+  // Genuine normal-Auth HTTP producer -> separately invoked UID-attested
+  // worker/controller -> immutable result readback. All identities below are
+  // newly-created synthetic fixtures in guarded parity port56321; no retained
+  // account/password/factor is changed. Local AES-GCM KMS is explicitly a
+  // synthetic port, never evidence of cloud IAM/KMS or all-agent clearance.
+  phase = 'normal-auth-assessment-http';
+  const roleKey = (
+    role: 'human_action_writer' | 'evidence_ingestion_writer' | 'agent_ledger_writer',
+  ) =>
+    mintLocalPostgrestRoleKey({
+      role,
+      jwtSecret: status.JWT_SECRET!,
+      serviceKey: status.SERVICE_ROLE_KEY!,
+    });
+  Object.assign(process.env, {
+    NODE_ENV: 'production',
+    ENVIRONMENT: 'local',
+    AXIOM_AUTH_MODE: 'strict',
+    SUPABASE_URL: url.origin,
+    SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY ?? status.ANON_KEY,
+    SUPABASE_SERVICE_KEY: status.SECRET_KEY ?? status.SERVICE_ROLE_KEY,
+    SUPABASE_HUMAN_ACTION_WRITER_KEY: roleKey('human_action_writer'),
+    SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: roleKey('evidence_ingestion_writer'),
+    SUPABASE_AGENT_LEDGER_WRITER_KEY: roleKey('agent_ledger_writer'),
+    APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
+    AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+    AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
+    AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
+    MODEL_GATEWAY_API_KEY: randomBytes(32).toString('hex'),
+    AXIOM_REGION: 'ap-south-1',
+    AXIOM_REPORT_EMAIL_MODE: 'disabled',
+    LOG_LEVEL: 'error',
+  });
+  await seedAcceptanceLibrary(
+    url.origin,
+    status.PUBLISHABLE_KEY ?? status.ANON_KEY!,
+    status.SERVICE_ROLE_KEY!,
+  );
+  const acceptanceLibrary = buildLibrarySeed();
+  assert.equal(acceptanceLibrary.version, '0.1.1');
+  assert.equal(acceptanceLibrary.controls.length, 46);
+  const nullAnswers: Record<string, Record<string, null>> = {};
+  let knownQuestions = 0;
+  for (const control of acceptanceLibrary.controls) {
+    const booleanQuestions = control.assessment_questions.filter(
+      (question) => question.type === 'boolean',
+    );
+    nullAnswers[control.id] = Object.fromEntries(
+      booleanQuestions.map((question) => [question.id, null]),
+    );
+    knownQuestions += booleanQuestions.length;
+  }
+  assert.equal(knownQuestions, 65);
+  const viewerPassword = randomBytes(32).toString('base64url');
+  const viewerCreated = await db.auth.admin.createUser({
+    email: `assessment-viewer-${randomUUID()}@example.invalid`,
+    password: viewerPassword,
+    email_confirm: true,
+  });
+  assert.equal(viewerCreated.error, null);
+  const viewer = viewerCreated.data.user!;
+  check(await db.from('users').insert({ id: viewer.id, email: viewer.email }));
+  check(
+    await db
+      .from('tenant_users')
+      .insert({ tenant_id: tenantId, user_id: viewer.id, role: 'viewer' }),
+  );
+  const signIn = async (email: string, password: string) => {
+    const client = createClient(url.origin, status.PUBLISHABLE_KEY ?? status.ANON_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const signed = await client.auth.signInWithPassword({ email, password });
+    assert.equal(signed.error, null);
+    assert(signed.data.session?.access_token);
+    return signed.data.session.access_token;
+  };
+  const ownerToken = await signIn(created.user!.email!, ownerPassword);
+  const viewerToken = await signIn(viewer.email!, viewerPassword);
+  const ring = keyPolicy.snapshot().get(tenantId as TenantId)!;
+  const producer = await composeAssessmentProducer(
+    {
+      schemaVersion: 1,
+      tenants: [
+        {
+          tenantId,
+          workloadId,
+          trustDomain: 'local.axiomproof.test',
+          keys: { provider: 'aws', primary: ring.primary, retiring: ring.retiring },
+        },
+      ],
+    },
+    db,
+    { awsKms: kms, writer: () => humanWriter },
+  );
+  const normalApp = (await import('../services/bff/src/app.js')).createApp({
+    assessmentRequests: producer,
+  });
+  // Standard Node HTTP transport only; every application request goes through
+  // the complete mounted app.fetch middleware chain, with no injected Auth state.
+  let httpOrigin = '';
+  const httpServer = createServer(async (incoming, outgoing) => {
+    try {
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      for await (const chunk of incoming) {
+        const value = Buffer.from(chunk);
+        bytes += value.length;
+        if (bytes > 256 * 1024) throw new Error('fixture body limit');
+        chunks.push(value);
+      }
+      const headers = new Headers();
+      for (const [name, values] of Object.entries(incoming.headers)) {
+        for (const value of Array.isArray(values) ? values : values ? [values] : [])
+          headers.append(name, value);
+      }
+      const response = await normalApp.fetch(
+        new Request(new URL(incoming.url ?? '/', httpOrigin), {
+          method: incoming.method,
+          headers,
+          ...(bytes ? { body: Buffer.concat(chunks).toString('utf8') } : {}),
+        }),
+      );
+      outgoing.statusCode = response.status;
+      response.headers.forEach((value, name) => outgoing.setHeader(name, value));
+      outgoing.end(Buffer.from(await response.arrayBuffer()));
+    } catch {
+      outgoing.statusCode = 500;
+      outgoing.end('fixture transport failed');
+    }
+  });
+  httpServer.requestTimeout = 30000;
+  httpServer.headersTimeout = 10000;
+  httpServer.listen(0, '127.0.0.1');
+  await once(httpServer, 'listening');
+  const address = httpServer.address();
+  assert(address && typeof address === 'object');
+  httpOrigin = `http://127.0.0.1:${address.port}`;
+  const ownerHeaders = {
+    Authorization: `Bearer ${ownerToken}`,
+    'x-tenant-id': tenantId,
+    'x-expected-actor-id': actorId,
+  };
+  const viewerHeaders = {
+    Authorization: `Bearer ${viewerToken}`,
+    'x-tenant-id': tenantId,
+    'x-expected-actor-id': viewer.id,
+  };
+  const request = async (path: string, expected: number, options: RequestInit = {}) => {
+    const response = await fetch(httpOrigin + path, {
+      ...options,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30000),
+    });
+    assert.equal(response.status, expected, phase);
+    return response;
+  };
+  const post = (
+    headers: Record<string, string>,
+    body: unknown,
+    operationKey = randomUUID(),
+  ): RequestInit => ({
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json', 'idempotency-key': operationKey },
+    body: JSON.stringify(body),
+  });
+  try {
+    await request('/v1/assessment', 403, { headers: ownerHeaders });
+    phase = 'normal-auth-mfa-enrol';
+    const enrollment = await request('/v1/mfa/enrol', 201, post(ownerHeaders, {}));
+    const factor = z
+      .object({ factorId: z.uuid(), secret: z.string().min(1) })
+      .parse(await enrollment.json());
+    const { generateTotp } = await import('../packages/mfa/src/index.js');
+    phase = 'normal-auth-mfa-activate';
+    const activated = await request(
+      '/v1/mfa/enrol/activate',
+      200,
+      post(ownerHeaders, { code: generateTotp(factor.secret) }),
+    );
+    const recovery = z
+      .object({ recoveryCodes: z.array(z.string()).min(4) })
+      .parse(await activated.json());
+    await request('/v1/assessment', 401, { headers: ownerHeaders });
+    phase = 'normal-auth-mfa-login';
+    const loginChallenge = await request(
+      '/v1/mfa/challenge',
+      201,
+      post(ownerHeaders, { purpose: 'login' }),
+    );
+    const challenge = z.object({ challengeId: z.uuid() }).parse(await loginChallenge.json());
+    await request(
+      `/v1/mfa/challenge/${challenge.challengeId}/verify`,
+      200,
+      post(ownerHeaders, { code: recovery.recoveryCodes[0] }),
+    );
+    outcomes['normal-auth-owner-password-and-persisted-mfa'] = true;
+    const engagementId = randomUUID(),
+      foreignEngagementId = randomUUID(),
+      foreignTenantId = randomUUID(),
+      jobId = randomUUID();
+    check(
+      await db.from('tenants').insert({
+        id: foreignTenantId,
+        slug: `foreign-assessment-${foreignTenantId}`,
+        name: 'Synthetic foreign assessment',
+      }),
+    );
+    check(
+      await db.from('engagements').insert([
+        {
+          id: engagementId,
+          tenant_id: tenantId,
+          library_version: acceptanceLibrary.version,
+          title: 'Unknown-only published-library acceptance',
+        },
+        {
+          id: foreignEngagementId,
+          tenant_id: foreignTenantId,
+          library_version: acceptanceLibrary.version,
+          title: 'Synthetic foreign assessment',
+        },
+      ]),
+    );
+    const intent = {
+      operationKey: jobId,
+      engagementId,
+      answers: {},
+      applicability: { sdfSelfAttested: null, processesChildren: null, processesHealth: null },
+    };
+    await request('/v1/assessment/jobs', 403, post(viewerHeaders, intent, jobId));
+    const foreignEngagementOperation = randomUUID();
+    await request(
+      '/v1/assessment/jobs',
+      404,
+      post(
+        ownerHeaders,
+        { ...intent, operationKey: foreignEngagementOperation, engagementId: foreignEngagementId },
+        foreignEngagementOperation,
+      ),
+    );
+    const foreignOperation = randomUUID();
+    await request(
+      '/v1/assessment/jobs',
+      403,
+      post(
+        { ...ownerHeaders, 'x-tenant-id': foreignTenantId },
+        { ...intent, operationKey: foreignOperation, engagementId: foreignEngagementId },
+        foreignOperation,
+      ),
+    );
+    outcomes['normal-auth-viewer-and-foreign-request-refused'] = true;
+    phase = 'normal-auth-assessment-accepted-without-launch';
+    const launchesBefore = jobNames.length;
+    const accepted = AssessmentRequestReceiptSchema.parse(
+      await (await request('/v1/assessment/jobs', 202, post(ownerHeaders, intent, jobId))).json(),
+    );
+    assert.equal(accepted.jobId, jobId);
+    const retried = AssessmentRequestReceiptSchema.parse(
+      await (await request('/v1/assessment/jobs', 202, post(ownerHeaders, intent, jobId))).json(),
+    );
+    assert.deepEqual(retried, accepted);
+    const changedIntent = await request(
+      '/v1/assessment/jobs',
+      503,
+      post(ownerHeaders, { ...intent, answers: nullAnswers }, jobId),
+    );
+    assert.equal(
+      z
+        .object({ error: z.object({ code: z.literal('assessment_request_unconfirmed') }) })
+        .parse(await changedIntent.json()).error.code,
+      'assessment_request_unconfirmed',
+    );
+    assert.equal(jobNames.length, launchesBefore);
+    const queued = z
+      .object({
+        status: z.literal('unconfirmed'),
+        phase: z.literal('queued'),
+        recordedRunStatus: z.literal('queued'),
+        claimedAt: z.null(),
+        finalization: z.null(),
+        allAgentEndToEndAccepted: z.literal(false),
+      })
+      .parse(
+        await (
+          await request(`/v1/assessment/jobs/${jobId}`, 200, { headers: ownerHeaders })
+        ).json(),
+      );
+    assert.equal(queued.finalization, null);
+    assert.equal(
+      check(
+        await db
+          .from('findings')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('engagement_id', engagementId),
+      )!.length,
+      0,
+    );
+    assert.equal(
+      check(
+        await db
+          .from('workload_assessment_packets')
+          .select('run_id')
+          .eq('tenant_id', tenantId)
+          .eq('run_id', accepted.runId),
+      )!.length,
+      0,
+    );
+    outcomes['normal-auth-accepted-is-queued-no-claim-no-launch-no-findings'] = true;
+    phase = 'normal-auth-separate-spire-controller';
+    const credential = controllerCredentialFixture(tenantId, status);
+    try {
+      const controllerDb = createClient(url.origin, status.ANON_KEY!, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: `Bearer ${credential.accessToken}` } },
+      });
+      const { requireControllerBackend } =
+        await import('../services/bff/src/workloads/controller-files.js');
+      await requireControllerBackend(controllerDb, tenantId);
+      const controllerDispatch = new AssessmentDispatch(controllerDb, wrapper, policyRevisions);
+      const controller = new AssessmentController(
+        controllerDispatch,
+        new AssessmentChannel(
+          launchSupervised,
+          {
+            start: (value) => callTool('start', value),
+            complete: (value) => callTool('complete', value),
+          },
+          'spiffe://local.axiomproof.test/agent/parikshan',
+        ),
+        new AssessmentConfirmation(controllerDb),
+      );
+      const executed = await controller.run(tenantId, jobId);
+      assert.equal(executed.status, 'confirmed');
+      assert.equal(executed.cleanupConfirmed, true);
+      assert.equal(jobNames.length, launchesBefore + 1);
+      const recovered = await controller.reconcile(tenantId, jobId);
+      assert.equal(recovered.status, 'confirmed');
+      assert.equal(jobNames.length, launchesBefore + 1);
+    } finally {
+      credential.revoke();
+    }
+    outcomes['normal-auth-separate-restricted-controller-single-spire-worker'] = true;
+    phase = 'normal-auth-finalized-unknown-readback';
+    const finalized = z
+      .object({
+        status: z.literal('finalization_recorded'),
+        phase: z.literal('finalized'),
+        recordedRunStatus: z.literal('succeeded'),
+        allAgentEndToEndAccepted: z.literal(false),
+        finalization: z.object({
+          resultDigest: z.string().regex(/^[a-f0-9]{64}$/),
+          verification: z.literal('persisted_controller_receipt_bindings'),
+        }),
+      })
+      .parse(
+        await (
+          await request(`/v1/assessment/jobs/${jobId}`, 200, { headers: ownerHeaders })
+        ).json(),
+      );
+    const snapshot = AssessmentSnapshotSchema.parse(
+      await (
+        await request(`/v1/assessment?engagementId=${engagementId}`, 200, { headers: ownerHeaders })
+      ).json(),
+    );
+    assert.equal(snapshot.controls.length, 46);
+    assert(snapshot.provenance);
+    assert.equal(snapshot.provenance.status, 'caller_declared_unverified');
+    assert.equal(snapshot.provenance.runId, accepted.runId);
+    assert.equal(snapshot.provenance.estimates, 'provisional');
+    assert.deepEqual(snapshot.provenance.applicability, {
+      sdfSelfAttested: { value: null, provenance: 'unknown' },
+      processesChildren: { value: null, provenance: 'unknown' },
+      processesHealth: { value: null, provenance: 'unknown' },
+    });
+    assert(
+      snapshot.controls.every(
+        (control) => control.status === 'unknown' && control.answerState === 'unknown',
+      ),
+    );
+    assert.equal(
+      snapshot.controls.reduce((count, control) => count + (control.answerCounts?.unknown ?? 0), 0),
+      65,
+    );
+    assert(
+      snapshot.controls.every(
+        (control) =>
+          control.answerCounts?.callerAffirmed === 0 && control.answerCounts?.callerDenied === 0,
+      ),
+    );
+    assert.equal(
+      check(
+        await db
+          .from('findings')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('engagement_id', engagementId),
+      )!.length,
+      46,
+    );
+    const actual = check(
+      await db
+        .from('workload_assessment_packets')
+        .select('result,result_digest,library_digest,finalized_receipt')
+        .eq('tenant_id', tenantId)
+        .eq('run_id', accepted.runId)
+        .single(),
+    );
+    assert(actual?.finalized_receipt);
+    assert.equal(actual.result_digest, finalized.finalization.resultDigest);
+    const sqlHash = execFileSync(
+      'docker',
+      [
+        'exec',
+        '-i',
+        'supabase_db_axiom-w0-parity',
+        'psql',
+        '-X',
+        '-U',
+        'postgres',
+        '-d',
+        'postgres',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-Atq',
+      ],
+      {
+        input: `select p.result_digest=encode(sha256(convert_to(p.result::text,'UTF8')),'hex') and r.output_redacted_hash=p.result_digest from public.workload_assessment_packets p join public.agent_runs r on r.id=p.run_id and r.tenant_id=p.tenant_id where p.tenant_id='${tenantId}' and p.run_id='${accepted.runId}';`,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 10000,
+      },
+    ).trim();
+    assert.equal(sqlHash, 't');
+    const humanRequests = check(
+      await db
+        .from('audit_ledger')
+        .select('actor_type,actor_id,input_hash,detail')
+        .eq('tenant_id', tenantId)
+        .eq('target_ref', jobId)
+        .eq('action_type', 'assessment.requested'),
+    )!;
+    assert.equal(humanRequests.length, 1);
+    assert.equal(humanRequests[0]!.actor_type, 'human');
+    assert.equal(humanRequests[0]!.actor_id, actorId);
+    assert.equal(humanRequests[0]!.detail.run_id, accepted.runId);
+    const expectedInputHash = createHash('sha256')
+      .update(
+        canonicalJson({
+          tenant_id: tenantId,
+          engagement_id: engagementId,
+          library_version: acceptanceLibrary.version,
+          answers: {},
+          sdf_self_attested: null,
+          processes_children: null,
+          processes_health: null,
+        }),
+        'utf8',
+      )
+      .digest('hex');
+    assert.equal(humanRequests[0]!.input_hash, expectedInputHash);
+    const sourceJob = check(
+      await db
+        .from('assessment_dispatch_jobs')
+        .select('input_hash,actor_id,workload_id,correlation_id')
+        .eq('tenant_id', tenantId)
+        .eq('id', jobId)
+        .single(),
+    );
+    assert.deepEqual(sourceJob, {
+      input_hash: expectedInputHash,
+      actor_id: actorId,
+      workload_id: workloadId,
+      correlation_id: jobId,
+    });
+    assert(!JSON.stringify(humanRequests).includes(factor.secret));
+    assert(!JSON.stringify(humanRequests).includes(ownerPassword));
+    assert(!JSON.stringify(humanRequests).includes('Q1'));
+    const afterFinal = AssessmentRequestReceiptSchema.parse(
+      await (await request('/v1/assessment/jobs', 202, post(ownerHeaders, intent, jobId))).json(),
+    );
+    assert.deepEqual(afterFinal, accepted);
+    assert.equal(jobNames.length, launchesBefore + 1);
+    await request(`/v1/assessment/jobs/${jobId}`, 403, {
+      headers: { ...ownerHeaders, 'x-tenant-id': foreignTenantId },
+    });
+    await request(`/v1/assessment?engagementId=${foreignEngagementId}`, 404, {
+      headers: ownerHeaders,
+    });
+    assert.deepEqual(
+      check(await db.rpc('verify_ledger', { p_tenant_id: tenantId, p_from_sequence: 1 })),
+      [],
+    );
+    outcomes['normal-auth-finalized-library011-46-controls-65-unknown-no-confirmed-compliance'] =
+      true;
+    outcomes['normal-auth-full-jsonb-packet-hash-one-human-request-zero-chain-violations'] = true;
+  } finally {
+    httpServer.closeAllConnections?.();
+    await new Promise<void>((resolve, reject) =>
+      httpServer.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+
   phase = 'vm-controller-integration';
   const vmDirectory = await mkdtemp(join(await realpath('.axiom-runtime'), 'vm-controller-'));
   const vmContainer = `axiom-vm-controller-${randomUUID()}`;
@@ -950,7 +1466,7 @@ except Exception as error:
       library_version: version,
       answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
     });
-    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions, () => humanWriter);
     await dispatcher.enqueue(
       {
         jobId,
@@ -1250,7 +1766,7 @@ except Exception as error:
       library_version: version,
       answers: { 'WA-1': { Q1: false }, 'WA-2': { Q1: true } },
     });
-    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions);
+    const dispatcher = new AssessmentDispatch(db, wrapper, policyRevisions, () => humanWriter);
     const inputHash = createHash('sha256').update(wire).digest('hex');
     const receipt = await dispatcher.enqueue(
       {
@@ -1325,7 +1841,12 @@ except Exception as error:
     );
     policyRevisions.set(scheduleTenantId, schedulingPolicy.revision);
     const scheduledJobs: Array<{ tenantId: string; jobId: string }> = [];
-    const schedulingDispatch = new AssessmentDispatch(db, wrapper, policyRevisions);
+    const schedulingDispatch = new AssessmentDispatch(
+      db,
+      wrapper,
+      policyRevisions,
+      () => humanWriter,
+    );
     for (let n = 0; n < 2; n++) {
       const engagementId = randomUUID(),
         correlationId = randomUUID(),

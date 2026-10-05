@@ -64,7 +64,7 @@ afterEach(cleanup);
 it('refuses invocation when saved assessment results are unavailable', () => {
   render(<AssessmentClient snapshot={null} canInvokeAgent />);
   expect(screen.getByTestId('assessment-provenance').textContent).toContain('unavailable');
-  expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Run Parikshan' })).toBeNull();
   expect(screen.getByTestId('assessment-summary').textContent).toContain(
     'Control posture unavailable',
   );
@@ -83,43 +83,11 @@ it('shows saved controls without inventing an assessment or exposure when no eng
   expect(screen.getByRole('link', { name: 'Create an assessment' }).getAttribute('href')).toBe(
     '/engagements',
   );
-  expect(screen.getByRole('button', { name: 'Run Parikshan' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Run Parikshan' })).toBeNull();
   expect(screen.getByTestId('assessment-summary').textContent).toContain('Not assessed');
   expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
   expect(screen.getByTestId('assessment-control-CTRL-2').textContent).toContain('No saved score');
   expect(state.invoke).not.toHaveBeenCalled();
-});
-
-it('invokes Parikshan only for the saved engagement and shows only a returned ledger reference', async () => {
-  state.invoke.mockResolvedValue({ ledger_entry_ids: ['ledger-1'] });
-  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
-  fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
-  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
-  expect(state.invoke).toHaveBeenCalledOnce();
-  expect(state.invoke).toHaveBeenCalledWith('parikshan', {
-    scope: 'assessment_pipeline',
-    engagement_id: snapshot.engagement?.id,
-    library_version: 'v2',
-  });
-  expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
-  expect(screen.getByTestId('pipeline-saakshi').getAttribute('data-state')).toBe('not-run');
-  expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe(
-    '/ledger?q=ledger-1',
-  );
-});
-
-it('keeps failed or ambiguous invocations unconfirmed and does not show a proof reference', async () => {
-  state.invoke.mockRejectedValue(new Error('network failed'));
-  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
-  fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
-  await waitFor(() =>
-    expect(screen.getByTestId('assessment-invocation-error').textContent).toContain(
-      'Could not confirm the assessment outcome',
-    ),
-  );
-  expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('not-run');
-  expect(screen.queryByRole('link', { name: /Ledger entry #/ })).toBeNull();
-  expect(state.refresh).not.toHaveBeenCalled();
 });
 
 it('renders the shared module context outside the heading', () => {
@@ -133,18 +101,6 @@ it('renders the shared module context outside the heading', () => {
   expect(heading.textContent).not.toContain(meta.hi);
   expect(heading.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(4);
   expect(screen.getByRole('region', { name: 'Saved control results' })).toBeTruthy();
-});
-
-it('labels each pipeline stage through AgentLabel; a finished run is static, not animated', async () => {
-  state.invoke.mockResolvedValue({ ledger_entry_ids: ['ledger-1'] });
-  render(<AssessmentClient snapshot={snapshot} canInvokeAgent />);
-  const stage = (key: string) =>
-    screen.getByTestId(`pipeline-${key}`).querySelector('[data-testid="agent-label"]');
-  expect(stage('parikshan')?.getAttribute('data-agent')).toBe('parikshan');
-  fireEvent.click(screen.getByRole('button', { name: 'Run Parikshan' }));
-  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
-  expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
-  expect(stage('parikshan')?.getAttribute('data-state')).toBe('idle');
 });
 
 it('keeps the saved assessment readable without an invocation control for viewers', () => {
@@ -237,4 +193,10 @@ it('does not infer questionnaire provenance from legacy numeric findings', () =>
   expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
   expect(document.body.textContent).not.toContain('Provisional score');
   expect(screen.queryByLabelText('Questionnaire applicability declarations')).toBeNull();
+});
+
+it('shows pipeline progress only from a saved finalized declaration snapshot', () => {
+  render(<AssessmentClient snapshot={declaredSnapshot()} />);
+  expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
+  expect(screen.getByTestId('pipeline-saakshi').getAttribute('data-state')).toBe('not-run');
 });

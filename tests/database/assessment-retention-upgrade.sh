@@ -14,6 +14,7 @@ sql() { docker exec -i "$container" psql -X -U postgres -d retention_upgrade_tes
 sql < tests/database/bootstrap.sql
 python3 scripts/migrate-database.py --container "$container" --user postgres --database retention_upgrade_test --migrations "$fixture_dir" > "$fixture_dir/migrate.log"
 sql -c 'create schema retention_upgrade'
+sql -c 'grant usage on schema retention_upgrade to human_action_writer'
 sed '/-- FIXTURE_READY/,$d' tests/database/assessment-retention.test.sql | sed '/^begin;$/d;s/pg_temp/retention_upgrade/g;s/create temporary table issued/create table retention_upgrade.issued/g;s/from issued/from retention_upgrade.issued/g;s/on issued/on retention_upgrade.issued/g;/create function retention_upgrade.purge/d' | sql > "$fixture_dir/fixture.log"
 sql <<'SQL'
 select public.confirm_workload_assessment(retention_upgrade.id(11),(select run_id from retention_upgrade.issued));

@@ -15,8 +15,41 @@ insert into public.engagements(id,tenant_id,estate_id,library_version,title) val
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status)
  values(pg_temp.id(31),pg_temp.id(11),'parikshan','spiffe://axiom.test/parikshan','active');
 
-create function pg_temp.enqueue(job int default 51,hash text default repeat('a',64),cipher bytea default decode(repeat('ab',100),'hex')) returns jsonb language sql as $$
- select public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('scheduling-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'))$$;
+-- Compatibility fixture only: preserve pre-0112 upgrade setup, and explicitly
+-- assume the human writer for latest enqueue while claims retain service scope.
+create function pg_temp.enqueue(job int default 51,hash text default repeat('a',64),cipher bytea default decode(repeat('ab',100),'hex')) returns jsonb language plpgsql as $$
+declare prior text:=current_user; reply jsonb; policy jsonb; key_ref text; modern boolean:=false; historical boolean;
+begin
+ if to_regprocedure('public.enqueue_assessment_dispatch(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,integer,text)') is not null then
+  modern:=not has_function_privilege('service_role','public.enqueue_assessment_dispatch(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,integer,text)','execute');
+ end if;
+ if not modern then
+  return public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('scheduling-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'));
+ end if;
+ if prior not in ('postgres','service_role','human_action_writer') then raise exception 'fixture writer denied' using errcode='42501'; end if;
+ select exists(select 1 from public.assessment_dispatch_jobs where id=pg_temp.id(job)) into historical;
+ execute 'set local role human_action_writer';
+ begin
+  if historical then
+   reply:=public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('scheduling-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'));
+  else
+   key_ref:='arn:aws:kms:ap-south-1:123456789012:key/'||pg_temp.id(61)::text;
+   policy:=public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),0,'aws',key_ref,array[key_ref]);
+   if policy ? 'error' then raise exception 'fixture policy refused'; end if;
+   reply:=public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('scheduling-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes',key_ref,decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'),(policy->>'revision')::integer,policy->>'fingerprint');
+  end if;
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior); return reply;
+end $$;
+create function pg_temp.claim(job int default 51, tenant uuid default pg_temp.id(11)) returns jsonb language plpgsql as $$
+declare revision integer; fingerprint text;
+begin
+ if to_regclass('public.assessment_dispatch_key_policies') is not null then
+  select p.revision,p.fingerprint into revision,fingerprint from public.assessment_dispatch_key_policies p where tenant_id=tenant;
+  return public.claim_assessment_dispatch(tenant,pg_temp.id(job),revision,fingerprint);
+ end if;
+ return public.claim_assessment_dispatch(tenant,pg_temp.id(job));
+end $$;
 
 create function pg_temp.reserve(ns text default 'default') returns jsonb language sql as $$select public.reserve_assessment_schedules(ns,pg_temp.id(11),1)$$;
 create function pg_temp.ack(ticket jsonb, execution uuid default pg_temp.id(61)) returns jsonb language sql as $$select public.acknowledge_assessment_schedule((ticket->>'tenantId')::uuid,(ticket->>'jobId')::uuid,(ticket->>'leaseId')::uuid,ticket->>'namespace',ticket->>'workflowId',execution)$$;

@@ -72,7 +72,13 @@ test('an assessment creator can start an intake and open its saved assessment', 
   await savedAssessment.first().click();
   await expect(page).toHaveURL(/\/assessment\?engagement=[0-9a-f-]+$/);
   await expect(page.getByTestId('assessment-provenance')).toContainText('October source review');
-  await expect(page.getByRole('button', { name: 'Run Parikshan' })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Request unknown-answer assessment' }),
+  ).toBeDisabled();
+  await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
+  await expect(
+    page.getByRole('button', { name: 'Request unknown-answer assessment' }),
+  ).toBeEnabled();
   const createdId = new URL(page.url()).searchParams.get('engagement');
   expect(createdId).toBe(posted.requestKey);
   const replay = await page.request.post('/api/bff/v1/engagements', {
@@ -106,5 +112,7 @@ test('a viewer can read agent modules without being offered a run action', async
   }
   await page.goto('/assessment');
   await expect(page.getByRole('heading', { name: 'Assessment pipeline' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Run Parikshan' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Request unknown-answer assessment' })).toHaveCount(
+    0,
+  );
 });
