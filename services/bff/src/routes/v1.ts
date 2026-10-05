@@ -10,6 +10,7 @@ import { connectorRoutes } from './connectors.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
+import { publicSourceReadRoutes } from './public-source-reads.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
@@ -215,6 +216,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());
   app.route('/', publicSourceBindingRoutes());
+  app.route('/', publicSourceReadRoutes());
   app.route(
     '/',
     publicSourceAgentRoutes({
