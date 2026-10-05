@@ -9,6 +9,7 @@ import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { buildLibrarySeed } from '../packages/control-library/src/seed.js';
 import { loadAssessmentHttpModules } from './lib/assessment-http-loader.js';
+import { verifyUnknownAssessmentSnapshot } from './lib/acceptance-assessment-snapshot.js';
 import {
   AssessmentSnapshotSchema,
   AssessmentRequestReceiptSchema,
@@ -1313,11 +1314,11 @@ except Exception as error:
       processesChildren: { value: null, provenance: 'unknown' },
       processesHealth: { value: null, provenance: 'unknown' },
     });
-    assert(
-      snapshot.controls.every(
-        (control) => control.status === 'unknown' && control.answerState === 'unknown',
-      ),
-    );
+    assert.deepEqual(verifyUnknownAssessmentSnapshot(snapshot, acceptanceLibrary.controls), {
+      booleanAssessableControls: 44,
+      nonBooleanAssessableControls: 2,
+      unknownQuestions: 65,
+    });
     assert.equal(
       snapshot.controls.reduce((count, control) => count + (control.answerCounts?.unknown ?? 0), 0),
       65,
