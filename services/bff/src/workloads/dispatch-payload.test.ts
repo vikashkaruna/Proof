@@ -293,3 +293,31 @@ describe('private dispatch reconciliation lookup', () => {
     ).rejects.toThrow('Private assessment dispatch was refused.');
   });
 });
+
+it('preserves explicit unknown applicability flags through the private dispatch envelope', async () => {
+  const text = JSON.stringify({
+    ...JSON.parse(input),
+    sdf_self_attested: null,
+    processes_children: null,
+    processes_health: null,
+  });
+  const c = { ...context, inputHash: createHash('sha256').update(text).digest('hex') },
+    f = fixture();
+  const sealed = await sealDispatch(c, text, f.proof, f.wrapper);
+  const opened = await openDispatch(c, sealed, f.hash, f.wrapper);
+  expect(JSON.parse(opened.reveal().inputJson)).toMatchObject({
+    sdf_self_attested: null,
+    processes_children: null,
+    processes_health: null,
+  });
+  expect(JSON.stringify(opened)).not.toContain('sdf_self_attested');
+});
+it.each(['false', 0, {}, []])(
+  'refuses non-boolean applicability %j before encryption',
+  async (value) => {
+    const text = JSON.stringify({ ...JSON.parse(input), processes_children: value });
+    const c = { ...context, inputHash: createHash('sha256').update(text).digest('hex') },
+      f = fixture();
+    await expect(sealDispatch(c, text, f.proof, f.wrapper)).rejects.toThrow();
+  },
+);

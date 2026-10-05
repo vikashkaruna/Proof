@@ -118,9 +118,9 @@ function validateInput(context: DispatchContext, input: string): void {
       engagement_id: z.literal(context.engagementId),
       library_version: z.string().min(1).max(200),
       answers: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
-      sdf_self_attested: z.boolean().optional(),
-      processes_children: z.boolean().optional(),
-      processes_health: z.boolean().optional(),
+      sdf_self_attested: z.boolean().nullable().optional(),
+      processes_children: z.boolean().nullable().optional(),
+      processes_health: z.boolean().nullable().optional(),
     })
     .strict();
   data.parse(parsed);

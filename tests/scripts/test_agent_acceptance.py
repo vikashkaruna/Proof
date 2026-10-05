@@ -7,6 +7,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
+from urllib.error import URLError
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -121,6 +123,61 @@ def audit():
 
 
 class AgentAcceptanceTests(unittest.TestCase):
+    def test_post_transport_sends_reviewed_request_key_and_credential_headers_once(self):
+        response = Mock(status=200)
+        response.read.return_value = b'{"ok":true}'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        opener = Mock()
+        opener.open.return_value = response
+        with patch.object(acceptance, "build_opener", return_value=opener):
+            self.assertEqual(
+                acceptance.request_json(
+                    "http://127.0.0.1:4439/v1/agents/lekha/run",
+                    body={"operation": "verify", "correlation_id": CORRELATION},
+                    token="fictional-bearer-credential",
+                    tenant=TENANT,
+                    idempotency_key=CORRELATION.upper(),
+                ),
+                (200, {"ok": True}),
+            )
+        opener.open.assert_called_once()
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Idempotency-key"), CORRELATION)
+        self.assertEqual(request.get_header("X-tenant-id"), TENANT)
+        self.assertEqual(
+            request.get_header("Authorization"), "Bearer fictional-bearer-credential"
+        )
+
+    def test_post_missing_or_invalid_key_refused_before_network(self):
+        with patch.object(acceptance, "build_opener") as build:
+            for key in (None, "", "invalid", "unsafe\r\nheader:value"):
+                with self.subTest(key=key), self.assertRaises(acceptance.Refused):
+                    acceptance.request_json(
+                        "http://127.0.0.1:4439/v1/agents/lekha/run",
+                        body={"operation": "verify"},
+                        idempotency_key=key,
+                    )
+            build.assert_not_called()
+
+    def test_transport_failure_never_retries_or_changes_request_key(self):
+        opener = Mock()
+        opener.open.side_effect = URLError("fictional timeout")
+        with (
+            patch.object(acceptance, "build_opener", return_value=opener),
+            self.assertRaisesRegex(acceptance.Refused, "transport_unconfirmed"),
+        ):
+            acceptance.request_json(
+                "http://127.0.0.1:4439/v1/agents/lekha/run",
+                body={"operation": "verify", "correlation_id": CORRELATION},
+                idempotency_key=CORRELATION,
+            )
+        opener.open.assert_called_once()
+        self.assertEqual(
+            opener.open.call_args.args[0].get_header("Idempotency-key"), CORRELATION
+        )
+
     def test_rejects_remote_origins_and_credential_or_path_origins(self):
         for value in (
             "https://localhost:4439",
@@ -533,6 +590,8 @@ class AgentAcceptanceTests(unittest.TestCase):
             "runtime_completed_domain_acceptance_pending",
         )
         self.assertEqual(len([item for item in calls if "body" in item[1]]), 1)
+        post = next(item for item in calls if "body" in item[1])
+        self.assertEqual(post[1]["idempotency_key"], CORRELATION)
         self.assertEqual(
             value["receipts"][0]["inputSha256"],
             acceptance.digest(manifest()["invocations"][0]["input"]),
@@ -553,6 +612,8 @@ class AgentAcceptanceTests(unittest.TestCase):
         self.assertEqual(value["receipts"][0]["status"], "transport_unconfirmed")
         self.assertFalse(value["allAgentEndToEndAccepted"])
         self.assertEqual(len([item for item in calls if "body" in item[1]]), 1)
+        post = next(item for item in calls if "body" in item[1])
+        self.assertEqual(post[1]["idempotency_key"], CORRELATION)
 
     def test_missing_durable_audit_and_changed_source_cannot_complete(self):
         def fetch(url, **kwargs):

@@ -4,13 +4,12 @@
 
 Parikshan runs the gap assessment against the versioned control
 library (46 controls in v0.1.0). It scores each control, weights
-the risk, and produces a posture score and an estimated statutory
-exposure. It also produces SDF self-assessments.
+the risk, and produces computation estimates of posture and exposure.
+Questionnaire declarations and SDF applicability remain unverified.
 
 In Phase 0, the agent produces a structured scoring against the
-46 controls. The reasoning model is used to generate the rationale
-for each finding. The structural classification of "what control
-applies to what evidence" is deterministic.
+46 controls. Rationale describes the deterministic computation and
+unknown inputs. Evidence and human/legal review remain required.
 """
 
 from __future__ import annotations
@@ -32,9 +31,9 @@ class ParikshanInput(BaseModel):
         default_factory=dict,
         description="Map of control_id → {question_id: answer} for the assessment questionnaire",
     )
-    sdf_self_attested: bool = False
-    processes_children: bool = False
-    processes_health: bool = False
+    sdf_self_attested: bool | None = Field(default=None, strict=True)
+    processes_children: bool | None = Field(default=None, strict=True)
+    processes_health: bool | None = Field(default=None, strict=True)
 
 
 class FindingOut(BaseModel):

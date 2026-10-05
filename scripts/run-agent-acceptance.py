@@ -135,7 +135,9 @@ def origin(value):
     return value.rstrip("/")
 
 
-def request_json(url, *, body=None, token=None, tenant=None, timeout=15):
+def request_json(
+    url, *, body=None, token=None, tenant=None, timeout=15, idempotency_key=None
+):
     parsed = urlsplit(url)
     origin(f"{parsed.scheme}://{parsed.netloc}")
     headers = {"Accept": "application/json"}
@@ -145,6 +147,10 @@ def request_json(url, *, body=None, token=None, tenant=None, timeout=15):
         headers["X-Tenant-Id"] = tenant
     payload = None
     if body is not None:
+        # The reviewed correlation supplies a stable, explicit request key.
+        # This helper sends exactly once; an unknown outcome is reconciled,
+        # never retried with a fresh key or correlation.
+        headers["Idempotency-Key"] = uuid_text(idempotency_key)
         payload = json.dumps(body, allow_nan=False).encode()
         headers["Content-Type"] = "application/json"
     # Environment proxies and redirects must never receive fixture credentials.
@@ -603,6 +609,7 @@ def run_manifest(manifest, token, fetch=request_json):
                 token=token,
                 tenant=manifest["tenantId"],
                 timeout=135,
+                idempotency_key=uuid_text(data["correlation_id"]),
             )
         except Refused:
             receipts.append(
