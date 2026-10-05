@@ -398,3 +398,14 @@ it('does not journal or submit a whitespace-only draft', async () => {
   expect(sessionStorage.length).toBe(0);
   expect(calls.filter((c) => c.options?.method === 'POST')).toHaveLength(0);
 });
+
+it('keeps select names exact after options load so assistive tools can find document controls', async () => {
+  render(<WorkflowPanel tenantId={tenant} actorId={actor} kind="policy_draft" canWrite />);
+  await openForm('Create policy or notice draft');
+  expect(screen.getByLabelText('Saved processing activity', { exact: true })).toBe(
+    screen.getByRole('combobox', { name: 'Saved processing activity', exact: true }),
+  );
+  expect(screen.getByLabelText('Document type', { exact: true })).toBe(
+    screen.getByRole('combobox', { name: 'Document type', exact: true }),
+  );
+});

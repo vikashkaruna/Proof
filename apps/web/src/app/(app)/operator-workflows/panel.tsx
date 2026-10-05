@@ -1,6 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  cloneElement,
+  isValidElement,
+  useId,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -43,13 +52,25 @@ function Field({
   maxLength?: number;
   defaultValue?: string | number;
 }) {
+  const labelId = useId();
   return (
     <label className="block text-sm font-medium text-slate-700">
-      {label}
-      {optional ? ' (unknown if blank)' : ''}
-      {children ?? (
-        <input className={input} name={name} type={type} required={!optional} {...rest} />
-      )}
+      <span id={labelId}>
+        {label}
+        {optional ? ' (unknown if blank)' : ''}
+      </span>
+      {isValidElement<{ 'aria-labelledby'?: string }>(children)
+        ? cloneElement(children, { 'aria-labelledby': labelId })
+        : (children ?? (
+            <input
+              className={input}
+              name={name}
+              type={type}
+              required={!optional}
+              aria-labelledby={labelId}
+              {...rest}
+            />
+          ))}
     </label>
   );
 }
