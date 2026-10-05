@@ -95,8 +95,9 @@ def build_ropa_records(
             categories = set()
             region = ""
             cross_border = None
-        if not cross_border and region and region.lower() not in INDIAN_REGIONS:
-            cross_border = True
+        # A stated hosting region does not establish a transfer or its absence.
+        # Preserve only an explicit Boolean declaration, including a stated no;
+        # contradictions and unknown processing facts remain for human review.
 
         safeguards = None
         if cross_border:
