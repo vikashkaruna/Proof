@@ -18,11 +18,23 @@ create temporary table issued as select (public.delegate_workload_task(pg_temp.i
 grant select on issued to service_role;
 create function pg_temp.start_tool(proof text default repeat('b',64),input_hash text default repeat('a',64),deadline timestamptz default clock_timestamp()+interval '5 minutes') returns jsonb language sql as $$
  select public.start_workload_assessment(pg_temp.id(11),(select run_id from issued),pg_temp.id(31),proof,input_hash,deadline)$$;
-create function pg_temp.result() returns jsonb language sql immutable as $$select '{"library_version":"worker-assessment-v1","posture_score":50,"estimated_exposure_inr":10000000,"findings":[{"control_id":"WA-1","score":0,"risk_points":10,"rationale":"No answers comply"},{"control_id":"WA-2","score":100,"risk_points":0,"rationale":"All answers comply"}]}'::jsonb$$;
+create function pg_temp.result() returns jsonb language sql stable as $$select '{"library_version":"worker-assessment-v1","posture_score":50,"estimated_exposure_inr":10000000,"findings":[{"control_id":"WA-1","score":0,"risk_points":10,"rationale":"No answers comply"},{"control_id":"WA-2","score":100,"risk_points":0,"rationale":"All answers comply"}]}'::jsonb || jsonb_build_object('questionnaire_provenance',jsonb_build_object(
+ 'version',1,'source_library_version','worker-assessment-v1',
+ 'source_library_digest',(select library_digest from public.workload_assessment_packets where run_id=(select run_id from issued)),
+ 'estimates','provisional','review_required',true,
+ 'controls',(select jsonb_agg(jsonb_build_object('control_id','WA-'||n,'questions','[]'::jsonb,
+  'known_boolean_question_count',0,'caller_affirmed_count',0,'caller_denied_count',0,'unknown_count',0,
+  'answer_state','not_boolean_assessable','applicability_state','unconditional')) from generate_series(1,2) n),
+ 'applicability',jsonb_build_object(
+  'sdf_self_attested',jsonb_build_object('value',null,'provenance','unknown'),
+  'processes_children',jsonb_build_object('value',null,'provenance','unknown'),
+  'processes_health',jsonb_build_object('value',null,'provenance','unknown'))))$$;
 create function pg_temp.finish_tool(result jsonb default pg_temp.result(),deadline timestamptz default clock_timestamp()+interval '5 minutes') returns jsonb language sql as $$
  select public.complete_workload_assessment(pg_temp.id(11),(select run_id from issued),pg_temp.id(31),repeat('b',64),(select library_digest from public.workload_assessment_packets where run_id=(select run_id from issued)),result,deadline)$$;
 select pg_temp.start_tool();
 select pg_temp.finish_tool();
+select pg_temp.ok((select result->'questionnaire_provenance'=pg_temp.result()->'questionnaire_provenance' from public.workload_assessment_packets),'full structured provenance survives result persistence');
+select pg_temp.ok(pg_temp.finish_tool(jsonb_set(pg_temp.result(),'{questionnaire_provenance,applicability,sdf_self_attested,value}','true'))->>'error'='result_conflict','metadata-only retry cannot rewrite immutable result');
 create function pg_temp.confirm_tool() returns jsonb language sql as $$select public.confirm_workload_assessment(pg_temp.id(11),(select run_id from issued))$$;
 set local role service_role;
 select pg_temp.ok(public.confirm_workload_assessment(pg_temp.id(91),(select run_id from issued))->>'error'='confirmation_unavailable','foreign tenant refuses');
@@ -46,6 +58,12 @@ set local role service_role;
 select pg_temp.ok(pg_temp.confirm_tool()->>'error'='confirmation_conflict','result digest is independently checked');
 reset role;
 rollback to conflicting_result;
+savepoint conflicting_provenance;
+update public.workload_assessment_packets set result=jsonb_set(result,'{questionnaire_provenance,applicability,sdf_self_attested,value}','true');
+set local role service_role;
+select pg_temp.ok(pg_temp.confirm_tool()->>'error'='confirmation_conflict','structured provenance is covered by independently checked result digest');
+reset role;
+rollback to conflicting_provenance;
 savepoint cancelled;
 update public.agent_runs set status='cancelled',completed_at=clock_timestamp() where id=(select run_id from issued);
 set local role service_role;
@@ -70,6 +88,8 @@ update public.kill_switch_state set engaged=true where scope_key='global';
 set local role service_role;
 select pg_temp.ok(pg_temp.confirm_tool()->>'status'='succeeded','confirms past committed result after authority ended');
 select pg_temp.ok(pg_temp.confirm_tool()->>'status'='succeeded','reconciliation retry is idempotent');
+select pg_temp.ok(pg_temp.confirm_tool()->'result'->'questionnaire_provenance'=pg_temp.result()->'questionnaire_provenance','finalization readback preserves exact structured declarations');
+select pg_temp.ok((select output_redacted_hash=encode(sha256(convert_to(pg_temp.result()::text,'UTF8')),'hex') from public.agent_runs where id=(select run_id from issued)),'finalized run hashes the entire result including provenance');
 select pg_temp.ok(pg_temp.finish_tool()->>'error'='task_refused','confirmation does not revive worker write authority');
 select pg_temp.ok((select status='succeeded' and output_redacted_hash is not null and completed_at is not null and error is null and total_tokens=0 and cost_usd=0 from public.agent_runs where id=(select run_id from issued)),'confirmed deterministic run fields');
 select pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='workload.task_completed'),'one completion receipt');

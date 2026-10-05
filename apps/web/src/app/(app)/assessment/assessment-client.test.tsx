@@ -153,3 +153,88 @@ it('keeps the saved assessment readable without an invocation control for viewer
   expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
   expect(screen.queryByRole('button', { name: 'Run Parikshan' })).toBeNull();
 });
+
+function declaredSnapshot(): AssessmentSnapshot {
+  return {
+    ...snapshot,
+    exposureInr: 1000,
+    provenance: {
+      status: 'caller_declared_unverified',
+      runId: '33333333-3333-4333-8333-333333333333',
+      libraryDigest: 'a'.repeat(64),
+      estimates: 'provisional',
+      applicability: {
+        sdfSelfAttested: { value: null, provenance: 'unknown' },
+        processesChildren: { value: false, provenance: 'caller_declared_unverified' },
+        processesHealth: { value: true, provenance: 'caller_declared_unverified' },
+      },
+    },
+    controls: [
+      {
+        ...snapshot.controls[0]!,
+        score: 30,
+        scoreBand: 'fail',
+        status: 'unknown',
+        answerState: 'unknown',
+        applicabilityState: 'unknown',
+        answerCounts: { knownBooleanQuestions: 2, callerAffirmed: 0, callerDenied: 0, unknown: 2 },
+      },
+      snapshot.controls[1]!,
+    ],
+    summary: { pass: 0, partial: 0, fail: 0, unassessed: 1, unknown: 1, not_applicable: 0 },
+  };
+}
+
+it('shows unknown questionnaire results separately from a failed score band', () => {
+  render(<AssessmentClient snapshot={declaredSnapshot()} />);
+  const row = screen.getByTestId('assessment-control-CTRL-1');
+  expect(row.textContent).toContain('UNKNOWN');
+  expect(row.textContent).not.toContain('FAIL');
+  expect(row.textContent).toContain('Provisional score: 30');
+  expect(row.textContent).toContain('2 of 2 boolean answers unknown');
+  expect(row.textContent).toContain('Applicability unknown');
+  expect(screen.getByTestId('assessment-summary').textContent).toContain('1 unknown');
+  expect(screen.getByTestId('assessment-questionnaire-provenance').textContent).toContain(
+    'requiring review',
+  );
+  expect(screen.queryByRole('button', { name: 'Run Parikshan' })).toBeNull();
+});
+
+it('keeps questionnaire declarations distinct from the recorded SDF tenant profile', () => {
+  render(<AssessmentClient snapshot={{ ...declaredSnapshot(), isSdf: true }} />);
+  expect(screen.getByText('Designated')).toBeTruthy();
+  // Explicitly inspect the labeled declaration group, not the tenant profile card.
+  const group = screen.getByLabelText('Questionnaire applicability declarations');
+  expect(group.textContent).toContain('SDF self-attestationUnknown');
+  expect(group.textContent).toContain('Processes children’s dataDeclared no · unverified');
+  expect(group.textContent).toContain('Processes health dataDeclared yes · unverified');
+});
+
+it('labels a declared non-applicable control as unverified without inventing a pass', () => {
+  const saved = declaredSnapshot();
+  saved.controls[0] = {
+    ...saved.controls[0]!,
+    status: 'not_applicable',
+    applicabilityState: 'caller_declared_not_applicable_unverified',
+  };
+  saved.summary.unknown = 0;
+  saved.summary.not_applicable = 1;
+  render(<AssessmentClient snapshot={saved} />);
+  const row = screen.getByTestId('assessment-control-CTRL-1');
+  expect(row.textContent).toContain('NOT APPLICABLE');
+  expect(row.textContent).toContain('caller declaration · requires review');
+  expect(row.textContent).not.toContain('PASS');
+  expect(screen.getByTestId('assessment-summary').textContent).toContain(
+    '1 not applicable · unverified',
+  );
+});
+
+it('does not infer questionnaire provenance from legacy numeric findings', () => {
+  render(<AssessmentClient snapshot={snapshot} />);
+  expect(screen.getByTestId('assessment-questionnaire-provenance').textContent).toContain(
+    'provenance is unavailable',
+  );
+  expect(screen.getByTestId('assessment-control-CTRL-1').textContent).toContain('Saved score: 75');
+  expect(document.body.textContent).not.toContain('Provisional score');
+  expect(screen.queryByLabelText('Questionnaire applicability declarations')).toBeNull();
+});

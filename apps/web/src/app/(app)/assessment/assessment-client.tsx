@@ -71,6 +71,10 @@ export function AssessmentClient({
   const partialCount = snapshot?.summary.partial ?? 0;
   const failCount = snapshot?.summary.fail ?? 0;
   const unassessedCount = snapshot?.summary.unassessed ?? 0;
+  const unknownCount = snapshot?.summary.unknown ?? 0;
+  const notApplicableCount = snapshot?.summary.not_applicable ?? 0;
+  const provenance = snapshot?.provenance;
+  const hasDeclarations = provenance?.status === 'caller_declared_unverified';
   const totalControlsCount = controls.length;
   const exposure =
     snapshot?.exposureInr == null
@@ -89,6 +93,8 @@ export function AssessmentClient({
       partial: rows.filter((row) => row.status === 'partial').length,
       fail: rows.filter((row) => row.status === 'fail').length,
       unassessed: rows.filter((row) => row.status === 'unassessed').length,
+      unknown: rows.filter((row) => row.status === 'unknown').length,
+      notApplicable: rows.filter((row) => row.status === 'not_applicable').length,
     };
   });
   const [assessRunning, setAssessRunning] = useState(false);
@@ -279,11 +285,44 @@ export function AssessmentClient({
             before running Parikshan.
           </p>
         ) : (
-          <p>
-            {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
-            {snapshot.engagement.status}. Showing saved findings only; missing results are
-            unassessed. Score bands retain the existing 80/40 presentation thresholds.
-          </p>
+          <div>
+            <p>
+              {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
+              {snapshot.engagement.status}. Showing saved findings only; missing results are
+              unassessed. Score bands use the 80/40 presentation thresholds, not a compliance
+              determination.
+            </p>
+            <p className="mt-2" data-testid="assessment-questionnaire-provenance">
+              {hasDeclarations
+                ? 'Questionnaire declarations are unverified. Scores and exposure are provisional estimates requiring review. Unknown answers or applicability are not a failed control.'
+                : 'Questionnaire provenance is unavailable for these saved results. Score bands do not establish verified answers or compliance.'}
+            </p>
+            {hasDeclarations && provenance.applicability && (
+              <dl
+                className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs"
+                aria-label="Questionnaire applicability declarations"
+              >
+                {(
+                  [
+                    ['SDF self-attestation', provenance.applicability.sdfSelfAttested],
+                    ['Processes children’s data', provenance.applicability.processesChildren],
+                    ['Processes health data', provenance.applicability.processesHealth],
+                  ] as const
+                ).map(([label, declaration]) => (
+                  <div key={label}>
+                    <dt className="font-semibold">{label}</dt>
+                    <dd>
+                      {declaration.value === null
+                        ? 'Unknown'
+                        : declaration.value
+                          ? 'Declared yes · unverified'
+                          : 'Declared no · unverified'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
         )}
       </div>
 
@@ -314,8 +353,18 @@ export function AssessmentClient({
               className="bg-slate-300"
               title={`${unassessedCount} Unassessed`}
             />
+            <div
+              style={{ flex: unknownCount }}
+              className="bg-slate-400"
+              title={`${unknownCount} Unknown`}
+            />
+            <div
+              style={{ flex: notApplicableCount }}
+              className="bg-slate-200"
+              title={`${notApplicableCount} Not applicable · declaration unverified`}
+            />
           </div>
-          <div className="flex gap-[18px] text-[12px] text-[#2F3542]">
+          <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12px] text-[#2F3542]">
             <span>
               <b className="font-heading text-[16px] text-[#0a8d80] font-bold">
                 {snapshot ? passCount : '—'}
@@ -335,7 +384,16 @@ export function AssessmentClient({
               fail
             </span>
             <span>{snapshot ? unassessedCount : '—'} unassessed</span>
+            {unknownCount > 0 && <span>{unknownCount} unknown</span>}
+            {notApplicableCount > 0 && (
+              <span>{notApplicableCount} not applicable · unverified</span>
+            )}
           </div>
+          {hasDeclarations && (
+            <p className="mt-2 text-xs text-slate-600">
+              Pass, partial and fail are provisional score bands.
+            </p>
+          )}
         </div>
 
         {/* SDF Self-Assessment Card */}
@@ -360,7 +418,9 @@ export function AssessmentClient({
             {snapshot ? exposure : 'Unavailable'}
           </div>
           <p className="mt-1 text-[11px] text-[#a03734] leading-tight">
-            Saved engagement estimate; no estimate is inferred from missing findings.
+            {hasDeclarations
+              ? 'Provisional estimate from unverified declarations; review applicability and supporting evidence.'
+              : 'Saved engagement estimate; questionnaire provenance is unavailable. No estimate is inferred from missing findings.'}
           </p>
         </div>
       </div>
@@ -378,6 +438,9 @@ export function AssessmentClient({
               <p>
                 {domain.total} controls · {domain.pass} pass · {domain.partial} partial ·{' '}
                 {domain.fail} fail · {domain.unassessed} unassessed
+                {domain.unknown > 0 && ` · ${domain.unknown} unknown`}
+                {domain.notApplicable > 0 &&
+                  ` · ${domain.notApplicable} not applicable (unverified)`}
               </p>
             </div>
           ))}
@@ -411,30 +474,21 @@ export function AssessmentClient({
             </p>
           )}
           {controls.map((c) => {
-            const stColor =
-              c.status === 'unassessed'
-                ? '#64748b'
-                : c.status === 'pass'
-                  ? '#0a8d80'
-                  : c.status === 'partial'
-                    ? '#8a6d10'
-                    : '#D9534F';
-            const stBg =
-              c.status === 'unassessed'
-                ? '#f1f5f9'
-                : c.status === 'pass'
-                  ? '#e6f7f5'
-                  : c.status === 'partial'
-                    ? '#fbf3df'
-                    : '#fbeceb';
-            const stLabel =
-              c.status === 'unassessed'
-                ? 'UNASSESSED'
-                : c.status === 'pass'
-                  ? 'PASS'
-                  : c.status === 'partial'
-                    ? 'PARTIAL'
-                    : 'FAIL';
+            const stColor = ['unassessed', 'unknown', 'not_applicable'].includes(c.status)
+              ? '#64748b'
+              : c.status === 'pass'
+                ? '#0a8d80'
+                : c.status === 'partial'
+                  ? '#8a6d10'
+                  : '#D9534F';
+            const stBg = ['unassessed', 'unknown', 'not_applicable'].includes(c.status)
+              ? '#f1f5f9'
+              : c.status === 'pass'
+                ? '#e6f7f5'
+                : c.status === 'partial'
+                  ? '#fbf3df'
+                  : '#fbeceb';
+            const stLabel = c.status.replaceAll('_', ' ').toUpperCase();
 
             return (
               <div
@@ -456,8 +510,31 @@ export function AssessmentClient({
                     {c.name}
                   </div>
                   <p className="text-xs text-slate-500">
-                    {c.score === null ? 'No saved score' : `Saved score: ${c.score}`}
+                    {c.score === null
+                      ? 'No saved score'
+                      : `${hasDeclarations ? 'Provisional score' : 'Saved score'}: ${c.score}`}
                   </p>
+                  {c.answerCounts && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      {c.answerCounts.unknown} of {c.answerCounts.knownBooleanQuestions} boolean
+                      answers unknown ·{' '}
+                      {c.answerCounts.callerAffirmed + c.answerCounts.callerDenied} declared,
+                      unverified
+                    </p>
+                  )}
+                  {c.applicabilityState === 'unknown' && (
+                    <p className="text-xs text-slate-600">Applicability unknown</p>
+                  )}
+                  {c.applicabilityState === 'caller_declared_not_applicable_unverified' && (
+                    <p className="text-xs text-slate-600">
+                      Not applicable by caller declaration · requires review
+                    </p>
+                  )}
+                  {c.answerState === 'not_boolean_assessable' && (
+                    <p className="text-xs text-slate-600">
+                      No boolean questionnaire basis for this score
+                    </p>
+                  )}
                   <div className="mt-1.5 h-[5px] max-w-[160px] overflow-hidden rounded-[20px] bg-[#F4F6F8]">
                     <div
                       style={{

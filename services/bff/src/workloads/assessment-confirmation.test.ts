@@ -51,6 +51,49 @@ describe('controller assessment confirmation', () => {
       p_run_id: id(2),
     });
   });
+  it('preserves versioned provisional questionnaire metadata from the SQL confirmation result', async () => {
+    const declaration = { value: null, provenance: 'unknown' };
+    const metadata = {
+      version: 1,
+      source_library_version: 'test',
+      source_library_digest: 'd'.repeat(64),
+      estimates: 'provisional',
+      review_required: true,
+      controls: [
+        {
+          control_id: 'test',
+          questions: [],
+          known_boolean_question_count: 0,
+          caller_affirmed_count: 0,
+          caller_denied_count: 0,
+          unknown_count: 0,
+          answer_state: 'not_boolean_assessable',
+          applicability_state: 'unconditional',
+        },
+      ],
+      applicability: {
+        sdf_self_attested: declaration,
+        processes_children: declaration,
+        processes_health: declaration,
+      },
+    };
+    const persisted = {
+      ...confirmed,
+      result: { ...confirmed.result, questionnaire_provenance: metadata },
+    };
+    const f = fixture(persisted);
+    expect(await f.confirmation.confirm(expected)).toEqual(persisted);
+    expect(f.fetcher).toHaveBeenCalledTimes(1);
+    await expect(
+      fixture({
+        ...persisted,
+        result: {
+          ...persisted.result,
+          questionnaire_provenance: { ...metadata, estimates: 'confirmed' },
+        },
+      }).confirmation.confirm(expected),
+    ).rejects.toThrow();
+  });
   it.each(['tenant_id', 'run_id', 'engagement_id', 'correlation_id'] as const)(
     'refuses a conflicting %s from the persistence boundary',
     async (key) => {

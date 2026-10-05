@@ -146,8 +146,24 @@ def test_worker_persists_unknown_answer_and_applicability_provenance(explicit):
     for label in ("SDF", "children", "health"):
         assert f"{label}=unknown" in finding["rationale"]
     # Keep the private-tool result contract and avoid persisting raw answers.
-    assert set(result) == {"library_version", "posture_score", "estimated_exposure_inr", "findings"}
+    assert set(result) == {
+        "library_version",
+        "posture_score",
+        "estimated_exposure_inr",
+        "findings",
+        "questionnaire_provenance",
+    }
     assert set(finding) == {"control_id", "score", "risk_points", "rationale"}
+    provenance = result["questionnaire_provenance"]
+    assert provenance["source_library_digest"] == packet["library_digest"]
+    assert provenance["source_library_version"] == packet["library_version"]
+    assert provenance["controls"][0]["answer_state"] == "unknown"
+    assert provenance["controls"][0]["questions"] == [
+        {"question_id": qid, "declaration": "unknown"} for qid in ("Q1", "Q2")
+    ]
+    assert all(
+        v == {"value": None, "provenance": "unknown"} for v in provenance["applicability"].values()
+    )
 
 
 @pytest.mark.parametrize("value", [False, True])
@@ -175,3 +191,19 @@ def test_worker_invalid_flags_are_refused_before_any_tools(flag, value):
     with pytest.raises(ValueError, match="Invalid input flags"):
         execute(envelope, call)
     assert calls == []
+
+
+@pytest.mark.parametrize("change", ["digest", "missing_flag", "string_flag", "duplicate_question"])
+def test_worker_refuses_untrusted_provenance_source_before_completion(change):
+    envelope, packet, calls, call = fixture()
+    if change == "digest":
+        packet["library_digest"] = "unverified"
+    elif change == "missing_flag":
+        del packet["controls"][0]["sdf_only"]
+    elif change == "string_flag":
+        packet["controls"][0]["children_only"] = "false"
+    else:
+        packet["controls"][0]["assessment_questions"] *= 2
+    with pytest.raises(ValueError, match="provenance"):
+        execute(envelope, call)
+    assert [c[0] for c in calls] == ["assessment.start"]

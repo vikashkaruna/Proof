@@ -162,6 +162,10 @@ def execute(envelope: dict, call=private_tool) -> dict:
         c["library_version"] != raw["library_version"] for c in definitions
     ):
         raise ValueError("Invalid library snapshot")
+    if not re.fullmatch(r"[a-f0-9]{64}", packet.get("library_digest", "")) or any(
+        type(c.get(flag)) is not bool for c in definitions for flag in ("sdf_only", "children_only")
+    ):
+        raise ValueError("Invalid provenance library snapshot")
     controls = [_parse_control(c) for c in definitions]
     for control in controls:
         if any(
@@ -183,6 +187,10 @@ def execute(envelope: dict, call=private_tool) -> dict:
         {key: finding[key] for key in ("control_id", "score", "risk_points", "rationale")}
         for finding in computed["findings"]
     ]
+    result["questionnaire_provenance"] = {
+        **computed["questionnaire_provenance"],
+        "source_library_digest": packet["library_digest"],
+    }
     receipt = call(
         "assessment.complete",
         {

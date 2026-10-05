@@ -14,9 +14,9 @@ unknown inputs. Evidence and human/legal review remain required.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..assessment_scoring import AssessmentInput, score_assessment
 from ..control_library_loader import ControlLibrary, load_default_library
@@ -47,6 +47,55 @@ class FindingOut(BaseModel):
     evidence_required: list[dict[str, Any]]
 
 
+class QuestionDeclaration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question_id: str = Field(min_length=1, max_length=200)
+    declaration: Literal["unknown", "caller_affirmed", "caller_denied"]
+
+
+class ControlProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    control_id: str = Field(min_length=1, max_length=200)
+    questions: list[QuestionDeclaration] = Field(max_length=1000)
+    known_boolean_question_count: int = Field(strict=True, ge=0, le=1000)
+    caller_affirmed_count: int = Field(strict=True, ge=0, le=1000)
+    caller_denied_count: int = Field(strict=True, ge=0, le=1000)
+    unknown_count: int = Field(strict=True, ge=0, le=1000)
+    answer_state: Literal[
+        "unknown", "partially_answered", "caller_declared_unverified", "not_boolean_assessable"
+    ]
+    applicability_state: Literal[
+        "unconditional",
+        "unknown",
+        "caller_declared_applicable_unverified",
+        "caller_declared_not_applicable_unverified",
+    ]
+
+
+class ApplicabilityDeclaration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: bool | None = Field(strict=True)
+    provenance: Literal["unknown", "caller_declared_unverified"]
+
+
+class ApplicabilityProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sdf_self_attested: ApplicabilityDeclaration
+    processes_children: ApplicabilityDeclaration
+    processes_health: ApplicabilityDeclaration
+
+
+class QuestionnaireProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1]
+    source_library_version: str = Field(min_length=1, max_length=200)
+    source_library_digest: str | None = Field(pattern=r"^[a-f0-9]{64}$")
+    estimates: Literal["provisional"]
+    review_required: Literal[True]
+    controls: list[ControlProvenance] = Field(min_length=1, max_length=500)
+    applicability: ApplicabilityProvenance
+
+
 class ParikshanOutput(BaseModel):
     library_version: str
     posture_score: float
@@ -54,6 +103,7 @@ class ParikshanOutput(BaseModel):
     findings: list[FindingOut]
     sdf_self_assessment: dict[str, Any]
     notes: str = ""
+    questionnaire_provenance: QuestionnaireProvenance | None = None
 
 
 class ParikshanAgent(BaseAgent[ParikshanInput, ParikshanOutput]):
