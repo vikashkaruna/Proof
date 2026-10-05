@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install uv
 
 # Python deps first (better layer caching)
-COPY services/agent-runtime/pyproject.toml services/agent-runtime/README.md ./services/agent-runtime/
+COPY services/agent-runtime/pyproject.toml ./services/agent-runtime/
 COPY services/agent-runtime/src ./services/agent-runtime/src
 COPY packages/offline-license-python ./packages/offline-license-python
 WORKDIR /app/services/agent-runtime

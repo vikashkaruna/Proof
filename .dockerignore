@@ -42,3 +42,14 @@ htmlcov
 **/.env.*
 .claude
 .codex
+
+# Private manuals and their local compatibility aliases are never build inputs.
+private-docs
+**/private-docs
+docs
+**/README.md
+.design-sync/NOTES.md
+.design-sync/conventions.md
+infra/workload/CONTROLLER_TRANSITIONS.md
+Axiom-Proof_Readiness_Matrix.md
+VK_QUICK_REF_PROOF_MODULES_SETUP.md

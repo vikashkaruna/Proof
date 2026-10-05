@@ -151,9 +151,9 @@ def sources(root: Path) -> dict[str, str]:
             if path.is_file() and not any(x in name for x in (".test.", ".spec.", ".helper.")):
                 if path.suffix in {".ts", ".tsx", ".py", ".sql", ".css", ".json", ".yaml", ".yml", ".jinja", ".j2", ".tf", ".tpl", ".sh"} or name.endswith(".example") or name.startswith("Dockerfile"):
                     paths.add(path.relative_to(root).as_posix())
-    for pattern in ("apps/*/.env.example", "services/*/.env.example"):
+    for pattern in ("apps/*/.env.example", "services/*/.env.example", "services/*/pyproject.toml"):
         paths.update(path.relative_to(root).as_posix() for path in root.glob(pattern) if path.is_file())
-    for name in ("docker-compose.yml", "scripts/bootstrap-onprem.sh", "scripts/build-preprod-images.sh",
+    for name in (".dockerignore", "docker-compose.yml", "scripts/bootstrap-onprem.sh", "scripts/build-preprod-images.sh",
                  "scripts/teardown-preprod-gcp.sh", "scripts/deploy-staging.sh", "scripts/deploy-firebase-marketing.sh"):
         if (root / name).is_file():
             paths.add(name)

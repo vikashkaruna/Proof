@@ -17,39 +17,39 @@ PY
 race() { race_run "$1" "$2" "$result_dir/first" "$result_dir/second"; }
 same="select operator_race.record('delivery_task',operator_race.task(),201)"
 race "$same" "$same"
-rg -q '"replayed": false' "$result_dir/first"
-rg -q '"replayed": true' "$result_dir/second"
+grep -Fq '"replayed": false' "$result_dir/first"
+grep -Fq '"replayed": true' "$result_dir/second"
 [ "$(sql -c 'select count(*) from public.operator_workflow_records where tenant_id=operator_race.id(11)')" = 1 ]
 race "$same" "select operator_race.record('delivery_task',operator_race.task(16,3),201)"
-rg -q 'idempotency_conflict' "$result_dir/second"
+grep -Fq 'idempotency_conflict' "$result_dir/second"
 race "update public.tenant_users set role='viewer' where tenant_id=operator_race.id(11) and user_id=operator_race.id(1)" "$same"
-rg -q 'forbidden' "$result_dir/second"
+grep -Fq 'forbidden' "$result_dir/second"
 sql -c "update public.tenant_users set role='owner' where tenant_id=operator_race.id(11) and user_id=operator_race.id(1);"
 sql -c "select operator_race.record('policy_draft',operator_race.policy(),202);" > "$result_dir/draft"
 review="jsonb_build_object('draftId',(select id from public.policy_drafts where tenant_id=operator_race.id(11)),'expectedHash',(select content_sha256 from public.policy_drafts where tenant_id=operator_race.id(11)),'decision','approved','reason','Synthetic founder concurrency review; no publication')"
 race "select operator_race.record('policy_review',$review,203,2)" "select operator_race.record('policy_review',$review,204,2)"
-rg -q '"replayed": false' "$result_dir/first"
-rg -q 'invalid_draft_state' "$result_dir/second"
+grep -Fq '"replayed": false' "$result_dir/first"
+grep -Fq 'invalid_draft_state' "$result_dir/second"
 [ "$(sql -c "select count(*) from public.operator_workflow_records where tenant_id=operator_race.id(11) and kind='policy_review'")" = 1 ]
 fresh="select operator_race.record('delivery_task',operator_race.task(),205)"
 race "update public.engagements set status='cancelled' where id=operator_race.id(31)" "$fresh"
-rg -q 'context_refused' "$result_dir/second"
+grep -Fq 'context_refused' "$result_dir/second"
 sql -c "update public.engagements set status='intake' where id=operator_race.id(31);"
 race "$fresh" "update public.engagements set status='cancelled' where id=operator_race.id(31)"
-rg -q '"replayed": false' "$result_dir/first"
+grep -Fq '"replayed": false' "$result_dir/first"
 [ "$(sql -c "$fresh")" = '{"error": "context_refused"}' ]
 # A cancel tombstone takes the same durable-operation lock as recording.
 sql -c "update public.engagements set status='intake' where id=operator_race.id(31);"
 cancel="select public.cancel_operator_workflow(operator_race.id(11),operator_race.id(1),operator_race.id(206),'delivery_task',operator_race.task(),gen_random_uuid())"
 late="select operator_race.record('delivery_task',operator_race.task(),206)"
 race "$cancel" "$late"
-rg -q '"cancelled": true' "$result_dir/first"
-rg -q 'operation_cancelled' "$result_dir/second"
+grep -Fq '"cancelled": true' "$result_dir/first"
+grep -Fq 'operation_cancelled' "$result_dir/second"
 [ "$(sql -c "select count(*) from public.operator_workflow_cancellations where tenant_id=operator_race.id(11)")" = 1 ]
 cancel_saved="select public.cancel_operator_workflow(operator_race.id(11),operator_race.id(1),operator_race.id(207),'delivery_task',operator_race.task(),gen_random_uuid())"
 race "select operator_race.record('delivery_task',operator_race.task(),207)" "$cancel_saved"
-rg -q '"replayed": false' "$result_dir/first"
-rg -q '"cancelled": false' "$result_dir/second"
+grep -Fq '"replayed": false' "$result_dir/first"
+grep -Fq '"cancelled": false' "$result_dir/second"
 [ "$(sql -c "select count(*) from public.operator_workflow_cancellations where tenant_id=operator_race.id(11)")" = 1 ]
 [ "$(sql -c 'select count(*) from public.operator_workflow_records where tenant_id=operator_race.id(11)')" = 5 ]
 [ "$(sql -c 'select count(*) from public.audit_ledger where tenant_id=operator_race.id(11)')" = 6 ]

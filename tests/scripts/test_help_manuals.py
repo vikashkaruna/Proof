@@ -87,7 +87,8 @@ class HelpManualTests(unittest.TestCase):
     def test_configuration_and_supporting_modules_require_manual_review(self):
         for path in ("packages/report-kit/src/render.ts", "packages/mfa/src/totp.ts",
                      "infra/terraform/envs/preprod/main.tf", "infra/helm/axiom-proof/values.yaml",
-                     "apps/web/.env.example", "services/bff/.env.example", "docker-compose.yml"):
+                     "apps/web/.env.example", "services/bff/.env.example", "docker-compose.yml",
+                     ".dockerignore", "services/agent-runtime/pyproject.toml"):
             with self.subTest(path=path):
                 file = self.put(path, "Changed operational or user-facing behavior\n")
                 with self.assertRaisesRegex(help_manuals.HelpError, "Feature/config drift"):
