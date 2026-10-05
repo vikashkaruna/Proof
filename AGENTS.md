@@ -124,46 +124,52 @@ terraform init && terraform plan && terraform apply
 
 ## Where to look for X
 
-| Question                                 | Where                                                                                           |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| What is the brand voice / naming?        | `docs/01_Product_Naming_Branding_and_GTM.md`                                                    |
-| What are the 14 modules and their phase? | `docs/02_Phase_Wise_Implementation_Plan.md`                                                     |
-| What's the FR / NFR / business rule?     | `docs/03_BRD_PRD.md`                                                                            |
-| What's the architecture?                 | `docs/04_Solution_Architecture.md`                                                              |
-| What stack?                              | `docs/05_Technology_Stack_Analysis.md`                                                          |
-| Why this stack over alternatives?        | `docs/06_Infrastructure_and_Lockin_Strategy.md`                                                 |
-| Security review?                         | `docs/07_SECURITY_REVIEW.md`                                                                    |
-| How do I deploy?                         | `docs/08_DEPLOYMENT_GUIDE.md`                                                                   |
-| How do I run this in production?         | `docs/09_RUNBOOK.md`                                                                            |
-| What are the agents?                     | `docs/01_...md` (Section 1.4) and `apps/marketing/src/app/agents/page.tsx`                      |
-| What does the control library look like? | `packages/control-library/src/controls.ts`                                                      |
-| How does the approval engine work?       | `packages/approval-engine/src/index.ts` + `services/agent-runtime/src/axiom/approval_engine.py` |
-| How does the audit ledger work?          | `infra/supabase/migrations/0005_approvals_ledger.sql` + `packages/ledger/src/append.ts`         |
-| How does evidence sealing work?          | `packages/evidence/src/index.ts` + `infra/terraform/envs/prod/s3.tf`                            |
-| How does the model gateway decide?       | `services/model-gateway/src/model_gateway/router.py`                                            |
-| How do the E2E tests work?               | `tests/e2e/tests/*.spec.ts`                                                                     |
-| What is the architectural segregation?   | `.agents/skills/proof-architecture-segregation/SKILL.md`                                        |
-| What is the plan and workstream status?  | `docs/20_Plan.md`                                                                               |
-| What was done, and what is the state?    | `docs/21_Progress.md` (append-only; never create new handoff files)                             |
-| What is the functional flow / how built? | `docs/22_Architecture_and_Flow.md` (links to `docs/04_Solution_Architecture.md`)                |
-| What must the operator do next?          | `docs/23_Operator_Runbook.md`                                                                   |
-| How do I record a checkpoint?            | `.agents/skills/axiom-docs-increment/SKILL.md`                                                  |
+| Question                                 | Where                                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| What is the brand voice / naming?        | `private-docs/reference/01_Product_Naming_Branding_and_GTM.md`                                                       |
+| What are the 14 modules and their phase? | `private-docs/reference/02_Phase_Wise_Implementation_Plan.md`                                                        |
+| What's the FR / NFR / business rule?     | `private-docs/reference/03_BRD_PRD.md`                                                                               |
+| What's the architecture?                 | `private-docs/reference/04_Solution_Architecture.md`                                                                 |
+| What stack?                              | `private-docs/reference/05_Technology_Stack_Analysis.md`                                                             |
+| Why this stack over alternatives?        | `private-docs/reference/06_Infrastructure_and_Lockin_Strategy.md`                                                    |
+| Security review?                         | `private-docs/reference/07_SECURITY_REVIEW.md`                                                                       |
+| How do I deploy?                         | `private-docs/reference/08_DEPLOYMENT_GUIDE.md`                                                                      |
+| How do I run this in production?         | `private-docs/reference/09_RUNBOOK.md`                                                                               |
+| What are the agents?                     | `private-docs/reference/01_...md` (Section 1.4) and `apps/marketing/src/app/agents/page.tsx`                         |
+| What does the control library look like? | `packages/control-library/src/controls.ts`                                                                           |
+| How does the approval engine work?       | `packages/approval-engine/src/index.ts` + `services/agent-runtime/src/axiom/approval_engine.py`                      |
+| How does the audit ledger work?          | `infra/supabase/migrations/0005_approvals_ledger.sql` + `packages/ledger/src/append.ts`                              |
+| How does evidence sealing work?          | `packages/evidence/src/index.ts` + `infra/terraform/envs/prod/s3.tf`                                                 |
+| How does the model gateway decide?       | `services/model-gateway/src/model_gateway/router.py`                                                                 |
+| How do the E2E tests work?               | `tests/e2e/tests/*.spec.ts`                                                                                          |
+| What is the architectural segregation?   | `.agents/skills/proof-architecture-segregation/SKILL.md`                                                             |
+| What is the plan and workstream status?  | `private-docs/reference/20_Plan.md`                                                                                  |
+| What was done, and what is the state?    | `private-docs/reference/21_Progress.md` (append-only; never create new handoff files)                                |
+| What is the functional flow / how built? | `private-docs/reference/22_Architecture_and_Flow.md` (links to `private-docs/reference/04_Solution_Architecture.md`) |
+| What must the operator do next?          | `private-docs/reference/23_Operator_Runbook.md`                                                                      |
+| How do I record a checkpoint?            | `.agents/skills/axiom-docs-increment/SKILL.md`                                                                       |
 
-## Persona help and manual acceptance maintenance
+## Private documentation and manual acceptance maintenance
 
-When a screen, route, role, workflow, agent output, user-visible error, configuration
-or deployment procedure changes, update its related help and manual cases in the
-same increment. Follow docs/help/README.md. Navigation/role references regenerate
-with `pnpm help:sync --review-reason "Meaningful explanation of the review"`;
-`pnpm help:check:private` verifies the protected local manuals, and public CI
-checks source freshness, route coverage, confidentiality and external exports.
-Do not update review hashes without reviewing content and release availability.
+All help manuals, architecture, testing guides, operations references and audit
+records live under ignored `private-docs/`. Start at `private-docs/README.md`.
+The old `docs/` and component guide paths are local compatibility aliases only.
+Never add documentation, receipts, illustrations or exported manuals to Git.
+The owner must preserve this pack in protected private storage before moving or
+archiving a worktree; a Git clone cannot restore it.
 
-The repository is public. Founder instructions and internal QA procedures/results
-belong only under ignored `.axiom-runtime/help-private/` (0700 directory,0600
-files), never tracked docs, application public assets or CI artifacts. Preserve
-them in operator-controlled private storage before moving/archiving a worktree.
-Only approved Partner/Client manuals and fictional illustrations may be shared.
-The sharing tool rejects internal audiences. Manuals describe authority; they
-never grant it or weaken any hard rule above. New help manuals are user-requested
-product documentation, not additional project runbooks/progress/handoff files.
+When a screen, role, workflow, agent output, error, configuration or deployment
+procedure changes, review related manuals/cases and release availability in the
+same increment. Follow `private-docs/help/README.md`. Regenerate source-derived
+references with `pnpm help:sync --review-reason "Meaningful review explanation"`
+and run `pnpm help:check:private` locally. Do not update review hashes without
+reviewing content. Update the four existing living documents in the private pack;
+do not create another plan/progress/runbook.
+
+Public CI runs maintenance regressions and `scripts/check-private-docs.sh`; it
+cannot validate ignored prose and never uploads documentation artifacts. Commit
+only executable tools/tests, ignore rules and minimal navigation pointers.
+Only reviewed Partner/Client standalone exports may be shared externally;
+Founder/QA/architecture material remains internal. In-repository exports belong
+under `private-docs/help/share/`. Directories use 0700 and files use 0600.
+Manuals describe authority; they never grant it or weaken the hard rules above.

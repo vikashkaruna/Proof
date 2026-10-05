@@ -20,14 +20,14 @@ import xml.etree.ElementTree as ET  # nosec B405
 
 ROOT = Path(__file__).resolve().parents[1]
 MANUALS = {
-    "founder": ".axiom-runtime/help-private/founder.md",
-    "partner": "docs/help/external/partner.md",
-    "client": "docs/help/external/client.md",
+    "founder": "private-docs/help/internal/founder.md",
+    "partner": "private-docs/help/external/partner.md",
+    "client": "private-docs/help/external/client.md",
 }
-INDEX = "docs/help/maintenance/source-index.json"
-CASES = ".axiom-runtime/help-private/manual-test-cases.json"
-PRIVATE_TESTING = ".axiom-runtime/help-private/manual-testing.md"
-COVERAGE = "docs/help/maintenance/manual-coverage.json"
+INDEX = "private-docs/help/maintenance/source-index.json"
+CASES = "private-docs/testing/manual-test-cases.json"
+PRIVATE_TESTING = "private-docs/testing/manual-testing.md"
+COVERAGE = "private-docs/help/maintenance/manual-coverage.json"
 ASSETS = ("dashboard.svg", "workflow.svg", "members.svg")
 BEGIN = "<!-- BEGIN GENERATED HELP REFERENCE -->"
 END = "<!-- END GENERATED HELP REFERENCE -->"
@@ -69,7 +69,7 @@ FORBIDDEN = re.compile(
     r"(?i)(?:architecture|database|terraform|postgrest|supabase|cloud\s*run|kubernetes|eks\b|"
     r"security\s+definer|service[-_ ]role|jwt\b|spiffe|spire\b|"
     r"append_ledger|\bsigned[- ](?:scope|token)|hash[- ]chain|"
-    r"\.axiom-runtime|\.env\b|localhost|127\.0\.0\.1|"
+    r"private-docs|\.axiom-runtime|\.env\b|localhost|127\.0\.0\.1|"
     r"(?:postgres|postgresql)://|run\.app|chore/|infra/|services/|"
     r"[A-Z][A-Z0-9]+_[A-Z0-9_]+|\b[a-f0-9]{40,64}\b|"
     r"migration\s*0\d{3}|founder\.md|founder help|internal.only|manual-testing|source-index|"
@@ -159,9 +159,10 @@ def sources(root: Path) -> dict[str, str]:
             paths.add(name)
     for path in ("scripts/axiom-ops.sh", "scripts/sync-env.sh", "scripts/dev-docker.sh",
                  "scripts/deploy-preprod-gcp.sh", "scripts/run-deployed-acceptance.sh",
-                 "docs/02_Phase_Wise_Implementation_Plan.md", "docs/03_BRD_PRD.md",
+                 "private-docs/reference/02_Phase_Wise_Implementation_Plan.md", "private-docs/reference/03_BRD_PRD.md",
                  "scripts/help-manuals.py", ".github/workflows/help-manuals.yml",
-                 *["docs/help/assets/" + asset for asset in ASSETS]):
+                 "scripts/check-private-docs.sh",
+                 *["private-docs/help/assets/" + asset for asset in ASSETS]):
         paths.add(path)
     return {name: digest(safe_file(root, name)) for name in sorted(paths)}
 
@@ -247,7 +248,7 @@ def validate_cases(root: Path, data: dict) -> dict:
 def approved_svg(root: Path, name: str) -> bytes:
     if name not in ASSETS:
         raise HelpError("Unapproved screen illustration")
-    raw = safe_file(root, f"docs/help/assets/{name}").read_bytes()
+    raw = safe_file(root, f"private-docs/help/assets/{name}").read_bytes()
     if len(raw) > 2_000_000:
         raise HelpError("Illustration exceeds approved size")
     if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
@@ -339,9 +340,9 @@ def sync(root: Path, reason: str) -> dict:
         proposed[name] = text
     for name, text in proposed.items():
         (root / name).write_text(text)
-        if name.startswith(".axiom-runtime/"):
+        if name.startswith("private-docs/"):
             (root / name).chmod(0o600)
-    maintenance = root / "docs/help/maintenance"
+    maintenance = root / "private-docs/help/maintenance"
     maintenance.mkdir(parents=True, exist_ok=True)
     (root / COVERAGE).write_text(json.dumps(public_coverage(cases), indent=2) + "\n")
     result = {"schemaVersion": 1, "reviewReason": reason.strip(), "sources": sources(root),
@@ -358,8 +359,10 @@ def sync(root: Path, reason: str) -> dict:
 
 def check(root: Path, require_private: bool = False) -> dict:
     # The repository is public: internal prose can never be part of tracked help.
-    if (root / "docs/help/internal").exists() and any((root / "docs/help/internal").rglob("*")):
+    if not (root / "docs").is_symlink() and (root / "docs/help/internal").exists() and any((root / "docs/help/internal").rglob("*")):
         raise HelpError("Internal help belongs in protected ignored storage, not the public repository")
+    if not (root / "private-docs").is_dir() or (root / "private-docs").stat().st_mode & 0o077:
+        raise HelpError("Private documentation folder is missing or lacks private permissions")
     data = inventory(root)
     cases = validate_coverage(root, data)
     stored = json.loads(safe_file(root, INDEX).read_text())
@@ -394,7 +397,7 @@ def check(root: Path, require_private: bool = False) -> dict:
     for name in ASSETS:
         approved_svg(root, name)
     if require_private:
-        if (root / ".axiom-runtime/help-private").stat().st_mode & 0o077:
+        if any((root / folder).stat().st_mode & 0o077 for folder in ("private-docs", "private-docs/help/internal", "private-docs/testing")):
             raise HelpError("Private manual directory lacks private permissions")
         private_paths = {"founder": MANUALS["founder"], "testing": PRIVATE_TESTING, "cases": CASES}
         for name, path in private_paths.items():
@@ -498,6 +501,8 @@ def export(root: Path, audience: str, output: Path) -> Path:
     # Never overwrite source docs or expose manuals under application public assets.
     if any(output.is_relative_to(root / name) for name in ("docs", "apps", "services", "packages")) or output == root:
         raise HelpError("Share output must be outside source/public trees")
+    if output.is_relative_to(root) and not output.is_relative_to(root / "private-docs/help/share"):
+        raise HelpError("In-repository help exports belong only in ignored private-docs/help/share")
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     if any(output.iterdir()):
         raise HelpError("Use a fresh empty share directory; existing files might contain internal content")

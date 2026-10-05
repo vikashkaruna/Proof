@@ -1,3 +1,0 @@
-# Axiom Proof — roadmap traceability (stub)
-
-**Superseded stub (consolidated 2026-10-01).** The phase-module, BR/FR and NFR ownership tables are in section 7 of the plan; its operator items are in [23_Operator_Runbook.md](23_Operator_Runbook.md). The current, single source is [20_Plan.md](20_Plan.md). The full original text of this file, including its dated revision history, is preserved in git: `git show 41b70b6:docs/13_Roadmap_Traceability.md`. Do not add new content here; follow the `axiom-docs-increment` skill (`.agents/skills/axiom-docs-increment/SKILL.md`): append dated entries to [21_Progress.md](21_Progress.md), update the status table in [20_Plan.md](20_Plan.md), and tick items in [23_Operator_Runbook.md](23_Operator_Runbook.md).
