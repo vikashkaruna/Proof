@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import { PublicSourceWorkflow } from './source-workflow';
 import { loadSourceOperation, operationStorageKey } from './source-request';
+import { reviewOperationSchema, saveReviewOperation } from './source-review-request';
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -150,6 +151,8 @@ async function fixture() {
         { status: 201 },
       );
     }
+    if (path.includes('/reviews?'))
+      return Response.json({ data: [], meta: { limit: 20, hasMore: false, nextCursor: null } });
     if (path.includes('/observations?'))
       return Response.json({
         data: Array.from(observations.values(), metadata),
@@ -452,4 +455,55 @@ it('refuses an operator action before POST when journal persistence fails', asyn
   await screen.findByRole('alert');
   expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
   expect(screen.queryByRole('heading', { name: 'Drishti public observation' })).toBeNull();
+});
+
+it('locks source mutations while a separate human review journal remains unconfirmed', async () => {
+  const f = await fixture();
+  f.setBound();
+  const body = {
+    engagementId: ENGAGEMENT,
+    expectedOutputSha256: f.drishti.output_sha256,
+    expectedProjectionSha256: projectionSha,
+    target: { kind: 'whole_observation' },
+    decision: 'acknowledged',
+    justification: 'Saved source facts reviewed.',
+    expectedPreviousReviewId: null,
+  };
+  saveReviewOperation(
+    localStorage,
+    reviewOperationSchema.parse({
+      version: 1,
+      tenantId: TENANT,
+      actorId: ACTOR,
+      operationKey: RUN,
+      engagementId: ENGAGEMENT,
+      bindingId: BINDING,
+      observationId: DRISHTI,
+      checkId: CHECK,
+      agent: 'drishti',
+      rootSha256: rootSha,
+      outputSha256: f.drishti.output_sha256,
+      projectionSha256: projectionSha,
+      bodyUtf8: JSON.stringify(body),
+    }),
+  );
+  view();
+  await selectSource();
+  await ready();
+  expect(screen.getByRole('button', { name: 'Reconcile retained review' })).toBeTruthy();
+  for (const name of [
+    'Record source binding',
+    'Run Drishti on saved source',
+    'Run Vibhaag on selected observation',
+  ])
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+  expect(f.fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
+});
+it('keeps reviewer access distinct from invocation controls in the full workflow', async () => {
+  await fixture();
+  render(<PublicSourceWorkflow tenantId={TENANT} actorId={ACTOR} canInvoke={false} canReview />);
+  await screen.findByRole('option', { name: /Axiom website audit/ });
+  expect(screen.getByText(/Human review is available/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Run Drishti on saved source' })).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Human source review' })).toBeTruthy();
 });
