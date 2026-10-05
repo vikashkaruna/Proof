@@ -28,6 +28,14 @@ Owner: **Operator** = provisions, bills, deploys, is irreversible, needs a
 credential the agent must never see, or is a business/posture decision.
 **Engineering** = code, migrations, tests, docs.
 
+**Start here, 2026-10-05:** the recorded overall goal is paused; the goal record
+does not contain a reason. It is **not an operator-testing-only wait**.
+Unfinished engineering remains in section 7. Existing local RC.3 can be reviewed
+now; the newer staging workflow and human-review candidate must first complete
+their engineering/release gates. Use [section 2b](#2b-step-by-step-operator-configuration-validation-and-confirmation) for the ordered procedures,
+expected results and confirmations. Documentation work does not constitute
+permission to deploy, enable cloud APIs, rotate credentials or stop a service.
+
 ---
 
 ## 0. Standing constraints `[16 §0][18]`
@@ -40,9 +48,10 @@ credential the agent must never see, or is a business/posture decision.
   clearance; that permits an agent to deploy an authorised release only once a
   verified target and completed gates exist `[18]`.
 - **Object Lock Compliance is a one-way door.** Nobody (including the cloud
-  owner) can shorten or delete it; a test bucket locked for 2555 days is gone
-  for seven years. Never set retention on a bucket you experiment with. W8
-  depends on it; it is deliberately the last thing turned on.
+  owner) can shorten or delete it; a test object locked for 2555 days cannot be deleted early. Never set
+  retention on a bucket you experiment with. Local experiments must finish
+  before selecting permanent retention; the current preprod deploy script
+  requires a real Compliance probe before every phase (section 2b step 5).
 - **Never send an agent:** a service-role key, JWT secret,
   `APPROVAL_SIGNING_KEY`, the contents of any `.env*`, or
   `.axiom-runtime/personas/state.json`. Supply Secret Manager _resource names_
@@ -97,7 +106,7 @@ One entry point, `scripts/axiom-ops.sh`, drives all of it. Every value comes fro
 **One-time setup per environment**
 
 ```bash
-cp infra/docker/environments/.env.preprod.example infra/docker/environments/.env.preprod
+cp -n infra/docker/environments/.env.preprod.example infra/docker/environments/.env.preprod
 ln -s infra/docker/environments/.env.preprod .env.preprod   # only if the root link is missing
 # an existing file from before: scripts/sync-env.sh preprod scaffold  (appends only missing keys)
 scripts/axiom-ops.sh env-check --env preprod
@@ -105,17 +114,17 @@ scripts/axiom-ops.sh env-check --env preprod
 
 `.env.local`, `.env.staging`, `.env.preprod`, `.env.production` and `infra/docker/environments/.env.*` are all gitignored; only the `.env*.example` templates are tracked (the root ones are symlinks into `infra/docker/environments/`), and a test fails if that ever changes. The tool parses the file (it never sources it), so a `$(...)` in a value cannot run. A value already set in your shell wins for that run (`GCP_REGION=... scripts/axiom-ops.sh ...`). A file whose `ENVIRONMENT=` disagrees with its name is refused. Placeholders such as `<your-project>` count as missing.
 
-| Command                                   | What it does                                                                                                                                                                                                                         | Cost / risk                                                          |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `axiom-ops.sh env-check --env E`          | Finds the file, reports required keys present or missing (names only), runs the config audit for preprod.                                                                                                                            | none                                                                 |
-| `axiom-ops.sh ci [--env E]`               | The CI gates locally: config audit, frozen install, format, lint, typecheck, unit tests, script tests, control-count and tfvars gates, Python service tests, the security scan. Flags `--skip-security --skip-python --skip-config`. | none (local)                                                         |
-| `axiom-ops.sh build --env preprod --yes`  | Builds the nine images from the exact HEAD SHA and **pushes** them to Artifact Registry. Needs a clean tree.                                                                                                                         | registry storage; asks first                                         |
-| `axiom-ops.sh deploy --env preprod --yes` | Runs `deploy-preprod-gcp.sh` at the exact HEAD SHA with your env file. `--dry-run` is a Terraform plan only. Pass phases through: `-- --from-phase services`, `-- --phase db`.                                                       | **billing starts** (Cloud SQL, Cloud Run, VPC connector); asks first |
-| `axiom-ops.sh stop --env preprod --yes`   | Soft stop, see below.                                                                                                                                                                                                                | cuts idle cost; deletes nothing                                      |
-| `axiom-ops.sh start --env preprod --yes`  | Puts everything back exactly as it was.                                                                                                                                                                                              | restores the cost                                                    |
-| `axiom-ops.sh status --env preprod`       | What is running and what still costs money.                                                                                                                                                                                          | none                                                                 |
+| Command                                   | What it does                                                                                                                                                                                                                               | Cost / risk                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `axiom-ops.sh env-check --env E`          | Finds the file, reports required keys present or missing (names only), runs the config audit for preprod.                                                                                                                                  | none                                                                                           |
+| `axiom-ops.sh ci [--env E]`               | The CI gates locally: config audit, frozen install, format, lint, typecheck, unit tests, script tests, control-count and tfvars gates, Python service tests, the security scan. Flags `--skip-security --skip-python --skip-config`.       | none (local)                                                                                   |
+| `axiom-ops.sh build --env preprod --yes`  | Builds the nine images from the exact HEAD SHA and **pushes** them to Artifact Registry. Needs a clean tree.                                                                                                                               | registry storage; asks first                                                                   |
+| `axiom-ops.sh deploy --env preprod --yes` | Runs `deploy-preprod-gcp.sh` at the exact HEAD SHA with your env file. For plan-only review select a phase explicitly; default prep can enable APIs (section 2b step 6). Pass phases through: `-- --from-phase services`, `-- --phase db`. | **billing starts** (Cloud SQL, Cloud Run, storage and other provisioned resources); asks first |
+| `axiom-ops.sh stop --env preprod --yes`   | Soft stop, see below.                                                                                                                                                                                                                      | cuts idle cost; deletes nothing                                                                |
+| `axiom-ops.sh start --env preprod --yes`  | Puts everything back exactly as it was.                                                                                                                                                                                                    | restores the cost                                                                              |
+| `axiom-ops.sh status --env preprod`       | What is running and what still costs money.                                                                                                                                                                                                | none                                                                                           |
 
-Every mutating command takes `--dry-run` (shows the exact `gcloud` calls) and asks for confirmation unless `--yes` is given; without a terminal it refuses rather than guess. For `local` and `staging`, `build`/`deploy` run `dev-docker.sh` (`--build` for build), `stop` is `dev-docker.sh --down` and `status` is `--status`; local stop keeps containers and data (see section 1).
+Mutating commands accept `--dry-run`; cloud stop/start preview their calls, while deploy requires the phase-specific precautions in section 2b step 6 and asks for confirmation unless `--yes` is given; without a terminal it refuses rather than guess. For `local` and `staging`, `build`/`deploy` run `dev-docker.sh` (`--build` for build), `stop` is `dev-docker.sh --down` and `status` is `--status`; local stop keeps containers and data (see section 1).
 
 **Soft stop covers every environment, production deliberately last and most guarded.**
 
@@ -152,7 +161,7 @@ What you must know before the first deploy:
 1. `controller_source_ranges` for any runner firewall must be `10.10.16.0/24` (the example tfvars already say so).
 2. The egress subnet cannot be deleted for up to 20 minutes after its services are gone (Cloud Run holds the addresses); teardown handles it in the last network phase.
 3. Services use the second-generation execution environment (required); expect a slightly slower cold start.
-4. **Not proven on a real project.** Only `terraform validate`, `fmt` and the mocked tests ran. Your first `deploy --dry-run` is the real check; read the plan for the services with a network interface (bff, agent-runtime, temporal-worker, supabase auth, supabase rest), the new `run-egress` subnet, the private `run.app` DNS zone and the per-caller invoker bindings.
+4. **Not proven on a real project.** Only `terraform validate`, `fmt` and the mocked tests ran. The phase-specific services plan in section 2b step 6 is the live plan check; read the plan for the services with a network interface (bff, agent-runtime, temporal-worker, supabase auth, supabase rest), the new `run-egress` subnet, the private `run.app` DNS zone and the per-caller invoker bindings.
 
 ## 2. Checklist index by workstream
 
@@ -177,7 +186,7 @@ Closure evidence.
 
 ## 2a. Your action list, in order
 
-Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the first thing that bills, so it starts only on your explicit go-ahead (nothing billable or irreversible is done without it). Items already done are in the changelog at the end of this section.
+Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C contains billable provisioning and publication; the permanent evidence prerequisite may require separately approved earlier spend (section 2b step 5), so it starts only on your explicit go-ahead (nothing billable or irreversible is done without it). Items already done are in the changelog at the end of this section.
 
 **Tier A — decisions and housekeeping (now, no cost)**
 
@@ -199,35 +208,471 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 **Tier C — provision and prove (billing starts; explicit go-ahead)**
 
-6. First `scripts/axiom-ops.sh deploy --env preprod --dry-run`, then `build --env preprod --yes` and `deploy --env preprod --yes` (section 1a). **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
+6. Follow section 2b steps 5–7: approved evidence/backup prerequisites, phase-specific plans that omit prep, separately approved exact-SHA image publication, full services-plan review, then explicitly approved deployment. Do not use a default dry-run as a cloud read-only check. **P0-4 → P0-5 → P0-6 → P0-7 → P0-8**, then **P0-11** (residency, IAM, Object Lock) and **P0-13** (service IAM isolation), then **P1-R1/R2** (clearance matrix, deploy at an exact SHA).
 
 **Tier D — verify each workstream on the deployed environment**
 
-7. W1 (**P1-W1a-d**), W2 (**P1-W2b**), W3 (**P1-W3c/d**), W4 (**P1-W4a-m**), **P1-W5**, **P1-W6**, W8 (**P1-W8b** opt-ins, the gap-scan durability probe, **P1-W8a** Object Lock last), **P1-W9** (live NFRs), **P1-W10** (air-gapped acceptance), then **P1-R4/R5/R6** (W8 journeys on preprod, production release, failure handling).
+7. W1 (**P1-W1a-d**), W2 (**P1-W2b**), W3 (**P1-W3c/d**), W4 (**P1-W4a-m**), **P1-W5**, **P1-W6**, W8 (**P1-W8b** opt-ins, the gap-scan durability probe, **P1-W8a** retained-object readback; its permanent probe is a preprod prerequisite), **P1-W9** (live NFRs), **P1-W10** (air-gapped acceptance), then **P1-R4/R5/R6** (W8 journeys on preprod, production release, failure handling).
 
 **Tier E — founder and commercial (run in parallel, any time)**
 
 8. **P2-12** incorporation and commercial setup, **P2-13** phase-exit evidence, **P2-14** gated Phase 5 items, **P2-6/P2-7/P2-9** (vendor descriptors, lineage model, provider equivalence).
 
-**Engineering-owned, you only watch:** **P1-DS1** (15 remaining routes get the module bar), **P1-W8d** (renderer flake, root cause open), **P1-W9b**, **P1-0099b**, **P2-3/P2-4**.
+**Engineering-owned:** combined human-review integration/real acceptance, RoPA/policy/delivery workflows and broader agent composition; P1-DS1 final release-wide design acceptance, P1-W8d repeated first-PDF validation, P1-W9b/P1-0099b fixture/writer readiness, and P2-3/P2-4. Operator configuration or manual feedback does not replace this work. See section 7.
 
-**Open and unproven (do not claim otherwise):** nothing is deployed or measured live (W9 numbers, W10 acceptance); the W8 first-PDF flake has no confirmed root cause (two theories refuted, the failing step's Chrome output points at first-launch work, it passes on re-run); the animated agent states (`thinking`, `working`) cannot be verified in still screenshots.
+**Open and unproven:** remote cloud/production acceptance, live W9 numbers and W10 offline acceptance. Local RC.3 is deployed and healthy. The renderer path correction has passing CI warm-ups, but P1-W8d stays open until repeated exact-revision first-PDF runs are verified. Animated agent states require an interactive journey, not still screenshots.
 
-**Cost saving between sessions (non-production):** `scripts/axiom-ops.sh stop --env preprod --yes` when you finish, `start` when you resume (section 1a). Nothing is deleted, so IDs and wiring survive.
+**Cost saving between sessions (non-production):** preview the named target, then stop/start only after explicit authorization (section 2b step 12). Nothing is deleted by soft stop; storage and other listed costs continue.
 
 **Changelog of operator items closed on 2026-10-03:** P0-9 reclassified informative (rotation is a provisioning practice, not a blocker), P0-16 (stash and worktree cleanup, no loss), P1-DS2 (design library uploaded), P1-DS3 (status colours accepted), P1-DS4 (agents mirrored into claude.ai), P2-15 (a, c, d), P2-16 (turbo opt-out).
+
+## 2b. Step-by-step operator configuration, validation and confirmation
+
+Follow the readiness column before running a procedure. An unchecked item is
+an open acceptance obligation, not necessarily something the operator can fix.
+Engineering must supply a tested release and evidence before requesting its
+review. All commands below run from the **selected release checkout**, not an
+unfinished feature branch. Placeholders identify inputs to supply; they are
+not executable defaults.
+
+| Step | Activity                                                              | Owner                                         | When to act                                                            |
+| ---- | --------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
+| 1    | Review current local RC.3                                             | Operator                                      | Now; optional feedback, not a prerequisite for independent engineering |
+| 2    | Record target, scope and business decisions                           | Operator                                      | Now, if remote preparation is wanted                                   |
+| 3    | Prepare and audit private configuration                               | Operator                                      | After the target is identified; no live key rotation                   |
+| 4    | Confirm exact release and engineering clearance                       | Engineering prepares; Operator reviews        | Before deploying or testing a new candidate                            |
+| 5    | Confirm evidence-storage prerequisite and recoverable backup          | Operator                                      | Before any preprod deployment phase or database change                 |
+| 6    | Review infrastructure plans                                           | Operator                                      | After configuration, backend and evidence prerequisites; no apply      |
+| 7    | Authorize and execute the deployment                                  | Operator                                      | Explicit target/SHA/plan/spend approval required                       |
+| 8    | Check deployed identity, health and private routing                   | Engineering + Operator                        | After deployment; before feature acceptance                            |
+| 9    | Perform persona and public-source journeys                            | Engineering proves first; Operator reviews    | Only when the selected release contains each feature                   |
+| 10   | Configure isolated remote acceptance and compare results              | Operator configures; Engineering runs/repairs | Approved synthetic target and fixture tunnel required                  |
+| 11   | Verify retained proof, recovery, performance and offline requirements | Engineering + Operator                        | Approved target-specific acceptance windows required                   |
+| 12   | Record sign-off and operate between sessions                          | Operator                                      | After applicable acceptance evidence; no implicit production stop      |
+
+### Step 1 — review the working local application
+
+**Purpose and reason:** review the user-visible behavior of the release actually
+running. A staging merge or worker test result does not mean port 3001 contains
+that code. Current verified local release is `v0.1.0-rc.3`, main
+`71323456a952953bae010619d545116ec11df112`; the newer operator workflow is on
+green staging `a3c845f512ec2b56278abf27cc2a31bbced39cbe`. Human structural review
+is still a candidate awaiting combined validation.
+
+1. Open `http://localhost:3001/api/health`. Confirm `status=ok`,
+   `authMode=strict` and the exact RC.3 revision above. If the revision differs,
+   ask Engineering to identify the deployed release before reviewing it.
+2. Use your own known account at `/login`; sign in through the normal form,
+   select the intended tenant and use that account's authenticator when asked.
+   Do not use another persona's TOTP. Named-admin role records exist, but
+   current-image sign-in using those credentials has not been proved. If you
+   cannot access the account, report the step/error; do not reset an existing
+   factor or password to unblock a test.
+3. Visit Dashboard, Estate/Setup, Assessment, Connectors, Discovery,
+   Classification, Plans, Approval, Execution, Evidence, DSARs, Consent,
+   Breaches, Monitoring, Regulatory Watch, Reports/Pramaan, Portal, Policies,
+   Settings/Members and Settings/Security as permitted for that role. Check
+   consistent headers, content width/margins, readable notices below the
+   header, usable actions and keyboard focus. Repeat a representative journey
+   at desktop and a narrow mobile width; use a separate browser profile for
+   each persona.
+4. In Connectors use the public website check for `https://axiomminds.ai`.
+   Review saved page/form details and reload the saved result. This release's
+   public check does not establish private-system access, storage location,
+   consent processing, a completed assessment or every agent's execution.
+5. Optionally submit a synthetic contact inquiry at
+   `http://localhost:3000/contact`. Local email delivery being disabled is
+   accepted; verify the saved-inquiry result rather than expecting an inbox
+   message. Mailpit remains a wishlist item.
+
+**Expected output:** a populated page after sign-in without a manual refresh,
+role-appropriate actions, persistent saved results and explicit unknown/private
+facts. A private connector can correctly report execution unavailable while the
+public website check works. Any missing action, blank page or lost result is a
+defect to report, not a reason to waive acceptance.
+
+**Confirmation to return:** release SHA, role, tenant alias, route, viewport,
+steps and pass/fail; include a saved result ID or sanitized error code. Do not
+send passwords, TOTP secrets, recovery codes, cookies or invitation URLs.
+
+### Step 2 — record target, scope and pending decisions
+
+**Purpose and reason:** establish where and on whose authority a test will run.
+Saving a connector descriptor cannot provide missing network access or a grant.
+Business decisions must not be inferred from public HTML or telemetry.
+
+1. For P0-1 record environment, project/account identifier, provider, region,
+   topology, public URLs, secret-store resource names, billing owner and
+   rollback owner. Confirm self-hosted Supabase and the intended database;
+   do not substitute a managed service by assumption.
+2. For P1-W2a state whether unassigned legacy engagements stay unassigned or
+   receive individually reviewed estate assignments. Keep existing null
+   historical scope intact until an explicit assignment is recorded.
+3. For private connector acceptance name one synthetic target, authorized
+   read scope, network route, credential broker, workload identity and expiry.
+   Do not transmit credentials or use a production write grant for discovery.
+4. For production record the EKS public-access CIDRs (P0-14), edge/ingress
+   design and any WAF decision. A WAF flag alone does not protect an NLB.
+   Resolve provider/retention equivalence under P2-9: the preprod scripts use
+   GCP `asia-south1`, while evidence requires AWS `ap-south-1`. This does not
+   waive AGENTS.md residency rules or authorize client-data movement.
+
+**Expected output:** an identified target and explicit decisions, with no
+secret values or invented processing facts. Unresolved production decisions
+leave that deployment gate open; independent local engineering can continue.
+
+**Confirmation to return:** item IDs, decision, scope, decision-maker and date.
+Mark an unanswered decision pending; do not treat silence as approval.
+
+### Step 3 — prepare private environment configuration
+
+**Purpose and reason:** use one consistent configuration for auth, database,
+service identities and evidence. Mixed JWT mintings or changed MFA encryption
+keys can make sign-in succeed while protected API calls fail.
+
+1. Select the correct ignored `.env.<environment>` file. If it does not exist,
+   copy that environment's tracked example without overwriting an existing
+   file. Keep it private and edit locally. Resolve differing root and
+   `infra/docker/environments/` copies; `axiom-ops.sh` prefers the root file.
+2. For an existing preprod file append missing template keys with
+   `./scripts/sync-env.sh preprod scaffold`. Fill placeholders locally. Verify
+   `ENVIRONMENT=preprod`, project, GCP region, Terraform backend bucket,
+   pinned Auth/REST upstream images, strict auth, service-specific secret
+   references, evidence probe and internal-routing settings.
+3. For a **new, unused target only**, use
+   `./scripts/sync-env.sh preprod mint` to mint matching auth secrets and keys.
+   For an existing target retain deployed keys and follow the reviewed
+   rotation procedure; do not remint to repair a configuration audit. Never
+   reset existing persona factors or replace their key ring ad hoc.
+4. Run `./scripts/axiom-ops.sh env-check --env preprod`, then
+   `./scripts/sync-env.sh preprod verify`. Select an explicit
+   `AXIOM_ENV_FILE` when needed to make both commands read the same file.
+   Keep invitation/report/contact email delivery disabled for acceptance.
+
+**Expected output:** exit zero, required key names reported present, no
+placeholders/configuration refusals and `environment 'preprod' is ready` from
+env-check. These are configuration checks, not proof of reachability or IAM.
+
+**Confirmation to return:** environment, config audit outcome and missing key
+names only. Keep the actual file, minted output and secret values private.
+
+### Step 4 — verify the exact candidate's engineering clearance
+
+**Purpose and reason:** ensure the reviewed code, deployed images and evidence
+refer to the same immutable revision. Operator testing must not replace unit,
+security, mutation, database or automated end-to-end work.
+
+1. Engineering supplies a clean committed candidate, requirement-to-evidence
+   matrix, exact source/staging/main CI links, security outcomes, module
+   coverage, full database results and known limitations (P1-R1).
+2. Inspect `git status --short` and `git rev-parse HEAD` in the selected
+   checkout. Verify CI on that exact SHA with
+   `gh run list --repo vikashkaruna/Proof --commit <exact-sha>`; check each
+   required job, rather than trusting an earlier branch run or aggregate PR
+   badge. Source goes to staging and then main with merge commits.
+3. Engineering runs `./scripts/axiom-ops.sh ci --env preprod` without skip
+   flags, plus the database, per-module coverage, Temporal-worker and actual
+   end-to-end gates required for the change. The CLI's `all gates passed`
+   message covers its own commands only; it does not include every release
+   requirement or remote acceptance.
+4. Confirm which features the proposed deployment includes. Human-review API
+   commit `ba394e78822d90210158a231b22add2aa80d7922` and Web commit
+   `be809eb2713c6dfbf9f0bc05f494c393fb240d7e` are worker candidates, not a
+   cleared combined release. Do not ask the operator to test them on RC.3.
+
+**Expected output:** one exact release SHA, green applicable checks, evidence
+for all changed requirements and explicit remaining blockers. Any failed,
+flaky, unexecuted or unexplained skipped required check leaves clearance open.
+
+**Confirmation to return:** the SHA and acceptance scope you have reviewed.
+Release review alone does not authorize a cloud build or deployment.
+
+### Step 5 — validate storage prerequisite and backup before changes
+
+**Purpose and reason:** preserve existing identities, ledger and evidence.
+Database migrations are append-only; an application rollback is not a reverse
+migration, and Compliance retention cannot be shortened.
+
+1. Inventory the selected database, applied migration names/checksums,
+   identities/memberships, ledger chain, evidence bucket/version and unrelated
+   local containers/volumes. At this checkpoint selected RC.3 has 105 applied
+   migrations through 0104; the isolated 59621 fixture has 109 through 0108.
+   Candidate 0109/0110 were tested on disposable databases, not applied here.
+2. Take a fresh uniquely named protected backup. Verify its hash, size and
+   readable archive inventory, then check the live state still matches the
+   pre-backup snapshot. Record successful verification **before** running a
+   migration; do not queue migration behind an unchecked backup command.
+
+   For the identified selected local database only, a protected PostgreSQL
+   backup can be taken as follows. Verify the container name first; execute
+   each command separately and stop if it exits nonzero. A successful dump
+   must precede the inventory/hash commands; none of these applies migrations.
+
+   ```bash
+   umask 077
+   mkdir -p .axiom-runtime/operator-backups
+   chmod 700 .axiom-runtime/operator-backups
+   LOCAL_REVIEW_BACKUP="$PWD/.axiom-runtime/operator-backups/selected-$(date -u +%Y%m%dT%H%M%SZ).dump"
+   (set -o noclobber; docker exec supabase_db_axiom-final-review pg_dump -U postgres -d postgres -Fc > "$LOCAL_REVIEW_BACKUP")
+   docker exec -i supabase_db_axiom-final-review pg_restore --list < "$LOCAL_REVIEW_BACKUP"
+   shasum -a 256 "$LOCAL_REVIEW_BACKUP"
+   wc -c < "$LOCAL_REVIEW_BACKUP"
+   ```
+
+   Keep the inventory private. Compare retained migration checksums,
+   identities/memberships and ledger/source snapshot before and after the
+   backup; the dump's readable inventory alone does not prove preservation.
+   For a remote target use its approved protected backup job rather than
+   copying local container commands or exposing a database URL.
+
+3. Confirm the approved database/application rollback route and restoration
+   owner. A restore exercise uses an approved disposable target, never
+   overwrites the retained local or production database to test recovery.
+4. Before invoking **any preprod deployment phase, including dry-run**, an
+   operator-approved AWS S3 `ap-south-1` Compliance bucket and retained
+   synthetic probe version must already exist. The script unconditionally
+   runs `verify-preprod-s3.py` before phase selection. Configure bucket,
+   `axiom-compliance-probe/` key, exact version and scoped application access
+   privately; expected readback verifies location, bucket default and that
+   exact object's Compliance retention. Creating/locking this resource needs
+   explicit approval of its cost and seven-year retention. Never lock an
+   experimental bucket. Do not bypass this gate.
+
+**Expected output:** verified backup identity and preservation snapshot,
+documented rollback route, and successful live evidence readback for preprod.
+An absent probe, checksum mismatch or backup failure stops the affected step.
+
+**Confirmation to return:** backup ID/time/hash, verification summary,
+rollback owner and approved bucket/probe version references. Never send the
+backup contents, credentials or client data. The old instruction to enable
+Object Lock last applies to disposable local experiments; it cannot describe
+the current preprod script's prerequisite order.
+
+### Step 6 — review plans without entering cloud setup
+
+**Purpose and reason:** understand resource, IAM, network and cost changes
+before approval. The default deployment's `prep` phase calls
+`gcloud services enable` even with `--dry-run`; a bare default dry-run is not a
+pure read-only cloud operation. This is an engineering follow-up, not an
+operator mistake.
+
+1. Use the approved pre-initialized Terraform backend and pre-enabled APIs.
+   Meet steps 3–5 first. Do not run the default pipeline as a first plan-only
+   check or bypass storage prerequisites to obtain a plan.
+2. Plan individual phases with the verified CLI syntax:
+
+   ```bash
+   ./scripts/axiom-ops.sh deploy --env preprod --dry-run -- --phase base
+   ./scripts/axiom-ops.sh deploy --env preprod --dry-run -- --phase db
+   ```
+
+3. Review the full services plan after the exact nine-image release manifest
+   exists and registry readback is authorized:
+   `./scripts/axiom-ops.sh deploy --env preprod --dry-run -- --phase services`.
+   The manifest validator checks actual registry digests even in dry-run.
+   First-time image publication is separately approved in step 7; a missing
+   manifest is a prerequisite failure, not permission to silently build.
+4. Check each plan summary and the full changes: Direct VPC egress subnet,
+   service interfaces, private `run.app` DNS, caller-specific invokers,
+   separate service identities/secret grants, database sizing and removals.
+   Confirm no unexpected deletion, public ingress, shared credential grant or
+   evidence-retention change. Keep saved plans private; they can contain
+   secrets. Backend initialization/tfvars generation can write local files.
+
+**Expected output:** reviewed plan summaries with expected resources and no
+cloud apply/API enablement. If digest lookup fails, stop and resolve narrowly
+scoped Artifact Registry/Container Analysis read permissions; do not drop
+digest verification. A phase plan alone does not clear the full rollout.
+
+**Confirmation to return:** exact SHA, phase, plan reference, add/change/delete
+summary, unexpected changes and your approve/reject decision. Approval of a
+plan is distinct from approval of billable execution.
+
+### Step 7 — authorize the build and deployment explicitly
+
+**Purpose and reason:** billable provisioning and service interruption require
+a concrete reviewed target and release. The production topology is not built
+or deployed by `axiom-ops.sh`.
+
+1. Record approval of environment, project, exact main SHA, plan references,
+   spend, migrations, evidence retention, rollback route and deployment
+   window. Review any newly resolved first-deploy prerequisite separately.
+2. From that clean checkout, publish preprod images only after approval:
+   `./scripts/axiom-ops.sh build --env preprod --yes`. Require a valid manifest
+   covering nine immutable image digests for the exact SHA.
+3. Review the services plan from step 6. Deploy only after its clearance and
+   explicit approval: `./scripts/axiom-ops.sh deploy --env preprod --yes`.
+   Its default pipeline includes API setup, image work, services, migration
+   and hosting phases; approved phase-specific execution can use
+   `-- --phase <name>`. Do not seed identities on a production/client target.
+4. Verify migration runner count, last name and **all prior checksums** against
+   the candidate; never assume the historical 90-file baseline is current.
+   Stop on any migration failure or changed-history refusal; never force it.
+
+**Expected output:** validated release manifest, successful approved phases,
+unchanged prior migration history and recorded provider revisions. The final
+message `PREPROD INFRASTRUCTURE DEPLOYED; ACCEPTANCE STILL REQUIRED` is not
+production sign-off.
+
+**Confirmation to return:** approval reference, release SHA, image manifest
+reference, migration summary, health endpoints and deployment time. For
+production use P1-R5's verified target-specific mechanism; no preprod command
+is a substitute for production topology review.
+
+### Step 8 — validate deployed identity and service paths
+
+**Purpose and reason:** healthy public endpoints do not establish tenant
+isolation, least privilege or private service connectivity.
+
+1. Verify the manifest and all nine Cloud Run service image digests using
+   `scripts/preprod-release-manifest.py validate` and
+   `scripts/verify-preprod-cloudrun.py` with their manifest/SHA/project inputs
+   from the approved deployment; compare application health revisions.
+2. Confirm BFF unauthenticated protected requests return 401, strict mode is
+   active and normal sign-in reaches the named tenant. A login redirect or
+   public health 200 cannot substitute for protected-API refusal.
+3. Exercise one approved BFF → agent-runtime call and one agent-runtime →
+   model-gateway call; capture successful application result and correlated
+   logs/IDs. Confirm private DNS, per-caller ID-token acceptance and cold start
+   at the configured minimum instances. Also prove an unauthorized caller
+   cannot invoke the internal service.
+4. Read back service identities and effective secret/IAM grants. Web and
+   marketing must not access approval, MFA, service-role or evidence secrets.
+   Record residency and routing evidence without secret values.
+
+**Expected output:** exact revision/digest matrix, allowed and denied outcomes
+for each path, worker connectivity and isolated service identities. A failure
+leaves acceptance red. Any temporary public-plus-token fallback requires an
+explicit recorded operator decision and is not private-routing acceptance.
+
+**Confirmation to return:** endpoints, revisions, caller/target identities,
+status/error codes and correlation IDs; no JWTs or raw provider log dump.
+
+### Step 9 — execute role and operator journeys on the cleared release
+
+**Purpose and reason:** prove that users can complete work and review its
+retained output, rather than merely see a screen or a mocked agent response.
+Engineering runs automated real-transport journeys before requesting manual
+review. Rows marked pending below are not executable acceptance on RC.3.
+
+| Area / purpose                                                | Steps on a release containing the feature                                                                                                                                                                                                                                                                                                                                                    | Expected validation and confirmation                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-in, organization and MFA (W1/W3)                         | In separate sessions sign in as owner/reviewer/viewer; open Settings → Security; use that account's enrollment flow only when it has no active factor; complete a fresh step-up. Open Estate/Setup under an explicitly entitled account. Test replacement/recovery only with an approved disposable persona.                                                                                 | Populated dashboard without refresh; factor tied to the correct identity; permitted organization setup; existing-factor controls refuse invalid codes. Return role, revision, step outcomes/error codes. A prerequisites refusal requires entitlement/configuration investigation, not a bypass.                                                      |
+| Invitation (W1)                                               | As authorized inviter create a synthetic invite in Settings → Members; privately copy its one-time link; in another browser profile sign up/sign in as the exact invited address; accept and reload. Test wrong-account and repeat acceptance separately.                                                                                                                                    | Correct membership and persistent accepted state; other identity refused; no duplicate membership. Return invitation record ID and outcomes, never its token URL. Remote email delivery is a separate provider/domain test; local disabled delivery is accepted.                                                                                      |
+| Remote email delivery (W1/W8; separately enabled)             | After provider/domain approval, verify sending-domain SPF/DKIM in the provider console; provision RESEND_API_KEY to BFF only; enable the required invitation/contact/report delivery mode on the approved remote target. Submit a synthetic request to an operator-controlled inbox and accept an invitation under its exact identity. Keep local and ordinary acceptance delivery disabled. | Provider delivery ID, actual inbox arrival and correct application result; rejection/provider failure reported truthfully. Return sanitized delivery/acceptance outcomes and secret resource name, never key or token. No Mailpit requirement or local delivery promise is introduced.                                                                |
+| Public observation (W2/W4; staged workflow)                   | Run the public check for axiomminds.ai; select the intended engagement and saved check; bind that exact source; run Drishti; select its retained observation as Vibhaag's input; inspect saved history, source digests and run/completion/settlement receipts; reload. Engineering injects response loss and reconciles the original key.                                                    | Both actual outputs retained, Vibhaag tied to the precise Drishti observation, private facts unknown, once-only execution after recovery, viewer readable and unable to invoke. Return check/binding/run/observation IDs and receipt references. The simpler RC.3 public check alone does not satisfy this row.                                       |
+| Human structural review (W2; candidate)                       | After combined clearance, an authorized reviewer acknowledges/disputes a whole observation or an exact stored indicator with a reason; reload; append a correction to its current predecessor. Read as viewer. Engineering covers stale/digest/foreign/revoked refusals and lost-response recovery.                                                                                          | Exact raw reason retained; separate historical/current judgments; one human receipt per accepted decision; no fabricated private facts or automatic assessment completion. Unknown outcomes stay locked for original-key reconciliation; discard of a known refused request requires confirmed not_found. Return review/predecessor IDs and receipts. |
+| RoPA, policy and delivery workflows (W2; engineering pending) | Do not request operator sign-off until capture/readback, source provenance, document review/reasons and task/time records are implemented and tested. Then exercise the complete scoped save/reload/review journey.                                                                                                                                                                          | Unknown processing facts remain explicit; immutable review history and real ranked delivery output. A placeholder Data Map, standing execution-policy list or incident playbook is not closure of these requirements.                                                                                                                                 |
+| Private connector (W4/W5; transport pending)                  | Provision an approved synthetic endpoint, broker identity and read grant; run tenant-scoped connection/discovery checks and prove revocation. Use a write target only after dry-run, validated rollback and signed human approval exist.                                                                                                                                                     | Actual authorized target result plus health/receipt evidence; ungranted/expired access refused. Saved connection options or a public HTML fetch do not prove private transport or production execution.                                                                                                                                               |
+| Every-agent real work                                         | Engineering supplies a requirement/agent input-output map and executes each supported agent through its actual composed path. Review outputs in the workspace: discovery/classification, findings/plan, approved execution/verification, regulatory/report/evidence and Pramaan/Samadhan proof as applicable.                                                                                | Stored input/output/provenance, relevant refusal evidence and reviewed artifacts per named agent. Sudhaar remains read-only; Karya cannot mutate without approved dry-run/rollback. Two successful public agents or Python-library tests do not establish all-agent completion.                                                                       |
+
+**Confirmation to return:** accept/reject each tested row with release, role,
+scope, retained IDs and a short reason. A screenshot alone does not prove
+persistence, server authority or ledger provenance. Operator feedback does
+not close pending engineering rows.
+
+### Step 10 — configure and run isolated remote acceptance
+
+**Purpose and reason:** compare the same strict-auth journeys on identified
+deployments. The runner creates synthetic fixtures; it is not a read-only
+health check and is not authorized against a customer dataset by this guide.
+
+1. Choose an approved isolated non-production database and create protected
+   `.axiom-runtime/preprod-target.json` from
+   `docs/ACCEPTANCE_TARGET.example.json`. Fill deploymentId, environment,
+   topology, expected exact revision, actual BFF/Web/marketing/Auth URLs and
+   scoped keys privately. Use HTTPS for remote topology; set
+   `syntheticFixtures=true`; protect the file with mode 0600.
+2. For plan/action fixture tests open the operator-owned PostgreSQL tunnel
+   bound to loopback. Create a separate private file containing exactly
+   `schemaVersion`, `deploymentId`, `environment`, `expectedRevision` and
+   `databaseUrl`; identities must match the target file. The database URL must
+   use the tunnel, no query/fragment or public host. Set
+   `AXIOM_ACCEPTANCE_FIXTURE_DB` to that file path. Keep credentials out of
+   shell history and command arguments.
+3. Run `./scripts/run-deployed-acceptance.sh .axiom-runtime/preprod-target.json`
+   only after fixture-writing approval. Validate the reported deployment ID,
+   revision, API and browser outcomes. Run the comparison target independently
+   under its own authorization, then use section 5's parity comparisons.
+4. Optionally configure `preprod-acceptance` and the comparison GitHub
+   environment with private `AXIOM_ACCEPTANCE_TARGET_JSON`. For manual cloud
+   operations configure `preprod-ops`, reviewer, `AXIOM_ENV_PREPROD` and the
+   two GCP federation variables from section 1a. Keep nightly stop disabled
+   unless explicitly opted in. Prove sign-in/status before actual mutation.
+
+**Expected output:** terminal successful API/browser summaries for the exact
+revision, with no failed/flaky/skipped required journeys and passing parity.
+Use only allowlisted sanitized `api-results.json`/`browser-results.json` for
+sharing; raw traces/logs/fixture state remain private. A production-profile
+label or isolated comparison topology is not actual production acceptance.
+
+**Confirmation to return:** target identity, exact revision, workflow/run URL,
+sanitized summaries and comparison result. Keep tunnel credentials, private
+target JSON and browser recordings out of chat and commits.
+
+### Step 11 — verify proof, recovery, performance and offline behavior
+
+**Purpose and reason:** these requirements need live provider/target evidence
+that local tests cannot manufacture. Schedule the relevant windows once
+Engineering provides the ready paths and synthetic datasets.
+
+| Gate                               | How to validate                                                                                                                                                                                                                                                                                        | Expected output / confirmation                                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W8 / Pramaan (W8.4/W11)            | Generate each supported source-bound dossier through the composed flow; review source authority, exact retained archive version, founder release and permitted dispatch. Retrieve that exact provider object version; exercise viewer/unreleased/stale-source refusals.                                | Real artifact, source/content hashes, version ID, retention readback, human release and dispatch receipts. Unsupported dossier types remain refused; a downloaded unretained PDF is insufficient. |
+| Samadhan approval proof (W8.5/W12) | Compare the signed approval with database-derived maker/checker, approved action subset and dry-run/rollback/execution/verification chain; independently retrieve the access-controlled retained archive and test release/refusal paths.                                                               | Matching reconciliation statement and ledger chain, exact archive version/hash and authorization outcomes. Founder review alone does not replace reconciliation or provider retention evidence.   |
+| Phase 3 execution (W5)             | On an approved synthetic write target execute all eight PRD §B.10 scenarios: rollback-complete plan, accurate dry-run diff, approval impossible before successful dry-run, partial subset only, successful rollback, independently reconstructable chain, blast-radius halt and in-flight kill switch. | Separate observed pass/fail for every scenario, scoped signed approval, actual target changes/rollback and receipt chain. No production write path is currently claimed cleared.                  |
+| W9 throughput/reporting            | Measure the approved representative dataset and target: discovery target 1M records/hour/connector; standard report under 5 minutes. Record dataset size, cold/warm behavior, repetitions, versions and resources.                                                                                     | Actual measurements at the stated thresholds; mock responses and a successful CI PDF are insufficient. Keep first-PDF timing/failures, not just warm reruns.                                      |
+| W9 recovery                        | Use a genuinely scheduled backup, restore DB and exact evidence bytes/versions into an approved isolated target; verify hashes, migrations, memberships and ledger chain. Measure backup age and full recovery duration.                                                                               | RPO ≤1 hour and RTO ≤4 hours with scheduler timestamps, restored-object integrity and retained proof. A fresh manual dump proves neither scheduled RPO nor full evidence recovery.                |
+| W10 offline                        | On an identified in-perimeter target block external egress; verify normal Auth/PostgREST/DB, licence, local model path or explicit unavailability, WORM, install/upgrade/restore and persona journeys.                                                                                                 | Firewall/egress evidence and actual offline outcomes. Mock Terraform tests or an online local stack do not close this gate.                                                                       |
+
+**Confirmation to return:** gate ID, tested target/revision, thresholds,
+measurements, retained artifact/version references, reviewer and limitations.
+Never mark a gate green from an unavailable production connector or provider.
+
+### Step 12 — record sign-off, release and session operations
+
+**Purpose and reason:** make acceptance auditable and prevent deployment or
+service interruption from being inferred from a general review.
+
+1. For each applicable requirement record pass/fail, release, target, role,
+   artifact/result/receipt references, reviewer, timestamp and remaining gap
+   in docs/21. Engineering updates matching docs/20 and checklist closures
+   here. Keep rejected and superseded results; do not erase failures.
+2. Approve or reject production separately under P1-R5 after its prerequisites
+   and exact-target acceptance plan exist. Deploy the tested artifacts,
+   verify revision/ledger before shifting traffic and run actual production
+   acceptance with approved synthetic accounts. Preserve RC tags; reserve a
+   stable release declaration for recorded clearance.
+3. For session operations select a single named environment and preview
+   `./scripts/axiom-ops.sh stop --env preprod --dry-run`. An actual stop/start
+   needs explicit authorization. Production stop additionally requires the
+   exact typed cluster via `--confirm-production`; it is a customer outage.
+   Avoid `--env all` when unrelated local stacks must remain running.
+4. Local teardown preserves database containers/volumes by default. Never
+   use `docker compose down -v`, purge flags or volume deletion for this
+   review. Do not reset personas or delete append-only evidence to clean up.
+
+**Expected output:** an explicit release/target acceptance decision and
+traceable checklist, or a documented rejection with Engineering's next repair.
+App availability is checked independently of the goal's paused status.
+
+**Confirmation format** (one row per activity; no secrets):
+
+| Item / step | Target + release SHA                | Role / scope              | Action + result              | Expected result matched? | Evidence / receipt reference                  | Decision + reviewer + date                |
+| ----------- | ----------------------------------- | ------------------------- | ---------------------------- | ------------------------ | --------------------------------------------- | ----------------------------------------- |
+| `<item-id>` | `<environment, deployment-id, sha>` | `<role, synthetic scope>` | `<steps, status/error code>` | `<yes/no, reason>`       | `<sanitized artifact/run/object-version IDs>` | `<accepted/rejected/pending, name, date>` |
 
 ## 3. P0 — blockers
 
 ### W0 and release path
 
 - [ ] **P0-1 Decide and record the target** (W0-1; `[16]`, `[18 §2]`) · Operator · project, region, billing account, topology; accepted direction is local Docker Supabase and self-hosted Supabase in higher environments (Cloud SQL may sit underneath; do not substitute managed Supabase); also existing deployment SHA, migration ledger, secrets source, DNS, rollback route · Verify: provider state and deployment records, not the doc-08 AWS examples · Closure: project id, region, topology (no credentials).
-- [ ] **P0-2 Scaffold and mint configuration** (W0-2) · Operator · none · `./scripts/sync-env.sh scaffold` (appends only missing keys to `.env.preprod`), then `./scripts/sync-env.sh mint` (anon and service keys must come from **one** minting, else "login works, every API call 401s") · Verify: `./scripts/sync-env.sh verify` · Closure: `verify` output (presence/shape only).
-- [ ] **P0-3 Pre-flight plan** (W0-3) · Operator · none · `./scripts/deploy-preprod-gcp.sh --dry-run` (review the script first: default phases may still enable APIs; use an initialised Terraform config with `terraform plan` for a plan-only review) · Closure: plan summary line (`Plan: N to add, ...`) and any unexpected resource.
-- [ ] **P0-4 Provision base and database** (W0-4; **billing starts**) · Operator · approved plan · `./scripts/deploy-preprod-gcp.sh --phase base` (VPC, subnet, peering, connector, GCS vault, Artifact Registry, IAM) then `--phase db` (Cloud SQL, Secret Manager) · Closure: Cloud SQL instance name and Secret Manager _resource names_ (never values).
-- [ ] **P0-5 Run the migration series on the real database** (W0-5) · Operator · DB URL via secret store · `./scripts/deploy-preprod-gcp.sh --phase migrate` or `./scripts/migrate-cloudsql.sh <DATABASE_URL>` (enforces TLS, records checksums, refuses edited history, non-zero on failure). The old runbook's "42 migrations 0000-0041" is stale: the repository at `41b70b6` has **90 files, 0000-0089** (`20_Plan.md` D4) · Verify: runner summary count and last migration name · Closure: summary; on a checksum refusal send the line verbatim and stop (never force).
-- [ ] **P0-6 Seed representative identities** (W0-6) · Operator · none · `./scripts/deploy-preprod-gcp.sh --phase migrate --seed-identities`; multiple tenants and personas, **never client production data** · Closure: tenant count and persona roles (no emails/passwords).
-- [ ] **P0-7 Deploy services and verify** (W0-7) · Operator · none · `--phase services` then `--phase verify`. Review the **full services-phase plan**, not just base/db · Closure: health matrix and public URLs of web app and BFF.
+- [ ] **P0-2 Scaffold and mint configuration** (W0-2) · Operator · none · `./scripts/sync-env.sh preprod scaffold` (appends only missing keys); for a new unused target only, `./scripts/sync-env.sh preprod mint` creates a matching key set. Existing targets retain deployed keys and follow reviewed rotation · Verify: `./scripts/sync-env.sh preprod verify`; see section 2b step 3 · Closure: `verify` output (presence/shape only).
+- [ ] **P0-3 Pre-flight plan** (W0-3) · Operator · none · section 2b steps 5–6: verify evidence/backend prerequisites, then `./scripts/axiom-ops.sh deploy --env preprod --dry-run -- --phase base` and db/services plans as applicable. Default prep can enable APIs even with dry-run; never use it as read-only approval evidence · Closure: plan summary line (`Plan: N to add, ...`) and any unexpected resource.
+- [ ] **P0-4 Provision base and database** (W0-4; **billing starts**) · Operator · approved plan · `./scripts/axiom-ops.sh deploy --env preprod --yes -- --phase base` (VPC, Direct VPC egress subnet, peering, Artifact Registry, IAM; permanent evidence remains the separately approved S3 prerequisite) then the same approved entrypoint with `-- --phase db` (Cloud SQL, Secret Manager) · Closure: Cloud SQL instance name and Secret Manager _resource names_ (never values).
+- [ ] **P0-5 Run the migration series on the real database** (W0-5) · Operator · DB URL via secret store · `./scripts/axiom-ops.sh deploy --env preprod --yes -- --phase migrate` or `./scripts/migrate-cloudsql.sh --skip-seeds` with SUPABASE_DB_URL privately injected from the approved secret store (enforces TLS, records checksums, refuses edited history, non-zero on failure). Historical 42/90-file counts are not the expected current deployment count; derive the manifest from the exact approved release and compare every prior checksum (section 2b steps 5 and 7) · Verify: runner summary count and last migration name · Closure: summary; on a checksum refusal send the line verbatim and stop (never force).
+- [ ] **P0-6 Seed representative identities** (W0-6) · Operator · none · `./scripts/axiom-ops.sh deploy --env preprod --yes -- --phase migrate --seed-identities` on an approved isolated synthetic target only; multiple tenants and personas, **never client production data** · Closure: tenant count and persona roles (no emails/passwords).
+- [ ] **P0-7 Deploy services and verify** (W0-7) · Operator · none · use the approved axiom-ops deploy entrypoint with `-- --phase services`, then `-- --phase verify`. Review the **full services-phase plan**, not just base/db · Closure: health matrix and public URLs of web app and BFF.
 - [ ] **P0-8 Prove strictness against the deployed environment** (W0-8; closes W0.1) · Operator · private target JSON per `ACCEPTANCE_TARGET.example.json` · see section 5 (deployed acceptance procedure) · Verify: BFF returns **401** to an unauthenticated request; parity lane green on a named commit comparing remote API and browser suites · Closure: exact revision, CI run URL, sanitised `api-results.json` and `browser-results.json` per target. A local Docker rehearsal does not close it.
 - [x] **P0-9 Held historical secrets: rotation practice (informative, not blocking)** (`[14]` decision 1; `[16]` secret-scan audit) · Operator · Decision 2026-10-03: nothing has been published or deployed with these values, and every secret is minted fresh at P0-10 and rotated as a routine when a target is provisioned, so this does not gate anything. Practice for operators: never reuse a historical value on a target; if any held value is ever found in use, rotate it first, then fingerprint-ignore in `.gitleaksignore`. Held, **not** fingerprint-ignored: two 64-hex `GOTRUE_JWT_SECRET`/`PGRST_JWT_SECRET` values in `infra/docker/docker-compose.supabase.yml` (commit `7719f0c`) and `APPROVAL_SIGNING_KEY` in `infra/docker/environments/.env.preprod.example` (commit `7631b1f`) · Closure: none required; revisit at P0-10.
 - [ ] **P0-10 Fresh secrets for the target** (`[18 §2]`) · Operator · target secret manager · Use fresh secrets; rotate values known exposed in historical commits; confirm effective strict auth mode · Closure: secret resource names; strict-mode readback.
@@ -266,7 +711,7 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 - [ ] **P1-W2a Legacy assignment policy** (W2-1) · Operator · decide: assign existing unassigned engagements to an estate by hand, or leave unassigned until reviewed (never infer scope) · Closure: the policy.
 - [ ] **P1-W2b Apply each migration batch to the deployed DB** (W2-2) · Operator · order is commit, then apply, never the reverse · Verify: same command as P0-5; also apply 0033 (creates seven empty connector tables; do not insert real credentials) · Closure: applied count and last migration name per batch.
-- [ ] **P1-W2c Operator workflow integration** · Engineering · Migration 0076 already delivers the four previously named schema gaps and BFF routes. Exact-green main already exposes bounded human-recorded classification review history and 0103 membership guards; it does not verify agent observations or perform source corrections. Next persist immutable observations bound to tenant, engagement, source digest and agent run, then wire human review/correction, RoPA, policy-draft review and playbooks. Do not infer scope from telemetry or invent processing facts. Selected local 60321 already has 0103; immutable 0105 source snapshots, strict runtime contracts and BFF preview/create foundation passed complete parent tests and 21 actual Auth/PostgREST checks on isolated 59621, with one source-bound human receipt and zero chain violations. Dedicated dispatch, persisted observations and authoritative reviews remain pending; generic public mode intentionally refuses. · Closure: authorized operator actions, persistence/reload, viewer/foreign-tenant refusal, ledger provenance and end-to-end evidence.
+- [ ] **P1-W2c Operator workflow integration** · Engineering · Migration 0076 already delivers the four previously named schema gaps and BFF routes. Exact-green main already exposes bounded human-recorded classification review history and 0103 membership guards; it does not verify agent observations or perform source corrections. Next persist immutable observations bound to tenant, engagement, source digest and agent run, then wire human review/correction, RoPA, policy-draft review and playbooks. Do not infer scope from telemetry or invent processing facts. Selected local 60321 now has checksum-verified 0104; immutable 0105 source snapshots, strict runtime contracts and BFF preview/create foundation passed complete parent tests and 21 actual Auth/PostgREST checks on isolated 59621, with one source-bound human receipt and zero chain violations. Dedicated dispatch and persisted observations are on exact-green staging through #177; source-bound human reviews remain candidate engineering. Generic public mode intentionally refuses. · Closure: authorized operator actions, persistence/reload, viewer/foreign-tenant refusal, ledger provenance and end-to-end evidence.
 
 - [ ] **P1-W2d Generic agent run lifecycle authority** · Engineering · The migrated database refuses direct service-role writes to `agent_runs`, while generic BFF dispatch still attempts INSERT/UPDATE. Candidate 1a578c0 implements restricted, tenant/actor/context/correlation-bound start and terminal RPCs with recorded provenance; parent real Auth/runtime/PostgREST acceptance passed on the isolated fixture, including configured development writer mode and uppercase UUIDs. Preserve Karya/report workflow refusals, current internal-user authority and existing dedicated flows; full combined database passed; PR #172 hosted portability and approval-region harness failures were corrected; exact source and staging gates passed and #172 merged. Main 71323456 exact CI/security and selected local 0104 acceptance passed in RC.3; remote target acceptance remains pending. Never restore broad service-role DML. · Verify: actual migrated database and runtime transport, initial-write refusal prevents dispatch, terminal ambiguity never produces a success event, viewer/foreign-context/revoked-actor refusal and mutation regressions. · Closure: real invocation/run/ledger evidence and exact source/staging/main gates.
 
@@ -308,13 +753,13 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 
 ### W8 Reporting, evidence, mail
 
-- [ ] **P1-W8a Object Lock Compliance bucket evidence** (`[16 §0]`, `[17B]`) · Operator · **last thing to turn on**; real bucket per P0-11 · Verify: provider readback of mode and retention against a real object/version; exact-version retrieval · Closure: readback archived. W8 WORM retention is not provable in CI.
+- [ ] **P1-W8a Object Lock Compliance bucket evidence** (`[16 §0]`, `[17B]`) · Operator · permanent real bucket per P0-11, with explicit retention approval after disposable experiments and before any preprod phase; see section 2b step 5 · Verify: provider readback of mode and retention against a real object/version; exact-version retrieval · Closure: readback archived. W8 WORM retention is not provable in CI.
 - [ ] **P1-W8b Mail opt-ins** (`[16 C-W0-4/6, W1]`) · Operator · keep `AXIOM_REPORT_EMAIL_MODE=disabled` and `AXIOM_CONTACT_EMAIL_MODE=disabled` during acceptance; production mail needs explicit `delivery` mode and the BFF-held managed `RESEND_API_KEY` (marketing holds none); apply 0037 and 0052 and deploy BFF and marketing together; remove the unused marketing `resend_api_key` accessor binding by applying the updated IAM (no secret value change) · Closure: acceptance preflight passes with delivery disabled; real provider delivery not yet exercised `[16]`.
 - [ ] **P1-W8c Gap-scan durability probe on remote targets** (`[17A]`) · Operator · after ordinary acceptance: `export AXIOM_ACCEPTANCE_TARGET="$PWD/.axiom-runtime/preprod-target.json"`; `pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare`; operator restarts all BFF/marketing replicas **without replacing the database**; `... verify`; repeat for the comparison target · Closure: restart evidence retained (the probe cannot prove a restart); private `gap-scan-private.json` never uploaded.
 
 ### W9 / W10
 
-- [ ] **P1-W9 Measured load, coverage and recovery on the target** · Operator + Engineering · real 1M-row discovery throughput and report timing at stated thresholds; CI-enforced per-module coverage floors (web gate 80% not met `[brief]`); scheduled-backup RPO and complete DB **and evidence-object** restore integrity with bounded RTO (synthetic benchmark and disposable restore are insufficient) `[A91]` · Closure: datasets, thresholds, versions, artifacts recorded.
+- [ ] **P1-W9 Measured load, coverage and recovery on the target** · Operator + Engineering · real 1M-row discovery throughput and report timing at stated thresholds; CI-enforced per-module coverage floors; current candidate module checks passed locally, while target-specific measurements remain open; scheduled-backup RPO and complete DB **and evidence-object** restore integrity with bounded RTO (synthetic benchmark and disposable restore are insufficient) `[A91]` · Closure: datasets, thresholds, versions, artifacts recorded.
 - [ ] **P1-W10 Offline install acceptance** · Operator + Engineering · isolated offline target with egress **blocked**: strict secrets, functional in-perimeter Auth/PostgREST/DB, verified WORM configuration, local model dispatch or explicit unavailable result; install, upgrade, restore and persona journey `[A91][18]` · Closure: live air-gapped acceptance run (not done as of 2026-10-01 `[brief]`).
 - [ ] **P1-W9b Remote acceptance plan fixtures** · Engineering + Operator · migration 0099 removed plan/action DML from the service credential. The candidate remote path requires an operator-owned PostgreSQL tunnel bound to loopback and a private `AXIOM_ACCEPTANCE_FIXTURE_DB` JSON file (mode `0600`) containing exactly `schemaVersion: 1`, `deploymentId`, `environment`, `expectedRevision` and `databaseUrl`. The first four values must match `AXIOM_ACCEPTANCE_TARGET`; `databaseUrl` must point to the tunnel's local port, never a public database host, and must have no query parameters or fragment (node-postgres permits `?host=` to override the URL hostname). The operator opens the tunnel to the selected **non-production synthetic** database, then runs `scripts/run-deployed-acceptance.sh PRIVATE_TARGET_JSON`. Before every plan/action write, the harness checks that this database contains the random engagement created through that target's API. No service-key plan DML or public seeding RPC is restored. Close only after source/staging/main gates and a remote persona/parity run using the operator tunnel, with the target identity, revision and result IDs recorded; no remote run has been made.
 - [ ] **P1-W1c Fresh-login token clock boundary** · Engineering · The isolated local main build intermittently returned PostgREST 401 on the first `/dashboard` membership read immediately after sign-in; a matching `PGRST303` future-issued-JWT response was reproduced with a signed future-`iat` token. PR #155 retries only that refusal once after the clock boundary and otherwise fails closed. Close after the PR, exact staging/main gates, a rebuilt local browser sign-in repetition including a cold start, and no membership error; unit tests alone do not close this.
@@ -338,18 +783,18 @@ Work top to bottom. Tier A costs nothing and unblocks engineering. Tier C is the
 3. Create a private JSON file from `ACCEPTANCE_TARGET.example.json` with credentials from the secret store (never chat or shell history): `anonKey` (JWT anon key), `publishableKey` (API gateway key), `serviceKey` (service-role JWT, fixture setup only). MFA encryption/signing keys are never supplied to the runner; SSR needs only the scoped public connection.
 4. Store under ignored `.axiom-runtime` at mode `0600`; `topology=remote` for HTTPS (loopback HTTP only with `topology=local-docker`); `syntheticFixtures=true`; unique `deploymentId` per deployment; `expectedRevision` = deployed source SHA.
 
-**Run and compare.**
+**Run and compare.** These fixture-writing commands require an approved isolated synthetic target. The comparison file identifies its real topology; a production-profile name is not permission to seed a customer production dataset. Actual production acceptance follows P1-R5 with its specifically approved synthetic scope.
 
 ```bash
 chmod 600 .axiom-runtime/preprod-target.json
 ./scripts/run-deployed-acceptance.sh .axiom-runtime/preprod-target.json
-./scripts/run-deployed-acceptance.sh .axiom-runtime/production-target.json
+./scripts/run-deployed-acceptance.sh .axiom-runtime/comparison-target.json
 pnpm exec tsx scripts/compare-deployed-parity.ts \
   .axiom-runtime/acceptance/<preprod-id>/api-results.json \
-  .axiom-runtime/acceptance/<production-id>/api-results.json
+  .axiom-runtime/acceptance/<comparison-id>/api-results.json
 pnpm exec tsx scripts/compare-deployed-parity.ts \
   .axiom-runtime/acceptance/<preprod-id>/browser-results.json \
-  .axiom-runtime/acceptance/<production-id>/browser-results.json
+  .axiom-runtime/acceptance/<comparison-id>/browser-results.json
 ```
 
 The runner verifies strict BFF identity and unauthenticated refusal before
@@ -390,9 +835,24 @@ ledger events remain; dispose through the isolated DB's normal lifecycle.
 
 ## 7. Engineering blockers that gate operator steps (not operator tasks)
 
-Listed so the operator knows why a gate stays shut (`21_Progress.md` section 2):
+The recorded overall goal is paused; no cause is stored in that goal record.
+Neither completed operator decisions nor manual testing automatically close
+these items. Documentation can be maintained while implementation is paused;
+resuming implementation is distinct from authorizing a cloud mutation.
 
-- Migration **0099** (ledger source + execution gate) is merged and tested. Selected local Docker readback confirms its unchanged checksum among 104 applied migrations through 0103. Remote targets still require approved migration and real scoped-writer acceptance; see P1-0099b/P1-W9b.
-- Statutory dossier migrations **0091-0097** and **0098** are promoted source and present in the selected local migration history. Remote retained-proof and Object Lock acceptance remain open.
-- W8.5 archive source and the human-writer release correction are promoted on main. Earlier failed local-provider evidence is historical; remote acceptance remains open.
-- Local teardown script vs section 1 rule 1 (`20_Plan.md` D12).
+| Engineering item                              | Evidence already present                                                                                                                                                             | Required next work                                                                                                                                                                                                                  | Operator dependency                                                                                                                                      |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator workflow release                     | PR #177 source and exact staging a3c845f5 CI/security passed; actual isolated source/read/recovery/browser proof retained.                                                           | Exact-green main promotion, backup/preservation checks, selected local image refresh and actual deployed acceptance.                                                                                                                | Manual review can follow the refreshed release; independent promotion/local validation already has session authorization. Cloud deployment is separate.  |
+| Human structural review                       | Parent SQL 0109/0110 and type gates passed. Separate API ba394e78 and Web be809eb2 worker commits are ready; their reported tests are not parent combined clearance.                 | Independently review/integrate, complete quality/security gates, verify a fresh backup before fixture migrations, then actual owner/reviewer/viewer HTTP/browser recovery and receipts. Complete source/staging/main release gates. | None for independent local engineering. Manual acceptance requested only after a ready release is identified.                                            |
+| RoPA, policy documents and delivery workflows | Requirement audit found concrete UI/composition/persistence gaps; policy human-event producer fence 0110 is tested.                                                                  | In plan order implement explicit-unknown RoPA capture/readback, source provenance, document reasons/history/review and task/time capture/ranking.                                                                                   | Processing facts and business judgments must come from authorized humans; no public-source inference. Implementation can proceed without inventing them. |
+| All-agent and private execution               | Drishti/Vibhaag public-source flow has real retained proof. Other modules have varying source/test evidence; production write path is not cleared.                                   | Complete agent input/output composition and real-work journeys; wire broker/SPIRE/transport/approved execution before claiming a functional private connector.                                                                      | Only the live target/network/grant and write-test approval are operator-owned; missing wiring remains engineering work.                                  |
+| W6/W7 and UI completeness                     | Local RC.3 passed responsive checks; existing backend/sector-pack evidence is recorded in docs/20–21.                                                                                | Remaining scheduler/alerts/UI/composition, SMB/vendor/partner/Sanket and Healthcare/Tech/library work; validate functional actions and design consistency throughout.                                                               | Do not defer implementation to operator screen testing. Obtain business/source decisions only where needed.                                              |
+| Remote acceptance and proof                   | 0099 restricted writers, 0091–0098 dossiers and W8.5 archive correction are on main. Selected local has 105 verified migrations through 0104; isolated fixture has 109 through 0108. | Maintain fixture/writer compatibility and exact-source suites; repeated first-PDF checks, live retained-object/RPO/RTO/performance/offline acceptance remain open.                                                                  | Identified approved target, private tunnel, provider identities/retention and target-specific windows (steps 2, 5, 10–11).                               |
+| Deployment dry-run behavior                   | Source inspection confirms prep calls gcloud services enable regardless of DRY_RUN; current deploy always checks the S3 probe before phase selection.                                | Correct and regression/mutation-test prep's read-only semantics before advertising a default dry-run as non-mutating. Keep the existing probe requirement explicit.                                                                 | Phase-specific planning is documented in step 6; no operator action can replace this code fix.                                                           |
+
+**What is safe to review now:** RC.3's existing local UI/public check, plus
+sanitized decisions and configuration readiness. **What is not being requested
+now:** approval of the unfinished human-review release, customer-data fixtures,
+private production writes, billable deployment or service interruption. Local
+Docker teardown remains data-preserving by default; there is no outstanding
+request to delete databases, volumes, persona factors or ledger history.
