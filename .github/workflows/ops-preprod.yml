@@ -64,7 +64,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: ${{ inputs.action == 'deploy' }}
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         if: ${{ inputs.action == 'deploy' }}
       - uses: google-github-actions/auth@v2
         with:
