@@ -33,7 +33,7 @@ class HelpManualTests(unittest.TestCase):
         self.put(help_manuals.MANUALS["founder"], "# PRIVATE FOUNDER MANUAL\n\nPrivate controls: never share this document.\n", private=True)
         self.put(help_manuals.PRIVATE_TESTING, "# Private test procedure\n\nAll cases not_run.\n", private=True)
         for audience in ("client", "partner"):
-            self.put(help_manuals.MANUALS[audience], '# User guide\n\nRead [Dashboard](/dashboard). Assigned scope still applies.\n\n![Fictional illustration](../assets/dashboard.svg)\n')
+            self.put(help_manuals.MANUALS[audience], '# User guide\n\nRead [Dashboard](/dashboard). Assigned scope still applies.\n\n![Fictional illustration](assets/dashboard.svg)\n')
         cases = {"schemaVersion": 1, "cases": [self.case("CASE-1", "/dashboard"), self.case("CASE-2", "marketing:/contact")]}
         self.put(help_manuals.CASES, json.dumps(cases), private=True)
         (self.root / "docs/private-docs").chmod(0o700)

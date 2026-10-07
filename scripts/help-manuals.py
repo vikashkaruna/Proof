@@ -215,7 +215,7 @@ def with_reference(text: str, reference: str) -> str:
 
 def validate_cases(root: Path, data: dict) -> dict:
     raw = json.loads(safe_file(root, CASES).read_text())
-    if set(raw) != {"schemaVersion", "cases"} or raw["schemaVersion"] != 1 or not isinstance(raw["cases"], list):
+    if not {"schemaVersion", "cases"} <= set(raw) <= {"schemaVersion", "cases", "modules"} or raw["schemaVersion"] != 1 or not isinstance(raw["cases"], list):
         raise HelpError("Invalid manual case suite")
     keys = {"id", "title", "routes", "personas", "requirementRefs", "availability",
             "preconditions", "steps", "expected", "evidence", "destructive"}
@@ -223,7 +223,7 @@ def validate_cases(root: Path, data: dict) -> dict:
     known = {r["route"] for r in data["routes"]}
     valid_states = {"current", "staged", "candidate", "blocked", "conditional"}
     for case in raw["cases"]:
-        if not isinstance(case, dict) or set(case) != keys:
+        if not isinstance(case, dict) or not keys <= set(case) <= keys | {"module", "feature"}:
             raise HelpError("Manual case has unknown or missing fields")
         if not isinstance(case["id"], str) or not re.fullmatch(r"[A-Z0-9-]+", case["id"]) or case["id"] in ids:
             raise HelpError("Invalid or duplicate case ID")
@@ -278,7 +278,7 @@ def validate_external(root: Path, audience: str, text: str) -> None:
     route_paths = {item["route"].split("?", 1)[0] for item in inventory(root)["routes"] if not item["route"].startswith("marketing:")}
     for image, target in re.findall(r"(!?)\[[^\]]*\]\(([^)]+)\)", text):
         if image:
-            if target not in {f"../assets/{name}" for name in ASSETS}:
+            if target not in {f"assets/{name}" for name in ASSETS}:
                 raise HelpError("External image is not an approved fictional illustration")
             approved_svg(root, Path(target).name)
         elif target.startswith("#"):
@@ -305,7 +305,7 @@ def public_coverage(cases: dict) -> dict:
 
 def validate_coverage(root: Path, data: dict) -> dict:
     raw = json.loads(safe_file(root, COVERAGE).read_text())
-    if set(raw) != {"schemaVersion", "cases"} or raw["schemaVersion"] != 1:
+    if not {"schemaVersion", "cases"} <= set(raw) <= {"schemaVersion", "cases", "modules"} or raw["schemaVersion"] != 1:
         raise HelpError("Invalid public coverage receipt")
     known = {r["route"] for r in data["routes"]}
     ids, covered = set(), set()
