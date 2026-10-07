@@ -130,6 +130,8 @@ const EnvFields = z.object({
     .transform((v) => Number(v)),
   BFF_PUBLIC_URL: z.string().url().optional(),
   BFF_CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001'),
+  // Protected server-owned deployment mapping; never a browser-provided configuration.
+  AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   // Private dispatch inputs/proofs only; never evidence, audit or consent records.
   AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS: z
     .string()

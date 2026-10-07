@@ -1,7 +1,12 @@
 /** Verify the exact frozen packet, reviewed draft and human review before PDF rendering. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { BoardReportContentV1Schema, renderBoardReportHtml } from './board-report';
+import { isDeepStrictEqual } from 'node:util';
+import { BoardReportContentSchema, renderBoardReportHtml } from './board-report';
+import {
+  interpretAssessmentReport,
+  assessmentReviewRecommendation,
+} from './assessment-interpretation';
 
 const uuid = z.uuid();
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -36,7 +41,7 @@ const controlSchema = z.object({
 const findingSchema = z.object({
   control_id: z.string().min(1).max(100),
   score: z.number().finite().min(0).max(100),
-  rationale: z.string().min(1).max(2000),
+  rationale: z.string().min(1).max(4000),
 });
 const resultSchema = z.object({
   library_version: z.string().min(1).max(200),
@@ -90,12 +95,12 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
     throw new Error('Board source or review digest mismatch');
   }
   const source = sourceSchema.parse(parseBounded(input.sourceText, 4 * 1024 * 1024));
-  const content = BoardReportContentV1Schema.parse(
-    parseBounded(input.documentText, 5 * 1024 * 1024),
-  );
+  const content = BoardReportContentSchema.parse(parseBounded(input.documentText, 5 * 1024 * 1024));
   const review = reviewSchema.parse(parseBounded(input.reviewText, 256 * 1024));
-  const controls = z.array(controlSchema).min(1).max(500).parse(JSON.parse(source.controls_text));
-  const result = resultSchema.parse(JSON.parse(source.result_text));
+  const controlsValue: unknown = JSON.parse(source.controls_text);
+  const resultValue: unknown = JSON.parse(source.result_text);
+  const controls = z.array(controlSchema).min(1).max(500).parse(controlsValue);
+  const result = resultSchema.parse(resultValue);
   if (
     hash(source.controls_text) !== source.controls_sha256 ||
     hash(source.result_text) !== source.result_sha256
@@ -132,6 +137,26 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
   ) {
     throw new Error('Board finding register is incomplete');
   }
+  // Historical documents cannot discard structured provenance to reintroduce score-as-failure claims.
+  if (
+    content.schema_version === 1 &&
+    Object.hasOwn(resultValue as object, 'questionnaire_provenance')
+  )
+    throw new Error('Board document provenance downgrade refused');
+  const interpreted =
+    content.schema_version === 2
+      ? interpretAssessmentReport(resultValue, controlsValue, source.controls_sha256, input.title)
+      : null;
+  if (content.schema_version === 2 && interpreted) {
+    if (
+      !isDeepStrictEqual(content.questionnaire_interpretation, interpreted.interpretation) ||
+      !isDeepStrictEqual(content.executive_summary, interpreted.summary)
+    )
+      throw new Error('Board document differs from frozen source');
+  }
+  const interpretations = new Map(
+    interpreted?.findings.map((finding) => [finding.control_id, finding]),
+  );
   result.findings.forEach((finding, index) => {
     const control = controlsById.get(finding.control_id)!;
     const rendered = content.key_findings[index]!;
@@ -141,38 +166,59 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
     same(rendered.severity, control.severity);
     same(rendered.score, finding.score);
     same(rendered.gap_summary, finding.rationale);
-    same(
-      rendered.remediation_recommendation,
-      control.remediation_patterns?.[0] ||
-        'No remediation pattern is recorded in the frozen control library.',
-    );
+    if (content.schema_version === 2) {
+      const expected = interpretations.get(finding.control_id)!;
+      const actual = content.key_findings[index]!;
+      for (const key of [
+        'display_state',
+        'answer_state',
+        'applicability_state',
+        'answer_counts',
+        'score_band',
+      ] as const)
+        if (!isDeepStrictEqual(actual[key], expected[key]))
+          throw new Error('Board document differs from frozen source');
+      same(
+        actual.remediation_recommendation,
+        assessmentReviewRecommendation(expected.display_state, control.remediation_patterns),
+      );
+    } else {
+      // Preserve V1 source and document bytes; do not silently reinterpret historical drafts.
+      findingSchema.extend({ rationale: z.string().min(1).max(2000) }).parse(finding);
+      same(
+        rendered.remediation_recommendation,
+        control.remediation_patterns?.[0] ||
+          'No remediation pattern is recorded in the frozen control library.',
+      );
+    }
   });
 
-  const summary = content.executive_summary;
-  same(summary.posture_score, result.posture_score);
-  same(summary.estimated_exposure_inr, result.estimated_exposure_inr);
-  same(summary.total_controls, controls.length);
-  const passed = result.findings.filter((item) => item.score >= 80).length;
-  same(summary.passed_controls, passed);
-  same(summary.failed_controls, controls.length - passed);
-  for (const [severity, key] of [
-    ['critical', 'critical_gaps'],
-    ['high', 'high_gaps'],
-    ['medium', 'medium_gaps'],
-    ['low', 'low_gaps'],
-  ] as const) {
+  if (content.schema_version === 1) {
+    const summary = content.executive_summary;
+    same(summary.posture_score, result.posture_score);
+    same(summary.estimated_exposure_inr, result.estimated_exposure_inr);
+    same(summary.total_controls, controls.length);
+    const passed = result.findings.filter((item) => item.score >= 80).length;
+    same(summary.passed_controls, passed);
+    same(summary.failed_controls, controls.length - passed);
+    for (const [severity, key] of [
+      ['critical', 'critical_gaps'],
+      ['high', 'high_gaps'],
+      ['medium', 'medium_gaps'],
+      ['low', 'low_gaps'],
+    ] as const) {
+      same(
+        summary[key],
+        result.findings.filter(
+          (item) => item.score < 80 && controlsById.get(item.control_id)?.severity === severity,
+        ).length,
+      );
+    }
     same(
-      summary[key],
-      result.findings.filter(
-        (item) => item.score < 80 && controlsById.get(item.control_id)?.severity === severity,
-      ).length,
+      summary.narrative,
+      `This report summarizes the recorded assessment for ${input.title}. The computed posture score is ${result.posture_score}%. Evidence requirements in the control library do not establish that evidence was collected or independently verified.`,
     );
   }
-  same(
-    summary.narrative,
-    `This report summarizes the recorded assessment for ${input.title}. The computed posture score is ${result.posture_score}%. Evidence requirements in the control library do not establish that evidence was collected or independently verified.`,
-  );
-
   return renderBoardReportHtml({
     ...content,
     signatures: {

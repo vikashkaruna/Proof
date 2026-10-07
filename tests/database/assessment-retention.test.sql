@@ -15,13 +15,46 @@ insert into public.engagements(id,tenant_id,estate_id,library_version,title) val
 insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status)
  values(pg_temp.id(31),pg_temp.id(11),'parikshan','spiffe://axiom.test/parikshan','active');
 
-create function pg_temp.enqueue(job int default 51,hash text default repeat('a',64),cipher bytea default decode(repeat('ab',100),'hex')) returns jsonb language sql as $$
- select public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('retention-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'))$$;
+-- Compatibility fixture only: preserve pre-0112 upgrade setup, and explicitly
+-- assume the human writer for latest enqueue while claims retain service scope.
+create function pg_temp.enqueue(job int default 51,hash text default repeat('a',64),cipher bytea default decode(repeat('ab',100),'hex')) returns jsonb language plpgsql as $$
+declare prior text:=current_user; reply jsonb; policy jsonb; key_ref text; modern boolean:=false; historical boolean;
+begin
+ if to_regprocedure('public.enqueue_assessment_dispatch(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,integer,text)') is not null then
+  modern:=not has_function_privilege('service_role','public.enqueue_assessment_dispatch(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,integer,text)','execute');
+ end if;
+ if not modern then
+  return public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('retention-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'));
+ end if;
+ if prior not in ('postgres','service_role','human_action_writer') then raise exception 'fixture writer denied' using errcode='42501'; end if;
+ select exists(select 1 from public.assessment_dispatch_jobs where id=pg_temp.id(job)) into historical;
+ execute 'set local role human_action_writer';
+ begin
+  if historical then
+   reply:=public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('retention-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes','synthetic-key/v1',decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'));
+  else
+   key_ref:='arn:aws:kms:ap-south-1:123456789012:key/'||pg_temp.id(61)::text;
+   policy:=public.publish_assessment_dispatch_key_policy(pg_temp.id(11),pg_temp.id(1),pg_temp.id(41),0,'aws',key_ref,array[key_ref]);
+   if policy ? 'error' then raise exception 'fixture policy refused'; end if;
+   reply:=public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to('retention-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes',key_ref,decode(repeat('ab',12),'hex'),cipher,decode(repeat('cd',32),'hex'),(policy->>'revision')::integer,policy->>'fingerprint');
+  end if;
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior); return reply;
+end $$;
+create function pg_temp.claim(job int default 51, tenant uuid default pg_temp.id(11)) returns jsonb language plpgsql as $$
+declare revision integer; fingerprint text;
+begin
+ if to_regclass('public.assessment_dispatch_key_policies') is not null then
+  select p.revision,p.fingerprint into revision,fingerprint from public.assessment_dispatch_key_policies p where tenant_id=tenant;
+  return public.claim_assessment_dispatch(tenant,pg_temp.id(job),revision,fingerprint);
+ end if;
+ return public.claim_assessment_dispatch(tenant,pg_temp.id(job));
+end $$;
 
 create temporary table issued as select (pg_temp.enqueue()->>'run_id')::uuid run_id;
 grant select on issued to service_role;
 create function pg_temp.purge(days integer default 90) returns jsonb language sql as $$select public.purge_next_assessment_dispatch_payload(days,pg_temp.id(11))$$;
-select public.claim_assessment_dispatch(pg_temp.id(11),pg_temp.id(51));
+select pg_temp.claim(51);
 select public.start_workload_assessment(pg_temp.id(11),(select run_id from issued),pg_temp.id(31),encode(sha256(convert_to('retention-51','UTF8')),'hex'),repeat('a',64),clock_timestamp()+interval '5 minutes');
 select public.complete_workload_assessment(pg_temp.id(11),(select run_id from issued),pg_temp.id(31),encode(sha256(convert_to('retention-51','UTF8')),'hex'),(select library_digest from public.workload_assessment_packets where run_id=(select run_id from issued)),
  '{"library_version":"retention-fixture-v1","posture_score":50,"estimated_exposure_inr":10000000,"findings":[{"control_id":"WA-1","score":0,"risk_points":10,"rationale":"No answers comply"},{"control_id":"WA-2","score":100,"risk_points":0,"rationale":"All answers comply"}]}'::jsonb,clock_timestamp()+interval '5 minutes');
@@ -73,7 +106,7 @@ select pg_temp.ok(pg_temp.purge()->>'status'='purged','eligible confirmed payloa
 select pg_temp.ok(pg_temp.purge()->>'status'='idle','repeat cleanup is idempotent');
 select pg_temp.ok((select nonce is null and ciphertext is null and wrapped_key is null and payload_purge_receipt is not null and payload_retention_days=90 and claimed_at is not null from public.assessment_dispatch_jobs where id=pg_temp.id(51)),'private bytes removed, single-use delivery preserved');
 select pg_temp.ok(pg_temp.enqueue()->>'run_id'=(select run_id::text from issued),'stable enqueue retry retains original receipt after purge');
-select pg_temp.ok(public.claim_assessment_dispatch(pg_temp.id(11),pg_temp.id(51)) ? 'error','purge cannot revive delivery');
+select pg_temp.ok(pg_temp.claim(51) ? 'error','purge cannot revive delivery');
 select pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='workload.dispatch_payload_purged'),'exactly one cleanup audit');
 select pg_temp.ok((select count(*)=2 from public.findings where tenant_id=pg_temp.id(11)),'findings survive');
 select pg_temp.ok((select count(*)=1 from public.workload_assessment_packets where finalized_receipt is not null),'confirmed result survives');

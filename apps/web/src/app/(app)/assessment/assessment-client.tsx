@@ -1,17 +1,18 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
+import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
+import { AssessmentRequestPanel } from './request-panel';
 
 export interface AssessmentClientProps {
   snapshot: AssessmentSnapshot | null;
   canCreate?: boolean;
   canInvokeAgent?: boolean;
+  actorId?: string;
 }
 
 export interface PipelineStage {
@@ -64,6 +65,7 @@ export function AssessmentClient({
   snapshot,
   canCreate = false,
   canInvokeAgent = false,
+  actorId,
 }: AssessmentClientProps) {
   const router = useRouter();
   const controls = snapshot?.controls ?? [];
@@ -97,46 +99,6 @@ export function AssessmentClient({
       notApplicable: rows.filter((row) => row.status === 'not_applicable').length,
     };
   });
-  const [assessRunning, setAssessRunning] = useState(false);
-  const [hasCompleted, setHasCompleted] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [ledgerEntryId, setLedgerEntryId] = useState<string | null>(null);
-  const inFlight = useRef(false);
-
-  const runAssessment = async () => {
-    if (inFlight.current || !snapshot?.engagement || !canInvokeAgent) return;
-    inFlight.current = true;
-    setAssessRunning(true);
-    setHasCompleted(false);
-    setRunError(null);
-    setLedgerEntryId(null);
-    try {
-      const result = await invokeAgent('parikshan', {
-        scope: 'assessment_pipeline',
-        ...(snapshot?.engagement
-          ? {
-              engagement_id: snapshot.engagement.id,
-              library_version: snapshot.engagement.libraryVersion,
-            }
-          : {}),
-      });
-      setLedgerEntryId(result.ledger_entry_ids.at(-1) ?? null);
-      setHasCompleted(true);
-      router.refresh();
-    } catch (error) {
-      setRunError(
-        error instanceof AgentInvocationError
-          ? error.message
-          : 'Could not confirm the assessment outcome.',
-      );
-    } finally {
-      inFlight.current = false;
-      setAssessRunning(false);
-    }
-  };
-  const pipelineMsg = assessRunning
-    ? 'Parikshan invocation in progress'
-    : 'Parikshan invocation completed. Saved results are refreshed separately.';
 
   return (
     <div className="min-w-0 w-full animate-in fade-in-0 duration-200">
@@ -151,26 +113,11 @@ export function AssessmentClient({
               Assessment pipeline
             </h1>
             <div className="mt-0.5 text-[11.5px] text-[#a9b3ce]">
-              Runs Parikshan only for the displayed saved assessment. Discovery, evidence sealing
-              and report generation run separately.
+              Request Parikshan for the displayed saved assessment below. Discovery, evidence
+              sealing and report generation run separately.
             </div>
             <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
           </div>
-
-          {canInvokeAgent && (
-            <button
-              type="button"
-              onClick={runAssessment}
-              disabled={assessRunning || !snapshot?.engagement}
-              className={`rounded-[9px] px-[18px] py-[10px] text-[12.5px] font-bold text-white transition-all shadow-xs ${
-                assessRunning || !snapshot?.engagement
-                  ? 'cursor-default bg-white/15 opacity-80'
-                  : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
-              }`}
-            >
-              {assessRunning ? 'Running Parikshan…' : 'Run Parikshan'}
-            </button>
-          )}
         </div>
 
         {/* 5-Stage Stepper Pipeline Row */}
@@ -181,17 +128,16 @@ export function AssessmentClient({
           tabIndex={0}
         >
           {PIPELINE_STAGES.map((p, i) => {
-            const isCompleted = p.agentKey === 'parikshan' && hasCompleted;
-            const isActive = p.agentKey === 'parikshan' && assessRunning;
-            const dotBg = isCompleted || isActive ? '#0FB5A5' : 'rgba(255,255,255,.12)';
-            const dotColor = isCompleted || isActive ? '#04322d' : '#ffffff';
+            const isCompleted = p.agentKey === 'parikshan' && hasDeclarations;
+            const dotBg = isCompleted ? '#0FB5A5' : 'rgba(255,255,255,.12)';
+            const dotColor = isCompleted ? '#04322d' : '#ffffff';
             const mark = isCompleted ? '✓' : String(i + 1);
 
             return (
               <div
                 key={p.agent}
                 data-testid={`pipeline-${p.agentKey}`}
-                data-state={isCompleted ? 'completed' : isActive ? 'running' : 'not-run'}
+                data-state={isCompleted ? 'completed' : 'not-run'}
                 className="group relative flex min-w-[110px] flex-1 flex-col items-center text-center"
               >
                 {/* Horizontal connector line to next step */}
@@ -206,11 +152,7 @@ export function AssessmentClient({
 
                 {/* Step Circle: 34px diameter, font-heading, 13px bold */}
                 <div
-                  className={`relative z-10 flex h-[34px] w-[34px] items-center justify-center rounded-full font-heading text-[13px] font-bold transition-all duration-300 select-none ${
-                    isActive
-                      ? 'animate-pulse ring-4 ring-[#0FB5A5]/40 shadow-lg shadow-[#0FB5A5]/20 scale-105'
-                      : ''
-                  }`}
+                  className="relative z-10 flex h-[34px] w-[34px] items-center justify-center rounded-full font-heading text-[13px] font-bold select-none"
                   style={{
                     backgroundColor: dotBg,
                     color: dotColor,
@@ -221,12 +163,7 @@ export function AssessmentClient({
 
                 {/* Agent Name with Mini Icon */}
                 <div className="mt-2 flex items-center justify-center text-white">
-                  <AgentLabel
-                    agent={p.agentKey}
-                    size="xs"
-                    tone="dark"
-                    state={isActive ? 'thinking' : 'idle'}
-                  />
+                  <AgentLabel agent={p.agentKey} size="xs" tone="dark" state="idle" />
                 </div>
 
                 {/* Stage Label & Indic Subtitle */}
@@ -237,31 +174,19 @@ export function AssessmentClient({
             );
           })}
         </div>
-
-        {runError && (
-          <p
-            data-testid="assessment-invocation-error"
-            role="alert"
-            className="mt-4 rounded-lg bg-white p-3 text-sm text-[#D9534F]"
-          >
-            {runError}
-          </p>
-        )}
-        {/* Confirmed invocation state */}
-        {(assessRunning || hasCompleted) && (
-          <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 text-center text-[12px] text-[#0FB5A5] font-medium animate-in fade-in-0 duration-150">
-            <span>● {pipelineMsg}</span>
-            {ledgerEntryId && (
-              <Link
-                href={`/ledger?q=${ledgerEntryId}`}
-                className="font-mono text-[11px] underline text-[#0FB5A5] hover:text-white"
-              >
-                (Ledger entry #{ledgerEntryId})
-              </Link>
-            )}
-          </div>
-        )}
       </div>
+
+      {snapshot?.engagement && actorId && (
+        <AssessmentRequestPanel
+          tenantId={snapshot.tenantId}
+          actorId={actorId}
+          engagementId={snapshot.engagement.id}
+          libraryVersion={snapshot.engagement.libraryVersion}
+          canRequest={canInvokeAgent}
+          hasSavedResults={controls.some((control) => control.score !== null)}
+          onFinalized={() => router.refresh()}
+        />
+      )}
 
       <div
         data-testid="assessment-provenance"

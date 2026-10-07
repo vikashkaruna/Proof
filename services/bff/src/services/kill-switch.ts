@@ -2,6 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
 
+/** Status visibility failed; execution still uses the fail-safe halted answer. */
+export class KillSwitchStateUnavailable extends Error {
+  constructor() {
+    super('Kill switch status is unavailable');
+    this.name = 'KillSwitchStateUnavailable';
+  }
+}
+
 export interface KillSwitchState {
   engaged: boolean;
   reason: string;
@@ -81,38 +89,33 @@ export function createKillSwitchService(
   clientFactory: () => SupabaseClient = createSupabaseAdmin,
 ): KillSwitchService {
   let cache: { rows: CachedRow[]; readAt: number } | null = null;
-  // Set when the shared state could not be read. Treated as engaged.
-  let lastReadFailed = false;
 
-  async function loadEngagedRows(): Promise<CachedRow[]> {
+  async function loadEngagedRows(): Promise<{ rows: CachedRow[]; unavailable: boolean }> {
     const now = Date.now();
-    if (cache && now - cache.readAt < CACHE_TTL_MS) return cache.rows;
+    if (cache && now - cache.readAt < CACHE_TTL_MS) return { rows: cache.rows, unavailable: false };
 
-    const supabase = clientFactory();
-    const { data, error } = await supabase
-      .from('kill_switch_state')
-      .select('scope_key, scope, tenant_id, engaged, reason, engaged_by, engaged_at')
-      .eq('engaged', true);
-
-    if (error) {
-      // Fail safe, not fail open. If we cannot confirm the emergency stop is
-      // clear, we must not let execution proceed. This is the opposite of the
-      // SEC-1 family, and deliberately so: there, failing open granted
-      // authority; here, failing closed withholds it.
-      lastReadFailed = true;
-      logger.error({ error: error.message }, 'kill switch state unreadable; assuming engaged');
-      return cache?.rows ?? [];
+    try {
+      const supabase = clientFactory();
+      const { data, error } = await supabase
+        .from('kill_switch_state')
+        .select('scope_key, scope, tenant_id, engaged, reason, engaged_by, engaged_at')
+        .abortSignal(AbortSignal.timeout(10000))
+        .eq('engaged', true);
+      if (error) throw new KillSwitchStateUnavailable();
+      cache = { rows: (data ?? []) as CachedRow[], readAt: now };
+      return { rows: cache.rows, unavailable: false };
+    } catch {
+      // Per-read status avoids a concurrent successful read changing the
+      // failure outcome of another request. Stale rows never establish status.
+      logger.error('kill switch state unreadable; assuming engaged');
+      return { rows: cache?.rows ?? [], unavailable: true };
     }
-
-    lastReadFailed = false;
-    cache = { rows: (data ?? []) as CachedRow[], readAt: now };
-    return cache.rows;
   }
 
   return {
     async isActive(tenantId?: string) {
-      const rows = await loadEngagedRows();
-      if (lastReadFailed) return true;
+      const { rows, unavailable } = await loadEngagedRows();
+      if (unavailable) return true;
       if (rows.some((r) => r.scope === 'global')) return true;
       return Boolean(
         tenantId && rows.some((r) => r.scope === 'tenant' && r.tenant_id === tenantId),
@@ -163,7 +166,7 @@ export function createKillSwitchService(
       // The caller may hold `owner` on one tenant; that is not authority over
       // every other tenant's execution.
       if (scope === 'tenant') {
-        const rows = await loadEngagedRows();
+        const { rows } = await loadEngagedRows();
         if (rows.some((r) => r.scope === 'global')) {
           logger.warn(
             { userId, tenantId },
@@ -202,7 +205,8 @@ export function createKillSwitchService(
     },
 
     async state(tenantId?: string) {
-      const rows = await loadEngagedRows();
+      const { rows, unavailable } = await loadEngagedRows();
+      if (unavailable) throw new KillSwitchStateUnavailable();
       const global = rows.find((r) => r.scope === 'global');
       const scoped = tenantId
         ? rows.find((r) => r.scope === 'tenant' && r.tenant_id === tenantId)

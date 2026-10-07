@@ -146,6 +146,10 @@ it('clears a selected board request and assessment when the tenant changes', asy
 });
 
 it('retries an uncertain board request with the same operation key and no premature success', async () => {
+  let resolveAssessments!: (value: Response) => void;
+  const pendingAssessments = new Promise<Response>((resolve) => {
+    resolveAssessments = resolve;
+  });
   const submitted: {
     operationKey: string;
     title: string;
@@ -153,23 +157,7 @@ it('retries an uncertain board request with the same operation key and no premat
     assessmentRunId: string;
   }[] = [];
   request.mockImplementation((_tenant, path, options) => {
-    if (path.includes('assessment-options'))
-      return Promise.resolve(
-        Response.json({
-          assessments: [
-            {
-              assessmentRunId: id,
-              engagementId: id,
-              engagementTitle: 'Finalized assessment',
-              finalizedAt: '2026-10-01T00:00:00Z',
-              libraryVersion: 'v1',
-            },
-          ],
-          total: 1,
-          limit: 20,
-          offset: 0,
-        }),
-      );
+    if (path.includes('assessment-options')) return pendingAssessments;
     if (path.includes('board/requests'))
       return Promise.resolve(Response.json({ requests: [], total: 0, limit: 20, offset: 0 }));
     if (path === '/reports/board/request') {
@@ -193,6 +181,28 @@ it('retries an uncertain board request with the same operation key and no premat
     />,
   );
   const form = await screen.findByRole('form', { name: 'Request board report' });
+  expect(within(form).getByRole('button', { name: 'Request board draft' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(within(form).queryByRole('option', { name: /Finalized assessment/ })).toBeNull();
+  resolveAssessments(
+    Response.json({
+      assessments: [
+        {
+          assessmentRunId: id,
+          engagementId: id,
+          engagementTitle: 'Finalized assessment',
+          finalizedAt: '2026-10-01T00:00:00Z',
+          libraryVersion: 'v1',
+        },
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    }),
+  );
+  await within(form).findByRole('option', { name: /Finalized assessment/ });
   fireEvent.change(within(form).getByLabelText('Assessment'), { target: { value: id } });
   fireEvent.change(within(form).getByLabelText('Report title'), {
     target: { value: 'Recorded board source' },

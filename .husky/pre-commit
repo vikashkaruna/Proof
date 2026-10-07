@@ -1,0 +1,2 @@
+# Confidentiality guard: private documentation, secrets and unmarked shared docs never enter a commit.
+bash scripts/guard-private-docs.sh --staged

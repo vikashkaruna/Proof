@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import {
-  BoardReportContentV1Schema,
+  BoardReportContentSchema,
   renderBoardReportHtml,
   AuditorPackContentV1Schema,
   renderAuditorPackHtml,
@@ -277,7 +277,7 @@ export class StatutoryReportService {
   } {
     switch (kind) {
       case 'board': {
-        const validatedContent = BoardReportContentV1Schema.parse(rawContent);
+        const validatedContent = BoardReportContentSchema.parse(rawContent);
         const html = renderBoardReportHtml(validatedContent);
         return { validatedContent, html };
       }

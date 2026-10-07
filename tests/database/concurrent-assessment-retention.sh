@@ -6,6 +6,7 @@ trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
 source tests/database/lib/concurrency-barrier.sh
 sql -c 'create schema retention_race'
+sql -c 'grant usage on schema retention_race to human_action_writer'
 sed '/-- FIXTURE_READY/,$d' tests/database/assessment-retention.test.sql | sed '/^begin;$/d;s/pg_temp/retention_race/g;s/create temporary table issued/create table retention_race.issued/g;s/from issued/from retention_race.issued/g;s/on issued/on retention_race.issued/g;s/69690000/70700000/g;s/retention-fixture/retention-race/g' | sql > "$result_dir/fixture.log"
 sql -c 'grant usage on schema retention_race to service_role'
 # An in-flight confirmation cannot expose uncommitted completion to cleanup.

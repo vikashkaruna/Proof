@@ -39,7 +39,9 @@ test('assessment displays owned saved results, missing findings and zero exposur
   await page.goto('/assessment');
   await expect(page.getByTestId('assessment-provenance')).toContainText('No saved assessment');
   await expect(page.getByTestId('assessment-summary')).toContainText('Not assessed');
-  await expect(page.getByRole('button', { name: 'Run Parikshan', exact: true })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Request unknown-answer assessment', exact: true }),
+  ).toHaveCount(0);
   await expect(page.locator('[data-testid^="assessment-control-"]')).toHaveCount(0);
 
   const libraryVersion = `fixture-${tenant}`;

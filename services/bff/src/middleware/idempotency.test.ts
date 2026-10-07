@@ -42,6 +42,14 @@ async function buildApp(
   });
   app.use('/v1/*', idempotency);
   app.post('/v1/execute', (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+  for (const path of [
+    '/v1/assessment/jobs',
+    '/v1/assessment/jobs-extra',
+    '/v1/assessment/jobs/extra',
+  ]) {
+    app.post(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+    app.put(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+  }
   app.get('/v1/read', (c) => c.json({ ok: true }));
   return app;
 }
@@ -146,6 +154,44 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ executed: true, replayed: true });
+  });
+
+  it('bypasses only the exact human assessment POST cache so durable SQL rechecks current authorization', async () => {
+    const double = createSupabaseDouble({
+      idempotencyHit: { response_status: 200, response_body: { cached: true } },
+    });
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const res = await app.request('/v1/assessment/jobs', {
+      method: 'POST',
+      headers: { 'idempotency-key': 'client-operation-key' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ executed: true, key: 'client-operation-key' });
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it.each([
+    ['POST', '/v1/assessment/jobs-extra'],
+    ['POST', '/v1/assessment/jobs/extra'],
+    ['PUT', '/v1/assessment/jobs'],
+  ])('keeps generic idempotency on %s %s', async (method, path) => {
+    const double = createSupabaseDouble({});
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const res = await app.request(path!, {
+      method,
+      headers: { 'idempotency-key': 'client-operation-key' },
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as ErrorBody).error.code).toBe('idempotency_unavailable');
+  });
+
+  it('still requires a client key on durable assessment requests', async () => {
+    const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+    const res = await app.request('/v1/assessment/jobs', { method: 'POST' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as ErrorBody).error.code).toBe('idempotency_required');
   });
 
   // Even under bypass, FR-8.3 stays on. The bypass relaxes *authentication*;

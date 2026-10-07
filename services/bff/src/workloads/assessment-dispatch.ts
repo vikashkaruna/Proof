@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHumanActionWriter } from '@axiom/supabase';
 import { z } from 'zod';
 import { TaskProof } from './tasks.js';
 import {
@@ -29,7 +30,9 @@ const claimed = sealedDispatchSchema
     expires_at: z.iso.datetime({ offset: true }),
   })
   .strict();
-/** Trusted controller only. No browser/worker route. The caller supplies a stable
+/** Trusted producer/controller adapter. Enqueue uses only the authenticated BFF
+ * human writer; read/claim retain their separate controller identity. No
+ * browser/worker route. The caller supplies a stable
  * job ID and authenticated context; returning a receipt never grants authority. */
 export class AssessmentDispatch {
   readonly #revisions = new Map<string, number>();
@@ -37,6 +40,7 @@ export class AssessmentDispatch {
     private readonly db: SupabaseClient,
     private readonly wrapper: DispatchKeyWrapper,
     revisions: ReadonlyMap<string, number> = new Map(),
+    private readonly enqueueWriter: () => SupabaseClient = createHumanActionWriter,
   ) {
     try {
       for (const [tenant, revision] of revisions) {
@@ -63,29 +67,62 @@ export class AssessmentDispatch {
         .parse(this.wrapper.policyFingerprint(tenant)),
     };
   }
+  /** Current authenticated human receipt recovery; no policy/KMS access or renewal. */
+  async recover(context: DispatchContext) {
+    try {
+      const c = dispatchContextSchema.parse(context);
+      const { data, error } = await this.enqueueWriter()
+        .rpc('recover_assessment_dispatch', {
+          p_job_id: c.jobId,
+          p_tenant_id: c.tenantId,
+          p_actor_id: c.actorId,
+          p_workload_id: c.workloadId,
+          p_estate_id: c.estateId,
+          p_engagement_id: c.engagementId,
+          p_correlation_id: c.correlationId,
+          p_input_hash: c.inputHash,
+        })
+        .abortSignal(AbortSignal.timeout(10000));
+      if (error) throw new DispatchRefused();
+      if (data === null) return null;
+      const row = receipt.parse(data);
+      if (row.job_id !== c.jobId) throw new DispatchRefused();
+      return row;
+    } catch {
+      throw new DispatchRefused();
+    }
+  }
   async enqueue(context: DispatchContext, inputJson: string) {
     try {
       const c = dispatchContextSchema.parse(context);
+      if (createHash('sha256').update(inputJson, 'utf8').digest('hex') !== c.inputHash)
+        throw new DispatchRefused();
+      const recovered = await this.recover(c);
+      if (recovered) return recovered;
       const binding = this.policyBinding(c.tenantId);
+      if (!binding.p_policy_revision || !binding.p_policy_fingerprint) throw new DispatchRefused();
+      const writer = this.enqueueWriter();
       const proof = new TaskProof(randomBytes(32).toString('base64url'));
       const sealed = await sealDispatch(c, inputJson, proof, this.wrapper);
-      const { data, error } = await this.db.rpc('enqueue_assessment_dispatch', {
-        ...binding,
-        p_job_id: c.jobId,
-        p_tenant_id: c.tenantId,
-        p_actor_id: c.actorId,
-        p_workload_id: c.workloadId,
-        p_estate_id: c.estateId,
-        p_engagement_id: c.engagementId,
-        p_correlation_id: c.correlationId,
-        p_input_hash: c.inputHash,
-        p_proof_hash: createHash('sha256').update(proof.reveal(), 'ascii').digest('hex'),
-        p_expires_at: new Date(Date.now() + 300000).toISOString(),
-        p_key_ref: sealed.key_ref,
-        p_nonce: '\\x' + sealed.nonce,
-        p_ciphertext: '\\x' + sealed.ciphertext,
-        p_wrapped_key: '\\x' + sealed.wrapped_key,
-      });
+      const { data, error } = await writer
+        .rpc('enqueue_assessment_dispatch', {
+          ...binding,
+          p_job_id: c.jobId,
+          p_tenant_id: c.tenantId,
+          p_actor_id: c.actorId,
+          p_workload_id: c.workloadId,
+          p_estate_id: c.estateId,
+          p_engagement_id: c.engagementId,
+          p_correlation_id: c.correlationId,
+          p_input_hash: c.inputHash,
+          p_proof_hash: createHash('sha256').update(proof.reveal(), 'ascii').digest('hex'),
+          p_expires_at: new Date(Date.now() + 300000).toISOString(),
+          p_key_ref: sealed.key_ref,
+          p_nonce: '\\x' + sealed.nonce,
+          p_ciphertext: '\\x' + sealed.ciphertext,
+          p_wrapped_key: '\\x' + sealed.wrapped_key,
+        })
+        .abortSignal(AbortSignal.timeout(10000));
       if (error) throw new DispatchRefused();
       const row = receipt.parse(data);
       if (row.job_id !== c.jobId) throw new DispatchRefused();

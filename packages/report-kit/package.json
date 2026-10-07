@@ -20,7 +20,8 @@
     "./approval-history": "./src/approval-history.ts",
     "./consumer-reports": "./src/consumer-reports.ts",
     "./renderer": "./src/renderer.ts",
-    "./pramaan-archive": "./src/pramaan-archive.ts"
+    "./pramaan-archive": "./src/pramaan-archive.ts",
+    "./assessment-interpretation": "./src/assessment-interpretation.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -29,12 +30,13 @@
   },
   "dependencies": {
     "fflate": "0.8.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@axiom/types": "workspace:*"
   },
   "devDependencies": {
     "@axiom/eslint-config": "workspace:*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.4",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   }
 }

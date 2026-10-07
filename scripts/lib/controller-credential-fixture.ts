@@ -2,12 +2,18 @@
  * The signing key stays in this fixture process, never in a controller. */
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { loadParityFixture, guardedParitySql } from './parity-fixture-target.js';
 import { z } from 'zod';
 
 export function controllerCredentialFixture(tenant: string, status: Record<string, string>) {
   z.uuid().parse(tenant);
-  assert.equal(new URL(status.API_URL!).port, '56321');
+  const selected = loadParityFixture();
+  if (
+    status.API_URL !== selected.status.API_URL ||
+    status.JWT_SECRET !== selected.status.JWT_SECRET ||
+    status.ANON_KEY !== selected.status.ANON_KEY
+  )
+    throw new Error('Fixture status refused');
   const id = randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const wire = [
@@ -25,25 +31,7 @@ export function controllerCredentialFixture(tenant: string, status: Record<strin
   const accessToken = `${wire}.${createHmac('sha256', status.JWT_SECRET!).update(wire).digest('base64url')}`;
   // Generated and validated UUIDs only. No token or signing key enters SQL,
   // argv, a database row, logs or instance metadata.
-  const sql = (statement: string) =>
-    execFileSync(
-      'docker',
-      [
-        'exec',
-        '-i',
-        'supabase_db_axiom-w0-parity',
-        'psql',
-        '-X',
-        '-U',
-        'supabase_admin',
-        '-d',
-        'postgres',
-        '-v',
-        'ON_ERROR_STOP=1',
-        '-q',
-      ],
-      { input: statement, stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 },
-    );
+  const sql = (statement: string) => guardedParitySql(statement);
   sql(
     `insert into controller_security.credentials(id,tenant_id,expires_at) values('${id}','${tenant}',to_timestamp(${now + 3601}));`,
   );

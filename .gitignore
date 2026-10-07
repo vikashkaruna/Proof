@@ -89,9 +89,21 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 
-# Consolidated local documentation; never tracked or published
+# Documentation confidentiality boundary (see docs/README.md).
+# docs/shared-docs/ and the docs/ README files are tracked. Everything else
+# under docs/ is operator-internal and never committed or published.
 /private-docs/
-/docs
+/docs/*
+!/docs/README.md
+!/docs/shared-docs/
+!/docs/private-docs/
+/docs/private-docs/*
+!/docs/private-docs/README.md
+!/docs/private-plans/
+/docs/private-plans/*
+!/docs/private-plans/README.md
+*.private.md
+*-CONFIDENTIAL.*
 /.design-sync/NOTES.md
 /.design-sync/conventions.md
 /.github/branch-protection.md
@@ -109,3 +121,7 @@ ds-bundle/
 /packages/report-kit/README.md
 /services/agent-runtime/README.md
 /services/model-gateway/README.md
+
+# Claude Code machine-local state
+.claude/settings.local.json
+.claude/worktrees/

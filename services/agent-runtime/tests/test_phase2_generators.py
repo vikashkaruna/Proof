@@ -103,14 +103,55 @@ def test_explicit_private_processor_observations_are_preserved_for_review():
     assert record.review_required is True
 
 
-def test_stated_foreign_region_is_reviewed_without_claiming_legal_determination():
-    record = build_ropa_records([{"name": "CRM", "region": "us-east-1"}]).records[0]
+def test_explicit_transfer_to_stated_foreign_region_is_reviewed_without_legal_determination():
+    record = build_ropa_records(
+        [{"name": "CRM", "region": "us-east-1", "cross_border": True}]
+    ).records[0]
     assert record.cross_border is True
     assert (
         record.transfer_safeguards
         == "Transfer restrictions and safeguards to be reviewed (Stated destination: us-east-1)"
     )
     assert record.review_required is True
+
+
+@pytest.mark.parametrize("region", ["Unknown", "us-east-1", "ap-south-1"])
+def test_stated_region_without_transfer_declaration_stays_unknown(region):
+    record = build_ropa_records([{"name": "CRM", "region": region}]).records[0]
+    assert record.region == region
+    assert record.cross_border is None
+    assert record.transfer_safeguards is None
+    assert record.review_required is True
+
+
+@pytest.mark.parametrize("declaration", [False, None, "false", "true", 0, 1])
+def test_foreign_region_never_overwrites_declared_transfer_state(declaration):
+    record = build_ropa_records(
+        [{"name": "CRM", "region": "us-east-1", "cross_border": declaration}]
+    ).records[0]
+    assert record.cross_border is (False if declaration is False else None)
+    assert record.transfer_safeguards is None
+    assert record.review_required is True
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [build_privacy_notice, build_retention_policy, build_consent_notice, build_dpa_template],
+)
+@pytest.mark.parametrize("declaration", [False, None])
+def test_all_policy_templates_preserve_transfer_unknown_or_no(builder, declaration):
+    record = build_ropa_records(
+        [{"name": "CRM", "region": "us-east-1", "cross_border": declaration}]
+    ).records[0]
+    draft = builder("Example Ltd", [record])
+    text = "\n".join(section["body"] for section in draft.sections)
+    expected = "False" if declaration is False else "Unknown"
+    assert f"Cross-border processing: {expected}." in text
+    assert "Cross-border processing: True." not in text
+    assert "Stated region: us-east-1." in text
+    assert "Unpublished draft" in text
+    assert draft.review_required is True
+    assert draft.legal_review_required is True
 
 
 def test_string_false_is_not_truthy_cross_border_evidence():
