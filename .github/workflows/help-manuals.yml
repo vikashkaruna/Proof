@@ -17,12 +17,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: python3 -m unittest discover -s tests/scripts -p 'test_help_manuals.py'
       - run: python3 -m unittest discover -s tests/scripts -p 'test_private_docs_guard.py'
+      - run: python3 -m unittest discover -s tests/scripts -p 'test_doc_guards.py'
       - run: bash scripts/check-private-docs.sh
+      - run: python3 scripts/check-doc-names.py
+      - name: Confidentiality guard over the pull request range
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/guard-private-docs.sh --range "${BASE_SHA}...${HEAD_SHA}"
       # Documentation, receipts and exports are local and Git-ignored.
       # The maintainer runs help:check:private before a feature checkpoint.
       # No documentation artifacts are built, uploaded or published here.

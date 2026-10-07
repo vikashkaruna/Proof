@@ -26,17 +26,17 @@ class HelpManualTests(unittest.TestCase):
                      "scripts/deploy-preprod-gcp.sh", "scripts/run-deployed-acceptance.sh",
                      "scripts/help-manuals.py", ".github/workflows/help-manuals.yml",
                      "scripts/check-private-docs.sh",
-                     "private-docs/reference/02_Phase_Wise_Implementation_Plan.md", "private-docs/reference/03_BRD_PRD.md"):
+                     "docs/private-plans/PLAN-02-phase-wise-implementation.md", "docs/private-docs/requirements/REQ-01-brd-prd.md"):
             self.put(name, "reviewed fixture\n")
         for name in help_manuals.ASSETS:
-            self.put("private-docs/help/assets/" + name, '<svg xmlns="http://www.w3.org/2000/svg"><title>Illustrative screen</title><text>Fictional example</text></svg>\n')
+            self.put("docs/private-docs/help/assets/" + name, '<svg xmlns="http://www.w3.org/2000/svg"><title>Illustrative screen</title><text>Fictional example</text></svg>\n')
         self.put(help_manuals.MANUALS["founder"], "# PRIVATE FOUNDER MANUAL\n\nPrivate controls: never share this document.\n", private=True)
         self.put(help_manuals.PRIVATE_TESTING, "# Private test procedure\n\nAll cases not_run.\n", private=True)
         for audience in ("client", "partner"):
             self.put(help_manuals.MANUALS[audience], '# User guide\n\nRead [Dashboard](/dashboard). Assigned scope still applies.\n\n![Fictional illustration](../assets/dashboard.svg)\n')
         cases = {"schemaVersion": 1, "cases": [self.case("CASE-1", "/dashboard"), self.case("CASE-2", "marketing:/contact")]}
         self.put(help_manuals.CASES, json.dumps(cases), private=True)
-        (self.root / "private-docs").chmod(0o700)
+        (self.root / "docs/private-docs").chmod(0o700)
         help_manuals.sync(self.root, "Reviewed all test fixtures and confidential boundaries")
 
     def put(self, relative, text, private=False):
@@ -77,7 +77,7 @@ class HelpManualTests(unittest.TestCase):
     def test_screen_change_requires_review_before_sharing(self):
         self.put("apps/web/src/app/(app)/dashboard/page.tsx", "changed user action\n")
         with self.assertRaisesRegex(help_manuals.HelpError, "Feature/config drift"):
-            help_manuals.export(self.root, "client", self.root / "private-docs/help/share/review")
+            help_manuals.export(self.root, "client", self.root / "docs/private-docs/help/share/review")
 
     def test_new_route_cannot_receive_a_review_receipt_without_cases(self):
         self.put("apps/web/src/app/(app)/new-feature/page.tsx", "new user feature\n")
@@ -130,7 +130,7 @@ class HelpManualTests(unittest.TestCase):
 
     def test_private_founder_cannot_be_exported(self):
         with self.assertRaisesRegex(help_manuals.HelpError, "Internal founder/QA"):
-            help_manuals.export(self.root, "founder", self.root / "private-docs/help/share/review")
+            help_manuals.export(self.root, "founder", self.root / "docs/private-docs/help/share/review")
 
     def test_confidential_content_markers_are_refused(self):
         for marker in ("Terraform", "SUPABASE_SERVICE_KEY", "JWT", "https://private.run.app", "23_Operator_Runbook.md", "Founder Help Manual"):
@@ -151,7 +151,7 @@ class HelpManualTests(unittest.TestCase):
                 help_manuals.validate_external(self.root, "client", f"![Sample]({image})")
         for svg in ('<svg><script>alert(1)</script></svg>', '<svg onload="alert(1)"/>', '<svg><image href="https://example.invalid/pixel"/></svg>', '<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///private">]><svg/>', '<svg><text>real@customer.example</text></svg>'):
             with self.subTest(svg=svg):
-                self.put("private-docs/help/assets/dashboard.svg", svg)
+                self.put("docs/private-docs/help/assets/dashboard.svg", svg)
                 with self.assertRaises(help_manuals.HelpError):
                     help_manuals.approved_svg(self.root, "dashboard.svg")
 
@@ -159,10 +159,10 @@ class HelpManualTests(unittest.TestCase):
         path = self.root / help_manuals.MANUALS["client"]
         path.unlink(); path.symlink_to(self.root / help_manuals.MANUALS["founder"])
         with self.assertRaises(help_manuals.HelpError):
-            help_manuals.export(self.root, "client", self.root / "private-docs/help/share/review")
+            help_manuals.export(self.root, "client", self.root / "docs/private-docs/help/share/review")
 
     def test_exports_are_offline_and_never_include_private_documents(self):
-        output = self.root / "private-docs/help/share/review"
+        output = self.root / "docs/private-docs/help/share/review"
         path = help_manuals.export(self.root, "client", output)
         page = path.read_text()
         self.assertIn("data:image/svg+xml;base64,", page)
@@ -174,33 +174,33 @@ class HelpManualTests(unittest.TestCase):
         self.assertEqual(path.stat().st_mode & 0o077, 0)
 
     def test_repository_exports_stay_in_the_ignored_share_folder(self):
-        for relative in ("customer-help", "private-docs/reference/export", "private-docs/testing/export"):
+        for relative in ("customer-help", "docs/private-docs/reference/export", "docs/private-docs/testing/export"):
             with self.subTest(relative=relative):
-                with self.assertRaisesRegex(help_manuals.HelpError, "ignored private-docs/help/share"):
+                with self.assertRaisesRegex(help_manuals.HelpError, "ignored docs/private-docs/help/share"):
                     help_manuals.export(self.root, "client", self.root / relative)
 
     def test_missing_private_pack_cannot_be_checked_or_exported(self):
-        (self.root / "private-docs").rename(self.root / "backup")
+        (self.root / "docs/private-docs").rename(self.root / "backup")
         with self.assertRaisesRegex(help_manuals.HelpError, "folder is missing"):
             help_manuals.check(self.root)
         with self.assertRaisesRegex(help_manuals.HelpError, "folder is missing"):
-            help_manuals.export(self.root, "client", self.root / "private-docs/help/share/review")
+            help_manuals.export(self.root, "client", self.root / "docs/private-docs/help/share/review")
 
     def test_private_pack_permissions_are_required_for_external_exports(self):
-        (self.root / "private-docs").chmod(0o755)
+        (self.root / "docs/private-docs").chmod(0o755)
         with self.assertRaisesRegex(help_manuals.HelpError, "lacks private permissions"):
-            help_manuals.export(self.root, "client", self.root / "private-docs/help/share/review")
+            help_manuals.export(self.root, "client", self.root / "docs/private-docs/help/share/review")
 
     def test_source_or_nonempty_share_output_is_refused(self):
         with self.assertRaises(help_manuals.HelpError):
             help_manuals.export(self.root, "client", self.root / "apps/public")
-        output = self.root / "private-docs/help/share/review"; output.mkdir(parents=True); (output / "private-note.md").write_text("private")
+        output = self.root / "docs/private-docs/help/share/review"; output.mkdir(parents=True); (output / "private-note.md").write_text("private")
         with self.assertRaises(help_manuals.HelpError):
             help_manuals.export(self.root, "client", output)
 
     def test_symlink_share_output_is_refused(self):
         dest = self.root / "destination"; dest.mkdir()
-        link = self.root / "private-docs/help/share/review"; link.parent.mkdir(parents=True, exist_ok=True); link.symlink_to(dest, target_is_directory=True)
+        link = self.root / "docs/private-docs/help/share/review"; link.parent.mkdir(parents=True, exist_ok=True); link.symlink_to(dest, target_is_directory=True)
         with self.assertRaises(help_manuals.HelpError):
             help_manuals.export(self.root, "client", link)
 
