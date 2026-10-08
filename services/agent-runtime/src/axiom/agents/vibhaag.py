@@ -51,7 +51,9 @@ class VibhaagInput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def public_facts_require_explicit_mode(cls, value: Any) -> Any:
-        return reject_public_fields_in_legacy(value, {"source", "source_binding", "observation"})
+        return reject_public_fields_in_legacy(
+            value, {"source", "source_binding", "observation", "records", "source_records_sha256"}
+        )
 
 
 class VibhaagOutput(BaseModel):

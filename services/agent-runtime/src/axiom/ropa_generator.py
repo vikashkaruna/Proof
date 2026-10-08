@@ -72,7 +72,6 @@ def build_ropa_records(
                     if isinstance(value, str) and value.strip()
                 )
             )
-            or None
             if isinstance(supplied_processors, list)
             else None
         )
@@ -112,7 +111,11 @@ def build_ropa_records(
                 system=name,
                 purpose=purpose,
                 data_items=fields or ["Unspecified — field inventory required"],
-                data_categories=sorted(categories) or None,
+                data_categories=(
+                    sorted(categories)
+                    if categories or (not public_source and system.get("data_categories") == [])
+                    else None
+                ),
                 lawful_basis="To be confirmed by the Data Fiduciary",
                 retention_period="To be confirmed by the retention schedule",
                 processors=processors,
