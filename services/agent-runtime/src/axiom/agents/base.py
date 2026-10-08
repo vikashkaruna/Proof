@@ -24,7 +24,6 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, ClassVar, Generic, TypeVar
 from uuid import UUID
 
@@ -33,16 +32,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..canonicalise import canonical_json, sha256_hex
 from ..config import Settings, get_settings
+from ..enum_types import QualifiedStringEnum
 from ..evidence_client import EvidenceVault
 from ..ledger_client import AppendInput, LedgerClient, new_correlation_id
 from ..model_gateway import ModelGateway, TaskKind
 
 
-class AuditCompletionFailed(RuntimeError):
+class AuditCompletionError(RuntimeError):
     """Mandatory completion evidence was not durably acknowledged."""
 
 
-class AutonomyLevel(str, Enum):
+# Keep existing imports and exception handlers compatible.
+AuditCompletionFailed = AuditCompletionError
+
+
+class AutonomyLevel(QualifiedStringEnum):
     L0 = "L0"  # Agent-assisted, human does everything client-facing
     L1 = "L1"  # Agent-proposes, human reviews every output
     L2 = "L2"  # Agent-executes-on-approval
@@ -58,7 +62,7 @@ class DispatchContext(BaseModel):
     request_hash: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
 
 
-class AgentName(str, Enum):
+class AgentName(QualifiedStringEnum):
     DRISHTI = "drishti"
     VIBHAAG = "vibhaag"
     PARIKSHAN = "parikshan"
@@ -195,7 +199,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 )
             )
             entry_ids.append(r.id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.log.error("ledger.append.started_failed")
             # Per BR-3 we cannot proceed without a ledger record; bail.
             return AgentRunResult(
@@ -237,7 +241,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                     )
                 )
                 entry_ids.append(r2.id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 self.log.error("ledger.append.completed_failed")
                 raise AuditCompletionFailed() from None
 
@@ -253,7 +257,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 output=output.model_dump(mode="json"),
                 ledger_entry_ids=entry_ids,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             latency_ms = int((time.monotonic() - t0) * 1000)
             failure_code = (
                 "audit_completion_failed"
@@ -282,7 +286,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                     )
                 )
                 entry_ids.append(r2.id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # The run already failed; record that its failure entry is missing.
                 self.log.error("agent.failure_ledger_append_failed")
             return AgentRunResult(

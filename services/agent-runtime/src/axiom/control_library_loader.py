@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
+from .enum_types import QualifiedStringEnum
 
-class ControlDomain(str, Enum):
+
+class ControlDomain(QualifiedStringEnum):
     GOV = "GOV"
     CNS = "CNS"
     DAT = "DAT"
@@ -32,14 +33,14 @@ class ControlDomain(str, Enum):
     DPIA = "DPIA"
 
 
-class ControlSeverity(str, Enum):
+class ControlSeverity(QualifiedStringEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(QualifiedStringEnum):
     DOCUMENT = "document"
     CONFIG = "config"
     SCREENSHOT = "screenshot"
@@ -287,7 +288,7 @@ def load_default_library() -> ControlLibrary:
 # loadable.
 
 
-class MappingStrength(str, Enum):
+class MappingStrength(QualifiedStringEnum):
     """M4.2 mapping strength. 'equivalent' requires regulator-side verification."""
 
     EQUIVALENT = "equivalent"
@@ -295,7 +296,7 @@ class MappingStrength(str, Enum):
     INDICATIVE = "indicative"
 
 
-class MappingProvenance(str, Enum):
+class MappingProvenance(QualifiedStringEnum):
     """Honest provenance vocabulary; 'vendor-verified' is deliberately absent
     until client tenants exist."""
 

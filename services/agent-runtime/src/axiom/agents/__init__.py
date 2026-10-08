@@ -14,30 +14,30 @@ Named agents:
   - Sanket    (Market Signal — internal GTM)
 """
 
-from .parikshan import ParikshanAgent
-from .prativedan import PrativedanAgent
 from .drishti import DrishtiAgent
-from .vibhaag import VibhaagAgent
-from .saakshi import SaakshiAgent
-from .sudhaar import SudhaarAgent
+from .karya import KaryaAgent
 from .lekha import LekhaAgent
 from .nazar import NazarAgent
-from .sanket import SanketAgent
-from .karya import KaryaAgent
-from .samadhan import SamadhanAgent
+from .parikshan import ParikshanAgent
 from .pramaan import PramaanAgent
+from .prativedan import PrativedanAgent
+from .saakshi import SaakshiAgent
+from .samadhan import SamadhanAgent
+from .sanket import SanketAgent
+from .sudhaar import SudhaarAgent
+from .vibhaag import VibhaagAgent
 
 __all__ = [
-    "ParikshanAgent",
-    "PrativedanAgent",
     "DrishtiAgent",
-    "VibhaagAgent",
-    "SaakshiAgent",
-    "SudhaarAgent",
+    "KaryaAgent",
     "LekhaAgent",
     "NazarAgent",
-    "SanketAgent",
-    "KaryaAgent",
-    "SamadhanAgent",
+    "ParikshanAgent",
     "PramaanAgent",
+    "PrativedanAgent",
+    "SaakshiAgent",
+    "SamadhanAgent",
+    "SanketAgent",
+    "SudhaarAgent",
+    "VibhaagAgent",
 ]

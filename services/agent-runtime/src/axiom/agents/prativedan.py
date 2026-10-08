@@ -14,14 +14,16 @@ data and uses the model gateway to draft the prose.
 
 from __future__ import annotations
 
-from enum import Enum
 from html import escape
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
+from ..enum_types import QualifiedStringEnum
+from .base import AgentName, AutonomyLevel, BaseAgent
 
-class ReportKind(str, Enum):
+
+class ReportKind(QualifiedStringEnum):
     BOARD = "board"
     AUDITOR = "auditor"
     DPB = "dpb"
@@ -31,8 +33,6 @@ class ReportKind(str, Enum):
     CUSTOM = "custom"
 
 
-from .base import AgentName, AutonomyLevel, BaseAgent
-from ..model_gateway import ModelRequest, TaskKind
 
 
 class PrativedanInput(BaseModel):

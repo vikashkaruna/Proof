@@ -714,7 +714,7 @@ def _finish_karya_run(
 ) -> None:
     """Close the action's `agent_runs` record, once, with the outcome."""
     output_hash = (
-        hashlib.sha256(f"{post_state_ref}".encode("utf-8")).hexdigest()
+        hashlib.sha256(f"{post_state_ref}".encode()).hexdigest()
         if post_state_ref
         else None
     )
