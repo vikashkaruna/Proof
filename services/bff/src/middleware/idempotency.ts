@@ -36,8 +36,10 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/operator-workflows\/requests\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
         c.req.path,
       ));
-  const durableAssessmentRequest = c.req.method === 'POST' && c.req.path === '/v1/assessment/jobs';
-  if (durableSourceReview || durableOperatorWorkflow || durableAssessmentRequest)
+  const trustedSourceRequest =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/assessment/jobs' || c.req.path === '/v1/plans/proposals');
+  if (durableSourceReview || durableOperatorWorkflow || trustedSourceRequest)
     c.header('Cache-Control', 'private, no-store');
 
   // SEC-13 row 3: a missing key used to be auto-generated in development,
@@ -73,10 +75,11 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     );
   }
 
-  // These exact routes use their locked, actor/body-scoped SQL operation ledger.
+  // These exact routes recheck live authority and trusted source context before
+  // their locked, actor/body-scoped SQL operation ledger.
   // Cached responses would skip live authority/context and cancellation checks
   // or freeze structural-review currency. Keep key checks above.
-  if (durableSourceReview || durableOperatorWorkflow || durableAssessmentRequest) {
+  if (durableSourceReview || durableOperatorWorkflow || trustedSourceRequest) {
     c.set('idempotencyKey', key);
     return next();
   }

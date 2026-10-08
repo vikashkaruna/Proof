@@ -34,7 +34,7 @@ async def test_vibhaag_accepts_documented_field_hint_shape():
 
 
 @pytest.mark.asyncio
-async def test_drishti_defaults_to_indian_region_ap_south_1():
+async def test_drishti_does_not_invent_a_region_for_a_declared_domestic_system():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
             tenant_id="t1",
@@ -57,13 +57,13 @@ async def test_drishti_defaults_to_indian_region_ap_south_1():
     assert result.personal_data_systems == 1
     assert result.cross_border_systems == 0
     assert result.escalate is False
-    assert result.inventory[0].region == "ap-south-1"
+    assert result.inventory[0].region == "Unknown — residency evidence required"
     assert result.inventory[0].cross_border is False
     assert len(result.warnings) == 0
 
 
 @pytest.mark.asyncio
-async def test_drishti_detects_foreign_region_in_description_and_overrides_cross_border():
+async def test_drishti_flags_a_foreign_region_indicator_without_overwriting_declarations():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
             tenant_id="t1",
@@ -75,22 +75,22 @@ async def test_drishti_detects_foreign_region_in_description_and_overrides_cross
                     "description": "Log telemetry archive in us-east-1",
                     "hosts_personal_data": True,
                     "data_categories": ["ip_address", "telemetry"],
-                    "cross_border": False,  # Operator erroneously claimed False
+                    "cross_border": False,  # A conflict needs review, not an invented fact.
                 }
             ],
         )
     )
     assert output.status == "succeeded"
     result = DrishtiOutput.model_validate(output.output)
-    assert result.cross_border_systems == 1
+    assert result.cross_border_systems == 0
     assert result.escalate is True
-    assert result.escalation_reason == "cross_border_transfer_detected"
-    assert result.inventory[0].region == "us-east-1"
-    assert result.inventory[0].cross_border is True
+    assert result.escalation_reason == "residency_declaration_review_required"
+    assert result.inventory[0].region == "Unknown — residency evidence required"
+    assert result.inventory[0].cross_border is False
     assert len(result.warnings) == 1
-    assert "DPDPA-XBD-01" in result.warnings[0]
+    assert "Residency review required" in result.warnings[0]
     assert "us-east-1" in result.warnings[0]
-    assert "ap-south-1" in result.warnings[0]
+    assert "does not establish" in result.warnings[0]
 
 
 @pytest.mark.asyncio
@@ -112,11 +112,11 @@ async def test_drishti_detects_explicit_foreign_region_and_warns():
     )
     assert output.status == "succeeded"
     result = DrishtiOutput.model_validate(output.output)
-    assert result.cross_border_systems == 1
+    assert result.cross_border_systems == 0
     assert result.escalate is True
     assert result.inventory[0].region == "eu-central-1"
-    assert result.inventory[0].cross_border is True
-    assert any("DPDPA-XBD-01" in w for w in result.warnings)
+    assert result.inventory[0].cross_border is False
+    assert any("Residency review required" in w for w in result.warnings)
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ from pathlib import Path
 block_at = runpy.run_path(str(Path(__file__).with_name('check-cloudrun-auth-wiring.py')))['block_at']
 # Reviewed runtime needs, not copied automatically from container declarations.
 EXPECTED = {
-    'bff': {'agent_runtime_internal_token', 'approval_signing_key',
+    'bff': {'agent_runtime_internal_token', 'planning_source_signing_key', 'approval_signing_key',
             'evidence_s3_access_key', 'evidence_s3_secret_key', 'mfa_encryption_key',
             'model_gateway_api_key', 'resend_api_key', 'supabase_anon_key',
             'supabase_service_key', 'supabase_statutory_proof_writer_key',
@@ -20,7 +20,7 @@ EXPECTED = {
             'supabase_agent_ledger_writer_key'},
     'web': {'supabase_anon_key'},
     'marketing': {'supabase_anon_key'},  # C-W0-6: contact mail is BFF-owned.
-    'agent_runtime': {'agent_runtime_internal_token', 'approval_signing_key',
+    'agent_runtime': {'agent_runtime_internal_token', 'planning_source_signing_key', 'approval_signing_key',
                       'evidence_s3_access_key', 'evidence_s3_secret_key',
                       'model_gateway_api_key', 'supabase_anon_key',
                       'supabase_agent_ledger_writer_key', 'supabase_service_key'},
@@ -90,7 +90,8 @@ def check(files: dict[str, str]) -> None:
                           'SUPABASE_SERVICE_KEY': 'supabase_service_key',
                           'SUPABASE_ANON_KEY': 'supabase_anon_key',
                           'SUPABASE_AGENT_LEDGER_WRITER_KEY': 'supabase_agent_ledger_writer_key',
-                          'AGENT_RUNTIME_INTERNAL_TOKEN': 'agent_runtime_internal_token'},  # nosec B105 - env-var name to secret reference mapping, not a credential
+                          'AGENT_RUNTIME_INTERNAL_TOKEN': 'agent_runtime_internal_token',
+                          'AXIOM_PLANNING_SOURCE_SIGNING_KEY': 'planning_source_signing_key'},  # nosec B105 - env-var name to secret reference mapping, not a credential
         'temporal_worker': {'ENVIRONMENT': 'var.environment',
                             'AGENT_RUNTIME_INTERNAL_TOKEN': 'agent_runtime_internal_token'},  # nosec B105 - env-var name to secret reference mapping, not a credential
     }

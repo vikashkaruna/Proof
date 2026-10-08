@@ -60,6 +60,15 @@ run "separate_runtime_identities" {
   }
   assert {
     condition = toset([for key, grant in local.runtime_secret_access : grant.service
+    if grant.secret == "planning_source_signing_key"]) == toset(["bff", "agent_runtime"])
+    error_message = "The source composer key must never be available to transport peers or SSR services."
+  }
+  assert {
+    condition     = contains(keys(random_password.internal_service_key), "planning_source_signing_key") && local.managed_secrets.planning_source_signing_key == random_password.internal_service_key["planning_source_signing_key"].result
+    error_message = "The default source key must use its own independent stable random generation."
+  }
+  assert {
+    condition = toset([for key, grant in local.runtime_secret_access : grant.service
     if grant.secret == "supabase_archive_writer_key"]) == toset(["bff"])
     error_message = "The approval archive writer credential must be BFF-only."
   }

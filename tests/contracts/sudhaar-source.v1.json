@@ -1,0 +1,1147 @@
+{
+  "syntheticOnly": true,
+  "nowSeconds": 1800000000,
+  "input": {
+    "tenant_id": "11111111-1111-4111-8111-111111111111",
+    "engagement_id": "22222222-2222-4222-8222-222222222222",
+    "title": "Synthetic 46-control review – नियम",
+    "source": {
+      "assessmentRunId": "33333333-3333-4333-8333-333333333333",
+      "libraryVersion": "synthetic-0.1.1",
+      "libraryDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resultDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalizedReceipt": "119"
+    },
+    "findings": [
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000001",
+        "control_id": "C01",
+        "title": "Synthetic control 1",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000002",
+        "control_id": "C02",
+        "title": "Synthetic control 2",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000003",
+        "control_id": "C03",
+        "title": "Synthetic control 3",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000004",
+        "control_id": "C04",
+        "title": "Synthetic control 4",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000005",
+        "control_id": "C05",
+        "title": "Synthetic control 5",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000006",
+        "control_id": "C06",
+        "title": "Synthetic control 6",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000007",
+        "control_id": "C07",
+        "title": "Synthetic control 7",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000008",
+        "control_id": "C08",
+        "title": "Synthetic control 8",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000009",
+        "control_id": "C09",
+        "title": "Synthetic control 9",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000010",
+        "control_id": "C10",
+        "title": "Synthetic control 10",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000011",
+        "control_id": "C11",
+        "title": "Synthetic control 11",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000012",
+        "control_id": "C12",
+        "title": "Synthetic control 12",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000013",
+        "control_id": "C13",
+        "title": "Synthetic control 13",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000014",
+        "control_id": "C14",
+        "title": "Synthetic control 14",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000015",
+        "control_id": "C15",
+        "title": "Synthetic control 15",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000016",
+        "control_id": "C16",
+        "title": "Synthetic control 16",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000017",
+        "control_id": "C17",
+        "title": "Synthetic control 17",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000018",
+        "control_id": "C18",
+        "title": "Synthetic control 18",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000019",
+        "control_id": "C19",
+        "title": "Synthetic control 19",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000020",
+        "control_id": "C20",
+        "title": "Synthetic control 20",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000021",
+        "control_id": "C21",
+        "title": "Synthetic control 21",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 2,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 2
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000022",
+        "control_id": "C22",
+        "title": "Synthetic control 22",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000023",
+        "control_id": "C23",
+        "title": "Synthetic control 23",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000024",
+        "control_id": "C24",
+        "title": "Synthetic control 24",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000025",
+        "control_id": "C25",
+        "title": "Synthetic control 25",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000026",
+        "control_id": "C26",
+        "title": "Synthetic control 26",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000027",
+        "control_id": "C27",
+        "title": "Synthetic control 27",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000028",
+        "control_id": "C28",
+        "title": "Synthetic control 28",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000029",
+        "control_id": "C29",
+        "title": "Synthetic control 29",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000030",
+        "control_id": "C30",
+        "title": "Synthetic control 30",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000031",
+        "control_id": "C31",
+        "title": "Synthetic control 31",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000032",
+        "control_id": "C32",
+        "title": "Synthetic control 32",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000033",
+        "control_id": "C33",
+        "title": "Synthetic control 33",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000034",
+        "control_id": "C34",
+        "title": "Synthetic control 34",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000035",
+        "control_id": "C35",
+        "title": "Synthetic control 35",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000036",
+        "control_id": "C36",
+        "title": "Synthetic control 36",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000037",
+        "control_id": "C37",
+        "title": "Synthetic control 37",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000038",
+        "control_id": "C38",
+        "title": "Synthetic control 38",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000039",
+        "control_id": "C39",
+        "title": "Synthetic control 39",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000040",
+        "control_id": "C40",
+        "title": "Synthetic control 40",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000041",
+        "control_id": "C41",
+        "title": "Synthetic control 41",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000042",
+        "control_id": "C42",
+        "title": "Synthetic control 42",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000043",
+        "control_id": "C43",
+        "title": "Synthetic control 43",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000044",
+        "control_id": "C44",
+        "title": "Synthetic control 44",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "unknown",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 1,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 1
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000045",
+        "control_id": "C45",
+        "title": "Synthetic control 45",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "not_boolean_assessable",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 0,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "finding_id": "44444444-4444-4444-8444-000000000046",
+        "control_id": "C46",
+        "title": "Synthetic control 46",
+        "severity": "critical",
+        "score_decimal": "30",
+        "risk_points_decimal": "7.5",
+        "answer_state": "not_boolean_assessable",
+        "applicability_state": "unconditional",
+        "answer_counts": {
+          "known": 0,
+          "affirmed": 0,
+          "denied": 0,
+          "unknown": 0
+        }
+      }
+    ]
+  },
+  "envelope": {
+    "signed_text": "{\"correlation_id\":\"66666666-6666-4666-8666-666666666666\",\"dispatch_context\":{\"request_hash\":\"038cc1ad51cfa23a4bb653c270b4b98c489f036b3cb17f8f23440eb53aec2efb\",\"run_id\":\"55555555-5555-4555-8555-555555555555\"},\"expires_at\":1800000090,\"input_text\":\"{\\\"engagement_id\\\":\\\"22222222-2222-4222-8222-222222222222\\\",\\\"findings\\\":[{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C01\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000001\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 1\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C02\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000002\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 2\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C03\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000003\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 3\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C04\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000004\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 4\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C05\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000005\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 5\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C06\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000006\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 6\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C07\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000007\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 7\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C08\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000008\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 8\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C09\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000009\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 9\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C10\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000010\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 10\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C11\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000011\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 11\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C12\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000012\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 12\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C13\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000013\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 13\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C14\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000014\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 14\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C15\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000015\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 15\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C16\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000016\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 16\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C17\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000017\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 17\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C18\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000018\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 18\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C19\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000019\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 19\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C20\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000020\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 20\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":2,\\\"unknown\\\":2},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C21\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000021\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 21\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C22\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000022\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 22\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C23\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000023\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 23\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C24\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000024\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 24\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C25\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000025\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 25\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C26\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000026\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 26\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C27\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000027\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 27\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C28\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000028\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 28\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C29\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000029\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 29\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C30\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000030\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 30\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C31\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000031\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 31\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C32\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000032\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 32\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C33\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000033\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 33\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C34\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000034\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 34\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C35\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000035\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 35\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C36\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000036\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 36\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C37\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000037\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 37\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C38\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000038\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 38\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C39\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000039\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 39\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C40\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000040\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 40\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C41\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000041\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 41\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C42\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000042\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 42\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C43\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000043\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 43\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":1,\\\"unknown\\\":1},\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C44\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000044\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 44\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":0,\\\"unknown\\\":0},\\\"answer_state\\\":\\\"not_boolean_assessable\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C45\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000045\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 45\\\"},{\\\"answer_counts\\\":{\\\"affirmed\\\":0,\\\"denied\\\":0,\\\"known\\\":0,\\\"unknown\\\":0},\\\"answer_state\\\":\\\"not_boolean_assessable\\\",\\\"applicability_state\\\":\\\"unconditional\\\",\\\"control_id\\\":\\\"C46\\\",\\\"finding_id\\\":\\\"44444444-4444-4444-8444-000000000046\\\",\\\"risk_points_decimal\\\":\\\"7.5\\\",\\\"score_decimal\\\":\\\"30\\\",\\\"severity\\\":\\\"critical\\\",\\\"title\\\":\\\"Synthetic control 46\\\"}],\\\"source\\\":{\\\"assessmentRunId\\\":\\\"33333333-3333-4333-8333-333333333333\\\",\\\"finalizedReceipt\\\":\\\"119\\\",\\\"libraryDigest\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\",\\\"libraryVersion\\\":\\\"synthetic-0.1.1\\\",\\\"resultDigest\\\":\\\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\\"},\\\"tenant_id\\\":\\\"11111111-1111-4111-8111-111111111111\\\",\\\"title\\\":\\\"Synthetic 46-control review – नियम\\\"}\",\"version\":1}",
+    "signature": "fa34de22f4d669d48f2a75a152727b55369fbb2d14a46f14298886f5b1fb7bcf"
+  },
+  "expectedOutput": {
+    "schema_version": 1,
+    "kind": "remediation_proposal",
+    "title": "Synthetic 46-control review – नियम",
+    "source": {
+      "assessmentRunId": "33333333-3333-4333-8333-333333333333",
+      "libraryVersion": "synthetic-0.1.1",
+      "libraryDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resultDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalizedReceipt": "119"
+    },
+    "persistence": "not_saved",
+    "review_required": true,
+    "escalate": true,
+    "execution_allowed": false,
+    "review_tasks": [
+      {
+        "sequence": 1,
+        "finding_id": "44444444-4444-4444-8444-000000000001",
+        "control_id": "C01",
+        "title": "Synthetic control 1",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 2,
+        "finding_id": "44444444-4444-4444-8444-000000000002",
+        "control_id": "C02",
+        "title": "Synthetic control 2",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 3,
+        "finding_id": "44444444-4444-4444-8444-000000000003",
+        "control_id": "C03",
+        "title": "Synthetic control 3",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 4,
+        "finding_id": "44444444-4444-4444-8444-000000000004",
+        "control_id": "C04",
+        "title": "Synthetic control 4",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 5,
+        "finding_id": "44444444-4444-4444-8444-000000000005",
+        "control_id": "C05",
+        "title": "Synthetic control 5",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 6,
+        "finding_id": "44444444-4444-4444-8444-000000000006",
+        "control_id": "C06",
+        "title": "Synthetic control 6",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 7,
+        "finding_id": "44444444-4444-4444-8444-000000000007",
+        "control_id": "C07",
+        "title": "Synthetic control 7",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 8,
+        "finding_id": "44444444-4444-4444-8444-000000000008",
+        "control_id": "C08",
+        "title": "Synthetic control 8",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 9,
+        "finding_id": "44444444-4444-4444-8444-000000000009",
+        "control_id": "C09",
+        "title": "Synthetic control 9",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 10,
+        "finding_id": "44444444-4444-4444-8444-000000000010",
+        "control_id": "C10",
+        "title": "Synthetic control 10",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 11,
+        "finding_id": "44444444-4444-4444-8444-000000000011",
+        "control_id": "C11",
+        "title": "Synthetic control 11",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 12,
+        "finding_id": "44444444-4444-4444-8444-000000000012",
+        "control_id": "C12",
+        "title": "Synthetic control 12",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 13,
+        "finding_id": "44444444-4444-4444-8444-000000000013",
+        "control_id": "C13",
+        "title": "Synthetic control 13",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 14,
+        "finding_id": "44444444-4444-4444-8444-000000000014",
+        "control_id": "C14",
+        "title": "Synthetic control 14",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 15,
+        "finding_id": "44444444-4444-4444-8444-000000000015",
+        "control_id": "C15",
+        "title": "Synthetic control 15",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 16,
+        "finding_id": "44444444-4444-4444-8444-000000000016",
+        "control_id": "C16",
+        "title": "Synthetic control 16",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 17,
+        "finding_id": "44444444-4444-4444-8444-000000000017",
+        "control_id": "C17",
+        "title": "Synthetic control 17",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 18,
+        "finding_id": "44444444-4444-4444-8444-000000000018",
+        "control_id": "C18",
+        "title": "Synthetic control 18",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 19,
+        "finding_id": "44444444-4444-4444-8444-000000000019",
+        "control_id": "C19",
+        "title": "Synthetic control 19",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 20,
+        "finding_id": "44444444-4444-4444-8444-000000000020",
+        "control_id": "C20",
+        "title": "Synthetic control 20",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 21,
+        "finding_id": "44444444-4444-4444-8444-000000000021",
+        "control_id": "C21",
+        "title": "Synthetic control 21",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 22,
+        "finding_id": "44444444-4444-4444-8444-000000000022",
+        "control_id": "C22",
+        "title": "Synthetic control 22",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 23,
+        "finding_id": "44444444-4444-4444-8444-000000000023",
+        "control_id": "C23",
+        "title": "Synthetic control 23",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 24,
+        "finding_id": "44444444-4444-4444-8444-000000000024",
+        "control_id": "C24",
+        "title": "Synthetic control 24",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 25,
+        "finding_id": "44444444-4444-4444-8444-000000000025",
+        "control_id": "C25",
+        "title": "Synthetic control 25",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 26,
+        "finding_id": "44444444-4444-4444-8444-000000000026",
+        "control_id": "C26",
+        "title": "Synthetic control 26",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 27,
+        "finding_id": "44444444-4444-4444-8444-000000000027",
+        "control_id": "C27",
+        "title": "Synthetic control 27",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 28,
+        "finding_id": "44444444-4444-4444-8444-000000000028",
+        "control_id": "C28",
+        "title": "Synthetic control 28",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 29,
+        "finding_id": "44444444-4444-4444-8444-000000000029",
+        "control_id": "C29",
+        "title": "Synthetic control 29",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 30,
+        "finding_id": "44444444-4444-4444-8444-000000000030",
+        "control_id": "C30",
+        "title": "Synthetic control 30",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 31,
+        "finding_id": "44444444-4444-4444-8444-000000000031",
+        "control_id": "C31",
+        "title": "Synthetic control 31",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 32,
+        "finding_id": "44444444-4444-4444-8444-000000000032",
+        "control_id": "C32",
+        "title": "Synthetic control 32",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 33,
+        "finding_id": "44444444-4444-4444-8444-000000000033",
+        "control_id": "C33",
+        "title": "Synthetic control 33",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 34,
+        "finding_id": "44444444-4444-4444-8444-000000000034",
+        "control_id": "C34",
+        "title": "Synthetic control 34",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 35,
+        "finding_id": "44444444-4444-4444-8444-000000000035",
+        "control_id": "C35",
+        "title": "Synthetic control 35",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 36,
+        "finding_id": "44444444-4444-4444-8444-000000000036",
+        "control_id": "C36",
+        "title": "Synthetic control 36",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 37,
+        "finding_id": "44444444-4444-4444-8444-000000000037",
+        "control_id": "C37",
+        "title": "Synthetic control 37",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 38,
+        "finding_id": "44444444-4444-4444-8444-000000000038",
+        "control_id": "C38",
+        "title": "Synthetic control 38",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 39,
+        "finding_id": "44444444-4444-4444-8444-000000000039",
+        "control_id": "C39",
+        "title": "Synthetic control 39",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 40,
+        "finding_id": "44444444-4444-4444-8444-000000000040",
+        "control_id": "C40",
+        "title": "Synthetic control 40",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 41,
+        "finding_id": "44444444-4444-4444-8444-000000000041",
+        "control_id": "C41",
+        "title": "Synthetic control 41",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 42,
+        "finding_id": "44444444-4444-4444-8444-000000000042",
+        "control_id": "C42",
+        "title": "Synthetic control 42",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 43,
+        "finding_id": "44444444-4444-4444-8444-000000000043",
+        "control_id": "C43",
+        "title": "Synthetic control 43",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 44,
+        "finding_id": "44444444-4444-4444-8444-000000000044",
+        "control_id": "C44",
+        "title": "Synthetic control 44",
+        "reason": "questionnaire_incomplete",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 45,
+        "finding_id": "44444444-4444-4444-8444-000000000045",
+        "control_id": "C45",
+        "title": "Synthetic control 45",
+        "reason": "evidence_required",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      },
+      {
+        "sequence": 46,
+        "finding_id": "44444444-4444-4444-8444-000000000046",
+        "control_id": "C46",
+        "title": "Synthetic control 46",
+        "reason": "evidence_required",
+        "instruction": "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+      }
+    ],
+    "provisional_actions": [],
+    "aggregate_records_affected": null,
+    "aggregate_systems": []
+  }
+}

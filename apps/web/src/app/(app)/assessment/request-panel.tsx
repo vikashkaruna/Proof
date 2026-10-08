@@ -101,6 +101,7 @@ function RequestPanel({
       : null;
   const displayedMessage =
     message?.operationKey === (retained?.request.operationKey ?? null) ? message.text : null;
+  const recoveryGuidance = displayedStatus ? requestRecoveryGuidance(displayedStatus) : null;
   const active = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -208,7 +209,8 @@ function RequestPanel({
       !canRequest ||
       !retained ||
       retained.request.engagementId !== engagementId ||
-      displayedStatus?.status === 'finalization_recorded'
+      displayedStatus?.status === 'finalization_recorded' ||
+      recoveryGuidance !== null
     )
       return;
     const expected = retained;
@@ -293,16 +295,20 @@ function RequestPanel({
           >
             {busy ? 'Checking request…' : 'Check retained request'}
           </button>
-          {canRequest && sameEngagement && displayedStatus?.status !== 'finalization_recorded' && (
-            <button
-              type="button"
-              disabled={busy || !ready}
-              onClick={retry}
-              className="ml-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:opacity-50"
-            >
-              Retry original request
-            </button>
-          )}
+          {recoveryGuidance && <p role="note">{recoveryGuidance}</p>}
+          {canRequest &&
+            sameEngagement &&
+            displayedStatus?.status !== 'finalization_recorded' &&
+            !recoveryGuidance && (
+              <button
+                type="button"
+                disabled={busy || !ready}
+                onClick={retry}
+                className="ml-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:opacity-50"
+              >
+                Retry original request
+              </button>
+            )}
           {displayedStatus?.status === 'finalization_recorded' && (
             <div>
               <p>
@@ -375,4 +381,17 @@ function RequestPanel({
       )}
     </section>
   );
+}
+
+/** These recorded states cannot be repaired by resubmitting the original body.
+ * Keep the reference until the server can prove completion or resolution. */
+function requestRecoveryGuidance(status: AssessmentJobReadout): string | null {
+  if (status.status === 'finalization_recorded') return null;
+  if (['failed', 'cancelled', 'timed_out'].includes(status.recordedRunStatus))
+    return `The saved run is ${status.recordedRunStatus.replaceAll('_', ' ')}. Keep this request reference and ask an assessment administrator to review the recorded run. Retrying cannot restart it; safe cancellation or resolution has not been confirmed.`;
+  if (status.schedulingStatus === 'needs_review')
+    return 'Dispatch requires administrator review. Keep this request reference and check its recorded status again after review. Retrying cannot repair the dispatch or establish completion.';
+  if (status.phase === 'result_recorded' || status.recordedRunStatus === 'succeeded')
+    return 'The recorded result still awaits verified controller finalization. Keep this request reference and check again. Retrying cannot finalize the result.';
+  return null;
 }

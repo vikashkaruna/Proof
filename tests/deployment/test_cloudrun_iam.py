@@ -30,6 +30,39 @@ class RuntimeIamTests(unittest.TestCase):
     def test_current_policy(self):
         CHECK(self.files)
 
+    def test_source_signing_permission_is_exactly_bff_runtime_only(self):
+        CHECK(self.files)
+        iam = self.files['iam.tf']
+        self.assertEqual(iam.count('"planning_source_signing_key"'), 2)
+        cloudrun = self.files['cloudrun.tf']
+        self.assertEqual(cloudrun.count('name = "AXIOM_PLANNING_SOURCE_SIGNING_KEY"'), 2)
+        secrets = self.files['secrets.tf']
+        self.assertIn('random_password.internal_service_key["planning_source_signing_key"].result', secrets)
+        self.assertNotIn('planning_source_signing_key = var.agent_runtime_internal_token', secrets)
+
+    def test_planning_source_key_in_worker_or_ssr_is_refused(self):
+        for role in ('temporal_worker', 'web', 'model_gateway'):
+            files = dict(self.files)
+            marker = 'resource "google_cloud_run_v2_service" "' + role + '" {'
+            files['cloudrun.tf'] = files['cloudrun.tf'].replace(marker, marker + '\n env { name="AXIOM_PLANNING_SOURCE_SIGNING_KEY" value_source { secret_key_ref { secret=google_secret_manager_secret.secret["planning_source_signing_key"].secret_id } } }')
+            with self.subTest(role=role), self.assertRaisesRegex(SystemExit, 'container secret'):
+                CHECK(files)
+
+    def test_helm_source_key_is_optional_and_only_in_bff_runtime(self):
+        templates = ROOT / 'infra/helm/axiom-proof/templates'
+        holders = {p.name for p in templates.glob('*.yaml') if 'name: AXIOM_PLANNING_SOURCE_SIGNING_KEY' in p.read_text()}
+        self.assertEqual(holders, {'bff-deployment.yaml', 'agent-runtime-deployment.yaml'})
+        for name in holders:
+            text = (templates / name).read_text().split('name: AXIOM_PLANNING_SOURCE_SIGNING_KEY', 1)[1].split('- name:', 1)[0]
+            self.assertIn('-planning-source', text)
+            self.assertIn('key: signing-key', text)
+            self.assertIn('optional: true', text)
+
+    def test_source_key_missing_from_runtime_iam_is_refused(self):
+        self.files['iam.tf'] = self.files['iam.tf'].replace('"planning_source_signing_key", ', '', 1)
+        with self.assertRaisesRegex(SystemExit, 'IAM permission'):
+            CHECK(self.files)
+
     def test_other_service_identity_is_refused(self):
         self.files['cloudrun.tf'] = self.files['cloudrun.tf'].replace('runtime["web"].email', 'runtime["bff"].email')
         with self.assertRaisesRegex(SystemExit, 'wrong identity'):

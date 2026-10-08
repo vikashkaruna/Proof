@@ -173,6 +173,17 @@ variable "agent_runtime_internal_token" {
   sensitive   = true
 }
 
+variable "planning_source_signing_key" {
+  description = "Independent BFF/runtime-only source composition signing key; empty uses its own stable random secret"
+  type        = string
+  default     = ""
+  sensitive   = true
+  validation {
+    condition     = var.planning_source_signing_key == "" || length(var.planning_source_signing_key) >= 32
+    error_message = "Planning source key must be empty or at least 32 characters; never reuse the transport key."
+  }
+}
+
 variable "model_gateway_api_key" {
   description = "Service-to-service API key for Model Gateway"
   type        = string

@@ -122,6 +122,8 @@ const EnvFields = z.object({
   // BFF → agent-runtime service-to-service authentication
   AGENT_RUNTIME_URL: z.string().url().optional(),
   AGENT_RUNTIME_INTERNAL_TOKEN: z.string().optional(),
+  // BFF/runtime-only source composer key, independent of peer transport Auth.
+  AXIOM_PLANNING_SOURCE_SIGNING_KEY: z.string().optional(),
 
   // BFF
   BFF_PORT: z
@@ -391,6 +393,23 @@ const EnvSchema = EnvFields.superRefine((env, ctx) => {
   const hardened = env.ENVIRONMENT
     ? HARDENED_ENVIRONMENTS.has(env.ENVIRONMENT)
     : env.NODE_ENV === 'production';
+  const planningKey = env.AXIOM_PLANNING_SOURCE_SIGNING_KEY;
+  if (
+    planningKey &&
+    (new TextEncoder().encode(planningKey).length < 32 ||
+      [
+        env.AGENT_RUNTIME_INTERNAL_TOKEN,
+        env.APPROVAL_SIGNING_KEY,
+        env.MODEL_GATEWAY_API_KEY,
+      ].includes(planningKey) ||
+      (hardened && isPlaceholderSecret(planningKey)))
+  )
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['AXIOM_PLANNING_SOURCE_SIGNING_KEY'],
+      message:
+        'Planning source key must be independent, at least 32 UTF-8 bytes, and non-placeholder in hardened environments',
+    });
   if (!hardened) return;
   if (!env.APPROVAL_SIGNING_KEY) {
     ctx.addIssue({

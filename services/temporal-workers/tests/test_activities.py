@@ -6,6 +6,9 @@ import json
 
 import httpx
 import pytest
+from temporalio.exceptions import ApplicationError
+from test_orchestration import assignment, response
+
 from temporal_workers import activities
 from temporal_workers.config import Settings
 from temporal_workers.contracts import (
@@ -13,8 +16,6 @@ from temporal_workers.contracts import (
     validate_result,
     validated_output,
 )
-from temporalio.exceptions import ApplicationError
-from test_orchestration import assignment, response
 
 CORRELATION = "00000000-0000-4000-8000-000000000001"
 
@@ -155,3 +156,17 @@ def test_assessment_payload_rejects_invalid_consumed_fields(field, value):
     result["output"][field] = value
     with pytest.raises(ProtocolRefused):
         validated_output(validate_result(result, "parikshan", CORRELATION), "fixture@1")
+
+
+async def test_sudhaar_refused_before_configuration_or_transport(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "Generic Sudhaar must not touch transport or configuration"
+        )
+
+    monkeypatch.setattr(activities, "get_settings", forbidden)
+    monkeypatch.setattr(activities.httpx, "AsyncClient", forbidden)
+    with pytest.raises(ApplicationError) as caught:
+        await activities.call_agent_runtime("sudhaar", assignment(), CORRELATION)
+    assert caught.value.type == "sudhaar_finalized_source_required"
+    assert caught.value.non_retryable

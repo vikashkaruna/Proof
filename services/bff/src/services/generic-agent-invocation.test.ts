@@ -752,3 +752,21 @@ describe('trusted source dispatch preparation', () => {
     });
   });
 });
+
+it('bounds the scoped human start and settlement RPC transports', async () => {
+  const f = fixture();
+  const signals: AbortSignal[] = [];
+  f.rpc.mockImplementation((name, args) => {
+    const call = f.db.client.rpc(name, args) as { abortSignal(signal: AbortSignal): unknown };
+    const original = call.abortSignal.bind(call);
+    call.abortSignal = (signal) => {
+      signals.push(signal);
+      return original(signal);
+    };
+    return call;
+  });
+  const out = await invokeGenericAgent(context(), f.deps);
+  expect(out.status).toBe(200);
+  expect(signals).toHaveLength(2);
+  expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(true);
+});

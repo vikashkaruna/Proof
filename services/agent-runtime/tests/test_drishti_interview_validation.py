@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
 from axiom.agents.base import AgentName
 from axiom.agents.drishti import DrishtiAgent, DrishtiInput, DrishtiOutput
 from axiom.app import app
-from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 
 def interview_input(**declarations):
@@ -57,7 +58,7 @@ async def test_json_boolean_interview_declarations_preserve_meaning(personal_dat
 
 
 @pytest.mark.asyncio
-async def test_absent_interview_boolean_declarations_keep_legacy_defaults():
+async def test_absent_interview_transfer_and_region_declarations_remain_unknown():
     agent = DrishtiAgent(
         ledger=SimpleNamespace(append=AsyncMock(return_value=SimpleNamespace(id="1"))),
         evidence=SimpleNamespace(),
@@ -67,7 +68,9 @@ async def test_absent_interview_boolean_declarations_keep_legacy_defaults():
     assert result.status == "succeeded"
     output = DrishtiOutput.model_validate(result.output)
     assert output.inventory[0].hosts_personal_data is False
-    assert output.inventory[0].cross_border is False
+    assert output.inventory[0].cross_border is None
+    assert output.inventory[0].region == "Unknown — residency evidence required"
+    assert output.unknown_cross_border_systems == 1
 
 
 @pytest.mark.parametrize("declaration", [False, True])

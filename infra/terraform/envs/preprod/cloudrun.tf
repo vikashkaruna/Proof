@@ -249,6 +249,15 @@ resource "google_cloud_run_v2_service" "bff" {
         }
       }
       env {
+        name = "AXIOM_PLANNING_SOURCE_SIGNING_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["planning_source_signing_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
         name = "MODEL_GATEWAY_API_KEY"
         value_source {
           secret_key_ref {
@@ -583,6 +592,15 @@ resource "google_cloud_run_v2_service" "agent_runtime" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.secret["agent_runtime_internal_token"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AXIOM_PLANNING_SOURCE_SIGNING_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["planning_source_signing_key"].secret_id
             version = "latest"
           }
         }

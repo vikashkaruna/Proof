@@ -67,6 +67,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-internal
                   key: model-gateway-key
+            - name: AXIOM_PLANNING_SOURCE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "axiom-proof.fullname" . }}-planning-source
+                  key: signing-key
+                  optional: true
             - name: AGENT_RUNTIME_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -21,6 +21,7 @@ from pydantic import (
     Discriminator,
     Field,
     RootModel,
+    StrictBool,
     Tag,
     field_validator,
     model_validator,
@@ -88,60 +89,57 @@ NON_INDIAN_REGION_PATTERNS: list[re.Pattern[str]] = [
     ),
 ]
 
+UNKNOWN_REGION = "Unknown — residency evidence required"
+
 
 def evaluate_residency_and_cross_border(system: SystemRecord) -> None:
-    """Evaluate system region and data residency under India DPDPA §16.
+    """Flag declarations and textual indicators for review without changing facts.
 
-    Defaults to ap-south-1 (Mumbai, India). Automatically detects non-Indian
-    regions (e.g. us-east-1) in region, name, or description. If a non-Indian
-    region is detected or configured, cross_border is strictly enforced (True)
-    even if the caller passed False, and statutory warnings are issued.
+    A system name, description or stated region cannot verify hosting or a
+    transfer. Missing declarations remain unknown; even contradictory stated
+    facts are preserved for the Data Fiduciary to review.
     """
     explicit_region = (system.region or "").strip()
     detected_region: str | None = None
 
-    if explicit_region and explicit_region.lower() not in INDIAN_REGIONS:
+    if (
+        explicit_region
+        and explicit_region.lower() not in INDIAN_REGIONS
+        and explicit_region not in {"Unknown", UNKNOWN_REGION}
+    ):
         detected_region = explicit_region
-    else:
-        text_to_scan = f"{system.name} {system.description}"
-        for pattern in NON_INDIAN_REGION_PATTERNS:
-            match = pattern.search(text_to_scan)
-            if match:
-                detected_region = match.group(0).lower()
-                break
+    text_to_scan = f"{system.name} {system.description}"
+    for pattern in NON_INDIAN_REGION_PATTERNS:
+        match = pattern.search(text_to_scan)
+        if match:
+            detected_region = detected_region or match.group(0).lower()
+            break
 
     if detected_region:
-        system.region = detected_region
-        system.cross_border = True
         system.warnings.append(
-            f"Statutory Warning [DPDPA-XBD-01]: System '{system.name}' (type: '{system.type}') "
-            f"is hosted in non-Indian region '{system.region}'. Under India DPDPA 2023 §16 & Rule 16, "
-            f"storing personal data, telemetry, or system logs in non-Indian jurisdictions constitutes "
-            f"a cross-border transfer subject to statutory restrictions and transfer safeguards. "
-            f"Default system destination must be India (ap-south-1 / Mumbai). Ensure statutory transfer "
-            f"safeguards, contractual clauses, and RoPA documentation are in place."
+            f"Residency review required: System '{system.name}' has an unverified region "
+            f"declaration or textual indicator '{detected_region}'. This does not establish "
+            "hosting, personal-data processing or a cross-border transfer. Confirm the stated "
+            "region and transfer declaration with the Data Fiduciary and supporting evidence."
         )
     elif system.cross_border:
         system.warnings.append(
-            f"Statutory Warning [DPDPA-XBD-01]: System '{system.name}' is flagged for cross-border data "
-            f"transfer under India DPDPA 2023 §16. Ensure statutory transfer safeguards and RoPA "
-            f"documentation are in place."
+            f"Transfer review required: System '{system.name}' has a stated cross-border "
+            "transfer. Verify the declaration, destinations and safeguards with the Data "
+            "Fiduciary before using it in a reviewed RoPA or policy."
         )
-    else:
-        if not system.region or system.region.lower() in INDIAN_REGIONS:
-            system.region = system.region or "ap-south-1"
 
 
 class SystemRecord(BaseModel):
     name: str
     type: str  # postgres, mysql, s3, gdrive, m365, salesforce, etc.
     description: str = ""
-    hosts_personal_data: bool = False
+    hosts_personal_data: StrictBool = False
     data_categories: list[str] = Field(default_factory=list)
-    cross_border: bool = False
+    cross_border: StrictBool | None = None
     processor: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
-    region: str = "ap-south-1"
+    region: str = UNKNOWN_REGION
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -178,6 +176,7 @@ class DrishtiOutput(BaseModel):
     system_count: int
     personal_data_systems: int
     cross_border_systems: int
+    unknown_cross_border_systems: int = 0
     inventory: list[SystemRecord]
     summary: str
     needs_live_connector: bool
@@ -271,6 +270,7 @@ class DrishtiAgent(BaseAgent[DrishtiInvocationInput, DrishtiInvocationOutput]):
 
         personal_data = [s for s in inventory if s.hosts_personal_data]
         cross_border = [s for s in inventory if s.cross_border]
+        unknown_transfers = [s for s in inventory if s.cross_border is None]
 
         escalate = False
         escalation_reason: str | None = None
@@ -290,28 +290,34 @@ class DrishtiAgent(BaseAgent[DrishtiInvocationInput, DrishtiInvocationOutput]):
                     escalation_reason or f"discovers_health_data: system '{s.name}' flagged"
                 )
                 break
-        # Escalate if any cross-border transfer was discovered
+        # A declaration or location hint is a review prompt, not a verified transfer.
         if any(s.cross_border for s in inventory):
             escalate = True
-            escalation_reason = escalation_reason or "cross_border_transfer_detected"
+            escalation_reason = escalation_reason or "cross_border_declaration_review_required"
+        elif any(s.warnings for s in inventory):
+            escalate = True
+            escalation_reason = escalation_reason or "residency_declaration_review_required"
 
         all_warnings: list[str] = []
         for s in inventory:
             all_warnings.extend(s.warnings)
 
         summary = (
-            f"Discovered {len(inventory)} system(s); "
-            f"{len(personal_data)} hold personal data; "
-            f"{len(cross_border)} involve cross-border transfer."
+            f"Recorded {len(inventory)} declared system(s); "
+            f"{len(personal_data)} declared to hold personal data; "
+            f"{len(cross_border)} declared cross-border transfer(s); "
+            f"{len(unknown_transfers)} transfer declaration(s) unknown. "
+            "Declarations require human review."
         )
         if all_warnings:
-            summary += f" ({len(all_warnings)} statutory residency warning(s) flagged)"
+            summary += f" ({len(all_warnings)} residency/transfer review prompt(s) flagged)"
 
         return DrishtiInvocationOutput(
             root=DrishtiOutput(
                 system_count=len(inventory),
                 personal_data_systems=len(personal_data),
                 cross_border_systems=len(cross_border),
+                unknown_cross_border_systems=len(unknown_transfers),
                 inventory=inventory,
                 summary=summary,
                 needs_live_connector=len(inventory) >= 3,
@@ -335,10 +341,10 @@ class DrishtiAgent(BaseAgent[DrishtiInvocationInput, DrishtiInvocationOutput]):
                     description=val.get("description", ""),
                     hosts_personal_data=val.get("hosts_personal_data", False),
                     data_categories=val.get("data_categories", []) or [],
-                    cross_border=val.get("cross_border", False),
+                    cross_border=val.get("cross_border"),
                     processor=val.get("processor"),
                     evidence_refs=val.get("evidence_refs", []) or [],
-                    region=val.get("region", "ap-south-1"),
+                    region=val.get("region", UNKNOWN_REGION),
                     warnings=val.get("warnings", []) or [],
                 )
             )

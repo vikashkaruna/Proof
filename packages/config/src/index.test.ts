@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   loadWebEnv,
   loadAssessmentRetentionEnv,
@@ -435,3 +435,44 @@ describe('assessment retention maintenance configuration', () => {
     ).not.toHaveProperty('AXIOM_ASSESSMENT_DISPATCH_RETENTION_DAYS');
   });
 });
+
+describe('independent planning source configuration', () => {
+  beforeEach(resetEnvCache);
+  const source = {
+    NODE_ENV: 'test',
+    ENVIRONMENT: 'test',
+    AGENT_RUNTIME_INTERNAL_TOKEN: 'p'.repeat(40),
+  };
+  it('keeps absence optional without disabling unrelated modules', () => {
+    expect(loadEnv(source).AXIOM_PLANNING_SOURCE_SIGNING_KEY).toBeUndefined();
+  });
+  it.each(['short', 'p'.repeat(40)])('refuses weak or reused planning source key', (value) => {
+    expect(() => loadEnv({ ...source, AXIOM_PLANNING_SOURCE_SIGNING_KEY: value })).toThrow(
+      /AXIOM_PLANNING_SOURCE_SIGNING_KEY/,
+    );
+  });
+  it('retains an independent source key in backend config only', () => {
+    expect(
+      loadWebEnv({ ...source, AXIOM_PLANNING_SOURCE_SIGNING_KEY: 's'.repeat(40) }),
+    ).not.toHaveProperty('AXIOM_PLANNING_SOURCE_SIGNING_KEY');
+    expect(
+      loadEnv({ ...source, AXIOM_PLANNING_SOURCE_SIGNING_KEY: 's'.repeat(40) })
+        .AXIOM_PLANNING_SOURCE_SIGNING_KEY,
+    ).toBe('s'.repeat(40));
+  });
+});
+
+it.each(['APPROVAL_SIGNING_KEY', 'MODEL_GATEWAY_API_KEY'])(
+  'does not permit source-key reuse of a credential held by another peer: %s',
+  (field) => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        NODE_ENV: 'test',
+        ENVIRONMENT: 'test',
+        [field]: 's'.repeat(40),
+        AXIOM_PLANNING_SOURCE_SIGNING_KEY: 's'.repeat(40),
+      }),
+    ).toThrow(/AXIOM_PLANNING_SOURCE_SIGNING_KEY/);
+  },
+);
