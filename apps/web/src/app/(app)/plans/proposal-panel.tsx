@@ -69,6 +69,7 @@ function Panel({
   const [options, setOptions] = useState<ReturnType<typeof proposalOptionsSchema.parse> | null>(
       null,
     ),
+    [pageOffset, setPageOffset] = useState(0),
     [selected, setSelected] = useState(''),
     [title, setTitle] = useState('Assessment review proposal'),
     [error, setError] = useState<string | null>(null),
@@ -85,14 +86,15 @@ function Panel({
   useEffect(() => {
     if (!canPropose) return;
     const abort = new AbortController();
-    void fetch('/api/bff/v1/plans/proposal-assessment-options', {
+    void fetch(`/api/bff/v1/plans/proposal-assessment-options?limit=25&offset=${pageOffset}`, {
       cache: 'no-store',
       headers: { 'X-Tenant-Id': tenantId },
-      signal: abort.signal,
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]),
     })
       .then(async (response) => {
         if (!response.ok) throw new ProposalRequestError();
         const parsed = proposalOptionsSchema.parse(await response.json());
+        if (parsed.offset !== pageOffset || parsed.limit !== 25) throw new ProposalRequestError();
         if (!abort.signal.aborted) setOptions(parsed);
       })
       .catch(() => {
@@ -100,7 +102,7 @@ function Panel({
           setError('Finalized assessment sources are unavailable. Refresh to check again.');
       });
     return () => abort.abort();
-  }, [canPropose, tenantId]);
+  }, [canPropose, tenantId, pageOffset]);
   const retained = journal.retained,
     displayed = result && retained && result.key === retained.request.operationKey ? result : null;
   const execute = async (recover: boolean) => {
@@ -264,17 +266,63 @@ function Panel({
       {!options && !error && <p role="status">Loading finalized assessment sources…</p>}
       {options && !options.runtimeAvailable && (
         <p role="status">
-          Proposal execution is unavailable in this environment. An administrator must configure the
-          planning runtime and independent source key.
+          Proposal execution is unavailable in this environment. Ask your administrator to complete
+          environment setup before requesting a proposal.
         </p>
       )}
-      {options?.runtimeAvailable && options.assessments.length === 0 && (
-        <p>
-          No finalized assessment is available. Complete an assessment before requesting review
-          work.
-        </p>
+      {options?.runtimeAvailable &&
+        options.assessments.length === 0 &&
+        options.offset === 0 &&
+        options.total === 0 && (
+          <p>
+            No finalized assessment is available. Complete an assessment before requesting review
+            work.
+          </p>
+        )}
+      {options && !retained && (options.total > 25 || options.offset > 0) && (
+        <nav aria-label="Assessment source pages" className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={busy || options.offset === 0}
+            onClick={() => {
+              setSelected('');
+              setOptions(null);
+              setError(null);
+              setPageOffset(Math.max(0, options.offset - options.limit));
+            }}
+            className="rounded-md border px-3 py-2"
+          >
+            Previous assessments
+          </button>
+          <p>
+            {options.assessments.length ? (
+              <>
+                Showing {options.offset + 1}–{options.offset + options.assessments.length} of{' '}
+                {options.total} assessments
+              </>
+            ) : (
+              'No assessments on this page. Return to the previous page or refresh.'
+            )}
+          </p>
+          <button
+            type="button"
+            disabled={
+              busy ||
+              options.offset + options.limit >= options.total ||
+              options.offset + options.limit > 1000000
+            }
+            onClick={() => {
+              setSelected('');
+              setOptions(null);
+              setError(null);
+              setPageOffset(options.offset + options.limit);
+            }}
+            className="rounded-md border px-3 py-2"
+          >
+            Next assessments
+          </button>
+        </nav>
       )}
-      {options && options.total > 25 && <p>Showing the latest 25 finalized assessments.</p>}
       {error && (
         <p role="alert" className="rounded-md border border-red-200 p-3">
           {error}

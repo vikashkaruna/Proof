@@ -22,6 +22,8 @@ export const proposalOptionsSchema = z
       )
       .max(25),
     total: z.number().int().nonnegative(),
+    limit: z.number().int().min(1).max(25),
+    offset: z.number().int().min(0).max(1000000),
     runtimeAvailable: z.boolean(),
   })
   .strict();

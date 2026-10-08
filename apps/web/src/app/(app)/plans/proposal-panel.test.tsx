@@ -38,6 +38,8 @@ const choices = {
     },
   ],
   total: 1,
+  limit: 25,
+  offset: 0,
   runtimeAvailable: true,
 };
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
@@ -144,7 +146,8 @@ it('viewer sees no proposal controls and fetches nothing', () => {
 it('configuration absence is unavailable, not an empty success', async () => {
   fetchMock.mockResolvedValueOnce(response({ ...choices, runtimeAvailable: false }));
   render(<ProposalPanel {...props} />);
-  await screen.findByText(/administrator must configure/);
+  await screen.findByText(/Ask your administrator/);
+  expect(document.body.textContent).not.toMatch(/signing|source key|planning runtime/);
   expect(
     screen.getByRole('button', { name: 'Request review proposal' }).hasAttribute('disabled'),
   ).toBe(true);
@@ -272,4 +275,112 @@ it('requires cross-tab locking before source read or proposal dispatch', async (
   await screen.findByRole('alert');
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(readProposalJournal(localStorage, tenant, actor)).toBeNull();
+});
+
+it('selects an older assessment after pagination without automatic submission', async () => {
+  const olderRun = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const olderInput = { ...input, source: { ...input.source, assessmentRunId: olderRun } };
+  let release!: (r: Response) => void;
+  fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).includes('assessment-options'))
+      return String(url).includes('offset=25')
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : response({ ...choices, total: 26 });
+    if (String(url).includes('assessment-source')) return response({ input: olderInput });
+    const request = JSON.parse(String(init?.body));
+    return response({
+      data: { ...proposal, source: olderInput.source, title: request.title },
+      invocation: {
+        runId: '99999999-9999-4999-8999-999999999999',
+        correlationId: request.operationKey,
+        requestHash: 'a'.repeat(64),
+        responseHash: 'b'.repeat(64),
+      },
+    });
+  });
+  render(<ProposalPanel {...props} />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Next assessments' }));
+  expect(screen.getByLabelText('Finalized assessment').getAttribute('disabled')).not.toBeNull();
+  expect((screen.getByLabelText('Finalized assessment') as HTMLSelectElement).value).toBe('');
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false);
+  await act(async () =>
+    release(
+      response({
+        ...choices,
+        total: 26,
+        offset: 25,
+        assessments: [
+          {
+            ...choices.assessments[0],
+            assessmentRunId: olderRun,
+            engagementTitle: 'Older finalized assessment',
+          },
+        ],
+      }),
+    ),
+  );
+  await screen.findByRole('option', { name: /Older finalized assessment/ });
+  fireEvent.change(screen.getByLabelText('Finalized assessment'), {
+    target: { value: olderRun },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Request review proposal' }));
+  await screen.findByLabelText('Review proposal');
+  expect(readProposalJournal(localStorage, tenant, actor)?.request.assessmentRunId).toBe(olderRun);
+});
+it('returns to the previous page and clears the selected source', async () => {
+  fetchMock.mockImplementation(async (url) =>
+    response({ ...choices, total: 26, offset: String(url).includes('offset=25') ? 25 : 0 }),
+  );
+  render(<ProposalPanel {...props} />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Next assessments' }));
+  await screen.findByText('Showing 26–26 of 26 assessments');
+  fireEvent.change(screen.getByLabelText('Finalized assessment'), {
+    target: { value: input.source.assessmentRunId },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Previous assessments' }));
+  await screen.findByText('Showing 1–1 of 26 assessments');
+  expect((screen.getByLabelText('Finalized assessment') as HTMLSelectElement).value).toBe('');
+  expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false);
+});
+it('refuses a wrong returned pagination offset instead of presenting stale options', async () => {
+  fetchMock.mockImplementation(async () => response({ ...choices, total: 26, offset: 25 }));
+  render(<ProposalPanel {...props} />);
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('option', { name: /Synthetic engagement/ })).toBeNull();
+  expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false);
+});
+
+it('aborts a page response when the active tenant changes', async () => {
+  let release!: (r: Response) => void;
+  fetchMock.mockImplementation(async (url) =>
+    String(url).includes('offset=25')
+      ? new Promise((resolve) => {
+          release = resolve;
+        })
+      : response({ ...choices, total: 26 }),
+  );
+  const view = render(<ProposalPanel {...props} />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Next assessments' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const oldSignal = fetchMock.mock.calls[1]![1]?.signal;
+  view.rerender(<ProposalPanel {...props} tenantId={actor} />);
+  expect(oldSignal?.aborted).toBe(true);
+  await act(async () =>
+    release(
+      response({
+        ...choices,
+        total: 26,
+        offset: 25,
+        assessments: [{ ...choices.assessments[0], engagementTitle: 'Foreign delayed page' }],
+      }),
+    ),
+  );
+  expect(screen.queryByRole('option', { name: /Foreign delayed page/ })).toBeNull();
+  expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false);
 });
