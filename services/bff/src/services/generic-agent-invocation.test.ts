@@ -847,3 +847,34 @@ it('refuses Sudhaar-specific capture configuration for another agent before any 
   expect(f.rpc).not.toHaveBeenCalled();
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
+
+it.each(['agent', 'mode', 'engagement', 'public', 'sudhaar', 'capture', 'validator'])(
+  'refuses reviewed workflow %s configuration before any writer or peer action',
+  async (change) => {
+    const f = fixture(),
+      start = vi.fn(),
+      settleSuccess = vi.fn();
+    const input = {
+      ...context(),
+      agent: change === 'agent' ? 'drishti' : 'vibhaag',
+      engagementId: change === 'engagement' ? null : ENGAGEMENT,
+      input: { mode: change === 'mode' ? 'public_website' : 'reviewed_workflow' },
+    };
+    const deps: GenericAgentInvocationDeps = {
+      ...f.deps,
+      reviewedWorkflow: { start, settleSuccess },
+      validateOutput: vi.fn(),
+    };
+    if (change === 'public')
+      Object.assign(deps, { prepareDispatch: async () => ({ kind: 'public_source' }) });
+    if (change === 'sudhaar') Object.assign(deps, { sudhaarDispatch: () => ({}) });
+    if (change === 'capture') Object.assign(deps, { settleSudhaarSuccess: vi.fn() });
+    if (change === 'validator') Object.assign(deps, { validateOutput: undefined });
+    const actual = await invokeGenericAgent(input, deps);
+    expect(actual.status).toBe(403);
+    expect(start).not.toHaveBeenCalled();
+    expect(settleSuccess).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.fetchImpl).not.toHaveBeenCalled();
+  },
+);

@@ -243,6 +243,55 @@ class LedgerClient:
         """In-memory ledger entries (test-only)."""
         return list(self._mem)
 
+    async def load_reviewed_workflow_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str
+    ) -> Any:
+        """Restricted transport source; memory cannot establish human provenance."""
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Reviewed source transport configuration was refused")
+        client = self._client
+
+        def read() -> Any:
+            return (
+                client.rpc(
+                    "read_reviewed_workflow_dispatch",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_run_id": run_id,
+                        "p_operation_key": operation_key,
+                    },
+                )
+                .execute()
+                .data
+            )
+
+        return await asyncio.to_thread(read)
+
+    async def claim_reviewed_workflow_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str, request_hash: str
+    ) -> Any:
+        """Claim once; loss of this response never grants a retry."""
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Reviewed source transport configuration was refused")
+        client = self._client
+
+        def claim() -> Any:
+            return (
+                client.rpc(
+                    "claim_reviewed_workflow_dispatch",
+                    {
+                        "p_tenant_id": tenant_id,
+                        "p_run_id": run_id,
+                        "p_operation_key": operation_key,
+                        "p_request_hash": request_hash,
+                    },
+                )
+                .execute()
+                .data
+            )
+
+        return await asyncio.to_thread(claim)
+
     async def append(self, input: AppendInput) -> AppendResult:
         # This client holds only the agent ledger identity. A human-labelled
         # event must be written by the BFF's human writer, so refuse it here
@@ -452,3 +501,9 @@ class AppendOnlyLedgerClient(LedgerClient):
 
     async def claim_public_source_dispatch(self, **kwargs: Any) -> dict[str, Any]:
         raise PermissionError("Source claim capability is unavailable")
+
+    async def load_reviewed_workflow_dispatch(self, **kwargs: Any) -> Any:
+        raise PermissionError("Reviewed source read capability is unavailable")
+
+    async def claim_reviewed_workflow_dispatch(self, **kwargs: Any) -> Any:
+        raise PermissionError("Reviewed source claim capability is unavailable")
