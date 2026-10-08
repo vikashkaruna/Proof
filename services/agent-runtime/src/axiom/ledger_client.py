@@ -443,7 +443,9 @@ class LedgerClient:
         if (
             not isinstance(first, dict)
             or type(first.get("sequence_no")) is not int
+            or not 1 <= first["sequence_no"] <= 9223372036854775807
             or not isinstance(first.get("reason"), str)
+            or not first["reason"].strip()
         ):
             raise RuntimeError("Audit verification response was refused")
         return {
@@ -501,7 +503,8 @@ class LedgerClient:
         rows = r.data
         if not isinstance(rows, list) or any(
             not isinstance(row, dict)
-            or ("sequence_no" in row and type(row["sequence_no"]) is not int)
+            or type(row.get("sequence_no")) is not int
+            or not 1 <= row["sequence_no"] <= 9223372036854775807
             for row in rows
         ):
             raise RuntimeError("Audit query response was refused")

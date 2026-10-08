@@ -20,7 +20,7 @@ def reader(data: object) -> LedgerClient:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("data", [None, {}, False, "", [None], [{"sequence_no": True, "reason": "break"}], [{"sequence_no": 1, "reason": None}]])
+@pytest.mark.parametrize("data", [None, {}, False, "", [None], [{"sequence_no": True, "reason": "break"}], [{"sequence_no": 1, "reason": None}], [{"sequence_no": 0, "reason": "break"}], [{"sequence_no": -1, "reason": "break"}], [{"sequence_no": 1, "reason": " "}]])
 async def test_unproven_verification_never_reports_intact(data: object) -> None:
     with pytest.raises(RuntimeError, match="verification response was refused"):
         await reader(data).verify("tenant-a")
@@ -36,7 +36,7 @@ async def test_empty_verified_break_list_is_intact_and_genuine_break_is_retained
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("data", [None, {}, False, [None], [{"sequence_no": True}], [{"sequence_no": "3"}]])
+@pytest.mark.parametrize("data", [None, {}, False, [None], [{"sequence_no": True}], [{"sequence_no": "3"}], [{}], [{"sequence_no": 0}], [{"sequence_no": -1}], [{"sequence_no": 9223372036854775808}]])
 async def test_malformed_query_never_becomes_empty_or_typed_records(data: object) -> None:
     with pytest.raises(RuntimeError, match="query response was refused"):
         await reader(data).query(tenant_id="tenant-a")
