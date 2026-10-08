@@ -158,7 +158,16 @@ function Panel({
         if (!lock)
           throw new Error('Another tab is updating this request. Wait and check it again.');
         if (!mounted.current) return;
-        archiveConfirmedReviewAdoption(localStorage, retained, saved, confirmed);
+        const current = readReviewAdoptionJournal(localStorage, tenantId, actorId);
+        if (canonicalJson(current) !== canonicalJson(retained))
+          throw new Error('The retained request changed. Preserve it for review.');
+        // Renew current server authority/source checks using the original body and key.
+        const refreshed = await submitReviewAdoption(retained);
+        if (!mounted.current) return;
+        confirmReviewAdoptionSource(refreshed, confirmed);
+        if (canonicalJson(refreshed) !== canonicalJson(saved))
+          throw new Error('The saved review receipt changed. Keep the retained request.');
+        archiveConfirmedReviewAdoption(localStorage, retained, refreshed, confirmed);
       });
     } catch (cause) {
       if (mounted.current)
