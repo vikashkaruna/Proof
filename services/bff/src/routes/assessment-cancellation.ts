@@ -7,7 +7,11 @@ import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import { canonicalAssessmentInput } from '../workloads/assessment-input.js';
 import type { Variables } from '../types.js';
-import { readOriginalAssessmentRequest } from './assessment-original-request.js';
+import {
+  readOriginalAssessmentRequest,
+  originalQuestionnaireMatches,
+  type RecordedQuestionnaire,
+} from './assessment-original-request.js';
 
 export function assessmentCancellationRoutes() {
   const app = new Hono<{ Variables: Variables }>();
@@ -108,6 +112,16 @@ export function assessmentCancellationRoutes() {
         .parse(runRead.data);
       const original = await readOriginalAssessmentRequest(db, originalJob, originalRun);
       if (!original) return c.json(unavailable, 503);
+      const reviewedInput = input.data as typeof input.data & {
+        expectedQuestionnaire?: RecordedQuestionnaire;
+      };
+      if (
+        !originalQuestionnaireMatches(
+          original.expectedQuestionnaire,
+          reviewedInput.expectedQuestionnaire,
+        )
+      )
+        return c.json({ error: { code: 'cancellation_conflict' } }, 409);
       const body = canonicalAssessmentInput(
         tenantId,
         engagement.id,

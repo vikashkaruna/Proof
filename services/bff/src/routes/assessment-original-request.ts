@@ -21,6 +21,26 @@ export interface OriginalAssessmentRun {
   input_redacted_hash: string | null;
   metadata: Record<string, unknown>;
 }
+const reviewedQuestionnaire = z
+  .object({
+    libraryVersion: z.string().min(1).max(200),
+    questionnaireDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+export type RecordedQuestionnaire = z.infer<typeof reviewedQuestionnaire>;
+export function originalQuestionnaireMatches(
+  recorded: RecordedQuestionnaire | undefined,
+  expected: unknown,
+) {
+  if (recorded === undefined) return expected === undefined;
+  const parsed = reviewedQuestionnaire.safeParse(expected);
+  return (
+    parsed.success &&
+    parsed.data.libraryVersion === recorded.libraryVersion &&
+    parsed.data.questionnaireDigest === recorded.questionnaireDigest
+  );
+}
+
 const receipt = z
   .union([z.number().int().positive().safe(), z.string().regex(/^[1-9][0-9]{0,18}$/)])
   .transform(String);
@@ -78,6 +98,7 @@ export async function readOriginalAssessmentRequest(
         estate_id: z.uuid().nullable(),
         engagement_id: z.uuid(),
         library_version: z.string().min(1).max(200),
+        expected_questionnaire: reviewedQuestionnaire.optional(),
       }),
     })
     .parse(read.data);
@@ -92,8 +113,14 @@ export async function readOriginalAssessmentRequest(
     entry.detail.run_id !== job.run_id ||
     entry.detail.workload_id !== job.workload_id ||
     entry.detail.estate_id !== job.estate_id ||
-    entry.detail.engagement_id !== job.engagement_id
+    entry.detail.engagement_id !== job.engagement_id ||
+    (entry.detail.expected_questionnaire !== undefined &&
+      entry.detail.expected_questionnaire.libraryVersion !== entry.detail.library_version)
   )
     throw new Error('original human receipt inconsistent');
-  return { libraryVersion: entry.detail.library_version, requestedReceipt: entry.id };
+  return {
+    libraryVersion: entry.detail.library_version,
+    requestedReceipt: entry.id,
+    expectedQuestionnaire: entry.detail.expected_questionnaire,
+  };
 }
