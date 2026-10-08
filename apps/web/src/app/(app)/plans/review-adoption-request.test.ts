@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { it, expect, vi, afterEach } from 'vitest';
+import type { ConfirmedProposal } from './proposal-request';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import {
+  archiveConfirmedReviewAdoption,
+  readCompletedReviewAdoptionReference,
   readReviewAdoptionJournal,
   retainReviewAdoptionJournal,
   reviewAdoptionJournalKey,
@@ -97,7 +100,59 @@ it('posts the strict original body and exact actor/key and accepts only matching
   };
   const fetcher = vi.fn().mockResolvedValue({ status: 201, json: async () => receipt });
   vi.stubGlobal('fetch', fetcher);
-  expect(await submitReviewAdoption(value)).toEqual(receipt);
+  const validated = await submitReviewAdoption(value);
+  expect(validated).toEqual(receipt);
+  const confirmed = {
+    proposal: { source: receipt.source, review_tasks: [{}] },
+    outputProof: {
+      ...receipt.outputProof,
+      requestHash: receipt.outputProof.inputHash,
+      responseHash: receipt.outputProof.outputHash,
+    },
+  } as unknown as ConfirmedProposal;
+  retainReviewAdoptionJournal(localStorage, value);
+  expect(() =>
+    archiveConfirmedReviewAdoption(localStorage, value, { ...validated }, confirmed),
+  ).toThrow('Confirm the saved');
+  expect(() =>
+    archiveConfirmedReviewAdoption(localStorage, value, validated, {
+      ...confirmed,
+      outputProof: { ...confirmed.outputProof, responseHash: 'f'.repeat(64) },
+    }),
+  ).toThrow('source could not');
+  expect(readReviewAdoptionJournal(localStorage, tenantId, actorId)).toEqual(value);
+  expect(() =>
+    archiveConfirmedReviewAdoption(
+      {
+        getItem: localStorage.getItem.bind(localStorage),
+        setItem: () => {},
+        removeItem: localStorage.removeItem.bind(localStorage),
+      },
+      value,
+      validated,
+      confirmed,
+    ),
+  ).toThrow('reference could not be retained');
+  expect(() =>
+    archiveConfirmedReviewAdoption(
+      {
+        getItem: localStorage.getItem.bind(localStorage),
+        setItem: localStorage.setItem.bind(localStorage),
+        removeItem: () => {},
+      },
+      value,
+      validated,
+      confirmed,
+    ),
+  ).toThrow('could not be archived');
+  archiveConfirmedReviewAdoption(localStorage, value, validated, confirmed);
+  expect(readReviewAdoptionJournal(localStorage, tenantId, actorId)).toBeNull();
+  expect(
+    readCompletedReviewAdoptionReference(localStorage, tenantId, actorId, proposalOperationKey),
+  ).toEqual(value);
+  expect(() => archiveConfirmedReviewAdoption(localStorage, value, validated, confirmed)).toThrow(
+    'retained request changed',
+  );
   expect(fetcher.mock.calls[0]![1].body).toBe(JSON.stringify(value.request));
   expect(fetcher.mock.calls[0]![1].headers['X-Expected-Actor-Id']).toBe(actorId);
   fetcher.mockResolvedValue({ status: 201, json: async () => ({ ...receipt, actorId: tenantId }) });

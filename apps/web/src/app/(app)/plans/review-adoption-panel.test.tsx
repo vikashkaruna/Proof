@@ -163,3 +163,146 @@ it('an actor switch while submitting cannot attach the old response to the new s
   expect(readReviewAdoptionJournal(localStorage, tenant, tenant)).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+async function successfulSave() {
+  const { canonicalJson, sha256 } = await import('@axiom/ledger');
+  fetcher.mockImplementation(async (_url, options) => {
+    const request = JSON.parse(options.body);
+    return {
+      status: 201,
+      json: async () => ({
+        tenantId: tenant,
+        actorId: actor,
+        proposalOperationKey: operation,
+        adoptionKey: request.adoptionKey,
+        planId: operation,
+        requestHash: await sha256(
+          canonicalJson({
+            tenantId: tenant,
+            actorId: actor,
+            proposalOperationKey: operation,
+            ...request,
+          }),
+        ),
+        adoptionReceipt: '5',
+        purpose: 'source_review',
+        status: 'review',
+        taskCount: confirmed.proposal.review_tasks.length,
+        actionCount: 0,
+        executionAllowed: false,
+        source: confirmed.proposal.source,
+        outputProof: {
+          runId: operation,
+          inputHash: 'a'.repeat(64),
+          outputHash: 'b'.repeat(64),
+          requestedReceipt: '1',
+          startedReceipt: '2',
+          completedReceipt: '3',
+          settledReceipt: '4',
+        },
+      }),
+    };
+  });
+  const view = panel();
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: 'Save review tasks' }));
+  await screen.findByText('Inspect saved review work');
+  return view;
+}
+it('explicit confirmed archive frees pending slot, preserves same-key manual recovery, and permits another proposal', async () => {
+  const view = await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await waitFor(() => expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toBeNull());
+  view.unmount();
+  const reopened = panel();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Check saved review work' }));
+  await screen.findByText('Inspect saved review work');
+  expect(fetcher.mock.calls[1]![1].body).toEqual(JSON.stringify(original!.request));
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await waitFor(() => expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toBeNull());
+  reopened.rerender(
+    <ReviewAdoptionPanel
+      tenantId={tenant}
+      actorId={actor}
+      operationKey={actor}
+      confirmed={confirmed}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Save review tasks' })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+it('silent completed-reference write loss preserves pending request', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: /Archive confirmed request/ })?.hasAttribute('disabled'),
+    ).not.toBe(true),
+  );
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
+  await screen.findByRole('alert');
+});
+it('silent archive removal loss preserves pending request', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: /Archive confirmed request/ })?.hasAttribute('disabled'),
+    ).not.toBe(true),
+  );
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
+  await screen.findByRole('alert');
+});
+it('another tab replacing the body cannot be archived with an earlier valid receipt', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor)!;
+  localStorage.setItem(
+    `axiom:review-adoption:v1:${tenant}:${actor}`,
+    JSON.stringify({
+      ...original,
+      request: { ...original.request, reason: 'Different changed body for another review' },
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await screen.findByRole('alert');
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)!.request.reason).toContain(
+    'Different',
+  );
+});
+
+it('an actor switch while waiting for the archive lock preserves the old pending request', async () => {
+  const view = await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  let release!: () => Promise<unknown>;
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: {
+      request: (_key: string, _options: unknown, callback: (lock: unknown) => Promise<unknown>) =>
+        new Promise<void>((resolve) => {
+          release = async () => {
+            await callback({});
+            resolve();
+          };
+        }),
+    },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  view.rerender(
+    <ReviewAdoptionPanel
+      tenantId={tenant}
+      actorId={tenant}
+      operationKey={operation}
+      confirmed={confirmed}
+    />,
+  );
+  await release();
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
+  expect(screen.queryByText('Inspect saved review work')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
