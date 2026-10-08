@@ -69,6 +69,7 @@ class ApprovalEngine:
     """
 
     def __init__(self, signing_key: str | bytes | None = None):
+        self._default_key: bytes | None
         if isinstance(signing_key, str):
             self._default_key = signing_key.encode("utf-8")
         elif isinstance(signing_key, bytes):

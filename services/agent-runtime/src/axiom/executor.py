@@ -501,9 +501,9 @@ async def _run_rollbacks(
     batch_id: str,
     succeeded_ids: list[str],
     outcomes: list[ActionOutcome],
-) -> bool:
+) -> tuple[bool, bool]:
     """Roll the batch's completed actions back, reverse order, simulated
-    first. Returns True when every rollback succeeded.
+    first. Reports whether every rollback succeeded and whether any was attempted.
 
     A rollback is executed against the action's STORED definition, and
     `record_rollback_execution` re-reads and re-compares it, so the engine
