@@ -1,4 +1,10 @@
+import {
+  recoverSudhaarOutput,
+  settleSudhaarOutput,
+  SudhaarOutputRefused,
+} from '../services/sudhaar-proposal-output.js';
 import { Hono } from 'hono';
+import { listFinalizedAssessmentOptions } from '../services/board-reports.js';
 import { z } from 'zod';
 import { Capability, sudhaarProposalRequestSchema, validateSudhaarProposal } from '@axiom/types';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -17,7 +23,12 @@ import {
 import type { EvidenceDatabase } from '../services/evidence-ingestion.js';
 export interface SudhaarProposalDeps extends Omit<
   GenericAgentInvocationDeps,
-  'runtimeUrl' | 'runtimeToken' | 'sudhaarDispatch' | 'validateOutput' | 'prepareDispatch'
+  | 'runtimeUrl'
+  | 'runtimeToken'
+  | 'sudhaarDispatch'
+  | 'validateOutput'
+  | 'prepareDispatch'
+  | 'settleSudhaarSuccess'
 > {
   runtimeUrl?: string;
   runtimeToken?: string;
@@ -27,6 +38,83 @@ export interface SudhaarProposalDeps extends Omit<
 }
 export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
   const app = new Hono<{ Variables: Variables }>();
+  app.get('/plans/proposal-assessment-options', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    for (const capability of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {
+      const denial = requireCapability(c, capability);
+      if (denial) return denial;
+    }
+    const pagination = z
+      .object({
+        limit: z
+          .string()
+          .regex(/^[1-9][0-9]*$/)
+          .default('25')
+          .transform(Number)
+          .pipe(z.number().int().min(1).max(25)),
+        offset: z
+          .string()
+          .regex(/^(0|[1-9][0-9]*)$/)
+          .default('0')
+          .transform(Number)
+          .pipe(z.number().int().min(0).max(1000000)),
+      })
+      .safeParse({ limit: c.req.query('limit'), offset: c.req.query('offset') });
+    if (
+      !pagination.success ||
+      Object.keys(c.req.query()).some((key) => !['limit', 'offset'].includes(key))
+    )
+      return c.json({ error: { code: 'validation_failed' } }, 400);
+    try {
+      const db = deps.db ?? createSupabaseAdmin();
+      const page = await listFinalizedAssessmentOptions(
+        db,
+        c.get('tenantId').toLowerCase(),
+        pagination.data,
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15000)]),
+      );
+      return c.json({
+        assessments: page.assessments,
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+        runtimeAvailable: Boolean(
+          deps.runtimeUrl &&
+          deps.runtimeToken &&
+          deps.sourceSigningKey &&
+          Buffer.byteLength(deps.sourceSigningKey) >= 32 &&
+          deps.sourceSigningKey !== deps.runtimeToken,
+        ),
+      });
+    } catch {
+      return c.json({ error: { code: 'planning_source_unavailable' } }, 503);
+    }
+  });
+  app.get('/plans/proposal-assessment-source/:runId', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    for (const capability of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {
+      const denial = requireCapability(c, capability);
+      if (denial) return denial;
+    }
+    const ids = z
+      .object({ runId: z.uuid(), engagementId: z.uuid() })
+      .strict()
+      .safeParse({ runId: c.req.param('runId'), engagementId: c.req.query('engagementId') });
+    if (!ids.success || Object.keys(c.req.query()).some((key) => key !== 'engagementId'))
+      return c.json({ error: { code: 'validation_failed' } }, 400);
+    try {
+      const input = await readSudhaarSource(
+        deps.db ?? createSupabaseAdmin(),
+        c.get('tenantId').toLowerCase(),
+        ids.data.engagementId,
+        ids.data.runId,
+        'Assessment review proposal',
+      );
+      return c.json({ input });
+    } catch {
+      return c.json({ error: { code: 'planning_source_unavailable' } }, 503);
+    }
+  });
   app.post('/plans/proposals', async (c) => {
     c.header('Cache-Control', 'private, no-store');
     for (const cap of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {
@@ -56,14 +144,6 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
       key = z.uuid().safeParse(c.req.header('Idempotency-Key'));
     if (!parsed.success || !key.success || key.data.toLowerCase() !== parsed.data.operationKey)
       return c.json({ error: { code: 'validation_failed' } }, 400);
-    if (
-      !deps.runtimeUrl ||
-      !deps.runtimeToken ||
-      !deps.sourceSigningKey ||
-      Buffer.byteLength(deps.sourceSigningKey) < 32 ||
-      deps.sourceSigningKey === deps.runtimeToken
-    )
-      return c.json({ error: { code: 'planning_runtime_unavailable' } }, 503);
     const request = parsed.data,
       tenantId = c.get('tenantId').toLowerCase();
     try {
@@ -74,6 +154,22 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         request.assessmentRunId,
         request.title,
       );
+      const recovered = await recoverSudhaarOutput(
+        tenantId,
+        actor,
+        request.operationKey,
+        input,
+        deps.writerFactory,
+      );
+      if (recovered) return c.json(recovered, 200);
+      if (
+        !deps.runtimeUrl ||
+        !deps.runtimeToken ||
+        !deps.sourceSigningKey ||
+        Buffer.byteLength(deps.sourceSigningKey) < 32 ||
+        deps.sourceSigningKey === deps.runtimeToken
+      )
+        return c.json({ error: { code: 'planning_runtime_unavailable' } }, 503);
       const outcome = await invokeGenericAgent(
         {
           agent: 'sudhaar',
@@ -85,6 +181,7 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         },
         {
           ...deps,
+          settleSudhaarSuccess: settleSudhaarOutput(deps.writerFactory),
           runtimeUrl: deps.runtimeUrl,
           runtimeToken: deps.runtimeToken,
           sudhaarDispatch: (ctx) =>
@@ -95,22 +192,30 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         },
       );
       if (outcome.status !== 200) return c.json(outcome.body, outcome.status);
-      return c.json(
-        {
-          data: validateSudhaarProposal(outcome.body.output, input),
-          invocation: {
-            runId: outcome.run.runId,
-            correlationId: request.operationKey,
-            requestHash: outcome.run.requestHash,
-            responseHash: outcome.run.responseHash,
-          },
-        },
-        200,
+      const recorded = await recoverSudhaarOutput(
+        tenantId,
+        actor,
+        request.operationKey,
+        input,
+        deps.writerFactory,
       );
+      if (
+        !recorded ||
+        recorded.invocation.runId !== outcome.run.runId ||
+        recorded.invocation.requestHash !== outcome.run.requestHash ||
+        recorded.invocation.responseHash !== outcome.run.responseHash
+      )
+        throw new SudhaarOutputRefused('planning_output_uncertain');
+      return c.json(recorded, 200);
     } catch (error) {
       const code =
-        error instanceof PlanningSourceRefused ? error.code : 'planning_proposal_unavailable';
-      return c.json({ error: { code } }, code === 'planning_source_conflict' ? 409 : 503);
+        error instanceof PlanningSourceRefused || error instanceof SudhaarOutputRefused
+          ? error.code
+          : 'planning_proposal_unavailable';
+      return c.json(
+        { error: { code } },
+        code === 'planning_source_conflict' || error instanceof SudhaarOutputRefused ? 409 : 503,
+      );
     }
   });
   return app;

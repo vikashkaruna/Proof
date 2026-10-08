@@ -21,3 +21,6 @@ export * from './assessment-request';
 export * from './assessment-provenance';
 
 export * from './sudhaar-proposal';
+export * from './assessment-questionnaire';
+
+export * from './sudhaar-review-adoption';

@@ -18,6 +18,12 @@ class PolicyDraft(BaseModel):
     legal_review_required: bool = True
 
 
+def _recorded_list(values: list[str] | None) -> str:
+    if values is None:
+        return "To be confirmed"
+    return ", ".join(values) if values else "Human recorded none (review required)"
+
+
 def _activity_sections(records: list[RopaRecord]) -> list[dict[str, str]]:
     """Carry unresolved facts through every draft instead of hiding them."""
     return [
@@ -26,7 +32,7 @@ def _activity_sections(records: list[RopaRecord]) -> list[dict[str, str]]:
             "body": (
                 f"Activity: {record.activity_id}. Purpose: {record.purpose}. "
                 f"Lawful basis: {record.lawful_basis}. Retention: {record.retention_period}. "
-                f"Stated processors: {', '.join(record.processors or []) or 'To be confirmed'}. "
+                f"Stated processors: {_recorded_list(record.processors)}. "
                 f"Stated region: {record.region}. "
                 f"Cross-border processing: {record.cross_border if record.cross_border is not None else 'Unknown'}. "
                 f"Transfer review: {record.transfer_safeguards or 'To be confirmed'}. "
@@ -62,7 +68,18 @@ def build_privacy_notice(organisation_name: str, records: list[RopaRecord]) -> P
         title=f"Draft Privacy Notice — {organisation_name}",
         sections=[
             {"heading": "Processing activities", "body": activities},
-            {"heading": "Data categories", "body": ", ".join(categories) or "To be confirmed"},
+            {
+                "heading": "Data categories",
+                "body": (
+                    (", ".join(categories) or "Human recorded none (review required)")
+                    if records and all(record.data_categories is not None for record in records)
+                    else (
+                        ", ".join(categories) + "; some activities require category confirmation"
+                        if categories
+                        else "To be confirmed"
+                    )
+                ),
+            },
             {
                 "heading": "Rights and contact details",
                 "body": "To be completed by the Data Fiduciary before publication.",

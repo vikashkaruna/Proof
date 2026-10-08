@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { AssessmentRequestSchema, AssessmentRequestReceiptSchema } from '@axiom/types';
+import {
+  AssessmentRequestSchema,
+  AssessmentRequestReceiptSchema,
+  ASSESSMENT_REQUEST_MAX_BYTES,
+} from '@axiom/types';
 
 export class AssessmentRequestError extends Error {}
 export const ASSESSMENT_JOURNAL_CHANGED = 'axiom:assessment-request-changed';
@@ -10,12 +14,30 @@ export const retainedAssessmentSchema = z
     actorId: uuid,
     libraryVersion: z.string().min(1).max(200),
     request: AssessmentRequestSchema,
+    questionnaireDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict()
   .refine(
     (value) =>
-      Object.keys(value.request.answers).length === 0 &&
-      Object.values(value.request.applicability).every((flag) => flag === null),
+      (Object.keys(value.request.answers).length === 0 &&
+        Object.values(value.request.applicability).every((flag) => flag === null)) ||
+      value.questionnaireDigest !== undefined,
+  )
+  .refine(
+    (value) =>
+      !value.request.expectedQuestionnaire ||
+      (value.request.expectedQuestionnaire.libraryVersion === value.libraryVersion &&
+        value.request.expectedQuestionnaire.questionnaireDigest === value.questionnaireDigest),
+    'The retained questionnaire does not match the reviewed source.',
+  )
+  .refine(
+    (value) =>
+      new TextEncoder().encode(JSON.stringify(value.request)).length <=
+      ASSESSMENT_REQUEST_MAX_BYTES,
+    'The questionnaire exceeds the supported request size.',
   );
 export type RetainedAssessment = z.infer<typeof retainedAssessmentSchema>;
 export const assessmentJournalKey = (tenant: string, actor: string) =>
@@ -23,7 +45,7 @@ export const assessmentJournalKey = (tenant: string, actor: string) =>
 export function readAssessmentJournal(storage: Storage, tenant: string, actor: string) {
   const raw = storage.getItem(assessmentJournalKey(tenant, actor));
   if (raw === null) return null;
-  if (raw.length > 4096)
+  if (new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024)
     throw new AssessmentRequestError('Retained request could not be verified.');
   const value = retainedAssessmentSchema.parse(JSON.parse(raw));
   if (value.tenantId !== tenant || value.actorId !== actor)
@@ -36,6 +58,13 @@ export function retainAssessmentJournal(storage: Storage, value: RetainedAssessm
   const parsed = retainedAssessmentSchema.parse(value);
   const old = readAssessmentJournal(storage, parsed.tenantId, parsed.actorId);
   const raw = JSON.stringify(parsed);
+  if (
+    new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024 ||
+    new TextEncoder().encode(JSON.stringify(parsed.request)).length > ASSESSMENT_REQUEST_MAX_BYTES
+  )
+    throw new AssessmentRequestError(
+      'The questionnaire exceeds the supported request size. Nothing was submitted.',
+    );
   if (old && JSON.stringify(old) !== raw)
     throw new AssessmentRequestError(
       'Resolve the retained assessment request before starting another.',
@@ -53,13 +82,16 @@ export function clearFinalizedAssessmentJournal(
 ) {
   const status = assessmentJobReadoutSchema.parse(readout);
   if (
-    status.status !== 'finalization_recorded' ||
+    (status.status !== 'finalization_recorded' && status.status !== 'resolution_recorded') ||
+    (status.status === 'resolution_recorded' && status.resolution.actorId !== value.actorId) ||
     status.jobId !== value.request.operationKey ||
     status.engagementId !== value.request.engagementId ||
     status.correlationId !== value.request.operationKey ||
     status.libraryVersion !== value.libraryVersion
   )
-    throw new AssessmentRequestError('Only a confirmed finalized request may be archived.');
+    throw new AssessmentRequestError(
+      'Only a matching finalized or resolved request may be archived.',
+    );
   const old = readAssessmentJournal(storage, value.tenantId, value.actorId);
   if (!old || JSON.stringify(old) !== JSON.stringify(value))
     throw new AssessmentRequestError('Retained request changed. Reload before continuing.');
@@ -86,7 +118,7 @@ async function responseBody(response: Response) {
   }
   return response.json() as Promise<unknown>;
 }
-export async function submitUnknownAssessment(value: RetainedAssessment) {
+export async function submitAssessmentRequest(value: RetainedAssessment) {
   const retained = retainedAssessmentSchema.parse(value);
   let response: Response;
   try {
@@ -141,6 +173,23 @@ export const assessmentJobReadoutSchema = z
   .discriminatedUnion('status', [
     baseStatus
       .extend({
+        status: z.literal('resolution_recorded'),
+        phase: z.literal('cancelled_unclaimed'),
+        finalization: z.null(),
+        resolution: z
+          .object({
+            actorId: uuid,
+            requestedReceipt: receiptId,
+            cancellationReceipt: receiptId,
+            resolvedAt: z.iso.datetime({ offset: true }),
+            verification: z.literal('persisted_human_unclaimed_cancellation_bindings'),
+            workerCleanupVerified: z.literal(false),
+          })
+          .strict(),
+      })
+      .strict(),
+    baseStatus
+      .extend({
         status: z.literal('unconfirmed'),
         phase: z.enum(['queued', 'running', 'result_recorded', 'terminal_unconfirmed']),
         finalization: z.null(),
@@ -165,6 +214,14 @@ export const assessmentJobReadoutSchema = z
       .strict(),
   ])
   .superRefine((value, context) => {
+    if (
+      value.status === 'resolution_recorded' &&
+      (value.recordedRunStatus !== 'cancelled' ||
+        value.claimedAt !== null ||
+        value.resolution.requestedReceipt === value.resolution.cancellationReceipt ||
+        Date.parse(value.resolution.resolvedAt) < Date.parse(value.createdAt))
+    )
+      context.addIssue({ code: 'custom', message: 'Resolved status is inconsistent' });
     if (value.status !== 'finalization_recorded') return;
     const final = value.finalization;
     if (
@@ -204,4 +261,67 @@ export async function readAssessmentRequest(value: RetainedAssessment) {
       'Saved status does not match the retained assessment request.',
     );
   return status;
+}
+
+/** Backward-compatible unknown-draft caller; full intake uses the same fenced endpoint. */
+export const submitUnknownAssessment = submitAssessmentRequest;
+
+export async function cancelUnclaimedAssessmentRequest(
+  value: RetainedAssessment,
+  readout: AssessmentJobReadout,
+) {
+  const retained = retainedAssessmentSchema.parse(value),
+    status = assessmentJobReadoutSchema.parse(readout);
+  if (
+    status.status !== 'unconfirmed' ||
+    status.recordedRunStatus !== 'queued' ||
+    status.phase !== 'queued' ||
+    status.claimedAt !== null ||
+    status.jobId !== retained.request.operationKey ||
+    status.correlationId !== retained.request.operationKey ||
+    status.engagementId !== retained.request.engagementId ||
+    status.libraryVersion !== retained.libraryVersion
+  )
+    throw new AssessmentRequestError(
+      'Only the matching recorded unclaimed request may be cancelled.',
+    );
+  let response: Response;
+  try {
+    response = await fetch(`/api/bff/v1/assessment/jobs/${retained.request.operationKey}/cancel`, {
+      method: 'POST',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-Id': retained.tenantId,
+        'X-Expected-Actor-Id': retained.actorId,
+        'Idempotency-Key': retained.request.operationKey,
+      },
+      body: JSON.stringify(retained.request),
+    });
+  } catch {
+    throw new AssessmentRequestError(
+      'Cancellation response was interrupted. Keep the original reference and check its recorded status.',
+    );
+  }
+  const receipt = z
+    .object({
+      jobId: uuid,
+      runId: uuid,
+      cancellationReceipt: receiptId,
+      resolvedAt: z.iso.datetime({ offset: true }),
+      status: z.literal('cancellation_recorded'),
+    })
+    .strict()
+    .safeParse(await responseBody(response));
+  if (
+    response.status !== 202 ||
+    !receipt.success ||
+    receipt.data.jobId !== status.jobId ||
+    receipt.data.runId !== status.runId
+  )
+    throw new AssessmentRequestError(
+      'Cancellation receipt could not be verified. Keep the original reference and check again.',
+    );
+  return receipt.data;
 }

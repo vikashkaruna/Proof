@@ -58,6 +58,37 @@ function progress(final = false) {
 }
 const fetchMock = vi.fn();
 const finalized = vi.fn();
+const questionnaire = () => ({
+  tenantId: tenant,
+  engagementId: engagement,
+  libraryVersion: '0.1.1',
+  questionnaireDigest: 'd'.repeat(64),
+  digestScope: 'ordered_questionnaire_projection_v1',
+  declarationsVerified: false,
+  controls: [
+    {
+      id: 'C',
+      title: 'Governance',
+      questions: [
+        { id: 'Q1', prompt: 'Is a policy adopted?', type: 'boolean' },
+        { id: 'Q2', prompt: 'Is a DPO appointed?', type: 'boolean' },
+        { id: 'Q3', prompt: 'Supply evidence', type: 'evidence' },
+      ],
+    },
+  ],
+});
+async function reviewKnownAnswers() {
+  fireEvent.click(screen.getByRole('button', { name: 'Enter questionnaire declarations' }));
+  const yes = await screen.findByRole('combobox', { name: 'C Q1: Is a policy adopted?' });
+  fireEvent.change(yes, { target: { value: 'yes' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'C Q2: Is a DPO appointed?' }), {
+    target: { value: 'no' },
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Processes children’s personal data' }), {
+    target: { value: 'no' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Review questionnaire declarations' }));
+}
 function panel(overrides: Partial<React.ComponentProps<typeof AssessmentRequestPanel>> = {}) {
   return (
     <AssessmentRequestPanel
@@ -88,6 +119,187 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it('does not enable questionnaire review or submission while published options are loading', async () => {
+  let resolve: (value: Response) => void = () => {};
+  fetchMock.mockReturnValue(
+    new Promise<Response>((done) => {
+      resolve = done;
+    }),
+  );
+  render(panel());
+  fireEvent.click(screen.getByRole('button', { name: 'Enter questionnaire declarations' }));
+  expect(screen.queryByRole('combobox')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Review questionnaire declarations' })).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Submit reviewed questionnaire' }).hasAttribute('disabled'),
+  ).toBe(true);
+  expect(screen.getByRole('checkbox').hasAttribute('disabled')).toBe(true);
+  resolve(Response.json(questionnaire()));
+  await screen.findByRole('combobox', { name: 'C Q1: Is a policy adopted?' });
+  expect(
+    screen
+      .getAllByRole('combobox')
+      .every((element) => (element as HTMLSelectElement).value === 'unknown'),
+  ).toBe(true);
+  expect(screen.getByText(/Supply evidence.*remains unassessed/)).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});
+it('never interprets inherited object properties as questionnaire declarations', async () => {
+  const value = questionnaire();
+  value.controls[0]!.questions.push({
+    id: 'constructor',
+    prompt: 'Prototype-named question',
+    type: 'boolean',
+  });
+  fetchMock
+    .mockResolvedValueOnce(Response.json(value))
+    .mockResolvedValueOnce(Response.json(accepted(), { status: 202 }));
+  render(panel());
+  fireEvent.click(screen.getByRole('button', { name: 'Enter questionnaire declarations' }));
+  const selection = await screen.findByRole('combobox', {
+    name: 'C constructor: Prototype-named question',
+  });
+  expect((selection as HTMLSelectElement).value).toBe('unknown');
+  fireEvent.change(screen.getByRole('combobox', { name: 'C Q1: Is a policy adopted?' }), {
+    target: { value: 'yes' },
+  });
+  expect((selection as HTMLSelectElement).value).toBe('unknown');
+  fireEvent.click(screen.getByRole('button', { name: 'Review questionnaire declarations' }));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed questionnaire' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body).answers.C).toEqual({
+    Q1: true,
+    Q2: null,
+    constructor: null,
+  });
+});
+it('requires reviewed exact declarations and explicit confirmation, then retains their body before POST', async () => {
+  fetchMock
+    .mockResolvedValueOnce(Response.json(questionnaire()))
+    .mockImplementationOnce(async (_url, init) => {
+      const saved = readAssessmentJournal(localStorage, tenant, actor);
+      expect(saved?.questionnaireDigest).toBe('d'.repeat(64));
+      expect(saved?.request).toEqual(JSON.parse(init.body));
+      return Response.json(accepted(), { status: 202 });
+    });
+  render(panel());
+  await reviewKnownAnswers();
+  expect(
+    screen.getByRole('button', { name: 'Submit reviewed questionnaire' }).hasAttribute('disabled'),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed questionnaire' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const body = JSON.parse(fetchMock.mock.calls[1]![1].body);
+  expect(body.answers).toEqual({ C: { Q1: true, Q2: false } });
+  expect(body.expectedQuestionnaire).toEqual({
+    libraryVersion: '0.1.1',
+    questionnaireDigest: 'd'.repeat(64),
+  });
+  expect(body.applicability).toEqual({
+    sdfSelfAttested: null,
+    processesChildren: false,
+    processesHealth: null,
+  });
+  expect(body.answers.C).not.toHaveProperty('Q3');
+  expect(fetchMock.mock.calls[1]![1].headers['X-Expected-Actor-Id']).toBe(actor);
+  expect(finalized).not.toHaveBeenCalled();
+});
+it('invalidates previous confirmation when reviewed declarations are edited before submission', async () => {
+  fetchMock.mockResolvedValue(Response.json(questionnaire()));
+  render(panel());
+  await reviewKnownAnswers();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit questionnaire declarations' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'C Q1: Is a policy adopted?' }), {
+    target: { value: 'no' },
+  });
+  expect(screen.getByRole('checkbox').hasAttribute('disabled')).toBe(true);
+  expect(
+    screen.getByRole('button', { name: 'Submit reviewed questionnaire' }).hasAttribute('disabled'),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Review questionnaire declarations' }));
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});
+it('recovers an interrupted known-answer submission across remount with the same body and key', async () => {
+  fetchMock
+    .mockResolvedValueOnce(Response.json(questionnaire()))
+    .mockRejectedValueOnce(new Error('response lost'));
+  const view = render(panel());
+  await reviewKnownAnswers();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed questionnaire' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('interrupted'));
+  const submitted = fetchMock.mock.calls[1]![1];
+  const saved = readAssessmentJournal(localStorage, tenant, actor);
+  view.unmount();
+  fetchMock.mockResolvedValueOnce(Response.json(accepted(), { status: 202 }));
+  render(panel());
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry original request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(fetchMock.mock.calls[2]![1].body).toBe(submitted.body);
+  expect(fetchMock.mock.calls[2]![1].headers['Idempotency-Key']).toBe(operation);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(saved);
+  expect(crypto.randomUUID).toHaveBeenCalledOnce();
+});
+it('never POSTs reviewed declarations when browser retention is blocked', async () => {
+  fetchMock.mockResolvedValue(Response.json(questionnaire()));
+  render(panel());
+  await reviewKnownAnswers();
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('storage blocked');
+  });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed questionnaire' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('storage blocked'));
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+});
+it.each(['actor', 'tenant'])(
+  'withdraws reviewed declarations and confirmation when %s changes',
+  async (kind) => {
+    fetchMock.mockResolvedValue(Response.json(questionnaire()));
+    const view = render(panel());
+    await reviewKnownAnswers();
+    fireEvent.click(screen.getByRole('checkbox'));
+    view.rerender(panel(kind === 'actor' ? { actorId: run } : { tenantId: run }));
+    expect(screen.queryByRole('button', { name: 'Submit reviewed questionnaire' })).toBeNull();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+  },
+);
+it.each(['tenant', 'engagement', 'library', 'duplicate', 'verified'])(
+  'refuses mismatched questionnaire source %s before review',
+  async (kind) => {
+    const value = questionnaire();
+    if (kind === 'tenant') value.tenantId = run;
+    if (kind === 'engagement') value.engagementId = run;
+    if (kind === 'library') value.libraryVersion = '0.1.0';
+    if (kind === 'duplicate') value.controls.push(value.controls[0]!);
+    fetchMock.mockResolvedValue(
+      Response.json(kind === 'verified' ? { ...value, declarationsVerified: true } : value),
+    );
+    render(panel());
+    fireEvent.click(screen.getByRole('button', { name: 'Enter questionnaire declarations' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('could not be verified'),
+    );
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(
+      screen
+        .getByRole('button', { name: 'Submit reviewed questionnaire' })
+        .hasAttribute('disabled'),
+    ).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  },
+);
 it('requires explicit unknown-answer acknowledgement before a human request', async () => {
   fetchMock.mockResolvedValue(Response.json(accepted(), { status: 202 }));
   render(panel());
@@ -379,4 +591,151 @@ it('withdraws an old finalization and completion message when another tab change
   expect(screen.getByRole('button', { name: 'Retry original request' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(replacement);
+});
+
+const cancelledResolution = () => ({
+  ...progress(),
+  status: 'resolution_recorded',
+  phase: 'cancelled_unclaimed',
+  recordedRunStatus: 'cancelled',
+  resolution: {
+    actorId: actor,
+    requestedReceipt: '21',
+    cancellationReceipt: '22',
+    resolvedAt: '2026-10-05T11:02:00Z',
+    verification: 'persisted_human_unclaimed_cancellation_bindings',
+    workerCleanupVerified: false,
+  },
+});
+async function reviewCancellation() {
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  const button = await screen.findByRole('button', { name: 'Cancel if not claimed' });
+  expect(button.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: /I want to cancel this original request/ }));
+  expect(button.hasAttribute('disabled')).toBe(false);
+}
+it('requires an explicit checked unclaimed cancellation and a separate verified read before archiving', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          jobId: operation,
+          runId: run,
+          cancellationReceipt: '22',
+          resolvedAt: '2026-10-05T11:02:00Z',
+          status: 'cancellation_recorded',
+        },
+        { status: 202 },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json(cancelledResolution()));
+  render(panel());
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation recorded. Check the retained request/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+  expect(screen.queryByRole('button', { name: 'Archive cancelled browser reference' })).toBeNull();
+  const init = fetchMock.mock.calls[1]![1];
+  expect(JSON.parse(init.body)).toEqual(journal().request);
+  expect(init.headers).toMatchObject({
+    'Idempotency-Key': operation,
+    'X-Expected-Actor-Id': actor,
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  const archive = await screen.findByRole('button', {
+    name: 'Archive cancelled browser reference',
+  });
+  expect(finalized).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Retry original request' })).toBeNull();
+  fireEvent.click(archive);
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(screen.getByRole('checkbox').getAttribute('checked')).toBeNull();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});
+it('lost cancellation response and remount preserve the reference without automatic POST or archive', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockRejectedValueOnce(new Error('lost'));
+  const mounted = render(panel());
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation response was interrupted/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+  mounted.unmount();
+  fetchMock.mockClear();
+  render(panel());
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Archive cancelled browser reference' })).toBeNull();
+  fetchMock.mockResolvedValueOnce(Response.json(cancelledResolution()));
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await screen.findByRole('button', { name: 'Archive cancelled browser reference' });
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0]![1].method).toBeUndefined();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+});
+it('does not expose cancellation for a viewer or after a worker claim', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock.mockResolvedValue(Response.json({ ...progress(), claimedAt: '2026-10-05T11:01:00Z' }));
+  const mounted = render(panel());
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+  mounted.unmount();
+  fetchMock.mockResolvedValue(Response.json(progress()));
+  render(panel({ canRequest: false }));
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+});
+it('rechecks cross-tab journal ownership before the explicit cancellation POST', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock.mockResolvedValue(Response.json(progress()));
+  render(panel());
+  await reviewCancellation();
+  localStorage.setItem(
+    assessmentJournalKey(tenant, actor),
+    JSON.stringify({
+      ...journal(),
+      request: { ...journal().request, operationKey: run },
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Retained request changed/);
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(readAssessmentJournal(localStorage, tenant, actor)!.request.operationKey).toBe(run);
+});
+it('retains original cancellation and explicit archive when the page current library pin has changed', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          jobId: operation,
+          runId: run,
+          cancellationReceipt: '22',
+          resolvedAt: '2026-10-05T11:02:00Z',
+          status: 'cancellation_recorded',
+        },
+        { status: 202 },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json(cancelledResolution()));
+  render(panel({ libraryVersion: 'current-new-version' }));
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation recorded. Check the retained request/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)!.libraryVersion).toBe('0.1.1');
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual(journal().request);
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Archive cancelled browser reference' }),
+  );
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(finalized).not.toHaveBeenCalled();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
 });

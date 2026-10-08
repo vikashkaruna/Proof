@@ -37,6 +37,29 @@ let fake: FakeDb,
   enqueue: ReturnType<typeof vi.fn<(args: Record<string, unknown>) => unknown>>,
   recovery: ReturnType<typeof vi.fn<(args: Record<string, unknown>) => unknown>>,
   send: ReturnType<typeof vi.fn>;
+function expectedQuestionnaire() {
+  return {
+    libraryVersion: 'pinned',
+    questionnaireDigest: createHash('sha256')
+      .update(
+        canonicalJson({
+          libraryVersion: 'pinned',
+          controls: [
+            {
+              id: 'A',
+              title: 'Fixture',
+              questions: [
+                { id: 'Q1', prompt: ' Boolean  déclaration \n?', type: 'boolean' },
+                { id: 'Q2', prompt: 'Text?', type: 'text' },
+              ],
+            },
+          ],
+        }),
+        'utf8',
+      )
+      .digest('hex'),
+  };
+}
 function parsed(value: unknown = { operationKey: J, engagementId: E }) {
   return AssessmentRequestSchema.parse(value);
 }
@@ -72,9 +95,10 @@ beforeEach(() => {
       {
         id: 'A',
         library_version: 'pinned',
+        title: 'Fixture',
         assessment_questions: [
-          { id: 'Q1', type: 'boolean' },
-          { id: 'Q2', type: 'text' },
+          { id: 'Q1', prompt: ' Boolean  déclaration \n?', type: 'boolean' },
+          { id: 'Q2', prompt: 'Text?', type: 'text' },
         ],
       },
     ],
@@ -87,7 +111,9 @@ beforeEach(() => {
   }));
   recovery = vi.fn((_args: Record<string, unknown>) => null);
   human.onRpc('recover_assessment_dispatch', recovery);
+  human.onRpc('recover_reviewed_assessment_dispatch', recovery);
   human.onRpc('enqueue_assessment_dispatch', enqueue);
+  human.onRpc('enqueue_reviewed_assessment_dispatch', enqueue);
   send = vi.fn(async (command) => {
     expect(command.constructor.name).toBe('EncryptCommand');
     expect(command.input.KeyId).toBe(ref);
@@ -202,6 +228,7 @@ describe('trusted human assessment producer composition', () => {
       parsed({
         operationKey: J,
         engagementId: E,
+        expectedQuestionnaire: expectedQuestionnaire(),
         answers: { A: { Q1: null } },
         applicability: { sdfSelfAttested: false, processesChildren: true },
       }),
@@ -228,8 +255,8 @@ describe('trusted human assessment producer composition', () => {
       if (field === 'controls') fake.rows('controls').splice(0);
       if (field === 'duplicateQID')
         fake.rows('controls')[0]!.assessment_questions = [
-          { id: 'Q1', type: 'boolean' },
-          { id: 'Q1', type: 'boolean' },
+          { id: 'Q1', prompt: ' Boolean  déclaration \n?', type: 'boolean' },
+          { id: 'Q1', prompt: ' Boolean  déclaration \n?', type: 'boolean' },
         ];
       if (field === 'duplicateControl') {
         fake.rows('control_libraries')[0]!.control_count = 2;
@@ -312,5 +339,214 @@ describe('trusted human assessment producer composition', () => {
       'startup refused',
     );
     await expect(loadAssessmentProducer('relative-config.json')).rejects.toThrow('startup refused');
+  });
+  it('requires reviewed source for new known declarations before encryption or enqueue', async () => {
+    const p = await producer();
+    await expect(
+      p.request(T, A, parsed({ operationKey: J, engagementId: E, answers: { A: { Q1: false } } })),
+    ).rejects.toThrow(AssessmentQuestionnaireRefused);
+    expect(send).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+  it('recovers an existing known journal without new review metadata', async () => {
+    recovery.mockReturnValue({ job_id: J, run_id: R, expires_at: '2026-10-05T20:00:00Z' });
+    const p = await producer();
+    expect(
+      (
+        await p.request(
+          T,
+          A,
+          parsed({ operationKey: J, engagementId: E, answers: { A: { Q1: true } } }),
+        )
+      ).run_id,
+    ).toBe(R);
+    expect(send).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+  it.each(['library', 'digest'])('refuses changed reviewed %s before encryption', async (field) => {
+    const p = await producer();
+    const expected = expectedQuestionnaire();
+    if (field === 'library') expected.libraryVersion = 'foreign';
+    else expected.questionnaireDigest = '0'.repeat(64);
+    await expect(
+      p.request(
+        T,
+        A,
+        parsed({
+          operationKey: J,
+          engagementId: E,
+          answers: { A: { Q1: true } },
+          expectedQuestionnaire: expected,
+        }),
+      ),
+    ).rejects.toThrow(AssessmentQuestionnaireRefused);
+    expect(send).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+  it('passes exact reviewed precondition to the atomic RPC without changing worker input hash', async () => {
+    human.onRpc('enqueue_assessment_dispatch', () => {
+      throw new Error('Reviewed request used legacy enqueue');
+    });
+    const p = await producer();
+    const expected = expectedQuestionnaire();
+    await p.request(
+      T,
+      A,
+      parsed({
+        operationKey: J,
+        engagementId: E,
+        answers: { A: { Q1: false } },
+        expectedQuestionnaire: expected,
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        p_expected_library_version: 'pinned',
+        p_expected_questionnaire_digest: expected.questionnaireDigest,
+      }),
+    );
+    expect(enqueue.mock.calls[0]![0].p_input_hash).toBe(
+      createHash('sha256')
+        .update(
+          canonicalJson({
+            tenant_id: T,
+            engagement_id: E,
+            library_version: 'pinned',
+            answers: { A: { Q1: false } },
+            sdf_self_attested: null,
+            processes_children: null,
+            processes_health: null,
+          }),
+          'utf8',
+        )
+        .digest('hex'),
+    );
+  });
+  it.each(['known', 'unknown'])(
+    'recovers original recorded %s body after engagement repinning without encryption or enqueue',
+    async (kind) => {
+      const body = parsed({
+        operationKey: J,
+        engagementId: E,
+        ...(kind === 'known'
+          ? { answers: { A: { Q1: false } }, applicability: { processesChildren: true } }
+          : {}),
+      });
+      const hash = createHash('sha256')
+        .update(
+          canonicalJson({
+            tenant_id: T,
+            engagement_id: E,
+            library_version: 'pinned',
+            answers: body.answers,
+            sdf_self_attested: body.applicability.sdfSelfAttested,
+            processes_children: body.applicability.processesChildren,
+            processes_health: body.applicability.processesHealth,
+          }),
+          'utf8',
+        )
+        .digest('hex');
+      fake.seed('assessment_dispatch_jobs', {
+        id: J,
+        tenant_id: T,
+        run_id: R,
+        actor_id: A,
+        workload_id: W,
+        estate_id: null,
+        engagement_id: E,
+        correlation_id: J,
+        input_hash: hash,
+      });
+      fake.seed('agent_runs', {
+        id: R,
+        tenant_id: T,
+        agent: 'parikshan',
+        engagement_id: E,
+        correlation_id: J,
+        input_redacted_hash: hash,
+        metadata: { request_kind: 'durable_assessment_v1', assessment_request_receipt: '11' },
+      });
+      fake.seed('audit_ledger', {
+        id: '11',
+        tenant_id: T,
+        correlation_id: J,
+        actor_type: 'human',
+        actor_id: A,
+        action_type: 'assessment.requested',
+        target_ref: J,
+        input_hash: hash,
+        output_hash: null,
+        result: 'pending',
+        detail: {
+          purpose: 'durable_assessment',
+          job_id: J,
+          run_id: R,
+          workload_id: W,
+          estate_id: null,
+          engagement_id: E,
+          library_version: 'pinned',
+        },
+      });
+      fake.rows('engagements')[0]!.library_version = 'new-current-pin';
+      recovery.mockImplementation((args) =>
+        args.p_input_hash === hash
+          ? { job_id: J, run_id: R, expires_at: '2026-10-05T20:00:00Z' }
+          : { error: 'dispatch_conflict' },
+      );
+      const p = await producer();
+      expect((await p.request(T, A, body)).run_id).toBe(R);
+      await expect(
+        p.request(
+          T,
+          A,
+          parsed({
+            ...body,
+            applicability: {
+              processesChildren: body.applicability.processesChildren === true ? false : true,
+            },
+          }),
+        ),
+      ).rejects.toThrow();
+      await expect(
+        p.request(T, A, parsed({ ...body, answers: { A: { Q1: true } } })),
+      ).rejects.toThrow();
+      await expect(p.request(T, R, body)).rejects.toThrow();
+      expect(send).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    },
+  );
+  it('never accepts a browser version hint as recovery authority for a new unknown request', async () => {
+    const p = await producer();
+    await expect(
+      p.request(
+        T,
+        A,
+        parsed({
+          operationKey: J,
+          engagementId: E,
+          expectedQuestionnaire: { libraryVersion: 'old-pin', questionnaireDigest: 'a'.repeat(64) },
+        }),
+      ),
+    ).rejects.toThrow(AssessmentQuestionnaireRefused);
+    expect(recovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        p_input_hash: createHash('sha256')
+          .update(
+            canonicalJson({
+              tenant_id: T,
+              engagement_id: E,
+              library_version: 'pinned',
+              answers: {},
+              sdf_self_attested: null,
+              processes_children: null,
+              processes_health: null,
+            }),
+            'utf8',
+          )
+          .digest('hex'),
+      }),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

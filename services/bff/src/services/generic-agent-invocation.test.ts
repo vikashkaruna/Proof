@@ -770,3 +770,80 @@ it('bounds the scoped human start and settlement RPC transports', async () => {
   expect(signals).toHaveLength(2);
   expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(true);
 });
+it('uses trusted atomic capture only after successful Sudhaar validation, keeping output and envelope hashes distinct', async () => {
+  const f = fixture(),
+    input = { ...context(), agent: 'sudhaar' };
+  f.fetchImpl.mockImplementation(
+    async (_url, init) => new Response(JSON.stringify(runtimeResult(init, { agent: 'sudhaar' }))),
+  );
+  const validateOutput = vi.fn(),
+    settleSudhaarSuccess = vi.fn<NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>>(
+      async () => ({
+        run_id: RUN,
+        status: 'succeeded',
+        replayed: false,
+      }),
+    );
+  const actual = await invokeGenericAgent(input, {
+    ...f.deps,
+    validateOutput,
+    settleSudhaarSuccess,
+  });
+  expect(actual.status).toBe(200);
+  expect(validateOutput).toHaveBeenCalledTimes(1);
+  expect(settleSudhaarSuccess).toHaveBeenCalledTimes(1);
+  expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['record_generic_agent_run_start']);
+  const c = settleSudhaarSuccess.mock.calls[0]?.[0];
+  expect(c).toMatchObject({
+    canonicalInput: canonicalJson(input.input),
+    canonicalOutput: canonicalJson(runtimeResult(f.fetchImpl.mock.calls[0]?.[1]).output),
+  });
+});
+it('capture failure remains uncertain and does not fall through to generic success settlement', async () => {
+  const f = fixture(),
+    input = { ...context(), agent: 'sudhaar' };
+  f.fetchImpl.mockImplementation(
+    async (_url, init) => new Response(JSON.stringify(runtimeResult(init, { agent: 'sudhaar' }))),
+  );
+  const actual = await invokeGenericAgent(input, {
+    ...f.deps,
+    settleSudhaarSuccess: async () => {
+      throw new Error('capture unavailable');
+    },
+  });
+  expect(actual.status).toBe(503);
+  expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['record_generic_agent_run_start']);
+  expect(f.broadcast).toHaveBeenCalledTimes(1);
+});
+it('failure settlement does not call the trusted Sudhaar success capture', async () => {
+  const f = fixture();
+  f.fetchImpl.mockImplementation(
+    async (_url, init) =>
+      new Response(
+        JSON.stringify(
+          runtimeResult(init, {
+            agent: 'sudhaar',
+            status: 'failed',
+            output: null,
+            error: 'provider failure',
+          }),
+        ),
+      ),
+  );
+  const settleSudhaarSuccess = vi.fn();
+  await invokeGenericAgent({ ...context(), agent: 'sudhaar' }, { ...f.deps, settleSudhaarSuccess });
+  expect(settleSudhaarSuccess).not.toHaveBeenCalled();
+  expect(f.rpc.mock.calls.map(([name]) => name)).toEqual([
+    'record_generic_agent_run_start',
+    'record_generic_agent_run_finish',
+  ]);
+});
+
+it('refuses Sudhaar-specific capture configuration for another agent before any dispatch', async () => {
+  const f = fixture();
+  const settleSudhaarSuccess = vi.fn();
+  const actual = await invokeGenericAgent(context(), { ...f.deps, settleSudhaarSuccess });
+  expect(actual.status).toBe(403);
+  expect(f.rpc).not.toHaveBeenCalled();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+});

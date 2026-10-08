@@ -112,8 +112,8 @@ const AGENTS: Array<{
   {
     name: 'sanket',
     label: 'Sanket',
-    role: 'Continuous Surveillance',
-    desc: 'Signal monitor & post-remediation regression monitoring.',
+    role: 'Public Market Observations',
+    desc: 'Public observations require configured capture transport and human review.',
     autonomy: 'L1',
   },
   {
@@ -133,6 +133,7 @@ const AGENTS: Array<{
 ];
 
 const WORKFLOW_HREF: Partial<Record<AgentName, string>> = {
+  sudhaar: '/plans',
   karya: '/approval',
   saakshi: '/evidence',
   prativedan: '/reports',

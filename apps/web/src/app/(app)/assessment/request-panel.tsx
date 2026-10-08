@@ -8,7 +8,8 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import Link from 'next/link';
-import { AssessmentRequestSchema } from '@axiom/types';
+import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
+import { AssessmentQuestionnaireEditor, type ReviewedQuestionnaire } from './questionnaire';
 import {
   ASSESSMENT_JOURNAL_CHANGED,
   assessmentJournalKey,
@@ -16,7 +17,8 @@ import {
   readAssessmentJournal,
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
-  submitUnknownAssessment,
+  submitAssessmentRequest,
+  cancelUnclaimedAssessmentRequest,
   readAssessmentRequest,
   type RetainedAssessment,
   type AssessmentJobReadout,
@@ -75,7 +77,8 @@ function RequestPanel({
     if (raw === '__unhydrated__') return { retained: null, ready: false, invalid: false };
     if (raw === null) return { retained: null, ready: true, invalid: false };
     try {
-      if (raw.length > 4096) throw new Error();
+      if (new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024)
+        throw new Error();
       const value = retainedAssessmentSchema.parse(JSON.parse(raw));
       if (value.tenantId !== tenantId || value.actorId !== actorId) throw new Error();
       return { retained: value, ready: true, invalid: false };
@@ -85,6 +88,8 @@ function RequestPanel({
   }, [raw, tenantId, actorId]);
   const { retained, ready } = journal;
   const [confirmedUnknown, setConfirmedUnknown] = useState(false);
+  const [intake, setIntake] = useState(false);
+  const [reviewed, setReviewed] = useState<ReviewedQuestionnaire | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; operationKey: string | null } | null>(
@@ -92,6 +97,7 @@ function RequestPanel({
   );
   const [status, setStatus] = useState<AssessmentJobReadout | null>(null);
   const [completedHere, setCompletedHere] = useState(false);
+  const [cancelAcknowledgement, setCancelAcknowledgement] = useState<string | null>(null);
   const displayedStatus =
     retained &&
     status?.jobId === retained.request.operationKey &&
@@ -118,7 +124,8 @@ function RequestPanel({
       retained ||
       hasSavedResults ||
       completedHere ||
-      !confirmedUnknown
+      !confirmedUnknown ||
+      (intake && !reviewed)
     )
       return;
     active.current = true;
@@ -145,10 +152,21 @@ function RequestPanel({
           request: AssessmentRequestSchema.parse({
             operationKey: crypto.randomUUID(),
             engagementId,
+            ...(intake && reviewed
+              ? {
+                  answers: reviewed.answers,
+                  applicability: reviewed.applicability,
+                  expectedQuestionnaire: {
+                    libraryVersion,
+                    questionnaireDigest: reviewed.questionnaireDigest,
+                  },
+                }
+              : {}),
           }),
+          ...(intake && reviewed ? { questionnaireDigest: reviewed.questionnaireDigest } : {}),
         };
         retainAssessmentJournal(localStorage, value);
-        await submitUnknownAssessment(value);
+        await submitAssessmentRequest(value);
         if (mounted.current)
           setMessage({
             text: 'Request accepted. Results are pending; check its recorded status.',
@@ -189,6 +207,11 @@ function RequestPanel({
           setCompletedHere(true);
           onFinalized();
         }
+      } else if (value.status === 'resolution_recorded') {
+        setMessage({
+          text: 'Unclaimed request cancellation is recorded. Review its receipt before archiving this browser reference. This is not worker cleanup or completed assessment proof.',
+          operationKey: expected.request.operationKey,
+        });
       } else
         setMessage({
           text: `Assessment ${value.phase.replaceAll('_', ' ')}. Completion is not yet confirmed.`,
@@ -227,7 +250,7 @@ function RequestPanel({
         const live = readAssessmentJournal(localStorage, tenantId, actorId);
         if (JSON.stringify(live) !== JSON.stringify(expected))
           throw new Error('Retained request changed. Reload before continuing.');
-        await submitUnknownAssessment(expected);
+        await submitAssessmentRequest(expected);
         if (mounted.current)
           setMessage({
             text: 'Original request accepted. Check its recorded status; no new request key was created.',
@@ -245,16 +268,76 @@ function RequestPanel({
     }
   }
   function archive() {
-    if (busy || !retained || displayedStatus?.status !== 'finalization_recorded') return;
+    if (
+      busy ||
+      !retained ||
+      (displayedStatus?.status !== 'finalization_recorded' &&
+        displayedStatus?.status !== 'resolution_recorded')
+    )
+      return;
     try {
       clearFinalizedAssessmentJournal(localStorage, retained, displayedStatus);
       setStatus(null);
+      setConfirmedUnknown(false);
+      setReviewed(null);
+      setIntake(false);
+      setCancelAcknowledgement(null);
       setMessage({
-        text: 'Completed request reference cleared from this browser. Saved results remain available.',
+        text: 'Resolved request reference archived in this browser. Server records remain available.',
         operationKey: null,
       });
     } catch {
       setError('Retained request changed. Reload before continuing.');
+    }
+  }
+  async function cancel() {
+    if (
+      active.current ||
+      !canRequest ||
+      !retained ||
+      retained.request.engagementId !== engagementId ||
+      cancelAcknowledgement !== retained.request.operationKey ||
+      displayedStatus?.status !== 'unconfirmed' ||
+      displayedStatus.recordedRunStatus !== 'queued' ||
+      displayedStatus.phase !== 'queued' ||
+      displayedStatus.claimedAt !== null
+    )
+      return;
+    const expected = retained,
+      recorded = displayedStatus;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new Error(
+          'This browser cannot safely coordinate assessment requests across tabs. Use a supported browser.',
+        );
+      await navigator.locks.request(assessmentJournalKey(tenantId, actorId), async () => {
+        if (!mounted.current) return;
+        const live = readAssessmentJournal(localStorage, tenantId, actorId);
+        if (JSON.stringify(live) !== JSON.stringify(expected))
+          throw new Error('Retained request changed. Reload before continuing.');
+        await cancelUnclaimedAssessmentRequest(expected, recorded);
+        if (mounted.current) {
+          setStatus(null);
+          setCancelAcknowledgement(null);
+          setMessage({
+            text: 'Cancellation recorded. Check the retained request to verify its resolution before archiving.',
+            operationKey: expected.request.operationKey,
+          });
+        }
+      });
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'Cancellation could not be confirmed. Keep the original reference.',
+        );
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
   const sameEngagement = !retained || retained.request.engagementId === engagementId;
@@ -265,8 +348,9 @@ function RequestPanel({
     >
       <h2 className="font-semibold text-slate-900">Parikshan assessment request</h2>
       <p className="mt-2">
-        An unknown-answer draft keeps all questionnaire answers and applicability flags unknown. It
-        produces provisional estimates for review; it does not establish compliance. Discovery,
+        Enter reviewed questionnaire declarations or request an unknown-answer draft. Answers and
+        applicability flags stay unknown until you explicitly choose otherwise. Estimates are
+        provisional and declarations remain unverified; neither establishes compliance. Discovery,
         evidence and reports run separately.
       </p>
       {retained ? (
@@ -296,6 +380,39 @@ function RequestPanel({
             {busy ? 'Checking request…' : 'Check retained request'}
           </button>
           {recoveryGuidance && <p role="note">{recoveryGuidance}</p>}
+          {canRequest &&
+            sameEngagement &&
+            displayedStatus?.status === 'unconfirmed' &&
+            displayedStatus.recordedRunStatus === 'queued' &&
+            displayedStatus.phase === 'queued' &&
+            displayedStatus.claimedAt === null && (
+              <div className="space-y-2">
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={cancelAcknowledgement === retained.request.operationKey}
+                    onChange={(event) =>
+                      setCancelAcknowledgement(
+                        event.target.checked ? retained.request.operationKey : null,
+                      )
+                    }
+                  />
+                  <span>
+                    I want to cancel this original request if it has never been claimed. The server
+                    will refuse started work; cancellation does not establish worker cleanup.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || cancelAcknowledgement !== retained.request.operationKey}
+                  onClick={cancel}
+                  className="rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:opacity-50"
+                >
+                  Cancel if not claimed
+                </button>
+              </div>
+            )}
           {canRequest &&
             sameEngagement &&
             displayedStatus?.status !== 'finalization_recorded' &&
@@ -331,6 +448,28 @@ function RequestPanel({
               </button>
             </div>
           )}
+          {displayedStatus?.status === 'resolution_recorded' && (
+            <div>
+              <p>
+                Cancellation receipt:{' '}
+                <Link
+                  className="font-mono text-teal-700 underline"
+                  href={`/ledger?q=${displayedStatus.resolution.cancellationReceipt}`}
+                >
+                  #{displayedStatus.resolution.cancellationReceipt}
+                </Link>
+                .
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={archive}
+                className="mt-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold"
+              >
+                Archive cancelled browser reference
+              </button>
+            </div>
+          )}
         </div>
       ) : canRequest ? (
         <div className="mt-3 space-y-3">
@@ -341,25 +480,67 @@ function RequestPanel({
             </p>
           ) : (
             <>
+              {!intake ? (
+                <button
+                  type="button"
+                  disabled={busy || !ready}
+                  className="rounded-lg border border-slate-300 px-3 py-2 font-semibold"
+                  onClick={() => {
+                    setIntake(true);
+                    setConfirmedUnknown(false);
+                  }}
+                >
+                  Enter questionnaire declarations
+                </button>
+              ) : (
+                <>
+                  <AssessmentQuestionnaireEditor
+                    tenantId={tenantId}
+                    engagementId={engagementId}
+                    libraryVersion={libraryVersion}
+                    disabled={busy}
+                    onReviewed={(value) => {
+                      setReviewed(value);
+                      setConfirmedUnknown(false);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !ready}
+                    onClick={() => {
+                      setIntake(false);
+                      setReviewed(null);
+                      setConfirmedUnknown(false);
+                    }}
+                  >
+                    Use unknown-answer draft instead
+                  </button>
+                </>
+              )}
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"
                   checked={confirmedUnknown}
                   onChange={(e) => setConfirmedUnknown(e.target.checked)}
-                  disabled={busy || !ready}
+                  disabled={busy || !ready || (intake && !reviewed)}
                 />
                 <span>
-                  I understand that every answer and applicability flag will remain unknown and
-                  require review.
+                  {intake
+                    ? 'I reviewed these exact declarations and understand they remain unverified; unknown answers and unsupported inputs require further review.'
+                    : 'I understand that every answer and applicability flag will remain unknown and require review.'}
                 </span>
               </label>
               <button
                 type="button"
                 onClick={start}
-                disabled={busy || !ready || !confirmedUnknown}
+                disabled={busy || !ready || !confirmedUnknown || (intake && !reviewed)}
                 className="rounded-lg bg-teal-700 px-3 py-2 font-semibold text-white disabled:opacity-50"
               >
-                {busy ? 'Submitting request…' : 'Request unknown-answer assessment'}
+                {busy
+                  ? 'Submitting request…'
+                  : intake
+                    ? 'Submit reviewed questionnaire'
+                    : 'Request unknown-answer assessment'}
               </button>
             </>
           )}
@@ -387,6 +568,8 @@ function RequestPanel({
  * Keep the reference until the server can prove completion or resolution. */
 function requestRecoveryGuidance(status: AssessmentJobReadout): string | null {
   if (status.status === 'finalization_recorded') return null;
+  if (status.status === 'resolution_recorded')
+    return 'This unclaimed request is cancelled. Its original key cannot start another execution. Server records and the cancellation receipt remain available.';
   if (['failed', 'cancelled', 'timed_out'].includes(status.recordedRunStatus))
     return `The saved run is ${status.recordedRunStatus.replaceAll('_', ' ')}. Keep this request reference and ask an assessment administrator to review the recorded run. Retrying cannot restart it; safe cancellation or resolution has not been confirmed.`;
   if (status.schedulingStatus === 'needs_review')

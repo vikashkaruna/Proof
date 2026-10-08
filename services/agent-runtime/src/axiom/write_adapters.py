@@ -17,6 +17,9 @@ NOT delivered here; with no write origin configured the executor refuses.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import zlib
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -45,15 +48,11 @@ class WriteAdapter(Protocol):
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> WriteResult:
         """Execute one approved action. Raise WriteRefused rather than guess."""
 
-    async def simulate_rollback(
-        self, action_type: str, definition: dict[str, Any]
-    ) -> WriteResult:
+    async def simulate_rollback(self, action_type: str, definition: dict[str, Any]) -> WriteResult:
         """Simulate a rollback without mutating (M3.5: the rollback engine
         is itself dry-run-able). Raise WriteRefused rather than guess."""
 
-    async def execute_rollback(
-        self, action_type: str, definition: dict[str, Any]
-    ) -> WriteResult:
+    async def execute_rollback(self, action_type: str, definition: dict[str, Any]) -> WriteResult:
         """Execute Sudhaar's stored rollback definition. Raise WriteRefused
         rather than guess."""
 
@@ -80,18 +79,19 @@ class ReferenceWriteAdapter:
     async def execute(self, action_type: str, parameters: dict[str, Any]) -> WriteResult:
         return await self._call({"action_type": action_type, "parameters": parameters})
 
-    async def simulate_rollback(
-        self, action_type: str, definition: dict[str, Any]
-    ) -> WriteResult:
+    async def simulate_rollback(self, action_type: str, definition: dict[str, Any]) -> WriteResult:
         return await self._call(
             {"op": "rollback", "simulate": True, "action_type": action_type, "rollback": definition}
         )
 
-    async def execute_rollback(
-        self, action_type: str, definition: dict[str, Any]
-    ) -> WriteResult:
+    async def execute_rollback(self, action_type: str, definition: dict[str, Any]) -> WriteResult:
         return await self._call(
-            {"op": "rollback", "simulate": False, "action_type": action_type, "rollback": definition}
+            {
+                "op": "rollback",
+                "simulate": False,
+                "action_type": action_type,
+                "rollback": definition,
+            }
         )
 
     async def verify(self, action_type: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
@@ -122,52 +122,87 @@ class ReferenceWriteAdapter:
 
     async def _call_raw(self, body: dict[str, Any]) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
-                timeout=WRITE_TIMEOUT_SECONDS, follow_redirects=False
-            ) as client:
-                response = await client.post(
-                    f"{self._origin}/writes",
-                    json=body,
-                    headers={
-                        "Authorization": f"Bearer {self._token}",
-                        "Content-Type": "application/json",
-                    },
-                )
-        except httpx.HTTPError:
+            # httpx's per-I/O timeout alone allows an indefinitely trickling body.
+            async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+                async with httpx.AsyncClient(
+                    timeout=WRITE_TIMEOUT_SECONDS, follow_redirects=False
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self._origin}/writes",
+                        json=body,
+                        headers={
+                            "Authorization": f"Bearer {self._token}",
+                            "Content-Type": "application/json",
+                            "Accept-Encoding": "gzip, deflate",
+                        },
+                    ) as response:
+                        if response.status_code != 200:
+                            raise WriteRefused("write_refused_by_target")
+                        declared = response.headers.get("content-length")
+                        if declared is not None and declared.isascii() and declared.isdecimal():
+                            # Compare numeric strings without parsing attacker-sized integers.
+                            size, limit = declared.lstrip("0") or "0", str(MAX_RESPONSE_BYTES)
+                            if len(size) > len(limit) or (len(size) == len(limit) and size > limit):
+                                raise WriteRefused("write_response_too_large")
+                        encoding = (
+                            response.headers.get("content-encoding", "identity").strip().lower()
+                        )
+                        if encoding not in ("identity", "gzip", "deflate"):
+                            raise WriteRefused("write_response_unreadable")
+                        decoder = (
+                            zlib.decompressobj(
+                                16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+                            )
+                            if encoding != "identity"
+                            else None
+                        )
+                        first_decode = True
+                        content = bytearray()
+                        wire_size = 0
+                        # httpx aiter_bytes inflates a complete chunk BEFORE callers
+                        # can inspect its size. Read raw bytes and budget inflation
+                        # itself, including a one-byte overflow probe.
+                        async for raw in response.aiter_raw():
+                            wire_size += len(raw)
+                            if wire_size > MAX_RESPONSE_BYTES:
+                                raise WriteRefused("write_response_too_large")
+                            remaining = MAX_RESPONSE_BYTES - len(content)
+                            if decoder is None:
+                                chunk = raw
+                            else:
+                                try:
+                                    try:
+                                        chunk = decoder.decompress(raw, remaining + 1)
+                                    except zlib.error:
+                                        # Match httpx's compatibility with raw deflate
+                                        # on the first decode, preserving the same bound.
+                                        if encoding != "deflate" or not first_decode:
+                                            raise
+                                        decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+                                        chunk = decoder.decompress(raw, remaining + 1)
+                                except zlib.error:
+                                    raise WriteRefused("write_response_unreadable") from None
+                                first_decode = False
+                                if decoder.unused_data:
+                                    raise WriteRefused("write_response_unreadable")
+                            if len(chunk) > remaining:
+                                raise WriteRefused("write_response_too_large")
+                            content.extend(chunk)
+                        if decoder is not None and not decoder.eof:
+                            raise WriteRefused("write_response_unreadable")
+        except (httpx.HTTPError, TimeoutError):
             raise WriteRefused("write_transport_unavailable") from None
-        if response.status_code != 200:
-            raise WriteRefused("write_refused_by_target")
         try:
-            payload = response.json()
-        except ValueError:
+            payload = json.loads(content)
+        except (ValueError, UnicodeError, RecursionError):
             raise WriteRefused("write_response_unreadable") from None
         if not isinstance(payload, dict):
             raise WriteRefused("write_response_unreadable")
         return payload
 
     async def _call(self, body: dict[str, Any]) -> WriteResult:
-        try:
-            async with httpx.AsyncClient(
-                timeout=WRITE_TIMEOUT_SECONDS, follow_redirects=False
-            ) as client:
-                response = await client.post(
-                    f"{self._origin}/writes",
-                    json=body,
-                    headers={
-                        "Authorization": f"Bearer {self._token}",
-                        "Content-Type": "application/json",
-                    },
-                )
-        except httpx.HTTPError:
-            raise WriteRefused("write_transport_unavailable") from None
-        if response.status_code != 200:
-            raise WriteRefused("write_refused_by_target")
-        try:
-            payload = response.json()
-        except ValueError:
-            raise WriteRefused("write_response_unreadable") from None
-        if not isinstance(payload, dict):
-            raise WriteRefused("write_response_unreadable")
+        payload = await self._call_raw(body)
         rows = payload.get("rows_affected")
         if rows is not None and (not isinstance(rows, int) or isinstance(rows, bool) or rows < 0):
             raise WriteRefused("write_response_invalid")
@@ -181,6 +216,4 @@ class ReferenceWriteAdapter:
                 or not all(c.isalnum() or c in "._:/-" for c in ref)
             ):
                 raise WriteRefused("write_response_invalid")
-        return WriteResult(
-            rows_affected=rows, pre_state_ref=pre_ref, post_state_ref=post_ref
-        )
+        return WriteResult(rows_affected=rows, pre_state_ref=pre_ref, post_state_ref=post_ref)

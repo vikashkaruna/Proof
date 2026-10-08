@@ -4,6 +4,8 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
+import { readAssessmentResolution } from './assessment-resolution.js';
+import { readOriginalAssessmentRequest } from './assessment-original-request.js';
 
 const uuid = z.uuid();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -16,6 +18,8 @@ const jobSchema = z.object({
   tenant_id: uuid,
   run_id: uuid,
   workload_id: uuid,
+  actor_id: uuid,
+  estate_id: uuid.nullable().default(null),
   engagement_id: uuid,
   correlation_id: uuid,
   input_hash: digest,
@@ -34,6 +38,7 @@ const runSchema = z.object({
   output_redacted_hash: digest.nullable(),
   completed_at: timestamp.nullable(),
   error: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 const packetSchema = z.object({
   run_id: uuid,
@@ -88,7 +93,7 @@ export function assessmentJobStatusRoutes() {
       const jobRead = await db
         .from('assessment_dispatch_jobs')
         .select(
-          'id,tenant_id,run_id,workload_id,engagement_id,correlation_id,input_hash,created_at,claimed_at,scheduling_status',
+          'id,tenant_id,run_id,workload_id,actor_id,estate_id,engagement_id,correlation_id,input_hash,created_at,claimed_at,scheduling_status',
         )
         .eq('tenant_id', tenantId)
         .eq('id', jobId)
@@ -102,7 +107,7 @@ export function assessmentJobStatusRoutes() {
         db
           .from('agent_runs')
           .select(
-            'id,tenant_id,agent,engagement_id,correlation_id,status,input_redacted_hash,output_redacted_hash,completed_at,error',
+            'id,tenant_id,agent,engagement_id,correlation_id,status,input_redacted_hash,output_redacted_hash,completed_at,error,metadata',
           )
           .eq('tenant_id', tenantId)
           .eq('id', job.run_id)
@@ -141,13 +146,15 @@ export function assessmentJobStatusRoutes() {
         engagement.tenant_id !== tenantId
       )
         return c.json(unavailable, 503);
+      const original = await readOriginalAssessmentRequest(db, job, run);
+      const requestLibraryVersion = original?.libraryVersion ?? engagement.library_version;
       const packet = packetRead.data ? packetSchema.parse(packetRead.data) : null;
       if (
         packet &&
         (packet.tenant_id !== tenantId ||
           packet.run_id !== job.run_id ||
           packet.engagement_id !== job.engagement_id ||
-          packet.library_version !== engagement.library_version)
+          packet.library_version !== requestLibraryVersion)
       )
         return c.json(unavailable, 503);
       const base = {
@@ -155,13 +162,28 @@ export function assessmentJobStatusRoutes() {
         runId: run.id,
         engagementId: job.engagement_id,
         correlationId: job.correlation_id,
-        libraryVersion: engagement.library_version,
+        libraryVersion: requestLibraryVersion,
         recordedRunStatus: run.status,
         schedulingStatus: job.scheduling_status,
         createdAt: job.created_at,
         claimedAt: job.claimed_at,
         allAgentEndToEndAccepted: false,
       };
+      const resolution = await readAssessmentResolution(
+        db,
+        job,
+        run,
+        requestLibraryVersion,
+        packet !== null,
+      );
+      if (resolution)
+        return c.json({
+          ...base,
+          status: 'resolution_recorded',
+          phase: 'cancelled_unclaimed',
+          finalization: null,
+          resolution,
+        });
       if (!packet?.finalized_receipt)
         return c.json({
           ...base,

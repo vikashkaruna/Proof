@@ -352,8 +352,13 @@ async def test_reference_adapter_refuses_an_error_target() -> None:
             return self
         async def __aexit__(self, *a: Any) -> None:
             return None
-        async def post(self, *a: Any, **k: Any) -> FakeResponse:
-            return FakeResponse()
+        def stream(self, *a: Any, **k: Any):
+            class ResponseContext:
+                async def __aenter__(self):
+                    return FakeResponse()
+                async def __aexit__(self, *args):
+                    return None
+            return ResponseContext()
 
     import axiom.write_adapters as wa
 

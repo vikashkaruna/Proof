@@ -72,6 +72,7 @@ beforeEach(() => {
         tenant_id: T,
         run_id: RUN,
         workload_id: WORKLOAD,
+        actor_id: id(10),
         engagement_id: ENGAGEMENT,
         correlation_id: CORRELATION,
         input_hash: INPUT,
@@ -168,6 +169,205 @@ beforeEach(() => {
 });
 
 describe('existing durable assessment job readback', () => {
+  function cancelledFixture() {
+    const job = fake.rows('assessment_dispatch_jobs')[0]!;
+    job.claimed_at = null;
+    job.correlation_id = JOB;
+    const run = fake.rows('agent_runs')[0]!;
+    run.correlation_id = JOB;
+    run.status = 'cancelled';
+    run.output_redacted_hash = null;
+    run.completed_at = TIME;
+    run.metadata = { request_kind: 'durable_assessment_v1', assessment_request_receipt: '100' };
+    fake.rows('workload_assessment_packets').splice(0);
+    fake.seed('assessment_request_resolutions', {
+      job_id: JOB,
+      tenant_id: T,
+      run_id: RUN,
+      actor_id: id(10),
+      engagement_id: ENGAGEMENT,
+      correlation_id: JOB,
+      input_hash: INPUT,
+      library_version: '0.1.1',
+      requested_receipt: '100',
+      cancellation_receipt: '103',
+      resolved_at: TIME,
+      kind: 'cancelled_unclaimed',
+    });
+    fake.seed('workload_task_delegations', {
+      run_id: RUN,
+      tenant_id: T,
+      workload_identity_id: WORKLOAD,
+      agent_name: 'parikshan',
+      created_by: id(10),
+      estate_id: null,
+      engagement_id: ENGAGEMENT,
+      correlation_id: JOB,
+      input_hash: INPUT,
+      revoked_at: TIME,
+    });
+    fake.rows('audit_ledger').splice(0);
+    const detail = {
+      job_id: JOB,
+      run_id: RUN,
+      workload_id: WORKLOAD,
+      engagement_id: ENGAGEMENT,
+      library_version: '0.1.1',
+    };
+    fake.seed('audit_ledger', {
+      id: '100',
+      sequence_no: '40',
+      tenant_id: T,
+      correlation_id: JOB,
+      actor_type: 'human',
+      actor_id: id(10),
+      action_type: 'assessment.requested',
+      target_ref: JOB,
+      input_hash: INPUT,
+      output_hash: null,
+      result: 'pending',
+      detail: { ...detail, purpose: 'durable_assessment', estate_id: null },
+    });
+    fake.seed('audit_ledger', {
+      id: '103',
+      sequence_no: '41',
+      tenant_id: T,
+      correlation_id: JOB,
+      actor_type: 'human',
+      actor_id: id(10),
+      action_type: 'assessment.request_cancelled',
+      target_ref: JOB,
+      input_hash: INPUT,
+      output_hash: null,
+      result: 'success',
+      detail: {
+        ...detail,
+        purpose: 'cancel_unclaimed_assessment',
+        requested_receipt: '100',
+        resolution: 'cancelled_unclaimed',
+      },
+    });
+  }
+  it('returns authoritative unclaimed cancellation without claiming assessment completion or worker cleanup', async () => {
+    cancelledFixture();
+    const before = JSON.stringify(fake.rows('assessment_request_resolutions'));
+    const response = await request();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: 'resolution_recorded',
+      phase: 'cancelled_unclaimed',
+      finalization: null,
+      allAgentEndToEndAccepted: false,
+      resolution: {
+        actorId: id(10),
+        requestedReceipt: '100',
+        cancellationReceipt: '103',
+        resolvedAt: TIME,
+        verification: 'persisted_human_unclaimed_cancellation_bindings',
+        workerCleanupVerified: false,
+      },
+    });
+    expect(JSON.stringify(fake.rows('assessment_request_resolutions'))).toBe(before);
+  });
+  it('reads original cancellation and queued recovery after the current engagement library changes', async () => {
+    cancelledFixture();
+    fake.rows('engagements')[0]!.library_version = 'new-version';
+    const resolved = await request();
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toMatchObject({
+      status: 'resolution_recorded',
+      libraryVersion: '0.1.1',
+    });
+    fake.rows('assessment_request_resolutions').splice(0);
+    fake.rows('agent_runs')[0]!.status = 'queued';
+    fake.rows('agent_runs')[0]!.completed_at = null;
+    fake.rows('workload_task_delegations')[0]!.revoked_at = null;
+    const queued = await request();
+    expect(queued.status).toBe(200);
+    expect(await queued.json()).toMatchObject({
+      status: 'unconfirmed',
+      phase: 'queued',
+      libraryVersion: '0.1.1',
+    });
+  });
+  it('refuses a forged original receipt library rather than accepting current engagement settings', async () => {
+    cancelledFixture();
+    fake.rows('engagements')[0]!.library_version = 'new-version';
+    (fake.rows('audit_ledger')[0]!.detail as Record<string, unknown>).library_version = 'forged';
+    expect((await request()).status).toBe(503);
+  });
+  it.each([
+    ['assessment_request_resolutions', 'actor_id', FOREIGN],
+    ['assessment_request_resolutions', 'input_hash', RESULT],
+    ['assessment_request_resolutions', 'run_id', FOREIGN],
+    ['assessment_request_resolutions', 'library_version', 'foreign'],
+    ['assessment_request_resolutions', 'requested_receipt', '103'],
+    ['assessment_request_resolutions', 'resolved_at', '2026-10-04T09:00:00.000Z'],
+    ['agent_runs', 'status', 'queued'],
+    ['agent_runs', 'error', 'PRIVATE-ERROR'],
+    ['agent_runs', 'output_redacted_hash', RESULT],
+    ['assessment_dispatch_jobs', 'claimed_at', TIME],
+    ['workload_task_delegations', 'revoked_at', null],
+    ['workload_task_delegations', 'revoked_at', '2026-10-04T09:00:00.000Z'],
+    ['workload_task_delegations', 'workload_identity_id', FOREIGN],
+    ['workload_task_delegations', 'created_by', FOREIGN],
+    ['workload_task_delegations', 'engagement_id', FOREIGN],
+    ['workload_task_delegations', 'input_hash', RESULT],
+    ['workload_task_delegations', 'estate_id', FOREIGN],
+  ])('refuses corrupt resolution context %s.%s', async (table, field, value) => {
+    cancelledFixture();
+    fake.rows(String(table))[0]![String(field)] = value;
+    const response = await request();
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain('PRIVATE');
+  });
+  it.each([
+    [0, 'actor_id', FOREIGN],
+    [0, 'action_type', 'assessment.started'],
+    [0, 'result', 'success'],
+    [0, 'input_hash', RESULT],
+    [0, 'target_ref', ENGAGEMENT],
+    [1, 'actor_type', 'system'],
+    [1, 'actor_id', FOREIGN],
+    [1, 'sequence_no', '39'],
+    [1, 'action_type', 'operator.request.cancelled'],
+    [1, 'output_hash', RESULT],
+    [1, 'result', 'pending'],
+  ])('refuses mismatched cancellation receipt %i.%s', async (index, field, value) => {
+    cancelledFixture();
+    fake.rows('audit_ledger')[Number(index)]![String(field)] = value;
+    expect((await request()).status).toBe(503);
+  });
+  it.each([
+    [0, 'purpose', 'other'],
+    [0, 'estate_id', FOREIGN],
+    [0, 'job_id', FOREIGN],
+    [0, 'library_version', 'foreign'],
+    [1, 'workload_id', FOREIGN],
+    [1, 'requested_receipt', '99'],
+    [1, 'resolution', 'completed'],
+  ])('refuses forged cancellation receipt detail %i.%s', async (index, field, value) => {
+    cancelledFixture();
+    (fake.rows('audit_ledger')[Number(index)]!.detail as Record<string, unknown>)[String(field)] =
+      value;
+    expect((await request()).status).toBe(503);
+  });
+  it('never treats a generic cancelled run or revoked task as authoritative request resolution', async () => {
+    cancelledFixture();
+    fake.rows('assessment_request_resolutions').splice(0);
+    expect(await (await request()).json()).toMatchObject({
+      status: 'unconfirmed',
+      recordedRunStatus: 'cancelled',
+      finalization: null,
+    });
+  });
+  it('refuses unavailable resolution and task reads without inventing a recoverable outcome', async () => {
+    cancelledFixture();
+    fake.failNext('assessment_request_resolutions');
+    expect((await request()).status).toBe(503);
+    fake.failNext('workload_task_delegations');
+    expect((await request()).status).toBe(503);
+  });
   it('returns controller-recorded finalization with exact receipt bindings, without promoting all-agent acceptance', async () => {
     const before = JSON.stringify(
       ['assessment_dispatch_jobs', 'agent_runs', 'workload_assessment_packets', 'audit_ledger'].map(

@@ -216,6 +216,22 @@ beforeEach(() => {
     calls.push({ name: 'start', args });
     return { run_id: DISPATCH, status: 'running', created: true };
   });
+  let captured: Record<string, unknown> | null = null;
+  db.onRpc('recover_sudhaar_output', () => captured ?? { missing: true });
+  db.onRpc('settle_sudhaar_output', (args) => {
+    calls.push({ name: 'finish', args: { ...args, p_status: 'succeeded' } });
+    captured = {
+      run_id: DISPATCH,
+      input_hash: args.p_request_hash,
+      output_hash: args.p_response_hash,
+      output_text: args.p_output_text,
+      requested_receipt: '119',
+      started_receipt: '120',
+      completed_receipt: '121',
+      settled_receipt: '122',
+    };
+    return { run_id: DISPATCH, status: 'succeeded', replayed: false };
+  });
   db.onRpc('record_generic_agent_run_finish', (args) => {
     calls.push({ name: 'finish', args });
     return { run_id: DISPATCH, status: args.p_status, replayed: false };
@@ -452,7 +468,7 @@ it('refuses source verifier transport failure without a business success or disp
 });
 
 it.each(['absent', 'weak', 'equal'])(
-  'fails closed before source lookup for %s source signing configuration',
+  'checks prior recorded output but refuses fresh dispatch for %s source signing configuration',
   async (mode) => {
     const signingKey = mode === 'absent' ? '' : mode === 'weak' ? 'short' : peerSecret;
     const response = await app(UserRole.OWNER, signingKey).request('/v1/plans/proposals', {
@@ -465,7 +481,7 @@ it.each(['absent', 'weak', 'equal'])(
       body: JSON.stringify({ operationKey: KEY, engagementId: ENG, assessmentRunId: RUN }),
     });
     expect(response.status).toBe(503);
-    expect(calls).toEqual([]);
+    expect(calls.map((c) => c.name)).toEqual(['proof']);
     expect(fetchImpl).not.toHaveBeenCalled();
   },
 );
@@ -477,4 +493,139 @@ it('refuses equal peer/source keys even through the trusted signing helper', () 
       peerSecret,
     ),
   ).toThrow();
+});
+
+describe('read-only proposal source choices', () => {
+  beforeEach(() => {
+    db.rows('engagements')[0]!.title = 'Owned assessment';
+  });
+  it('lists scoped metadata without verifying or transporting all source findings', async () => {
+    const res = await app().request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(200);
+    const body = z
+      .object({ assessments: z.array(z.unknown()), runtimeAvailable: z.boolean() })
+      .parse(await res.json());
+    expect(body.assessments).toEqual([
+      {
+        assessmentRunId: RUN,
+        engagementId: ENG,
+        engagementTitle: 'Owned assessment',
+        libraryVersion: 'v1',
+        finalizedAt: '2026-10-06T12:00:00.000Z',
+      },
+    ]);
+    expect(body.runtimeAvailable).toBe(true);
+    expect(calls).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('keeps source choices available but identifies missing execution configuration', async () => {
+    const res = await app(UserRole.OWNER, '').request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(200);
+    expect(
+      z.object({ runtimeAvailable: z.boolean() }).parse(await res.json()).runtimeAvailable,
+    ).toBe(false);
+  });
+  it('viewer cannot list or read proposal source facts', async () => {
+    for (const path of [
+      '/v1/plans/proposal-assessment-options',
+      `/v1/plans/proposal-assessment-source/${RUN}?engagementId=${ENG}`,
+    ])
+      expect((await app(UserRole.VIEWER).request(path)).status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+  it('selected source verifies pinned ownership and finalization without invoking', async () => {
+    const res = await app().request(
+      `/v1/plans/proposal-assessment-source/${RUN}?engagementId=${ENG}`,
+    );
+    expect(res.status).toBe(200);
+    const { input } = z.object({ input: sudhaarInputSchema }).parse(await res.json());
+    expect(input.tenant_id).toBe(TENANT);
+    expect(input.source.assessmentRunId).toBe(RUN);
+    expect(input.findings).toHaveLength(2);
+    expect(calls.map((c) => c.name)).toEqual(['proof']);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it.each(['proof', 'foreign', 'malformed'])(
+    'selected source refuses %s and exposes no facts',
+    async (fault) => {
+      if (fault === 'proof') proof = false;
+      const run = fault === 'foreign' ? DISPATCH : fault === 'malformed' ? 'invalid' : RUN;
+      const res = await app().request(
+        `/v1/plans/proposal-assessment-source/${run}?engagementId=${ENG}`,
+      );
+      expect(res.status).toBe(fault === 'malformed' ? 400 : 503);
+      expect(await res.json()).not.toHaveProperty('input');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+  it('source read errors remain unavailable rather than false empty success', async () => {
+    db.failNext('workload_assessment_packets');
+    const res = await app().request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(503);
+    expect(await res.json()).not.toHaveProperty('assessments');
+  });
+});
+
+it.each(['limit=0', 'limit=26', 'offset=-1', 'offset=1.5', 'offset=1000001', 'extra=secret'])(
+  'refuses unbounded or unknown source pagination: %s',
+  async (query) => {
+    const res = await app().request(`/v1/plans/proposal-assessment-options?${query}`);
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  },
+);
+it('reads later bounded source pages without source facts or runtime invocation', async () => {
+  db.rows('engagements')[0]!.title = 'Owned assessment';
+  const packet = db.rows('workload_assessment_packets')[0]!;
+  for (let i = 0; i < 30; i++)
+    db.seed('workload_assessment_packets', {
+      ...packet,
+      run_id: `77777777-7777-4777-8777-${String(i).padStart(12, '0')}`,
+      finalized_at: '2026-10-08T00:00:00Z',
+    });
+  const res = await app().request('/v1/plans/proposal-assessment-options?limit=25&offset=25');
+  expect(res.status).toBe(200);
+  const page = z
+    .object({
+      assessments: z.array(z.unknown()),
+      limit: z.number(),
+      offset: z.number(),
+      total: z.number(),
+    })
+    .parse(await res.json());
+  expect(page.limit).toBe(25);
+  expect(page.offset).toBe(25);
+  expect(page.total).toBe(31);
+  expect(page.assessments).toHaveLength(6);
+  expect(page.assessments).toContainEqual(expect.objectContaining({ assessmentRunId: RUN }));
+  expect(calls).toEqual([]);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+it('recovers the exact recorded output without a second invocation, even when runtime configuration is unavailable', async () => {
+  const first = await request();
+  expect(first.status).toBe(200);
+  const saved = await first.json();
+  const second = await app(UserRole.OWNER, '').request('/v1/plans/proposals', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Idempotency-Key': KEY,
+      'X-Expected-Actor-Id': ACTOR,
+    },
+    body: JSON.stringify({ operationKey: KEY, engagementId: ENG, assessmentRunId: RUN }),
+  });
+  expect(second.status).toBe(200);
+  expect(await second.json()).toEqual(saved);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(calls.filter((c) => c.name === 'start')).toHaveLength(1);
+  expect(calls.filter((c) => c.name === 'finish')).toHaveLength(1);
+});
+it('refuses uncertain legacy output without dispatching again', async () => {
+  db.onRpc('recover_sudhaar_output', () => ({ error: 'output_unrecoverable' }));
+  const res = await request();
+  expect(res.status).toBe(409);
+  expect(await res.json()).toMatchObject({ error: { code: 'planning_output_uncertain' } });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(calls.some((c) => c.name === 'start')).toBe(false);
 });

@@ -7,6 +7,7 @@ import {
   Capability,
 } from '@axiom/types';
 import type { Variables } from '../types.js';
+import { assessmentCancellationRoutes } from './assessment-cancellation.js';
 import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import {
@@ -18,6 +19,7 @@ import {
 /** Human request boundary only; a 202 is acknowledgment, never controller completion. */
 export function assessmentRequestRoutes(producer?: AssessmentRequestProducer) {
   const app = new Hono<{ Variables: Variables }>();
+  app.route('/', assessmentCancellationRoutes());
   app.use('/assessment/jobs', boundedJsonBody(ASSESSMENT_REQUEST_MAX_BYTES));
   app.post('/assessment/jobs', async (c) => {
     c.header('Cache-Control', 'private, no-store');

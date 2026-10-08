@@ -38,6 +38,14 @@ export interface GenericAgentInvocationDeps {
     context: GenericAgentPreparationContext,
   ) => Promise<{ readonly kind: 'public_source' }>;
   readonly validateOutput?: (output: unknown) => void;
+  /** Trusted Sudhaar-only atomic success capture; failure settlement stays unchanged. */
+  readonly settleSudhaarSuccess?: (
+    context: GenericAgentPreparationContext & {
+      readonly result: GenericAgentRuntimeResult;
+      readonly canonicalOutput: string;
+      readonly responseHash: string;
+    },
+  ) => Promise<unknown>;
   readonly sudhaarDispatch?: (context: {
     runId: string;
     requestHash: string;
@@ -94,6 +102,13 @@ export async function invokeGenericAgent(
   const { agent, tenantId, actorId, engagementId, correlationId, input } = context;
   const { runtimeUrl, runtimeToken, prepareDispatch } = deps;
   const log = deps.logger ?? logger;
+  if (deps.settleSudhaarSuccess && agent !== 'sudhaar')
+    return {
+      status: 403,
+      body: {
+        error: { code: 'planning_settlement_refused', message: 'Planning settlement was refused.' },
+      },
+    };
   // Snapshot wire input before the first await. The request hash still uses
   // the original canonical domain, including its existing undefined semantics.
   const wireInput = JSON.stringify(input);
@@ -268,26 +283,48 @@ export async function invokeGenericAgent(
   let responseHash: string | null = null;
   try {
     responseHash = succeeded && result ? await sha256(canonicalJson(result.output)) : null;
-    const { data: recorded, error } = await writer
-      .rpc('record_generic_agent_run_finish', {
-        p_tenant_id: tenantId,
-        p_actor_id: actorId,
-        p_run_id: runId,
-        p_agent: agent,
-        p_engagement_id: engagementId,
-        p_correlation_id: correlationId,
-        p_request_hash: requestHash,
-        p_status: terminalStatus,
-        p_error_code: succeeded ? null : failureCode,
-        p_latency_ms: result?.latency_ms ?? null,
-        p_input_tokens: result?.input_tokens ?? null,
-        p_output_tokens: result?.output_tokens ?? null,
-        p_cost_usd: result?.cost_usd ?? null,
-        p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
-        p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
-        p_response_hash: responseHash,
-      })
-      .abortSignal(AbortSignal.timeout(10000));
+    if (succeeded && deps.settleSudhaarSuccess && agent !== 'sudhaar')
+      throw new Error('planning_settlement_refused');
+    const { data: recorded, error } =
+      succeeded && deps.settleSudhaarSuccess
+        ? {
+            data: await deps.settleSudhaarSuccess(
+              Object.freeze({
+                agent,
+                tenantId,
+                actorId,
+                engagementId,
+                correlationId,
+                runId,
+                requestHash,
+                canonicalInput,
+                result: result!,
+                canonicalOutput: canonicalJson(result!.output),
+                responseHash: responseHash!,
+              }),
+            ),
+            error: null,
+          }
+        : await writer
+            .rpc('record_generic_agent_run_finish', {
+              p_tenant_id: tenantId,
+              p_actor_id: actorId,
+              p_run_id: runId,
+              p_agent: agent,
+              p_engagement_id: engagementId,
+              p_correlation_id: correlationId,
+              p_request_hash: requestHash,
+              p_status: terminalStatus,
+              p_error_code: succeeded ? null : failureCode,
+              p_latency_ms: result?.latency_ms ?? null,
+              p_input_tokens: result?.input_tokens ?? null,
+              p_output_tokens: result?.output_tokens ?? null,
+              p_cost_usd: result?.cost_usd ?? null,
+              p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
+              p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
+              p_response_hash: responseHash,
+            })
+            .abortSignal(AbortSignal.timeout(10000));
     const confirmed = z
       .object({
         run_id: z.literal(runId),
