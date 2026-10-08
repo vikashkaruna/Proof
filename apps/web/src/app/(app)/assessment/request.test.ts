@@ -386,3 +386,23 @@ it('never archives a valid unconfirmed status or a write acknowledgement without
   ).toThrow();
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
 });
+it.each(['library', 'digest'])(
+  'refuses changed nested reviewed %s before retaining or submitting',
+  (field) => {
+    const value = {
+      ...retainedFixture(),
+      questionnaireDigest: 'd'.repeat(64),
+      request: {
+        ...retainedFixture().request,
+        answers: { C: { Q1: true } },
+        expectedQuestionnaire: {
+          libraryVersion: field === 'library' ? 'foreign' : '0.1.1',
+          questionnaireDigest: field === 'digest' ? 'f'.repeat(64) : 'd'.repeat(64),
+        },
+      },
+    };
+    expect(() => retainAssessmentJournal(localStorage, value)).toThrow(/reviewed source/);
+    expect(localStorage.getItem(assessmentJournalKey(tenant, actor))).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);

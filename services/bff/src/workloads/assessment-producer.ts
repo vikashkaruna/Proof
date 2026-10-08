@@ -1,9 +1,11 @@
+import { canonicalJson } from '@axiom/ledger';
 import { canonicalAssessmentInput } from './assessment-input.js';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin, createHumanActionWriter } from '@axiom/supabase';
 import {
   AssessmentRequestSchema,
+  AssessmentQuestionnaireSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
   type AssessmentRequest,
   type TenantId,
@@ -21,6 +23,7 @@ import {
 } from './dispatch-key-wrappers.js';
 import { DispatchRefused, type DispatchKeyWrapper } from './dispatch-payload.js';
 import { workloadTrustDomain } from './jwt-svid.js';
+import { readOriginalAssessmentRequest } from '../routes/assessment-original-request.js';
 
 export class AssessmentQuestionnaireRefused extends Error {
   constructor() {
@@ -68,6 +71,7 @@ const engagementSchema = z.object({
 const controlSchema = z.object({
   id: z.string().min(1).max(200),
   library_version: z.string(),
+  title: z.string().optional(),
   assessment_questions: z
     .array(z.object({ id: z.string().min(1).max(200), type: z.string() }).passthrough())
     .max(5000),
@@ -172,10 +176,59 @@ export async function composeAssessmentProducer(
         const engagement = engagementSchema.parse(read.data);
         if (engagement.id !== engagementId || engagement.tenant_id !== tenantId)
           throw new DispatchRefused();
+        // Recovery authority is the verified immutable original human receipt,
+        // never a browser-supplied version hint or today's engagement settings.
+        const jobRead = await db
+          .from('assessment_dispatch_jobs')
+          .select(
+            'id,tenant_id,run_id,actor_id,workload_id,estate_id,engagement_id,correlation_id,input_hash',
+          )
+          .eq('tenant_id', tenantId)
+          .eq('id', jobId)
+          .abortSignal(signal)
+          .maybeSingle();
+        if (jobRead.error) throw new DispatchRefused();
+        let requestLibraryVersion = engagement.library_version;
+        if (jobRead.data) {
+          const job = z
+            .object({
+              id: z.literal(jobId),
+              tenant_id: z.literal(tenantId),
+              run_id: uuid,
+              actor_id: z.literal(actorId),
+              workload_id: z.literal(configured.workloadId),
+              estate_id: z.literal(engagement.estate_id),
+              engagement_id: z.literal(engagementId),
+              correlation_id: z.literal(jobId),
+              input_hash: z.string().regex(/^[a-f0-9]{64}$/),
+            })
+            .parse(jobRead.data);
+          const runRead = await db
+            .from('agent_runs')
+            .select('id,tenant_id,agent,engagement_id,correlation_id,input_redacted_hash,metadata')
+            .eq('tenant_id', tenantId)
+            .eq('id', job.run_id)
+            .abortSignal(signal)
+            .single();
+          if (runRead.error) throw new DispatchRefused();
+          const run = z
+            .object({
+              id: uuid,
+              tenant_id: uuid,
+              agent: z.literal('parikshan'),
+              engagement_id: uuid,
+              correlation_id: uuid,
+              input_redacted_hash: z.string().regex(/^[a-f0-9]{64}$/),
+              metadata: z.record(z.string(), z.unknown()),
+            })
+            .parse(runRead.data);
+          const original = await readOriginalAssessmentRequest(db, job, run);
+          if (original) requestLibraryVersion = original.libraryVersion;
+        }
         const inputJson = canonicalAssessmentInput(
           tenantId,
           engagementId,
-          engagement.library_version,
+          requestLibraryVersion,
           input,
         );
         if (Buffer.byteLength(inputJson, 'utf8') > ASSESSMENT_REQUEST_MAX_BYTES)
@@ -190,8 +243,19 @@ export async function composeAssessmentProducer(
           correlationId: jobId,
           inputHash: createHash('sha256').update(inputJson, 'utf8').digest('hex'),
         };
-        const recovered = await configured.dispatch.recover(context);
+        const recovered = await configured.dispatch.recover(context, input.expectedQuestionnaire);
         if (recovered) return recovered;
+        const hasDeclarations =
+          Object.values(input.answers).some((row) =>
+            Object.values(row).some((answer) => answer !== null),
+          ) || Object.values(input.applicability).some((flag) => flag !== null);
+        if (hasDeclarations && !input.expectedQuestionnaire)
+          throw new AssessmentQuestionnaireRefused();
+        if (
+          input.expectedQuestionnaire &&
+          input.expectedQuestionnaire.libraryVersion !== engagement.library_version
+        )
+          throw new AssessmentQuestionnaireRefused();
         const findingsRead = await db
           .from('findings')
           .select('id', { count: 'exact' })
@@ -216,7 +280,7 @@ export async function composeAssessmentProducer(
             .single(),
           db
             .from('controls')
-            .select('id,library_version,assessment_questions', { count: 'exact' })
+            .select('id,title,library_version,assessment_questions', { count: 'exact' })
             .eq('library_version', engagement.library_version)
             .order('id')
             .abortSignal(signal)
@@ -262,7 +326,35 @@ export async function composeAssessmentProducer(
           if (!source || Object.keys(questions).some((key) => !source.has(key)))
             throw new AssessmentQuestionnaireRefused();
         }
-        return configured.dispatch.enqueue(context, inputJson);
+        if (input.expectedQuestionnaire) {
+          const projection = {
+            libraryVersion: engagement.library_version,
+            controls: controls.map((row) => ({
+              id: row.id,
+              title: row.title,
+              questions: row.assessment_questions.map((question) => ({
+                id: question.id,
+                prompt: question.prompt,
+                type: question.type,
+              })),
+            })),
+          };
+          const checked = AssessmentQuestionnaireSchema.safeParse({
+            tenantId,
+            engagementId,
+            ...projection,
+            questionnaireDigest: input.expectedQuestionnaire.questionnaireDigest,
+            digestScope: 'ordered_questionnaire_projection_v1',
+            declarationsVerified: false,
+          });
+          if (
+            !checked.success ||
+            createHash('sha256').update(canonicalJson(projection), 'utf8').digest('hex') !==
+              input.expectedQuestionnaire.questionnaireDigest
+          )
+            throw new AssessmentQuestionnaireRefused();
+        }
+        return configured.dispatch.enqueue(context, inputJson, input.expectedQuestionnaire);
       },
     });
   } catch {

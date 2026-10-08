@@ -11,11 +11,18 @@ const answers = z
     )
       context.addIssue({ code: 'custom', message: 'Questionnaire exceeds the supported size' });
   });
+export const ExpectedAssessmentQuestionnaireSchema = z
+  .object({
+    libraryVersion: boundedId,
+    questionnaireDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
 export const AssessmentRequestSchema = z
   .object({
     operationKey: z.uuid(),
     engagementId: z.uuid(),
     answers: answers.default({}),
+    expectedQuestionnaire: ExpectedAssessmentQuestionnaireSchema.optional(),
     applicability: z
       .object({
         sdfSelfAttested: z.boolean().nullable().default(null),
