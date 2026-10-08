@@ -1,3 +1,5 @@
+import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
+import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
 import { stagedEvidencePrivateRoutes } from './routes/staged-evidence-private.js';
 import {
   createSaakshiComposition,
@@ -47,6 +49,7 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
  */
 export function createApp(
   options: {
+    ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
     discovery?: Pick<DiscoveryService, 'run'>;
@@ -101,6 +104,10 @@ export function createApp(
   const mfa = createMfaService();
   const realtime = startRealtimeChannel({ ledger, killSwitch });
   const stagedEvidence = createSaakshiComposition();
+  const ownedSynthetic =
+    options.ownedSynthetic === undefined
+      ? createConfiguredOwnedSynthetic((tenantId) => killSwitch.isActive(tenantId))
+      : options.ownedSynthetic;
 
   // Health endpoints (no auth)
   app.get('/health', (c) =>
@@ -143,6 +150,13 @@ export function createApp(
       return boundedJsonBody(4096)(c, next);
     return next();
   });
+  // Bound owned original-request bodies before idempotency can clone/buffer them.
+  for (const path of [
+    '/v1/plans/owned-synthetic',
+    '/v1/plans/owned-synthetic/cancel',
+    '/v1/plans/owned-synthetic/outcome',
+  ])
+    app.use(path, boundedJsonBody(16384));
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
@@ -156,6 +170,7 @@ export function createApp(
       mfa,
       realtime,
       assessmentRequests: options.assessmentRequests,
+      ownedSynthetic,
       stagedEvidence: {
         rpc: evidenceControllerRpc,
         configuration: stagedEvidence?.configuration,

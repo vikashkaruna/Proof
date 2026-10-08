@@ -1,5 +1,6 @@
 /** Disjoint source routes. Mount only behind normal Auth/tenant middleware and trusted controller ports. */
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
@@ -59,9 +60,19 @@ export interface OwnedSyntheticRouteDeps {
     requestHash: string,
   ): Promise<unknown>;
 }
-export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
+export function ownedSyntheticPlanRoutes(deps?: OwnedSyntheticRouteDeps | null) {
+  const unavailable = () => {
+    throw Error('Owned synthetic source is not configured');
+  };
+  const controller: OwnedSyntheticRouteDeps = deps ?? {
+    isKilled: async () => unavailable(),
+    planPorts: unavailable,
+    cancellationPorts: unavailable,
+    readTargets: async () => unavailable(),
+    readOriginalOutcome: async () => unavailable(),
+  };
   const app = new Hono<{ Variables: Variables }>();
-  app.use('*', async (c, next) => {
+  const ownAuthority: MiddlewareHandler<{ Variables: Variables }> = async (c, next) => {
     c.header('Cache-Control', 'private, no-store');
     if (!uuid.safeParse(c.get('user')?.id).success || !uuid.safeParse(c.get('tenantId')).success)
       return c.json({ error: { code: 'unauthorized' } }, 401);
@@ -76,8 +87,18 @@ export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
       return c.json({ error: { code: 'mfa_required' } }, 403);
     if ([...new URL(c.req.url).searchParams].length)
       return c.json({ error: { code: 'validation_failed' } }, 400);
+    if (!deps) return c.json({ error: { code: 'owned_source_not_configured' } }, 503);
     return next();
-  });
+  };
+  for (const path of [
+    '/plans/owned-synthetic',
+    '/plans/owned-synthetic/cancel',
+    '/plans/owned-synthetic/outcome',
+    '/plans/owned-synthetic/targets/:engagementId',
+  ]) {
+    app.use(path, boundedJsonBody(16384));
+    app.use(path, ownAuthority);
+  }
   const context = (
     tenantId: string,
     actorId: string,
@@ -95,9 +116,9 @@ export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
     if (!engagement.success) return c.json({ error: { code: 'validation_failed' } }, 400);
     const ctx = context(c.get('tenantId'), c.get('user').id, c.get('sessionId'), '');
     try {
-      if (await deps.isKilled(ctx.tenantId))
+      if (await controller.isKilled(ctx.tenantId))
         return c.json({ error: { code: 'kill_switch_active' } }, 423);
-      const source = targetList.safeParse(await deps.readTargets(ctx, engagement.data));
+      const source = targetList.safeParse(await controller.readTargets(ctx, engagement.data));
       if (
         !source.success ||
         source.data.tenantId !== ctx.tenantId ||
@@ -127,10 +148,10 @@ export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
       return c.json({ error: { code: 'validation_failed' } }, 400);
     const ctx = context(c.get('tenantId'), c.get('user').id, c.get('sessionId'), key.data);
     try {
-      if (await deps.isKilled(ctx.tenantId))
+      if (await controller.isKilled(ctx.tenantId))
         return c.json({ error: { code: 'kill_switch_active' } }, 423);
       return c.json(
-        await produceOwnedPostgresMeasuredPlan(ctx, parsed.data, deps.planPorts(ctx)),
+        await produceOwnedPostgresMeasuredPlan(ctx, parsed.data, controller.planPorts(ctx)),
         201,
       );
     } catch (error) {
@@ -156,7 +177,7 @@ export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
     const ctx = context(c.get('tenantId'), c.get('user').id, c.get('sessionId'), key.data);
     try {
       return c.json(
-        await cancelOwnedPendingRequest(ctx, parsed.data, deps.cancellationPorts(ctx)),
+        await cancelOwnedPendingRequest(ctx, parsed.data, controller.cancellationPorts(ctx)),
         200,
       );
     } catch (error) {
@@ -192,7 +213,9 @@ export function ownedSyntheticPlanRoutes(deps: OwnedSyntheticRouteDeps) {
       const result = z
         .object({ state: z.enum(['pending', 'recorded', 'cancelled']), receipt: z.unknown() })
         .strict()
-        .safeParse(await deps.readOriginalOutcome(ctx, parsed.data.operationKey, requestHash));
+        .safeParse(
+          await controller.readOriginalOutcome(ctx, parsed.data.operationKey, requestHash),
+        );
       if (!result.success) return c.json({ error: { code: 'owned_source_unconfirmed' } }, 503);
       if (result.data.state === 'pending') {
         if (result.data.receipt !== null)

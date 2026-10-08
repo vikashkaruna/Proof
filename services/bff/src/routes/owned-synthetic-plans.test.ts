@@ -198,3 +198,65 @@ it('substituted discovery identity is refused', async () => {
     ).status,
   ).toBe(503);
 });
+
+it.each(['owner', 'viewer'] as const)(
+  'mounted source middleware leaves unrelated later and legacy plan GET routes unchanged for%s',
+  async (r) => {
+    role = r;
+    app.get('/later-unrelated', (c) => c.json({ ok: true }));
+    app.get('/plans/:id', (c) => c.json({ legacyId: c.req.param('id') }));
+    const unrelated = await app.request('/later-unrelated');
+    expect(unrelated.status).toBe(200);
+    expect(await unrelated.json()).toEqual({ ok: true });
+    const legacy = await app.request('/plans/' + id(99));
+    expect(legacy.status).toBe(200);
+    expect(await legacy.json()).toEqual({ legacyId: id(99) });
+    expect(deps.readTargets).not.toHaveBeenCalled();
+    expect(deps.planPorts).not.toHaveBeenCalled();
+  },
+);
+it.each(['', '/cancel', '/outcome'])(
+  'counts streaming bytes before buffering owned body%s despite false length',
+  async (suffix) => {
+    const cancelled = vi.fn();
+    const raw = new Request('http://localhost/plans/owned-synthetic' + suffix, {
+      method: 'POST',
+      headers: { 'Content-Length': '1', 'Idempotency-Key': id(3), 'X-Expected-Actor-Id': id(2) },
+      body: new ReadableStream({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(16385));
+        },
+        cancel: cancelled,
+      }),
+      ...{ duplex: 'half' },
+    });
+    const unbounded = vi.spyOn(raw, 'text');
+    const result = await app.request(raw);
+    expect(result.status).toBe(413);
+    expect(unbounded).not.toHaveBeenCalled();
+    expect(cancelled).toHaveBeenCalled();
+    expect(deps.planPorts).not.toHaveBeenCalled();
+    expect(deps.cancellationPorts).not.toHaveBeenCalled();
+    expect(deps.readOriginalOutcome).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['', '/cancel', '/outcome'])(
+  'finite owned stream%s rejects before unbounded text materialization',
+  async (suffix) => {
+    const raw = new Request('http://localhost/plans/owned-synthetic' + suffix, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': id(3), 'X-Expected-Actor-Id': id(2) },
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array(16385));
+          c.close();
+        },
+      }),
+      ...{ duplex: 'half' },
+    });
+    const unbounded = vi.spyOn(raw, 'text');
+    expect((await app.request(raw)).status).toBe(413);
+    expect(unbounded).not.toHaveBeenCalled();
+  },
+);

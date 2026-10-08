@@ -43,6 +43,11 @@ async function buildApp(
   app.use('/v1/*', idempotency);
   app.post('/v1/execute', (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
   for (const path of [
+    '/v1/plans/owned-synthetic',
+    '/v1/plans/owned-synthetic/cancel',
+    '/v1/plans/owned-synthetic/outcome',
+    '/v1/plans/owned-synthetic-extra',
+    '/v1/plans/owned-synthetic/extra',
     '/v1/assessment/jobs',
     '/v1/plans/proposals',
     '/v1/plans/proposals-extra',
@@ -243,4 +248,39 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     const res = await app.request('/v1/execute', { method: 'POST' });
     expect(res.status).toBe(400);
   });
+});
+
+it.each([
+  '/v1/plans/owned-synthetic',
+  '/v1/plans/owned-synthetic/cancel',
+  '/v1/plans/owned-synthetic/outcome',
+])('original owned operation %s rechecks source instead of generic cached reply', async (path) => {
+  const double = createSupabaseDouble({
+    idempotencyHit: { response_status: 200, response_body: { cached: true } },
+  });
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ ENVIRONMENT: 'test' }, double);
+  const response = await app.request(path, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': 'owned-original-operation' },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ executed: true, key: 'owned-original-operation' });
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  expect((await app.request(path, { method: 'POST' })).status).toBe(400);
+});
+it.each([
+  ['POST', '/v1/plans/owned-synthetic-extra'],
+  ['POST', '/v1/plans/owned-synthetic/extra'],
+  ['PUT', '/v1/plans/owned-synthetic'],
+])('owned-like %s %s retains generic idempotency claim', async (method, path) => {
+  const double = createSupabaseDouble({});
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ ENVIRONMENT: 'test' }, double);
+  const response = await app.request(path, {
+    method,
+    headers: { 'Idempotency-Key': 'owned-original-operation' },
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: 'idempotency_unavailable' } });
 });
