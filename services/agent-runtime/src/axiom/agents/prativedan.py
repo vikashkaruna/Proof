@@ -129,7 +129,7 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
             ),
         }
 
-        sections = [executive_summary, top_section, library_section, attribution]
+        sections: list[dict[str, Any]] = [executive_summary, top_section, library_section, attribution]
 
         # Render HTML
         rendered = self._render_html(input.title, sections, posture, verdict)
@@ -162,7 +162,8 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     def _render_html(
         self, title: str, sections: list[dict[str, Any]], posture: float, verdict: str
     ) -> str:
-        safe = lambda value: escape(str(value if value is not None else ""), quote=True)
+        def safe(value: object) -> str:
+            return escape(str(value if value is not None else ""), quote=True)
         out = [f"<h1>{safe(title)}</h1>"]
         out.append(
             f'<div class="axiom-cover"><p>Posture: <strong>{posture:.0f}/100 ({verdict})</strong></p></div>'
