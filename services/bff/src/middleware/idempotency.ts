@@ -36,6 +36,10 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/operator-workflows\/requests\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
         c.req.path,
       ));
+  const durableReviewedWorkflow =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/reviewed-workflows/runs' ||
+      c.req.path === '/v1/reviewed-workflows/acknowledgements');
   const trustedSourceRequest =
     c.req.method === 'POST' &&
     (c.req.path === '/v1/assessment/jobs' ||
@@ -46,7 +50,12 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/plans\/proposals\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/adopt$/.test(
         c.req.path,
       ));
-  if (durableSourceReview || durableOperatorWorkflow || trustedSourceRequest)
+  if (
+    durableSourceReview ||
+    durableOperatorWorkflow ||
+    trustedSourceRequest ||
+    durableReviewedWorkflow
+  )
     c.header('Cache-Control', 'private, no-store');
 
   // SEC-13 row 3: a missing key used to be auto-generated in development,
@@ -86,7 +95,12 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   // their locked, actor/body-scoped SQL operation ledger.
   // Cached responses would skip live authority/context and cancellation checks
   // or freeze structural-review currency. Keep key checks above.
-  if (durableSourceReview || durableOperatorWorkflow || trustedSourceRequest) {
+  if (
+    durableSourceReview ||
+    durableOperatorWorkflow ||
+    trustedSourceRequest ||
+    durableReviewedWorkflow
+  ) {
     c.set('idempotencyKey', key);
     return next();
   }

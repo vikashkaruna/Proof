@@ -202,8 +202,11 @@ cmd_ci() {
   step "control count gate" bash scripts/check-control-count.sh
   step "tfvars coverage gate" bash scripts/check-tfvars-coverage.sh
   if [ "$SKIP_PYTHON" = false ]; then
-    step "agent-runtime tests" bash -c 'cd services/agent-runtime && uv run pytest -q'
-    step "model-gateway tests" bash -c 'cd services/model-gateway && uv run pytest -q'
+    step "agent-runtime source types" bash -c 'cd services/agent-runtime && uv run mypy src/axiom'
+    step "agent-runtime source lint" bash -c 'cd services/agent-runtime && uv run ruff check src/axiom'
+    step "agent-runtime tests and coverage" bash -c 'cd services/agent-runtime && uv run pytest --cov --cov-fail-under=80 -q'
+    step "model-gateway tests and coverage" bash -c 'cd services/model-gateway && uv run pytest --cov --cov-fail-under=80 -q'
+    step "temporal-worker tests and coverage" bash -c 'cd services/temporal-workers && uv run pytest --cov --cov-fail-under=80 -q'
   fi
   if [ "$SKIP_SECURITY" = false ]; then step "security scan" bash scripts/security-scan.sh; fi
   say "CI summary"

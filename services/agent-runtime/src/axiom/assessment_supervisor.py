@@ -17,9 +17,12 @@ import stat
 import subprocess  # nosec B404 - launches the fixed in-package worker module; no shell, no CLI-supplied command
 import sys
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn, Protocol, TypedDict, cast
 
 from .process_lifetime import bind_parent_lifetime
 
@@ -28,7 +31,23 @@ WORKER_UID = 20003
 MAX_SECONDS = 65
 
 
-def child_limits(expected_parent: int):
+class _PidfdOS(Protocol):
+    def pidfd_open(self, pid: int, flags: int = 0) -> int: ...
+
+
+class _PidfdSignal(Protocol):
+    def pidfd_send_signal(
+        self, pidfd: int, sig: int, siginfo: None = None, flags: int = 0
+    ) -> None: ...
+
+
+class SupervisorReport(TypedDict):
+    worker_exit: int | None
+    timed_out: bool
+    cleanup_confirmed: bool
+
+
+def child_limits(expected_parent: int) -> None:
     bind_parent_lifetime(expected_parent)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
@@ -39,7 +58,7 @@ def child_limits(expected_parent: int):
         raise RuntimeError("Worker confinement unavailable")
 
 
-def cleanup(child: subprocess.Popen, seconds: float = 3) -> bool:
+def cleanup(child: subprocess.Popen[bytes], seconds: float = 3) -> bool:
     # A live/unreaped direct child reserves its PID, so the process-group signal
     # cannot hit a reused group. Adopted descendants are handled by pidfd below.
     if child.returncode is None:
@@ -61,11 +80,11 @@ def cleanup(child: subprocess.Popen, seconds: float = 3) -> bool:
             fd = None
             try:
                 pid = int(value)
-                fd = os.pidfd_open(pid)
+                fd = cast(_PidfdOS, os).pidfd_open(pid)
                 status = Path(f"/proc/{pid}/status").read_text()
                 # Protect against PID reuse between the proc snapshot and pidfd.
                 if f"PPid:\t{os.getpid()}\n" in status:
-                    signal.pidfd_send_signal(fd, signal.SIGKILL)
+                    cast(_PidfdSignal, signal).pidfd_send_signal(fd, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             except FileNotFoundError:
@@ -77,7 +96,9 @@ def cleanup(child: subprocess.Popen, seconds: float = 3) -> bool:
     return False
 
 
-def supervise(command=WORKER, seconds: float = MAX_SECONDS) -> tuple[int, dict]:
+def supervise(
+    command: Sequence[str] = WORKER, seconds: float = MAX_SECONDS
+) -> tuple[int, SupervisorReport]:
     """The command override is for trusted process-tree tests, never CLI input."""
     if sys.platform != "linux" or os.geteuid() != 0 or not 0 < seconds <= MAX_SECONDS:
         raise RuntimeError("Supervisor confinement unavailable")
@@ -86,7 +107,7 @@ def supervise(command=WORKER, seconds: float = MAX_SECONDS) -> tuple[int, dict]:
     child = None
     timed_out, cleaned, code = False, False, None
 
-    def interrupted(_signal, _frame):
+    def interrupted(_signal: int, _frame: FrameType | None) -> NoReturn:
         raise InterruptedError("Supervisor interrupted")
 
     previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGTERM, signal.SIGINT)}
@@ -124,7 +145,7 @@ def supervise(command=WORKER, seconds: float = MAX_SECONDS) -> tuple[int, dict]:
                 cleaned = False
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-    result = {"worker_exit": code, "timed_out": timed_out, "cleanup_confirmed": cleaned}
+    result: SupervisorReport = {"worker_exit": code, "timed_out": timed_out, "cleanup_confirmed": cleaned}
     return (70 if not cleaned else 124 if timed_out else 0 if code == 0 else 1), result
 
 

@@ -46,13 +46,13 @@ def build_ropa_records(
     by_system: dict[str, list[str]] = {}
     categories_by_system: dict[str, set[str]] = {}
     for item in classifications:
-        system = str(item.get("system", "unknown"))
+        classification_system = str(item.get("system", "unknown"))
         field_path = str(item.get("field_path", ""))
         field_name = field_path.rsplit(".", 1)[-1] if field_path else "*"
-        by_system.setdefault(system, []).append(field_name)
+        by_system.setdefault(classification_system, []).append(field_name)
         category = item.get("category")
         if isinstance(category, str) and category.strip():
-            categories_by_system.setdefault(system, set()).add(category.strip())
+            categories_by_system.setdefault(classification_system, set()).add(category.strip())
 
     records: list[RopaRecord] = []
     for index, system in enumerate(inventory, start=1):
@@ -65,7 +65,7 @@ def build_ropa_records(
         )
         categories_invalid = supplied_categories is not None and not categories_valid
         categories = (
-            {value.strip().lower() for value in supplied_categories} if categories_valid else set()
+            {value.strip().lower() for value in supplied_categories} if categories_valid and isinstance(supplied_categories, list) else set()
         )
         categories.update(value.lower() for value in categories_by_system.get(name, set()))
         supplied_processors = system.get("processors", system.get("processor"))

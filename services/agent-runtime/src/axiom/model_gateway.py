@@ -16,8 +16,6 @@ gateway itself is in services/model-gateway.
 
 from __future__ import annotations
 
-import hashlib
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -27,7 +25,6 @@ import httpx
 from .canonicalise import sha256_hex
 from .config import Settings, get_settings
 from .service_auth import ServiceAuthError, service_auth_headers
-
 
 TaskKind = Literal[
     "structural",  # schema/metadata only; no row values

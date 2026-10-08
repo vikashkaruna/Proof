@@ -14,7 +14,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .canonicalise import canonical_json, sha256_hex
@@ -69,6 +69,7 @@ class ApprovalEngine:
     """
 
     def __init__(self, signing_key: str | bytes | None = None):
+        self._default_key: bytes | None
         if isinstance(signing_key, str):
             self._default_key = signing_key.encode("utf-8")
         elif isinstance(signing_key, bytes):
@@ -152,7 +153,7 @@ class ApprovalEngine:
             exp = datetime.fromisoformat(spec.expires_at.replace("Z", "+00:00"))
         except Exception:
             return ValidationResult(valid=False, reason="invalid_expiry_format")
-        if exp < datetime.now(timezone.utc):
+        if exp < datetime.now(UTC):
             return ValidationResult(valid=False, reason="expired", details={"expiresAt": spec.expires_at})
 
         # Nonce replay (in-memory; the DB is the source of truth)

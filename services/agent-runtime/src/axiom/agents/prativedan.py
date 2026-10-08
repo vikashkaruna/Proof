@@ -14,14 +14,16 @@ data and uses the model gateway to draft the prose.
 
 from __future__ import annotations
 
-from enum import Enum
 from html import escape
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
+from ..enum_types import QualifiedStringEnum
+from .base import AgentName, AutonomyLevel, BaseAgent
 
-class ReportKind(str, Enum):
+
+class ReportKind(QualifiedStringEnum):
     BOARD = "board"
     AUDITOR = "auditor"
     DPB = "dpb"
@@ -29,10 +31,6 @@ class ReportKind(str, Enum):
     GAP_SCAN = "gap_scan"
     EVIDENCE_PACK = "evidence_pack"
     CUSTOM = "custom"
-
-
-from .base import AgentName, AutonomyLevel, BaseAgent
-from ..model_gateway import ModelRequest, TaskKind
 
 
 class PrativedanInput(BaseModel):
@@ -129,7 +127,7 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
             ),
         }
 
-        sections = [executive_summary, top_section, library_section, attribution]
+        sections: list[dict[str, Any]] = [executive_summary, top_section, library_section, attribution]
 
         # Render HTML
         rendered = self._render_html(input.title, sections, posture, verdict)
@@ -162,7 +160,8 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     def _render_html(
         self, title: str, sections: list[dict[str, Any]], posture: float, verdict: str
     ) -> str:
-        safe = lambda value: escape(str(value if value is not None else ""), quote=True)
+        def safe(value: object) -> str:
+            return escape(str(value if value is not None else ""), quote=True)
         out = [f"<h1>{safe(title)}</h1>"]
         out.append(
             f'<div class="axiom-cover"><p>Posture: <strong>{posture:.0f}/100 ({verdict})</strong></p></div>'

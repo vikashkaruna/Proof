@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from enum import Enum
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import NotRequired, TypedDict
+
+from .enum_types import QualifiedStringEnum
 
 
-class ControlDomain(str, Enum):
+class ControlDomain(QualifiedStringEnum):
     GOV = "GOV"
     CNS = "CNS"
     DAT = "DAT"
@@ -30,14 +33,14 @@ class ControlDomain(str, Enum):
     DPIA = "DPIA"
 
 
-class ControlSeverity(str, Enum):
+class ControlSeverity(QualifiedStringEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(QualifiedStringEnum):
     DOCUMENT = "document"
     CONFIG = "config"
     SCREENSHOT = "screenshot"
@@ -46,6 +49,45 @@ class EvidenceType(str, Enum):
     INTERVIEW = "interview"
     INVENTORY = "inventory"
     REPORT = "report"
+
+
+class RawCitation(TypedDict):
+    instrument: str
+    reference: str
+    url: NotRequired[str | None]
+
+
+class RawEvidenceRequirement(TypedDict):
+    type: str
+    description: str
+    retention: NotRequired[str | None]
+
+
+class RawScoring(TypedDict):
+    baseline: float
+    weight: float
+    penaltyPoints: float
+    maxPenaltyINR: int
+
+
+class RawControl(TypedDict):
+    id: str
+    title: str
+    obligation: str
+    domain: str
+    severity: str
+    scoring: RawScoring
+    library_version: NotRequired[str]
+    introduced_in_version: NotRequired[str]
+    revised_in_version: NotRequired[str | None]
+    notes: NotRequired[str | None]
+    citations: NotRequired[list[RawCitation]]
+    evidence_required: NotRequired[list[RawEvidenceRequirement]]
+    assessment_questions: NotRequired[list[dict[str, object]]]
+    remediation_patterns: NotRequired[list[str]]
+    tags: NotRequired[list[str]]
+    sdf_only: NotRequired[bool]
+    children_only: NotRequired[bool]
 
 
 @dataclass(frozen=True)
@@ -80,7 +122,7 @@ class Control:
     severity: ControlSeverity
     citations: tuple[ControlCitation, ...]
     evidence_required: tuple[ControlEvidenceRequirement, ...]
-    assessment_questions: tuple[dict, ...]
+    assessment_questions: tuple[dict[str, object], ...]
     scoring: ControlScoring
     remediation_patterns: tuple[str, ...]
     tags: tuple[str, ...]
@@ -91,7 +133,7 @@ class Control:
     notes: str | None = None
 
 
-def _parse_control(raw: dict) -> Control:
+def _parse_control(raw: RawControl) -> Control:
     citations = tuple(
         ControlCitation(
             instrument=c["instrument"],
@@ -144,7 +186,7 @@ class ControlLibrary:
     def __len__(self) -> int:
         return len(self._controls)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Control]:
         return iter(self._controls)
 
     def get(self, control_id: str) -> Control | None:
@@ -246,7 +288,7 @@ def load_default_library() -> ControlLibrary:
 # loadable.
 
 
-class MappingStrength(str, Enum):
+class MappingStrength(QualifiedStringEnum):
     """M4.2 mapping strength. 'equivalent' requires regulator-side verification."""
 
     EQUIVALENT = "equivalent"
@@ -254,7 +296,7 @@ class MappingStrength(str, Enum):
     INDICATIVE = "indicative"
 
 
-class MappingProvenance(str, Enum):
+class MappingProvenance(QualifiedStringEnum):
     """Honest provenance vocabulary; 'vendor-verified' is deliberately absent
     until client tenants exist."""
 
@@ -299,7 +341,7 @@ class SectorPack:
     description: str
     framework_codes: tuple[str, ...]
     control_ids: tuple[str, ...]
-    evidence_requirements: tuple[dict, ...]
+    evidence_requirements: tuple[dict[str, str], ...]
     remediation_patterns: tuple[str, ...]
     provenance: MappingProvenance
     basis: str

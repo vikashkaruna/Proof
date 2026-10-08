@@ -341,33 +341,35 @@ export function GenericModuleView({
             {meta.recentEvents.map((e, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-3 px-5 py-3 hover:bg-[#F4F6F8]/50 transition-colors"
+                className="flex flex-col gap-2 px-4 py-3 hover:bg-[#F4F6F8]/50 transition-colors sm:px-5 lg:flex-row lg:items-start lg:gap-3"
               >
                 {e.seq !== undefined && (
                   <Link
                     href={`/ledger?q=${e.seq}`}
-                    className="font-mono text-xs font-semibold text-[#1E2A4A] hover:underline w-12 shrink-0"
+                    className="font-mono text-xs font-semibold text-[#1E2A4A] hover:underline shrink-0 lg:w-12"
                   >
                     #{e.seq}
                   </Link>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-[#2F3542]">{e.title}</span>
+                  <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-start sm:gap-2">
+                    <span className="text-xs font-semibold text-[#2F3542] [overflow-wrap:anywhere]">
+                      {e.title}
+                    </span>
                     {e.target && (
-                      <span className="font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                      <span className="max-w-full break-all font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
                         {e.target}
                       </span>
                     )}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-[#8a909b] truncate">
+                  <div className="mt-0.5 text-[11px] text-[#8a909b] [overflow-wrap:anywhere]">
                     {e.detail}
                     {e.hash && (
                       <span className="ml-2 font-mono text-[10px]">H:{e.hash.slice(0, 10)}…</span>
                     )}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
+                <div className="min-w-0 [overflow-wrap:anywhere] lg:max-w-64 lg:shrink-0 lg:text-right">
                   <div className="text-[10.5px] text-[#8a909b] font-mono">{e.time}</div>
                   <div className="text-[10px] font-semibold text-[#0a8d80]">
                     {e.status || 'Status unavailable'}
