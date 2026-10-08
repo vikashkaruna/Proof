@@ -216,10 +216,10 @@ it('explicit confirmed archive frees pending slot, preserves same-key manual rec
   await waitFor(() => expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toBeNull());
   view.unmount();
   const reopened = panel();
-  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
   fireEvent.click(screen.getByRole('button', { name: 'Check saved review work' }));
   await screen.findByText('Inspect saved review work');
-  expect(fetcher.mock.calls[1]![1].body).toEqual(JSON.stringify(original!.request));
+  expect(fetcher.mock.calls[2]![1].body).toEqual(JSON.stringify(original!.request));
   fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
   await waitFor(() => expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toBeNull());
   reopened.rerender(
@@ -231,7 +231,7 @@ it('explicit confirmed archive frees pending slot, preserves same-key manual rec
     />,
   );
   expect(screen.getByRole('button', { name: 'Save review tasks' })).toBeTruthy();
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher).toHaveBeenCalledTimes(4);
 });
 it('silent completed-reference write loss preserves pending request', async () => {
   await successfulSave();
@@ -305,4 +305,69 @@ it('an actor switch while waiting for the archive lock preserves the old pending
   expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
   expect(screen.queryByText('Inspect saved review work')).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('archive renews the same original request before clearing pending state', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor)!;
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await waitFor(() => expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toBeNull());
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1]![1].body).toBe(JSON.stringify(original.request));
+  expect(fetcher.mock.calls[1]![1].headers['Idempotency-Key']).toBe(original.request.adoptionKey);
+});
+it.each([403, 409, 423, 503])(
+  'archive retains original request after renewed server refusal %s',
+  async (status) => {
+    await successfulSave();
+    const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+    fetcher.mockResolvedValue({ status, json: async () => ({}) });
+    fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+    await screen.findByRole('alert');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
+  },
+);
+it('archive refuses a changed renewed receipt even when source proof matches', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  const successful = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (...args) => {
+    const response = await successful(...args);
+    return { ...response, json: async () => ({ ...(await response.json()), planId: actor }) };
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await screen.findByRole('alert');
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
+});
+it('archive retains a journal replaced while the renewed response was in flight', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor)!;
+  const successful = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation(async (...args) => {
+    const response = await successful(...args);
+    localStorage.setItem(
+      `axiom:review-adoption:v1:${tenant}:${actor}`,
+      JSON.stringify({
+        ...original,
+        request: { ...original.request, reason: 'Changed request during renewed source check' },
+      }),
+    );
+    return response;
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await screen.findByRole('alert');
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)!.request.reason).toContain(
+    'Changed request',
+  );
+});
+
+it('a lost renewed archive response preserves the original pending request', async () => {
+  await successfulSave();
+  const original = readReviewAdoptionJournal(localStorage, tenant, actor);
+  fetcher.mockRejectedValue(new Error('renewed response lost'));
+  fireEvent.click(screen.getByRole('button', { name: /Archive confirmed request/ }));
+  await screen.findByRole('alert');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(readReviewAdoptionJournal(localStorage, tenant, actor)).toEqual(original);
 });
