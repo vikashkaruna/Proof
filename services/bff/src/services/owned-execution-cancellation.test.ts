@@ -94,6 +94,8 @@ it.each([
   { planId: id(99) },
   { executionAllowed: true },
   { humanReceipt: '0' },
+  { humanReceipt: '9223372036854775808' },
+  { humanReceipt: '9999999999999999999' },
   { state: 'recorded' },
   { approvalTokenId: id(99) },
 ])('refuses substituted or authority-inflating receipt %j', async (change) => {
@@ -114,4 +116,14 @@ it('lost committed reply stays uncertain and exact retry reuses original keys an
     f.ports.cancelOriginalPendingRequest.mock.calls[1],
   );
   expect(f.ports.authorizeCurrentHuman).toHaveBeenCalledTimes(2);
+});
+it('accepts the exact signed-int64 cancellation receipt boundary', async () => {
+  const f = fixture();
+  f.ports.cancelOriginalPendingRequest.mockResolvedValue({
+    ...f.receipt,
+    humanReceipt: '9223372036854775807',
+  });
+  expect((await cancelOwnedPendingRequest(f.context, f.input, f.ports)).humanReceipt).toBe(
+    '9223372036854775807',
+  );
 });

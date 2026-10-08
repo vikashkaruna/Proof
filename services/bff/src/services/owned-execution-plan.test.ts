@@ -270,3 +270,20 @@ describe('unwired owned-synthetic human plan source producer contracts', () => {
     );
   });
 });
+it.each(['9223372036854775808', '9999999999999999999'])(
+  'refuses overflowing signed-int64 plan receipt %s',
+  async (humanReceipt) => {
+    const f = fixture();
+    f.receipt.humanReceipt = humanReceipt;
+    await expect(produceOwnedMeasuredPlan(f.context, f.request, f.ports)).rejects.toThrow(
+      'owned_plan_outcome_unconfirmed',
+    );
+  },
+);
+it('accepts the exact signed-int64 plan receipt boundary without number conversion', async () => {
+  const f = fixture();
+  f.receipt.humanReceipt = '9223372036854775807';
+  expect((await produceOwnedMeasuredPlan(f.context, f.request, f.ports)).humanReceipt).toBe(
+    '9223372036854775807',
+  );
+});

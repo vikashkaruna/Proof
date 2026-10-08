@@ -14,7 +14,7 @@ export const ownedCancellationRequestSchema = z
     reason: z.string().trim().min(20).max(2000),
   })
   .strict();
-const cancelledReceipt = z
+export const ownedCancellationReceiptSchema = z
   .object({
     tenantId: uuid,
     actorId: uuid,
@@ -23,12 +23,17 @@ const cancelledReceipt = z
     cancellationKey: uuid,
     reason: z.string().min(20).max(2000),
     state: z.literal('cancelled'),
-    humanReceipt: z.string().regex(/^[1-9][0-9]{0,18}$/),
+    humanReceipt: z
+      .string()
+      .regex(/^[1-9][0-9]{0,18}$/)
+      .refine(
+        (value) => value.length < 19 || (value.length === 19 && value <= '9223372036854775807'),
+      ),
     planId: z.null(),
     executionAllowed: z.literal(false),
   })
   .strict();
-export type OwnedCancellationReceipt = z.infer<typeof cancelledReceipt>;
+export type OwnedCancellationReceipt = z.infer<typeof ownedCancellationReceiptSchema>;
 export interface OwnedCancellationPorts {
   /** Current normal identity, accepted dual-capability membership and MFA; stopping needs no active target. */
   authorizeCurrentHuman(context: OwnedPlanContext): Promise<void>;
@@ -83,7 +88,7 @@ export async function cancelOwnedPendingRequest(
     // An uncertain reply never authorizes dropping the original request journal.
     throw new OwnedCancellationRefused('owned_cancellation_outcome_unconfirmed');
   }
-  const result = cancelledReceipt.safeParse(raw);
+  const result = ownedCancellationReceiptSchema.safeParse(raw);
   if (
     !result.success ||
     result.data.tenantId !== context.tenantId ||

@@ -4,7 +4,10 @@ import { z } from 'zod';
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const receipt = z.string().regex(/^[1-9][0-9]{0,18}$/);
+const receipt = z
+  .string()
+  .regex(/^[1-9][0-9]{0,18}$/)
+  .refine((value) => value.length < 19 || (value.length === 19 && value <= '9223372036854775807'));
 export const ownedPlanRequestSchema = z
   .object({
     operationKey: uuid,
@@ -66,7 +69,7 @@ const binding = z
   })
   .strict();
 export type OwnedBinding = z.infer<typeof binding>;
-const planReceipt = z
+export const ownedPlanReceiptSchema = z
   .object({
     tenantId: uuid,
     actorId: uuid,
@@ -88,7 +91,7 @@ const planReceipt = z
     validationHash: hash,
   })
   .strict();
-export type OwnedPlanReceipt = z.infer<typeof planReceipt>;
+export type OwnedPlanReceipt = z.infer<typeof ownedPlanReceiptSchema>;
 const source = z
   .object({
     tenantId: uuid,
@@ -97,7 +100,7 @@ const source = z
     requestHash: hash,
     binding,
     state: z.enum(['pending', 'recorded']),
-    recorded: planReceipt.nullable(),
+    recorded: ownedPlanReceiptSchema.nullable(),
     recordedValidation: roundtrip.nullable(),
   })
   .strict();
@@ -173,7 +176,7 @@ function validateReceipt(
   requestHash: string,
   validationHash?: string,
 ): OwnedPlanReceipt {
-  const parsed = planReceipt.safeParse(value);
+  const parsed = ownedPlanReceiptSchema.safeParse(value);
   if (!parsed.success) throw new OwnedPlanRefused('owned_plan_outcome_unconfirmed');
   const result = parsed.data;
   if (
