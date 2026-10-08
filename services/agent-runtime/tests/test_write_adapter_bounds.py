@@ -195,3 +195,97 @@ async def test_nested_unreadable_json_refuses_without_provider_diagnostics(monke
         await value.execute("policy.publish", {})
     assert str(error.value) == "write_response_unreadable"
     assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_real_http_single_chunk_gzip_allocation_is_bounded():
+    import threading
+    import tracemalloc
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    # Prepare outside tracing so only transport/decoder allocations are measured.
+    body = gzip.compress(
+        b'{"rows_affected":1,"padding":"' + b"a" * (16 * MAX_RESPONSE_BYTES) + b'"}'
+    )
+    assert len(body) < 65536
+
+    class Target(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(200)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    tracemalloc.start()
+    try:
+        with pytest.raises(WriteRefused, match="write_response_too_large"):
+            await ReferenceWriteAdapter(
+                f"http://127.0.0.1:{server.server_port}", "test-placeholder"
+            ).execute("policy.publish", {})
+        _, peak = tracemalloc.get_traced_memory()
+        print(f"compressed transport peak: {peak}")
+        assert peak < 6 * MAX_RESPONSE_BYTES, (
+            f"compressed response allocated {peak} bytes before refusing"
+        )
+    finally:
+        tracemalloc.stop()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "raw-deflate"])
+@pytest.mark.parametrize("split", [False, True])
+async def test_supported_compression_at_exact_decoded_limit(monkeypatch, encoding, split):
+    import zlib
+
+    prefix = b'{"rows_affected":1,"padding":"'
+    body = prefix + b"a" * (MAX_RESPONSE_BYTES - len(prefix) - 2) + b'"}'
+    if encoding == "gzip":
+        wire = gzip.compress(body)
+    elif encoding == "deflate":
+        wire = zlib.compress(body)
+    else:
+        encoder = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+        wire = encoder.compress(body) + encoder.flush()
+    chunks = [wire[:4], wire[4:-4], wire[-4:]] if split else [wire]
+    value, stream, seen = adapter(
+        monkeypatch,
+        chunks,
+        {
+            "content-encoding": "deflate" if encoding == "raw-deflate" else encoding,
+            "content-length": str(len(wire)),
+        },
+    )
+    assert (await value.execute("policy.publish", {})).rows_affected == 1
+    assert stream.closed
+    assert seen[0].headers["Accept-Encoding"] == "gzip, deflate"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "wire", [gzip.compress(b'{"rows_affected":1}')[:-4], b"corrupt-compressed-data"]
+)
+async def test_corrupt_or_truncated_compressed_response_is_unconfirmed(monkeypatch, wire):
+    value, stream, _ = adapter(monkeypatch, [wire], {"content-encoding": "gzip"})
+    with pytest.raises(WriteRefused, match="write_response_unreadable"):
+        await value.execute_rollback("policy.publish", {})
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_unnegotiated_compression_refuses_without_inflation(monkeypatch):
+    value, stream, _ = adapter(monkeypatch, [b"opaque"], {"content-encoding": "br"})
+    with pytest.raises(WriteRefused, match="write_response_unreadable"):
+        await value.execute("policy.publish", {})
+    assert stream.reads == 0
+    assert stream.closed
