@@ -111,13 +111,23 @@ export default async function PoliciesPage() {
     Capability.POSTURE_READ,
   );
   const documents = (
-    <WorkflowPanel
-      tenantId={tenantId}
-      actorId={userId}
-      kind="policy_draft"
-      canWrite={can(Capability.ESTATE_MANAGE, { role })}
-      canReview={role === UserRole.FOUNDER && isAxiomInternal}
-    />
+    <div className="space-y-4">
+      {can(Capability.AGENT_INVOKE, { role }) && (
+        <Link
+          href="/policies/review-drafts"
+          className="inline-flex rounded-md border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-700"
+        >
+          Prepare source-bound agent review drafts
+        </Link>
+      )}
+      <WorkflowPanel
+        tenantId={tenantId}
+        actorId={userId}
+        kind="policy_draft"
+        canWrite={can(Capability.ESTATE_MANAGE, { role })}
+        canReview={role === UserRole.FOUNDER && isAxiomInternal}
+      />
+    </div>
   );
   if (!can(Capability.TENANT_SETTINGS_WRITE, { role })) {
     return (

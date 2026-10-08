@@ -38,6 +38,11 @@ export interface GenericAgentInvocationDeps {
     context: GenericAgentPreparationContext,
   ) => Promise<{ readonly kind: 'public_source' }>;
   readonly validateOutput?: (output: unknown) => void;
+  /** Only the reviewed Vibhaag route may provide this retained-source transport. */
+  readonly reviewedWorkflow?: {
+    readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
+    readonly settleSuccess: NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>;
+  };
   /** Trusted Sudhaar-only atomic success capture; failure settlement stays unchanged. */
   readonly settleSudhaarSuccess?: (
     context: GenericAgentPreparationContext & {
@@ -109,6 +114,25 @@ export async function invokeGenericAgent(
         error: { code: 'planning_settlement_refused', message: 'Planning settlement was refused.' },
       },
     };
+  if (
+    deps.reviewedWorkflow &&
+    (agent !== 'vibhaag' ||
+      input.mode !== 'reviewed_workflow' ||
+      engagementId === null ||
+      prepareDispatch ||
+      deps.sudhaarDispatch ||
+      deps.settleSudhaarSuccess ||
+      !deps.validateOutput)
+  )
+    return {
+      status: 403,
+      body: {
+        error: {
+          code: 'reviewed_workflow_transport_refused',
+          message: 'Reviewed workflow transport was refused.',
+        },
+      },
+    };
   // Snapshot wire input before the first await. The request hash still uses
   // the original canonical domain, including its existing undefined semantics.
   const wireInput = JSON.stringify(input);
@@ -118,16 +142,31 @@ export async function invokeGenericAgent(
   let writer: Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   try {
     writer = (deps.writerFactory ?? createHumanActionWriter)();
-    const { data, error } = await writer
-      .rpc('record_generic_agent_run_start', {
-        p_tenant_id: tenantId,
-        p_actor_id: actorId,
-        p_agent: agent,
-        p_engagement_id: engagementId,
-        p_correlation_id: correlationId,
-        p_request_hash: requestHash,
-      })
-      .abortSignal(AbortSignal.timeout(10000));
+    const { data, error } = deps.reviewedWorkflow
+      ? {
+          data: await deps.reviewedWorkflow.start(
+            Object.freeze({
+              agent,
+              tenantId,
+              actorId,
+              engagementId,
+              correlationId,
+              requestHash,
+              canonicalInput,
+            }),
+          ),
+          error: null,
+        }
+      : await writer
+          .rpc('record_generic_agent_run_start', {
+            p_tenant_id: tenantId,
+            p_actor_id: actorId,
+            p_agent: agent,
+            p_engagement_id: engagementId,
+            p_correlation_id: correlationId,
+            p_request_hash: requestHash,
+          })
+          .abortSignal(AbortSignal.timeout(10000));
     if (error) throw new Error('start_unconfirmed');
     const parsed = z
       .object({ run_id: z.uuid(), created: z.boolean(), status: z.string() })
@@ -243,6 +282,10 @@ export async function invokeGenericAgent(
       path = `/public-source/agents/${agent}/invoke`;
       transportBody = { tenant_id: tenantId, run_id: runId, correlation_id: correlationId };
     }
+    if (deps.reviewedWorkflow) {
+      path = '/reviewed-workflows/agents/vibhaag/invoke';
+      transportBody = { tenant_id: tenantId, run_id: runId, operation_key: correlationId };
+    }
     const res = await (deps.fetchImpl ?? fetch)(`${runtimeUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
@@ -285,10 +328,11 @@ export async function invokeGenericAgent(
     responseHash = succeeded && result ? await sha256(canonicalJson(result.output)) : null;
     if (succeeded && deps.settleSudhaarSuccess && agent !== 'sudhaar')
       throw new Error('planning_settlement_refused');
+    const successCapture = deps.reviewedWorkflow?.settleSuccess ?? deps.settleSudhaarSuccess;
     const { data: recorded, error } =
-      succeeded && deps.settleSudhaarSuccess
+      succeeded && successCapture
         ? {
-            data: await deps.settleSudhaarSuccess(
+            data: await successCapture(
               Object.freeze({
                 agent,
                 tenantId,
