@@ -137,6 +137,13 @@ seed = (
     seed.replace("begin;", "", 1)
     .replace("temporary table", "table")
     .replace("pg_temp.", "sudhaar_race.")
+    # Other suites persist their common synthetic b64 proof in the combined DB.
+    # Keep this fixture's actual delegation/start/completion proof consistent
+    # while giving it a namespace distinct from every preceding worker race.
+    .replace(
+        "repeat('b',64)",
+        "encode(sha256(convert_to('sudhaar-output-race:99750000-0000-4000-8000-000000000041','UTF8')),'hex')",
+    )
 )
 sql(
     "create schema sudhaar_race;grant usage on schema sudhaar_race to human_action_writer,agent_ledger_writer;"
