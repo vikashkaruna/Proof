@@ -108,7 +108,7 @@ export interface OwnedPlanContext {
   sessionId: string;
   idempotencyKey: string;
 }
-export interface OwnedPlanPorts {
+export interface OwnedPlanSourcePorts {
   /** Normal server authority/MFA session verifier; rechecked even on exact recovery. */
   authorizeCurrent(context: OwnedPlanContext): Promise<void>;
   /** Future narrow human writer RPC; SQL must repeat current source/authority checks atomically. */
@@ -118,6 +118,8 @@ export interface OwnedPlanPorts {
   ): Promise<unknown>;
   /** Bound server-configured target; no caller URLs/credentials or declared-only simulator. */
   validateRoundtrip(binding: OwnedBinding): Promise<unknown>;
+}
+export interface OwnedPlanPorts extends OwnedPlanSourcePorts {
   /** Real target read fence must hold the measured snapshot through the atomic writer commit. */
   withCurrentSnapshot(
     binding: OwnedBinding,
@@ -127,6 +129,14 @@ export interface OwnedPlanPorts {
       bindingId: string;
       snapshotHash: string;
     }) => Promise<unknown>,
+  ): Promise<unknown>;
+}
+/** The actual SQL writer owns the resource and plan in one transaction domain. */
+export interface OwnedPostgresPlanPorts extends OwnedPlanSourcePorts {
+  persistInResourceTransaction(
+    binding: OwnedBinding,
+    proof: OwnedRoundtrip,
+    args: Record<string, unknown>,
   ): Promise<unknown>;
 }
 export class OwnedPlanRefused extends Error {
@@ -181,7 +191,7 @@ function validateReceipt(
   return result;
 }
 async function writerCall(
-  ports: OwnedPlanPorts,
+  ports: OwnedPlanSourcePorts,
   name: Parameters<OwnedPlanPorts['rpc']>[0],
   args: Record<string, unknown>,
 ): Promise<unknown> {
@@ -195,7 +205,7 @@ async function writerCall(
     );
   }
 }
-async function measuredCall(ports: OwnedPlanPorts, value: OwnedBinding): Promise<unknown> {
+async function measuredCall(ports: OwnedPlanSourcePorts, value: OwnedBinding): Promise<unknown> {
   try {
     return await ports.validateRoundtrip(value);
   } catch {
@@ -203,10 +213,15 @@ async function measuredCall(ports: OwnedPlanPorts, value: OwnedBinding): Promise
   }
 }
 /** Creates a NEW human plan; review-only plan conversion and caller-created approvals are absent. */
-export async function produceOwnedMeasuredPlan(
+async function produceWithOwnedSource(
   context: OwnedPlanContext,
   input: unknown,
-  ports: OwnedPlanPorts,
+  ports: OwnedPlanSourcePorts,
+  persist: (
+    binding: OwnedBinding,
+    proof: OwnedRoundtrip,
+    args: Record<string, unknown>,
+  ) => Promise<unknown>,
 ): Promise<OwnedPlanReceipt> {
   const parsed = ownedPlanRequestSchema.safeParse(input);
   if (
@@ -273,26 +288,58 @@ export async function produceOwnedMeasuredPlan(
   const validationHash = ownedHash(proof);
   if (current.state === 'recorded')
     return validateReceipt(current.recorded, context, request, requestHash, validationHash);
-  const recorded = await ports.withCurrentSnapshot(current.binding, proof, async (fence) => {
-    if (
-      !uuid.safeParse(fence.fenceId).success ||
-      fence.bindingId !== request.bindingId ||
-      fence.snapshotHash !== request.expectedSnapshotHash
-    )
-      throw new OwnedPlanRefused('owned_plan_source_refused');
-    await ports.authorizeCurrent(context);
-    return await writerCall(ports, 'record_owned_measured_plan', {
-      p_tenant_id: context.tenantId,
-      p_actor_id: context.actorId,
-      p_session_id: context.sessionId,
-      p_operation_key: request.operationKey,
-      p_request_hash: requestHash,
-      p_binding_id: request.bindingId,
-      p_engagement_id: request.engagementId,
-      p_roundtrip: proof,
-      p_validation_hash: validationHash,
-      p_snapshot_fence_id: fence.fenceId,
-    });
+  const recorded = await persist(current.binding, proof, {
+    p_tenant_id: context.tenantId,
+    p_actor_id: context.actorId,
+    p_session_id: context.sessionId,
+    p_operation_key: request.operationKey,
+    p_request_hash: requestHash,
+    p_binding_id: request.bindingId,
+    p_engagement_id: request.engagementId,
+    p_roundtrip: proof,
+    p_validation_hash: validationHash,
   });
   return validateReceipt(recorded, context, request, requestHash, validationHash);
+}
+
+/** Separate target: an actual external read fence spans the atomic writer commit. */
+export async function produceOwnedMeasuredPlan(
+  context: OwnedPlanContext,
+  input: unknown,
+  ports: OwnedPlanPorts,
+): Promise<OwnedPlanReceipt> {
+  return produceWithOwnedSource(context, input, ports, (binding, proof, args) =>
+    ports.withCurrentSnapshot(binding, proof, async (fence) => {
+      if (
+        !uuid.safeParse(fence.fenceId).success ||
+        fence.bindingId !== binding.id ||
+        fence.snapshotHash !== ownedHash(proof.before)
+      )
+        throw new OwnedPlanRefused('owned_plan_source_refused');
+      await ports.authorizeCurrent(context);
+      return writerCall(ports, 'record_owned_measured_plan', {
+        ...args,
+        p_snapshot_fence_id: fence.fenceId,
+      });
+    }),
+  );
+}
+
+/** Same PostgreSQL target: a narrow writer rechecks and locks the source through its own commit.
+ * This port has no default implementation and cannot be selected by the request body.
+ * Native row locks are mandatory; no fabricated external lease is accepted or issued.
+ */
+export async function produceOwnedPostgresMeasuredPlan(
+  context: OwnedPlanContext,
+  input: unknown,
+  ports: OwnedPostgresPlanPorts,
+): Promise<OwnedPlanReceipt> {
+  return produceWithOwnedSource(context, input, ports, async (binding, proof, args) => {
+    await ports.authorizeCurrent(context);
+    try {
+      return await ports.persistInResourceTransaction(binding, proof, args);
+    } catch {
+      throw new OwnedPlanRefused('owned_plan_outcome_unconfirmed');
+    }
+  });
 }
