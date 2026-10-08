@@ -8,7 +8,8 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import Link from 'next/link';
-import { AssessmentRequestSchema } from '@axiom/types';
+import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
+import { AssessmentQuestionnaireEditor, type ReviewedQuestionnaire } from './questionnaire';
 import {
   ASSESSMENT_JOURNAL_CHANGED,
   assessmentJournalKey,
@@ -16,7 +17,7 @@ import {
   readAssessmentJournal,
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
-  submitUnknownAssessment,
+  submitAssessmentRequest,
   readAssessmentRequest,
   type RetainedAssessment,
   type AssessmentJobReadout,
@@ -75,7 +76,8 @@ function RequestPanel({
     if (raw === '__unhydrated__') return { retained: null, ready: false, invalid: false };
     if (raw === null) return { retained: null, ready: true, invalid: false };
     try {
-      if (raw.length > 4096) throw new Error();
+      if (new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024)
+        throw new Error();
       const value = retainedAssessmentSchema.parse(JSON.parse(raw));
       if (value.tenantId !== tenantId || value.actorId !== actorId) throw new Error();
       return { retained: value, ready: true, invalid: false };
@@ -85,6 +87,8 @@ function RequestPanel({
   }, [raw, tenantId, actorId]);
   const { retained, ready } = journal;
   const [confirmedUnknown, setConfirmedUnknown] = useState(false);
+  const [intake, setIntake] = useState(false);
+  const [reviewed, setReviewed] = useState<ReviewedQuestionnaire | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; operationKey: string | null } | null>(
@@ -118,7 +122,8 @@ function RequestPanel({
       retained ||
       hasSavedResults ||
       completedHere ||
-      !confirmedUnknown
+      !confirmedUnknown ||
+      (intake && !reviewed)
     )
       return;
     active.current = true;
@@ -145,10 +150,14 @@ function RequestPanel({
           request: AssessmentRequestSchema.parse({
             operationKey: crypto.randomUUID(),
             engagementId,
+            ...(intake && reviewed
+              ? { answers: reviewed.answers, applicability: reviewed.applicability }
+              : {}),
           }),
+          ...(intake && reviewed ? { questionnaireDigest: reviewed.questionnaireDigest } : {}),
         };
         retainAssessmentJournal(localStorage, value);
-        await submitUnknownAssessment(value);
+        await submitAssessmentRequest(value);
         if (mounted.current)
           setMessage({
             text: 'Request accepted. Results are pending; check its recorded status.',
@@ -227,7 +236,7 @@ function RequestPanel({
         const live = readAssessmentJournal(localStorage, tenantId, actorId);
         if (JSON.stringify(live) !== JSON.stringify(expected))
           throw new Error('Retained request changed. Reload before continuing.');
-        await submitUnknownAssessment(expected);
+        await submitAssessmentRequest(expected);
         if (mounted.current)
           setMessage({
             text: 'Original request accepted. Check its recorded status; no new request key was created.',
@@ -265,8 +274,9 @@ function RequestPanel({
     >
       <h2 className="font-semibold text-slate-900">Parikshan assessment request</h2>
       <p className="mt-2">
-        An unknown-answer draft keeps all questionnaire answers and applicability flags unknown. It
-        produces provisional estimates for review; it does not establish compliance. Discovery,
+        Enter reviewed questionnaire declarations or request an unknown-answer draft. Answers and
+        applicability flags stay unknown until you explicitly choose otherwise. Estimates are
+        provisional and declarations remain unverified; neither establishes compliance. Discovery,
         evidence and reports run separately.
       </p>
       {retained ? (
@@ -341,25 +351,67 @@ function RequestPanel({
             </p>
           ) : (
             <>
+              {!intake ? (
+                <button
+                  type="button"
+                  disabled={busy || !ready}
+                  className="rounded-lg border border-slate-300 px-3 py-2 font-semibold"
+                  onClick={() => {
+                    setIntake(true);
+                    setConfirmedUnknown(false);
+                  }}
+                >
+                  Enter questionnaire declarations
+                </button>
+              ) : (
+                <>
+                  <AssessmentQuestionnaireEditor
+                    tenantId={tenantId}
+                    engagementId={engagementId}
+                    libraryVersion={libraryVersion}
+                    disabled={busy}
+                    onReviewed={(value) => {
+                      setReviewed(value);
+                      setConfirmedUnknown(false);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !ready}
+                    onClick={() => {
+                      setIntake(false);
+                      setReviewed(null);
+                      setConfirmedUnknown(false);
+                    }}
+                  >
+                    Use unknown-answer draft instead
+                  </button>
+                </>
+              )}
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"
                   checked={confirmedUnknown}
                   onChange={(e) => setConfirmedUnknown(e.target.checked)}
-                  disabled={busy || !ready}
+                  disabled={busy || !ready || (intake && !reviewed)}
                 />
                 <span>
-                  I understand that every answer and applicability flag will remain unknown and
-                  require review.
+                  {intake
+                    ? 'I reviewed these exact declarations and understand they remain unverified; unknown answers and unsupported inputs require further review.'
+                    : 'I understand that every answer and applicability flag will remain unknown and require review.'}
                 </span>
               </label>
               <button
                 type="button"
                 onClick={start}
-                disabled={busy || !ready || !confirmedUnknown}
+                disabled={busy || !ready || !confirmedUnknown || (intake && !reviewed)}
                 className="rounded-lg bg-teal-700 px-3 py-2 font-semibold text-white disabled:opacity-50"
               >
-                {busy ? 'Submitting request…' : 'Request unknown-answer assessment'}
+                {busy
+                  ? 'Submitting request…'
+                  : intake
+                    ? 'Submit reviewed questionnaire'
+                    : 'Request unknown-answer assessment'}
               </button>
             </>
           )}

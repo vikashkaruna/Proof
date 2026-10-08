@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { AssessmentRequestSchema } from '@axiom/types';
+import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
 import {
   readAssessmentJournal,
   retainAssessmentJournal,
@@ -68,6 +68,47 @@ it('retains exact actor/tenant/engagement/key and genuinely unknown flags', () =
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
   expect(value.request.answers).toEqual({});
   expect(Object.values(value.request.applicability)).toEqual([null, null, null]);
+});
+it('retains reviewed Boolean/unknown declarations and their exact source reference without coercion', () => {
+  const value = {
+    ...retainedFixture(),
+    questionnaireDigest: 'd'.repeat(64),
+    request: {
+      ...retainedFixture().request,
+      answers: { C: { Q1: true, Q2: false, Q3: null } },
+      applicability: { sdfSelfAttested: null, processesChildren: false, processesHealth: true },
+    },
+  };
+  retainAssessmentJournal(localStorage, value);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  expect(() =>
+    retainAssessmentJournal(localStorage, {
+      ...value,
+      request: { ...value.request, answers: { C: { Q1: false } } },
+    }),
+  ).toThrow(/Resolve/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+});
+it('refuses an oversized valid declaration body before retention or POST', async () => {
+  const value = {
+    ...retainedFixture(),
+    questionnaireDigest: 'd'.repeat(64),
+    request: {
+      ...retainedFixture().request,
+      answers: {
+        C: Object.fromEntries(
+          Array.from({ length: 900 }, (_, i) => [`Q${i}${'x'.repeat(190)}`, true]),
+        ),
+      },
+    },
+  };
+  expect(new TextEncoder().encode(JSON.stringify(value.request)).length).toBeGreaterThan(
+    ASSESSMENT_REQUEST_MAX_BYTES,
+  );
+  expect(() => retainAssessmentJournal(localStorage, value)).toThrow(/supported request size/);
+  await expect(submitUnknownAssessment(value)).rejects.toThrow(/supported request size/);
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
 });
 it('refuses overwriting a different pending request or clearing a changed reference', () => {
   const value = retainedFixture();
