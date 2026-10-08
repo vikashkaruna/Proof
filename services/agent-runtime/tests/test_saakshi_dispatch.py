@@ -145,3 +145,21 @@ async def test_foreign_source_capability_never_runs_storage():
     assert result.status == "failed"
     assert result.evidence_ids == []
     stage.assert_not_awaited()
+
+@pytest.mark.parametrize("value", ["0", "01", "-1", "+1", "1.0", " 1", "9223372036854775808", "10000000000000000000"])
+@pytest.mark.asyncio
+async def test_invalid_retained_receipt_never_claims(value):
+    ledger = transport()
+    ledger.load_saakshi_dispatch.return_value["requested_receipt"] = value
+    with pytest.raises(ValueError):
+        await prepare_evidence_dispatch(ledger, REQUEST, now_ms=1000)
+    ledger.claim_saakshi_dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retained_receipt_accepts_exact_signed_int64_maximum():
+    ledger = transport()
+    ledger.load_saakshi_dispatch.return_value["requested_receipt"] = "9223372036854775807"
+    prepared = await prepare_evidence_dispatch(ledger, REQUEST, now_ms=1000)
+    assert prepared.requested_receipt == "9223372036854775807"
+    ledger.claim_saakshi_dispatch.assert_awaited_once()

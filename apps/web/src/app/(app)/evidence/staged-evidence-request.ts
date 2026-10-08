@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { uploadMetadataSchema } from './evidence-contract';
 import { evidenceUploadBytes } from './evidence-workflow';
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const receipt = z
+  .string()
+  .regex(/^[1-9][0-9]{0,18}$/)
+  .refine((value) => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9223372036854775807n);
 export const stagedRetentionConfiguration = z
   .object({
     provider: z.enum(['s3', 's3-compatible']),
@@ -83,10 +87,10 @@ const resultSchema = z
     stageOutputHash: digest,
     receipts: z
       .object({
-        requested: z.string().regex(/^[1-9][0-9]{0,19}$/),
-        started: z.string().regex(/^[1-9][0-9]{0,19}$/),
-        completed: z.string().regex(/^[1-9][0-9]{0,19}$/),
-        settled: z.string().regex(/^[1-9][0-9]{0,19}$/),
+        requested: receipt,
+        started: receipt,
+        completed: receipt,
+        settled: receipt,
       })
       .strict(),
   })
@@ -307,7 +311,7 @@ const unconfirmedStatusSchema = z
     observedVersion: z.string().min(1).nullable(),
     observedOutputHash: digest.nullable(),
     newApprovedKeyAllowed: z.boolean(),
-    requestedReceipt: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    requestedReceipt: receipt,
   })
   .strict();
 export type UnconfirmedStagedStatus = z.infer<typeof unconfirmedStatusSchema>;

@@ -330,3 +330,17 @@ describe('dedicated human evidence composition', () => {
     expect(f.call).not.toHaveBeenCalled();
   });
 });
+
+it.each(['0', '01', '-1', '+1', '1.0', ' 1', '9223372036854775808', '10000000000000000000'])(
+  'prepared source refuses noncanonical or overflowing receipt before dispatch: %s',
+  async (value) => {
+    const f = fixture();
+    f.prepared.requested_receipt = value;
+    await expect(
+      prepareStagedEvidence({ call: f.call }, id, id, f.human, {
+        key,
+        retention: configuredRetention,
+      }),
+    ).rejects.toThrow();
+  },
+);

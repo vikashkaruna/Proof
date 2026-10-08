@@ -35,12 +35,16 @@ export const retainedStageSource = z
       s.object_key ===
       `tenants/${s.tenant_id}/evidence-ingestions/${s.operation_key}/${s.content_hash}`,
   );
+export const stagedLedgerReceipt = z
+  .string()
+  .regex(/^[1-9][0-9]{0,18}$/)
+  .refine((value) => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9223372036854775807n);
 export const stageBindingSchema = z
   .object({
     source: retainedStageSource,
     runId: uuid,
     correlationId: uuid,
-    requestedReceipt: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    requestedReceipt: stagedLedgerReceipt,
   })
   .strict();
 export type StageBinding = z.infer<typeof stageBindingSchema>;

@@ -13,6 +13,7 @@ import {
 } from './saakshi-temporary-payload.js';
 import {
   stageBindingSchema,
+  stagedLedgerReceipt,
   retainedStageSource,
   StageUnconfirmed,
   type StageBinding,
@@ -28,7 +29,7 @@ export const stagedEvidenceHumanRequest = evidenceUploadSchema
   .extend({ retentionApproval: humanRetentionApprovalSchema })
   .strict();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const receipt = z.string().regex(/^[1-9][0-9]{0,19}$/);
+const receipt = stagedLedgerReceipt;
 export interface EvidenceControllerRpc {
   call(
     name:

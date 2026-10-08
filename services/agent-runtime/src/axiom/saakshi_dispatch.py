@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .canonicalise import canonical_json, sha256_hex
 from .saakshi_staging import HASH, UUID, EvidenceStageInput
@@ -21,7 +21,15 @@ class EvidenceInvokeRequest(BaseModel):
 class RecordedEvidenceDispatch(EvidenceInvokeRequest):
     input_text: str = Field(min_length=1, max_length=16000)
     request_hash: str = Field(pattern=HASH)
-    requested_receipt: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
+    requested_receipt: str = Field(pattern=r"^[1-9][0-9]{0,18}$")
+
+
+    @field_validator("requested_receipt")
+    @classmethod
+    def bounded_receipt(cls, value: str) -> str:
+        if int(value) > 9_223_372_036_854_775_807:
+            raise ValueError("Evidence requested receipt exceeds signed int64")
+        return value
 
 
 class EvidenceDispatchClaim(BaseModel):
