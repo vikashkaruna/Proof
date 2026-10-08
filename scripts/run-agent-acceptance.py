@@ -38,7 +38,7 @@ AGENTS = (
     "samadhan",
     "pramaan",
 )
-SUPPORTED = {"parikshan", "sudhaar", "lekha", "nazar", "sanket"}
+SUPPORTED = {"parikshan", "lekha", "nazar", "sanket"}
 LIMIT = 2 * 1024 * 1024
 CONTRACTS = {
     "drishti": (
@@ -58,8 +58,8 @@ CONTRACTS = {
         "Exact object version, content digest, retention/lock verification and receipt; generic response alone is insufficient.",
     ),
     "sudhaar": (
-        "generic_proposal_compute",
-        "Source finding identifiers and declared scope; typed actions and unvalidated rollback; plan persistence/review separately required.",
+        "source_bound_review_proposal",
+        "Exact finalized assessment packet/library/persisted finding IDs; dedicated signed read-only proposal dispatch. Unknown or unverified facts require human review; no saved plan, finding closure or execution permission.",
     ),
     "karya": (
         "approved_execution_workflow",
@@ -246,21 +246,12 @@ def validate_manifest(value):
         if "correlation_id" not in data:
             raise Refused("explicit_correlation_required")
         uuid_text(data["correlation_id"])
-        if agent in {"parikshan", "sudhaar"}:
+        if agent == "parikshan":
             uuid_text(data.get("engagement_id"))
         if agent == "parikshan" and (
             not isinstance(data.get("answers"), dict) or not data["answers"]
         ):
             raise Refused("reviewed_answers_required")
-        if agent == "sudhaar" and (
-            not isinstance(data.get("findings"), list)
-            or not data["findings"]
-            or any(
-                not isinstance(item, dict) or not item.get("id")
-                for item in data["findings"]
-            )
-        ):
-            raise Refused("source_findings_required")
         if agent == "lekha" and (
             data.get("operation") != "verify" or data.get("from_sequence", 1) != 1
         ):
@@ -429,6 +420,8 @@ def source_processor_status(agent, output):
 
 
 def classify_output(agent, correlation, code, result):
+    if agent == "sudhaar":
+        return "dedicated_source_bound_workflow_required"
     if not isinstance(result, dict) or code != 200:
         return "http_refused"
     if (
@@ -464,20 +457,6 @@ def classify_output(agent, correlation, code, result):
             )
         ):
             return "meaningful_output_missing"
-    if agent == "sudhaar":
-        actions = output.get("actions")
-        if (
-            not isinstance(actions, list)
-            or not actions
-            or any(
-                not isinstance(item, dict)
-                or not item.get("closes_finding_id")
-                or not isinstance(item.get("rollback"), dict)
-                or item["rollback"].get("validatedExecutable") is not False
-                for item in actions
-            )
-        ):
-            return "proposal_or_rollback_refused"
     if agent == "lekha" and (
         output.get("operation") != "verify"
         or output.get("intact") is not True
@@ -646,16 +625,6 @@ def run_manifest(manifest, token, fetch=request_json):
                 readback,
             ):
                 status = "durable_audit_readback_unconfirmed"
-        if (
-            status == "runtime_completed_domain_acceptance_pending"
-            and agent == "sudhaar"
-        ):
-            source_ids = {item["id"] for item in data["findings"]}
-            action_ids = {
-                item["closes_finding_id"] for item in result["output"]["actions"]
-            }
-            if action_ids != source_ids:
-                status = "proposal_source_binding_refused"
         if (
             status == "runtime_completed_domain_acceptance_pending"
             and agent == "parikshan"

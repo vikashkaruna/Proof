@@ -29,6 +29,7 @@ gemini_api_key    = "AIzaSy..."
 # Security Tokens — leave blank for stable generated keys, or supply secret-manager values.
 approval_signing_key         = ""
 agent_runtime_internal_token = ""
+planning_source_signing_key = "" # Independent stable random default; BFF/runtime only
 model_gateway_api_key        = ""
 
 mfa_encryption_key           = ""

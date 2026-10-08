@@ -47,6 +47,7 @@ from .public_source_dispatch import (
     PublicSourceInvokeRequest,
     prepare_public_source_input,
 )
+from .sudhaar_source import SignedPlanningRequest, verify_planning_request
 
 AGENTS: dict[AgentName, Any] = {
     AgentName.DRISHTI: DrishtiAgent,
@@ -238,6 +239,9 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
             ledger_entry_ids=[],
         )
 
+    if agent_enum == AgentName.SUDHAAR:
+        raise HTTPException(status_code=403, detail="planning_source_workflow_required")
+
     agent = app.state.agents.get(agent_enum)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not initialised: {agent_name}")
@@ -259,6 +263,36 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
         correlation_id=result.correlation_id,
         status=result.status,
         latency_ms=latency_ms,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        error=result.error,
+        output=result.output,
+        ledger_entry_ids=result.ledger_entry_ids,
+    )
+
+
+@app.post("/assessment-source/sudhaar/invoke", response_model=InvokeResponse)
+async def invoke_source_sudhaar(request: SignedPlanningRequest, req: Request):
+    require_internal_caller(req)
+    source_key = getattr(app.state.settings, "planning_source_signing_key", None)
+    if not source_key:
+        raise HTTPException(status_code=503, detail="planning_runtime_unavailable")
+    try:
+        value, correlation, context = verify_planning_request(
+            request, source_key, peer_secret=app.state.settings.internal_token
+        )
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(status_code=403, detail="planning_source_refused") from None
+    agent = app.state.agents.get(AgentName.SUDHAAR)
+    if not agent:
+        raise HTTPException(status_code=503, detail="planning_runtime_unavailable")
+    result = await agent.invoke(value, correlation_id=correlation, dispatch_context=context)
+    return InvokeResponse(
+        agent=result.agent.value,
+        correlation_id=result.correlation_id,
+        status=result.status,
+        latency_ms=result.latency_ms,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         cost_usd=result.cost_usd,

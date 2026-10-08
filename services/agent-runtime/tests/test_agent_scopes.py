@@ -23,8 +23,8 @@ from axiom.agents.karya import KaryaAgent
 from axiom.agents.lekha import LekhaAgent
 from axiom.agents.nazar import NazarAgent
 from axiom.agents.parikshan import ParikshanAgent
-from axiom.agents.prativedan import PrativedanAgent
 from axiom.agents.pramaan import PramaanAgent
+from axiom.agents.prativedan import PrativedanAgent
 from axiom.agents.saakshi import SaakshiAgent
 from axiom.agents.samadhan import SamadhanAgent
 from axiom.agents.sanket import SanketAgent
@@ -89,13 +89,12 @@ def test_scopes_match_typescript_declaration(name: str) -> None:
     """
     ts = _typescript_scopes()
     assert sorted(PYTHON_AGENTS[name].tool_scopes) == sorted(ts[name]), (
-        f"{name}: Python declares {PYTHON_AGENTS[name].tool_scopes}, "
-        f"TypeScript declares {ts[name]}"
+        f"{name}: Python declares {PYTHON_AGENTS[name].tool_scopes}, TypeScript declares {ts[name]}"
     )
 
 
 @pytest.mark.security
-@pytest.mark.parametrize("name,agent", sorted(PYTHON_AGENTS.items()))
+@pytest.mark.parametrize(("name", "agent"), sorted(PYTHON_AGENTS.items()))
 def test_no_agent_may_write_the_control_library(name: str, agent: type) -> None:
     """SEC-15.
 
@@ -143,7 +142,7 @@ def test_explicit_mutation_metadata_matches_typescript(name: str) -> None:
     block = source.split(f"  {name}: {{", 1)[1].split("\n  },", 1)[0]
     agent = PYTHON_AGENTS[name]
     expected_client = name == "karya"
-    expected_internal = name not in {"vibhaag", "sanket"}
+    expected_internal = name not in {"vibhaag", "sanket", "sudhaar"}
     assert agent.can_mutate is expected_client
     assert agent.mutates_client_estate is expected_client
     assert agent.writes_axiom_state is expected_internal
@@ -153,6 +152,10 @@ def test_explicit_mutation_metadata_matches_typescript(name: str) -> None:
 
 def test_reporting_declares_explicit_reads_without_connector_access() -> None:
     assert set(PrativedanAgent.tool_scopes) == {
-        "findings.read", "evidence.read", "control_library.read", "report.write", "pdf.render"
+        "findings.read",
+        "evidence.read",
+        "control_library.read",
+        "report.write",
+        "pdf.render",
     }
     assert PrativedanAgent.can_mutate is False

@@ -98,7 +98,7 @@ describe('explicit mutation metadata', () => {
     expect(() => AgentContractSchema.parse({ ...baseContract, canMutate: true })).toThrow(
       'canMutate must match mutatesClientEstate',
     );
-    expect(AGENT_CONTRACTS.sudhaar.writesAxiomState).toBe(true);
+    expect(AGENT_CONTRACTS.sudhaar.writesAxiomState).toBe(false);
     expect(AGENT_CONTRACTS.nazar.writesAxiomState).toBe(true);
     expect(AGENT_CONTRACTS.vibhaag.writesAxiomState).toBe(false);
     expect(AGENT_CONTRACTS.prativedan.toolScopes).toEqual([

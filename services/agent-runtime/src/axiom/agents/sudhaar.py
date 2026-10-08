@@ -2,9 +2,9 @@
 
 "I propose the fix. You decide."
 
-Sudhaar converts each finding into a typed, parameterised remediation
-action with a risk score, blast radius, dependency order, and a
-mandatory generated rollback plan.
+Sudhaar converts exact source-bound assessment findings into mandatory review
+work. Scores and caller declarations never establish verified failures, safe
+scope, reversible operations, executable actions or closed findings.
 
 Per ADR-3 (mirror): Sudhaar holds NO write credentials. It proposes,
 never executes. This is the separation of duties.
@@ -12,15 +12,24 @@ never executes. This is the separation of duties.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Annotated, Any, ClassVar, Literal
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+import structlog
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from ..canonicalise import canonical_json
+from ..ledger_client import LedgerClient
+
+if TYPE_CHECKING:
+    from ..config import Settings
+    from ..evidence_client import EvidenceVault
+    from ..model_gateway import ModelGateway
 
 from .base import AgentName, AutonomyLevel, BaseAgent
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     POLICY_PUBLISH = "policy.publish"
     POLICY_UPDATE = "policy.update"
     NOTICE_UPDATE = "notice.update"
@@ -66,9 +75,9 @@ PATTERN_TO_ACTION: dict[str, ActionType] = {
 
 def inverse_action(action: ActionType) -> ActionType | None:
     """For each mutating action, return its typed inverse for rollback."""
-    pairs: dict[ActionType, ActionType] = {
-        ActionType.DATA_DELETE: ActionType.POLICY_PUBLISH,  # data can't be un-deleted; rollback = log+notify
-        ActionType.DATA_MASK: ActionType.CUSTOM,  # masked data cannot be unmasked by design
+    pairs: dict[ActionType, ActionType | None] = {
+        ActionType.DATA_DELETE: None,  # Irreversible deletion has no typed inverse.
+        ActionType.DATA_MASK: None,  # Irreversible masking cannot claim a custom undo.
         ActionType.CONFIG_RBAC_UPDATE: ActionType.CONFIG_RBAC_UPDATE,
         ActionType.CONFIG_MFA_ENFORCE: ActionType.CONFIG_MFA_ENFORCE,
         ActionType.CONSENT_UPDATE: ActionType.NOTICE_UPDATE,
@@ -77,82 +86,176 @@ def inverse_action(action: ActionType) -> ActionType | None:
     return pairs.get(action)
 
 
-class SudhaarAction(BaseModel):
-    sequence: int
-    action_type: str
-    description: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    closes_finding_id: str
-    risk_class: str  # 'low' | 'medium' | 'high' | 'critical'
-    risk_score: float  # 0-100
-    records_affected: int | None
-    systems_affected: list[str] = Field(default_factory=list)
-    environment: str | None
-    scope_status: Literal["declared", "incomplete"]
-    rollback: dict[str, Any]
-    depends_on: list[int] = Field(default_factory=list)
+class PlanningSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, serialize_by_alias=True)
+    assessment_run_id: str = Field(
+        alias="assessmentRunId", pattern=r"^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+    )
+    library_version: str = Field(alias="libraryVersion", min_length=1, max_length=200)
+    library_digest: str = Field(alias="libraryDigest", pattern=r"^[a-f0-9]{64}$")
+    result_digest: str = Field(alias="resultDigest", pattern=r"^[a-f0-9]{64}$")
+    finalized_receipt: str = Field(alias="finalizedReceipt", pattern=r"^[1-9][0-9]{0,18}$")
+
+    @model_validator(mode="after")
+    def validate_receipt(self) -> Self:
+        if int(self.finalized_receipt) > 9223372036854775807:
+            raise ValueError("Planning receipt refused")
+        return self
 
 
-class DeclaredActionScope(BaseModel):
-    """Human/source declarations for a proposal, never proof of a live measurement.
+class AnswerCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    known: int = Field(ge=0, le=1000)
+    affirmed: int = Field(ge=0, le=1000)
+    denied: int = Field(ge=0, le=1000)
+    unknown: int = Field(ge=0, le=1000)
 
-    Missing counts stay unknown. A complete declaration does not replace the
-    persisted dry-run, rollback validation or human approval execution requires.
-    """
 
-    model_config = ConfigDict(extra="forbid")
-    records_affected: int | None = Field(default=None, strict=True, ge=0, le=10**12)
-    systems_affected: list[
-        Annotated[
-            str,
-            StringConstraints(
-                strip_whitespace=True,
-                min_length=1,
-                max_length=200,
-                pattern=r"^[A-Za-z0-9_. -]+$",
-            ),
-        ]
-    ] = Field(default_factory=list, max_length=100)
-    environment: Literal["production", "staging", "development", "n/a"] | None = None
+class PlanningFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    finding_id: str = Field(pattern=r"^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$")
+    control_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    severity: Literal["critical", "high", "medium", "low", "info"]
+    score_decimal: str = Field(pattern=r"^(?:100(?:\.0+)?|(?:[0-9]|[1-9][0-9])(?:\.[0-9]{1,6})?)$")
+    risk_points_decimal: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,4})(?:\.[0-9]{1,6})?$")
+    answer_state: Literal[
+        "unknown",
+        "partially_answered",
+        "caller_declared_unverified",
+        "not_boolean_assessable",
+        "unavailable",
+    ]
+    applicability_state: Literal[
+        "unconditional",
+        "unknown",
+        "caller_declared_applicable_unverified",
+        "caller_declared_not_applicable_unverified",
+        "unavailable",
+    ]
+    answer_counts: AnswerCounts | None
+
+    @model_validator(mode="after")
+    def validate_declarations(self) -> Self:
+        n = self.answer_counts
+        expected = (
+            "unavailable"
+            if n is None
+            else "not_boolean_assessable"
+            if n.known == 0
+            else "unknown"
+            if n.unknown == n.known
+            else "partially_answered"
+            if n.unknown
+            else "caller_declared_unverified"
+        )
+        if (
+            self.answer_state != expected
+            or (n and n.known != n.affirmed + n.denied + n.unknown)
+            or ((n is None) != (self.applicability_state == "unavailable"))
+        ):
+            raise ValueError("Unbound planning declarations")
+        return self
 
 
 class SudhaarInput(BaseModel):
-    tenant_id: str
-    engagement_id: str
-    title: str = "Remediation plan"
-    findings: list[dict[str, Any]] = Field(default_factory=list)
-    scope_hints: dict[str, DeclaredActionScope] = Field(
-        default_factory=dict,
-        description="Declared scope keyed by finding ID; missing facts require human review",
-    )
-    blast_radius_cap_records: int = 50_000  # tenant-set cap
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tenant_id: str = Field(pattern=r"^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$")
+    engagement_id: str = Field(pattern=r"^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$")
+    title: str = Field(min_length=1, max_length=300)
+    source: PlanningSource
+    findings: list[PlanningFinding] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_register(self) -> Self:
+        if (
+            len({f.finding_id for f in self.findings}) != len(self.findings)
+            or len({f.control_id for f in self.findings}) != len(self.findings)
+            or sum(f.answer_counts.known for f in self.findings if f.answer_counts) > 5000
+            or len(canonical_json(self.model_dump(mode="json")).encode()) > 524_288
+        ):
+            raise ValueError("Planning register refused")
+        return self
+
+
+ReviewReason = Literal[
+    "provenance_unavailable",
+    "applicability_unverified",
+    "questionnaire_incomplete",
+    "evidence_required",
+    "declarations_unverified",
+]
+
+
+class ReviewTask(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    sequence: int = Field(ge=1, le=500)
+    finding_id: str
+    control_id: str
+    title: str
+    reason: ReviewReason
+    instruction: Literal[
+        "Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal."
+    ]
 
 
 class SudhaarOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1]
+    kind: Literal["remediation_proposal"]
     title: str
-    actions: list[SudhaarAction]
-    aggregate_records_affected: int | None
-    aggregate_systems: list[str]
-    escalate: bool = False
-    escalation_reason: str | None = None
+    source: PlanningSource
+    persistence: Literal["not_saved"]
+    review_required: Literal[True]
+    escalate: Literal[True]
+    execution_allowed: Literal[False]
+    review_tasks: list[ReviewTask] = Field(min_length=1, max_length=500)
+    provisional_actions: list[Any] = Field(max_length=0)
+    aggregate_records_affected: None
+    aggregate_systems: list[str] = Field(max_length=0)
+
+
+def review_reason(finding: PlanningFinding) -> ReviewReason:
+    if finding.answer_state == "unavailable":
+        return "provenance_unavailable"
+    if finding.applicability_state != "unconditional":
+        return "applicability_unverified"
+    if finding.answer_state in {"unknown", "partially_answered"}:
+        return "questionnaire_incomplete"
+    if finding.answer_state == "not_boolean_assessable":
+        return "evidence_required"
+    return "declarations_unverified"
 
 
 class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
     name: ClassVar[AgentName] = AgentName.SUDHAAR
-    writes_axiom_state: ClassVar[bool] = True
-    description: ClassVar[str] = "Generate a typed remediation plan with rollback definitions."
-    one_liner: ClassVar[str] = "I propose the fix. You decide."
-    # A plan proposal is returned to the caller; Sudhaar has no persistence
-    # scope and cannot mutate a tenant's plan or any external system.
+    writes_axiom_state: ClassVar[bool] = False
+    description: ClassVar[str] = (
+        "Propose source-bound assessment review work; never execute or close findings."
+    )
+    one_liner: ClassVar[str] = "I propose the review. You decide."
     tool_scopes: ClassVar[tuple[str, ...]] = (
         "findings.read",
         "control_library.read",
         "plan.propose",
     )
     autonomy: ClassVar[AutonomyLevel] = AutonomyLevel.L1
-    # Per ADR-3, Sudhaar holds NO write credentials
     can_mutate: ClassVar[bool] = False
     default_task_kind: ClassVar[Any] = "reasoning"
+
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        ledger: LedgerClient | None = None,
+        evidence: EvidenceVault | None = None,
+        model_gateway: ModelGateway | None = None,
+    ) -> None:
+        # Keep constructor compatibility with the shared runtime registry while
+        # retaining none of the shared settings/vault/gateway/read credentials.
+        # The only credential-bearing capability is the scoped audit writer.
+        self.ledger = (ledger or LedgerClient.from_settings(settings)).append_only_view()
+        self.log = structlog.get_logger(agent=self.name.value, version=self.version)
 
     def input_schema(self) -> type[SudhaarInput]:
         return SudhaarInput
@@ -161,123 +264,28 @@ class SudhaarAgent(BaseAgent[SudhaarInput, SudhaarOutput]):
         return SudhaarOutput
 
     async def _run(self, *, correlation_id: str, input: SudhaarInput, **deps: Any) -> SudhaarOutput:
-        actions: list[SudhaarAction] = []
-        aggregate_records = 0
-        all_counts_declared = True
-        aggregate_systems: set[str] = set()
-        escalate = False
-        escalation_reason: str | None = None
-
-        # Sort findings by risk (descending) so the highest-priority
-        # actions come first in the plan
-        sorted_findings = sorted(
-            input.findings, key=lambda f: f.get("risk_points", 0), reverse=True
-        )
-
-        for i, finding in enumerate(sorted_findings, start=1):
-            patterns = finding.get("remediation_patterns") or ["policy"]
-            primary_pattern = patterns[0] if patterns else "policy"
-            action_type = PATTERN_TO_ACTION.get(primary_pattern, ActionType.CUSTOM)
-            control_id = finding.get("control_id", "")
-            severity = finding.get("severity", "medium")
-            risk_score = float(finding.get("risk_points", 0))
-            risk_class = severity if severity in {"low", "medium", "high", "critical"} else "medium"
-
-            # Risk points measure priority, not estate size. Only preserve
-            # supplied scope facts; unknown is neither zero nor production.
-            scope = input.scope_hints.get(finding.get("id", "")) or DeclaredActionScope()
-            records_affected = scope.records_affected
-            systems_affected = list(dict.fromkeys(scope.systems_affected))
-            scope_complete = (
-                records_affected is not None
-                and bool(systems_affected)
-                and scope.environment is not None
+        tasks = [
+            ReviewTask(
+                sequence=i,
+                finding_id=f.finding_id,
+                control_id=f.control_id,
+                title=f.title,
+                reason=review_reason(f),
+                instruction="Review the recorded questionnaire, applicability and supporting evidence before proposing corrective work. No finding is closed by this proposal.",
             )
-            if records_affected is None:
-                all_counts_declared = False
-            if not scope_complete:
-                escalate = True
-                escalation_reason = (
-                    escalation_reason
-                    or f"blast_radius_unconfirmed: action #{i} needs declared scope"
-                )
-
-            # Build the rollback plan
-            inv = inverse_action(action_type)
-            rollback = {
-                "type": "typed",
-                "inverseActionType": inv.value if inv else None,
-                "steps": [
-                    {
-                        "description": (
-                            f"Restore {action_type.value} to pre-execution state"
-                            if inv
-                            else f"Manual recovery: revert {action_type.value} via documented procedure"
-                        ),
-                        "action": "rollback.execute",
-                        "parameters": {"originalActionId": "{{action.id}}"},
-                    }
-                ],
-                "estimatedRollbackTimeSeconds": 300,
-                "preconditions": [
-                    "pre_state snapshot exists for action {action.id}",
-                    "no concurrent mutations on the same target",
-                ],
-                "validatedExecutable": False,  # set true after dry-run
-            }
-
-            actions.append(
-                SudhaarAction(
-                    sequence=i,
-                    action_type=action_type.value,
-                    description=f"Address {control_id}: {finding.get('title', '')}",
-                    parameters={
-                        "control_id": control_id,
-                        "finding_id": finding.get("id", ""),
-                    },
-                    closes_finding_id=finding.get("id", ""),
-                    risk_class=risk_class,
-                    risk_score=min(100.0, risk_score),
-                    records_affected=records_affected,
-                    systems_affected=systems_affected,
-                    environment=scope.environment,
-                    scope_status="declared" if scope_complete else "incomplete",
-                    rollback=rollback,
-                )
-            )
-
-            if records_affected is not None:
-                aggregate_records += records_affected
-            aggregate_systems.update(systems_affected)
-
-            # Per-action escalation: high-risk actions get a flag
-            if (
-                risk_class in {"high", "critical"}
-                and records_affected is not None
-                and records_affected > 10_000
-            ):
-                escalate = True
-                escalation_reason = (
-                    escalation_reason
-                    or f"high_blast_radius: action #{i} ({action_type.value}) affects {records_affected} records"
-                )
-
-        # Tenant-level blast-radius cap check
-        if aggregate_records > input.blast_radius_cap_records:
-            escalate = True
-            cap_reason = (
-                f"blast_radius_exceeded: declared scope affects {aggregate_records} records "
-                f"> cap {input.blast_radius_cap_records}"
-            )
-            escalation_reason = (
-                f"{cap_reason}; {escalation_reason}" if escalation_reason else cap_reason
-            )
-
+            for i, f in enumerate(input.findings, 1)
+        ]
         return SudhaarOutput(
+            schema_version=1,
+            kind="remediation_proposal",
             title=input.title,
-            actions=actions,
-            aggregate_records_affected=aggregate_records if all_counts_declared else None,
-            aggregate_systems=sorted(aggregate_systems),
-            escalate=escalate,
-            escalation_reason=escalation_reason,
+            source=input.source,
+            persistence="not_saved",
+            review_required=True,
+            escalate=True,
+            execution_allowed=False,
+            review_tasks=tasks,
+            provisional_actions=[],
+            aggregate_records_affected=None,
+            aggregate_systems=[],
         )

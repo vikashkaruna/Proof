@@ -1,3 +1,4 @@
+import { sudhaarProposalRoutes } from './sudhaar-proposals.js';
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
 import { boardReportRoutes } from './board-reports.js';
@@ -221,6 +222,16 @@ export function v1Routes(deps: Deps) {
   app.route('/', w2ParityRoutes());
   app.route('/', assessmentRequestRoutes(deps.assessmentRequests));
   app.route('/', assessmentRoutes());
+  app.route(
+    '/',
+    sudhaarProposalRoutes({
+      killSwitch: deps.killSwitch,
+      sourceSigningKey: env.AXIOM_PLANNING_SOURCE_SIGNING_KEY,
+      runtimeUrl: env.AGENT_RUNTIME_URL,
+      runtimeToken: env.AGENT_RUNTIME_INTERNAL_TOKEN,
+      realtime: deps.realtime,
+    }),
+  );
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());
@@ -4007,6 +4018,16 @@ export function v1Routes(deps: Deps) {
         403,
       );
     }
+    if (name === 'sudhaar')
+      return c.json(
+        {
+          error: {
+            code: 'planning_source_workflow_required',
+            message: 'Use the finalized assessment proposal workflow.',
+          },
+        },
+        403,
+      );
     // Generated reports must stay in the private source/review/artifact lifecycle.
     // Generic runtime output would bypass that visibility and release boundary.
     if (name === 'prativedan') {

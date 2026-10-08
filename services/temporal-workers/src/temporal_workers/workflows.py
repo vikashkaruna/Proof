@@ -1,7 +1,8 @@
 """Versioned engagement computation frontier.
 
-This workflow stops at a truthful plan-persistence/review handoff. It does not
-claim approval, execution, verification, persisted assessment or compliance
+New executions stop at the finalized-assessment source handoff. Legacy histories
+retain their recorded computation frontier for deterministic replay. Neither path
+claims approval, execution, verification, persisted assessment or compliance
 closure from legacy runtime output. Private workload orchestration remains the
 next integration; proofs/SVIDs must never be placed in Temporal arguments.
 """
@@ -62,6 +63,16 @@ class ComplianceEngagementWorkflow:
         # response must be reconciled before any repeat; never retry it blindly.
         retry = RetryPolicy(maximum_attempts=1)
         for agent in ("drishti", "vibhaag", "parikshan", "sudhaar"):
+            if agent == "sudhaar" and workflow.patched("sudhaar-finalized-source-v1"):
+                self._stage = "assessment_finalization_required"
+                return {
+                    "status": "assessment_finalization_required",
+                    "stage": "sudhaar",
+                    "code": "sudhaar_finalized_source_required",
+                    "correlation_id": correlation,
+                    "stages": dict(self._state),
+                    "assessment": outputs["parikshan"],
+                }
             self._stage = agent
             if agent == "drishti":
                 payload = {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentName } from './enums';
+import { sudhaarInputSchema, sudhaarProposalSchema } from './sudhaar-proposal';
 
 /**
  * Per-agent contracts. Each agent declares:
@@ -118,13 +119,13 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
   sudhaar: {
     name: 'sudhaar',
     displayName: 'Sudhaar',
-    oneLiner: 'I propose the fix. You decide.',
+    oneLiner: 'I propose the review. You decide.',
     autonomyLevel: 'L1',
     canMutate: false, // Planning agent holds NO write credentials (ADR-3)
     mutatesClientEstate: false,
-    writesAxiomState: true,
-    inputSchema: z.unknown(),
-    outputSchema: z.unknown(),
+    writesAxiomState: false,
+    inputSchema: sudhaarInputSchema,
+    outputSchema: sudhaarProposalSchema,
     toolScopes: ['findings.read', 'control_library.read', 'plan.propose'],
     escalationConditions: [
       'novel_remediation_pattern',

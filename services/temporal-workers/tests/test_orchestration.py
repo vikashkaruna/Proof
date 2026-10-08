@@ -7,14 +7,15 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from temporal_workers.workflows import ComplianceEngagementWorkflow
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
-AGENTS = ("drishti", "vibhaag", "parikshan", "sudhaar")
+from temporal_workers.workflows import ComplianceEngagementWorkflow
+
+AGENTS = ("drishti", "vibhaag", "parikshan")
 
 
 def assignment():
@@ -113,10 +114,12 @@ async def run(server, runtime, data=None):
 async def test_actual_server_computation_frontier_and_deterministic_replay(server):
     data, runtime = assignment(), SyntheticRuntime()
     result, _ = await run(server, runtime, data)
-    assert result["status"] == "plan_persistence_required"
+    assert result["status"] == "assessment_finalization_required"
     assert result["stages"] == dict.fromkeys(AGENTS, "computed")
     assert result["assessment"]["posture_score"] == 0
-    assert result["proposal"] == {"actions": []}
+    assert "proposal" not in result
+    assert result["code"] == "sudhaar_finalized_source_required"
+    assert result["stage"] == "sudhaar"
     assert [row[0] for row in runtime.calls] == list(AGENTS)
     assert {row[2] for row in runtime.calls} == {result["correlation_id"]}
     assert all(
@@ -218,7 +221,7 @@ async def test_pending_activity_survives_worker_restart_once_then_history_replay
     ):
         result = await asyncio.wait_for(handle.result(), 30)
         history = await handle.fetch_history()
-    assert result["status"] == "plan_persistence_required"
+    assert result["status"] == "assessment_finalization_required"
     assert [row[0] for row in runtime.calls] == list(AGENTS)
     await Replayer(workflows=[ComplianceEngagementWorkflow]).replay_workflow(history)
 
@@ -232,6 +235,7 @@ async def test_real_activity_http_boundary_and_sanitized_history(
     from types import SimpleNamespace
 
     import httpx
+
     from temporal_workers import activities
     from temporal_workers.config import Settings
 
@@ -265,9 +269,9 @@ async def test_real_activity_http_boundary_and_sanitized_history(
         server, SimpleNamespace(invoke=activities.call_agent_runtime)
     )
     assert result["status"] == (
-        "unconfirmed" if refused else "plan_persistence_required"
+        "unconfirmed" if refused else "assessment_finalization_required"
     )
-    assert len(calls) == (1 if refused else 4)
+    assert len(calls) == (1 if refused else 3)
     serialized = history.to_json()
     assert "synthetic-history-secret" not in serialized
     assert "synthetic-private-failure-body" not in serialized
@@ -284,3 +288,19 @@ async def test_real_activity_http_boundary_and_sanitized_history(
         assert len(failed) == 1
         assert failed[0].message == "agent_invocation_unconfirmed"
         assert not failed[0].HasField("cause")
+
+
+async def test_legacy_history_replays_without_inventing_new_source_authority(
+    server, monkeypatch
+):
+    from temporal_workers import workflows
+
+    runtime = SyntheticRuntime()
+    # Simulate a history recorded before the source-bound patch marker existed.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(workflows.workflow, "patched", lambda _id: False)
+        result, history = await run(server, runtime)
+    assert result["status"] == "plan_persistence_required"
+    assert [row[0] for row in runtime.calls] == [*AGENTS, "sudhaar"]
+    # Current code must replay it, while all new executions stop before Sudhaar.
+    await Replayer(workflows=[ComplianceEngagementWorkflow]).replay_workflow(history)

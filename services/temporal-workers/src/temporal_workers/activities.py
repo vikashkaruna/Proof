@@ -21,6 +21,12 @@ from .service_auth import service_auth_headers
 async def call_agent_runtime(
     agent: str, input: dict[str, Any], correlation_id: str
 ) -> dict[str, Any]:
+    if agent == "sudhaar":
+        raise ApplicationError(
+            "sudhaar_finalized_source_required",
+            type="sudhaar_finalized_source_required",
+            non_retryable=True,
+        )
     failure = "agent_invocation_unconfirmed"
     parsed = None
     try:
@@ -28,7 +34,6 @@ async def call_agent_runtime(
             "drishti",
             "vibhaag",
             "parikshan",
-            "sudhaar",
         } or not isinstance(input, dict):
             raise ValueError("Invalid activity assignment")
         UUID(correlation_id)
