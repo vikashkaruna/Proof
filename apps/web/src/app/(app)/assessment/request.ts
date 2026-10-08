@@ -28,6 +28,13 @@ export const retainedAssessmentSchema = z
   )
   .refine(
     (value) =>
+      !value.request.expectedQuestionnaire ||
+      (value.request.expectedQuestionnaire.libraryVersion === value.libraryVersion &&
+        value.request.expectedQuestionnaire.questionnaireDigest === value.questionnaireDigest),
+    'The retained questionnaire does not match the reviewed source.',
+  )
+  .refine(
+    (value) =>
       new TextEncoder().encode(JSON.stringify(value.request)).length <=
       ASSESSMENT_REQUEST_MAX_BYTES,
     'The questionnaire exceeds the supported request size.',

@@ -194,6 +194,10 @@ it('requires reviewed exact declarations and explicit confirmation, then retains
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   const body = JSON.parse(fetchMock.mock.calls[1]![1].body);
   expect(body.answers).toEqual({ C: { Q1: true, Q2: false } });
+  expect(body.expectedQuestionnaire).toEqual({
+    libraryVersion: '0.1.1',
+    questionnaireDigest: 'd'.repeat(64),
+  });
   expect(body.applicability).toEqual({
     sdfSelfAttested: null,
     processesChildren: false,
