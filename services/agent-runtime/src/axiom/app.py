@@ -249,6 +249,11 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
     if agent_enum == AgentName.VIBHAAG and request.input.get("mode") == "reviewed_workflow":
         raise HTTPException(status_code=403, detail="reviewed_source_workflow_required")
 
+    # Reconciliation must derive from a retained approved execution batch.
+    # The generic route supplies no database source and would sign caller prose.
+    if agent_enum is AgentName.SAMADHAN:
+        raise HTTPException(status_code=403, detail="execution_reconciliation_workflow_required")
+
     if agent_enum == AgentName.SUDHAAR:
         raise HTTPException(status_code=403, detail="planning_source_workflow_required")
 
