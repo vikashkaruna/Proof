@@ -133,6 +133,7 @@ const AGENTS: Array<{
 ];
 
 const WORKFLOW_HREF: Partial<Record<AgentName, string>> = {
+  sudhaar: '/plans',
   karya: '/approval',
   saakshi: '/evidence',
   prativedan: '/reports',

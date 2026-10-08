@@ -99,3 +99,12 @@ it('labels the hero agent through AgentLabel, animated only while a real invocat
   finish({ status: 'succeeded', latency_ms: 1, ledger_entry_ids: [] });
   await waitFor(() => expect(hero().getAttribute('data-state')).toBe('idle'));
 });
+
+it('routes Sudhaar to the source-bound plans workflow with no generic invocation', () => {
+  render(<AgentWorkbenchClient {...props} />);
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'sudhaar' } });
+  expect(screen.getByRole('link', { name: 'Open sudhaar workflow' }).getAttribute('href')).toBe(
+    '/plans',
+  );
+  expect(screen.queryByRole('button', { name: 'Run sudhaar' })).toBeNull();
+});

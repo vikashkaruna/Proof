@@ -70,69 +70,7 @@ export class BoardReportService {
     signal?: AbortSignal,
   ) {
     await this.readRole(tenantId, actorId, signal);
-    const { limit, offset } = options;
-    let query = this.db
-      .from('workload_assessment_packets')
-      .select('run_id,engagement_id,library_version,finalized_at,finalized_receipt', {
-        count: 'exact',
-      })
-      .eq('tenant_id', tenantId)
-      .gte('finalized_at', '1970-01-01T00:00:00Z')
-      .order('finalized_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (signal) query = query.abortSignal(signal);
-    const result = await query;
-    if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
-    const parsed = z
-      .array(
-        z.object({
-          run_id: z.uuid(),
-          engagement_id: z.uuid(),
-          library_version: z.string().min(1),
-          finalized_at: z.string().datetime({ offset: true }),
-          finalized_receipt: z.union([
-            z.number().int().positive(),
-            z.string().regex(/^[1-9][0-9]*$/),
-          ]),
-        }),
-      )
-      .max(limit)
-      .safeParse(result.data ?? []);
-    if (!parsed.success) throw new EvidenceError('invalid_report_record', 503);
-    const engagementIds = [...new Set(parsed.data.map((row) => row.engagement_id))];
-    let engagements: Array<{ id: string; title: string }> = [];
-    if (engagementIds.length) {
-      let titles = this.db
-        .from('engagements')
-        .select('id,title')
-        .eq('tenant_id', tenantId)
-        .in('id', engagementIds)
-        .range(0, limit - 1);
-      if (signal) titles = titles.abortSignal(signal);
-      const titleResult = await titles;
-      if (titleResult.error) throw new EvidenceError('report_storage_unavailable', 503);
-      const titleRows = z
-        .array(z.object({ id: z.uuid(), title: z.string() }))
-        .max(limit)
-        .safeParse(titleResult.data ?? []);
-      if (!titleRows.success) throw new EvidenceError('invalid_report_record', 503);
-      engagements = titleRows.data;
-    }
-    const titleById = new Map(engagements.map((row) => [row.id, row.title]));
-    if (parsed.data.some((row) => !titleById.has(row.engagement_id)))
-      throw new EvidenceError('invalid_report_record', 503);
-    return {
-      assessments: parsed.data.map((row) => ({
-        assessmentRunId: row.run_id,
-        engagementId: row.engagement_id,
-        engagementTitle: titleById.get(row.engagement_id)!,
-        finalizedAt: row.finalized_at,
-        libraryVersion: row.library_version,
-      })),
-      total: result.count ?? 0,
-      limit,
-      offset,
-    };
+    return listFinalizedAssessmentOptions(this.db, tenantId, options, signal);
   }
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -529,4 +467,76 @@ export class BoardReportService {
       offset,
     };
   }
+}
+
+/** Tenant-scoped packet metadata query; callers enforce their own capability. */
+export async function listFinalizedAssessmentOptions(
+  db: EvidenceDatabase,
+  tenantId: string,
+  options: { limit: number; offset: number },
+  signal?: AbortSignal,
+) {
+  const { limit, offset } = options;
+  let query = db
+    .from('workload_assessment_packets')
+    .select('run_id,engagement_id,library_version,finalized_at,finalized_receipt', {
+      count: 'exact',
+    })
+    .eq('tenant_id', tenantId)
+    .gte('finalized_at', '1970-01-01T00:00:00Z')
+    .order('finalized_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (signal) query = query.abortSignal(signal);
+  const result = await query;
+  if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
+  const parsed = z
+    .array(
+      z.object({
+        run_id: z.uuid(),
+        engagement_id: z.uuid(),
+        library_version: z.string().min(1),
+        finalized_at: z.string().datetime({ offset: true }),
+        finalized_receipt: z.union([
+          z.number().int().positive(),
+          z.string().regex(/^[1-9][0-9]*$/),
+        ]),
+      }),
+    )
+    .max(limit)
+    .safeParse(result.data ?? []);
+  if (!parsed.success) throw new EvidenceError('invalid_report_record', 503);
+  const engagementIds = [...new Set(parsed.data.map((row) => row.engagement_id))];
+  let engagements: Array<{ id: string; title: string }> = [];
+  if (engagementIds.length) {
+    let titles = db
+      .from('engagements')
+      .select('id,title')
+      .eq('tenant_id', tenantId)
+      .in('id', engagementIds)
+      .range(0, limit - 1);
+    if (signal) titles = titles.abortSignal(signal);
+    const titleResult = await titles;
+    if (titleResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+    const titleRows = z
+      .array(z.object({ id: z.uuid(), title: z.string() }))
+      .max(limit)
+      .safeParse(titleResult.data ?? []);
+    if (!titleRows.success) throw new EvidenceError('invalid_report_record', 503);
+    engagements = titleRows.data;
+  }
+  const titleById = new Map(engagements.map((row) => [row.id, row.title]));
+  if (parsed.data.some((row) => !titleById.has(row.engagement_id)))
+    throw new EvidenceError('invalid_report_record', 503);
+  return {
+    assessments: parsed.data.map((row) => ({
+      assessmentRunId: row.run_id,
+      engagementId: row.engagement_id,
+      engagementTitle: titleById.get(row.engagement_id)!,
+      finalizedAt: row.finalized_at,
+      libraryVersion: row.library_version,
+    })),
+    total: result.count ?? 0,
+    limit,
+    offset,
+  };
 }

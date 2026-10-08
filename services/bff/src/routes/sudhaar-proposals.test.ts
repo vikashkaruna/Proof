@@ -478,3 +478,74 @@ it('refuses equal peer/source keys even through the trusted signing helper', () 
     ),
   ).toThrow();
 });
+
+describe('read-only proposal source choices', () => {
+  beforeEach(() => {
+    db.rows('engagements')[0]!.title = 'Owned assessment';
+  });
+  it('lists scoped metadata without verifying or transporting all source findings', async () => {
+    const res = await app().request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(200);
+    const body = z
+      .object({ assessments: z.array(z.unknown()), runtimeAvailable: z.boolean() })
+      .parse(await res.json());
+    expect(body.assessments).toEqual([
+      {
+        assessmentRunId: RUN,
+        engagementId: ENG,
+        engagementTitle: 'Owned assessment',
+        libraryVersion: 'v1',
+        finalizedAt: '2026-10-06T12:00:00.000Z',
+      },
+    ]);
+    expect(body.runtimeAvailable).toBe(true);
+    expect(calls).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('keeps source choices available but identifies missing execution configuration', async () => {
+    const res = await app(UserRole.OWNER, '').request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(200);
+    expect(
+      z.object({ runtimeAvailable: z.boolean() }).parse(await res.json()).runtimeAvailable,
+    ).toBe(false);
+  });
+  it('viewer cannot list or read proposal source facts', async () => {
+    for (const path of [
+      '/v1/plans/proposal-assessment-options',
+      `/v1/plans/proposal-assessment-source/${RUN}?engagementId=${ENG}`,
+    ])
+      expect((await app(UserRole.VIEWER).request(path)).status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+  it('selected source verifies pinned ownership and finalization without invoking', async () => {
+    const res = await app().request(
+      `/v1/plans/proposal-assessment-source/${RUN}?engagementId=${ENG}`,
+    );
+    expect(res.status).toBe(200);
+    const { input } = z.object({ input: sudhaarInputSchema }).parse(await res.json());
+    expect(input.tenant_id).toBe(TENANT);
+    expect(input.source.assessmentRunId).toBe(RUN);
+    expect(input.findings).toHaveLength(2);
+    expect(calls.map((c) => c.name)).toEqual(['proof']);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it.each(['proof', 'foreign', 'malformed'])(
+    'selected source refuses %s and exposes no facts',
+    async (fault) => {
+      if (fault === 'proof') proof = false;
+      const run = fault === 'foreign' ? DISPATCH : fault === 'malformed' ? 'invalid' : RUN;
+      const res = await app().request(
+        `/v1/plans/proposal-assessment-source/${run}?engagementId=${ENG}`,
+      );
+      expect(res.status).toBe(fault === 'malformed' ? 400 : 503);
+      expect(await res.json()).not.toHaveProperty('input');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+  it('source read errors remain unavailable rather than false empty success', async () => {
+    db.failNext('workload_assessment_packets');
+    const res = await app().request('/v1/plans/proposal-assessment-options');
+    expect(res.status).toBe(503);
+    expect(await res.json()).not.toHaveProperty('assessments');
+  });
+});
