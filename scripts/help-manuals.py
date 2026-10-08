@@ -20,14 +20,14 @@ import xml.etree.ElementTree as ET  # nosec B405
 
 ROOT = Path(__file__).resolve().parents[1]
 MANUALS = {
-    "founder": "private-docs/help/internal/founder.md",
-    "partner": "private-docs/help/external/partner.md",
-    "client": "private-docs/help/external/client.md",
+    "founder": "docs/private-docs/help/HELP-founder-manual.md",
+    "partner": "docs/private-docs/help/HELP-partner-manual.md",
+    "client": "docs/private-docs/help/HELP-client-manual.md",
 }
-INDEX = "private-docs/help/maintenance/source-index.json"
-CASES = "private-docs/testing/manual-test-cases.json"
-PRIVATE_TESTING = "private-docs/testing/manual-testing.md"
-COVERAGE = "private-docs/help/maintenance/manual-coverage.json"
+INDEX = "docs/private-docs/help/maintenance/source-index.json"
+CASES = "docs/private-docs/testing/TEST-DATA-manual-test-cases.json"
+PRIVATE_TESTING = "docs/private-docs/testing/INDEX.md"
+COVERAGE = "docs/private-docs/help/maintenance/manual-coverage.json"
 ASSETS = ("dashboard.svg", "workflow.svg", "members.svg")
 BEGIN = "<!-- BEGIN GENERATED HELP REFERENCE -->"
 END = "<!-- END GENERATED HELP REFERENCE -->"
@@ -159,10 +159,10 @@ def sources(root: Path) -> dict[str, str]:
             paths.add(name)
     for path in ("scripts/axiom-ops.sh", "scripts/sync-env.sh", "scripts/dev-docker.sh",
                  "scripts/deploy-preprod-gcp.sh", "scripts/run-deployed-acceptance.sh",
-                 "private-docs/reference/02_Phase_Wise_Implementation_Plan.md", "private-docs/reference/03_BRD_PRD.md",
+                 "docs/private-plans/PLAN-02-phase-wise-implementation.md", "docs/private-docs/requirements/REQ-01-brd-prd.md",
                  "scripts/help-manuals.py", ".github/workflows/help-manuals.yml",
                  "scripts/check-private-docs.sh",
-                 *["private-docs/help/assets/" + asset for asset in ASSETS]):
+                 *["docs/private-docs/help/assets/" + asset for asset in ASSETS]):
         paths.add(path)
     return {name: digest(safe_file(root, name)) for name in sorted(paths)}
 
@@ -215,7 +215,7 @@ def with_reference(text: str, reference: str) -> str:
 
 def validate_cases(root: Path, data: dict) -> dict:
     raw = json.loads(safe_file(root, CASES).read_text())
-    if set(raw) != {"schemaVersion", "cases"} or raw["schemaVersion"] != 1 or not isinstance(raw["cases"], list):
+    if not {"schemaVersion", "cases"} <= set(raw) <= {"schemaVersion", "cases", "modules"} or raw["schemaVersion"] != 1 or not isinstance(raw["cases"], list):
         raise HelpError("Invalid manual case suite")
     keys = {"id", "title", "routes", "personas", "requirementRefs", "availability",
             "preconditions", "steps", "expected", "evidence", "destructive"}
@@ -223,7 +223,7 @@ def validate_cases(root: Path, data: dict) -> dict:
     known = {r["route"] for r in data["routes"]}
     valid_states = {"current", "staged", "candidate", "blocked", "conditional"}
     for case in raw["cases"]:
-        if not isinstance(case, dict) or set(case) != keys:
+        if not isinstance(case, dict) or not keys <= set(case) <= keys | {"module", "feature"}:
             raise HelpError("Manual case has unknown or missing fields")
         if not isinstance(case["id"], str) or not re.fullmatch(r"[A-Z0-9-]+", case["id"]) or case["id"] in ids:
             raise HelpError("Invalid or duplicate case ID")
@@ -248,7 +248,7 @@ def validate_cases(root: Path, data: dict) -> dict:
 def approved_svg(root: Path, name: str) -> bytes:
     if name not in ASSETS:
         raise HelpError("Unapproved screen illustration")
-    raw = safe_file(root, f"private-docs/help/assets/{name}").read_bytes()
+    raw = safe_file(root, f"docs/private-docs/help/assets/{name}").read_bytes()
     if len(raw) > 2_000_000:
         raise HelpError("Illustration exceeds approved size")
     if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
@@ -278,7 +278,7 @@ def validate_external(root: Path, audience: str, text: str) -> None:
     route_paths = {item["route"].split("?", 1)[0] for item in inventory(root)["routes"] if not item["route"].startswith("marketing:")}
     for image, target in re.findall(r"(!?)\[[^\]]*\]\(([^)]+)\)", text):
         if image:
-            if target not in {f"../assets/{name}" for name in ASSETS}:
+            if target not in {f"assets/{name}" for name in ASSETS}:
                 raise HelpError("External image is not an approved fictional illustration")
             approved_svg(root, Path(target).name)
         elif target.startswith("#"):
@@ -305,7 +305,7 @@ def public_coverage(cases: dict) -> dict:
 
 def validate_coverage(root: Path, data: dict) -> dict:
     raw = json.loads(safe_file(root, COVERAGE).read_text())
-    if set(raw) != {"schemaVersion", "cases"} or raw["schemaVersion"] != 1:
+    if not {"schemaVersion", "cases"} <= set(raw) <= {"schemaVersion", "cases", "modules"} or raw["schemaVersion"] != 1:
         raise HelpError("Invalid public coverage receipt")
     known = {r["route"] for r in data["routes"]}
     ids, covered = set(), set()
@@ -340,9 +340,9 @@ def sync(root: Path, reason: str) -> dict:
         proposed[name] = text
     for name, text in proposed.items():
         (root / name).write_text(text)
-        if name.startswith("private-docs/"):
+        if name.startswith("docs/private-docs/"):
             (root / name).chmod(0o600)
-    maintenance = root / "private-docs/help/maintenance"
+    maintenance = root / "docs/private-docs/help/maintenance"
     maintenance.mkdir(parents=True, exist_ok=True)
     (root / COVERAGE).write_text(json.dumps(public_coverage(cases), indent=2) + "\n")
     result = {"schemaVersion": 1, "reviewReason": reason.strip(), "sources": sources(root),
@@ -361,7 +361,7 @@ def check(root: Path, require_private: bool = False) -> dict:
     # The repository is public: internal prose can never be part of tracked help.
     if not (root / "docs").is_symlink() and (root / "docs/help/internal").exists() and any((root / "docs/help/internal").rglob("*")):
         raise HelpError("Internal help belongs in protected ignored storage, not the public repository")
-    if not (root / "private-docs").is_dir() or (root / "private-docs").stat().st_mode & 0o077:
+    if not (root / "docs/private-docs").is_dir() or (root / "docs/private-docs").stat().st_mode & 0o077:
         raise HelpError("Private documentation folder is missing or lacks private permissions")
     data = inventory(root)
     cases = validate_coverage(root, data)
@@ -397,7 +397,7 @@ def check(root: Path, require_private: bool = False) -> dict:
     for name in ASSETS:
         approved_svg(root, name)
     if require_private:
-        if any((root / folder).stat().st_mode & 0o077 for folder in ("private-docs", "private-docs/help/internal", "private-docs/testing")):
+        if any((root / folder).stat().st_mode & 0o077 for folder in ("docs/private-docs", "docs/private-docs/help", "docs/private-docs/testing")):
             raise HelpError("Private manual directory lacks private permissions")
         private_paths = {"founder": MANUALS["founder"], "testing": PRIVATE_TESTING, "cases": CASES}
         for name, path in private_paths.items():
@@ -499,10 +499,10 @@ def export(root: Path, audience: str, output: Path) -> Path:
     if output.exists() and (not output.is_dir() or output.is_symlink()):
         raise HelpError("Sharing output must be a regular directory")
     # Never overwrite source docs or expose manuals under application public assets.
-    if any(output.is_relative_to(root / name) for name in ("docs", "apps", "services", "packages")) or output == root:
+    if any(output.is_relative_to(root / name) for name in ("docs/shared-docs", "apps", "services", "packages")) or output == root:
         raise HelpError("Share output must be outside source/public trees")
-    if output.is_relative_to(root) and not output.is_relative_to(root / "private-docs/help/share"):
-        raise HelpError("In-repository help exports belong only in ignored private-docs/help/share")
+    if output.is_relative_to(root) and not output.is_relative_to(root / "docs/private-docs/help/share"):
+        raise HelpError("In-repository help exports belong only in ignored docs/private-docs/help/share")
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     if any(output.iterdir()):
         raise HelpError("Use a fresh empty share directory; existing files might contain internal content")

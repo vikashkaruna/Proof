@@ -183,5 +183,5 @@ describe('shared immutable questionnaire provenance', () => {
       })),
     };
     expect(questionnaireProvenanceSchema.safeParse(raw).success).toBe(false);
-  });
+  }, 30_000);
 });

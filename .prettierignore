@@ -36,4 +36,5 @@ docs/help/maintenance/manual-coverage.json
 
 # Private documentation is formatted explicitly by its local maintenance tools.
 private-docs/
-docs
+docs/private-docs/
+docs/private-plans/

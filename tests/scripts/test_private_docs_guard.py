@@ -39,7 +39,7 @@ class PrivateDocsGuardTests(unittest.TestCase):
         self.git('add', '-f', relative)
 
     def test_public_navigation_and_ignored_pack_pass(self):
-        path = self.root / 'private-docs/help/internal/founder.md'
+        path = self.root / 'docs/private-docs/help/internal/founder.md'
         path.parent.mkdir(parents=True)
         path.write_text('Fictional private manual fixture\n')
         result = self.guard()
@@ -47,7 +47,7 @@ class PrivateDocsGuardTests(unittest.TestCase):
         self.assertIn('no documentation content was read', result.stdout)
 
     def test_force_tracking_private_manual_fails(self):
-        self.force_track('private-docs/help/internal/founder.md')
+        self.force_track('docs/private-docs/help/internal/founder.md')
         result = self.guard()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('must not be tracked', result.stderr)
@@ -56,6 +56,26 @@ class PrivateDocsGuardTests(unittest.TestCase):
     def test_force_tracking_legacy_architecture_fails(self):
         self.force_track('docs/04_Solution_Architecture.md')
         self.assertNotEqual(self.guard().returncode, 0)
+
+    def test_force_tracking_private_plan_fails(self):
+        self.force_track('docs/private-plans/PLAN-02-phase-wise-implementation.md')
+        result = self.guard()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('must not be tracked', result.stderr)
+
+    def test_legacy_root_private_docs_still_fails(self):
+        self.force_track('private-docs/README.md')
+        self.assertNotEqual(self.guard().returncode, 0)
+
+    def test_tracked_navigation_and_shared_docs_pass(self):
+        for relative in ('docs/README.md', 'docs/private-docs/README.md',
+                         'docs/private-plans/README.md', 'docs/shared-docs/overview.md'):
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('Fictional public navigation fixture\n')
+            self.git('add', relative)
+        result = self.guard()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_force_tracking_component_guide_fails(self):
         self.force_track('services/agent-runtime/README.md')
