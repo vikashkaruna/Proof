@@ -8,6 +8,7 @@ import {
   validateRetainedSanketOutput,
   startRetainedSanketDispatch,
 } from './retained-sanket-source.js';
+import { retainedSanketTransport } from './retained-sanket-transport.js';
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString().padStart(12, '0')}`;
 // Synthetic RPC consistency fixtures only. No source/authority or HTTP grant.
@@ -102,6 +103,157 @@ function writer(data: unknown, error: unknown = null) {
   const rpc = vi.fn((_name: string, _args: Record<string, unknown>) => ({ abortSignal: abort }));
   return { factory: () => ({ rpc }), rpc, abort };
 }
+async function transportFixture() {
+  const f = await fixture();
+  const context = {
+    agent: 'sanket',
+    tenantId: id(1),
+    actorId: id(2),
+    engagementId: id(3),
+    correlationId: id(5),
+    canonicalInput: canonicalJson(f.input),
+    requestHash: f.row.input_hash,
+  };
+  const loaded = {
+    capture: f.preview.source,
+    captureResultText: f.preview.capture_result_text,
+    sourceHash: f.preview.source_hash,
+  };
+  const success = {
+    ...context,
+    runId: id(4),
+    canonicalOutput: canonicalJson(f.output),
+    responseHash: f.row.output_hash,
+    result: {
+      agent: 'sanket',
+      correlation_id: id(5),
+      status: 'succeeded' as const,
+      latency_ms: 1,
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      error: null,
+      output: f.output,
+      ledger_entry_ids: ['21', '22'],
+    },
+  };
+  return { f, context, loaded, success };
+}
+describe('unmounted retained Sanket lifecycle transport', () => {
+  it('records the exact source through the dedicated start callback', async () => {
+    const { f, context, loaded } = await transportFixture();
+    const w = writer({ run_id: id(4), created: true, status: 'running' });
+    await retainedSanketTransport(id(2), f.input, loaded, w.factory).start(context);
+    expect(w.rpc).toHaveBeenCalledExactlyOnceWith('start_retained_sanket_dispatch', {
+      p_tenant_id: id(1),
+      p_actor_id: id(2),
+      p_engagement_id: id(3),
+      p_operation_key: id(5),
+      p_input_text: context.canonicalInput,
+      p_capture_result_text: loaded.captureResultText,
+    });
+  });
+  it.each([
+    'agent',
+    'tenantId',
+    'actorId',
+    'engagementId',
+    'correlationId',
+    'canonicalInput',
+    'requestHash',
+  ] as const)('refuses altered callback context %s before either mutation', async (field) => {
+    const { f, context, loaded, success } = await transportFixture();
+    const w = writer({});
+    const transport = retainedSanketTransport(id(2), f.input, loaded, w.factory);
+    await expect(transport.start({ ...context, [field]: 'changed' })).rejects.toThrow(
+      'sanket_source_conflict',
+    );
+    await expect(transport.settleSuccess({ ...success, [field]: 'changed' })).rejects.toThrow(
+      'sanket_source_conflict',
+    );
+    expect(w.rpc).not.toHaveBeenCalled();
+  });
+  it('snapshots canonical source before a caller changes its object', async () => {
+    const { f, context, loaded } = await transportFixture();
+    const w = writer({ run_id: id(4), created: true, status: 'running' });
+    const transport = retainedSanketTransport(id(2), f.input, loaded, w.factory);
+    f.input.source.title = 'Invented later title';
+    loaded.captureResultText += ' ';
+    await transport.start(context);
+    expect(w.rpc.mock.calls[0]?.[1].p_input_text).toBe(context.canonicalInput);
+  });
+  it('captures validated exact output atomically through the narrow SQL RPC', async () => {
+    const { f, loaded, success } = await transportFixture();
+    const w = writer({ run_id: id(4), status: 'succeeded', replayed: false });
+    expect(
+      await retainedSanketTransport(id(2), f.input, loaded, w.factory).settleSuccess(success),
+    ).toEqual({ run_id: id(4), status: 'succeeded', replayed: false });
+    expect(w.rpc).toHaveBeenCalledExactlyOnceWith('settle_retained_sanket_output', {
+      p_tenant_id: id(1),
+      p_actor_id: id(2),
+      p_run_id: id(4),
+      p_engagement_id: id(3),
+      p_correlation_id: id(5),
+      p_request_hash: success.requestHash,
+      p_input_text: success.canonicalInput,
+      p_output_text: success.canonicalOutput,
+      p_response_hash: success.responseHash,
+      p_latency_ms: 1,
+      p_input_tokens: 0,
+      p_output_tokens: 0,
+      p_cost_usd: 0,
+      p_started_receipt: '21',
+      p_completed_receipt: '22',
+    });
+    expect(w.abort.mock.calls[0]?.[0]).toBeInstanceOf(AbortSignal);
+  });
+  it.each(['hash', 'canonical', 'receipt', 'score', 'agent', 'error', 'accounting'])(
+    'refuses poisoned runtime output %s before settlement',
+    async (field) => {
+      const { f, loaded, success } = await transportFixture();
+      const w = writer({});
+      if (field === 'hash') success.responseHash = 'f'.repeat(64);
+      if (field === 'canonical') {
+        success.canonicalOutput += ' ';
+        success.responseHash = await sha256(success.canonicalOutput);
+      }
+      if (field === 'receipt') success.result.ledger_entry_ids.reverse();
+      if (field === 'score') {
+        success.result.output.signals[0]!.score = 99;
+        success.canonicalOutput = canonicalJson(success.result.output);
+        success.responseHash = await sha256(success.canonicalOutput);
+      }
+      if (field === 'agent') success.result.agent = 'nazar';
+      if (field === 'error') Object.assign(success.result, { error: 'private-provider-error' });
+      if (field === 'accounting') success.result.input_tokens = 2147483648;
+      await expect(
+        retainedSanketTransport(id(2), f.input, loaded, w.factory).settleSuccess(success),
+      ).rejects.toThrow('sanket_source_conflict');
+      expect(w.rpc).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    { run_id: id(99), status: 'succeeded', replayed: false },
+    { run_id: id(4), status: 'failed', replayed: false },
+    { run_id: id(4), status: 'succeeded', replayed: false, output: {} },
+    { error: 'output_context_refused' },
+  ])('does not infer success from malformed SQL acknowledgement', async (data) => {
+    const { f, loaded, success } = await transportFixture();
+    const w = writer(data);
+    await expect(
+      retainedSanketTransport(id(2), f.input, loaded, w.factory).settleSuccess(success),
+    ).rejects.toThrow('sanket_output_uncertain');
+    expect(w.rpc).toHaveBeenCalledTimes(1);
+  });
+  it('preserves lost settlement as uncertain without a retry or generic fallback', async () => {
+    const { f, loaded, success } = await transportFixture();
+    const w = writer(null, new Error('private-provider-sentinel'));
+    await expect(
+      retainedSanketTransport(id(2), f.input, loaded, w.factory).settleSuccess(success),
+    ).rejects.toThrow('sanket_output_uncertain');
+    expect(w.rpc).toHaveBeenCalledTimes(1);
+  });
+});
 describe('retained Sanket RPC consistency boundary', () => {
   it('records the exact server-loaded source through the human RPC without invoking runtime', async () => {
     const f = await fixture(),
