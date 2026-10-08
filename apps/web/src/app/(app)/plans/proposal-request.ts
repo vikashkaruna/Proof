@@ -84,6 +84,67 @@ export function retainProposalJournal(
     );
   window.dispatchEvent(new Event(PROPOSAL_CHANGED));
 }
+export const proposalOutputProofSchema = z
+  .object({
+    kind: z.literal('settled_output_recorded'),
+    tenantId: z.uuid(),
+    actorId: z.uuid(),
+    operationKey: z.uuid(),
+    runId: z.uuid(),
+    requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+    responseHash: z.string().regex(/^[a-f0-9]{64}$/),
+    requestedReceipt: z.string().regex(/^[1-9][0-9]{0,18}$/),
+    startedReceipt: z.string().regex(/^[1-9][0-9]{0,18}$/),
+    completedReceipt: z.string().regex(/^[1-9][0-9]{0,18}$/),
+    settledReceipt: z.string().regex(/^[1-9][0-9]{0,18}$/),
+  })
+  .strict();
+function canonicalProposalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalProposalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const fields = value as Record<string, unknown>;
+    return `{${Object.keys(fields)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalProposalJson(fields[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+async function proposalHash(value: unknown) {
+  const bytes = new TextEncoder().encode(canonicalProposalJson(value));
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
+}
+export type ConfirmedProposal = Awaited<ReturnType<typeof submitProposal>>;
+const verifiedOutputs = new WeakMap<object, string>();
+export function archiveConfirmedProposal(
+  storage: Pick<Storage, 'getItem' | 'removeItem'>,
+  retained: RetainedProposal,
+  confirmed: ConfirmedProposal,
+) {
+  if (verifiedOutputs.get(confirmed) !== JSON.stringify({ retained, confirmed }))
+    throw new ProposalRequestError('The settled output has not been verified for this request.');
+  const proof = proposalOutputProofSchema.parse(confirmed.outputProof);
+  if (
+    proof.tenantId !== retained.tenantId ||
+    proof.actorId !== retained.actorId ||
+    proof.operationKey !== retained.request.operationKey ||
+    proof.runId !== confirmed.invocation.runId ||
+    proof.requestHash !== confirmed.invocation.requestHash ||
+    proof.responseHash !== confirmed.invocation.responseHash ||
+    JSON.stringify(readProposalJournal(storage, retained.tenantId, retained.actorId)) !==
+      JSON.stringify(retained)
+  )
+    throw new ProposalRequestError(
+      'The confirmed proposal reference changed. Nothing was archived.',
+    );
+  validateSudhaarProposal(confirmed.proposal, retained.input);
+  storage.removeItem(proposalJournalKey(retained.tenantId, retained.actorId));
+  if (storage.getItem(proposalJournalKey(retained.tenantId, retained.actorId)) !== null)
+    throw new ProposalRequestError('The browser reference could not be archived.');
+  window.dispatchEvent(new Event(PROPOSAL_CHANGED));
+}
 async function submitProposalRequest(value: RetainedProposal) {
   const retained = retainedProposalSchema.parse(value);
   const response = await fetch('/api/bff/v1/plans/proposals', {
@@ -112,6 +173,7 @@ async function submitProposalRequest(value: RetainedProposal) {
   const receipt = z
     .object({
       data: sudhaarProposalSchema,
+      outputProof: proposalOutputProofSchema,
       invocation: z
         .object({
           runId: z.uuid(),
@@ -123,10 +185,30 @@ async function submitProposalRequest(value: RetainedProposal) {
     })
     .strict()
     .parse(body);
-  return {
+  const proof = receipt.outputProof;
+  if (
+    proof.tenantId !== retained.tenantId ||
+    proof.actorId !== retained.actorId ||
+    proof.operationKey !== retained.request.operationKey ||
+    proof.runId !== receipt.invocation.runId ||
+    proof.requestHash !== receipt.invocation.requestHash ||
+    proof.responseHash !== receipt.invocation.responseHash ||
+    proof.requestHash !== (await proposalHash(retained.input)) ||
+    proof.responseHash !== (await proposalHash(receipt.data)) ||
+    !(
+      BigInt(proof.requestedReceipt) < BigInt(proof.startedReceipt) &&
+      BigInt(proof.startedReceipt) < BigInt(proof.completedReceipt) &&
+      BigInt(proof.completedReceipt) < BigInt(proof.settledReceipt)
+    )
+  )
+    throw new ProposalRequestError('The settled proposal proof could not be verified.');
+  const confirmed = {
     proposal: validateSudhaarProposal(receipt.data, retained.input),
     invocation: receipt.invocation,
+    outputProof: receipt.outputProof,
   };
+  verifiedOutputs.set(confirmed, JSON.stringify({ retained, confirmed }));
+  return confirmed;
 }
 
 export async function readSelectedProposalSource(

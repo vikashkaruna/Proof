@@ -17,7 +17,7 @@ fi
 test_log=$(mktemp)
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; }
 trap cleanup EXIT
-docker run --rm -d --name "$container" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
+docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
 for attempt in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
@@ -99,5 +99,17 @@ bash tests/database/controller-issuance-upgrade.sh "$container"
 bash tests/database/consent-notice-upgrade.sh "$container"
 bash tests/database/evidence-ingestion-upgrade.sh "$container"
 bash tests/database/evidence-pack-upgrade.sh "$container"
+# Bind the new race harness to this exact disposable container, never a retained stack.
+sudhaar_race_evidence=$(mktemp -d)
+python3 - "$container" "$sudhaar_race_evidence/proof.json" "$(pwd)" <<'PYPROOF'
+import json,os,subprocess,sys
+name,path,owner=sys.argv[1:]
+item=json.loads(subprocess.check_output(['docker','inspect',name]))[0]
+with open(path,'w') as stream:
+ json.dump({'containerId':item['Id'],'name':name,'ownerWorktree':owner,'project':'axiom-db-tests','database':'axiom_policy_test','loopbackPort':None},stream)
+os.chmod(path,0o600)
+PYPROOF
+python3 -I tests/database/concurrent-sudhaar-settled-outputs.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence"
+rm -rf "$sudhaar_race_evidence"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."

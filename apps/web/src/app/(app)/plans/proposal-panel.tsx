@@ -17,7 +17,8 @@ import {
   retainedProposalSchema,
   submitProposal,
   readSelectedProposalSource,
-  type Proposal,
+  archiveConfirmedProposal,
+  type ConfirmedProposal,
 } from './proposal-request';
 export function ProposalPanel(props: { tenantId: string; actorId: string; canPropose: boolean }) {
   return <Panel key={`${props.tenantId}:${props.actorId}:${props.canPropose}`} {...props} />;
@@ -74,7 +75,7 @@ function Panel({
     [title, setTitle] = useState('Assessment review proposal'),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
-    [result, setResult] = useState<{ key: string; proposal: Proposal; runId: string } | null>(null);
+    [result, setResult] = useState<{ key: string; confirmed: ConfirmedProposal } | null>(null);
   const mounted = useRef(true),
     active = useRef(false);
   useEffect(() => {
@@ -164,8 +165,7 @@ function Panel({
           );
         setResult({
           key: current.request.operationKey,
-          proposal: response.proposal,
-          runId: response.invocation.runId,
+          confirmed: response,
         });
       });
     } catch (cause) {
@@ -174,6 +174,37 @@ function Panel({
           cause instanceof ProposalRequestError
             ? cause.message
             : 'The response was interrupted. Keep the retained request and use the same request to check again.',
+        );
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
+  const archive = async () => {
+    if (active.current || !canPropose || !journal.ready || !retained || !displayed) return;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new ProposalRequestError('Cross-tab request protection is unavailable.');
+      await navigator.locks.request(key, async () => {
+        if (!mounted.current) return;
+        const live = readProposalJournal(localStorage, tenantId, actorId);
+        if (!live || JSON.stringify(live) !== JSON.stringify(retained))
+          throw new ProposalRequestError('The retained request changed. Nothing was archived.');
+        const checked = await submitProposal(live);
+        if (!mounted.current) return;
+        if (JSON.stringify(checked) !== JSON.stringify(displayed.confirmed))
+          throw new ProposalRequestError('The recorded proposal changed. Nothing was archived.');
+        archiveConfirmedProposal(localStorage, live, checked);
+        setResult(null);
+        setSelected('');
+      });
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error ? cause.message : 'The browser reference could not be archived.',
         );
     } finally {
       active.current = false;
@@ -330,18 +361,31 @@ function Panel({
       )}
       {displayed && (
         <div className="space-y-3" aria-label="Review proposal">
-          <h3 className="break-words font-semibold">{displayed.proposal.title}</h3>
+          <h3 className="break-words font-semibold">{displayed.confirmed.proposal.title}</h3>
           <p>Human review required · Escalated · Not saved as a plan · Execution unavailable</p>
           <p>
-            {displayed.proposal.review_tasks.length} review tasks · 0 corrective actions · No
-            inferred record counts or systems
+            {displayed.confirmed.proposal.review_tasks.length} review tasks · 0 corrective actions ·
+            No inferred record counts or systems
           </p>
           <p className="break-all text-xs">
-            Run {displayed.runId} · Source {displayed.proposal.source.assessmentRunId} · Library{' '}
-            {displayed.proposal.source.libraryVersion}
+            Run {displayed.confirmed.invocation.runId} · Source{' '}
+            {displayed.confirmed.proposal.source.assessmentRunId} · Library{' '}
+            {displayed.confirmed.proposal.source.libraryVersion}
           </p>
+          <p>
+            The exact output and receipts remain recorded on the server. Archiving removes this
+            completed browser reference and allows a later proposal request.
+          </p>
+          <button
+            type="button"
+            disabled={busy || !journal.ready}
+            onClick={() => void archive()}
+            className="rounded-md border px-3 py-2"
+          >
+            Archive completed browser reference
+          </button>
           <ol className="space-y-3">
-            {displayed.proposal.review_tasks.map((task) => (
+            {displayed.confirmed.proposal.review_tasks.map((task) => (
               <li key={task.finding_id} className="break-words rounded-md border p-3">
                 <strong>
                   {task.sequence}. {task.control_id}: {task.title}
