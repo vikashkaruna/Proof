@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -W error::ResourceWarning -m unittest discover -s tests/database/lib -p 'test_*.py'
+python3 -W error::ResourceWarning tests/database/sudhaar-review-adoption-upgrade-identity.test.py
 container="axiom-db-test-$$"
 image="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
 # Public ECR can throttle clean CI runners. Prefer Docker Hub; a pinned mirror
