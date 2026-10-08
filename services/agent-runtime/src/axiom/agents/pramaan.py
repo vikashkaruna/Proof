@@ -16,7 +16,7 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 from html import escape
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -373,7 +373,7 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
             return 100.0
         total_risk = sum(f.get("risk_points", 0) for f in findings)
         score = max(0.0, 100.0 - (total_risk / 2.5))
-        return round(score, 1)
+        return cast(float, round(score, 1))
 
     @staticmethod
     def _calculate_exposure_inr(findings: list[dict[str, Any]]) -> int:
@@ -646,7 +646,8 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
         maker_checker_root: str,
         manifest_hash: str,
     ) -> str:
-        safe = lambda v: escape(str(v if v is not None else ""), quote=True)
+        def safe(value: object) -> str:
+            return escape(str(value if value is not None else ""), quote=True)
 
         out: list[str] = [
             "<!DOCTYPE html>",

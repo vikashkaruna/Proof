@@ -65,7 +65,7 @@ def build_ropa_records(
         )
         categories_invalid = supplied_categories is not None and not categories_valid
         categories = (
-            {value.strip().lower() for value in supplied_categories} if categories_valid else set()
+            {value.strip().lower() for value in supplied_categories} if categories_valid and isinstance(supplied_categories, list) else set()
         )
         categories.update(value.lower() for value in categories_by_system.get(name, set()))
         supplied_processors = system.get("processors", system.get("processor"))
