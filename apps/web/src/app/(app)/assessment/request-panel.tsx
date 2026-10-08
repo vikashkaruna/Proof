@@ -153,7 +153,14 @@ function RequestPanel({
             operationKey: crypto.randomUUID(),
             engagementId,
             ...(intake && reviewed
-              ? { answers: reviewed.answers, applicability: reviewed.applicability }
+              ? {
+                  answers: reviewed.answers,
+                  applicability: reviewed.applicability,
+                  expectedQuestionnaire: {
+                    libraryVersion,
+                    questionnaireDigest: reviewed.questionnaireDigest,
+                  },
+                }
               : {}),
           }),
           ...(intake && reviewed ? { questionnaireDigest: reviewed.questionnaireDigest } : {}),
