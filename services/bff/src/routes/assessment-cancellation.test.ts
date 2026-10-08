@@ -368,3 +368,13 @@ it.each([
     expect(state.args).toBeNull();
   },
 );
+
+it('refuses dropped original reviewed metadata before mutation even when canonical worker input matches', async () => {
+  (state.db!.rows('audit_ledger')[0]!.detail as Record<string, unknown>).expected_questionnaire = {
+    libraryVersion: '0.1.1',
+    questionnaireDigest: 'd'.repeat(64),
+  };
+  const response = await request();
+  expect(response.status).toBe(409);
+  expect(state.args).toBeNull();
+});
