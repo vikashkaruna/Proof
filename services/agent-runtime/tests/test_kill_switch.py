@@ -246,3 +246,23 @@ def test_malformed_shared_state_is_not_a_clear_switch(rows):
     client = FakeClient()
     client.rows = rows
     assert KillSwitchReader(client).is_engaged(TENANT)
+
+
+@pytest.mark.parametrize("tenant_id", [17, [TENANT], {"tenant": TENANT}])
+def test_malformed_tenant_scope_cannot_be_interpreted_as_clear(tenant_id: object) -> None:
+    client = FakeClient()
+    client.rows = [{"scope": "tenant", "tenant_id": tenant_id, "engaged": True, "reason": "incident"}]
+    reader = KillSwitchReader(client)
+    state = reader.state(TENANT)
+    assert state.engaged is True
+    assert state.scope == "global"
+    assert "unreadable" in state.reason
+
+
+@pytest.mark.parametrize("reason", [True, 0, {"text": "incident"}])
+def test_malformed_reason_never_becomes_a_typed_verified_state(reason: object) -> None:
+    client = FakeClient()
+    client.rows = [{"scope": "tenant", "tenant_id": OTHER_TENANT, "engaged": True, "reason": reason}]
+    state = KillSwitchReader(client).state(TENANT)
+    assert state.engaged is True
+    assert "unreadable" in state.reason

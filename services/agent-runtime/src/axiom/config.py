@@ -240,7 +240,7 @@ def get_settings() -> Settings:
     """Cached settings accessor. The same instance is returned for the
     lifetime of the process — no per-request env reads.
     """
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
 
 
 def setup_logging(settings: Settings) -> None:

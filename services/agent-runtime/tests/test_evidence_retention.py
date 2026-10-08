@@ -197,3 +197,29 @@ def test_fixed_operation_retention_is_not_extended_on_retry(vault):
     subject.seal(seal_input(retain_until=deadline, operation_id="operation"))
     assert client.put_object.call_args.kwargs["ObjectLockRetainUntilDate"] == deadline
     assert client.put_object.call_args.kwargs["Metadata"]["axiom-operation-id"] == "operation"
+
+
+@pytest.mark.parametrize("reply", [None, False, [], "not a provider receipt"])
+def test_provider_nonmapping_reply_is_refused(vault, reply: object) -> None:
+    subject, client = vault
+    client.get_object_lock_configuration.return_value = reply
+    with pytest.raises(RuntimeError, match="provider response was refused"):
+        subject.seal(seal_input())
+    client.put_object.assert_not_called()
+
+
+@pytest.mark.parametrize("reply", [None, False, {}, 7])
+def test_audit_url_provider_must_return_actual_string(vault, reply: object) -> None:
+    subject, client = vault
+    client.generate_presigned_url.return_value = reply
+    with pytest.raises(RuntimeError, match="audit URL was refused"):
+        subject.presigned_audit_url("evidence", "key", "immutable-version")
+
+
+def test_valid_audit_url_is_preserved_with_exact_version(vault) -> None:
+    subject, client = vault
+    client.generate_presigned_url.return_value = "https://evidence.invalid/exact-version-signature"
+    assert subject.presigned_audit_url("evidence", "key", "immutable-version") == "https://evidence.invalid/exact-version-signature"
+    assert client.generate_presigned_url.call_args.kwargs["Params"] == {
+        "Bucket": "evidence", "Key": "key", "VersionId": "immutable-version"
+    }

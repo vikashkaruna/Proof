@@ -6,13 +6,44 @@ import hashlib
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, TypedDict, cast
 from urllib.parse import urlparse
 
 import boto3
 from botocore.client import Config
 
 from .config import Settings, get_settings
+
+
+class EvidenceStream(Protocol):
+    def read(self, amount: int) -> bytes: ...
+    def close(self) -> None: ...
+
+
+class RetentionReply(TypedDict, total=False):
+    Mode: str
+    RetainUntilDate: datetime
+
+
+class ObjectLockReply(TypedDict, total=False):
+    ObjectLockEnabled: str
+
+
+class LegalHoldReply(TypedDict, total=False):
+    Status: str
+
+
+class ProviderReply(TypedDict, total=False):
+    VersionId: str
+    Body: EvidenceStream
+    ObjectLockConfiguration: ObjectLockReply
+    Retention: RetentionReply
+    LegalHold: LegalHoldReply
+    ContentLength: int
+    DeleteMarker: bool
+    Metadata: dict[str, str]
+    ServerSideEncryption: str
+    ContentType: str
 
 
 @dataclass(frozen=True)
@@ -121,9 +152,12 @@ class EvidenceVault:
             kwargs["endpoint_url"] = endpoint
         self._s3 = boto3.client("s3", **kwargs)
 
-    def _call(self, method: str, deadline: float, **kwargs: Any) -> dict[str, Any]:
+    def _call(self, method: str, deadline: float, **kwargs: Any) -> ProviderReply:
         _remaining(deadline)
-        result = getattr(self._s3, method)(**kwargs)
+        raw: object = getattr(self._s3, method)(**kwargs)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Evidence provider response was refused")
+        result = cast(ProviderReply, raw)
         try:
             _remaining(deadline)
         except TimeoutError:
@@ -191,6 +225,8 @@ class EvidenceVault:
             ChecksumAlgorithm="SHA256",
         )
         version_id = result.get("VersionId")
+        if not isinstance(version_id, str):
+            raise ValueError("Exact evidence version is required")
         _reference(input.bucket, input.key, version_id)
         # Failure after upload remains a pending ingestion; never invent a DB receipt.
         return self._receipt(
@@ -342,7 +378,7 @@ class EvidenceVault:
         *,
         max_bytes: int = 16 * 1024 * 1024,
         timeout_seconds: float = 30,
-    ) -> dict[str, Any]:
+    ) -> ProviderReply:
         obj = self._call(
             "head_object",
             _deadline(timeout_seconds, max_bytes),
@@ -360,9 +396,12 @@ class EvidenceVault:
         ref = _reference(bucket, key, version_id)
         if type(expires_in_seconds) is not int or not 0 < expires_in_seconds <= 900:
             raise ValueError("Invalid audit URL lifetime")
-        return self._s3.generate_presigned_url(
+        url: object = self._s3.generate_presigned_url(
             "get_object", Params=ref, ExpiresIn=expires_in_seconds
         )
+        if not isinstance(url, str):
+            raise RuntimeError("Evidence audit URL was refused")
+        return url
 
 
 def content_key(
