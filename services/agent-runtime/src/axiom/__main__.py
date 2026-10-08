@@ -9,7 +9,7 @@ import uvicorn
 from .config import get_settings
 
 
-def main():
+def main() -> None:
     settings = get_settings()
     uvicorn.run(
         "axiom.app:app",
