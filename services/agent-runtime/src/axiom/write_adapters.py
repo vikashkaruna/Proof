@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import zlib
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -133,6 +134,7 @@ class ReferenceWriteAdapter:
                         headers={
                             "Authorization": f"Bearer {self._token}",
                             "Content-Type": "application/json",
+                            "Accept-Encoding": "gzip, deflate",
                         },
                     ) as response:
                         if response.status_code != 200:
@@ -143,13 +145,52 @@ class ReferenceWriteAdapter:
                             size, limit = declared.lstrip("0") or "0", str(MAX_RESPONSE_BYTES)
                             if len(size) > len(limit) or (len(size) == len(limit) and size > limit):
                                 raise WriteRefused("write_response_too_large")
+                        encoding = (
+                            response.headers.get("content-encoding", "identity").strip().lower()
+                        )
+                        if encoding not in ("identity", "gzip", "deflate"):
+                            raise WriteRefused("write_response_unreadable")
+                        decoder = (
+                            zlib.decompressobj(
+                                16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+                            )
+                            if encoding != "identity"
+                            else None
+                        )
+                        first_decode = True
                         content = bytearray()
-                        # Count decoded bytes: compressed and lying-length responses
-                        # cannot bypass the cap. Stop before appending excess bytes.
-                        async for chunk in response.aiter_bytes():
-                            if len(content) + len(chunk) > MAX_RESPONSE_BYTES:
+                        wire_size = 0
+                        # httpx aiter_bytes inflates a complete chunk BEFORE callers
+                        # can inspect its size. Read raw bytes and budget inflation
+                        # itself, including a one-byte overflow probe.
+                        async for raw in response.aiter_raw():
+                            wire_size += len(raw)
+                            if wire_size > MAX_RESPONSE_BYTES:
+                                raise WriteRefused("write_response_too_large")
+                            remaining = MAX_RESPONSE_BYTES - len(content)
+                            if decoder is None:
+                                chunk = raw
+                            else:
+                                try:
+                                    try:
+                                        chunk = decoder.decompress(raw, remaining + 1)
+                                    except zlib.error:
+                                        # Match httpx's compatibility with raw deflate
+                                        # on the first decode, preserving the same bound.
+                                        if encoding != "deflate" or not first_decode:
+                                            raise
+                                        decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+                                        chunk = decoder.decompress(raw, remaining + 1)
+                                except zlib.error:
+                                    raise WriteRefused("write_response_unreadable") from None
+                                first_decode = False
+                                if decoder.unused_data:
+                                    raise WriteRefused("write_response_unreadable")
+                            if len(chunk) > remaining:
                                 raise WriteRefused("write_response_too_large")
                             content.extend(chunk)
+                        if decoder is not None and not decoder.eof:
+                            raise WriteRefused("write_response_unreadable")
         except (httpx.HTTPError, TimeoutError):
             raise WriteRefused("write_transport_unavailable") from None
         try:
