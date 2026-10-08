@@ -36,6 +36,7 @@ from .agents import (
     VibhaagAgent,
 )
 from .agents.base import AgentName, AgentRunResult, DispatchContext
+from .agents.reviewed_workflow_agent import VibhaagReviewDraftAgent
 from .canonicalise import canonical_json, sha256_hex
 from .config import Settings, get_settings, setup_logging
 from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
@@ -46,6 +47,11 @@ from .public_source_dispatch import (
     PublicSourceAlreadyClaimedError,
     PublicSourceInvokeRequest,
     prepare_public_source_input,
+)
+from .reviewed_workflow_dispatch import (
+    ReviewedWorkflowAlreadyClaimedError,
+    ReviewedWorkflowInvokeRequest,
+    prepare_reviewed_workflow_input,
 )
 from .sudhaar_source import SignedPlanningRequest, verify_planning_request
 
@@ -86,6 +92,7 @@ async def lifespan(app: FastAPI):
         name: AgentCls(settings=settings, ledger=ledger, evidence=evidence, model_gateway=gateway)
         for name, AgentCls in AGENTS.items()
     }
+    app.state.reviewed_workflow_agent = VibhaagReviewDraftAgent(ledger=ledger)
 
     # W6 — the continuous-compliance scheduler, off unless the environment
     # turns it on: a scheduler that fires without reviewed configuration is
@@ -329,6 +336,42 @@ async def invoke_public_source_agent(
     result: AgentRunResult = await agent.invoke(
         agent_input,
         correlation_id=request.correlation_id,
+        dispatch_context={
+            "run_id": request.run_id,
+            "request_hash": sha256_hex(canonical_json(agent_input)),
+        },
+    )
+    return InvokeResponse(
+        agent=agent.name.value,
+        correlation_id=result.correlation_id,
+        status=result.status,
+        latency_ms=int((time.monotonic() - t0) * 1000),
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        error=result.error,
+        output=result.output,
+        ledger_entry_ids=result.ledger_entry_ids,
+    )
+
+
+@app.post("/reviewed-workflows/agents/vibhaag/invoke", response_model=InvokeResponse)
+async def invoke_reviewed_workflow_agent(request: ReviewedWorkflowInvokeRequest, req: Request):
+    require_internal_caller(req)
+    agent = getattr(app.state, "reviewed_workflow_agent", None)
+    if agent is None:
+        raise HTTPException(status_code=503, detail="reviewed_workflow_agent_unavailable")
+    try:
+        agent_input = await prepare_reviewed_workflow_input(app.state.ledger, request)
+    except ReviewedWorkflowAlreadyClaimedError:
+        raise HTTPException(status_code=409, detail="reviewed_workflow_already_claimed") from None
+    except Exception:
+        # No provider response, source declaration or writer configuration leaks.
+        raise HTTPException(status_code=503, detail="reviewed_workflow_unconfirmed") from None
+    t0 = time.monotonic()
+    result: AgentRunResult = await agent.invoke(
+        agent_input,
+        correlation_id=request.operation_key,
         dispatch_context={
             "run_id": request.run_id,
             "request_hash": sha256_hex(canonical_json(agent_input)),

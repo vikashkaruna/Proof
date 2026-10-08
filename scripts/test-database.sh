@@ -111,6 +111,7 @@ with open(path,'w') as stream:
 os.chmod(path,0o600)
 PYPROOF
 python3 -I tests/database/concurrent-sudhaar-settled-outputs.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence"
+python3 -I tests/database/concurrent-reviewed-workflow-drafts.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence/reviewed-workflows"
 rm -rf "$sudhaar_race_evidence"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."
