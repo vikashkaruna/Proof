@@ -58,7 +58,10 @@ export interface StageClaim {
   /** Must atomically recheck authority/source and consume ONE upload lease in SQL.
    * A recorded consumed lease can only authorize readback, never another PUT.
    */
-  consume(binding: StageBinding, signal: AbortSignal): Promise<'upload_once' | 'recover_only'>;
+  consume(
+    binding: StageBinding,
+    signal: AbortSignal,
+  ): Promise<{ mode: 'upload_once' | 'recover_only'; expiresAt: number }>;
 }
 export type ScopedEvidenceVault = Pick<
   EvidenceVault,
@@ -137,8 +140,8 @@ export function createConfiguredStagePort(config: {
     throw new StageUnconfirmed();
   return async (input: StageBinding) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    const deadline = Date.now() + timeout;
+    let timer = setTimeout(() => controller.abort(), timeout);
+    let deadline = Date.now() + timeout;
     try {
       const binding = stageBindingSchema.parse(input);
       const s = binding.source;
@@ -153,11 +156,21 @@ export function createConfiguredStagePort(config: {
         config.resources,
         controller.signal,
       );
-      const mode = await interrupt(
+      const lease = await interrupt(
         config.claim.consume(binding, controller.signal),
         controller.signal,
       );
-      if (mode !== 'upload_once' && mode !== 'recover_only') throw new StageUnconfirmed();
+      if (
+        !lease ||
+        (lease.mode !== 'upload_once' && lease.mode !== 'recover_only') ||
+        !Number.isSafeInteger(lease.expiresAt) ||
+        lease.expiresAt <= Date.now()
+      )
+        throw new StageUnconfirmed();
+      const mode = lease.mode;
+      deadline = Math.min(deadline, lease.expiresAt);
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
       const options = (): EvidenceReadOptions => ({
         maxBytes: s.byte_size,
         timeoutMs: Math.max(1, deadline - Date.now()),
@@ -185,6 +198,7 @@ export function createConfiguredStagePort(config: {
           controller.signal,
         );
       let candidate = await find();
+      if (controller.signal.aborted || Date.now() >= deadline) throw new StageUnconfirmed();
       if (!candidate && mode === 'upload_once') {
         try {
           const sealed = await interrupt(

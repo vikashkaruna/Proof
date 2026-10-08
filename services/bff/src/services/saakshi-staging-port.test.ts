@@ -156,9 +156,9 @@ async function loopback(
   let consumed = false;
   const claim = {
     async consume() {
-      if (consumed) return 'recover_only' as const;
+      if (consumed) return { mode: 'recover_only' as const, expiresAt: Date.now() + 60_000 };
       consumed = true;
-      return 'upload_once' as const;
+      return { mode: 'upload_once' as const, expiresAt: Date.now() + 60_000 };
     },
   };
   const port = createConfiguredStagePort({
@@ -202,9 +202,9 @@ describe('retained human resource boundary', () => {
         };
       },
     };
-    expect(
-      (await resolveRetainedHumanBytes(b, resources, new AbortController().signal)).body,
-    ).toEqual(bytes);
+    const resolved = await resolveRetainedHumanBytes(b, resources, new AbortController().signal);
+    expect(resolved.body.byteLength).toBe(bytes.byteLength);
+    expect(resolved.body.equals(bytes)).toBe(true);
   });
   it('rejects a declared size above eight MiB before opening the resource', async () => {
     let read = false;
@@ -287,7 +287,7 @@ describe('retained human resource boundary', () => {
       resources: reader(),
       claim: {
         async consume() {
-          return 'recover_only';
+          return { mode: 'recover_only', expiresAt: Date.now() + 60_000 };
         },
       },
     });
@@ -305,7 +305,7 @@ describe('retained human resource boundary', () => {
       claim: {
         async consume() {
           claims++;
-          return 'upload_once';
+          return { mode: 'upload_once', expiresAt: Date.now() + 60_000 };
         },
       },
       timeoutMs: 20,
@@ -313,6 +313,58 @@ describe('retained human resource boundary', () => {
     await expect(port(binding())).rejects.toThrow('Evidence staging is unconfirmed');
     expect(claims).toBe(0);
   });
+});
+describe('payload expiry after upload claim', () => {
+  it('refuses PUT after a slow version lookup outlives original lease', async () => {
+    let puts = 0;
+    const port = createConfiguredStagePort({
+      provider: 's3-compatible',
+      bucket: 'owned-stage-fixture',
+      resources: reader(),
+      claim: {
+        async consume() {
+          return { mode: 'upload_once', expiresAt: Date.now() + 15 };
+        },
+      },
+      vault: {
+        async findEvidenceVersion() {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return null;
+        },
+        async seal() {
+          puts++;
+          throw new Error('must not execute');
+        },
+      } as unknown as EvidenceVault,
+      timeoutMs: 1000,
+    });
+    await expect(port(binding())).rejects.toThrow('Evidence staging is unconfirmed');
+    expect(puts).toBe(0);
+  });
+  it.each([0, NaN, Infinity, Date.now() - 1000])(
+    'refuses invalid/expired lease %s before storage lookup',
+    async (expiresAt) => {
+      let reads = 0;
+      const port = createConfiguredStagePort({
+        provider: 's3-compatible',
+        bucket: 'owned-stage-fixture',
+        resources: reader(),
+        claim: {
+          async consume() {
+            return { mode: 'upload_once', expiresAt };
+          },
+        },
+        vault: {
+          async findEvidenceVersion() {
+            reads++;
+            return null;
+          },
+        } as unknown as EvidenceVault,
+      });
+      await expect(port(binding())).rejects.toThrow('Evidence staging is unconfirmed');
+      expect(reads).toBe(0);
+    },
+  );
 });
 describe('actual owned HTTP storage protocol (simulated Compliance assertions)', () => {
   it.each([false, true])(
