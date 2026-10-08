@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { listFinalizedAssessmentOptions } from '../services/board-reports.js';
 import { z } from 'zod';
 import { Capability, sudhaarProposalRequestSchema, validateSudhaarProposal } from '@axiom/types';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -27,6 +28,60 @@ export interface SudhaarProposalDeps extends Omit<
 }
 export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
   const app = new Hono<{ Variables: Variables }>();
+  app.get('/plans/proposal-assessment-options', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    for (const capability of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {
+      const denial = requireCapability(c, capability);
+      if (denial) return denial;
+    }
+    try {
+      const db = deps.db ?? createSupabaseAdmin();
+      const page = await listFinalizedAssessmentOptions(
+        db,
+        c.get('tenantId').toLowerCase(),
+        { limit: 25, offset: 0 },
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15000)]),
+      );
+      return c.json({
+        assessments: page.assessments,
+        total: page.total,
+        runtimeAvailable: Boolean(
+          deps.runtimeUrl &&
+          deps.runtimeToken &&
+          deps.sourceSigningKey &&
+          Buffer.byteLength(deps.sourceSigningKey) >= 32 &&
+          deps.sourceSigningKey !== deps.runtimeToken,
+        ),
+      });
+    } catch {
+      return c.json({ error: { code: 'planning_source_unavailable' } }, 503);
+    }
+  });
+  app.get('/plans/proposal-assessment-source/:runId', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    for (const capability of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {
+      const denial = requireCapability(c, capability);
+      if (denial) return denial;
+    }
+    const ids = z
+      .object({ runId: z.uuid(), engagementId: z.uuid() })
+      .strict()
+      .safeParse({ runId: c.req.param('runId'), engagementId: c.req.query('engagementId') });
+    if (!ids.success || Object.keys(c.req.query()).some((key) => key !== 'engagementId'))
+      return c.json({ error: { code: 'validation_failed' } }, 400);
+    try {
+      const input = await readSudhaarSource(
+        deps.db ?? createSupabaseAdmin(),
+        c.get('tenantId').toLowerCase(),
+        ids.data.engagementId,
+        ids.data.runId,
+        'Assessment review proposal',
+      );
+      return c.json({ input });
+    } catch {
+      return c.json({ error: { code: 'planning_source_unavailable' } }, 503);
+    }
+  });
   app.post('/plans/proposals', async (c) => {
     c.header('Cache-Control', 'private, no-store');
     for (const cap of [Capability.PLAN_CREATE, Capability.AGENT_INVOKE]) {

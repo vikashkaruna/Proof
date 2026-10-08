@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { can } from '@axiom/types';
+import { ProposalPanel } from './proposal-panel';
 import { DataPlaceholder, PageHeader } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
@@ -6,7 +8,7 @@ import { moduleBarProps } from '@/lib/module-bar';
 export const dynamic = 'force-dynamic';
 
 export default async function PlansListPage() {
-  const { supabase, tenantId } = await requireCapabilityContext(Capability.PLAN_READ);
+  const { supabase, tenantId, userId, role } = await requireCapabilityContext(Capability.PLAN_READ);
   const { data: plans, error } = await supabase
     .from('remediation_plans')
     .select('id, title, status, version, created_at, library_version')
@@ -19,6 +21,11 @@ export default async function PlansListPage() {
         module={moduleBarProps('remediation')}
         title="Remediation plans"
         description="Plans recorded for this tenant. A plan is a proposal until its actions pass the required dry-run, rollback, and human approval gates."
+      />
+      <ProposalPanel
+        tenantId={tenantId}
+        actorId={userId}
+        canPropose={can(Capability.PLAN_CREATE, { role }) && can(Capability.AGENT_INVOKE, { role })}
       />
       {error || !plans ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
