@@ -152,3 +152,58 @@ def test_valid_context_is_passed_separately_from_business_input(monkeypatch):
     assert response.status_code == 200
     assert invoke.await_args.kwargs["dispatch_context"].model_dump(mode="json") == context
     assert invoke.await_args.args[0] == {"dispatch_context": {"run_id": "untrusted"}}
+
+
+@pytest.mark.parametrize("supplied_token", [None, "wrong-fixture-token", "source-boundary-fixture"])
+@pytest.mark.parametrize(
+    "input_data",
+    [
+        {"action_ids": [], "outcomes": [{"action_id": "unapproved", "outcome": "succeeded"}]},
+        {
+            "action_ids": ["invented"],
+            "outcomes": [{"action_id": "invented", "outcome": "succeeded"}],
+        },
+        {"signing_key": "caller-controlled-signing-key", "batch_status": "completed"},
+    ],
+)
+def test_generic_samadhan_cannot_sign_unpersisted_execution(
+    monkeypatch, supplied_token, input_data
+):
+    from axiom.agents.samadhan import SamadhanAgent
+
+    class RecordingLedger:
+        def __init__(self):
+            self.entries = []
+
+        async def append(self, entry):
+            self.entries.append(entry)
+            return SimpleNamespace(id=f"fixture-entry-{len(self.entries)}")
+
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        internal_token="source-boundary-fixture",
+        approval_signing_key="fixture-server-signing-key",
+        supabase_url="http://127.0.0.1:55321",
+        supabase_service_key="fixture-only-key",
+    )
+    ledger = RecordingLedger()
+    agent = SamadhanAgent(settings=settings, ledger=ledger)
+    invoke = AsyncMock(wraps=agent.invoke)
+    monkeypatch.setattr(agent, "invoke", invoke)
+    monkeypatch.setattr(app.state, "settings", settings, raising=False)
+    monkeypatch.setattr(app.state, "agents", {AgentName.SAMADHAN: agent}, raising=False)
+    response = TestClient(app).post(
+        "/agents/samadhan/invoke",
+        json={"input": input_data},
+        headers={} if supplied_token is None else {"X-Internal-Token": supplied_token},
+    )
+    authenticated = supplied_token == "source-boundary-fixture"
+    assert response.status_code == (403 if authenticated else 401)
+    assert response.json() == {
+        "detail": "execution_reconciliation_workflow_required"
+        if authenticated
+        else "invalid internal token"
+    }
+    invoke.assert_not_called()
+    assert ledger.entries == []
