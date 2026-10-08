@@ -25,10 +25,12 @@ WRITER_KEYS = (
 # agent runtime hold it, nothing else.
 AGENT_LEDGER_KEY = "SUPABASE_AGENT_LEDGER_WRITER_KEY"
 AGENT_LEDGER_HOLDERS = {"bff", "agent-runtime"}
+PLANNING_SOURCE_KEY = "AXIOM_PLANNING_SOURCE_SIGNING_KEY"
 env = os.environ.copy()
 for key in (
     *WRITER_KEYS,
     AGENT_LEDGER_KEY,
+    PLANNING_SOURCE_KEY,
     "MODEL_GATEWAY_API_KEY",
     "AGENT_RUNTIME_INTERNAL_TOKEN",
     "APPROVAL_SIGNING_KEY",
@@ -71,6 +73,8 @@ for file in COMPOSE_FILES:
         for key in WRITER_KEYS:
             if (key in configured) != (name == "bff"):
                 raise AssertionError(f"{file}: {key} has incorrect scope on {name}")
+        if (PLANNING_SOURCE_KEY in configured) != (name in AGENT_LEDGER_HOLDERS):
+            raise AssertionError(f"{file}: {PLANNING_SOURCE_KEY} has incorrect scope on {name}")
         if (AGENT_LEDGER_KEY in configured) != (name in AGENT_LEDGER_HOLDERS):
             raise AssertionError(f"{file}: {AGENT_LEDGER_KEY} has incorrect scope on {name}")
 

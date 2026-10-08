@@ -160,6 +160,17 @@ class LedgerClient:
     def in_memory(cls) -> LedgerClient:
         return cls(in_memory=True)
 
+    def append_only_view(self) -> LedgerClient:
+        """Clone only the scoped audit writer, never the privileged read client.
+
+        This narrows an agent capability within the process; it does not claim
+        process isolation. The database still enforces the writer role grants.
+        """
+        view = AppendOnlyLedgerClient(self._client, in_memory=self._in_memory)
+        view._mem = self._mem
+        view._mem_chains = self._mem_chains
+        return view
+
     @property
     def in_memory_mode(self) -> bool:
         return self._in_memory
@@ -427,3 +438,17 @@ class LedgerClient:
 
 def new_correlation_id() -> str:
     return str(uuid.uuid4())
+
+
+class AppendOnlyLedgerClient(LedgerClient):
+    """Audit append capability with no retained reader or domain access."""
+
+    @property
+    def _reader(self) -> Client | None:
+        raise PermissionError("Audit read capability is unavailable")
+
+    async def load_public_source_dispatch(self, **kwargs: Any) -> dict[str, Any]:
+        raise PermissionError("Source read capability is unavailable")
+
+    async def claim_public_source_dispatch(self, **kwargs: Any) -> dict[str, Any]:
+        raise PermissionError("Source claim capability is unavailable")

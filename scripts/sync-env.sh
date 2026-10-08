@@ -392,6 +392,7 @@ tfvar_value() {
     # creates no secret at all; see infra/terraform/envs/preprod/secrets.tf.
     mfa_encryption_keys_previous) get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS" ;;
     agent_runtime_internal_token) get_val "AGENT_RUNTIME_INTERNAL_TOKEN" ;;
+    planning_source_signing_key) get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY" ;;
     model_gateway_api_key)        get_val "MODEL_GATEWAY_API_KEY" ;;
 
     # Self-hosted Supabase. These three are minted TOGETHER by
@@ -573,6 +574,12 @@ do_secrets() {
     "axiom-${TARGET_ENV}-model-gateway-api-key:$(get_val "MODEL_GATEWAY_API_KEY")"
     "axiom-${TARGET_ENV}-upstash-redis-url:$(get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")")"
   )
+
+  # Optional source composer key, BFF/runtime only. Empty leaves Compose/Helm
+  # proposals disabled; Terraform has its own independent stable random default.
+  if [ -n "$(get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY")" ]; then
+    secret_pairs+=("axiom-${TARGET_ENV}-planning-source-signing-key:$(get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY")")
+  fi
 
   # Added only while a rotation is in flight. Appending it unconditionally
   # would print "Skipping empty or placeholder secret" on every ordinary sync,

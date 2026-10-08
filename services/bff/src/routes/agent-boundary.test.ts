@@ -462,3 +462,20 @@ describe('confirmed runtime completion', () => {
     expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.succeeded');
   });
 });
+
+it.each(['sudhaar', 'SUDHAAR'])(
+  'requires source-bound planning workflow for generic %s even for an owner',
+  async (name) => {
+    const response = await request(UserRole.OWNER, name, {
+      engagement_id: ENGAGEMENT,
+      findings: [{ id: 'forged', score: 0 }],
+      scope_hints: {},
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'planning_source_workflow_required' },
+    });
+    expect(transport).not.toHaveBeenCalled();
+    expect(state.adminCalls).toBe(0);
+  },
+);

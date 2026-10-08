@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from functools import lru_cache
 from typing import Literal
 
@@ -23,11 +24,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     # ─── Service identity ───────────────────────────────────────────
     service_name: str = "axiom-agent-runtime"
-    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = "development"
+    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = (
+        "development"
+    )
     log_level: Literal["debug", "info", "warn", "error"] = "info"
     http_port: int = Field(default_factory=lambda: int(os.environ.get("PORT", "8000")))
     # Containers must listen on all interfaces; exposure is controlled by the
@@ -88,9 +92,7 @@ class Settings(BaseSettings):
     )
     axiom_storage_endpoint: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "AXIOM_STORAGE_ENDPOINT", "S3_ENDPOINT", "AWS_S3_ENDPOINT"
-        ),
+        validation_alias=AliasChoices("AXIOM_STORAGE_ENDPOINT", "S3_ENDPOINT", "AWS_S3_ENDPOINT"),
         description="S3-compatible storage endpoint URL (GCS, MinIO, etc.)",
     )
     axiom_project_id: str | None = Field(
@@ -150,6 +152,15 @@ class Settings(BaseSettings):
         description="BFF-to-runtime authentication; canonical deployment variable first",
     )
 
+    planning_source_signing_key: str | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices(
+            "AXIOM_PLANNING_SOURCE_SIGNING_KEY", "planning_source_signing_key"
+        ),
+        description="Independent BFF/runtime-only source composition key; absent disables proposals",
+    )
+
     # ─── Feature flags ─────────────────────────────────────────────
     feature_dry_run_engine: bool = True
     feature_execution_engine: bool = True
@@ -177,10 +188,32 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> Settings:
+        if self.planning_source_signing_key and (
+            len(self.planning_source_signing_key.encode()) < 32
+            or self.planning_source_signing_key
+            in {self.internal_token, self.approval_signing_key, self.model_gateway_api_key}
+            or (
+                self.environment in {"staging", "preprod", "production", "onprem"}
+                and re.search(
+                    r"^(dev-|test-|changeme|placeholder)|placeholder|changeme|your-|xxx|<[^>]+>",
+                    self.planning_source_signing_key,
+                    re.I,
+                )
+            )
+        ):
+            raise ValueError(
+                "AXIOM_PLANNING_SOURCE_SIGNING_KEY must be independent and at least 32 UTF-8 bytes"
+            )
         if self.environment in ("production", "onprem"):
-            if not self.supabase_url or "localhost" in self.supabase_url or "127.0.0.1" in self.supabase_url:
+            if (
+                not self.supabase_url
+                or "localhost" in self.supabase_url
+                or "127.0.0.1" in self.supabase_url
+            ):
                 raise ValueError("Valid production SUPABASE_URL is required")
-            if not self.supabase_service_key or self.supabase_service_key.startswith("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v"):
+            if not self.supabase_service_key or self.supabase_service_key.startswith(
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1v"
+            ):
                 raise ValueError("Valid production SUPABASE_SERVICE_KEY is required")
             if (
                 not self.supabase_agent_ledger_writer_key
@@ -190,7 +223,9 @@ class Settings(BaseSettings):
             if not self.supabase_anon_key:
                 raise ValueError("SUPABASE_ANON_KEY is required in production")
             if self.axiom_region not in ("ap-south-1", "asia-south1"):
-                raise ValueError("Production data-plane services must run in Mumbai (ap-south-1 or asia-south1)")
+                raise ValueError(
+                    "Production data-plane services must run in Mumbai (ap-south-1 or asia-south1)"
+                )
             if not self.internal_token:
                 raise ValueError("AGENT_RUNTIME_INTERNAL_TOKEN is required in production")
             if not self.approval_signing_key:

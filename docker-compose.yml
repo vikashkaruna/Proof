@@ -60,6 +60,7 @@ services:
       - MODEL_GATEWAY_URL=${MODEL_GATEWAY_URL:-http://model-gateway:8001}
       - MODEL_GATEWAY_API_KEY=${MODEL_GATEWAY_API_KEY:-dev-model-gateway-key-axiom}
       - INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:-dev-agent-runtime-token-axiom}
+      - AXIOM_PLANNING_SOURCE_SIGNING_KEY=${AXIOM_PLANNING_SOURCE_SIGNING_KEY:-}
       - APPROVAL_SIGNING_KEY=${APPROVAL_SIGNING_KEY:-dev-signing-secret-key-at-least-32-chars-long-12345}
       - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
       - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-axiom-proof}
@@ -110,6 +111,7 @@ services:
       - SUPABASE_AGENT_LEDGER_WRITER_KEY=${SUPABASE_AGENT_LEDGER_WRITER_KEY:?Set agent/BFF-only agent ledger writer JWT}
       - AGENT_RUNTIME_URL=${AGENT_RUNTIME_URL:-http://agent-runtime:8000}
       - AGENT_RUNTIME_INTERNAL_TOKEN=${AGENT_RUNTIME_INTERNAL_TOKEN:-dev-agent-runtime-token-axiom}
+      - AXIOM_PLANNING_SOURCE_SIGNING_KEY=${AXIOM_PLANNING_SOURCE_SIGNING_KEY:-}
       - MODEL_GATEWAY_URL=${MODEL_GATEWAY_URL:-http://model-gateway:8001}
       - MODEL_GATEWAY_API_KEY=${MODEL_GATEWAY_API_KEY:-dev-model-gateway-key-axiom}
       - APPROVAL_SIGNING_KEY=${APPROVAL_SIGNING_KEY:-dev-signing-secret-key-at-least-32-chars-long-12345}

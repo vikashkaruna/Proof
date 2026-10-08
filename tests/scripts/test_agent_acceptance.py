@@ -32,31 +32,24 @@ def manifest():
         "humanRequestReference": "test:user-request-reference",
         "invocations": [
             {
-                "agent": "sudhaar",
+                "agent": "lekha",
                 "input": {
                     "engagement_id": ENGAGEMENT,
                     "correlation_id": CORRELATION,
-                    "findings": [{"id": "source-finding-1"}],
+                    "operation": "verify",
                 },
             }
         ],
     }
 
 
-def result(agent="sudhaar"):
+def result(agent="lekha"):
     return {
         "agent": agent,
         "correlation_id": CORRELATION,
         "status": "succeeded",
         "error": None,
-        "output": {
-            "actions": [
-                {
-                    "closes_finding_id": "source-finding-1",
-                    "rollback": {"validatedExecutable": False},
-                }
-            ]
-        },
+        "output": {"operation": "verify", "intact": True, "first_break": None},
         "ledger_entry_ids": ["71", "72"],
     }
 
@@ -64,7 +57,7 @@ def result(agent="sudhaar"):
 def audit():
     base = {
         "actor_type": "agent",
-        "actor_id": "sudhaar",
+        "actor_id": "lekha",
         "tenant_id": TENANT,
         "correlation_id": CORRELATION,
         "input_hash": "1" * 64,
@@ -112,7 +105,7 @@ def audit():
                 "output_hash": "2" * 64,
                 "detail": {
                     "requested_by": "test-human",
-                    "agent": "sudhaar",
+                    "agent": "lekha",
                     "runtime_outcome": "receipt_confirmed",
                     "started_receipt": "71",
                     "completed_receipt": "72",
@@ -232,7 +225,6 @@ class AgentAcceptanceTests(unittest.TestCase):
     def test_empty_compute_cannot_claim_real_work(self):
         for agent, inputs in (
             ("parikshan", {"answers": {}}),
-            ("sudhaar", {"findings": []}),
         ):
             value = manifest()
             value["invocations"][0]["agent"] = agent
@@ -316,7 +308,7 @@ class AgentAcceptanceTests(unittest.TestCase):
             value[key] = replacement
             with self.subTest(key=key):
                 self.assertNotEqual(
-                    acceptance.classify_output("sudhaar", CORRELATION, 200, value),
+                    acceptance.classify_output("lekha", CORRELATION, 200, value),
                     "runtime_completed_domain_acceptance_pending",
                 )
 
@@ -486,17 +478,20 @@ class AgentAcceptanceTests(unittest.TestCase):
             value = result()
             value["ledger_entry_ids"] = ids
             self.assertEqual(
-                acceptance.classify_output("sudhaar", CORRELATION, 200, value),
+                acceptance.classify_output("lekha", CORRELATION, 200, value),
                 "audit_completion_unconfirmed",
             )
 
-    def test_no_forged_validated_rollback_from_proposal(self):
-        value = result()
-        value["output"]["actions"][0]["rollback"]["validatedExecutable"] = True
+    def test_generic_collector_refuses_sudhaar_even_with_fabricated_success(self):
+        value = manifest()
+        value["invocations"][0]["agent"] = "sudhaar"
+        with self.assertRaises(acceptance.Refused):
+            acceptance.validate_manifest(value)
         self.assertEqual(
-            acceptance.classify_output("sudhaar", CORRELATION, 200, value),
-            "proposal_or_rollback_refused",
+            acceptance.classify_output("sudhaar", CORRELATION, 200, result("sudhaar")),
+            "dedicated_source_bound_workflow_required",
         )
+        self.assertEqual(acceptance.CONTRACTS["sudhaar"][0], "source_bound_review_proposal")
 
     def test_empty_findings_and_broken_ledger_refused(self):
         value = result("parikshan")
@@ -515,7 +510,7 @@ class AgentAcceptanceTests(unittest.TestCase):
     def test_durable_audit_binding_rejects_foreign_missing_and_failed_rows(self):
         self.assertTrue(
             acceptance.verify_audit_readback(
-                "sudhaar", CORRELATION, TENANT, result(), 200, audit()
+                "lekha", CORRELATION, TENANT, result(), 200, audit()
             )
         )
         for key, replacement in (
@@ -532,12 +527,12 @@ class AgentAcceptanceTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertFalse(
                     acceptance.verify_audit_readback(
-                        "sudhaar", CORRELATION, TENANT, result(), 200, value
+                        "lekha", CORRELATION, TENANT, result(), 200, value
                     )
                 )
         self.assertFalse(
             acceptance.verify_audit_readback(
-                "sudhaar", CORRELATION, TENANT, result(), 200, {"entries": []}
+                "lekha", CORRELATION, TENANT, result(), 200, {"entries": []}
             )
         )
 
@@ -552,21 +547,21 @@ class AgentAcceptanceTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertFalse(
                     acceptance.verify_audit_readback(
-                        "sudhaar", CORRELATION, TENANT, result(), 200, value
+                        "lekha", CORRELATION, TENANT, result(), 200, value
                     )
                 )
         value = audit()
         value["entries"] = value["entries"][:2]
         self.assertFalse(
             acceptance.verify_audit_readback(
-                "sudhaar", CORRELATION, TENANT, result(), 200, value
+                "lekha", CORRELATION, TENANT, result(), 200, value
             )
         )
         value = audit()
         value["entries"][3]["detail"]["requested_by"] = "forged-human"
         self.assertFalse(
             acceptance.verify_audit_readback(
-                "sudhaar", CORRELATION, TENANT, result(), 200, value
+                "lekha", CORRELATION, TENANT, result(), 200, value
             )
         )
 
@@ -615,7 +610,7 @@ class AgentAcceptanceTests(unittest.TestCase):
         post = next(item for item in calls if "body" in item[1])
         self.assertEqual(post[1]["idempotency_key"], CORRELATION)
 
-    def test_missing_durable_audit_and_changed_source_cannot_complete(self):
+    def test_missing_durable_audit_cannot_complete(self):
         def fetch(url, **kwargs):
             if url.endswith("/health"):
                 return 200, {"status": "ok", "authMode": "strict", "revision": REVISION}
@@ -628,24 +623,6 @@ class AgentAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             value["receipts"][0]["status"], "durable_audit_readback_unconfirmed"
-        )
-
-        def foreign(url, **kwargs):
-            if "/ledger?" in url:
-                return 200, audit()
-            if url.endswith("/health"):
-                return fetch(url, **kwargs)
-            response = result()
-            response["output"]["actions"][0]["closes_finding_id"] = (
-                "foreign-source-finding"
-            )
-            return 200, response
-
-        value = acceptance.run_manifest(
-            manifest(), "fictional-bearer-credential", foreign
-        )
-        self.assertEqual(
-            value["receipts"][0]["status"], "proposal_source_binding_refused"
         )
 
     def test_probe_only_get_and_lists_twelve_including_dedicated_pramaan(self):

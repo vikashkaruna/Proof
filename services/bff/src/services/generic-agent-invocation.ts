@@ -37,6 +37,13 @@ export interface GenericAgentInvocationDeps {
   readonly prepareDispatch?: (
     context: GenericAgentPreparationContext,
   ) => Promise<{ readonly kind: 'public_source' }>;
+  readonly validateOutput?: (output: unknown) => void;
+  readonly sudhaarDispatch?: (context: {
+    runId: string;
+    requestHash: string;
+    wireInput: string;
+    correlationId: string;
+  }) => Readonly<Record<string, unknown>>;
   readonly realtime: Pick<RealtimeService, 'broadcast'>;
   readonly writerFactory?: () => Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   readonly fetchImpl?: typeof fetch;
@@ -96,14 +103,16 @@ export async function invokeGenericAgent(
   let writer: Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   try {
     writer = (deps.writerFactory ?? createHumanActionWriter)();
-    const { data, error } = await writer.rpc('record_generic_agent_run_start', {
-      p_tenant_id: tenantId,
-      p_actor_id: actorId,
-      p_agent: agent,
-      p_engagement_id: engagementId,
-      p_correlation_id: correlationId,
-      p_request_hash: requestHash,
-    });
+    const { data, error } = await writer
+      .rpc('record_generic_agent_run_start', {
+        p_tenant_id: tenantId,
+        p_actor_id: actorId,
+        p_agent: agent,
+        p_engagement_id: engagementId,
+        p_correlation_id: correlationId,
+        p_request_hash: requestHash,
+      })
+      .abortSignal(AbortSignal.timeout(10000));
     if (error) throw new Error('start_unconfirmed');
     const parsed = z
       .object({ run_id: z.uuid(), created: z.boolean(), status: z.string() })
@@ -186,6 +195,13 @@ export async function invokeGenericAgent(
       input: JSON.parse(wireInput),
       dispatch_context: { run_id: runId, request_hash: requestHash },
     };
+    if (deps.sudhaarDispatch) {
+      if (agent !== 'sudhaar') throw new Error('planning_dispatch_refused');
+      path = '/assessment-source/sudhaar/invoke';
+      transportBody = {
+        ...deps.sudhaarDispatch({ runId, requestHash, wireInput: canonicalInput, correlationId }),
+      };
+    }
     if (prepareDispatch) {
       if (
         (agent !== 'drishti' && agent !== 'vibhaag') ||
@@ -238,6 +254,7 @@ export async function invokeGenericAgent(
       throw new Error('runtime_result_refused');
     if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
       throw new Error('runtime_accounting_refused');
+    if (parsedResult.status === 'succeeded') deps.validateOutput?.(parsedResult.output);
     result = parsedResult;
     if (result.status === 'failed') failureCode = 'agent_reported_failure';
   } catch {
@@ -251,24 +268,26 @@ export async function invokeGenericAgent(
   let responseHash: string | null = null;
   try {
     responseHash = succeeded && result ? await sha256(canonicalJson(result.output)) : null;
-    const { data: recorded, error } = await writer.rpc('record_generic_agent_run_finish', {
-      p_tenant_id: tenantId,
-      p_actor_id: actorId,
-      p_run_id: runId,
-      p_agent: agent,
-      p_engagement_id: engagementId,
-      p_correlation_id: correlationId,
-      p_request_hash: requestHash,
-      p_status: terminalStatus,
-      p_error_code: succeeded ? null : failureCode,
-      p_latency_ms: result?.latency_ms ?? null,
-      p_input_tokens: result?.input_tokens ?? null,
-      p_output_tokens: result?.output_tokens ?? null,
-      p_cost_usd: result?.cost_usd ?? null,
-      p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
-      p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
-      p_response_hash: responseHash,
-    });
+    const { data: recorded, error } = await writer
+      .rpc('record_generic_agent_run_finish', {
+        p_tenant_id: tenantId,
+        p_actor_id: actorId,
+        p_run_id: runId,
+        p_agent: agent,
+        p_engagement_id: engagementId,
+        p_correlation_id: correlationId,
+        p_request_hash: requestHash,
+        p_status: terminalStatus,
+        p_error_code: succeeded ? null : failureCode,
+        p_latency_ms: result?.latency_ms ?? null,
+        p_input_tokens: result?.input_tokens ?? null,
+        p_output_tokens: result?.output_tokens ?? null,
+        p_cost_usd: result?.cost_usd ?? null,
+        p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
+        p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
+        p_response_hash: responseHash,
+      })
+      .abortSignal(AbortSignal.timeout(10000));
     const confirmed = z
       .object({
         run_id: z.literal(runId),

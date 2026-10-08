@@ -5,7 +5,7 @@
 # Stable random defaults replace the formerly committed signing/runtime keys.
 # Keep Terraform state encrypted and access-controlled; these keys are durable.
 resource "random_password" "internal_service_key" {
-  for_each = toset(["approval_signing_key", "agent_runtime_internal_token", "model_gateway_api_key", "mfa_encryption_key"])
+  for_each = toset(["approval_signing_key", "agent_runtime_internal_token", "planning_source_signing_key", "model_gateway_api_key", "mfa_encryption_key"])
   length   = 64
   special  = false
 }
@@ -28,6 +28,7 @@ locals {
     gemini_api_key               = var.gemini_api_key != "" ? var.gemini_api_key : "placeholder-gemini-key"
     approval_signing_key         = var.approval_signing_key != "" ? var.approval_signing_key : random_password.internal_service_key["approval_signing_key"].result
     agent_runtime_internal_token = var.agent_runtime_internal_token != "" ? var.agent_runtime_internal_token : random_password.internal_service_key["agent_runtime_internal_token"].result
+    planning_source_signing_key  = var.planning_source_signing_key != "" ? var.planning_source_signing_key : random_password.internal_service_key["planning_source_signing_key"].result
     model_gateway_api_key        = var.model_gateway_api_key != "" ? var.model_gateway_api_key : random_password.internal_service_key["model_gateway_api_key"].result
     mfa_encryption_key           = var.mfa_encryption_key != "" ? var.mfa_encryption_key : random_password.internal_service_key["mfa_encryption_key"].result
     temporal_api_key             = var.temporal_api_key != "" ? var.temporal_api_key : "placeholder-temporal-key"
