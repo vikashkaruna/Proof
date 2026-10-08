@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict, cast
 from urllib.parse import urlsplit
 
 from supabase import Client, create_client
@@ -31,6 +31,11 @@ from .config import Settings, get_settings
 
 ActorType = Literal["agent", "human", "system"]
 LedgerResult = Literal["success", "failure", "rolled_back", "skipped", "pending"]
+
+
+class MemoryChain(TypedDict):
+    last_seq: int
+    last_hash: str | None
 
 
 @dataclass(frozen=True)
@@ -106,8 +111,8 @@ class LedgerClient:
         self._client = client
         self._read_client = read_client
         self._in_memory = in_memory
-        self._mem: list[dict] = []
-        self._mem_chains: dict[str, dict[str, str | int]] = {}
+        self._mem: list[dict[str, object]] = []
+        self._mem_chains: dict[str, MemoryChain] = {}
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> LedgerClient:
@@ -239,7 +244,7 @@ class LedgerClient:
         return await asyncio.to_thread(claim)
 
     @property
-    def memory_entries(self) -> list[dict]:
+    def memory_entries(self) -> list[dict[str, object]]:
         """In-memory ledger entries (test-only)."""
         return list(self._mem)
 
@@ -291,6 +296,50 @@ class LedgerClient:
             )
 
         return await asyncio.to_thread(claim)
+
+    async def load_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str
+    ) -> object:
+        """Named metadata transport only; no temporary ciphertext or storage credential."""
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Evidence source transport configuration was refused")
+        client = self._client
+        return await asyncio.to_thread(
+            lambda: (
+                client.rpc(
+                    "read_saakshi119_dispatch",
+                    {
+                        "t": tenant_id,
+                        "runid": run_id,
+                        "k": operation_key,
+                    },
+                )
+                .execute()
+                .data
+            )
+        )
+
+    async def claim_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str, request_hash: str
+    ) -> object:
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Evidence source transport configuration was refused")
+        client = self._client
+        return await asyncio.to_thread(
+            lambda: (
+                client.rpc(
+                    "claim_saakshi119_dispatch",
+                    {
+                        "t": tenant_id,
+                        "runid": run_id,
+                        "k": operation_key,
+                        "ih": request_hash,
+                    },
+                )
+                .execute()
+                .data
+            )
+        )
 
     async def append(self, input: AppendInput) -> AppendResult:
         # This client holds only the agent ledger identity. A human-labelled
@@ -417,8 +466,11 @@ class LedgerClient:
         return AppendResult(id=str(receipt), occurred_at=datetime.now(UTC))
 
     @property
-    def _reader(self) -> Client | None:
-        return self._read_client or self._client
+    def _reader(self) -> Client:
+        client = self._read_client or self._client
+        if client is None:
+            raise RuntimeError("Audit read capability is unavailable")
+        return client
 
     async def verify(self, tenant_id: str, from_sequence: int = 1) -> dict[str, Any]:
         rpc = self._reader.rpc(
@@ -426,10 +478,20 @@ class LedgerClient:
             {"p_tenant_id": tenant_id, "p_from_sequence": from_sequence},
         )
         result = rpc.execute()
-        rows = result.data or []
+        rows = result.data
+        if not isinstance(rows, list):
+            raise RuntimeError("Audit verification response was refused")
         if not rows:
             return {"intact": True}
         first = rows[0]
+        if (
+            not isinstance(first, dict)
+            or type(first.get("sequence_no")) is not int
+            or not 1 <= first["sequence_no"] <= 9223372036854775807
+            or not isinstance(first.get("reason"), str)
+            or not first["reason"].strip()
+        ):
+            raise RuntimeError("Audit verification response was refused")
         return {
             "intact": False,
             "firstBreak": {
@@ -453,7 +515,7 @@ class LedgerClient:
         result: LedgerResult | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[dict]:
+    ) -> list[dict[str, object]]:
         q = (
             self._reader.table("audit_ledger")
             .select("*")
@@ -482,7 +544,15 @@ class LedgerClient:
         if offset:
             q = q.range(offset, offset + limit - 1)
         r = q.execute()
-        return r.data or []
+        rows = r.data
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict)
+            or type(row.get("sequence_no")) is not int
+            or not 1 <= row["sequence_no"] <= 9223372036854775807
+            for row in rows
+        ):
+            raise RuntimeError("Audit query response was refused")
+        return cast(list[dict[str, object]], rows)
 
 
 def new_correlation_id() -> str:
@@ -492,8 +562,18 @@ def new_correlation_id() -> str:
 class AppendOnlyLedgerClient(LedgerClient):
     """Audit append capability with no retained reader or domain access."""
 
+    async def load_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str
+    ) -> object:
+        raise PermissionError("Evidence source read capability is unavailable")
+
+    async def claim_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str, request_hash: str
+    ) -> object:
+        raise PermissionError("Evidence source claim capability is unavailable")
+
     @property
-    def _reader(self) -> Client | None:
+    def _reader(self) -> Client:
         raise PermissionError("Audit read capability is unavailable")
 
     async def load_public_source_dispatch(self, **kwargs: Any) -> dict[str, Any]:

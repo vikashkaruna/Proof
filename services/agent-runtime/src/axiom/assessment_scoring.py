@@ -8,20 +8,90 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import TypedDict, cast
 
-from .control_library_loader import ControlLibrary
+from .control_library_loader import Control, ControlLibrary
+
+
+class FindingEvidence(TypedDict):
+    type: str
+    description: str
+    retention: str | None
+
+
+class Finding(TypedDict):
+    control_id: str
+    title: str
+    domain: str
+    severity: str
+    score: float
+    risk_points: float
+    rationale: str
+    evidence_required: list[FindingEvidence]
+
+
+class QuestionDeclaration(TypedDict):
+    question_id: str
+    declaration: str
+
+
+class ControlProvenance(TypedDict):
+    control_id: str
+    questions: list[QuestionDeclaration]
+    known_boolean_question_count: int
+    caller_affirmed_count: int
+    caller_denied_count: int
+    unknown_count: int
+    answer_state: str
+    applicability_state: str
+
+
+class ApplicabilityDeclaration(TypedDict):
+    value: bool | None
+    provenance: str
+
+
+class QuestionnaireProvenance(TypedDict):
+    version: int
+    source_library_version: str
+    source_library_digest: str | None
+    estimates: str
+    review_required: bool
+    controls: list[ControlProvenance]
+    applicability: dict[str, ApplicabilityDeclaration]
+
+
+class SdfAssessment(TypedDict):
+    is_sdf_attested: bool | None
+    processes_children: bool | None
+    processes_health: bool | None
+    applicable_sdf_controls: list[str] | None
+    applicable_children_controls: list[str] | None
+    declaration_provenance: dict[str, str]
+    applicability_review_required: bool
+    computation_scope: str
+
+
+class AssessmentResult(TypedDict):
+    library_version: str
+    posture_score: float
+    estimated_exposure_inr: int
+    findings: list[Finding]
+    sdf_self_assessment: SdfAssessment
+    questionnaire_provenance: QuestionnaireProvenance
+    notes: str
 
 
 @dataclass(frozen=True)
 class AssessmentInput:
     library_version: str
-    answers: dict = field(default_factory=dict)
+    answers: dict[str, dict[str, object]] = field(default_factory=dict)
     sdf_self_attested: bool | None = None
     processes_children: bool | None = None
     processes_health: bool | None = None
 
 
-def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> dict:
+def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> AssessmentResult:
     if not lib.version or lib.version != input.library_version or len(lib) == 0:
         raise ValueError("Assessment library mismatch")
     declarations = {
@@ -31,8 +101,8 @@ def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> dict:
     }
     if any(value is not None and type(value) is not bool for value in declarations.values()):
         raise ValueError("Invalid input flags")
-    findings: list[dict] = []
-    provenance_controls: list[dict] = []
+    findings: list[Finding] = []
+    provenance_controls: list[ControlProvenance] = []
     if not 1 <= len(lib) <= 500:
         raise ValueError("Invalid provenance library size")
     total_weight = 0.0
@@ -86,7 +156,7 @@ def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> dict:
 
     posture = round(weighted_score / max(0.0001, total_weight), 2)
 
-    sdf_assessment = {
+    sdf_assessment: SdfAssessment = {
         "is_sdf_attested": input.sdf_self_attested,
         "processes_children": input.processes_children,
         "processes_health": input.processes_health,
@@ -103,7 +173,7 @@ def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> dict:
         "applicability_review_required": True,
         "computation_scope": "All library controls are scored; applicability is not determined.",
     }
-    provenance = {
+    provenance: QuestionnaireProvenance = {
         "version": 1,
         "source_library_version": lib.version,
         "source_library_digest": None,
@@ -136,7 +206,7 @@ def score_assessment(lib: ControlLibrary, input: AssessmentInput) -> dict:
     }
 
 
-def boolean_answer_counts(control, answers: dict) -> tuple[int, int, int]:
+def boolean_answer_counts(control: Control, answers: dict[str, object]) -> tuple[int, int, int]:
     boolean_ids = {
         str(q.get("id"))
         for q in control.assessment_questions
@@ -149,7 +219,9 @@ def boolean_answer_counts(control, answers: dict) -> tuple[int, int, int]:
     )
 
 
-def control_provenance(control, answers: dict, input: AssessmentInput) -> dict:
+def control_provenance(
+    control: Control, answers: dict[str, object], input: AssessmentInput
+) -> ControlProvenance:
     """Bounded known-question declarations, never free text, evidence or PII."""
     if (
         not isinstance(answers, dict)
@@ -165,7 +237,7 @@ def control_provenance(control, answers: dict, input: AssessmentInput) -> dict:
         raise ValueError("Invalid provenance questions")
     if len(set(ids)) != len(ids):
         raise ValueError("Duplicate provenance questions")
-    questions = [
+    questions: list[QuestionDeclaration] = [
         {
             "question_id": qid,
             "declaration": "caller_affirmed"
@@ -174,7 +246,7 @@ def control_provenance(control, answers: dict, input: AssessmentInput) -> dict:
             if answers.get(qid) is False
             else "unknown",
         }
-        for qid in sorted(ids)
+        for qid in sorted(cast(list[str], ids))
     ]
     total = len(questions)
     affirmed = sum(q["declaration"] == "caller_affirmed" for q in questions)
@@ -216,7 +288,7 @@ def control_provenance(control, answers: dict, input: AssessmentInput) -> dict:
 
 
 def build_rationale(
-    control, score: float, answers: dict, input: AssessmentInput | None = None
+    control: Control, score: float, answers: dict[str, object], input: AssessmentInput | None = None
 ) -> str:
     citations = "; ".join(f"{c.instrument} {c.reference}" for c in control.citations)
     total, yes, no = boolean_answer_counts(control, answers)

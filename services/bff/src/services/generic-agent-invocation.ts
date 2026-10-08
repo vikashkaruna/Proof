@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { logger } from '../lib/logger.js';
 import type { RealtimeService } from './realtime.js';
 import { serviceAuthHeaders } from './service-auth.js';
+import { retainedStageSource } from './saakshi-staging-port.js';
 
 /** Capability, name/workflow, UUID and owned-engagement checks belong to the caller.
  * The configured start RPC checks live authority again before peer dispatch.
@@ -40,6 +41,11 @@ export interface GenericAgentInvocationDeps {
   readonly validateOutput?: (output: unknown) => void;
   /** Only the reviewed Vibhaag route may provide this retained-source transport. */
   readonly reviewedWorkflow?: {
+    readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
+    readonly settleSuccess: NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>;
+  };
+  /** Dedicated Saakshi-only persisted human evidence transport, never a generic storage grant. */
+  readonly stagedEvidence?: {
     readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
     readonly settleSuccess: NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>;
   };
@@ -133,6 +139,31 @@ export async function invokeGenericAgent(
         },
       },
     };
+  const stage = retainedStageSource.safeParse(input);
+  if (
+    (agent === 'saakshi' && !deps.stagedEvidence) ||
+    (deps.stagedEvidence &&
+      (agent !== 'saakshi' ||
+        !stage.success ||
+        stage.data.tenant_id !== tenantId ||
+        stage.data.actor_id !== actorId ||
+        stage.data.engagement_id !== engagementId ||
+        stage.data.operation_key !== correlationId ||
+        prepareDispatch ||
+        deps.reviewedWorkflow ||
+        deps.sudhaarDispatch ||
+        deps.settleSudhaarSuccess ||
+        !deps.validateOutput))
+  )
+    return {
+      status: 403,
+      body: {
+        error: {
+          code: 'staged_evidence_transport_refused',
+          message: 'Evidence staging was refused.',
+        },
+      },
+    };
   // Snapshot wire input before the first await. The request hash still uses
   // the original canonical domain, including its existing undefined semantics.
   const wireInput = JSON.stringify(input);
@@ -142,31 +173,32 @@ export async function invokeGenericAgent(
   let writer: Pick<ReturnType<typeof createHumanActionWriter>, 'rpc'>;
   try {
     writer = (deps.writerFactory ?? createHumanActionWriter)();
-    const { data, error } = deps.reviewedWorkflow
-      ? {
-          data: await deps.reviewedWorkflow.start(
-            Object.freeze({
-              agent,
-              tenantId,
-              actorId,
-              engagementId,
-              correlationId,
-              requestHash,
-              canonicalInput,
-            }),
-          ),
-          error: null,
-        }
-      : await writer
-          .rpc('record_generic_agent_run_start', {
-            p_tenant_id: tenantId,
-            p_actor_id: actorId,
-            p_agent: agent,
-            p_engagement_id: engagementId,
-            p_correlation_id: correlationId,
-            p_request_hash: requestHash,
-          })
-          .abortSignal(AbortSignal.timeout(10000));
+    const { data, error } =
+      (deps.reviewedWorkflow ?? deps.stagedEvidence)
+        ? {
+            data: await (deps.reviewedWorkflow ?? deps.stagedEvidence)!.start(
+              Object.freeze({
+                agent,
+                tenantId,
+                actorId,
+                engagementId,
+                correlationId,
+                requestHash,
+                canonicalInput,
+              }),
+            ),
+            error: null,
+          }
+        : await writer
+            .rpc('record_generic_agent_run_start', {
+              p_tenant_id: tenantId,
+              p_actor_id: actorId,
+              p_agent: agent,
+              p_engagement_id: engagementId,
+              p_correlation_id: correlationId,
+              p_request_hash: requestHash,
+            })
+            .abortSignal(AbortSignal.timeout(10000));
     if (error) throw new Error('start_unconfirmed');
     const parsed = z
       .object({ run_id: z.uuid(), created: z.boolean(), status: z.string() })
@@ -286,6 +318,10 @@ export async function invokeGenericAgent(
       path = '/reviewed-workflows/agents/vibhaag/invoke';
       transportBody = { tenant_id: tenantId, run_id: runId, operation_key: correlationId };
     }
+    if (deps.stagedEvidence) {
+      path = '/staged-evidence/agents/saakshi/invoke';
+      transportBody = { tenant_id: tenantId, run_id: runId, operation_key: correlationId };
+    }
     const res = await (deps.fetchImpl ?? fetch)(`${runtimeUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
@@ -328,7 +364,10 @@ export async function invokeGenericAgent(
     responseHash = succeeded && result ? await sha256(canonicalJson(result.output)) : null;
     if (succeeded && deps.settleSudhaarSuccess && agent !== 'sudhaar')
       throw new Error('planning_settlement_refused');
-    const successCapture = deps.reviewedWorkflow?.settleSuccess ?? deps.settleSudhaarSuccess;
+    const successCapture =
+      deps.stagedEvidence?.settleSuccess ??
+      deps.reviewedWorkflow?.settleSuccess ??
+      deps.settleSudhaarSuccess;
     const { data: recorded, error } =
       succeeded && successCapture
         ? {

@@ -878,3 +878,116 @@ it.each(['agent', 'mode', 'engagement', 'public', 'sudhaar', 'capture', 'validat
     expect(f.fetchImpl).not.toHaveBeenCalled();
   },
 );
+
+function stagedContext() {
+  return {
+    ...context(),
+    agent: 'saakshi',
+    input: {
+      purpose: 'saakshi_owned_resource_stage_v1',
+      tenant_id: TENANT,
+      actor_id: ACTOR,
+      engagement_id: ENGAGEMENT,
+      operation_id: FOREIGN,
+      operation_key: CORRELATION,
+      owned_resource_id: ACTOR,
+      human_request_hash: 'a'.repeat(64),
+      provider: 's3-compatible',
+      bucket: 'owned-test',
+      object_key: `tenants/${TENANT}/evidence-ingestions/${CORRELATION}/${'b'.repeat(64)}`,
+      content_hash: 'b'.repeat(64),
+      byte_size: 3,
+      retain_until: '2034-01-01T00:00:00Z',
+      legal_hold: false,
+      encryption: 'AES256',
+    },
+  };
+}
+it.each([
+  'missing',
+  'agent',
+  'purpose',
+  'actor',
+  'tenant',
+  'key',
+  'engagement',
+  'public',
+  'reviewed',
+  'sudhaar',
+  'capture',
+  'validator',
+])('refuses staged evidence %s before writer or peer action', async (change) => {
+  const f = fixture(),
+    start = vi.fn(),
+    settleSuccess = vi.fn();
+  const c = stagedContext();
+  const deps: GenericAgentInvocationDeps = {
+    ...f.deps,
+    stagedEvidence: { start, settleSuccess },
+    validateOutput: vi.fn(),
+  };
+  if (change === 'missing') Object.assign(deps, { stagedEvidence: undefined });
+  if (change === 'agent') c.agent = 'drishti';
+  if (change === 'purpose') c.input.purpose = 'public_website';
+  if (change === 'actor') c.input.actor_id = FOREIGN;
+  if (change === 'tenant') c.input.tenant_id = FOREIGN;
+  if (change === 'key') c.input.operation_key = FOREIGN;
+  if (change === 'engagement') c.input.engagement_id = FOREIGN;
+  if (change === 'public') Object.assign(deps, { prepareDispatch: vi.fn() });
+  if (change === 'reviewed') Object.assign(deps, { reviewedWorkflow: { start, settleSuccess } });
+  if (change === 'sudhaar') Object.assign(deps, { sudhaarDispatch: vi.fn() });
+  if (change === 'capture') Object.assign(deps, { settleSudhaarSuccess: vi.fn() });
+  if (change === 'validator') Object.assign(deps, { validateOutput: undefined });
+  const result = await invokeGenericAgent(c, deps);
+  expect(result.status).toBe(403);
+  expect(f.writerFactory).not.toHaveBeenCalled();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(start).not.toHaveBeenCalled();
+});
+it('dedicated staged source sends only IDs and captures successful output atomically', async () => {
+  const f = fixture(),
+    c = stagedContext();
+  const start = vi.fn(async () => ({ run_id: RUN, created: true, status: 'running' }));
+  const settleSuccess = vi.fn(async () => ({ run_id: RUN, status: 'succeeded', replayed: false }));
+  f.fetchImpl.mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify(
+          runtimeResult({ body: '{}' }, { agent: 'saakshi', correlation_id: CORRELATION }),
+        ),
+      ),
+  );
+  const result = await invokeGenericAgent(c, {
+    ...f.deps,
+    stagedEvidence: { start, settleSuccess },
+    validateOutput: vi.fn(),
+  });
+  expect(result.status).toBe(200);
+  expect(f.rpc).not.toHaveBeenCalled();
+  const [url, init] = f.fetchImpl.mock.calls[0]!;
+  expect(url).toBe('http://runtime.invalid/staged-evidence/agents/saakshi/invoke');
+  expect(JSON.parse(String(init?.body))).toEqual({
+    tenant_id: TENANT,
+    run_id: RUN,
+    operation_key: CORRELATION,
+  });
+  expect(settleSuccess).toHaveBeenCalledWith(
+    expect.objectContaining({
+      runId: RUN,
+      canonicalInput: canonicalJson(c.input),
+      canonicalOutput: canonicalJson({ inventory: [], normalized: { a: 1, z: 2 } }),
+    }),
+  );
+});
+it('already prepared staged source never redispatches after lost response', async () => {
+  const f = fixture();
+  const start = vi.fn(async () => ({ run_id: RUN, created: false, status: 'succeeded' }));
+  const result = await invokeGenericAgent(stagedContext(), {
+    ...f.deps,
+    stagedEvidence: { start, settleSuccess: vi.fn() },
+    validateOutput: vi.fn(),
+  });
+  expect(result.status).toBe(409);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(f.rpc).not.toHaveBeenCalled();
+});

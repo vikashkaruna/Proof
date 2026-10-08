@@ -8,7 +8,7 @@ import re
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,17 @@ class Settings(BaseSettings):
         extra="ignore",
         hide_input_in_errors=True,
     )
+
+    # Optional persisted human evidence path. Partial configuration grants no staging.
+    saakshi_stage_enabled: bool = Field(default=False, validation_alias="AXIOM_SAAKSHI_STAGE_ENABLED")
+    saakshi_stage_url: str | None = Field(default=None, validation_alias="AXIOM_SAAKSHI_STAGE_URL")
+    saakshi_stage_peer_token: str | None = Field(default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_PEER_TOKEN")
+    saakshi_stage_source_key: str | None = Field(default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_SOURCE_KEY")
+
+    @field_validator("saakshi_stage_enabled", mode="before")
+    @classmethod
+    def explicit_stage_enablement(cls, value: object) -> bool:
+        return value is True or value == "true"
 
     # ─── Service identity ───────────────────────────────────────────
     service_name: str = "axiom-agent-runtime"
@@ -240,7 +251,7 @@ def get_settings() -> Settings:
     """Cached settings accessor. The same instance is returned for the
     lifetime of the process — no per-request env reads.
     """
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
 
 
 def setup_logging(settings: Settings) -> None:
