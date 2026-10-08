@@ -1,7 +1,7 @@
+import { canonicalAssessmentInput } from './assessment-input.js';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin, createHumanActionWriter } from '@axiom/supabase';
-import { canonicalJson } from '@axiom/ledger';
 import {
   AssessmentRequestSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
@@ -172,15 +172,12 @@ export async function composeAssessmentProducer(
         const engagement = engagementSchema.parse(read.data);
         if (engagement.id !== engagementId || engagement.tenant_id !== tenantId)
           throw new DispatchRefused();
-        const inputJson = canonicalJson({
-          tenant_id: tenantId,
-          engagement_id: engagementId,
-          library_version: engagement.library_version,
-          answers: input.answers,
-          sdf_self_attested: input.applicability.sdfSelfAttested,
-          processes_children: input.applicability.processesChildren,
-          processes_health: input.applicability.processesHealth,
-        });
+        const inputJson = canonicalAssessmentInput(
+          tenantId,
+          engagementId,
+          engagement.library_version,
+          input,
+        );
         if (Buffer.byteLength(inputJson, 'utf8') > ASSESSMENT_REQUEST_MAX_BYTES)
           throw new DispatchRefused();
         const context = {

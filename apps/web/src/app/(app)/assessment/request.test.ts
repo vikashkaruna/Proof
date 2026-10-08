@@ -7,6 +7,7 @@ import {
   clearFinalizedAssessmentJournal,
   assessmentJournalKey,
   submitUnknownAssessment,
+  cancelUnclaimedAssessmentRequest,
   readAssessmentRequest,
   assessmentJobReadoutSchema,
   type RetainedAssessment,
@@ -220,3 +221,168 @@ it.each(['sdfSelfAttested', 'processesChildren', 'processesHealth'] as const)(
     }
   },
 );
+
+const resolutionFixture = () => ({
+  ...readoutFixture(),
+  status: 'resolution_recorded',
+  phase: 'cancelled_unclaimed',
+  recordedRunStatus: 'cancelled',
+  resolution: {
+    actorId: actor,
+    requestedReceipt: '21',
+    cancellationReceipt: '22',
+    resolvedAt: '2026-10-05T11:02:00Z',
+    verification: 'persisted_human_unclaimed_cancellation_bindings',
+    workerCleanupVerified: false,
+  },
+});
+it('cancels only the exact retained reviewed body and original operation key without erasing its journal', async () => {
+  const value = {
+    ...retainedFixture(),
+    questionnaireDigest: 'd'.repeat(64),
+    request: {
+      ...retainedFixture().request,
+      answers: { C: { Q: true, N: false, U: null } },
+      applicability: { sdfSelfAttested: null, processesChildren: false, processesHealth: true },
+    },
+  };
+  retainAssessmentJournal(localStorage, value);
+  fetchMock.mockResolvedValue(
+    Response.json(
+      {
+        jobId: operation,
+        runId: run,
+        cancellationReceipt: '22',
+        resolvedAt: '2026-10-05T11:02:00Z',
+        status: 'cancellation_recorded',
+      },
+      { status: 202 },
+    ),
+  );
+  await cancelUnclaimedAssessmentRequest(value, assessmentJobReadoutSchema.parse(readoutFixture()));
+  const [path, init] = fetchMock.mock.calls[0]!;
+  expect(path).toBe(`/api/bff/v1/assessment/jobs/${operation}/cancel`);
+  expect(init.method).toBe('POST');
+  expect(init.headers).toMatchObject({
+    'X-Tenant-Id': tenant,
+    'X-Expected-Actor-Id': actor,
+    'Idempotency-Key': operation,
+  });
+  expect(JSON.parse(init.body)).toEqual(value.request);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+});
+it.each(['job', 'engagement', 'library', 'claimed', 'running', 'phase', 'finalized'])(
+  'refuses cancellation of ineligible recorded context %s before posting',
+  async (kind) => {
+    const changes: Record<string, Record<string, unknown>> = {
+      job: { jobId: run },
+      engagement: { engagementId: run },
+      library: { libraryVersion: 'other' },
+      claimed: { claimedAt: '2026-10-05T11:01:00Z' },
+      running: { recordedRunStatus: 'running' },
+      phase: { phase: 'dispatch_needs_review' },
+      finalized: readoutFixture(true),
+    };
+    await expect(
+      cancelUnclaimedAssessmentRequest(retainedFixture(), {
+        ...readoutFixture(),
+        ...changes[kind],
+      } as never),
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+it('lost cancellation response preserves the original body and permits an exact explicit retry', async () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  fetchMock.mockRejectedValueOnce(new Error('lost response')).mockResolvedValueOnce(
+    Response.json(
+      {
+        jobId: operation,
+        runId: run,
+        cancellationReceipt: '22',
+        resolvedAt: '2026-10-05T11:02:00Z',
+        status: 'cancellation_recorded',
+      },
+      { status: 202 },
+    ),
+  );
+  const status = assessmentJobReadoutSchema.parse(readoutFixture());
+  await expect(cancelUnclaimedAssessmentRequest(value, status)).rejects.toThrow(/interrupted/);
+  expect(fetchMock).toHaveBeenCalledOnce();
+  await cancelUnclaimedAssessmentRequest(
+    readAssessmentJournal(localStorage, tenant, actor)!,
+    status,
+  );
+  expect(fetchMock.mock.calls[1]![0]).toEqual(fetchMock.mock.calls[0]![0]);
+  expect(fetchMock.mock.calls[1]![1].body).toEqual(fetchMock.mock.calls[0]![1].body);
+  expect(fetchMock.mock.calls[1]![1].headers).toEqual(fetchMock.mock.calls[0]![1].headers);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+});
+it('archives only a server-verified matching cancellation resolution', () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  clearFinalizedAssessmentJournal(
+    localStorage,
+    value,
+    assessmentJobReadoutSchema.parse(resolutionFixture()),
+  );
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+});
+it.each([
+  'actor',
+  'cleanup',
+  'duplicate-receipt',
+  'claimed',
+  'wrong-job',
+  'older-resolution',
+  'generic-cancelled',
+])('keeps browser reference when resolution proof is invalid: %s', (kind) => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  const result = resolutionFixture();
+  const changes: Record<string, Record<string, unknown>> = {
+    actor: { resolution: { ...result.resolution, actorId: run } },
+    cleanup: { resolution: { ...result.resolution, workerCleanupVerified: true } },
+    'duplicate-receipt': { resolution: { ...result.resolution, cancellationReceipt: '21' } },
+    claimed: { claimedAt: '2026-10-05T11:01:00Z' },
+    'wrong-job': { jobId: run },
+    'older-resolution': {
+      resolution: { ...result.resolution, resolvedAt: '2026-10-04T11:02:00Z' },
+    },
+    'generic-cancelled': {
+      status: 'unconfirmed',
+      phase: 'dispatch_cancelled',
+      resolution: undefined,
+    },
+  };
+  expect(() =>
+    clearFinalizedAssessmentJournal(
+      localStorage,
+      value,
+      assessmentJobReadoutSchema.parse({ ...result, ...changes[kind] }),
+    ),
+  ).toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+});
+it('never archives a valid unconfirmed status or a write acknowledgement without read proof', () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  expect(() =>
+    clearFinalizedAssessmentJournal(
+      localStorage,
+      value,
+      assessmentJobReadoutSchema.parse(readoutFixture()),
+    ),
+  ).toThrow(/resolved/);
+  expect(() =>
+    clearFinalizedAssessmentJournal(localStorage, value, {
+      jobId: operation,
+      runId: run,
+      cancellationReceipt: '22',
+      resolvedAt: '2026-10-05T11:02:00Z',
+      status: 'cancellation_recorded',
+    } as never),
+  ).toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+});

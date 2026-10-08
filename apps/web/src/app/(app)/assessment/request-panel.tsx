@@ -18,6 +18,7 @@ import {
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
   submitAssessmentRequest,
+  cancelUnclaimedAssessmentRequest,
   readAssessmentRequest,
   type RetainedAssessment,
   type AssessmentJobReadout,
@@ -96,6 +97,7 @@ function RequestPanel({
   );
   const [status, setStatus] = useState<AssessmentJobReadout | null>(null);
   const [completedHere, setCompletedHere] = useState(false);
+  const [cancelAcknowledgement, setCancelAcknowledgement] = useState<string | null>(null);
   const displayedStatus =
     retained &&
     status?.jobId === retained.request.operationKey &&
@@ -198,6 +200,11 @@ function RequestPanel({
           setCompletedHere(true);
           onFinalized();
         }
+      } else if (value.status === 'resolution_recorded') {
+        setMessage({
+          text: 'Unclaimed request cancellation is recorded. Review its receipt before archiving this browser reference. This is not worker cleanup or completed assessment proof.',
+          operationKey: expected.request.operationKey,
+        });
       } else
         setMessage({
           text: `Assessment ${value.phase.replaceAll('_', ' ')}. Completion is not yet confirmed.`,
@@ -254,16 +261,76 @@ function RequestPanel({
     }
   }
   function archive() {
-    if (busy || !retained || displayedStatus?.status !== 'finalization_recorded') return;
+    if (
+      busy ||
+      !retained ||
+      (displayedStatus?.status !== 'finalization_recorded' &&
+        displayedStatus?.status !== 'resolution_recorded')
+    )
+      return;
     try {
       clearFinalizedAssessmentJournal(localStorage, retained, displayedStatus);
       setStatus(null);
+      setConfirmedUnknown(false);
+      setReviewed(null);
+      setIntake(false);
+      setCancelAcknowledgement(null);
       setMessage({
-        text: 'Completed request reference cleared from this browser. Saved results remain available.',
+        text: 'Resolved request reference archived in this browser. Server records remain available.',
         operationKey: null,
       });
     } catch {
       setError('Retained request changed. Reload before continuing.');
+    }
+  }
+  async function cancel() {
+    if (
+      active.current ||
+      !canRequest ||
+      !retained ||
+      retained.request.engagementId !== engagementId ||
+      cancelAcknowledgement !== retained.request.operationKey ||
+      displayedStatus?.status !== 'unconfirmed' ||
+      displayedStatus.recordedRunStatus !== 'queued' ||
+      displayedStatus.phase !== 'queued' ||
+      displayedStatus.claimedAt !== null
+    )
+      return;
+    const expected = retained,
+      recorded = displayedStatus;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new Error(
+          'This browser cannot safely coordinate assessment requests across tabs. Use a supported browser.',
+        );
+      await navigator.locks.request(assessmentJournalKey(tenantId, actorId), async () => {
+        if (!mounted.current) return;
+        const live = readAssessmentJournal(localStorage, tenantId, actorId);
+        if (JSON.stringify(live) !== JSON.stringify(expected))
+          throw new Error('Retained request changed. Reload before continuing.');
+        await cancelUnclaimedAssessmentRequest(expected, recorded);
+        if (mounted.current) {
+          setStatus(null);
+          setCancelAcknowledgement(null);
+          setMessage({
+            text: 'Cancellation recorded. Check the retained request to verify its resolution before archiving.',
+            operationKey: expected.request.operationKey,
+          });
+        }
+      });
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'Cancellation could not be confirmed. Keep the original reference.',
+        );
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
   const sameEngagement = !retained || retained.request.engagementId === engagementId;
@@ -308,6 +375,39 @@ function RequestPanel({
           {recoveryGuidance && <p role="note">{recoveryGuidance}</p>}
           {canRequest &&
             sameEngagement &&
+            displayedStatus?.status === 'unconfirmed' &&
+            displayedStatus.recordedRunStatus === 'queued' &&
+            displayedStatus.phase === 'queued' &&
+            displayedStatus.claimedAt === null && (
+              <div className="space-y-2">
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={cancelAcknowledgement === retained.request.operationKey}
+                    onChange={(event) =>
+                      setCancelAcknowledgement(
+                        event.target.checked ? retained.request.operationKey : null,
+                      )
+                    }
+                  />
+                  <span>
+                    I want to cancel this original request if it has never been claimed. The server
+                    will refuse started work; cancellation does not establish worker cleanup.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || cancelAcknowledgement !== retained.request.operationKey}
+                  onClick={cancel}
+                  className="rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:opacity-50"
+                >
+                  Cancel if not claimed
+                </button>
+              </div>
+            )}
+          {canRequest &&
+            sameEngagement &&
             displayedStatus?.status !== 'finalization_recorded' &&
             !recoveryGuidance && (
               <button
@@ -338,6 +438,28 @@ function RequestPanel({
                 className="mt-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold"
               >
                 Archive completed browser reference
+              </button>
+            </div>
+          )}
+          {displayedStatus?.status === 'resolution_recorded' && (
+            <div>
+              <p>
+                Cancellation receipt:{' '}
+                <Link
+                  className="font-mono text-teal-700 underline"
+                  href={`/ledger?q=${displayedStatus.resolution.cancellationReceipt}`}
+                >
+                  #{displayedStatus.resolution.cancellationReceipt}
+                </Link>
+                .
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={archive}
+                className="mt-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold"
+              >
+                Archive cancelled browser reference
               </button>
             </div>
           )}
@@ -439,6 +561,8 @@ function RequestPanel({
  * Keep the reference until the server can prove completion or resolution. */
 function requestRecoveryGuidance(status: AssessmentJobReadout): string | null {
   if (status.status === 'finalization_recorded') return null;
+  if (status.status === 'resolution_recorded')
+    return 'This unclaimed request is cancelled. Its original key cannot start another execution. Server records and the cancellation receipt remain available.';
   if (['failed', 'cancelled', 'timed_out'].includes(status.recordedRunStatus))
     return `The saved run is ${status.recordedRunStatus.replaceAll('_', ' ')}. Keep this request reference and ask an assessment administrator to review the recorded run. Retrying cannot restart it; safe cancellation or resolution has not been confirmed.`;
   if (status.schedulingStatus === 'needs_review')

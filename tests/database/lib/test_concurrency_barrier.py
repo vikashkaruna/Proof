@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -75,6 +76,31 @@ class FailureDeadlineTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertLess(elapsed, 5)
         self.assertGreaterEqual(len(pids), 2)
+
+
+class DatabaseArgumentTests(unittest.TestCase):
+    def test_refuses_unsafe_optional_database_before_any_process(self):
+        argv = [
+            "barrier",
+            "owned-disposable",
+            "postgres",
+            "select 1",
+            "select 2",
+            "first",
+            "second",
+            "status",
+            "blocked",
+            "success",
+            "",
+            "axiom_policy_test;drop database postgres",
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(subprocess, "Popen") as start,
+        ):
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.main()
+            start.assert_not_called()
 
 
 if __name__ == "__main__":
