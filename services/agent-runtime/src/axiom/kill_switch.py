@@ -24,8 +24,9 @@ checks and connector interruption are pending; this alone is not live-stop proof
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict, cast
 
 import structlog
 
@@ -38,6 +39,13 @@ log = structlog.get_logger()
 CACHE_TTL_SECONDS = 2.0
 
 GLOBAL_SCOPE = "global"
+
+
+class KillSwitchRow(TypedDict):
+    scope: str
+    tenant_id: str | None
+    engaged: bool
+    reason: str | None
 
 
 class KillSwitchEngaged(RuntimeError):  # noqa: N818 — reads as the state it reports
@@ -68,15 +76,15 @@ class KillSwitchReader:
         client: Any | None = None,
         *,
         in_memory: bool = False,
-        clock: Any = time.monotonic,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client
         self._in_memory = in_memory
         self._clock = clock
-        self._rows: list[dict] | None = None
+        self._rows: list[KillSwitchRow] | None = None
         self._read_at: float | None = None
         self._last_read_failed = False
-        self._memory_rows: list[dict] = []
+        self._memory_rows: list[KillSwitchRow] = []
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> KillSwitchReader:
@@ -108,7 +116,7 @@ class KillSwitchReader:
         self._read_at = None
 
     # ─── the read ────────────────────────────────────────────────────
-    def _load(self) -> list[dict]:
+    def _load(self) -> list[KillSwitchRow]:
         now = self._clock()
         if (
             self._rows is not None
@@ -124,6 +132,8 @@ class KillSwitchReader:
             return self._rows
 
         try:
+            if self._client is None:
+                raise RuntimeError("kill switch client unavailable")
             response = (
                 self._client.table("kill_switch_state")
                 .select("scope, tenant_id, engaged, reason")
@@ -132,12 +142,15 @@ class KillSwitchReader:
             )
             if not isinstance(response.data, list):
                 raise ValueError("invalid kill switch response")
-            rows = response.data
-            for row in rows:
+            raw_rows = response.data
+            for row in raw_rows:
                 if (not isinstance(row, dict) or row.get("engaged") is not True
                         or row.get("scope") not in {"global", "tenant"}
-                        or (row.get("scope") == "tenant" and not row.get("tenant_id"))):
+                        or (row.get("scope") == "tenant" and
+                            (not isinstance(row.get("tenant_id"), str) or not row["tenant_id"]))
+                        or (row.get("reason") is not None and not isinstance(row.get("reason"), str))):
                     raise ValueError("invalid kill switch row")
+            rows = cast(list[KillSwitchRow], raw_rows)
         except Exception:
             # Fail SAFE. Serving a stale "clear" here would let a batch keep
             # mutating a client estate through the exact incident the switch
