@@ -13,7 +13,7 @@ reconstructs chains, generates audit reports, and verifies integrity.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel, Field
 
@@ -74,7 +74,7 @@ class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
             )
             return LekhaOutput(
                 operation="reconstruct",
-                chain=sorted(entries, key=lambda e: e.get("sequence_no", 0)),
+                chain=sorted(entries, key=lambda e: cast(int, e.get("sequence_no", 0))),
                 notes=f"Reconstructed {len(entries)} entries for correlation {input.correlation_id}",
             )
         elif input.operation == "export":
