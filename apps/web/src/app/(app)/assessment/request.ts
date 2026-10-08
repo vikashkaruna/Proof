@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { AssessmentRequestSchema, AssessmentRequestReceiptSchema } from '@axiom/types';
+import {
+  AssessmentRequestSchema,
+  AssessmentRequestReceiptSchema,
+  ASSESSMENT_REQUEST_MAX_BYTES,
+} from '@axiom/types';
 
 export class AssessmentRequestError extends Error {}
 export const ASSESSMENT_JOURNAL_CHANGED = 'axiom:assessment-request-changed';
@@ -10,12 +14,23 @@ export const retainedAssessmentSchema = z
     actorId: uuid,
     libraryVersion: z.string().min(1).max(200),
     request: AssessmentRequestSchema,
+    questionnaireDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict()
   .refine(
     (value) =>
-      Object.keys(value.request.answers).length === 0 &&
-      Object.values(value.request.applicability).every((flag) => flag === null),
+      (Object.keys(value.request.answers).length === 0 &&
+        Object.values(value.request.applicability).every((flag) => flag === null)) ||
+      value.questionnaireDigest !== undefined,
+  )
+  .refine(
+    (value) =>
+      new TextEncoder().encode(JSON.stringify(value.request)).length <=
+      ASSESSMENT_REQUEST_MAX_BYTES,
+    'The questionnaire exceeds the supported request size.',
   );
 export type RetainedAssessment = z.infer<typeof retainedAssessmentSchema>;
 export const assessmentJournalKey = (tenant: string, actor: string) =>
@@ -23,7 +38,7 @@ export const assessmentJournalKey = (tenant: string, actor: string) =>
 export function readAssessmentJournal(storage: Storage, tenant: string, actor: string) {
   const raw = storage.getItem(assessmentJournalKey(tenant, actor));
   if (raw === null) return null;
-  if (raw.length > 4096)
+  if (new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024)
     throw new AssessmentRequestError('Retained request could not be verified.');
   const value = retainedAssessmentSchema.parse(JSON.parse(raw));
   if (value.tenantId !== tenant || value.actorId !== actor)
@@ -36,6 +51,13 @@ export function retainAssessmentJournal(storage: Storage, value: RetainedAssessm
   const parsed = retainedAssessmentSchema.parse(value);
   const old = readAssessmentJournal(storage, parsed.tenantId, parsed.actorId);
   const raw = JSON.stringify(parsed);
+  if (
+    new TextEncoder().encode(raw).length > ASSESSMENT_REQUEST_MAX_BYTES + 1024 ||
+    new TextEncoder().encode(JSON.stringify(parsed.request)).length > ASSESSMENT_REQUEST_MAX_BYTES
+  )
+    throw new AssessmentRequestError(
+      'The questionnaire exceeds the supported request size. Nothing was submitted.',
+    );
   if (old && JSON.stringify(old) !== raw)
     throw new AssessmentRequestError(
       'Resolve the retained assessment request before starting another.',
@@ -86,7 +108,7 @@ async function responseBody(response: Response) {
   }
   return response.json() as Promise<unknown>;
 }
-export async function submitUnknownAssessment(value: RetainedAssessment) {
+export async function submitAssessmentRequest(value: RetainedAssessment) {
   const retained = retainedAssessmentSchema.parse(value);
   let response: Response;
   try {
@@ -205,3 +227,6 @@ export async function readAssessmentRequest(value: RetainedAssessment) {
     );
   return status;
 }
+
+/** Backward-compatible unknown-draft caller; full intake uses the same fenced endpoint. */
+export const submitUnknownAssessment = submitAssessmentRequest;

@@ -6,6 +6,7 @@ import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { canonicalJson } from '@axiom/ledger';
 import { assessmentResult, validateAssessmentProvenance } from '../workloads/assessment-tools.js';
+import { assessmentQuestionnaireRoutes } from './assessment-questionnaire.js';
 
 const nullableNumber = z
   .union([z.number(), z.string().min(1)])
@@ -88,6 +89,7 @@ const unavailable = {
 /** Read projection only: never starts an assessment, recomputes scores or seals evidence. */
 export function assessmentRoutes() {
   const app = new Hono<{ Variables: Variables }>();
+  app.route('/', assessmentQuestionnaireRoutes());
   app.get('/assessment', async (c) => {
     c.header('Cache-Control', 'private, no-store');
     const denied = requireCapability(c, Capability.POSTURE_READ);
