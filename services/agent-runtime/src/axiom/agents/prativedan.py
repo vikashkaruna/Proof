@@ -33,8 +33,6 @@ class ReportKind(QualifiedStringEnum):
     CUSTOM = "custom"
 
 
-
-
 class PrativedanInput(BaseModel):
     tenant_id: str = "00000000-0000-0000-0000-000000000001"
     engagement_id: str | None = None
