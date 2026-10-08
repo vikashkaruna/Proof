@@ -42,6 +42,9 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       c.req.path === '/v1/plans/proposals' ||
       /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
         c.req.path,
+      ) ||
+      /^\/v1\/plans\/proposals\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/adopt$/.test(
+        c.req.path,
       ));
   if (durableSourceReview || durableOperatorWorkflow || trustedSourceRequest)
     c.header('Cache-Control', 'private, no-store');

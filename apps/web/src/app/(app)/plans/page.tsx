@@ -11,7 +11,7 @@ export default async function PlansListPage() {
   const { supabase, tenantId, userId, role } = await requireCapabilityContext(Capability.PLAN_READ);
   const { data: plans, error } = await supabase
     .from('remediation_plans')
-    .select('id, title, status, version, created_at, library_version')
+    .select('id, title, status, version, created_at, library_version, purpose')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
 
@@ -41,6 +41,9 @@ export default async function PlansListPage() {
                 <div>
                   <h2 className="font-medium text-[#1E2A4A]">{plan.title}</h2>
                   <p className="mt-1 text-xs text-slate-600">
+                    {plan.purpose === 'source_review'
+                      ? 'Review-only work · 0 corrective actions · '
+                      : ''}
                     Status {plan.status} · Version {plan.version} · Library{' '}
                     {plan.library_version ?? 'not recorded'}
                   </p>

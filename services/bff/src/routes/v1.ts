@@ -1,3 +1,4 @@
+import { sudhaarReviewAdoptionRoutes } from './sudhaar-review-adoption.js';
 import { sudhaarProposalRoutes } from './sudhaar-proposals.js';
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
@@ -232,6 +233,7 @@ export function v1Routes(deps: Deps) {
       realtime: deps.realtime,
     }),
   );
+  app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());

@@ -20,6 +20,7 @@ import {
   archiveConfirmedProposal,
   type ConfirmedProposal,
 } from './proposal-request';
+import { ReviewAdoptionPanel } from './review-adoption-panel';
 export function ProposalPanel(props: { tenantId: string; actorId: string; canPropose: boolean }) {
   return <Panel key={`${props.tenantId}:${props.actorId}:${props.canPropose}`} {...props} />;
 }
@@ -75,6 +76,7 @@ function Panel({
     [title, setTitle] = useState('Assessment review proposal'),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
+    [adoptionPending, setAdoptionPending] = useState(false),
     [result, setResult] = useState<{ key: string; confirmed: ConfirmedProposal } | null>(null);
   const mounted = useRef(true),
     active = useRef(false);
@@ -378,12 +380,19 @@ function Panel({
           </p>
           <button
             type="button"
-            disabled={busy || !journal.ready}
+            disabled={busy || !journal.ready || adoptionPending}
             onClick={() => void archive()}
             className="rounded-md border px-3 py-2"
           >
             Archive completed browser reference
           </button>
+          <ReviewAdoptionPanel
+            tenantId={tenantId}
+            actorId={actorId}
+            operationKey={displayed.key}
+            onPending={setAdoptionPending}
+            confirmed={displayed.confirmed}
+          />
           <ol className="space-y-3">
             {displayed.confirmed.proposal.review_tasks.map((task) => (
               <li key={task.finding_id} className="break-words rounded-md border p-3">
