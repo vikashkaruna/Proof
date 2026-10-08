@@ -1,3 +1,4 @@
+import { canonicalJson } from '@axiom/ledger';
 import { canonicalAssessmentInput } from './assessment-input.js';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
