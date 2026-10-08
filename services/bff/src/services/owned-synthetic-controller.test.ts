@@ -120,14 +120,12 @@ it('stop verification uses distinct normal human stop authority RPC', async () =
 it('cross-subject stop args are refused before writer use', async () => {
   const f = fixture();
   await expect(
-    f.deps
-      .cancellationPorts(context)
-      .cancelOriginalPendingRequest({
-        p_tenant_id: id(1),
-        p_actor_id: id(99),
-        p_session_id: id(3),
-        p_cancellation_key: id(4),
-      }),
+    f.deps.cancellationPorts(context).cancelOriginalPendingRequest({
+      p_tenant_id: id(1),
+      p_actor_id: id(99),
+      p_session_id: id(3),
+      p_cancellation_key: id(4),
+    }),
   ).rejects.toThrow('source changed');
   expect(f.human).not.toHaveBeenCalled();
 });
