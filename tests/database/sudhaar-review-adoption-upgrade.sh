@@ -4,21 +4,58 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 container=${1:?owned test container required}
 case "$container" in axiom-db-test-[0-9]*) ;; *) echo 'Dedicated policy fixture required' >&2; exit 1;; esac
-owner=$(docker inspect --format '{{ index .Config.Labels "com.axiom.owner-worktree" }}' "$container")
-kind=$(docker inspect --format '{{ index .Config.Labels "com.axiom.fixture" }}' "$container")
-[ "$owner" = "$(pwd)" ] && [ "$kind" = database-policy-test ]
-database=axiom_adoption_upgrade
+# Resolve once, then use and revalidate the immutable ID before every operation.
+container_id=$(docker inspect --format '{{.Id}}' "$container")
+[[ "$container_id" =~ ^[a-f0-9]{64}$ ]]
+expected_owner=$(pwd)
+check_identity(){
+  docker inspect "$container_id" | python3 -c '
+import json, sys
+item, = json.load(sys.stdin)
+labels = item.get("Config", {}).get("Labels") or {}
+assert item.get("Id") == sys.argv[1]
+assert item.get("Name") == "/" + sys.argv[2]
+assert labels.get("com.axiom.owner-worktree") == sys.argv[3]
+assert labels.get("com.axiom.fixture") == "database-policy-test"
+assert labels.get("com.axiom.fixture.project") == "axiom-db-tests"
+assert not any((item.get("HostConfig", {}).get("PortBindings") or {}).values())
+assert not any((item.get("NetworkSettings", {}).get("Ports") or {}).values())
+' "$container_id" "$container" "$expected_owner"
+}
+check_identity
 scratch=$(mktemp -d)
-cleanup(){ docker exec "$container" dropdb -U postgres --if-exists "$database" >/dev/null 2>&1 || true; rm -rf "$scratch"; }
+database="axiom_adoption_upgrade_$(basename "$scratch" | tr -cd 'a-zA-Z0-9' | tr 'A-Z' 'a-z')"
+created=false
+# Keep command arguments after the immutable container target.
+db_command(){ check_identity && docker exec "$container_id" "$@"; }
+cleanup(){
+  if "$created"; then
+    if ! db_command dropdb -U postgres --if-exists "$database"; then
+      echo "Fixture identity or cleanup failed; preserving evidence at $scratch" >&2
+      return 1
+    fi
+  fi
+  rm -rf "$scratch"
+}
 trap cleanup EXIT
 mkdir "$scratch/migrations"
 for migration in infra/supabase/migrations/*.sql; do
   if [[ "$(basename "$migration")" < 0117_ ]]; then cp "$migration" "$scratch/migrations/"; fi
 done
-docker exec "$container" createdb -U postgres "$database"
-sql(){ docker exec -i "$container" psql -X -U postgres -d "$database" -v ON_ERROR_STOP=1 -q; }
+db_command createdb -U postgres "$database"
+created=true
+sql(){ check_identity && docker exec -i "$container_id" psql -X -U postgres -d "$database" -v ON_ERROR_STOP=1 -q; }
+migrate(){
+  # The exact checksummed migration program uses the same checked SQL boundary.
+  python3 - "$1" <<'PYTHON' | sql
+import runpy, sys
+from pathlib import Path
+program = runpy.run_path("scripts/migrate-database.py")["migration_program"]
+print(program(Path(sys.argv[1])))
+PYTHON
+}
 sql < tests/database/bootstrap.sql
-python3 scripts/migrate-database.py --container "$container" --user postgres --database "$database" --migrations "$scratch/migrations" >/dev/null
+migrate "$scratch/migrations" >/dev/null
 python3 - <<'PY' | sql
 from pathlib import Path
 fixture=Path('tests/database/sudhaar-settled-outputs.test.sql').read_text()
@@ -33,7 +70,7 @@ create table public.adoption_upgrade_snapshot as select
  (select jsonb_agg(to_jsonb(s)) from public.sudhaar_settled_outputs s) outputs,
  (select count(*) from public.audit_ledger) receipts;
 SQL
-python3 scripts/migrate-database.py --container "$container" --user postgres --database "$database" >/dev/null
+migrate infra/supabase/migrations >/dev/null
 sql <<'SQL'
 do $$declare before public.adoption_upgrade_snapshot;begin
  select * into before from public.adoption_upgrade_snapshot;
