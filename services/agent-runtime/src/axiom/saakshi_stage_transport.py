@@ -45,6 +45,7 @@ class InternalEvidenceStageTransport:
             or len(source_secret.encode()) < 32
             or peer_secret == source_secret
             or source_secret in other_secrets
+            or peer_secret in other_secrets
         ):
             raise ValueError("Evidence staging configuration is unavailable")
         self._url = stage_url

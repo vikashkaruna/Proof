@@ -1,3 +1,4 @@
+import { stagedEvidenceRoutes, type StagedEvidenceRoutesDeps } from './staged-evidence.js';
 import { reviewedWorkflowDraftRoutes } from './reviewed-workflow-drafts.js';
 import { sudhaarReviewAdoptionRoutes } from './sudhaar-review-adoption.js';
 import { sudhaarProposalRoutes } from './sudhaar-proposals.js';
@@ -204,6 +205,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
@@ -216,6 +218,8 @@ export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
+  // Specific staged options must precede the legacy /evidence/:id route.
+  if (deps.stagedEvidence) app.route('/', stagedEvidenceRoutes(deps.stagedEvidence));
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());

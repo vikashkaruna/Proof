@@ -26,6 +26,10 @@ export interface StagedEvidenceRoutesDeps {
   invocation?: Parameters<typeof invokePreparedStagedEvidence>[2];
 }
 const recoveryQuery = z.object({ bodyHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+const isStagedOperation = (path: string) =>
+  path === '/evidence/staged-ingestions' ||
+  /^\/evidence\/staged-ingestions\/[^/]+\/(?:result|status|expire)$/.test(path);
+const relativePath = (path: string) => path.replace(/^\/v1(?=\/)/, '');
 export function stagedEvidenceRoutes(deps: StagedEvidenceRoutesDeps) {
   const app = new Hono<{ Variables: Variables }>();
   const available = () => {
@@ -49,6 +53,8 @@ export function stagedEvidenceRoutes(deps: StagedEvidenceRoutesDeps) {
     }
   };
   app.use('*', async (c, next) => {
+    const path = relativePath(c.req.path);
+    if (path !== '/evidence/staged-ingestion-options' && !isStagedOperation(path)) return next();
     c.header('Cache-Control', 'private, no-store');
     for (const capability of [Capability.EVIDENCE_RECORD, Capability.AGENT_INVOKE]) {
       const denied = requireCapability(c, capability);
@@ -62,7 +68,8 @@ export function stagedEvidenceRoutes(deps: StagedEvidenceRoutesDeps) {
     const enabled = available();
     return c.json({ enabled, retention: enabled ? deps.configuration!.retention : null });
   });
-  app.use('/evidence/staged-ingestions*', async (c, next) => {
+  app.use('*', async (c, next) => {
+    if (!isStagedOperation(relativePath(c.req.path))) return next();
     const actor = c.get('user').id.toLowerCase();
     const expected = z.uuid().safeParse(c.req.header('X-Expected-Actor-Id'));
     if (!expected.success || expected.data.toLowerCase() !== actor)

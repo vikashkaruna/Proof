@@ -72,6 +72,11 @@ const resultSchema = z
     runId: z.uuid(),
     evidenceId: z.uuid(),
     objectVersionId: z.uuid(),
+    storageVersionId: z
+      .string()
+      .min(1)
+      .max(1024)
+      .refine((value) => Boolean(value.trim()) && value !== 'null'),
     operationKey: z.uuid(),
     contentHash: digest,
     sourceRequestHash: digest,

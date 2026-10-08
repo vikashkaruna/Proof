@@ -419,6 +419,7 @@ export interface AcceptedStagedEvidence {
   runId: string;
   evidenceId: string;
   objectVersionId: string;
+  storageVersionId: string;
   operationKey: string;
   contentHash: string;
   sourceRequestHash: string;
@@ -434,6 +435,7 @@ export function acceptedStagedEvidenceResult(
     runId: accepted.saved.run_id,
     evidenceId: accepted.saved.evidence_id,
     objectVersionId: accepted.saved.object_version_id,
+    storageVersionId: accepted.output.receipt.version_id,
     operationKey: accepted.source.operation_key,
     contentHash: accepted.source.content_hash,
     sourceRequestHash: accepted.saved.human_body_hash,

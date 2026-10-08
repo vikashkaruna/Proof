@@ -379,7 +379,8 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
         >
           <p>Evidence accepted with matching storage and runtime receipts.</p>
           <p className="break-all">Evidence: {accepted.evidenceId}</p>
-          <p className="break-all">Object version: {accepted.objectVersionId}</p>
+          <p className="break-all">Evidence version record: {accepted.objectVersionId}</p>
+          <p className="break-all">Storage version: {accepted.storageVersionId}</p>
           <p className="break-all">Receipts: {Object.values(accepted.receipts).join(' → ')}</p>
           {journal && (
             <button type="button" className={button} disabled={busy} onClick={archive}>

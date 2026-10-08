@@ -50,6 +50,7 @@ async function fixture() {
     runId: id,
     evidenceId: id,
     objectVersionId: id,
+    storageVersionId: 'owned-storage-version',
     operationKey: id,
     contentHash: journal.contentHash,
     sourceRequestHash: journal.bodyHash,

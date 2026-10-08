@@ -52,6 +52,7 @@ beforeEach(() => {
       runId: id,
       evidenceId: id,
       objectVersionId: id,
+      storageVersionId: 'owned-storage-version',
       operationKey: id,
       contentHash: journal.contentHash,
       sourceRequestHash: journal.bodyHash,
@@ -107,6 +108,8 @@ it('lost response keeps payload-free retained reference and uses GET to recover 
   lost = false;
   fireEvent.click(screen.getByRole('button', { name: 'Check retained evidence result' }));
   await screen.findByText('Evidence accepted with matching storage and runtime receipts.');
+  expect(screen.getByText('Storage version: owned-storage-version')).toBeTruthy();
+  expect(screen.getByText(/^Evidence version record:/)).toBeTruthy();
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
 });
 it('archive renews current server acceptance and preserves pending reference on current authority refusal', async () => {

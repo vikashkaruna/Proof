@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import { EvidenceType } from '@axiom/types';
@@ -35,11 +35,13 @@ export function EvidenceClient({
   canRecord,
   canExport,
   initialQuery = '',
+  stagedWorkflow,
 }: {
   tenantId: string;
   canRecord: boolean;
   canExport: boolean;
   initialQuery?: string;
+  stagedWorkflow?: ReactNode;
 }) {
   const [rows, setRows] = useState<EvidenceRow[]>([]);
   const [meta, setMeta] = useState({ limit: 20, offset: 0, total: 0, hasMore: false });
@@ -307,6 +309,7 @@ export function EvidenceClient({
         title="Evidence vault"
         description="Inspect recorded evidence, check exact stored versions, or compare a local file against its recorded SHA-256."
       />
+      {stagedWorkflow}
       {error && (
         <p role="alert" className="rounded border border-red-200 bg-red-50 p-3">
           {error}
