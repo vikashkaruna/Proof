@@ -1,3 +1,4 @@
+import { reviewedWorkflowDraftRoutes } from './reviewed-workflow-drafts.js';
 import { sudhaarReviewAdoptionRoutes } from './sudhaar-review-adoption.js';
 import { sudhaarProposalRoutes } from './sudhaar-proposals.js';
 import { evidenceRoutes } from './evidence.js';
@@ -258,6 +259,15 @@ export function v1Routes(deps: Deps) {
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
   app.route('/', operatorWorkflowRoutes());
+  app.route(
+    '/',
+    reviewedWorkflowDraftRoutes({
+      killSwitch: deps.killSwitch,
+      runtimeUrl: env.AGENT_RUNTIME_URL,
+      runtimeToken: env.AGENT_RUNTIME_INTERNAL_TOKEN,
+      realtime: deps.realtime,
+    }),
+  );
   app.route('/', policyPreviewRoutes());
   app.route('/', sovereignLicenseRoutes());
 
