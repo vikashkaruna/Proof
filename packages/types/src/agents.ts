@@ -264,7 +264,7 @@ export const AGENT_CONTRACTS: Record<AgentName, AgentContract> = {
   sanket: {
     name: 'sanket',
     displayName: 'Sanket',
-    oneLiner: "I find who's about to buy.",
+    oneLiner: 'I surface public observations for your review.',
     autonomyLevel: 'L1', // Internal GTM only
     canMutate: false,
     mutatesClientEstate: false,

@@ -1,13 +1,10 @@
-"""Sanket — the Market Signal Agent.
+"""Sanket — the Public Market Observation Agent.
 
-"I find who's about to buy."
+"I surface public observations for your review."
 
-Sanket reads public sources (hiring posts, tender notices,
-regulatory filings) for buying-intent signals relevant to DPDPA.
-Internal-only — used to fuel the founder's GTM.
-
-This is intentionally NOT exposed to customer tenants. The agent
-exists to support the founder's outbound motion.
+Reviews authenticated, captured public sources for bounded heading markers.
+Those observations do not establish purchase intent or authorize outreach.
+Current runtime invocation requires trusted source transport to be composed.
 """
 
 from __future__ import annotations
@@ -63,8 +60,8 @@ class SanketOutput(BaseModel):
 
 class SanketAgent(BaseAgent[SanketInput, SanketOutput]):
     name: ClassVar[AgentName] = AgentName.SANKET
-    description: ClassVar[str] = "Detect buying-intent signals from public sources (internal GTM)."
-    one_liner: ClassVar[str] = "I find who's about to buy."
+    description: ClassVar[str] = "Review source-bound public market observations with human oversight."
+    one_liner: ClassVar[str] = "I surface public observations for your review."
     tool_scopes: ClassVar[tuple[str, ...]] = ("http.read.public_sources",)
     autonomy: ClassVar[AutonomyLevel] = AutonomyLevel.L1
     default_task_kind: ClassVar[Any] = "structural"
