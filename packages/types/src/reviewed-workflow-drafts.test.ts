@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fixture from './__fixtures__/reviewed-workflow-drafts.json';
+import variants from './__fixtures__/reviewed-workflow-variants.json';
 import {
   reviewedWorkflowInputSchema,
   reviewedWorkflowOutputSchema,
@@ -151,3 +152,69 @@ describe('reviewed source draft contracts', () => {
     expect(reviewedWorkflowOutputSchema.safeParse(output).success).toBe(false);
   });
 });
+
+it.each([
+  'appended_private_claim',
+  'removed_disclaimer',
+  'false_to_true',
+  'unknown_to_known',
+  'none_to_unknown',
+  'source_note',
+  'source_actor_text',
+  'title',
+  'order',
+  'trimmed_title',
+])('rejects a policy text substitution even with all original provenance: %s', (change) => {
+  const { input, output } = copy();
+  const draft = output.policy_drafts[0]!;
+  if (change === 'appended_private_claim')
+    draft.content +=
+      '\n\nAll private processing and contracts have been independently verified compliant.';
+  if (change === 'removed_disclaimer')
+    draft.content = draft.content.replace(
+      'Public HTML provenance does not establish private processing facts, residency, contracts, lawful basis or compliance.',
+      '',
+    );
+  if (change === 'false_to_true')
+    draft.content = draft.content.replace(
+      'Recorded cross-border processing: Human recorded no',
+      'Recorded cross-border processing: Human recorded yes',
+    );
+  if (change === 'unknown_to_known')
+    draft.content = draft.content.replace(
+      'Recorded purpose: Unknown — authorised human confirmation required',
+      'Recorded purpose: Verified marketing purpose',
+    );
+  if (change === 'none_to_unknown')
+    draft.content = draft.content.replace(
+      'Recorded processors: Human recorded none (review required)',
+      'Recorded processors: Unknown',
+    );
+  if (change === 'source_note')
+    draft.content = draft.content.replace(
+      'Human reviewed public website context; private facts unresolved',
+      'Facts independently verified',
+    );
+  if (change === 'source_actor_text')
+    draft.content = draft.content.replace(
+      `Original recorded actor: ${input.records[0]!.created_by}`,
+      `Original recorded actor: ${input.tenant_id}`,
+    );
+  if (change === 'title') draft.title = 'Verified compliant privacy notice';
+  if (change === 'order') output.policy_drafts.reverse();
+  if (change === 'trimmed_title') draft.title = ` ${draft.title}`;
+  expect(() => validateReviewedWorkflowOutput(input, output)).toThrow();
+});
+
+it('does not silently normalise source fields or actor identifiers', () => {
+  const { input, output } = copy();
+  input.records[0]!.payload.sourceNote = ` ${input.records[0]!.payload.sourceNote}`;
+  expect(() => validateReviewedWorkflowOutput(input, output)).toThrow();
+});
+
+it.each(variants)(
+  'exactly matches Python known/Unicode/absent-provenance variant %#',
+  ({ input, output }) => {
+    expect(validateReviewedWorkflowOutput(input, output)).toEqual(output);
+  },
+);

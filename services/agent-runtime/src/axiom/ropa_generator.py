@@ -51,28 +51,32 @@ def build_ropa_records(
         field_name = field_path.rsplit(".", 1)[-1] if field_path else "*"
         by_system.setdefault(system, []).append(field_name)
         category = item.get("category")
-        if category:
-            categories_by_system.setdefault(system, set()).add(str(category))
+        if isinstance(category, str) and category.strip():
+            categories_by_system.setdefault(system, set()).add(category.strip())
 
     records: list[RopaRecord] = []
     for index, system in enumerate(inventory, start=1):
         name = str(system.get("name") or f"system-{index}")
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or f"system-{index}"
         fields = list(dict.fromkeys(by_system.get(name, [])))
-        categories = {str(value).lower() for value in system.get("data_categories", []) or []}
+        supplied_categories = system.get("data_categories")
+        categories_valid = isinstance(supplied_categories, list) and all(
+            isinstance(value, str) and value.strip() for value in supplied_categories
+        )
+        categories_invalid = supplied_categories is not None and not categories_valid
+        categories = (
+            {value.strip().lower() for value in supplied_categories} if categories_valid else set()
+        )
         categories.update(value.lower() for value in categories_by_system.get(name, set()))
         supplied_processors = system.get("processors", system.get("processor"))
         if isinstance(supplied_processors, str):
             supplied_processors = [supplied_processors]
+        # Only a genuinely empty declaration establishes a recorded none.
+        # Invalid or mixed nonempty lists cannot be sanitised into that claim.
         processors = (
-            list(
-                dict.fromkeys(
-                    value.strip()
-                    for value in supplied_processors
-                    if isinstance(value, str) and value.strip()
-                )
-            )
+            list(dict.fromkeys(value.strip() for value in supplied_processors))
             if isinstance(supplied_processors, list)
+            and all(isinstance(value, str) and value.strip() for value in supplied_processors)
             else None
         )
         # A discovered system description is an observation, not an attested
@@ -113,7 +117,8 @@ def build_ropa_records(
                 data_items=fields or ["Unspecified — field inventory required"],
                 data_categories=(
                     sorted(categories)
-                    if categories or (not public_source and system.get("data_categories") == [])
+                    if not categories_invalid
+                    and (categories or (not public_source and supplied_categories == []))
                     else None
                 ),
                 lawful_basis="To be confirmed by the Data Fiduciary",

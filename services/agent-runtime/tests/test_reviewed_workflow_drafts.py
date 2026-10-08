@@ -466,3 +466,51 @@ def test_shared_wire_fixture_is_exact_current_python_projection():
     value = ReviewedWorkflowInput.model_validate(fixture["input"])
     assert value.model_dump(mode="json") == fixture["input"]
     assert build_reviewed_workflow_drafts(value).model_dump(mode="json") == fixture["output"]
+
+
+@pytest.mark.parametrize("invalid", [[" "], [None], [True], [12], ["Known", None], ["Known", " "]])
+def test_nonempty_invalid_private_lists_remain_unknown_instead_of_none_or_invented_categories(
+    invalid,
+):
+    record = build_ropa_records(
+        [{"name": "CRM", "processors": invalid, "data_categories": invalid}]
+    ).records[0]
+    assert record.processors is None
+    assert record.data_categories is None
+    assert record.review_required is True
+    draft = build_privacy_notice("Example Ltd", [record])
+    content = "\n".join(section["body"] for section in draft.sections)
+    assert "Stated processors: To be confirmed" in content
+    assert "Human recorded none" not in content
+    assert draft.sections[1]["body"] == "To be confirmed"
+
+
+@pytest.mark.parametrize(
+    ("field", "limit"), [("system", 200), ("sourceNote", 2000), ("region", 100)]
+)
+def test_unicode_source_bounds_match_shared_utf16_character_contract(field, limit):
+    record = processing_record()
+    record["payload"][field] = "😀" * (limit // 2)
+    value = ReviewedWorkflowInput.model_validate(payload([record]))
+    assert value.records[0].payload.model_dump()[field] == record["payload"][field]
+    record["payload"][field] += "😀"
+    with pytest.raises(ValidationError, match="shared character bound"):
+        ReviewedWorkflowInput.model_validate(payload([record]))
+
+
+def test_unicode_reported_notes_cannot_exceed_the_shared_character_bound():
+    record = task_record()
+    record["payload"]["notes"] = "😀" * 1001
+    with pytest.raises(ValidationError, match="shared character bound"):
+        ReviewedWorkflowInput.model_validate(payload([record]))
+
+
+def test_additional_shared_known_unicode_and_absent_provenance_variants():
+    fixture_path = (
+        Path(__file__).resolve().parents[3]
+        / "packages/types/src/__fixtures__/reviewed-workflow-variants.json"
+    )
+    for fixture in json.loads(fixture_path.read_text()):
+        value = ReviewedWorkflowInput.model_validate(fixture["input"])
+        assert value.model_dump(mode="json") == fixture["input"]
+        assert build_reviewed_workflow_drafts(value).model_dump(mode="json") == fixture["output"]

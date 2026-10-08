@@ -10,6 +10,7 @@ is not evidence that a declaration is true. Agents receive no domain credentials
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
@@ -45,8 +46,21 @@ def _false(value: bool) -> bool:
 
 FalseOnly = Annotated[Literal[False], BeforeValidator(_false)]
 Text = Annotated[str, AfterValidator(_text)]
-Name = Annotated[Text, Field(max_length=200)]
-Note = Annotated[Text, Field(max_length=2000)]
+
+
+def _utf16_bound(limit: int) -> Callable[[str], str]:
+    def bounded(value: str) -> str:
+        if len(value.encode("utf-16-le")) > limit * 2:
+            raise ValueError("Recorded text exceeds the shared character bound")
+        return value
+
+    return bounded
+
+
+Name = Annotated[Text, Field(max_length=200), AfterValidator(_utf16_bound(200))]
+Note = Annotated[Text, Field(max_length=2000), AfterValidator(_utf16_bound(2000))]
+Region = Annotated[Text, Field(max_length=100), AfterValidator(_utf16_bound(100))]
+Title = Annotated[Text, Field(max_length=300), AfterValidator(_utf16_bound(300))]
 RecordedList = Annotated[list[Name], Field(max_length=50)] | None
 
 
@@ -74,7 +88,7 @@ class ProcessingDeclarations(Contract):
     destinationCountries: RecordedList
     transferSafeguards: Note | None
     dpiaRequired: bool | None
-    region: Annotated[Text, Field(max_length=100)] | None
+    region: Region | None
     crossBorder: bool | None
     securityMeasures: Note | None
 
@@ -103,7 +117,7 @@ class ReportedTask(Contract):
 
     @model_validator(mode="after")
     def exact_notes(self) -> Self:
-        if self.notes and _text(self.notes) != self.notes:
+        if self.notes and _utf16_bound(2000)(_text(self.notes)) != self.notes:
             raise ValueError("Invalid recorded notes")
         return self
 
@@ -201,7 +215,7 @@ class PolicyReviewDraft(Contract):
     source: SourceReference
     source_ropa_id: Identifier
     category: PolicyCategory
-    title: Annotated[Text, Field(max_length=300)]
+    title: Title
     content: Annotated[Text, Field(max_length=100_000)]
     review_required: TrueOnly
     legal_review_required: TrueOnly
