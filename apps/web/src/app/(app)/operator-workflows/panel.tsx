@@ -34,6 +34,9 @@ import {
   type Journal,
 } from './request';
 
+import { parseListDeclaration } from './list-input';
+import { ListInputField } from './list-input-field';
+
 const input = 'mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm';
 const button =
   'rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50';
@@ -126,6 +129,8 @@ function Panel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [notFound, setNotFound] = useState(false);
+  const [listErrors, setListErrors] = useState<Record<string, string>>({});
+  const [listRevision, setListRevision] = useState(0);
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
   const [generatedFrom, setGeneratedFrom] = useState<{ id: string; category: string } | null>(null);
   const [generationChanged, setGenerationChanged] = useState(false);
@@ -331,13 +336,15 @@ function Panel({
     const fields = new FormData(form);
     const text = (key: string) => String(fields.get(key) ?? '').trim();
     const nullable = (key: string) => text(key) || null;
-    const list = (key: string) =>
-      text(key)
-        ? text(key)
-            .split(',')
-            .map((v) => v.trim())
-            .filter(Boolean)
-        : null;
+    const invalidLists: Record<string, string> = {};
+    const list = (key: string) => {
+      try {
+        return parseListDeclaration(text(`${key}Declaration`), text(key));
+      } catch (cause) {
+        invalidLists[key] = cause instanceof Error ? cause.message : 'Check this declaration.';
+        return null;
+      }
+    };
     const source =
       text('sourceObservation') || text('sourceDigest')
         ? { observationId: text('sourceObservation'), outputSha256: text('sourceDigest') }
@@ -389,6 +396,14 @@ function Panel({
                 content: String(fields.get('content') ?? ''),
                 sourceRopaId: nullable('sourceRopaId'),
               };
+    setListErrors(invalidLists);
+    if (Object.keys(invalidLists).length) {
+      setError('');
+      setNotice('');
+      const field = form.elements.namedItem(Object.keys(invalidLists)[0]!);
+      if (field instanceof HTMLInputElement) field.focus();
+      return;
+    }
     void task(async () => {
       const request = workflowRequestSchema.parse({
         operationKey: crypto.randomUUID(),
@@ -613,6 +628,10 @@ function Panel({
                 : 'Create policy or notice draft'}
           </summary>
           <form
+            onReset={() => {
+              setListErrors({});
+              setListRevision((version) => version + 1);
+            }}
             ref={draftForm}
             onSubmit={submit}
             className="mt-4"
@@ -653,35 +672,46 @@ function Panel({
                     min={1}
                     max={1200}
                   />
-                  <Field
+                  <ListInputField
+                    key={`dataCategories:${listRevision}`}
                     name="dataCategories"
-                    label="Data categories, separated by commas"
-                    optional
-                    maxLength={4000}
+                    label="Data categories"
+                    error={listErrors.dataCategories}
+                    onChange={() =>
+                      setListErrors((previous) => ({ ...previous, dataCategories: '' }))
+                    }
                   />
-                  <Field
+                  <ListInputField
+                    key={`processors:${listRevision}`}
                     name="processors"
-                    label="Processors, separated by commas"
-                    optional
-                    maxLength={4000}
+                    label="Processors"
+                    error={listErrors.processors}
+                    onChange={() => setListErrors((previous) => ({ ...previous, processors: '' }))}
                   />
-                  <Field
+                  <ListInputField
+                    key={`dataPrincipals:${listRevision}`}
                     name="dataPrincipals"
-                    label="Data principal groups, separated by commas"
-                    optional
-                    maxLength={4000}
+                    label="Data principal groups"
+                    error={listErrors.dataPrincipals}
+                    onChange={() =>
+                      setListErrors((previous) => ({ ...previous, dataPrincipals: '' }))
+                    }
                   />
-                  <Field
+                  <ListInputField
+                    key={`recipients:${listRevision}`}
                     name="recipients"
-                    label="Recipients, separated by commas"
-                    optional
-                    maxLength={4000}
+                    label="Recipients"
+                    error={listErrors.recipients}
+                    onChange={() => setListErrors((previous) => ({ ...previous, recipients: '' }))}
                   />
-                  <Field
+                  <ListInputField
+                    key={`destinationCountries:${listRevision}`}
                     name="destinationCountries"
-                    label="Transfer destinations, separated by commas"
-                    optional
-                    maxLength={4000}
+                    label="Transfer destinations"
+                    error={listErrors.destinationCountries}
+                    onChange={() =>
+                      setListErrors((previous) => ({ ...previous, destinationCountries: '' }))
+                    }
                   />
                   <Field
                     name="transferSafeguards"
