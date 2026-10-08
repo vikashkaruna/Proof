@@ -6,6 +6,10 @@ import type { SudhaarReviewAdoptionReceipt } from '@axiom/types';
 import type { ConfirmedProposal } from './proposal-request';
 import {
   REVIEW_ADOPTION_CHANGED,
+  archiveConfirmedReviewAdoption,
+  completedReviewAdoptionKey,
+  confirmReviewAdoptionSource,
+  readCompletedReviewAdoptionReference,
   readReviewAdoptionJournal,
   retainReviewAdoptionJournal,
   reviewAdoptionJournalKey,
@@ -30,19 +34,34 @@ function Panel({
 }: Parameters<typeof ReviewAdoptionPanel>[0]) {
   const [retained, setRetained] = useState<ReviewAdoptionJournal | null>(null),
     [ready, setReady] = useState(false),
+    [pending, setPending] = useState(false),
     [reason, setReason] = useState(''),
     [ack, setAck] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null),
     [saved, setSaved] = useState<SudhaarReviewAdoptionReceipt | null>(null);
   const mounted = useRef(true),
-    active = useRef(false);
+    active = useRef(false),
+    savedJournal = useRef<ReviewAdoptionJournal | null>(null);
   const key = reviewAdoptionJournalKey(tenantId, actorId);
   useEffect(() => {
     mounted.current = true;
     const refresh = () => {
       try {
-        setRetained(readReviewAdoptionJournal(localStorage, tenantId, actorId));
+        const current = readReviewAdoptionJournal(localStorage, tenantId, actorId);
+        if (
+          current &&
+          savedJournal.current &&
+          canonicalJson(current) !== canonicalJson(savedJournal.current)
+        ) {
+          savedJournal.current = null;
+          setSaved(null);
+        }
+        setPending(!!current);
+        setRetained(
+          current ??
+            readCompletedReviewAdoptionReference(localStorage, tenantId, actorId, operationKey),
+        );
         setReady(true);
       } catch {
         setReady(false);
@@ -50,7 +69,12 @@ function Panel({
       }
     };
     const storage = (event: StorageEvent) => {
-      if (event.key === null || event.key === key) refresh();
+      if (
+        event.key === null ||
+        event.key === key ||
+        event.key === completedReviewAdoptionKey(tenantId, actorId, operationKey)
+      )
+        refresh();
     };
     refresh();
     window.addEventListener('storage', storage);
@@ -60,10 +84,10 @@ function Panel({
       window.removeEventListener('storage', storage);
       window.removeEventListener(REVIEW_ADOPTION_CHANGED, refresh);
     };
-  }, [tenantId, actorId, key]);
+  }, [tenantId, actorId, key, operationKey]);
   useEffect(() => {
-    onPending?.((!!retained || busy) && !saved);
-  }, [onPending, retained, busy, saved]);
+    onPending?.((pending || busy) && !saved);
+  }, [onPending, pending, busy, saved]);
   const submit = async () => {
     if (active.current || !ready || saved) return;
     active.current = true;
@@ -78,7 +102,9 @@ function Panel({
             'Another tab is saving review work. Wait and check the retained request.',
           );
         if (!mounted.current) return;
-        const current = readReviewAdoptionJournal(localStorage, tenantId, actorId);
+        const current =
+          readReviewAdoptionJournal(localStorage, tenantId, actorId) ??
+          readCompletedReviewAdoptionReference(localStorage, tenantId, actorId, operationKey);
         if (
           current?.proposalOperationKey !== undefined &&
           current.proposalOperationKey !== operationKey
@@ -104,21 +130,8 @@ function Panel({
           canonicalJson(exact)
         )
           throw new Error('The retained request changed while saving. Keep it for review.');
-        const proof = confirmed.outputProof;
-        if (
-          canonicalJson(receipt.source) !== canonicalJson(confirmed.proposal.source) ||
-          receipt.taskCount !== confirmed.proposal.review_tasks.length ||
-          receipt.outputProof.runId !== proof.runId ||
-          receipt.outputProof.inputHash !== proof.requestHash ||
-          receipt.outputProof.outputHash !== proof.responseHash ||
-          receipt.outputProof.requestedReceipt !== proof.requestedReceipt ||
-          receipt.outputProof.startedReceipt !== proof.startedReceipt ||
-          receipt.outputProof.completedReceipt !== proof.completedReceipt ||
-          receipt.outputProof.settledReceipt !== proof.settledReceipt
-        )
-          throw new Error(
-            'The saved review source could not be confirmed. Keep the retained request.',
-          );
+        confirmReviewAdoptionSource(receipt, confirmed);
+        savedJournal.current = exact;
         setSaved(receipt);
       });
     } catch (cause) {
@@ -133,6 +146,28 @@ function Panel({
       if (mounted.current) setBusy(false);
     }
   };
+  const archive = async () => {
+    if (active.current || !saved || !retained || !pending) return;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new Error('Cross-tab request protection is unavailable. Use a supported browser.');
+      await navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
+        if (!lock)
+          throw new Error('Another tab is updating this request. Wait and check it again.');
+        if (!mounted.current) return;
+        archiveConfirmedReviewAdoption(localStorage, retained, saved, confirmed);
+      });
+    } catch (cause) {
+      if (mounted.current)
+        setError(cause instanceof Error ? cause.message : 'Keep the retained request for review.');
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
   return (
     <section aria-label="Save review work" className="space-y-3 rounded-md border p-4">
       <h4 className="font-semibold">Save tasks for human review</h4>
@@ -141,11 +176,29 @@ function Panel({
         close findings, approve changes or permit execution.
       </p>
       {saved ? (
-        <p role="status">
-          Saved {saved.taskCount} review tasks · 0 corrective actions · Receipt{' '}
-          {saved.adoptionReceipt}.{' '}
-          <Link href={`/plans/${saved.planId}`}>Inspect saved review work</Link>
-        </p>
+        <>
+          <p role="status">
+            Saved {saved.taskCount} review tasks · 0 corrective actions · Receipt{' '}
+            {saved.adoptionReceipt}.{' '}
+            <Link href={`/plans/${saved.planId}`}>Inspect saved review work</Link>
+          </p>
+          {pending && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void archive()}
+              className="rounded-md border px-3 py-2"
+            >
+              Archive confirmed request to review another proposal
+            </button>
+          )}
+          {!pending && (
+            <p>
+              The saved request reference is retained for a deliberate check after reopening this
+              proposal.
+            </p>
+          )}
+        </>
       ) : (
         <>
           {retained ? (
@@ -191,7 +244,9 @@ function Panel({
             {busy
               ? 'Confirming review work…'
               : retained
-                ? 'Retry retained review request'
+                ? pending
+                  ? 'Retry retained review request'
+                  : 'Check saved review work'
                 : 'Save review tasks'}
           </button>
         </>
