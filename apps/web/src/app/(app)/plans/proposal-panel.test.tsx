@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import React from 'react';
+import { createHash, webcrypto } from 'node:crypto';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { sudhaarInputSchema, sudhaarProposalSchema } from '@axiom/types';
 import { ProposalPanel } from './proposal-panel';
-import { proposalJournalKey, readProposalJournal, retainProposalJournal } from './proposal-request';
+import {
+  archiveConfirmedProposal,
+  proposalJournalKey,
+  readProposalJournal,
+  retainProposalJournal,
+} from './proposal-request';
 const fixture = JSON.parse(
   readFileSync(resolve(process.cwd(), '../../tests/contracts/sudhaar-source.v1.json'), 'utf8'),
 );
@@ -45,8 +51,21 @@ const choices = {
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const props = { tenantId: tenant, actorId: actor, canPropose: true };
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+const hash = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
 beforeEach(() => {
   localStorage.clear();
+  vi.stubGlobal('crypto', webcrypto);
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: { request: vi.fn(async (_key, callback) => callback()) },
@@ -57,11 +76,24 @@ beforeEach(() => {
     const request = JSON.parse(String(init?.body));
     return response({
       data: { ...proposal, title: request.title },
+      outputProof: {
+        kind: 'settled_output_recorded',
+        tenantId: tenant,
+        actorId: actor,
+        operationKey: request.operationKey,
+        runId: '99999999-9999-4999-8999-999999999999',
+        requestHash: hash({ ...input, title: request.title }),
+        responseHash: hash({ ...proposal, title: request.title }),
+        requestedReceipt: '1',
+        startedReceipt: '2',
+        completedReceipt: '3',
+        settledReceipt: '4',
+      },
       invocation: {
         runId: '99999999-9999-4999-8999-999999999999',
         correlationId: request.operationKey,
-        requestHash: 'a'.repeat(64),
-        responseHash: 'b'.repeat(64),
+        requestHash: hash({ ...input, title: request.title }),
+        responseHash: hash({ ...proposal, title: request.title }),
       },
     });
   });
@@ -293,11 +325,24 @@ it('selects an older assessment after pagination without automatic submission', 
     const request = JSON.parse(String(init?.body));
     return response({
       data: { ...proposal, source: olderInput.source, title: request.title },
+      outputProof: {
+        kind: 'settled_output_recorded',
+        tenantId: tenant,
+        actorId: actor,
+        operationKey: request.operationKey,
+        runId: '99999999-9999-4999-8999-999999999999',
+        requestHash: hash({ ...olderInput, title: request.title }),
+        responseHash: hash({ ...proposal, source: olderInput.source, title: request.title }),
+        requestedReceipt: '1',
+        startedReceipt: '2',
+        completedReceipt: '3',
+        settledReceipt: '4',
+      },
       invocation: {
         runId: '99999999-9999-4999-8999-999999999999',
         correlationId: request.operationKey,
-        requestHash: 'a'.repeat(64),
-        responseHash: 'b'.repeat(64),
+        requestHash: hash({ ...olderInput, title: request.title }),
+        responseHash: hash({ ...proposal, source: olderInput.source, title: request.title }),
       },
     });
   });
@@ -408,4 +453,80 @@ it('refuses dispatch when storage rewrites the retained operation key', async ()
   await screen.findByRole('alert');
   expect(readProposalJournal(localStorage, tenant, actor)?.request.operationKey).toBe(actor);
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+it('archives only after explicit action and a second identical server confirmation, preserving the operation key', async () => {
+  retainProposalJournal(localStorage, retained());
+  render(<ProposalPanel {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Check using the same request' }));
+  await screen.findByLabelText('Review proposal');
+  expect(readProposalJournal(localStorage, tenant, actor)).toEqual(retained());
+  fireEvent.click(screen.getByRole('button', { name: 'Archive completed browser reference' }));
+  await waitFor(() => expect(readProposalJournal(localStorage, tenant, actor)).toBeNull());
+  const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(posts).toHaveLength(2);
+  expect(posts[0]?.[1]?.body).toBe(posts[1]?.[1]?.body);
+  expect(posts[1]?.[1]?.headers).toMatchObject({ 'Idempotency-Key': key });
+  expect(screen.getByRole('button', { name: 'Request review proposal' })).toBeTruthy();
+});
+it('retains browser reference when archive confirmation is lost', async () => {
+  retainProposalJournal(localStorage, retained());
+  render(<ProposalPanel {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Check using the same request' }));
+  await screen.findByLabelText('Review proposal');
+  fetchMock.mockRejectedValueOnce(new Error('lost confirmation'));
+  fireEvent.click(screen.getByRole('button', { name: 'Archive completed browser reference' }));
+  await screen.findByRole('alert');
+  expect(readProposalJournal(localStorage, tenant, actor)).toEqual(retained());
+});
+it('refuses archive after a concurrent tab changes the retained original body during confirmation', async () => {
+  retainProposalJournal(localStorage, retained());
+  render(<ProposalPanel {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Check using the same request' }));
+  await screen.findByLabelText('Review proposal');
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce(async (url, init) => {
+    const response = await original(url, init);
+    localStorage.setItem(
+      proposalJournalKey(tenant, actor),
+      JSON.stringify({
+        ...retained(),
+        request: { ...retained().request, operationKey: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      }),
+    );
+    return response;
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Archive completed browser reference' }));
+  await screen.findByRole('alert');
+  expect(readProposalJournal(localStorage, tenant, actor)?.request.operationKey).toBe(
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  );
+});
+
+it('refuses a caller-built output proof that was never authenticated and verified by the request client', () => {
+  const value = retained();
+  retainProposalJournal(localStorage, value);
+  const forged = {
+    proposal,
+    invocation: {
+      runId: '99999999-9999-4999-8999-999999999999',
+      correlationId: key,
+      requestHash: hash(input),
+      responseHash: hash(proposal),
+    },
+    outputProof: {
+      kind: 'settled_output_recorded' as const,
+      tenantId: tenant,
+      actorId: actor,
+      operationKey: key,
+      runId: '99999999-9999-4999-8999-999999999999',
+      requestHash: hash(input),
+      responseHash: hash(proposal),
+      requestedReceipt: '1',
+      startedReceipt: '2',
+      completedReceipt: '3',
+      settledReceipt: '4',
+    },
+  };
+  expect(() => archiveConfirmedProposal(localStorage, value, forged)).toThrow(/not been verified/);
+  expect(readProposalJournal(localStorage, tenant, actor)).toEqual(value);
 });
