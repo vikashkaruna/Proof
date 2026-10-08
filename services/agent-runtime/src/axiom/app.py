@@ -12,15 +12,17 @@ import asyncio
 import os
 import secrets
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal, TypeAlias, TypedDict
 
 import structlog
 from axiom_offline_license import verify_offline_license
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.base import RequestResponseEndpoint
 
 from .agents import (
     DrishtiAgent,
@@ -36,6 +38,7 @@ from .agents import (
     VibhaagAgent,
 )
 from .agents.base import AgentName, AgentRunResult, DispatchContext
+from .agents.reviewed_workflow_agent import VibhaagReviewDraftAgent
 from .canonicalise import canonical_json, sha256_hex
 from .config import Settings, get_settings, setup_logging
 from .dry_run import DRY_RUN_CONTRACT_VERSION, DryRunOutcome, simulate
@@ -46,6 +49,11 @@ from .public_source_dispatch import (
     PublicSourceAlreadyClaimedError,
     PublicSourceInvokeRequest,
     prepare_public_source_input,
+)
+from .reviewed_workflow_dispatch import (
+    ReviewedWorkflowAlreadyClaimedError,
+    ReviewedWorkflowInvokeRequest,
+    prepare_reviewed_workflow_input,
 )
 from .sudhaar_source import SignedPlanningRequest, verify_planning_request
 
@@ -65,7 +73,7 @@ AGENTS: dict[AgentName, Any] = {
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(settings)
     log = structlog.get_logger()
@@ -86,6 +94,7 @@ async def lifespan(app: FastAPI):
         name: AgentCls(settings=settings, ledger=ledger, evidence=evidence, model_gateway=gateway)
         for name, AgentCls in AGENTS.items()
     }
+    app.state.reviewed_workflow_agent = VibhaagReviewDraftAgent(ledger=ledger)
 
     # W6 — the continuous-compliance scheduler, off unless the environment
     # turns it on: a scheduler that fires without reviewed configuration is
@@ -133,7 +142,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def require_onprem_license(request: Request, call_next):
+async def require_onprem_license(request: Request, call_next: RequestResponseEndpoint) -> Response:
     if (
         os.environ.get("ENVIRONMENT") == "onprem"
         and request.url.path != "/health"
@@ -163,13 +172,83 @@ class InvokeResponse(BaseModel):
     ledger_entry_ids: list[str] = []
 
 
-@app.get("/health")
-async def health():
+# These shapes describe the existing JSON bodies without introducing response
+# validation on legacy routes. Explicit response_model=None preserves that boundary.
+JsonValue: TypeAlias = str | int | float | bool | list["JsonValue"] | dict[str, "JsonValue"] | None
+
+
+class HealthResponse(TypedDict):
+    status: Literal["ok"]
+
+
+class ReadyResponse(TypedDict):
+    status: Literal["ready"]
+    gateway_healthy: bool
+    env: str
+
+
+class AgentDescription(TypedDict):
+    name: str
+    version: str
+    autonomy: str
+    one_liner: str
+    tool_scopes: list[str]
+    can_mutate: bool
+    mutates_client_estate: bool
+    writes_axiom_state: bool
+
+
+class AgentCatalogResponse(TypedDict):
+    agents: list[AgentDescription]
+
+
+class ExecutionOutcomeResponse(TypedDict):
+    action_id: str
+    outcome: str
+    error_code: str | None
+    rows_affected: int | None
+
+
+class ExecutionBatchResponse(TypedDict):
+    id: str
+    status: str
+    replay: bool
+
+
+class ExecutionAcceptedResponse(TypedDict):
+    accepted: Literal[True]
+    contract_version: int
+    correlation_id: str
+    batch: ExecutionBatchResponse
+    outcomes: list[ExecutionOutcomeResponse]
+
+
+class RollbackBatchResponse(TypedDict):
+    id: str
+
+
+class RollbackAcceptedResponse(TypedDict):
+    accepted: Literal[True]
+    contract_version: int
+    correlation_id: str
+    batch: RollbackBatchResponse
+    outcomes: list[ExecutionOutcomeResponse]
+
+
+class DryRunAcceptedResponse(TypedDict):
+    accepted: Literal[True]
+    contract_version: int
+    correlation_id: str
+    dry_run: JsonValue
+
+
+@app.get("/health", response_model=None)
+async def health() -> HealthResponse:
     return {"status": "ok"}
 
 
-@app.get("/ready")
-async def ready():
+@app.get("/ready", response_model=None)
+async def ready() -> ReadyResponse:
     settings: Settings = app.state.settings
     gateway: ModelGateway = app.state.gateway
     return {
@@ -179,8 +258,8 @@ async def ready():
     }
 
 
-@app.get("/agents")
-async def list_agents():
+@app.get("/agents", response_model=None)
+async def list_agents() -> AgentCatalogResponse:
     return {
         "agents": [
             {
@@ -207,7 +286,7 @@ def require_internal_caller(request: Request) -> None:
 
 
 @app.post("/agents/{agent_name}/invoke", response_model=InvokeResponse)
-async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
+async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request) -> InvokeResponse:
     require_internal_caller(req)
     try:
         agent_enum = AgentName(agent_name)
@@ -241,6 +320,11 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 
     if agent_enum == AgentName.VIBHAAG and request.input.get("mode") == "reviewed_workflow":
         raise HTTPException(status_code=403, detail="reviewed_source_workflow_required")
+
+    # Reconciliation must derive from a retained approved execution batch.
+    # The generic route supplies no database source and would sign caller prose.
+    if agent_enum is AgentName.SAMADHAN:
+        raise HTTPException(status_code=403, detail="execution_reconciliation_workflow_required")
 
     if agent_enum == AgentName.SUDHAAR:
         raise HTTPException(status_code=403, detail="planning_source_workflow_required")
@@ -276,7 +360,7 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request):
 
 
 @app.post("/assessment-source/sudhaar/invoke", response_model=InvokeResponse)
-async def invoke_source_sudhaar(request: SignedPlanningRequest, req: Request):
+async def invoke_source_sudhaar(request: SignedPlanningRequest, req: Request) -> InvokeResponse:
     require_internal_caller(req)
     source_key = getattr(app.state.settings, "planning_source_signing_key", None)
     if not source_key:
@@ -308,7 +392,7 @@ async def invoke_source_sudhaar(request: SignedPlanningRequest, req: Request):
 @app.post("/public-source/agents/{agent_name}/invoke", response_model=InvokeResponse)
 async def invoke_public_source_agent(
     agent_name: str, request: PublicSourceInvokeRequest, req: Request
-):
+) -> InvokeResponse:
     require_internal_caller(req)
     if agent_name not in {"drishti", "vibhaag"}:
         raise HTTPException(status_code=404, detail="public_source_agent_refused")
@@ -329,6 +413,44 @@ async def invoke_public_source_agent(
     result: AgentRunResult = await agent.invoke(
         agent_input,
         correlation_id=request.correlation_id,
+        dispatch_context={
+            "run_id": request.run_id,
+            "request_hash": sha256_hex(canonical_json(agent_input)),
+        },
+    )
+    return InvokeResponse(
+        agent=agent.name.value,
+        correlation_id=result.correlation_id,
+        status=result.status,
+        latency_ms=int((time.monotonic() - t0) * 1000),
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        error=result.error,
+        output=result.output,
+        ledger_entry_ids=result.ledger_entry_ids,
+    )
+
+
+@app.post("/reviewed-workflows/agents/vibhaag/invoke", response_model=InvokeResponse)
+async def invoke_reviewed_workflow_agent(
+    request: ReviewedWorkflowInvokeRequest, req: Request
+) -> InvokeResponse:
+    require_internal_caller(req)
+    agent = getattr(app.state, "reviewed_workflow_agent", None)
+    if agent is None:
+        raise HTTPException(status_code=503, detail="reviewed_workflow_agent_unavailable")
+    try:
+        agent_input = await prepare_reviewed_workflow_input(app.state.ledger, request)
+    except ReviewedWorkflowAlreadyClaimedError:
+        raise HTTPException(status_code=409, detail="reviewed_workflow_already_claimed") from None
+    except Exception:
+        # No provider response, source declaration or writer configuration leaks.
+        raise HTTPException(status_code=503, detail="reviewed_workflow_unconfirmed") from None
+    t0 = time.monotonic()
+    result: AgentRunResult = await agent.invoke(
+        agent_input,
+        correlation_id=request.operation_key,
         dispatch_context={
             "run_id": request.run_id,
             "request_hash": sha256_hex(canonical_json(agent_input)),
@@ -381,8 +503,10 @@ class InternalExecuteRequest(BaseModel):
     content_digest: str
 
 
-@app.post("/internal/execute")
-async def internal_execute(body: InternalExecuteRequest, req: Request):
+@app.post("/internal/execute", response_model=None)
+async def internal_execute(
+    body: InternalExecuteRequest, req: Request
+) -> ExecutionAcceptedResponse | JSONResponse:
     require_internal_caller(req)
 
     if body.contract_version != EXECUTION_CONTRACT_VERSION:
@@ -491,8 +615,10 @@ class InternalRollbackRequest(BaseModel):
     correlation_id: str
 
 
-@app.post("/internal/rollback")
-async def internal_rollback(body: InternalRollbackRequest, req: Request):
+@app.post("/internal/rollback", response_model=None)
+async def internal_rollback(
+    body: InternalRollbackRequest, req: Request
+) -> RollbackAcceptedResponse | JSONResponse:
     require_internal_caller(req)
 
     if body.contract_version != ROLLBACK_CONTRACT_VERSION:
@@ -620,8 +746,10 @@ _RECODER_REFUSALS = {
 }
 
 
-@app.post("/internal/dry-run")
-async def internal_dry_run(body: InternalDryRunRequest, req: Request):
+@app.post("/internal/dry-run", response_model=None)
+async def internal_dry_run(
+    body: InternalDryRunRequest, req: Request
+) -> DryRunAcceptedResponse | JSONResponse:
     require_internal_caller(req)
 
     if body.contract_version != DRY_RUN_CONTRACT_VERSION:

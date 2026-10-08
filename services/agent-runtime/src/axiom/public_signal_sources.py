@@ -95,7 +95,7 @@ class GuardedPublicDocument:
     headings: tuple[str, ...]
     capture_reference: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         public_source_url(self.requested_url)
         public_source_url(self.final_url)
         capture_time(self.checked_at)
@@ -126,7 +126,7 @@ class GuardedPublicDocument:
         title: str,
         headings: tuple[str, ...],
         capture_reference: str,
-    ):
+    ) -> GuardedPublicDocument:
         """Called by trusted fetch composition, never on caller-supplied prose.
 
         The title/headings must come from the guarded producer's DOM projection.
@@ -180,7 +180,7 @@ class VerifiedPublicSourceBatch:
     documents: tuple[GuardedPublicDocument, ...]
     previous_documents: tuple[GuardedPublicDocument, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         UUID(self.tenant_id)
         UUID(self.correlation_id)
         if self.agent not in {"nazar", "sanket"}:
@@ -225,7 +225,9 @@ class VerifiedPublicSourceBatch:
             ):
                 raise ValueError("earlier_source_baseline_required")
 
-    def for_dispatch(self, *, agent: str, tenant_id: str | None, correlation_id: str):
+    def for_dispatch(
+        self, *, agent: str, tenant_id: str | None, correlation_id: str
+    ) -> VerifiedPublicSourceBatch:
         if (
             agent != self.agent
             or tenant_id is None
@@ -236,7 +238,9 @@ class VerifiedPublicSourceBatch:
         return self
 
 
-def require_public_sources(value, *, agent: str, tenant_id: str | None, correlation_id: str):
+def require_public_sources(
+    value: object, *, agent: str, tenant_id: str | None, correlation_id: str
+) -> VerifiedPublicSourceBatch:
     if type(value) is not VerifiedPublicSourceBatch:
         raise ValueError("trusted_public_source_capability_required")
     return value.for_dispatch(agent=agent, tenant_id=tenant_id, correlation_id=correlation_id)

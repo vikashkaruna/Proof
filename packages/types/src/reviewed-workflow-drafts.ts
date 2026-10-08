@@ -49,6 +49,103 @@ export const reviewedWorkflowInputSchema = z
       context.addIssue({ code: 'custom', message: 'Reviewed source register refused' });
   });
 export type ReviewedWorkflowInput = z.infer<typeof reviewedWorkflowInputSchema>;
+
+export const reviewedWorkflowSelectionSchema = z
+  .object({
+    engagementId: uuid,
+    recordIds: z
+      .array(uuid)
+      .min(1)
+      .max(20)
+      .refine((ids) => new Set(ids).size === ids.length),
+    sourceDigest: digest,
+  })
+  .strict();
+export const reviewedWorkflowRequestSchema = reviewedWorkflowSelectionSchema
+  .extend({
+    operationKey: uuid,
+    confirmSourceReview: z.literal(true),
+  })
+  .strict();
+export const reviewedWorkflowAcknowledgementSchema = z
+  .object({
+    runId: uuid,
+    outputHash: digest,
+    policyIndex: z.number().int().min(0).max(79).nullable(),
+    reason: z
+      .string()
+      .min(1)
+      .max(2000)
+      .refine(
+        (text) =>
+          text === text.trim() &&
+          !text.includes('\0') &&
+          !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(text),
+      ),
+    confirmReview: z.literal(true),
+  })
+  .strict();
+export const reviewedWorkflowAdoptionRequestSchema = reviewedWorkflowSelectionSchema
+  .extend({
+    originalOperationKey: uuid,
+    operationKey: uuid,
+    acknowledgement: reviewedWorkflowAcknowledgementSchema,
+    readOnly: z.literal(true).optional(),
+  })
+  .strict();
+
+export const reviewedWorkflowAcknowledgementProofSchema = z
+  .object({
+    kind: z.literal('reviewed_workflow_acknowledgement_recorded'),
+    tenantId: uuid,
+    actorId: uuid,
+    operationKey: uuid,
+    originalOperationKey: uuid,
+    runId: uuid,
+    inputHash: digest,
+    outputHash: digest,
+    sourceDigest: digest,
+    bodyHash: digest,
+    acknowledgementId: uuid,
+    receiptId: receipt,
+    policyIndex: z.number().int().min(0).max(79).nullable(),
+    policyDraftId: uuid.nullable(),
+    policyReceipt: receipt.nullable(),
+    initialPolicyStatus: z.literal('draft').nullable(),
+    currentPolicyStatus: z
+      .enum(['draft', 'under_review', 'approved', 'published', 'deprecated'])
+      .nullable(),
+    requestedReceipt: receipt,
+    startedReceipt: receipt,
+    completedReceipt: receipt,
+    settledReceipt: receipt,
+  })
+  .strict()
+  .superRefine((proof, ctx) => {
+    if (
+      !(
+        BigInt(proof.requestedReceipt) < BigInt(proof.startedReceipt) &&
+        BigInt(proof.startedReceipt) < BigInt(proof.completedReceipt) &&
+        BigInt(proof.completedReceipt) < BigInt(proof.settledReceipt) &&
+        BigInt(proof.settledReceipt) < BigInt(proof.receiptId)
+      ) ||
+      (proof.policyIndex === null
+        ? proof.policyDraftId !== null ||
+          proof.policyReceipt !== null ||
+          proof.initialPolicyStatus !== null ||
+          proof.currentPolicyStatus !== null
+        : proof.policyDraftId === null ||
+          proof.policyReceipt === null ||
+          proof.initialPolicyStatus !== 'draft' ||
+          proof.currentPolicyStatus === null ||
+          BigInt(proof.policyReceipt) <= BigInt(proof.settledReceipt) ||
+          BigInt(proof.policyReceipt) >= BigInt(proof.receiptId))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Acknowledgement receipt or historical policy proof refused',
+      });
+  });
 const reference = z
   .object({
     record_id: uuid,
