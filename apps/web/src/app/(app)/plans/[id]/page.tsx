@@ -19,6 +19,7 @@ import {
 } from '@axiom/ui';
 import { formatDateTime, formatINR, truncateHash } from '@axiom/ui';
 import { parseDryRunChanges, describeRefusal } from '@/lib/execution-view';
+import { ReviewOnlyDetail } from './review-only-detail';
 import { ApprovalActions } from './approval-actions';
 import { KillSwitchButton } from './kill-switch-button';
 import { DryRunHistory, type DryRunRow } from './dry-run-history';
@@ -58,6 +59,7 @@ interface RemediationAction {
 
 interface PlanDetail {
   id: string;
+  purpose?: 'remediation' | 'source_review';
   title: string;
   description: string | null;
   tenant_id: string;
@@ -75,9 +77,8 @@ export default async function PlanDetailPage({ params }: PageProps) {
   // W1 · SEC-9/SEC-8: this page read the session directly, so any signed-in
   // user could open any plan the RLS policy let through, and — once login MFA
   // landed — could do so without having met the second factor.
-  const { supabase, email, role, approvalScopes, isAxiomInternal } = await requireCapabilityContext(
-    Capability.PLAN_READ,
-  );
+  const { supabase, tenantId, email, role, approvalScopes, isAxiomInternal } =
+    await requireCapabilityContext(Capability.PLAN_READ);
 
   // Reading a plan and approving it are different authorities. A viewer sees
   // the actions, the blast radius and the dry-run diff, and no buttons.
@@ -97,10 +98,21 @@ export default async function PlanDetailPage({ params }: PageProps) {
     `,
     )
     .eq('id', id)
+    .eq('tenant_id', tenantId)
     .single();
 
   if (error || !plan) notFound();
   const typedPlan = plan as unknown as PlanDetail;
+
+  if (typedPlan.purpose === 'source_review')
+    return (
+      <ReviewOnlyDetail
+        supabase={supabase}
+        tenantId={tenantId}
+        planId={id}
+        title={typedPlan.title}
+      />
+    );
 
   const archiveTokens = canExportEvidence
     ? ((

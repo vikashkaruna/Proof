@@ -164,6 +164,7 @@ export const LedgerActionType = {
   EVIDENCE_SEALED: 'evidence.sealed',
   EVIDENCE_LINKED: 'evidence.linked',
   PLAN_GENERATED: 'plan.generated',
+  PLAN_REVIEW_ADOPTED: 'plan.review_adopted',
   PLAN_DRY_RUN_COMPLETED: 'plan.dry_run.completed',
   PLAN_APPROVAL_REQUESTED: 'plan.approval_requested',
   PLAN_REJECTED: 'plan.rejected',

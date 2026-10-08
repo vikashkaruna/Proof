@@ -46,6 +46,7 @@ for suite in tests/database/*.test.sql; do
     sql < "$suite"
   fi
 done
+python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"
 bash tests/database/concurrent-idempotency.sh "$container"
@@ -100,6 +101,7 @@ bash tests/database/controller-issuance-upgrade.sh "$container"
 bash tests/database/consent-notice-upgrade.sh "$container"
 bash tests/database/evidence-ingestion-upgrade.sh "$container"
 bash tests/database/evidence-pack-upgrade.sh "$container"
+bash tests/database/sudhaar-review-adoption-upgrade.sh "$container"
 # Bind the new race harness to this exact disposable container, never a retained stack.
 sudhaar_race_evidence=$(mktemp -d)
 python3 - "$container" "$sudhaar_race_evidence/proof.json" "$(pwd)" <<'PYPROOF'
@@ -111,6 +113,7 @@ with open(path,'w') as stream:
 os.chmod(path,0o600)
 PYPROOF
 python3 -I tests/database/concurrent-sudhaar-settled-outputs.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence"
+python3 -I tests/database/concurrent-sudhaar-review-adoption.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence/adoption"
 rm -rf "$sudhaar_race_evidence"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."
