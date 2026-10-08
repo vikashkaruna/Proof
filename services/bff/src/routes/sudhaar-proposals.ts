@@ -1,3 +1,8 @@
+import {
+  recoverSudhaarOutput,
+  settleSudhaarOutput,
+  SudhaarOutputRefused,
+} from '../services/sudhaar-proposal-output.js';
 import { Hono } from 'hono';
 import { listFinalizedAssessmentOptions } from '../services/board-reports.js';
 import { z } from 'zod';
@@ -18,7 +23,12 @@ import {
 import type { EvidenceDatabase } from '../services/evidence-ingestion.js';
 export interface SudhaarProposalDeps extends Omit<
   GenericAgentInvocationDeps,
-  'runtimeUrl' | 'runtimeToken' | 'sudhaarDispatch' | 'validateOutput' | 'prepareDispatch'
+  | 'runtimeUrl'
+  | 'runtimeToken'
+  | 'sudhaarDispatch'
+  | 'validateOutput'
+  | 'prepareDispatch'
+  | 'settleSudhaarSuccess'
 > {
   runtimeUrl?: string;
   runtimeToken?: string;
@@ -134,14 +144,6 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
       key = z.uuid().safeParse(c.req.header('Idempotency-Key'));
     if (!parsed.success || !key.success || key.data.toLowerCase() !== parsed.data.operationKey)
       return c.json({ error: { code: 'validation_failed' } }, 400);
-    if (
-      !deps.runtimeUrl ||
-      !deps.runtimeToken ||
-      !deps.sourceSigningKey ||
-      Buffer.byteLength(deps.sourceSigningKey) < 32 ||
-      deps.sourceSigningKey === deps.runtimeToken
-    )
-      return c.json({ error: { code: 'planning_runtime_unavailable' } }, 503);
     const request = parsed.data,
       tenantId = c.get('tenantId').toLowerCase();
     try {
@@ -152,6 +154,22 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         request.assessmentRunId,
         request.title,
       );
+      const recovered = await recoverSudhaarOutput(
+        tenantId,
+        actor,
+        request.operationKey,
+        input,
+        deps.writerFactory,
+      );
+      if (recovered) return c.json(recovered, 200);
+      if (
+        !deps.runtimeUrl ||
+        !deps.runtimeToken ||
+        !deps.sourceSigningKey ||
+        Buffer.byteLength(deps.sourceSigningKey) < 32 ||
+        deps.sourceSigningKey === deps.runtimeToken
+      )
+        return c.json({ error: { code: 'planning_runtime_unavailable' } }, 503);
       const outcome = await invokeGenericAgent(
         {
           agent: 'sudhaar',
@@ -163,6 +181,7 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         },
         {
           ...deps,
+          settleSudhaarSuccess: settleSudhaarOutput(deps.writerFactory),
           runtimeUrl: deps.runtimeUrl,
           runtimeToken: deps.runtimeToken,
           sudhaarDispatch: (ctx) =>
@@ -173,22 +192,30 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
         },
       );
       if (outcome.status !== 200) return c.json(outcome.body, outcome.status);
-      return c.json(
-        {
-          data: validateSudhaarProposal(outcome.body.output, input),
-          invocation: {
-            runId: outcome.run.runId,
-            correlationId: request.operationKey,
-            requestHash: outcome.run.requestHash,
-            responseHash: outcome.run.responseHash,
-          },
-        },
-        200,
+      const recorded = await recoverSudhaarOutput(
+        tenantId,
+        actor,
+        request.operationKey,
+        input,
+        deps.writerFactory,
       );
+      if (
+        !recorded ||
+        recorded.invocation.runId !== outcome.run.runId ||
+        recorded.invocation.requestHash !== outcome.run.requestHash ||
+        recorded.invocation.responseHash !== outcome.run.responseHash
+      )
+        throw new SudhaarOutputRefused('planning_output_uncertain');
+      return c.json(recorded, 200);
     } catch (error) {
       const code =
-        error instanceof PlanningSourceRefused ? error.code : 'planning_proposal_unavailable';
-      return c.json({ error: { code } }, code === 'planning_source_conflict' ? 409 : 503);
+        error instanceof PlanningSourceRefused || error instanceof SudhaarOutputRefused
+          ? error.code
+          : 'planning_proposal_unavailable';
+      return c.json(
+        { error: { code } },
+        code === 'planning_source_conflict' || error instanceof SudhaarOutputRefused ? 409 : 503,
+      );
     }
   });
   return app;

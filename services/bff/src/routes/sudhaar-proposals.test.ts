@@ -216,6 +216,22 @@ beforeEach(() => {
     calls.push({ name: 'start', args });
     return { run_id: DISPATCH, status: 'running', created: true };
   });
+  let captured: Record<string, unknown> | null = null;
+  db.onRpc('recover_sudhaar_output', () => captured ?? { missing: true });
+  db.onRpc('settle_sudhaar_output', (args) => {
+    calls.push({ name: 'finish', args: { ...args, p_status: 'succeeded' } });
+    captured = {
+      run_id: DISPATCH,
+      input_hash: args.p_request_hash,
+      output_hash: args.p_response_hash,
+      output_text: args.p_output_text,
+      requested_receipt: '119',
+      started_receipt: '120',
+      completed_receipt: '121',
+      settled_receipt: '122',
+    };
+    return { run_id: DISPATCH, status: 'succeeded', replayed: false };
+  });
   db.onRpc('record_generic_agent_run_finish', (args) => {
     calls.push({ name: 'finish', args });
     return { run_id: DISPATCH, status: args.p_status, replayed: false };
@@ -452,7 +468,7 @@ it('refuses source verifier transport failure without a business success or disp
 });
 
 it.each(['absent', 'weak', 'equal'])(
-  'fails closed before source lookup for %s source signing configuration',
+  'checks prior recorded output but refuses fresh dispatch for %s source signing configuration',
   async (mode) => {
     const signingKey = mode === 'absent' ? '' : mode === 'weak' ? 'short' : peerSecret;
     const response = await app(UserRole.OWNER, signingKey).request('/v1/plans/proposals', {
@@ -465,7 +481,7 @@ it.each(['absent', 'weak', 'equal'])(
       body: JSON.stringify({ operationKey: KEY, engagementId: ENG, assessmentRunId: RUN }),
     });
     expect(response.status).toBe(503);
-    expect(calls).toEqual([]);
+    expect(calls.map((c) => c.name)).toEqual(['proof']);
     expect(fetchImpl).not.toHaveBeenCalled();
   },
 );
@@ -585,4 +601,15 @@ it('reads later bounded source pages without source facts or runtime invocation'
   expect(page.assessments).toContainEqual(expect.objectContaining({ assessmentRunId: RUN }));
   expect(calls).toEqual([]);
   expect(fetchImpl).not.toHaveBeenCalled();
+});
+it('recovers the exact recorded output without a second invocation, even when runtime configuration is unavailable',async()=>{
+ const first=await request();expect(first.status).toBe(200);const saved=await first.json();
+ const second=await app(UserRole.OWNER,'').request('/v1/plans/proposals',{method:'POST',headers:{'content-type':'application/json','Idempotency-Key':KEY,'X-Expected-Actor-Id':ACTOR},body:JSON.stringify({operationKey:KEY,engagementId:ENG,assessmentRunId:RUN})});
+ expect(second.status).toBe(200);expect(await second.json()).toEqual(saved);
+ expect(fetchImpl).toHaveBeenCalledTimes(1);expect(calls.filter(c=>c.name==='start')).toHaveLength(1);expect(calls.filter(c=>c.name==='finish')).toHaveLength(1);
+});
+it('refuses uncertain legacy output without dispatching again',async()=>{
+ db.onRpc('recover_sudhaar_output',()=>({error:'output_unrecoverable'}));
+ const res=await request();expect(res.status).toBe(409);expect(await res.json()).toMatchObject({error:{code:'planning_output_uncertain'}});
+ expect(fetchImpl).not.toHaveBeenCalled();expect(calls.some(c=>c.name==='start')).toBe(false);
 });
