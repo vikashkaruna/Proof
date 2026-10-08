@@ -13,8 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
 from html import escape
 from typing import Any, ClassVar, cast
 from uuid import uuid4
@@ -22,10 +21,11 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from ..canonicalise import canonical_json, sha256_hex
+from ..enum_types import QualifiedStringEnum
 from .base import AgentName, AutonomyLevel, BaseAgent
 
 
-class DossierType(str, Enum):
+class DossierType(QualifiedStringEnum):
     BOARD_EXECUTIVE = "board_executive"
     DPB_STATUTORY = "dpb_statutory"
     AUDITOR_ASSURANCE = "auditor_assurance"
@@ -33,7 +33,7 @@ class DossierType(str, Enum):
     FULL_CLOSURE = "full_closure"
 
 
-class DossierStatus(str, Enum):
+class DossierStatus(QualifiedStringEnum):
     DRAFT = "draft"
     APPROVED = "approved"
     SEALED = "sealed"
@@ -177,7 +177,7 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
             # the database's separately verified source-bound workflow.
             raise ValueError("reconciliation_record_verification_unavailable")
         dossier_id = input.metadata.get("dossier_id") or str(uuid4())
-        created_at = input.created_at or input.metadata.get("created_at") or datetime.now(timezone.utc).isoformat()
+        created_at = input.created_at or input.metadata.get("created_at") or datetime.now(UTC).isoformat()
         dtype_str = (
             input.dossier_type.value
             if isinstance(input.dossier_type, DossierType)
@@ -192,11 +192,11 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
         for finding in input.findings:
             leaf_hashes.append(sha256_hex(canonical_json(finding)))
         for pid in input.plan_ids:
-            leaf_hashes.append(sha256_hex(f"plan:{pid}".encode("utf-8")))
+            leaf_hashes.append(sha256_hex(f"plan:{pid}".encode()))
         for batch in input.execution_batches:
             leaf_hashes.append(sha256_hex(canonical_json(batch)))
         for eid in cited_evidence_ids:
-            leaf_hashes.append(sha256_hex(f"evidence:{eid}".encode("utf-8")))
+            leaf_hashes.append(sha256_hex(f"evidence:{eid}".encode()))
         merkle_root = _compute_merkle_root(leaf_hashes)
 
         # 3. Cryptographic Ledger Root Hash
@@ -210,7 +210,7 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
                 )
                 ledger_leaf_hashes.append(str(entry_hash))
         else:
-            ledger_leaf_hashes.append(sha256_hex(f"ledger:genesis:{input.tenant_id}".encode("utf-8")))
+            ledger_leaf_hashes.append(sha256_hex(f"ledger:genesis:{input.tenant_id}".encode()))
         ledger_root = _compute_merkle_root(ledger_leaf_hashes)
 
         # 4. Cryptographic Maker-Checker Reconciliation Root Hash
@@ -689,7 +689,7 @@ class PramaanAgent(BaseAgent[PramaanInput, PramaanOutput]):
             "",
             "    <div class=\"proof-seal-card\">",
             "      <span class=\"proof-seal-badge\">Gold ProofSeal Attestation</span>",
-            f"      <div style=\"font-size: 14px; font-weight: 600; color: #856404; margin-bottom: 8px;\">Authoritative Proof Seal Hash</div>",
+            "      <div style=\"font-size: 14px; font-weight: 600; color: #856404; margin-bottom: 8px;\">Authoritative Proof Seal Hash</div>",
             f"      <div class=\"hash-block\">{safe(proof_seal_hash)}</div>",
             "      <div style=\"font-size: 12px; color: #64748B;\">Merkle Root:</div>",
             f"      <div class=\"hash-block\">{safe(merkle_root)}</div>",

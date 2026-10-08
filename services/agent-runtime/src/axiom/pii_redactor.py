@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 # Patterns covering the common DPDPA-relevant PII types
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("PAN", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")),

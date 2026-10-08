@@ -102,14 +102,15 @@ class ConnectorManifest(StrictModel):
 class DescriptorLoader(yaml.SafeLoader):
     """Use YAML 1.2 booleans; never coerce a target named on/off or a timestamp."""
 
-    yaml_implicit_resolvers: dict[str | None, list[tuple[str, re.Pattern[str]]]] = {
-        key: [
-            (tag, regex)
-            for tag, regex in values
-            if tag not in ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:timestamp")
-        ]
-        for key, values in yaml.SafeLoader.yaml_implicit_resolvers.items()
-    }
+
+DescriptorLoader.yaml_implicit_resolvers = {
+    key: [
+        (tag, regex)
+        for tag, regex in values
+        if tag not in ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:timestamp")
+    ]
+    for key, values in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
 
 
 DescriptorLoader.add_implicit_resolver(
