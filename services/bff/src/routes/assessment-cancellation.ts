@@ -7,6 +7,7 @@ import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import { canonicalAssessmentInput } from '../workloads/assessment-input.js';
 import type { Variables } from '../types.js';
+import { readOriginalAssessmentRequest } from './assessment-original-request.js';
 
 export function assessmentCancellationRoutes() {
   const app = new Hono<{ Variables: Variables }>();
@@ -37,7 +38,8 @@ export function assessmentCancellationRoutes() {
     const tenantId = c.get('tenantId').toLowerCase();
     const unavailable = { error: { code: 'assessment_cancellation_unconfirmed' } };
     try {
-      const read = await createSupabaseAdmin()
+      const db = createSupabaseAdmin();
+      const read = await db
         .from('engagements')
         .select('id,tenant_id,library_version')
         .eq('tenant_id', tenantId)
@@ -54,22 +56,77 @@ export function assessmentCancellationRoutes() {
         engagement.id !== input.data.engagementId.toLowerCase()
       )
         return c.json(unavailable, 503);
+      const jobRead = await db
+        .from('assessment_dispatch_jobs')
+        .select(
+          'id,tenant_id,run_id,actor_id,workload_id,estate_id,engagement_id,correlation_id,input_hash',
+        )
+        .eq('tenant_id', tenantId)
+        .eq('id', jobId.data.toLowerCase())
+        .abortSignal(AbortSignal.timeout(10000))
+        .maybeSingle();
+      if (jobRead.error) return c.json(unavailable, 503);
+      if (!jobRead.data) return c.json({ error: { code: 'assessment_job_not_found' } }, 404);
+      const originalJob = z
+        .object({
+          id: z.uuid(),
+          tenant_id: z.uuid(),
+          run_id: z.uuid(),
+          actor_id: z.uuid(),
+          workload_id: z.uuid(),
+          estate_id: z.uuid().nullable(),
+          engagement_id: z.uuid(),
+          correlation_id: z.uuid(),
+          input_hash: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .parse(jobRead.data);
+      if (
+        originalJob.id !== jobId.data.toLowerCase() ||
+        originalJob.tenant_id !== tenantId ||
+        originalJob.actor_id !== actorId ||
+        originalJob.engagement_id !== engagement.id
+      )
+        return c.json({ error: { code: 'cancellation_conflict' } }, 409);
+      const runRead = await db
+        .from('agent_runs')
+        .select('id,tenant_id,agent,engagement_id,correlation_id,input_redacted_hash,metadata')
+        .eq('tenant_id', tenantId)
+        .eq('id', originalJob.run_id)
+        .abortSignal(AbortSignal.timeout(10000))
+        .single();
+      if (runRead.error) return c.json(unavailable, 503);
+      const originalRun = z
+        .object({
+          id: z.uuid(),
+          tenant_id: z.uuid(),
+          agent: z.string(),
+          engagement_id: z.uuid().nullable(),
+          correlation_id: z.uuid(),
+          input_redacted_hash: z.string().nullable(),
+          metadata: z.record(z.string(), z.unknown()),
+        })
+        .parse(runRead.data);
+      const original = await readOriginalAssessmentRequest(db, originalJob, originalRun);
+      if (!original) return c.json(unavailable, 503);
       const body = canonicalAssessmentInput(
         tenantId,
         engagement.id,
-        engagement.library_version,
+        original.libraryVersion,
         input.data,
       );
       if (Buffer.byteLength(body, 'utf8') > ASSESSMENT_REQUEST_MAX_BYTES)
         return c.json({ error: { code: 'invalid_assessment_cancellation' } }, 400);
+      const inputHash = createHash('sha256').update(body, 'utf8').digest('hex');
+      if (inputHash !== originalJob.input_hash)
+        return c.json({ error: { code: 'cancellation_conflict' } }, 409);
       const result = await createHumanActionWriter()
         .rpc('cancel_unclaimed_assessment_request', {
           p_tenant_id: tenantId,
           p_actor_id: actorId,
           p_job_id: jobId.data.toLowerCase(),
           p_engagement_id: engagement.id,
-          p_library_version: engagement.library_version,
-          p_input_hash: createHash('sha256').update(body, 'utf8').digest('hex'),
+          p_library_version: original.libraryVersion,
+          p_input_hash: inputHash,
         })
         .abortSignal(AbortSignal.timeout(10000));
       if (result.error) return c.json(unavailable, 503);

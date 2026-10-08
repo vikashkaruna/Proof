@@ -5,6 +5,7 @@ import { Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { readAssessmentResolution } from './assessment-resolution.js';
+import { readOriginalAssessmentRequest } from './assessment-original-request.js';
 
 const uuid = z.uuid();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -145,13 +146,15 @@ export function assessmentJobStatusRoutes() {
         engagement.tenant_id !== tenantId
       )
         return c.json(unavailable, 503);
+      const original = await readOriginalAssessmentRequest(db, job, run);
+      const requestLibraryVersion = original?.libraryVersion ?? engagement.library_version;
       const packet = packetRead.data ? packetSchema.parse(packetRead.data) : null;
       if (
         packet &&
         (packet.tenant_id !== tenantId ||
           packet.run_id !== job.run_id ||
           packet.engagement_id !== job.engagement_id ||
-          packet.library_version !== engagement.library_version)
+          packet.library_version !== requestLibraryVersion)
       )
         return c.json(unavailable, 503);
       const base = {
@@ -159,7 +162,7 @@ export function assessmentJobStatusRoutes() {
         runId: run.id,
         engagementId: job.engagement_id,
         correlationId: job.correlation_id,
-        libraryVersion: engagement.library_version,
+        libraryVersion: requestLibraryVersion,
         recordedRunStatus: run.status,
         schedulingStatus: job.scheduling_status,
         createdAt: job.created_at,
@@ -170,7 +173,7 @@ export function assessmentJobStatusRoutes() {
         db,
         job,
         run,
-        engagement.library_version,
+        requestLibraryVersion,
         packet !== null,
       );
       if (resolution)

@@ -20,20 +20,43 @@ args = parser.parse_args()
 proof = json.loads(args.fixture_proof.read_text())
 args.evidence.mkdir(parents=True, exist_ok=True, mode=0o700)
 container, database = proof["containerId"], proof["database"]
-assert re.fullmatch(r"[a-f0-9]{64}", container)
-assert re.fullmatch(r"axiom_assessment_cancel_test[a-zA-Z0-9_]*", database)
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+require(re.fullmatch(r"[a-f0-9]{64}", container), "Immutable fixture ID required")
+require(
+    re.fullmatch(r"axiom_assessment_cancel_test[a-zA-Z0-9_]*", database),
+    "Dedicated cancellation fixture database required",
+)
 
 
 def owned():
     actual = json.loads(subprocess.check_output(["docker", "inspect", container]))[0]
-    assert actual["Id"] == container and actual["Name"] == "/" + proof["name"]
+    require(
+        actual["Id"] == container and actual["Name"] == "/" + proof["name"],
+        "Fixture identity changed",
+    )
     labels = actual["Config"]["Labels"]
-    assert labels["com.axiom.fixture"] == "assessment-cancel-test"
-    assert labels["com.axiom.owner-worktree"] == proof["ownerWorktree"] == str(ROOT)
-    assert labels["com.axiom.fixture.project"] == proof["project"]
-    assert actual["NetworkSettings"]["Ports"]["5432/tcp"] == [
-        {"HostIp": "127.0.0.1", "HostPort": str(proof["loopbackPort"])}
-    ]
+    require(
+        labels["com.axiom.fixture"] == "assessment-cancel-test", "Fixture class changed"
+    )
+    require(
+        labels["com.axiom.owner-worktree"] == proof["ownerWorktree"] == str(ROOT),
+        "Fixture owner changed",
+    )
+    require(
+        labels["com.axiom.fixture.project"] == proof["project"],
+        "Fixture project changed",
+    )
+    require(
+        actual["NetworkSettings"]["Ports"]["5432/tcp"]
+        == [{"HostIp": "127.0.0.1", "HostPort": str(proof["loopbackPort"])}],
+        "Fixture loopback binding changed",
+    )
 
 
 def sql(source):

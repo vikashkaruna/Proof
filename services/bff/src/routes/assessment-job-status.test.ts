@@ -269,6 +269,33 @@ describe('existing durable assessment job readback', () => {
     });
     expect(JSON.stringify(fake.rows('assessment_request_resolutions'))).toBe(before);
   });
+  it('reads original cancellation and queued recovery after the current engagement library changes', async () => {
+    cancelledFixture();
+    fake.rows('engagements')[0]!.library_version = 'new-version';
+    const resolved = await request();
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toMatchObject({
+      status: 'resolution_recorded',
+      libraryVersion: '0.1.1',
+    });
+    fake.rows('assessment_request_resolutions').splice(0);
+    fake.rows('agent_runs')[0]!.status = 'queued';
+    fake.rows('agent_runs')[0]!.completed_at = null;
+    fake.rows('workload_task_delegations')[0]!.revoked_at = null;
+    const queued = await request();
+    expect(queued.status).toBe(200);
+    expect(await queued.json()).toMatchObject({
+      status: 'unconfirmed',
+      phase: 'queued',
+      libraryVersion: '0.1.1',
+    });
+  });
+  it('refuses a forged original receipt library rather than accepting current engagement settings', async () => {
+    cancelledFixture();
+    fake.rows('engagements')[0]!.library_version = 'new-version';
+    (fake.rows('audit_ledger')[0]!.detail as Record<string, unknown>).library_version = 'forged';
+    expect((await request()).status).toBe(503);
+  });
   it.each([
     ['assessment_request_resolutions', 'actor_id', FOREIGN],
     ['assessment_request_resolutions', 'input_hash', RESULT],
