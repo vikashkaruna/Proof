@@ -704,3 +704,34 @@ it('rechecks cross-tab journal ownership before the explicit cancellation POST',
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(readAssessmentJournal(localStorage, tenant, actor)!.request.operationKey).toBe(run);
 });
+it('retains original cancellation and explicit archive when the page current library pin has changed', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          jobId: operation,
+          runId: run,
+          cancellationReceipt: '22',
+          resolvedAt: '2026-10-05T11:02:00Z',
+          status: 'cancellation_recorded',
+        },
+        { status: 202 },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json(cancelledResolution()));
+  render(panel({ libraryVersion: 'current-new-version' }));
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation recorded. Check the retained request/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)!.libraryVersion).toBe('0.1.1');
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual(journal().request);
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Archive cancelled browser reference' }),
+  );
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(finalized).not.toHaveBeenCalled();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});

@@ -43,9 +43,70 @@ const input = () =>
     answers: { C: { Q1: true, Q2: false, Q3: null } },
     applicability: { processesChildren: false },
   });
+const originalHash = (version = '0.1.1', body = input()) =>
+  createHash('sha256')
+    .update(
+      canonicalJson({
+        tenant_id: tenant,
+        engagement_id: engagement,
+        library_version: version,
+        answers: body.answers,
+        sdf_self_attested: body.applicability.sdfSelfAttested,
+        processes_children: body.applicability.processesChildren,
+        processes_health: body.applicability.processesHealth,
+      }),
+    )
+    .digest('hex');
 beforeEach(() => {
   state.db = createFakeDb({
     engagements: [{ id: engagement, tenant_id: tenant, library_version: '0.1.1' }],
+    assessment_dispatch_jobs: [
+      {
+        id: job,
+        tenant_id: tenant,
+        run_id: run,
+        actor_id: actor,
+        workload_id: id(6),
+        estate_id: null,
+        engagement_id: engagement,
+        correlation_id: job,
+        input_hash: originalHash(),
+      },
+    ],
+    agent_runs: [
+      {
+        id: run,
+        tenant_id: tenant,
+        agent: 'parikshan',
+        engagement_id: engagement,
+        correlation_id: job,
+        input_redacted_hash: originalHash(),
+        metadata: { request_kind: 'durable_assessment_v1', assessment_request_receipt: '81' },
+      },
+    ],
+    audit_ledger: [
+      {
+        id: '81',
+        tenant_id: tenant,
+        correlation_id: job,
+        actor_type: 'human',
+        actor_id: actor,
+        action_type: 'assessment.requested',
+        target_ref: job,
+        input_hash: originalHash(),
+        output_hash: null,
+        result: 'pending',
+        detail: {
+          purpose: 'durable_assessment',
+          job_id: job,
+          run_id: run,
+          workload_id: id(6),
+          estate_id: null,
+          engagement_id: engagement,
+          library_version: '0.1.1',
+        },
+      },
+    ],
   });
   state.reads = [];
   state.args = null;
@@ -250,3 +311,60 @@ it('a verified owner session still traverses the same exact human cancellation p
   expect((await request(input(), {}, UserRole.OWNER, job, '', mfa)).status).toBe(202);
   expect(state.args?.p_actor_id).toBe(actor);
 });
+
+it('cancels and explicitly recovers the original pinned body after the engagement moves to another library', async () => {
+  state.db!.rows('engagements')[0]!.library_version = 'new-version';
+  const before = JSON.stringify(state.db!.rows('audit_ledger'));
+  const first = await request();
+  const second = await request();
+  expect(first.status).toBe(202);
+  expect(second.status).toBe(202);
+  expect(await first.json()).toEqual(await second.json());
+  expect(state.args?.p_library_version).toBe('0.1.1');
+  expect(state.args?.p_input_hash).toBe(originalHash());
+  expect(JSON.stringify(state.db!.rows('audit_ledger'))).toBe(before);
+});
+it.each([
+  'actor',
+  'tenant',
+  'job',
+  'run',
+  'workload',
+  'estate',
+  'engagement',
+  'hash',
+  'purpose',
+  'agent-receipt',
+  'receipt-id',
+  'forged-version',
+  'run-metadata',
+  'run-context',
+  'missing-job',
+  'changed-body',
+])(
+  'refuses forged original recovery authority %s without calling the human mutation RPC',
+  async (kind) => {
+    const entry = state.db!.rows('audit_ledger')[0]!;
+    const detail = entry.detail as Record<string, unknown>;
+    const fields: Record<string, string> = {
+      actor: 'actor_id',
+      tenant: 'tenant_id',
+      job: 'target_ref',
+      hash: 'input_hash',
+    };
+    if (kind in fields) entry[fields[kind]!] = kind === 'hash' ? 'e'.repeat(64) : id(9);
+    if (['run', 'workload', 'estate', 'engagement'].includes(kind)) detail[kind + '_id'] = id(9);
+    if (kind === 'purpose') detail.purpose = 'forged';
+    if (kind === 'agent-receipt') entry.actor_type = 'agent';
+    if (kind === 'receipt-id') entry.id = '999';
+    if (kind === 'forged-version') detail.library_version = 'new-version';
+    if (kind === 'run-metadata') state.db!.rows('agent_runs')[0]!.metadata = {};
+    if (kind === 'run-context') state.db!.rows('agent_runs')[0]!.correlation_id = id(9);
+    if (kind === 'missing-job') state.db!.rows('assessment_dispatch_jobs').splice(0);
+    const response = await request(
+      kind === 'changed-body' ? { ...input(), answers: { C: { Q1: false } } } : input(),
+    );
+    expect([404, 409, 503]).toContain(response.status);
+    expect(state.args).toBeNull();
+  },
+);
