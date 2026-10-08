@@ -214,7 +214,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
             )
             output_hash = sha256_hex(canonical_json(output.model_dump(mode="json")))
             latency_ms = int((time.monotonic() - t0) * 1000)
-            total_tokens = sum(getattr(output, "_tokens", lambda: 0)() for _ in [0])  # type: ignore[func-returns-value]
+            total_tokens = sum(getattr(output, "_tokens", lambda: 0)() for _ in [0])
             cost_usd = 0.0
             input_tokens = 0
             output_tokens = 0

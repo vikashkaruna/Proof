@@ -116,7 +116,7 @@ class KaryaAgent(BaseAgent[KaryaInput, KaryaOutput]):
             )
 
         # Validate the approval token signature via the approval engine
-        from ..approval_engine import ApprovalEngine  # type: ignore[attr-defined]
+        from ..approval_engine import ApprovalEngine
 
         engine = ApprovalEngine(
             signing_key=self.settings.approval_signing_key,

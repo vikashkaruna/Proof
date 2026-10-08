@@ -52,14 +52,14 @@ def redact_text(text: str, *, replacement: str = "[REDACTED:{}]") -> RedactionRe
     return RedactionResult(redacted_text=out, redactions=redactions)
 
 
-def redact_dict(data: dict, *, depth: int = 0) -> tuple[dict, list[dict[str, str]]]:
+def redact_dict(data: dict[str, object], *, depth: int = 0) -> tuple[dict[str, object], list[dict[str, str]]]:
     """Recursively redact string values in a dict. Non-string values
     are passed through. Lists are recursed into.
     """
     if depth > 8:
         return data, []
     all_redactions: list[dict[str, str]] = []
-    out: dict = {}
+    out: dict[str, object] = {}
     for k, v in data.items():
         if isinstance(v, str):
             r = redact_text(v)
@@ -73,7 +73,7 @@ def redact_dict(data: dict, *, depth: int = 0) -> tuple[dict, list[dict[str, str
             out[k] = sub
             all_redactions.extend(sub_red)
         elif isinstance(v, list):
-            new_list = []
+            new_list: list[object] = []
             for item in v:
                 if isinstance(item, str):
                     r = redact_text(item)
