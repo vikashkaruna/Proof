@@ -75,7 +75,13 @@ export function retainProposalJournal(
     throw new ProposalRequestError(
       'Resolve the retained proposal before creating another request.',
     );
-  storage.setItem(proposalJournalKey(value.tenantId, value.actorId), JSON.stringify(value));
+  const key = proposalJournalKey(value.tenantId, value.actorId),
+    raw = JSON.stringify(value);
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw)
+    throw new ProposalRequestError(
+      'The proposal request could not be retained. Nothing was submitted.',
+    );
   window.dispatchEvent(new Event(PROPOSAL_CHANGED));
 }
 async function submitProposalRequest(value: RetainedProposal) {

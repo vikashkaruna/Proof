@@ -70,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 async function choose() {
   await screen.findByRole('option', { name: /Synthetic engagement/ });
@@ -383,4 +384,28 @@ it('aborts a page response when the active tenant changes', async () => {
   );
   expect(screen.queryByRole('option', { name: /Foreign delayed page/ })).toBeNull();
   expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'POST')).toBe(false);
+});
+
+it('refuses dispatch when storage silently loses the retained request', async () => {
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+  render(<ProposalPanel {...props} />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Request review proposal' }));
+  await screen.findByRole('alert');
+  expect(readProposalJournal(localStorage, tenant, actor)).toBeNull();
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+it('refuses dispatch when storage rewrites the retained operation key', async () => {
+  const write = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    const altered = JSON.parse(value);
+    altered.request.operationKey = actor;
+    write.call(this, key, JSON.stringify(altered));
+  });
+  render(<ProposalPanel {...props} />);
+  await choose();
+  fireEvent.click(screen.getByRole('button', { name: 'Request review proposal' }));
+  await screen.findByRole('alert');
+  expect(readProposalJournal(localStorage, tenant, actor)?.request.operationKey).toBe(actor);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
