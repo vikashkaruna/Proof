@@ -588,3 +588,119 @@ it('withdraws an old finalization and completion message when another tab change
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(replacement);
 });
+
+const cancelledResolution = () => ({
+  ...progress(),
+  status: 'resolution_recorded',
+  phase: 'cancelled_unclaimed',
+  recordedRunStatus: 'cancelled',
+  resolution: {
+    actorId: actor,
+    requestedReceipt: '21',
+    cancellationReceipt: '22',
+    resolvedAt: '2026-10-05T11:02:00Z',
+    verification: 'persisted_human_unclaimed_cancellation_bindings',
+    workerCleanupVerified: false,
+  },
+});
+async function reviewCancellation() {
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  const button = await screen.findByRole('button', { name: 'Cancel if not claimed' });
+  expect(button.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: /I want to cancel this original request/ }));
+  expect(button.hasAttribute('disabled')).toBe(false);
+}
+it('requires an explicit checked unclaimed cancellation and a separate verified read before archiving', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          jobId: operation,
+          runId: run,
+          cancellationReceipt: '22',
+          resolvedAt: '2026-10-05T11:02:00Z',
+          status: 'cancellation_recorded',
+        },
+        { status: 202 },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json(cancelledResolution()));
+  render(panel());
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation recorded. Check the retained request/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+  expect(screen.queryByRole('button', { name: 'Archive cancelled browser reference' })).toBeNull();
+  const init = fetchMock.mock.calls[1]![1];
+  expect(JSON.parse(init.body)).toEqual(journal().request);
+  expect(init.headers).toMatchObject({
+    'Idempotency-Key': operation,
+    'X-Expected-Actor-Id': actor,
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  const archive = await screen.findByRole('button', {
+    name: 'Archive cancelled browser reference',
+  });
+  expect(finalized).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Retry original request' })).toBeNull();
+  fireEvent.click(archive);
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(screen.getByRole('checkbox').getAttribute('checked')).toBeNull();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});
+it('lost cancellation response and remount preserve the reference without automatic POST or archive', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock
+    .mockResolvedValueOnce(Response.json(progress()))
+    .mockRejectedValueOnce(new Error('lost'));
+  const mounted = render(panel());
+  await reviewCancellation();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Cancellation response was interrupted/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+  mounted.unmount();
+  fetchMock.mockClear();
+  render(panel());
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Archive cancelled browser reference' })).toBeNull();
+  fetchMock.mockResolvedValueOnce(Response.json(cancelledResolution()));
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await screen.findByRole('button', { name: 'Archive cancelled browser reference' });
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0]![1].method).toBeUndefined();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+});
+it('does not expose cancellation for a viewer or after a worker claim', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock.mockResolvedValue(Response.json({ ...progress(), claimedAt: '2026-10-05T11:01:00Z' }));
+  const mounted = render(panel());
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+  mounted.unmount();
+  fetchMock.mockResolvedValue(Response.json(progress()));
+  render(panel({ canRequest: false }));
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('button', { name: 'Cancel if not claimed' })).toBeNull();
+});
+it('rechecks cross-tab journal ownership before the explicit cancellation POST', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock.mockResolvedValue(Response.json(progress()));
+  render(panel());
+  await reviewCancellation();
+  localStorage.setItem(
+    assessmentJournalKey(tenant, actor),
+    JSON.stringify({
+      ...journal(),
+      request: { ...journal().request, operationKey: run },
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel if not claimed' }));
+  await screen.findByText(/Retained request changed/);
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(readAssessmentJournal(localStorage, tenant, actor)!.request.operationKey).toBe(run);
+});

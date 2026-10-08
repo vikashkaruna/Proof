@@ -50,7 +50,7 @@ def main() -> int:
         mode,
         expectation,
         expected_value,
-    ) = sys.argv[1:]
+    ) = sys.argv[1:11]
     if not re.fullmatch(r"[a-zA-Z0-9_.-]+", container) or user not in {
         "postgres",
         "supabase_admin",
@@ -61,7 +61,11 @@ def main() -> int:
         "error",
     }:
         raise BarrierFailure("Invalid race semantics")
-    database = "axiom_policy_test"
+    database = sys.argv[11] if len(sys.argv) == 12 else "axiom_policy_test"
+    if len(sys.argv) not in {11, 12} or not re.fullmatch(
+        r"[a-zA-Z_][a-zA-Z0-9_]{0,62}", database
+    ):
+        raise BarrierFailure("Invalid disposable database")
     tag = "axiom-race-" + uuid4().hex
     first_name, second_name = tag + "-first", tag + "-second"
     command = [
