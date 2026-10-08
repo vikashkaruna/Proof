@@ -34,17 +34,40 @@ export function sudhaarProposalRoutes(deps: SudhaarProposalDeps) {
       const denial = requireCapability(c, capability);
       if (denial) return denial;
     }
+    const pagination = z
+      .object({
+        limit: z
+          .string()
+          .regex(/^[1-9][0-9]*$/)
+          .default('25')
+          .transform(Number)
+          .pipe(z.number().int().min(1).max(25)),
+        offset: z
+          .string()
+          .regex(/^(0|[1-9][0-9]*)$/)
+          .default('0')
+          .transform(Number)
+          .pipe(z.number().int().min(0).max(1000000)),
+      })
+      .safeParse({ limit: c.req.query('limit'), offset: c.req.query('offset') });
+    if (
+      !pagination.success ||
+      Object.keys(c.req.query()).some((key) => !['limit', 'offset'].includes(key))
+    )
+      return c.json({ error: { code: 'validation_failed' } }, 400);
     try {
       const db = deps.db ?? createSupabaseAdmin();
       const page = await listFinalizedAssessmentOptions(
         db,
         c.get('tenantId').toLowerCase(),
-        { limit: 25, offset: 0 },
+        pagination.data,
         AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15000)]),
       );
       return c.json({
         assessments: page.assessments,
         total: page.total,
+        limit: page.limit,
+        offset: page.offset,
         runtimeAvailable: Boolean(
           deps.runtimeUrl &&
           deps.runtimeToken &&

@@ -549,3 +549,40 @@ describe('read-only proposal source choices', () => {
     expect(await res.json()).not.toHaveProperty('assessments');
   });
 });
+
+it.each(['limit=0', 'limit=26', 'offset=-1', 'offset=1.5', 'offset=1000001', 'extra=secret'])(
+  'refuses unbounded or unknown source pagination: %s',
+  async (query) => {
+    const res = await app().request(`/v1/plans/proposal-assessment-options?${query}`);
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  },
+);
+it('reads later bounded source pages without source facts or runtime invocation', async () => {
+  db.rows('engagements')[0]!.title = 'Owned assessment';
+  const packet = db.rows('workload_assessment_packets')[0]!;
+  for (let i = 0; i < 30; i++)
+    db.seed('workload_assessment_packets', {
+      ...packet,
+      run_id: `77777777-7777-4777-8777-${String(i).padStart(12, '0')}`,
+      finalized_at: '2026-10-08T00:00:00Z',
+    });
+  const res = await app().request('/v1/plans/proposal-assessment-options?limit=25&offset=25');
+  expect(res.status).toBe(200);
+  const page = z
+    .object({
+      assessments: z.array(z.unknown()),
+      limit: z.number(),
+      offset: z.number(),
+      total: z.number(),
+    })
+    .parse(await res.json());
+  expect(page.limit).toBe(25);
+  expect(page.offset).toBe(25);
+  expect(page.total).toBe(31);
+  expect(page.assessments).toHaveLength(6);
+  expect(page.assessments).toContainEqual(expect.objectContaining({ assessmentRunId: RUN }));
+  expect(calls).toEqual([]);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
