@@ -13,7 +13,9 @@ from axiom.agents.sanket import SanketInput
 from axiom.canonicalise import canonical_json, sha256_hex
 from axiom.ledger_client import LedgerClient
 from axiom.retained_sanket_source import (
+    RecordedSanketSource,
     RetainedSanketAgent,
+    RetainedSanketCapture,
     RetainedSanketInput,
     RetainedSanketScope,
     prepare_retained_sanket_source,
@@ -233,6 +235,27 @@ def test_named_request_receipt_must_follow_original_human_capture(receipt: str):
     row = fixture()
     alter_source(row, "capture_receipt", receipt)
     with pytest.raises(ValueError, match="input consistency"):
+        prepare_retained_sanket_source(row, expected_scope=scope())
+
+
+def test_both_receipt_fields_accept_exact_signed_int64_maximum():
+    row = fixture()
+    source = json.loads(row["input_text"])["source"]
+    source["capture_receipt"] = "9223372036854775807"
+    assert RetainedSanketCapture.model_validate(source).capture_receipt == "9223372036854775807"
+    row["requested_receipt"] = "9223372036854775807"
+    assert RecordedSanketSource.model_validate(row).requested_receipt == "9223372036854775807"
+
+
+@pytest.mark.parametrize("receipt", ["9223372036854775808", "9999999999999999999"])
+@pytest.mark.parametrize("field", ["capture_receipt", "requested_receipt"])
+def test_both_receipt_fields_refuse_nineteen_digit_signed_int64_overflow(field: str, receipt: str):
+    row = fixture()
+    if field == "capture_receipt":
+        alter_source(row, field, receipt)
+    else:
+        row[field] = receipt
+    with pytest.raises(ValidationError, match="signed int64 receipt"):
         prepare_retained_sanket_source(row, expected_scope=scope())
 
 

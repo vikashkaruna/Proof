@@ -11,17 +11,29 @@ claim to fetch it again or independently rehash its content digest.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from .agents.public_source import Digest, Identifier, Version
 from .agents.sanket import SanketAgent, SanketInput, SanketOutput
 from .canonicalise import canonical_json, sha256_hex
 from .public_signal_sources import GuardedPublicDocument, VerifiedPublicSourceBatch, public_origin
 
-Receipt = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,18}$")]
+
+def canonical_positive_int64_receipt(value: Any) -> str:
+    if (
+        type(value) is not str
+        or re.fullmatch(r"[1-9][0-9]{0,18}", value) is None
+        or int(value) > 9223372036854775807
+    ):
+        raise ValueError("Canonical positive signed int64 receipt refused")
+    return value
+
+
+Receipt = Annotated[str, BeforeValidator(canonical_positive_int64_receipt)]
 MAX_CAPTURE_RESULT_BYTES = 32768
 MAX_INPUT_BYTES = 32768
 
