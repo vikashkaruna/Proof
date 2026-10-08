@@ -140,6 +140,105 @@ it('retries only the explicitly retained body and key, without creating another 
   expect(crypto.randomUUID).not.toHaveBeenCalled();
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
 });
+it.each(['failed', 'cancelled', 'timed_out'])(
+  'preserves a recorded %s request for review without offering a futile retry',
+  async (recordedRunStatus) => {
+    retainAssessmentJournal(localStorage, journal());
+    fetchMock.mockImplementation(async () =>
+      Response.json({ ...progress(), recordedRunStatus, phase: 'terminal_unconfirmed' }),
+    );
+    const view = render(panel());
+    fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+    await waitFor(() => expect(screen.getByRole('note').textContent).toContain('saved run is'));
+    expect(screen.getByRole('note').textContent).toContain(recordedRunStatus.replaceAll('_', ' '));
+    expect(screen.getByRole('note').textContent).toContain('resolution has not been confirmed');
+    expect(screen.queryByRole('button', { name: 'Retry original request' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Archive|Request unknown-answer/ })).toBeNull();
+    expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+    expect(finalized).not.toHaveBeenCalled();
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    view.unmount();
+    render(panel());
+    // A remount does not silently re-submit or erase the retained reference.
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry original request' })).toBeNull(),
+    );
+    expect(fetchMock.mock.calls.every(([, options]) => !options.method)).toBe(true);
+    expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+  },
+);
+it.each([
+  [{ schedulingStatus: 'needs_review' }, 'Dispatch requires administrator review'],
+  [
+    { phase: 'result_recorded', recordedRunStatus: 'running' },
+    'awaits verified controller finalization',
+  ],
+  [
+    { phase: 'terminal_unconfirmed', recordedRunStatus: 'succeeded' },
+    'awaits verified controller finalization',
+  ],
+])(
+  'withholds retry for a recorded state requiring separate resolution %j',
+  async (fields, message) => {
+    retainAssessmentJournal(localStorage, journal());
+    fetchMock.mockResolvedValue(Response.json({ ...progress(), ...fields }));
+    render(panel());
+    fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+    await waitFor(() => expect(screen.getByRole('note').textContent).toContain(message));
+    expect(screen.queryByRole('button', { name: 'Retry original request' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Archive|Request unknown-answer/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Check retained request' })).toBeTruthy();
+    expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(journal());
+    expect(finalized).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  },
+);
+it.each(['queued', 'running'])(
+  'keeps exact-key recovery available for an unconfirmed %s delivery',
+  async (recordedRunStatus) => {
+    retainAssessmentJournal(localStorage, journal());
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json({ ...progress(), recordedRunStatus, phase: recordedRunStatus }),
+      )
+      .mockResolvedValueOnce(Response.json(accepted(), { status: 202 }));
+    render(panel());
+    fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toContain('Completion is not yet confirmed'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original request' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]![1].headers['Idempotency-Key']).toBe(operation);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual(journal().request);
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+  },
+);
+it('withdraws terminal review guidance when another tab replaces the retained operation', async () => {
+  retainAssessmentJournal(localStorage, journal());
+  fetchMock.mockResolvedValue(
+    Response.json({ ...progress(), recordedRunStatus: 'failed', phase: 'terminal_unconfirmed' }),
+  );
+  render(panel());
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() =>
+    expect(screen.getByRole('note').textContent).toContain('saved run is failed'),
+  );
+  const replacement = { ...journal(), request: { ...journal().request, operationKey: run } };
+  act(() => {
+    localStorage.setItem(assessmentJournalKey(tenant, actor), JSON.stringify(replacement));
+    window.dispatchEvent(new StorageEvent('storage', { key: assessmentJournalKey(tenant, actor) }));
+  });
+  expect(screen.queryByRole('note')).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Retry original request' })).toBeTruthy();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(replacement);
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
 it('refreshes saved findings only after a matching recorded finalization; archive never removes server results', async () => {
   retainAssessmentJournal(localStorage, journal());
   fetchMock.mockResolvedValue(Response.json(progress(true)));
