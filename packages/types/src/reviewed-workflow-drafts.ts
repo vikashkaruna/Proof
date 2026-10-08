@@ -4,7 +4,7 @@ import {
   policyDocumentPayloadSchema,
   processingActivityPayloadSchema,
   workflowRecordSchema,
-} from './operator-workflows.js';
+} from './operator-workflows';
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -137,7 +137,26 @@ export function validateReviewedWorkflowOutput(
         b.payload.durationMinutes * b.payload.repetitions -
         a.payload.durationMinutes * a.payload.repetitions,
     );
-  const exact = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const exact = (a: unknown, b: unknown): boolean => {
+    if (a === b) return true;
+    if (Array.isArray(a) || Array.isArray(b))
+      return (
+        Array.isArray(a) &&
+        Array.isArray(b) &&
+        a.length === b.length &&
+        a.every((value, index) => exact(value, b[index]))
+      );
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+    const left = a as Record<string, unknown>,
+      right = b as Record<string, unknown>;
+    const keys = Object.keys(left).sort();
+    return (
+      exact(keys, Object.keys(right).sort()) && keys.every((key) => exact(left[key], right[key]))
+    );
+  };
+  // Retained bytes must not be silently normalised into different facts/IDs.
+  if (!exact(rawInput, input) || !exact(rawOutput, output))
+    throw new Error('reviewed_output_source_refused');
   const source = (record: ReviewedWorkflowInput['records'][number]) => ({
     record_id: record.id,
     human_receipt_id: record.receipt_id,
@@ -151,6 +170,8 @@ export function validateReviewedWorkflowOutput(
     output.policy_drafts.length !== processing.length * 4
   )
     throw new Error('reviewed_output_source_refused');
+  if (!exact(output.policy_drafts, processing.flatMap(expectedPolicies)))
+    throw new Error('reviewed_output_source_refused');
   processing.forEach((record, index) => {
     const review = output.processing_reviews[index]!;
     const unresolved = Object.entries(record.payload)
@@ -163,18 +184,6 @@ export function validateReviewedWorkflowOutput(
       !exact([...review.unresolved_fields].sort(), unresolved)
     )
       throw new Error('reviewed_output_source_refused');
-    const drafts = output.policy_drafts.filter((draft) => draft.source_ropa_id === record.id);
-    if (drafts.length !== 4 || new Set(drafts.map((draft) => draft.category)).size !== 4)
-      throw new Error('reviewed_output_source_refused');
-    drafts.forEach((draft) => {
-      if (
-        !exact(draft.source, source(record)) ||
-        !draft.content.includes(`Human source record: ${record.id}`) ||
-        !draft.content.includes(`Human audit receipt: ${record.receipt_id}`) ||
-        !draft.content.includes(`Original recorded actor: ${record.created_by}`)
-      )
-        throw new Error('reviewed_output_source_refused');
-    });
   });
   delivery.forEach((record, index) => {
     const review = output.playbook_reviews[index]!;
@@ -186,4 +195,90 @@ export function validateReviewedWorkflowOutput(
       throw new Error('reviewed_output_source_refused');
   });
   return output;
+}
+
+const declarationLabels: Record<string, string> = {
+  engagementId: 'engagement',
+  sourceNote: 'source and reason',
+  system: 'system',
+  purpose: 'purpose',
+  legalBasis: 'legal basis',
+  retentionMonths: 'retention in months',
+  dataCategories: 'data categories',
+  dataPrincipals: 'data principal groups',
+  processors: 'processors',
+  recipients: 'recipients',
+  destinationCountries: 'destination countries',
+  transferSafeguards: 'transfer safeguards',
+  dpiaRequired: 'impact assessment required',
+  region: 'processing location',
+  crossBorder: 'cross-border processing',
+  securityMeasures: 'security measures',
+};
+const policyPrompts = {
+  privacy_notice: [
+    'Privacy Notice',
+    'Confirm organisation identity, contacts, rights routes, notice languages and applicable obligations before publication.',
+  ],
+  consent_notice: [
+    'Consent Notice',
+    'Confirm specific purposes, lawful basis, clear affirmative action, notice language, consent records and withdrawal routes. No consent is proven by this draft.',
+  ],
+  retention: [
+    'Retention Policy',
+    'Confirm retention triggers, deletion methods, legal holds, exceptions, owners and review schedule. No deletion is authorised by this draft.',
+  ],
+  dpa_template: [
+    'Data Processing Agreement Template',
+    'Verify parties, roles, instructions, subprocessors, security, incidents, audit terms, transfers and signatures with legal counsel. This unsigned draft creates no agreement.',
+  ],
+} as const;
+function declared(value: unknown): string {
+  if (value === null) return 'Unknown — authorised human confirmation required';
+  if (Array.isArray(value))
+    return value.length ? value.join(', ') : 'Human recorded none (review required)';
+  if (typeof value === 'boolean')
+    return value ? 'Human recorded yes (review required)' : 'Human recorded no (review required)';
+  return String(value);
+}
+function expectedPolicies(
+  record: Extract<ReviewedWorkflowInput['records'][number], { kind: 'ropa' }>,
+): ReviewedWorkflowOutput['policy_drafts'] {
+  const payload = record.payload;
+  const source = {
+    record_id: record.id,
+    human_receipt_id: record.receipt_id,
+    created_by: record.created_by,
+    record_kind: record.kind,
+  };
+  const content = [
+    'Human and legal review required. Recorded declarations are not independently verified processing or legal facts.',
+    `Human source record: ${record.id}`,
+    `Human audit receipt: ${record.receipt_id}`,
+    `Original recorded actor: ${record.created_by}`,
+    ...Object.entries(payload)
+      .filter(([field]) => field !== 'source')
+      .map(([field, value]) => `Recorded ${declarationLabels[field]}: ${declared(value)}`),
+    ...(payload.source
+      ? [
+          `Retained public observation: ${payload.source.observationId}`,
+          `Public observation output SHA-256: ${payload.source.outputSha256}`,
+        ]
+      : []),
+    'Public HTML provenance does not establish private processing facts, residency, contracts, lawful basis or compliance.',
+    'Approval, publication and execution remain separate human decisions.',
+  ];
+  return (Object.keys(policyPrompts) as (keyof typeof policyPrompts)[]).map((category) => {
+    const [label, prompt] = policyPrompts[category];
+    return {
+      source,
+      source_ropa_id: record.id,
+      category,
+      title: `Draft ${label} — ${payload.system}`,
+      content: [`DRAFT ${label.toUpperCase()} — UNPUBLISHED`, ...content, prompt].join('\n\n'),
+      review_required: true,
+      legal_review_required: true,
+      publication_status: 'unpublished',
+    };
+  });
 }
