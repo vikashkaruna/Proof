@@ -14,6 +14,14 @@ from uuid import UUID, uuid4
 import pytest
 
 from axiom.owned_target import ACTION, OwnedTarget, OwnedWriteAdapter, Snapshot, digest, measure
+from axiom.owned_target_semantics import (
+    CAPABILITIES,
+    ENGINE,
+    capability_sha256,
+    implementation_sha256,
+    project,
+)
+from axiom.owned_target_validation import measure_validated_review, validate_owned_roundtrip
 from axiom.write_adapters import WriteRefused
 
 
@@ -63,6 +71,31 @@ def server(tmp_path):
                     if modes["read_lie"]:
                         value["audit_log_enabled"] = not value["audit_log_enabled"]
                     self.send(200, value)
+                elif self.path == "/validation/audit-log-enable":
+                    before = Snapshot.model_validate(snapshot(db))
+                    after = project(before, enabled=True)
+                    restored = project(after, enabled=before.audit_log_enabled)
+                    proof = {
+                        "engine": {
+                            "engine": ENGINE,
+                            "implementation_sha256": implementation_sha256(),
+                            "capability_sha256": capability_sha256(),
+                            "capabilities": list(CAPABILITIES),
+                        },
+                        "before": before.model_dump(mode="json"),
+                        "projected_after": after.model_dump(mode="json"),
+                        "restored": restored.model_dump(mode="json"),
+                        "persistent_mutations": 0,
+                        "resources_measured": 1,
+                    }
+                    if modes.get("invalid_roundtrip"):
+                        proof["restored"]["audit_log_enabled"] = True
+                    if modes.get("wrong_engine"):
+                        proof["engine"]["implementation_sha256"] = "0" * 64
+                    if modes.get("change_after_simulation"):
+                        db.execute("update resource set version=version+1")
+                        db.commit()
+                    self.send(200, proof)
                 elif self.path.startswith("/operations/"):
                     key = self.path.removeprefix("/operations/")
                     row = db.execute(
@@ -106,11 +139,9 @@ def server(tmp_path):
                 ] != digest(before):
                     self.send(409, {})
                     return
-                after = {
-                    **before,
-                    "version": before["version"] + 1,
-                    "audit_log_enabled": body["enabled"],
-                }
+                after = project(
+                    Snapshot.model_validate(before), enabled=body["enabled"]
+                ).model_dump(mode="json")
                 if not modes["false_success"]:
                     db.execute(
                         "update resource set version=?,enabled=?",
@@ -392,3 +423,47 @@ async def test_nonboolean_or_noop_review_cannot_be_measured(server):
         )
     with sqlite3.connect(database) as db:
         assert db.execute("select count(*) from operations").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_real_read_only_engine_roundtrip_preserves_actual_persistent_state(server):
+    target, database, _ = server
+    proof = await validate_owned_roundtrip(
+        target,
+        registered_engine_sha256=implementation_sha256(),
+        registered_capability_sha256=capability_sha256(),
+    )
+    assert proof.before.audit_log_enabled is False
+    assert proof.projected_after.audit_log_enabled is True
+    assert proof.restored.content_sha256 == proof.before.content_sha256
+    assert proof.persistent_mutations == 0
+    review, measured_proof = await measure_validated_review(
+        target,
+        registered_engine_sha256=implementation_sha256(),
+        registered_capability_sha256=capability_sha256(),
+    )
+    assert review.before == proof.before
+    assert measured_proof == proof
+    with sqlite3.connect(database) as db:
+        assert db.execute("select version,enabled from resource").fetchone() == (0, 0)
+        assert db.execute("select count(*) from operations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("mode", ["invalid_roundtrip", "wrong_engine", "change_after_simulation"])
+@pytest.mark.asyncio
+async def test_rollback_validation_refuses_engine_roundtrip_or_current_source_drift(server, mode):
+    target, database, modes = server
+    modes[mode] = True
+    with pytest.raises(WriteRefused, match=r"validation_unconfirmed|source_changed"):
+        await validate_owned_roundtrip(
+            target,
+            registered_engine_sha256=implementation_sha256(),
+            registered_capability_sha256=capability_sha256(),
+        )
+    with sqlite3.connect(database) as db:
+        assert db.execute("select enabled from resource").fetchone()[0] == 0
+        assert db.execute("select count(*) from operations").fetchone()[0] == 0
+
+
+def test_capability_manifest_has_reproducible_cross_language_golden_digest():
+    assert capability_sha256() == "a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9"
