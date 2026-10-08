@@ -1149,3 +1149,33 @@ it('lost retained Sanket settlement stays unconfirmed without generic finish or 
     0,
   );
 });
+it('awaits async retained output validation before atomic success settlement', async () => {
+  const f = fixture();
+  f.db.onRpc('record_generic_agent_run_finish', () => ({
+    run_id: RUN,
+    status: 'failed',
+    replayed: false,
+  }));
+  const start = vi.fn(async () => ({ run_id: RUN, created: true, status: 'running' }));
+  const settleSuccess = vi.fn();
+  f.fetchImpl.mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify(
+          runtimeResult({ body: '{}' }, { agent: 'sanket', correlation_id: CORRELATION }),
+        ),
+      ),
+  );
+  const result = await invokeGenericAgent(sanketContext(), {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess },
+    validateOutput: async () => {
+      await Promise.resolve();
+      throw new Error('private-output-invalid');
+    },
+  });
+  expect(result.status).toBe(502);
+  expect(settleSuccess).not.toHaveBeenCalled();
+  expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['record_generic_agent_run_finish']);
+  expect(JSON.stringify(result)).not.toContain('private-output-invalid');
+});

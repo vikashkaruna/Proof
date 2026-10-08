@@ -39,7 +39,7 @@ export interface GenericAgentInvocationDeps {
   readonly prepareDispatch?: (
     context: GenericAgentPreparationContext,
   ) => Promise<{ readonly kind: 'public_source' }>;
-  readonly validateOutput?: (output: unknown) => void;
+  readonly validateOutput?: (output: unknown) => void | Promise<void>;
   /** Only the reviewed Vibhaag route may provide this retained-source transport. */
   readonly reviewedWorkflow?: {
     readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
@@ -387,7 +387,7 @@ export async function invokeGenericAgent(
       throw new Error('runtime_result_refused');
     if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
       throw new Error('runtime_accounting_refused');
-    if (parsedResult.status === 'succeeded') deps.validateOutput?.(parsedResult.output);
+    if (parsedResult.status === 'succeeded') await deps.validateOutput?.(parsedResult.output);
     result = parsedResult;
     if (result.status === 'failed') failureCode = 'agent_reported_failure';
   } catch {
