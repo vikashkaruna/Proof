@@ -336,3 +336,35 @@ describe('unconfirmed expired attempt preservation', () => {
     },
   );
 });
+
+it.each(['0', '01', '-1', '+1', '1.0', ' 1', '9223372036854775808', '10000000000000000000'])(
+  'confirmed browser output refuses invalid final receipt without clearing the journal: %s',
+  async (value) => {
+    const f = await fixture();
+    vi.stubGlobal('window', { dispatchEvent: vi.fn() });
+    retainStagedEvidenceJournal(storage, f.journal);
+    f.result.receipts.settled = value;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json(f.result)),
+    );
+    await expect(
+      readAcceptedStagedResult(storage, f.journal, current, AbortSignal.timeout(1000)),
+    ).rejects.toThrow('unconfirmed');
+    expect(readStagedEvidenceJournal(storage, id, id)).toEqual(f.journal);
+  },
+);
+it('confirmed browser output admits exact signed-int64 maximum settlement receipt', async () => {
+  const f = await fixture();
+  vi.stubGlobal('window', { dispatchEvent: vi.fn() });
+  retainStagedEvidenceJournal(storage, f.journal);
+  f.result.receipts.settled = '9223372036854775807';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json(f.result)),
+  );
+  expect(
+    (await readAcceptedStagedResult(storage, f.journal, current, AbortSignal.timeout(1000)))
+      .receipts.settled,
+  ).toBe('9223372036854775807');
+});

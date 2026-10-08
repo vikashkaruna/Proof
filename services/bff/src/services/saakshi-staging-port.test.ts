@@ -5,6 +5,7 @@ import { EvidenceVault } from '@axiom/evidence';
 import { describe, expect, it } from 'vitest';
 import {
   createConfiguredStagePort,
+  stageBindingSchema,
   resolveRetainedHumanBytes,
   type StageBinding,
   type RetainedResourceReader,
@@ -421,4 +422,19 @@ describe('actual owned HTTP storage protocol (simulated Compliance assertions)',
       await fixture.close();
     }
   });
+});
+
+it.each(['0', '01', '-1', '+1', '1.0', ' 1', '9223372036854775808', '10000000000000000000'])(
+  'source requested receipt must be canonical positive signed-int64: %s',
+  (value) => {
+    expect(stageBindingSchema.safeParse({ ...binding(), requestedReceipt: value }).success).toBe(
+      false,
+    );
+  },
+);
+it('source requested receipt admits the exact signed-int64 maximum', () => {
+  expect(
+    stageBindingSchema.parse({ ...binding(), requestedReceipt: '9223372036854775807' })
+      .requestedReceipt,
+  ).toBe('9223372036854775807');
 });
