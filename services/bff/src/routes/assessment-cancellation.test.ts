@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { UserRole, AssessmentRequestSchema } from '@axiom/types';
 import { canonicalJson } from '@axiom/ledger';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
+import { applyEnv, createSupabaseDouble } from '../test/harness.js';
 import type { Variables } from '../types.js';
 import type { MfaService } from '../services/mfa.js';
 import { requireSessionMfa } from '../middleware/session-mfa.js';
@@ -16,8 +17,41 @@ const state = vi.hoisted(() => ({
   reads: [] as string[],
   args: null as Record<string, unknown> | null,
   reply: null as unknown,
+  auth: null as ReturnType<typeof createSupabaseDouble> | null,
+  genericCalls: [] as string[],
+  cached: null as { status: number; body: unknown } | null,
+  freshMfa: true,
 }));
-vi.mock('@axiom/supabase', () => ({
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: () => ({
+    ...state.auth!.createClient(),
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      state.genericCalls.push(name);
+      if (name === 'claim_request')
+        return {
+          data: state.cached
+            ? { decision: 'replay', ...state.cached }
+            : { decision: 'claimed', id: '99990000-0000-4000-8000-000000000090' },
+          error: null,
+        };
+      if (name === 'complete_request') {
+        state.cached = { status: Number(args.p_status), body: args.p_body };
+        return { data: true, error: null };
+      }
+      throw new Error(`Unexpected generic RPC: ${name}`);
+    },
+  }),
+}));
+vi.mock('../services/mfa.js', async (load) => ({
+  ...(await load<typeof import('../services/mfa.js')>()),
+  createMfaService: () => ({
+    requiresLoginMfa: async () => true,
+    isEnrolled: async () => true,
+    sessionAttestation: async () => (state.freshMfa ? { verified: true } : null),
+  }),
+}));
+vi.mock('@axiom/supabase', async (load) => ({
+  ...(await load<typeof import('@axiom/supabase')>()),
   createSupabaseAdmin: () => ({
     from: (table: string) => {
       state.reads.push(table);
@@ -58,6 +92,14 @@ const originalHash = (version = '0.1.1', body = input()) =>
     )
     .digest('hex');
 beforeEach(() => {
+  applyEnv({ ENVIRONMENT: 'test', AXIOM_AUTH_MODE: 'strict' });
+  state.auth = createSupabaseDouble({
+    auth: { kind: 'user', id: actor },
+    membership: { role: UserRole.OWNER },
+  });
+  state.genericCalls = [];
+  state.cached = null;
+  state.freshMfa = true;
   state.db = createFakeDb({
     engagements: [{ id: engagement, tenant_id: tenant, library_version: '0.1.1' }],
     assessment_dispatch_jobs: [
@@ -377,4 +419,61 @@ it('refuses dropped original reviewed metadata before mutation even when canonic
   const response = await request();
   expect(response.status).toBe(409);
   expect(state.args).toBeNull();
+});
+
+async function composedCancellationApp() {
+  const { resetEnvCache } = await import('@axiom/config');
+  resetEnvCache();
+  const { createApp } = await import('../app.js');
+  return createApp();
+}
+function composedRequest(
+  app: Awaited<ReturnType<typeof composedCancellationApp>>,
+  expected = actor,
+) {
+  return app.request(`/v1/assessment/jobs/${job}/cancel`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer synthetic-validated-session',
+      'X-Tenant-Id': tenant,
+      'X-Expected-Actor-Id': expected,
+      'Idempotency-Key': job,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input()),
+  });
+}
+
+it('composed BFF does not cache a wrong-actor refusal over the valid exact-key cancellation', async () => {
+  const app = await composedCancellationApp();
+  const wrong = await composedRequest(app, id(9));
+  expect(wrong.status).toBe(409);
+  expect(await wrong.json()).toEqual({ error: { code: 'assessment_actor_changed' } });
+  expect(state.args).toBeNull();
+  const valid = await composedRequest(app);
+  expect(valid.status).toBe(202);
+  expect(valid.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(await valid.json()).toMatchObject({ cancellationReceipt: '82' });
+  expect(state.args?.p_job_id).toBe(job);
+  expect(state.genericCalls).toEqual([]);
+  expect(state.cached).toBeNull();
+});
+
+it('composed BFF rechecks current cancellation authority, original source and MFA on exact replay', async () => {
+  const app = await composedCancellationApp();
+  expect((await composedRequest(app)).status).toBe(202);
+  state.args = null;
+  state.auth!.state.membership = { role: UserRole.VIEWER };
+  expect((await composedRequest(app)).status).toBe(403);
+  expect(state.args).toBeNull();
+  state.auth!.state.membership = { role: UserRole.OWNER };
+  state.reply = { error: 'kill_switch_engaged' };
+  expect((await composedRequest(app)).status).toBe(409);
+  state.args = null;
+  state.db!.rows('audit_ledger')[0]!.input_hash = 'f'.repeat(64);
+  expect((await composedRequest(app)).status).toBe(503);
+  expect(state.args).toBeNull();
+  state.freshMfa = false;
+  expect((await composedRequest(app)).status).toBe(401);
+  expect(state.genericCalls).toEqual([]);
 });

@@ -602,14 +602,30 @@ it('reads later bounded source pages without source facts or runtime invocation'
   expect(calls).toEqual([]);
   expect(fetchImpl).not.toHaveBeenCalled();
 });
-it('recovers the exact recorded output without a second invocation, even when runtime configuration is unavailable',async()=>{
- const first=await request();expect(first.status).toBe(200);const saved=await first.json();
- const second=await app(UserRole.OWNER,'').request('/v1/plans/proposals',{method:'POST',headers:{'content-type':'application/json','Idempotency-Key':KEY,'X-Expected-Actor-Id':ACTOR},body:JSON.stringify({operationKey:KEY,engagementId:ENG,assessmentRunId:RUN})});
- expect(second.status).toBe(200);expect(await second.json()).toEqual(saved);
- expect(fetchImpl).toHaveBeenCalledTimes(1);expect(calls.filter(c=>c.name==='start')).toHaveLength(1);expect(calls.filter(c=>c.name==='finish')).toHaveLength(1);
+it('recovers the exact recorded output without a second invocation, even when runtime configuration is unavailable', async () => {
+  const first = await request();
+  expect(first.status).toBe(200);
+  const saved = await first.json();
+  const second = await app(UserRole.OWNER, '').request('/v1/plans/proposals', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Idempotency-Key': KEY,
+      'X-Expected-Actor-Id': ACTOR,
+    },
+    body: JSON.stringify({ operationKey: KEY, engagementId: ENG, assessmentRunId: RUN }),
+  });
+  expect(second.status).toBe(200);
+  expect(await second.json()).toEqual(saved);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(calls.filter((c) => c.name === 'start')).toHaveLength(1);
+  expect(calls.filter((c) => c.name === 'finish')).toHaveLength(1);
 });
-it('refuses uncertain legacy output without dispatching again',async()=>{
- db.onRpc('recover_sudhaar_output',()=>({error:'output_unrecoverable'}));
- const res=await request();expect(res.status).toBe(409);expect(await res.json()).toMatchObject({error:{code:'planning_output_uncertain'}});
- expect(fetchImpl).not.toHaveBeenCalled();expect(calls.some(c=>c.name==='start')).toBe(false);
+it('refuses uncertain legacy output without dispatching again', async () => {
+  db.onRpc('recover_sudhaar_output', () => ({ error: 'output_unrecoverable' }));
+  const res = await request();
+  expect(res.status).toBe(409);
+  expect(await res.json()).toMatchObject({ error: { code: 'planning_output_uncertain' } });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(calls.some((c) => c.name === 'start')).toBe(false);
 });

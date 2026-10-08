@@ -49,6 +49,9 @@ async function buildApp(
     '/v1/plans/proposals/extra',
     '/v1/assessment/jobs-extra',
     '/v1/assessment/jobs/extra',
+    '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel',
+    '/v1/assessment/jobs/not-a-uuid/cancel',
+    '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel-extra',
   ]) {
     app.post(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
     app.put(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
@@ -195,6 +198,9 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     ['POST', '/v1/plans/proposals-extra'],
     ['POST', '/v1/plans/proposals/extra'],
     ['PUT', '/v1/plans/proposals'],
+    ['PUT', '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel'],
+    ['POST', '/v1/assessment/jobs/not-a-uuid/cancel'],
+    ['POST', '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel-extra'],
   ])('keeps generic idempotency on %s %s', async (method, path) => {
     const double = createSupabaseDouble({});
     double.state.failRpc = 'claim_request';
@@ -213,6 +219,19 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as ErrorBody).error.code).toBe('idempotency_required');
   });
+
+  it.each([undefined, 'short'])(
+    'still validates the key before durable cancellation with key %s',
+    async (key) => {
+      const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+      const response = await app.request(
+        '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel',
+        { method: 'POST', headers: key ? { 'idempotency-key': key } : {} },
+      );
+      expect(response.status).toBe(400);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    },
+  );
 
   // Even under bypass, FR-8.3 stays on. The bypass relaxes *authentication*;
   // it is not a general "make the product easier to call" switch.
