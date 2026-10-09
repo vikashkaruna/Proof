@@ -148,18 +148,18 @@ variable "deploy_services" {
   type        = bool
 }
 variable "migration_account_id" {
-  type = string
+  type    = string
   default = ""
   validation {
-    condition = var.migration_account_id == "" || (length(var.migration_account_id) <= 30 && can(regex("^axiom-proof-preprod-[a-z0-9-]+$", var.migration_account_id)))
+    condition     = var.migration_account_id == "" || (length(var.migration_account_id) <= 30 && can(regex("^axiom-proof-preprod-[a-z0-9-]+$", var.migration_account_id)))
     error_message = "Dedicated migration identity must follow the preprod convention within30 characters."
   }
 }
 variable "bootstrap_secrets" {
-  type = map(string)
+  type    = map(string)
   default = {}
   validation {
-    condition = length(var.bootstrap_secrets) == 0 || (toset(keys(var.bootstrap_secrets)) == toset(["admin_db_url", "auth_password", "rest_password"]) && length(toset(values(var.bootstrap_secrets))) == 3 && alltrue([for secret in values(var.bootstrap_secrets) : can(regex("^axiom-proof-preprod-[a-z0-9-]+$",secret))]))
+    condition     = length(var.bootstrap_secrets) == 0 || (toset(keys(var.bootstrap_secrets)) == toset(["admin_db_url", "auth_password", "rest_password"]) && length(toset(values(var.bootstrap_secrets))) == 3 && alltrue([for secret in values(var.bootstrap_secrets) : can(regex("^axiom-proof-preprod-[a-z0-9-]+$", secret))]))
     error_message = "Three distinct exact preprod bootstrap secret IDs required."
   }
 }

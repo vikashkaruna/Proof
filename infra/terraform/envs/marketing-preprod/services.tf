@@ -101,16 +101,16 @@ module "bff" {
   network               = google_compute_network.marketing.id
   subnetwork            = google_compute_subnetwork.run.id
   env = merge(lookup(var.service_env, "bff", {}), local.common_env, {
-    BFF_PORT                  = tostring(var.service_settings["bff"].port)
-    GCP_PROJECT_ID             = var.project_id
-    GCP_REGION                 = var.region
-    AXIOM_IDLE_PROJECT_ID       = var.project_id
-    AXIOM_IDLE_CONTROLLER_URL   = local.lifecycle_enabled ? google_cloud_run_v2_service.lifecycle[0].uri : ""
+    BFF_PORT                       = tostring(var.service_settings["bff"].port)
+    GCP_PROJECT_ID                 = var.project_id
+    GCP_REGION                     = var.region
+    AXIOM_IDLE_PROJECT_ID          = var.project_id
+    AXIOM_IDLE_CONTROLLER_URL      = local.lifecycle_enabled ? google_cloud_run_v2_service.lifecycle[0].uri : ""
     AXIOM_IDLE_CONTROLLER_AUDIENCE = local.lifecycle_enabled ? google_cloud_run_v2_service.lifecycle[0].uri : ""
-    SUPABASE_URL              = (var.deploy_services ? module.gateway[0].uri : "")
-    AXIOM_AUTH_MODE           = "strict"
-    AXIOM_PROOF_MARKETING_URL = var.firebase_origin
-    AXIOM_REGION              = "ap-south-1"
+    SUPABASE_URL                   = (var.deploy_services ? module.gateway[0].uri : "")
+    AXIOM_AUTH_MODE                = "strict"
+    AXIOM_PROOF_MARKETING_URL      = var.firebase_origin
+    AXIOM_REGION                   = "ap-south-1"
   })
   secrets    = lookup(var.service_secrets, "bff", {})
   depends_on = [google_project_service.apis, terraform_data.configuration, google_secret_manager_secret.runtime, google_cloud_run_v2_service_iam_member.lifecycle]

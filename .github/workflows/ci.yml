@@ -343,11 +343,11 @@ jobs:
       - run: ./scripts/check-tfvars-coverage.sh
       - run: python3 scripts/check-cloudrun-auth-wiring.py
       - run: python3 scripts/check-cloudrun-iam.py
-      - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - run: python3 -m pip install pytest==8.4.2
+      - run: python3 -m pip install pytest==8.4.2 PyYAML==6.0.3
+      - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
       - name: Marketing profile and environment authority regressions
         run: python3 -m pytest -q tests/deployment services/marketing-lifecycle/tests
 

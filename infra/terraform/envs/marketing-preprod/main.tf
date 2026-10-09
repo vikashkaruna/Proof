@@ -66,7 +66,7 @@ resource "terraform_data" "configuration" {
   input = var.release_sha
   lifecycle {
     precondition {
-      condition = !var.deploy_services || (var.lifecycle_image != "" && startswith(var.lifecycle_image, "${var.region}-docker.pkg.dev/${var.project_id}/"))
+      condition     = !var.deploy_services || (var.lifecycle_image != "" && startswith(var.lifecycle_image, "${var.region}-docker.pkg.dev/${var.project_id}/"))
       error_message = "Marketing backend requires its reviewed private lifecycle controller image; gate-less service deployment is refused."
     }
     precondition {
@@ -129,17 +129,17 @@ resource "google_service_account" "runtime" {
   depends_on   = [google_project_service.apis]
 }
 resource "google_service_account" "migration" {
-  count = var.migration_account_id != "" ? 1 : 0
-  project = var.project_id
-  account_id = var.migration_account_id
+  count        = var.migration_account_id != "" ? 1 : 0
+  project      = var.project_id
+  account_id   = var.migration_account_id
   display_name = var.migration_account_id
-  depends_on = [google_project_service.apis]
+  depends_on   = [google_project_service.apis]
 }
 resource "google_secret_manager_secret_iam_member" "migration" {
-  for_each = var.migration_account_id != "" ? var.bootstrap_secrets : {}
-  project = var.project_id
-  secret_id = each.value
-  role = "roles/secretmanager.secretAccessor"
-  member = "serviceAccount:${google_service_account.migration[0].email}"
+  for_each   = var.migration_account_id != "" ? var.bootstrap_secrets : {}
+  project    = var.project_id
+  secret_id  = each.value
+  role       = "roles/secretmanager.secretAccessor"
+  member     = "serviceAccount:${google_service_account.migration[0].email}"
   depends_on = [google_secret_manager_secret.runtime]
 }
