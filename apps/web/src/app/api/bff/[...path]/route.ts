@@ -48,9 +48,11 @@ async function forward(request: NextRequest, context: RouteContext) {
             target.pathname,
           )
         ? 4096
-        : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
-          ? 64 * 1024
-          : null;
+        : /^\/v1\/plans\/owned-synthetic(?:\/(?:cancel|outcome))?$/.test(target.pathname)
+          ? 16384
+          : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
+            ? 64 * 1024
+            : null;
     try {
       bodyBytes =
         bodyLimit !== null
