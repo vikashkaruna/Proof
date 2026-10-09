@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import type { RealtimeService } from './realtime.js';
 import { serviceAuthHeaders } from './service-auth.js';
 import { retainedStageSource } from './saakshi-staging-port.js';
+import { retainedSanketInputSchema } from './retained-sanket-source.js';
 
 /** Capability, name/workflow, UUID and owned-engagement checks belong to the caller.
  * The configured start RPC checks live authority again before peer dispatch.
@@ -38,7 +39,7 @@ export interface GenericAgentInvocationDeps {
   readonly prepareDispatch?: (
     context: GenericAgentPreparationContext,
   ) => Promise<{ readonly kind: 'public_source' }>;
-  readonly validateOutput?: (output: unknown) => void;
+  readonly validateOutput?: (output: unknown) => void | Promise<void>;
   /** Only the reviewed Vibhaag route may provide this retained-source transport. */
   readonly reviewedWorkflow?: {
     readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
@@ -46,6 +47,11 @@ export interface GenericAgentInvocationDeps {
   };
   /** Dedicated Saakshi-only persisted human evidence transport, never a generic storage grant. */
   readonly stagedEvidence?: {
+    readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
+    readonly settleSuccess: NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>;
+  };
+  /** Dedicated Sanket-only retained human capture; never caller source authority. */
+  readonly retainedSanket?: {
     readonly start: (context: Omit<GenericAgentPreparationContext, 'runId'>) => Promise<unknown>;
     readonly settleSuccess: NonNullable<GenericAgentInvocationDeps['settleSudhaarSuccess']>;
   };
@@ -128,6 +134,7 @@ export async function invokeGenericAgent(
       prepareDispatch ||
       deps.sudhaarDispatch ||
       deps.settleSudhaarSuccess ||
+      deps.retainedSanket ||
       !deps.validateOutput)
   )
     return {
@@ -153,6 +160,7 @@ export async function invokeGenericAgent(
         deps.reviewedWorkflow ||
         deps.sudhaarDispatch ||
         deps.settleSudhaarSuccess ||
+        deps.retainedSanket ||
         !deps.validateOutput))
   )
     return {
@@ -161,6 +169,31 @@ export async function invokeGenericAgent(
         error: {
           code: 'staged_evidence_transport_refused',
           message: 'Evidence staging was refused.',
+        },
+      },
+    };
+  const retained = retainedSanketInputSchema.safeParse(input);
+  if (
+    (agent === 'sanket' && !deps.retainedSanket) ||
+    (deps.retainedSanket &&
+      (agent !== 'sanket' ||
+        !retained.success ||
+        retained.data.tenant_id !== tenantId ||
+        retained.data.engagement_id !== engagementId ||
+        retained.data.correlation_id !== correlationId ||
+        prepareDispatch ||
+        deps.reviewedWorkflow ||
+        deps.stagedEvidence ||
+        deps.sudhaarDispatch ||
+        deps.settleSudhaarSuccess ||
+        !deps.validateOutput))
+  )
+    return {
+      status: 403,
+      body: {
+        error: {
+          code: 'retained_sanket_transport_refused',
+          message: 'Retained public observation transport was refused.',
         },
       },
     };
@@ -174,9 +207,11 @@ export async function invokeGenericAgent(
   try {
     writer = (deps.writerFactory ?? createHumanActionWriter)();
     const { data, error } =
-      (deps.reviewedWorkflow ?? deps.stagedEvidence)
+      (deps.reviewedWorkflow ?? deps.stagedEvidence ?? deps.retainedSanket)
         ? {
-            data: await (deps.reviewedWorkflow ?? deps.stagedEvidence)!.start(
+            data: await (deps.reviewedWorkflow ??
+              deps.stagedEvidence ??
+              deps.retainedSanket)!.start(
               Object.freeze({
                 agent,
                 tenantId,
@@ -322,6 +357,10 @@ export async function invokeGenericAgent(
       path = '/staged-evidence/agents/saakshi/invoke';
       transportBody = { tenant_id: tenantId, run_id: runId, operation_key: correlationId };
     }
+    if (deps.retainedSanket) {
+      path = '/retained-public-sources/agents/sanket/invoke';
+      transportBody = { tenant_id: tenantId, run_id: runId, operation_key: correlationId };
+    }
     const res = await (deps.fetchImpl ?? fetch)(`${runtimeUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
@@ -348,7 +387,7 @@ export async function invokeGenericAgent(
       throw new Error('runtime_result_refused');
     if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
       throw new Error('runtime_accounting_refused');
-    if (parsedResult.status === 'succeeded') deps.validateOutput?.(parsedResult.output);
+    if (parsedResult.status === 'succeeded') await deps.validateOutput?.(parsedResult.output);
     result = parsedResult;
     if (result.status === 'failed') failureCode = 'agent_reported_failure';
   } catch {
@@ -366,6 +405,7 @@ export async function invokeGenericAgent(
       throw new Error('planning_settlement_refused');
     const successCapture =
       deps.stagedEvidence?.settleSuccess ??
+      deps.retainedSanket?.settleSuccess ??
       deps.reviewedWorkflow?.settleSuccess ??
       deps.settleSudhaarSuccess;
     const { data: recorded, error } =
