@@ -297,6 +297,50 @@ class LedgerClient:
 
         return await asyncio.to_thread(claim)
 
+    async def load_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str
+    ) -> object:
+        """Named metadata transport only; no temporary ciphertext or storage credential."""
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Evidence source transport configuration was refused")
+        client = self._client
+        return await asyncio.to_thread(
+            lambda: (
+                client.rpc(
+                    "read_saakshi119_dispatch",
+                    {
+                        "t": tenant_id,
+                        "runid": run_id,
+                        "k": operation_key,
+                    },
+                )
+                .execute()
+                .data
+            )
+        )
+
+    async def claim_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str, request_hash: str
+    ) -> object:
+        if self._in_memory or self._client is None:
+            raise RuntimeError("Evidence source transport configuration was refused")
+        client = self._client
+        return await asyncio.to_thread(
+            lambda: (
+                client.rpc(
+                    "claim_saakshi119_dispatch",
+                    {
+                        "t": tenant_id,
+                        "runid": run_id,
+                        "k": operation_key,
+                        "ih": request_hash,
+                    },
+                )
+                .execute()
+                .data
+            )
+        )
+
     async def append(self, input: AppendInput) -> AppendResult:
         # This client holds only the agent ledger identity. A human-labelled
         # event must be written by the BFF's human writer, so refuse it here
@@ -517,6 +561,16 @@ def new_correlation_id() -> str:
 
 class AppendOnlyLedgerClient(LedgerClient):
     """Audit append capability with no retained reader or domain access."""
+
+    async def load_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str
+    ) -> object:
+        raise PermissionError("Evidence source read capability is unavailable")
+
+    async def claim_saakshi_dispatch(
+        self, *, tenant_id: str, run_id: str, operation_key: str, request_hash: str
+    ) -> object:
+        raise PermissionError("Evidence source claim capability is unavailable")
 
     @property
     def _reader(self) -> Client:

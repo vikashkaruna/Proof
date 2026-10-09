@@ -55,6 +55,8 @@ from .reviewed_workflow_dispatch import (
     ReviewedWorkflowInvokeRequest,
     prepare_reviewed_workflow_input,
 )
+from .saakshi_dispatch import EvidenceAlreadyClaimedError, EvidenceInvokeRequest
+from .saakshi_stage_transport import InternalEvidenceStageTransport, invoke_staged_evidence
 from .sudhaar_source import SignedPlanningRequest, verify_planning_request
 
 AGENTS: dict[AgentName, Any] = {
@@ -95,6 +97,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for name, AgentCls in AGENTS.items()
     }
     app.state.reviewed_workflow_agent = VibhaagReviewDraftAgent(ledger=ledger)
+    app.state.staged_evidence_transport = None
+    if settings.saakshi_stage_enabled:
+        try:
+            app.state.staged_evidence_transport = InternalEvidenceStageTransport(
+                stage_url=settings.saakshi_stage_url or "",
+                peer_secret=settings.saakshi_stage_peer_token or "",
+                source_secret=settings.saakshi_stage_source_key or "",
+                other_secrets=(settings.internal_token, settings.planning_source_signing_key),
+            )
+        except ValueError:
+            log.warning("staged_evidence.configuration_unavailable")
 
     # W6 — the continuous-compliance scheduler, off unless the environment
     # turns it on: a scheduler that fires without reviewed configuration is
@@ -295,6 +308,8 @@ async def invoke_agent(agent_name: str, request: InvokeRequest, req: Request) ->
 
     # The legacy generic invocation has no report source, review, or publication
     # boundary. Board reports enter through the BFF's persisted workflow only.
+    if agent_enum is AgentName.SAAKSHI:
+        raise HTTPException(status_code=403, detail="staged_evidence_workflow_required")
     if agent_enum is AgentName.PRATIVEDAN:
         raise HTTPException(status_code=403, detail="board_report_workflow_required")
 
@@ -429,6 +444,27 @@ async def invoke_public_source_agent(
         error=result.error,
         output=result.output,
         ledger_entry_ids=result.ledger_entry_ids,
+    )
+
+
+@app.post("/staged-evidence/agents/saakshi/invoke", response_model=InvokeResponse)
+async def invoke_staged_evidence_agent(request: EvidenceInvokeRequest, req: Request) -> InvokeResponse:
+    require_internal_caller(req)
+    transport = getattr(app.state, "staged_evidence_transport", None)
+    if transport is None:
+        raise HTTPException(status_code=503, detail="staged_evidence_unavailable")
+    started = time.monotonic()
+    try:
+        result = await invoke_staged_evidence(app.state.ledger, request, transport)
+    except EvidenceAlreadyClaimedError:
+        raise HTTPException(status_code=409, detail="staged_evidence_already_claimed") from None
+    except Exception:
+        raise HTTPException(status_code=503, detail="staged_evidence_unconfirmed") from None
+    return InvokeResponse(
+        agent="saakshi", correlation_id=result.correlation_id, status=result.status,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        input_tokens=result.input_tokens, output_tokens=result.output_tokens, cost_usd=result.cost_usd,
+        error=result.error, output=result.output, ledger_entry_ids=result.ledger_entry_ids,
     )
 
 
