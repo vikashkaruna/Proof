@@ -72,3 +72,5 @@ UTC - Revision/PR - title`, then bullets: what changed, evidence (SHAs, run
 Teardown scripts must not remove local database containers or volumes by
 default; full removal only through an explicit flag. Say so in
 `OPS-00-platform-ops.md` whenever you touch teardown guidance.
+
+Session chronology: locate the insertion marker as an exact standalone line, never by substring (instructions may quote it). Keep timed entries newest first within each day, with explicit UTC. Preserve historical date-only entries without inventing a time. Run the chronology checker after every prepend.

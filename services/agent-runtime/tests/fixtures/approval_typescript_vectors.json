@@ -8,10 +8,7 @@
       "token": {
         "spec": {
           "planId": "owned-plan-test",
-          "actionIds": [
-            "b",
-            "a"
-          ],
+          "actionIds": ["b", "a"],
           "approverId": "test-approver",
           "mode": "individual",
           "concurrency": 1,
@@ -27,10 +24,7 @@
       "token": {
         "spec": {
           "planId": "owned-plan-test",
-          "actionIds": [
-            "b",
-            "a"
-          ],
+          "actionIds": ["b", "a"],
           "approverId": "test-approver",
           "mode": "individual",
           "concurrency": 1,
@@ -47,10 +41,7 @@
       "token": {
         "spec": {
           "planId": "owned-plan-test",
-          "actionIds": [
-            "b",
-            "a"
-          ],
+          "actionIds": ["b", "a"],
           "approverId": "test-approver",
           "mode": "individual",
           "concurrency": 1,
@@ -67,10 +58,7 @@
       "token": {
         "spec": {
           "planId": "owned-plan-test",
-          "actionIds": [
-            "b",
-            "a"
-          ],
+          "actionIds": ["b", "a"],
           "approverId": "test-approver",
           "mode": "individual",
           "concurrency": 1,
@@ -88,10 +76,7 @@
       "token": {
         "spec": {
           "planId": "owned-plan-test",
-          "actionIds": [
-            "b",
-            "a"
-          ],
+          "actionIds": ["b", "a"],
           "approverId": "test-approver",
           "mode": "individual",
           "concurrency": 1,

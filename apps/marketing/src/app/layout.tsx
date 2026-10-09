@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { BRAND } from '@axiom/config';
+import { marketingOrigin } from '@/lib/public-urls';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(`https://${BRAND.primaryDomain}`),
+  metadataBase: new URL(marketingOrigin()),
   title: {
     template: `%s · ${BRAND.name}`,
     default: `${BRAND.name} — ${BRAND.tagline}`,
@@ -32,7 +33,7 @@ export const metadata: Metadata = {
     title: BRAND.name,
     description: 'Agents do the work. You approve. The proof is automatic.',
     locale: 'en_IN',
-    url: `https://${BRAND.primaryDomain}`,
+    url: marketingOrigin(),
   },
   twitter: {
     card: 'summary_large_image',

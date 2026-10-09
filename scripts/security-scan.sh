@@ -29,7 +29,7 @@ exclusions='*/tests/*,*/.venv/*,*/node_modules/*,*/.claude/*,*/.kilo/*,*/.codex/
 
 echo "security-scan: bandit (services, medium+)"
 "${bandit[@]}" -q -r services/agent-runtime/src services/model-gateway/src \
-  services/temporal-workers/src --ini .bandit -x "$exclusions" -ll -ii
+  services/temporal-workers/src services/marketing-lifecycle services/marketing-db-gateway --ini .bandit -x "$exclusions" -ll -ii
 echo "security-scan: bandit (repository, high)"
 "${bandit[@]}" -q -r . --ini .bandit -x "$exclusions" -lll -ii
 

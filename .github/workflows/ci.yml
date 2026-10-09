@@ -344,6 +344,13 @@ jobs:
       - run: python3 scripts/check-cloudrun-auth-wiring.py
       - run: python3 scripts/check-cloudrun-iam.py
       - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install pytest==8.4.2
+      - name: Marketing profile and environment authority regressions
+        run: python3 -m pytest -q tests/deployment services/marketing-lifecycle/tests
+
       # Every surface that runs the BFF must be able to carry BOTH halves of
       # the MFA key ring. Rotation landed with the retiring list wired into
       # the Compose files only, so Cloud Run and Helm could start the BFF with
@@ -399,6 +406,9 @@ jobs:
 
       - name: Offline Terraform runtime IAM and MFA rotation tests
         run: terraform -chdir=infra/terraform/envs/preprod test -no-color
+
+      - name: Offline marketing acceptance profile tests
+        run: terraform -chdir=infra/terraform/envs/marketing-preprod test -no-color
 
       - name: Offline private issuer and runner boundary tests
         run: |

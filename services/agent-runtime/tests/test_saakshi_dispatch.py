@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 from test_saakshi_staging import OPERATION, TENANT, receipt, source
 
 from axiom.agents.saakshi_stage_agent import SaakshiStageAgent
@@ -151,7 +152,7 @@ async def test_foreign_source_capability_never_runs_storage():
 async def test_invalid_retained_receipt_never_claims(value):
     ledger = transport()
     ledger.load_saakshi_dispatch.return_value["requested_receipt"] = value
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="requested_receipt"):
         await prepare_evidence_dispatch(ledger, REQUEST, now_ms=1000)
     ledger.claim_saakshi_dispatch.assert_not_called()
 

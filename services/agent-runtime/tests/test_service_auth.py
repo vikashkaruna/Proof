@@ -7,6 +7,7 @@ import json
 
 import httpx
 import pytest
+
 from axiom import service_auth as sa
 from axiom.config import Settings
 from axiom.model_gateway import ModelGateway, ModelRequest

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { cookies } from 'next/headers';
+import { readGapScanAccess } from '@/lib/gap-scan-access';
 import { getGapScanReport, SAMPLE_GAP_SCAN_RECORD } from '@/lib/gap-scan-store';
 import {
   Card,
@@ -32,7 +32,7 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
     // development, preprod, staging and any container without NODE_ENV, which
     // meant three deployed environments served any prospect's report to any
     // visitor who had an ID.
-    const access = (await cookies()).get('gap_scan_access')?.value;
+    const access = await readGapScanAccess();
     scan = await getGapScanReport(id, access);
   }
 

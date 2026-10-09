@@ -1,0 +1,47 @@
+# Build from a verified official archive; no production credentials in context.
+ARG GO_BUILD_IMAGE
+FROM --platform=$BUILDPLATFORM ${GO_BUILD_IMAGE} AS dependencies
+WORKDIR /src
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=2 GOFLAGS=-p=2
+COPY upstream/ /src/
+RUN go mod edit -require=google.golang.org/grpc@v1.83.2 && go mod tidy && go mod download && go mod verify && go mod vendor
+COPY review/ /review/
+RUN cp /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/*_test.go /src/vendor/github.com/jackc/pgproto3/v2/
+COPY review/pgproto3_regression_test.go /src/vendor/github.com/jackc/pgproto3/v2/axiom_security_test.go
+
+# Deliberately fails on the original source; retain its actual panic as proof.
+FROM dependencies AS original-regression
+RUN go test -mod=vendor -run '^TestAxiomNegativeLengthsReturnError$' github.com/jackc/pgproto3/v2
+
+FROM dependencies AS patched-tests
+RUN go build -mod=vendor -o /tmp/apply-patch /review/apply-patch.go && /tmp/apply-patch vendor/github.com/jackc/pgproto3/v2/data_row.go /review/pgproto3-data-row.patch > /review/patch-application.txt
+RUN go test -mod=vendor github.com/jackc/pgproto3/v2
+RUN go test -mod=vendor github.com/jackc/pgproto3/v2 -run '^$' -fuzz FuzzAxiomDataRowNeverPanics -fuzztime=10s -parallel=2
+
+FROM patched-tests AS build
+ARG TARGETARCH
+RUN mkdir -p /out/provenance /out/tmp && chmod 1777 /out/tmp && \
+    GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor -trimpath -buildvcs=false \
+    -ldflags '-X github.com/supabase/auth/internal/utilities.Version=v2.197.0+axiom-pgproto3-fix' -o /out/auth . && \
+    go version -m /out/auth > /out/provenance/compiled-modules.txt && \
+    sha256sum /out/auth > /out/provenance/binary-sha256.txt && \
+    cp /review/source.json /review/source-snapshot.json /review/pgproto3-data-row.patch /review/patch-application.txt /out/provenance/ && \
+    cp /src/go.mod /out/provenance/patched-go-mod.txt && cp /src/go.sum /out/provenance/patched-go-sum.txt && \
+    cp /src/vendor/github.com/jackc/pgproto3/v2/data_row.go /out/provenance/patched-data-row.go && \
+    cp /src/vendor/github.com/jackc/pgproto3/v2/LICENSE /out/provenance/pgproto3-LICENSE.txt
+
+FROM scratch AS runtime
+ARG SOURCE_SNAPSHOT_SHA256
+LABEL org.opencontainers.image.source="https://github.com/supabase/auth" \
+      org.opencontainers.image.revision="4eee58f296d9698a1c2c0ae14d7a0b379c7622d3" \
+      org.opencontainers.image.version="v2.197.0+axiom-pgproto3-fix" \
+      org.axiom.source-snapshot="sha256:${SOURCE_SNAPSHOT_SHA256}"
+COPY --from=build /out/auth /usr/local/bin/auth
+COPY --from=build /out/auth /usr/local/bin/gotrue
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /src/migrations /usr/local/etc/auth/migrations/
+COPY --from=build /out/provenance/ /usr/local/share/axiom-auth-build/
+COPY --from=build /out/tmp/ /tmp/
+ENV GOTRUE_DB_MIGRATIONS_PATH=/usr/local/etc/auth/migrations
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/auth"]

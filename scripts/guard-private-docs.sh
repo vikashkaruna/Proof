@@ -54,7 +54,8 @@ pat='(sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|
 hits="$(added 'docs/*' '*.md' | grep -E '^\+[^+]' | grep -iE "$pat" || true)"
 if [ -n "$hits" ]; then
   say "possible secret in added documentation lines (values redacted):"
-  echo "$hits" | sed -E 's/([:=][[:space:]]*["'"'"']?[A-Za-z0-9]{4})[A-Za-z0-9\/+_-]+/\1<redacted>/' | cut -c1-110 | sed 's/^/    /' >&2
+  # Never echo matching lines: standalone tokens need not have an assignment
+  # delimiter, so assignment-only redaction can disclose the rejected value.
 fi
 
 # High-confidence credentials in any added line outside tests and lockfiles.
@@ -62,7 +63,7 @@ hi='(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|-----BEGIN [
 code_hits="$(added ':(exclude)tests/*' ':(exclude)*.lock' ':(exclude)pnpm-lock.yaml' ':(exclude)*/tests/*' ':(exclude)*.test.*' ':(exclude)*.spec.*' | grep -E '^\+[^+]' | grep -E "$hi" || true)"
 if [ -n "$code_hits" ]; then
   say "possible credential in added lines (not in tests or lockfiles):"
-  echo "$code_hits" | sed -E 's/(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1<redacted>/g' | cut -c1-110 | sed 's/^/    /' >&2
+  # The rejection is sufficient; raw source lines can contain other token types.
 fi
 
 [ "$fail" -eq 0 ] || { echo "Move confidential material to docs/private-docs/ (git-ignored). See docs/README.md." >&2; exit 1; }

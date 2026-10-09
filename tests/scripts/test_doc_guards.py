@@ -65,6 +65,18 @@ class CommitGuardTests(unittest.TestCase):
         self.stage('.env.example', 'A=\n')
         self.assertEqual(self.guard().returncode, 0, self.guard().stderr)
 
+    def test_standalone_tokens_are_rejected_without_disclosing_values(self):
+        tokens = ('AKIA' + 'X' * 16, 'ghp_' + 'x' * 36,
+                  'eyJ' + 'a' * 24 + '.' + 'b' * 24 + '.' + 'c' * 24)
+        for relative in ('notes.md', 'src/example.ts'):
+            for token in tokens:
+                with self.subTest(relative=relative, token_type=token[:4]):
+                    self.setUp()
+                    self.stage(relative, 'rejected credential: ' + token + '\n')
+                    result = self.guard()
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn(token, result.stdout + result.stderr)
+
 
 class ClaudeHookTests(unittest.TestCase):
     def run_hook(self, tool, **tool_input):

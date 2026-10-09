@@ -125,3 +125,6 @@ ds-bundle/
 # Claude Code machine-local state
 .claude/settings.local.json
 .claude/worktrees/
+
+# Release-generated public library seed (source hashes are in the image manifest).
+/infra/supabase/marketing-library.json

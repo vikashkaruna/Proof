@@ -55,7 +55,7 @@ def test_actual_route_forwards_only_retained_ids(monkeypatch):
     assert invoke.call_args.args[1].model_dump() == REQUEST
 
 
-@pytest.mark.parametrize("failure,status,detail", [(EvidenceAlreadyClaimedError("private fixture"),409,"staged_evidence_already_claimed"),(ValueError("private provider fixture"),503,"staged_evidence_unconfirmed")])
+@pytest.mark.parametrize(("failure", "status", "detail"), [(EvidenceAlreadyClaimedError("private fixture"),409,"staged_evidence_already_claimed"),(ValueError("private provider fixture"),503,"staged_evidence_unconfirmed")])
 def test_claimed_or_uncertain_dispatch_never_exposes_cause_or_retries(monkeypatch, failure, status, detail):
     client, invoke = mount(monkeypatch, failure)
     response = client.post(ROUTE, json=REQUEST, headers={"X-Internal-Token": TOKEN})
@@ -81,7 +81,7 @@ def test_stage_peer_and_source_keys_are_independent_from_other_server_credential
             InternalEvidenceStageTransport(stage_url="http://localhost/internal/staged-evidence/stage", peer_secret="p" * 48, source_secret="s" * 48, other_secrets=(key,))
 
 
-@pytest.mark.parametrize("flag,enabled", [("true", True), ("false", False), ("1", False), ("TRUE", False), ("yes", False)])
+@pytest.mark.parametrize(("flag", "enabled"), [("true", True), ("false", False), ("1", False), ("TRUE", False), ("yes", False)])
 def test_runtime_enablement_matches_explicit_bff_configuration(monkeypatch, flag, enabled):
     from axiom.config import Settings
     monkeypatch.setenv("AXIOM_SAAKSHI_STAGE_ENABLED", flag)

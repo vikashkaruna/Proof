@@ -8,6 +8,7 @@ Exit 1 lists every violation. Subtrees that carry third-party or generated names
 from __future__ import annotations
 
 import re
+from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -30,6 +31,46 @@ SESSION_FILE = ROOT / "docs/private-docs/status/STATUS-session-log.md"
 MARKER = "<!-- NEWEST SESSION ENTRIES GO BELOW THIS LINE -->"
 
 
+def session_log_problems(text: str) -> list[str]:
+    """Validate the standalone insertion marker and recorded UTC minute ordering.
+
+    Historical entries with a date only keep their original text; minute ordering
+    applies to timed entries on the same day. Instructions may quote the marker.
+    """
+    lines = text.splitlines()
+    markers = [i for i, line in enumerate(lines) if line.strip() == MARKER]
+    if len(markers) != 1:
+        return ["STATUS-session-log.md: expected exactly one standalone newest-first marker"]
+    problems: list[str] = []
+    previous_day = None
+    previous_minute = None
+    pattern = re.compile(r"^### (\d{4}-\d{2}-\d{2})(?:[ \t]+(\d{2}:\d{2})(?:[ \t]+(UTC))?)?(?:[ \t]|$)")
+    for line in lines[markers[0] + 1:]:
+        match = pattern.match(line)
+        if match is None:
+            continue
+        day, minute, zone = match.groups()
+        try:
+            datetime.strptime(day, "%Y-%m-%d")
+            if minute:
+                datetime.strptime(minute, "%H:%M")
+        except ValueError:
+            problems.append("STATUS-session-log.md: invalid recorded session date or time")
+            continue
+        if minute and zone != "UTC":
+            problems.append("STATUS-session-log.md: timed session entries must explicitly use UTC")
+        if previous_day is not None and day > previous_day:
+            problems.append("STATUS-session-log.md: session entries are not in reverse chronological order")
+        if day == previous_day and minute and previous_minute and minute > previous_minute:
+            problems.append("STATUS-session-log.md: timed sessions on the same day are not newest first")
+        if day != previous_day:
+            previous_minute = None
+        previous_day = day
+        if minute:
+            previous_minute = minute
+    return problems
+
+
 def main() -> int:
     problems: list[str] = []
     for zone, pattern in ZONES.items():
@@ -44,13 +85,7 @@ def main() -> int:
             if path.name.startswith(".") or rx.fullmatch(path.name) is None:
                 problems.append(f"{rel}: name does not match the {zone} convention")
     if SESSION_FILE.is_file():
-        head = SESSION_FILE.read_text(encoding="utf-8")
-        if MARKER not in head:
-            problems.append(f"{SESSION_FILE.relative_to(ROOT)}: missing newest-first marker {MARKER}")
-        else:
-            dates = re.findall(r"^### (\d{4}-\d{2}-\d{2})", head.split(MARKER, 1)[1], re.M)
-            if dates != sorted(dates, reverse=True):
-                problems.append("STATUS-session-log.md: session entries are not in reverse chronological order")
+        problems.extend(session_log_problems(SESSION_FILE.read_text(encoding="utf-8")))
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

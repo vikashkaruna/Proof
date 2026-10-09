@@ -1,0 +1,3 @@
+# Unified-diff context prefixes are data, including a space before original Go
+# tabs and blank context lines. Preserve the reviewed, SHA-pinned patch bytes.
+infra/docker/auth-security/pgproto3-data-row.patch -whitespace

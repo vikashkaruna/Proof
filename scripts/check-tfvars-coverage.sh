@@ -20,6 +20,10 @@ cd "$(dirname "$0")/.."
 status=0
 for tf_dir in infra/terraform/envs/*/; do
   env_name="$(basename "$tf_dir")"
+  if [ "$env_name" = marketing-preprod ]; then
+    python3 scripts/marketing-preprod-config.py --check-coverage || status=1
+    continue
+  fi
   # Mirror sync-env.sh: the `prod` Terraform directory is configured by
   # .env.production.
   [ "$env_name" = "prod" ] && env_name="production"
