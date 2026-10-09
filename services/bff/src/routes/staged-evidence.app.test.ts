@@ -1,3 +1,4 @@
+import type * as ActualSupabase from '@axiom/supabase';
 import { beforeEach, it, expect, vi } from 'vitest';
 import { UserRole } from '@axiom/types';
 import type { Variables } from '../types.js';
@@ -62,7 +63,7 @@ vi.mock('../services/mfa.js', () => ({
 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ rpc: state.cacheRpc }) }));
 vi.mock('@axiom/supabase', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@axiom/supabase')>()),
+  ...(await importOriginal<typeof ActualSupabase>()),
   createHumanActionWriter: () => ({
     rpc: (...args: unknown[]) => {
       const pending = state.domainRpc(...args) as Promise<unknown> & {

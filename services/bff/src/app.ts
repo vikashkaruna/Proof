@@ -164,6 +164,7 @@ export function createApp(
   app.route(
     '/v1',
     v1Routes({
+      licensePublicKeyPem: options.licensePublicKeyPem,
       approvalEngine,
       killSwitch,
       ledger,

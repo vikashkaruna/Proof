@@ -128,3 +128,9 @@ ds-bundle/
 
 # Release-generated public library seed (source hashes are in the image manifest).
 /infra/supabase/marketing-library.json
+
+# CI security reports may contain source snippets; upload only through scan jobs.
+/semgrep-community.json
+/semgrep-community.sarif
+/semgrep-managed.json
+/semgrep-managed.sarif

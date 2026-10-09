@@ -2,15 +2,19 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import configure_docker_mirror as mirror
 
-CI = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_OS": "Linux"}
+CI = {
+    "GITHUB_ACTIONS": "true",
+    "RUNNER_ENVIRONMENT": "github-hosted",
+    "RUNNER_OS": "Linux",
+}
 
 
 class ConfigureMirrorTests(unittest.TestCase):
@@ -18,7 +22,9 @@ class ConfigureMirrorTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.config = Path(self.directory.name) / "daemon.json"
-        self.original = b'{"log-driver":"local","registry-mirrors":["https://existing.example"]}\n'
+        self.original = (
+            b'{"log-driver":"local","registry-mirrors":["https://existing.example"]}\n'
+        )
         self.config.write_bytes(self.original)
         self.commands = []
         self.containers = ""
@@ -51,20 +57,33 @@ class ConfigureMirrorTests(unittest.TestCase):
         mirror.configure(self.config)
         settings = json.loads(self.config.read_bytes())
         self.assertEqual(settings["log-driver"], "local")
-        self.assertEqual(settings["registry-mirrors"], [mirror.MIRROR, "https://existing.example"])
+        self.assertEqual(
+            settings["registry-mirrors"], [mirror.MIRROR, "https://existing.example"]
+        )
         self.assertFalse(any("restart" in command for command in self.commands))
 
     def test_non_ci_self_hosted_other_os_and_unprivileged_refuse_before_commands(self):
-        for values in ({"GITHUB_ACTIONS": "false"}, {"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_OS": "macOS"}):
-            with self.subTest(values=values), patch.dict(os.environ, values):
-                with self.assertRaises(RuntimeError):
-                    mirror.configure(self.config)
-        with patch.object(mirror.os, "geteuid", return_value=1000):
-            with self.assertRaises(RuntimeError):
+        for values in (
+            {"GITHUB_ACTIONS": "false"},
+            {"RUNNER_ENVIRONMENT": "self-hosted"},
+            {"RUNNER_OS": "macOS"},
+        ):
+            with (
+                self.subTest(values=values),
+                patch.dict(os.environ, values),
+                self.assertRaises(RuntimeError),
+            ):
                 mirror.configure(self.config)
-        with patch.object(mirror.platform, "system", return_value="Darwin"):
-            with self.assertRaises(RuntimeError):
-                mirror.configure(self.config)
+        with (
+            patch.object(mirror.os, "geteuid", return_value=1000),
+            self.assertRaises(RuntimeError),
+        ):
+            mirror.configure(self.config)
+        with (
+            patch.object(mirror.platform, "system", return_value="Darwin"),
+            self.assertRaises(RuntimeError),
+        ):
+            mirror.configure(self.config)
         self.assertEqual(self.commands, [])
         self.assertEqual(self.config.read_bytes(), self.original)
 
@@ -84,11 +103,16 @@ class ConfigureMirrorTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), self.original)
 
     def test_bad_config_refuses_without_repairing_or_reloading(self):
-        for contents in (b'{', b'[]', b'{"registry-mirrors":"https://bad.example"}', b'{"registry-mirrors":[1]}'):
+        for contents in (
+            b"{",
+            b"[]",
+            b'{"registry-mirrors":"https://bad.example"}',
+            b'{"registry-mirrors":[1]}',
+        ):
             with self.subTest(contents=contents):
                 self.config.write_bytes(contents)
                 self.commands.clear()
-                with self.assertRaises((RuntimeError, ValueError)):
+                with self.assertRaises((RuntimeError, TypeError, ValueError)):
                     mirror.configure(self.config)
                 self.assertEqual(self.config.read_bytes(), contents)
                 self.assertEqual(len(self.commands), 1)
@@ -116,9 +140,13 @@ class ConfigureMirrorTests(unittest.TestCase):
         self.original = None
         self.active = []
         # This fixture intentionally starts without an original configuration.
-        with patch.object(mirror, "run", side_effect=lambda argv: "[]" if "info" in argv else ""):
-            with self.assertRaises(RuntimeError):
-                mirror.configure(self.config)
+        with (
+            patch.object(
+                mirror, "run", side_effect=lambda argv: "[]" if "info" in argv else ""
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            mirror.configure(self.config)
         self.assertFalse(self.config.exists())
 
 

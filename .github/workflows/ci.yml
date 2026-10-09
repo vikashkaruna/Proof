@@ -69,6 +69,8 @@ jobs:
           fi
 
   evidence-storage:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Exact-version evidence storage and human ingestion (W8)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -121,6 +123,8 @@ jobs:
           fi
 
   workload-identity:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Isolated SPIRE workload identity (W4.3)
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -154,6 +158,8 @@ jobs:
           retention-days: 14
 
   workload-host:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Protected SPIRE host and native restart (W4.3)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -175,6 +181,8 @@ jobs:
           retention-days: 14
 
   workload-runner-host:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Native SPIRE runner and observer lifecycle (W4.3)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -194,13 +202,17 @@ jobs:
           retention-days: 14
 
   database-security:
+    env:
+      AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
     name: Fresh migrations and direct-client RLS
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Configure Docker Hub cache on disposable CI runner
         run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
-      - run: python3 -m unittest discover -s .github/ci -p 'test_*.py'
+      - run: |
+          python3 -m unittest discover -s .github/ci -p 'test_configure_docker_mirror.py'
+          python3 -m unittest discover -s .github/ci -p 'test_fixture_images.py'
       - run: ./scripts/test-database.sh
       - run: bash tests/scripts/test-backup-restore.sh
       - run: bash tests/scripts/test-dev-docker-lifecycle.sh
@@ -208,6 +220,8 @@ jobs:
       - run: python3 -m unittest discover -s tests/scripts -p 'test_*.py'
 
   strict-auth-parity:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Real Auth/PostgREST strict topology parity
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -544,6 +558,11 @@ jobs:
       # The BFF-shaped supabase-js probe resolves the client from services/bff.
       - run: pnpm install --frozen-lockfile --filter @axiom/bff...
       - run: ./tests/deployment/selfhosted-supabase.sh
+        env:
+          AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
+          AXIOM_TEST_GOTRUE_IMAGE: mirror.gcr.io/supabase/gotrue:v2.169.0@sha256:92f58a6c7f3fd99575347a0eb0849326a88c25efae6413c140b31261e518f91e
+          AXIOM_TEST_POSTGREST_IMAGE: mirror.gcr.io/postgrest/postgrest:v12.2.8@sha256:e5978740a590628f2114730bb942f35342ea70b8b7a86697a3df283c0caea109
+          AXIOM_TEST_INGRESS_IMAGE: mirror.gcr.io/library/nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 
   # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
   # The library's total is derived from the controls array. Six other

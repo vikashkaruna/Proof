@@ -29,6 +29,7 @@ GW="axiom-sh-gw-$$"
 PG_IMAGE="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
 GOTRUE_IMAGE="${AXIOM_TEST_GOTRUE_IMAGE:-supabase/gotrue:v2.169.0}"
 REST_IMAGE="${AXIOM_TEST_POSTGREST_IMAGE:-postgrest/postgrest:v12.2.8}"
+INGRESS_IMAGE="${AXIOM_TEST_INGRESS_IMAGE:-nginx:alpine}"
 
 cleanup() {
   for c in "$GW" "$REST" "$AUTH" "$DB"; do docker rm -f "$c" >/dev/null 2>&1 || true; done
@@ -149,7 +150,7 @@ server {
 NGINX
 sed -i.bak "s/REST_HOST/${REST}/; s/AUTH_HOST/${AUTH}/" "$GW_CONF"
 docker run --rm -d --name "$GW" --network "$NET" -p 127.0.0.1:0:80 \
-  -v "${GW_CONF}:/etc/nginx/conf.d/default.conf:ro" nginx:alpine >/dev/null
+  -v "${GW_CONF}:/etc/nginx/conf.d/default.conf:ro" "$INGRESS_IMAGE" >/dev/null
 GW_PORT="$(docker port "$GW" 80/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:${GW_PORT}"
 

@@ -87,7 +87,7 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
             1
           </span>
           <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
-            Organization & Statutory Profile
+            Organization &amp; Statutory Profile
           </h2>
         </div>
 
@@ -226,7 +226,7 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
             2
           </span>
           <h2 className="font-heading text-sm font-semibold text-[#1E2A4A]">
-            Data Protection Officer (DPO) & Resident Contact (§8(4))
+            Data Protection Officer (DPO) &amp; Resident Contact (§8(4))
           </h2>
         </div>
 

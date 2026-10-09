@@ -206,6 +206,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
@@ -277,7 +278,7 @@ export function v1Routes(deps: Deps) {
     }),
   );
   app.route('/', policyPreviewRoutes());
-  app.route('/', sovereignLicenseRoutes());
+  app.route('/', sovereignLicenseRoutes({ publicKeyPem: deps.licensePublicKeyPem }));
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //

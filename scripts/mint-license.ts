@@ -3,6 +3,7 @@
  * ==============================================================================
  * Axiom Proof — Sovereign Offline License Minting Utility
  * ==============================================================================
+ * Requires AXIOM_LICENSE_ROOT_PUBLIC_KEY from the independently trusted authority.
  * Mints cryptographically signed, air-gapped offline license tokens for
  * on-premise enterprise deployments (W10).
  *

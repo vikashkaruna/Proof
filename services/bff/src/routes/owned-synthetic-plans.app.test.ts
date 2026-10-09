@@ -1,3 +1,4 @@
+import type * as ActualSupabase from '@axiom/supabase';
 /** Actual createApp middleware/mount checks with synthetic Auth/controller ports; not live login. */
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { Variables } from '../types.js';
@@ -67,7 +68,7 @@ vi.mock('../services/saakshi-staging-composition.js', () => ({
 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ rpc: state.cache }) }));
 vi.mock('@axiom/supabase', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@axiom/supabase')>()),
+  ...(await importOriginal<typeof ActualSupabase>()),
   createSupabaseAdmin: () => ({ from: state.lookup }),
 }));
 import { createApp } from '../app.js';
