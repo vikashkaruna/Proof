@@ -21,7 +21,8 @@ export default function PricingPage() {
       </h1>
       <p className="mt-3 max-w-2xl text-lg text-slate-600">
         We're bootstrap-mode. The pricing model is services-first, software-second, and adapts to
-        the engagement rather than the other way around.
+        the engagement rather than the other way around. Indicative pricing is below, but we can
+        tailor it to your needs. Reach out to us for a conversation.
       </p>
 
       <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -29,7 +30,7 @@ export default function PricingPage() {
           <CardHeader>
             <Badge variant="info">vDPO Retainer</Badge>
             <CardTitle className="mt-1">₹40k – ₹1.5L / month</CardTitle>
-            <CardDescription>Founder-delivered, AI-agent-assisted fractional DPO.</CardDescription>
+            <CardDescription>Founder-delivered, AI-agent-assisted fractional vDPO.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="flex flex-col gap-2 text-sm text-slate-600">
@@ -72,6 +73,7 @@ export default function PricingPage() {
               <li>· Dry-run diffs for every action</li>
               <li>· Generated rollback plans, validated</li>
               <li>· Karya executes after your approval</li>
+              <li>· Customize Karya suitable to your estate</li>
               <li>· Continuous evidence + audit ledger</li>
               <li>· Priced per-action, not per-seat</li>
             </ul>
