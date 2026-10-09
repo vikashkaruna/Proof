@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GenericModuleView, type GenericModuleMeta } from './generic-module-view';
 
@@ -122,7 +122,10 @@ it('keeps related agents static and shows run state only while a run is in fligh
     />,
   );
   const labels = () => screen.queryAllByTestId('agent-label');
-  expect(screen.getByTestId('related-agents').textContent).toContain('Discovery');
+  const relatedAgents = screen.getByTestId('related-agents');
+  expect(within(relatedAgents).getByText('drishti', { exact: true })).toBeTruthy();
+  expect(relatedAgents.textContent).not.toContain('Discovery');
+  expect(relatedAgents.querySelector('svg')).toBeTruthy();
   expect(labels()).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: /Run it/ }));
   await waitFor(() =>

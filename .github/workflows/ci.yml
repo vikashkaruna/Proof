@@ -623,7 +623,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       postgres:
-        image: postgres:16-alpine
+        image: mirror.gcr.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: w46-ci-only
         ports: ['5432:5432']
@@ -648,7 +648,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       postgres:
-        image: postgres:16-alpine
+        image: mirror.gcr.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: w9-ci-only
           POSTGRES_DB: axiom_w9_probe
@@ -690,7 +690,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       mysql:
-        image: mysql:8
+        image: mirror.gcr.io/library/mysql:8@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
         env:
           MYSQL_ROOT_PASSWORD: w46-ci-only
         ports: ['3306:3306']
