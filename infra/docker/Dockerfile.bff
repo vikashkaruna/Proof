@@ -55,22 +55,26 @@ FROM build AS workload-trust-acceptance
 COPY scripts/verify-workload-trust.ts /app/scripts/verify-workload-trust.ts
 
 # ─── runtime ───────────────────────────────────────────────────────
-FROM base AS common-runtime
+FROM ${NODE_RUNTIME_IMAGE} AS common-runtime
 ARG AXIOM_RELEASE_SHA
 ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
 LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
 WORKDIR /app
-RUN apk add --no-cache tini chromium font-noto
+RUN apk add --no-cache libc6-compat tini chromium font-noto \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/pnpm /usr/local/bin/pnpx
 ENV NODE_ENV=production
 ENV PORT=4000
 COPY --from=build /app /app
+# The native TypeScript compiler is needed only by the build, not TSX execution.
+RUN rm -rf /app/node_modules/.pnpm/@typescript+typescript-linux-*
 WORKDIR /app/services/bff
 EXPOSE 4000
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["pnpm", "exec", "tsx", "src/index.ts"]
+CMD ["node", "/app/services/bff/node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 
 # Public marketing acceptance profile: isolated Node runtime without the
-# image's global package managers. The default product runtime remains unchanged.
+# image's global package managers.
 FROM ${NODE_RUNTIME_IMAGE} AS marketing-runtime
 ARG AXIOM_RELEASE_SHA
 ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
