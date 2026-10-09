@@ -702,7 +702,7 @@ def validate(
             "/app/scripts/marketing-db-job.py",
             "run-phase",
             "--phase",
-            "inspect-clients",
+            "inspect",
         ]
         and job_template.get("serviceAccount")
         == migration_identity.removeprefix("serviceAccount:")

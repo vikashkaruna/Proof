@@ -119,7 +119,7 @@ def inventory() -> dict:
                     "/app/scripts/marketing-db-job.py",
                     "run-phase",
                     "--phase",
-                    "inspect-clients",
+                    "inspect",
                 ],
             }
         ],
@@ -305,6 +305,38 @@ class AdoptionTests(unittest.TestCase):
         self.assertTrue(result["seed_gate_enabled"])
         self.assertEqual(result["valid_until_unix"], observation_time() + 30)
         self.assertEqual(result["inspection_execution"], INSPECTED)
+
+    def test_released_inspection_job_is_accepted_by_adoption_and_runtime(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "marketing_db_job_contract", ROOT / "scripts/marketing-db-job.py"
+        )
+        assert spec and spec.loader
+        job = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(job)
+        source = {
+            **env(),
+            "MARKETING_MIGRATION_SERVICE_ACCOUNT": SA,
+            "MARKETING_MIGRATION_IMAGE": IMAGE,
+            "MARKETING_MIGRATION_CPU": "1",
+            "MARKETING_MIGRATION_MEMORY": "256Mi",
+            "MARKETING_MIGRATION_TIMEOUT_SECONDS": "60",
+            "CLOUD_SQL_PRIVATE_IP": "10.65.0.2",
+            "CLOUD_SQL_ADMIN_USER": "axiom_admin",
+            "MARKETING_ADMIN_DB_URL_SECRET_ID": "axiom-proof-preprod-admin-db-url",
+            "MARKETING_ADMIN_DB_URL_SECRET_VERSION": "1",
+        }
+        data = inventory()
+        data["job"] = job.job_payload(source, "inspect")
+        self.assertTrue(self.check(data)["exclusive_client_adoption"])
+        args = data["job"]["template"]["template"]["containers"][0]["args"]
+        phase = args[args.index("--phase") + 1]
+        with (
+            patch.object(job, "runtime_environment", return_value={}),
+            patch.object(job, "inspect_clients") as inspect_clients,
+            patch.object(job, "run_sql", side_effect=AssertionError("inspection mutated")),
+        ):
+            job.run_phase(source, phase)
+        inspect_clients.assert_called_once_with(source, {})
 
     def test_public_sql_address_or_wrong_network_refused(self) -> None:
         for change in (
