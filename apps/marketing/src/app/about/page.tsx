@@ -26,14 +26,22 @@ export default function AboutPage() {
 
       <h2 className="mt-10 font-heading text-2xl font-semibold text-indigo-500">How we work</h2>
       <p className="mt-3 text-slate-600">
-        Ten named AI agents — <strong>Drishti</strong> (discovery), <strong>Vibhaag</strong>{' '}
+        Twelve named AI agents — <strong>Drishti</strong> (discovery), <strong>Vibhaag</strong>{' '}
         (classification), <strong>Parikshan</strong> (assessment), <strong>Saakshi</strong>{' '}
         (evidence), <strong>Sudhaar</strong> (planning), <strong>Karya</strong> (execution),{' '}
-        <strong>Lekha</strong> (audit), <strong>Nazar</strong> (regulatory watch),{' '}
-        <strong>Prativedan</strong> (reporting), <strong>Sanket</strong> (market signal). Each has a
-        contract, an autonomy ceiling, and tool permissions. The planning agent holds no write
+        <strong>Samadhan</strong> (reconciliation), <strong>Lekha</strong> (audit),{' '}
+        <strong>Nazar</strong> (regulatory watch), <strong>Prativedan</strong> (reporting),{' '}
+        <strong>Pramaan</strong> (closure dossier), <strong>Sanket</strong> (market signal). Each
+        has a contract, an autonomy ceiling, and tool permissions. The planning agent holds no write
         credentials — separation of duties between proposing and executing. Execution requires a
         signed, scope-bound approval token validated per action.
+      </p>
+      <p className="mt-3 text-slate-600">
+        After approved execution, <strong>Samadhan</strong> checks recorded actions against the
+        approved plan and scope, flagging discrepancies for human review. <strong>Pramaan</strong>{' '}
+        brings findings, reconciled outcomes, evidence and audit records together into a closure
+        dossier. An authorized human reviews the dossier before release; missing evidence or
+        unresolved checks must not be presented as completed compliance.
       </p>
       <p className="mt-3 text-slate-600">
         Every action — agent or human, read or write — is written to an append-only, hash-chained
@@ -45,10 +53,10 @@ export default function AboutPage() {
       </h2>
       <p className="mt-3 text-slate-600">
         All client data, evidence, and ledger entries are stored in{' '}
-        <strong>{BRAND.dataResidencyRegion}</strong> on AWS. LLM inference for
-        personal-data-touching tasks runs through a self-hosted model gateway on the same EKS
-        cluster — no third-party model provider sees raw personal data, because no major LLM vendor
-        today guarantees India-only inference.
+        <strong>{BRAND.dataResidencyRegion}</strong> on Amazon Web Services (AWS). For tasks
+        involving personal data, large language model (LLM) processing runs within our own
+        infrastructure, in the same Kubernetes cluster. Raw personal data is not sent to third-party
+        AI providers.
       </p>
     </main>
   );
