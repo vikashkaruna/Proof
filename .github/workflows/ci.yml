@@ -213,6 +213,7 @@ jobs:
       - run: |
           python3 -m unittest discover -s .github/ci -p 'test_configure_docker_mirror.py'
           python3 -m unittest discover -s .github/ci -p 'test_fixture_images.py'
+          python3 -m unittest discover -s .github/ci -p 'test_supabase_startup.py'
       - run: ./scripts/test-database.sh
       - run: bash tests/scripts/test-backup-restore.sh
       - run: bash tests/scripts/test-dev-docker-lifecycle.sh

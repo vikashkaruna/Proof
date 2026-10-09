@@ -41,20 +41,7 @@ if [ "$started" != true ]; then
   echo "Supabase startup failed. Inspect the protected log at $state_dir/start.log" >&2
   # Logs may contain generated credentials. Emit only fixed diagnostic labels,
   # never raw startup logs or status JSON into CI logs/artifacts.
-  python3 - "$state_dir/start.log" <<'PYDIAG'
-from pathlib import Path
-import sys
-message = Path(sys.argv[1]).read_text().lower()
-patterns = {
-    'image registry/auth/rate-limit failure': ['toomanyrequests', 'pull access denied', 'manifest unknown', 'failed to pull', 'error pulling', 'unauthorized', '429 too many'],
-    'container health/startup failure': ['unhealthy', 'health check', 'failed to start'],
-    'host resource/port failure': ['no space left', 'address already in use', 'port is already allocated', 'out of memory'],
-    'network timeout/connectivity failure': ['timeout', 'connection refused', 'connection reset', 'no such host', 'tls handshake'],
-}
-found = [label for label, terms in patterns.items() if any(term in message for term in terms)]
-print('Startup diagnostic categories: ' + (', '.join(found) or 'unclassified; protected log required'), file=sys.stderr)
-PYDIAG
-  docker ps -a --filter "name=$project_id" --format '{{.Names}}: {{.Status}}' >&2
+  python3 .github/ci/diagnose_supabase_startup.py "$state_dir/start.log" "$project_id" || true
   exit 1
 fi
 python3 scripts/migrate-database.py --container "$db_container"
