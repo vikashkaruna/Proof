@@ -743,3 +743,86 @@ it('does not clear local form inputs for another actor or tenant saved event', a
     'Public website',
   );
 });
+it('refuses delimiter-only processing declarations before retaining or submitting a request', async () => {
+  await processingForm();
+  fireEvent.change(screen.getByLabelText('Processors, separated by commas (unknown if blank)'), {
+    target: { value: ' , , ' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await screen.findByRole('alert');
+  expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(0);
+  expect(saved).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+});
+const listDeclarations = [
+  ['dataCategories', 'Data categories'],
+  ['dataPrincipals', 'Data principal groups'],
+  ['processors', 'Processors'],
+  ['recipients', 'Recipients'],
+  ['destinationCountries', 'Transfer destinations'],
+] as const;
+it.each(listDeclarations)(
+  'rejects empty named items in %s with a linked inline error and no retained request',
+  async (_name, label) => {
+    await processingForm();
+    const field = screen.getByLabelText(`${label}, separated by commas (unknown if blank)`);
+    fireEvent.change(field, { target: { value: 'Vendor A, ,Vendor B' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/Remove empty items/);
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-describedby')).toBe(alert.id);
+    expect(document.activeElement).toBe(field);
+    expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(0);
+    expect(sessionStorage.length).toBe(0);
+  },
+);
+it.each(listDeclarations)(
+  'records explicit None for %s without inventing none for sibling fields',
+  async (name, label) => {
+    await processingForm();
+    fireEvent.change(screen.getByLabelText(`${label} declaration`), { target: { value: 'none' } });
+    expect(
+      (
+        screen.getByLabelText(
+          `${label}, separated by commas (unknown if blank)`,
+        ) as HTMLInputElement
+      ).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+    await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
+    expect(saved?.payload).toEqual({ ...payload, [name]: [] });
+    expect(sessionStorage.length).toBe(0);
+  },
+);
+it('clears prior named items when Unknown is explicitly selected', async () => {
+  await processingForm();
+  const values = screen.getByLabelText('Processors, separated by commas (unknown if blank)');
+  fireEvent.change(values, { target: { value: 'Vendor A' } });
+  fireEvent.change(screen.getByLabelText('Processors declaration'), {
+    target: { value: 'unknown' },
+  });
+  expect((values as HTMLInputElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
+  expect(saved?.payload).toEqual(payload);
+});
+it('resets an explicit None choice after confirmed save rather than carrying it into the next activity', async () => {
+  await processingForm();
+  fireEvent.change(screen.getByLabelText('Processors declaration'), { target: { value: 'none' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
+  expect(saved?.payload).toEqual({ ...payload, processors: [] });
+  expect((screen.getByLabelText('Processors declaration') as HTMLSelectElement).value).toBe('list');
+  fireEvent.change(screen.getByLabelText('System or processing activity'), {
+    target: { value: 'Public website' },
+  });
+  fireEvent.change(screen.getByLabelText('Source and reason for this record'), {
+    target: { value: payload.sourceNote },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+  await waitFor(() =>
+    expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(2),
+  );
+  expect(saved?.payload).toEqual(payload);
+});
