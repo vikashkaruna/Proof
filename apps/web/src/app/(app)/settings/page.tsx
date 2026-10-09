@@ -71,30 +71,34 @@ export default async function SettingsPage() {
       {/* 2 Main Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Account Card */}
-        <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3">
             Account & Session Identity
           </div>
           <div className="divide-y divide-[#eef1f5]">
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Email</span>
-              <span className="font-medium text-[12.5px] text-[#1E2A4A]">{user.email}</span>
+              <span className="min-w-0 break-all font-medium text-[12.5px] text-[#1E2A4A] sm:text-right">
+                {user.email}
+              </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Full Name</span>
-              <span className="font-medium text-[12.5px] text-[#1E2A4A]">
+              <span className="min-w-0 break-words font-medium text-[12.5px] text-[#1E2A4A] sm:text-right">
                 {typeof user.user_metadata?.full_name === 'string'
                   ? user.user_metadata.full_name
                   : 'Not provided'}
               </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">User ID</span>
-              <span className="font-mono text-[11px] text-slate-500">{user.id.slice(0, 18)}…</span>
+              <span className="min-w-0 break-all font-mono text-[11px] text-slate-500 sm:text-right">
+                {user.id.slice(0, 18)}…
+              </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Last Authentication</span>
-              <span className="text-[11.5px] text-[#1E2A4A]">
+              <span className="min-w-0 text-[11.5px] text-[#1E2A4A] sm:text-right">
                 {user.last_sign_in_at
                   ? new Date(user.last_sign_in_at).toLocaleDateString('en-IN')
                   : 'Unavailable'}
@@ -110,32 +114,32 @@ export default async function SettingsPage() {
         </div>
 
         {/* Security & Sovereignty Card */}
-        <div className="rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[#e4e8ee] bg-white p-5 sm:p-6 shadow-sm">
           <div className="font-heading text-[14px] font-semibold text-[#1E2A4A] mb-3">
             Operational assurance
           </div>
           <div className="divide-y divide-[#eef1f5]">
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Data Residency Region</span>
-              <span className="rounded bg-teal-50 px-2 py-0.5 font-mono text-[11.5px] font-semibold text-teal-700">
+              <span className="min-w-0 break-words rounded bg-teal-50 px-2 py-0.5 font-mono text-[11.5px] font-semibold text-teal-700 sm:text-right">
                 Verify in deployment records
               </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Cross-Border Egress</span>
-              <span className="font-medium text-[12.5px] text-teal-700">
+              <span className="min-w-0 break-words font-medium text-[12.5px] text-teal-700 sm:text-right">
                 Unverified in this view
               </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Model Gateway Redaction</span>
-              <span className="font-medium text-[12.5px] text-teal-700">
+              <span className="min-w-0 break-words font-medium text-[12.5px] text-teal-700 sm:text-right">
                 Unverified in this view
               </span>
             </div>
-            <div className="flex items-center justify-between py-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Evidence Retention WORM</span>
-              <span className="font-medium text-[12.5px] text-slate-700">
+              <span className="min-w-0 break-words font-medium text-[12.5px] text-slate-700 sm:text-right">
                 Verify with the exact stored object version
               </span>
             </div>

@@ -225,3 +225,41 @@ test('generic module pages fill desktop width and fit a narrow mobile viewport',
     }
   }
 });
+
+test('settings keeps long account identities readable without horizontal page scrolling', async ({
+  page,
+}) => {
+  const account = await createMfaAccount('long-organization-operator-layout-verification', {
+    role: 'admin',
+  });
+  await signInAs(page, account.email, account.password);
+  await selectTenant(page, 'a');
+  await page.goto('/settings');
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Settings & Preferences' }),
+  ).toBeVisible();
+  const email = page.getByText(account.email, { exact: true });
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(email, `complete account email at ${width}px`).toBeVisible();
+    const layout = await email.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        left: bounds.left,
+        right: bounds.right,
+        contentFits: element.scrollWidth <= element.clientWidth + 1,
+        clipped: ['hidden', 'clip'].includes(style.overflowX),
+      };
+    });
+    expect(layout.pageWidth, `settings fits the ${width}px viewport`).toBeLessThanOrEqual(
+      layout.viewportWidth + 1,
+    );
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.contentFits, `complete email fits its cell at ${width}px`).toBe(true);
+    expect(layout.clipped, `email is not hidden at ${width}px`).toBe(false);
+  }
+});
