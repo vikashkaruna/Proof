@@ -15,7 +15,7 @@ export const metadata = { title: 'Pricing' };
 export default function PricingPage() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-      <Badge variant="indigo">Founder-led v1</Badge>
+      <Badge variant="indigo">Founder & Partner(s) led program</Badge>
       <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight text-indigo-500 sm:text-4xl">
         Pricing
       </h1>
