@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { AgentPill } from './AgentPill';
 import { DataPlaceholder } from './DataPlaceholder';
 import { PageHeader } from './Layout';
 import { ModuleBar } from './ModuleBar';
@@ -11,12 +12,15 @@ const html = (element: React.ReactElement) => renderToStaticMarkup(element);
 const visible = (markup: string) => markup.replace(/<style>[\s\S]*?<\/style>/g, '');
 
 describe('related agents strip', () => {
-  it('names each agent and states the approval rule, but never a live status', () => {
+  it('shows only agent names and icons, with an accessible group label and no live status', () => {
     const markup = html(<RelatedAgents agents={['drishti', 'parikshan']} />);
-    expect(markup).toContain('Agents on this module');
+    expect(markup).toContain('aria-label="Agents on this module"');
+    const text = visible(markup).replace(/<[^>]*>/g, '');
+    expect(text).toBe('drishtiparikshan');
+    expect(markup).toContain('<svg');
     expect(markup).toContain('drishti');
     expect(markup).toContain('parikshan');
-    expect(markup).toContain('nothing changes without a recorded human approval');
+    expect(markup).not.toContain('nothing changes without a recorded human approval');
     expect(visible(markup)).not.toMatch(/online|healthy|running|offline|idle|working|thinking/i);
   });
 
@@ -24,6 +28,10 @@ describe('related agents strip', () => {
     const markup = html(<RelatedAgents agents={['drishti']} />);
     expect(markup).toContain('title="Discovery"');
     expect(markup).not.toContain('(idle)');
+  });
+
+  it('preserves persona text for other agent pill uses', () => {
+    expect(html(<AgentPill agent="drishti" />)).toContain('· Discovery');
   });
 
   it('renders nothing when a module has no agents', () => {
@@ -44,6 +52,18 @@ describe('module context line', () => {
     expect(markup).toContain('M3.3');
     expect(markup).toContain('Execute');
     expect(markup).not.toMatch(/<h[1-6]/);
+  });
+
+  it('places agents beside the phase in the same wrapping metadata row', () => {
+    const markup = html(
+      <ModuleBar crumb="Monitor" phase="P3" moduleId="M6.1" agents={['nazar', 'lekha']} />,
+    );
+    expect(markup).toMatch(/data-testid="module-bar" class="[^"]*flex-wrap/);
+    // No nested row closes between the phase badge and the agent group.
+    const row = markup.slice(markup.indexOf('Delivery phase'), markup.indexOf('related-agents'));
+    expect(row).not.toContain('</div>');
+    expect(markup).toContain('min-w-0 max-w-full');
+    expect(visible(markup).replace(/<[^>]*>/g, '')).toContain('Delivery phase P3');
   });
 
   it('switches to light-on-dark text for dark banners', () => {

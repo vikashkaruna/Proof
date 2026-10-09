@@ -36,35 +36,32 @@ export function ModuleBar({
   const hasLine = Boolean(crumb || titleHi || phase || moduleId);
   if (!hasLine && agents.length === 0) return null;
   return (
-    <div data-testid="module-bar" className={cn('flex flex-col gap-2', className)}>
-      {hasLine && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          {crumb && (
-            <span className={tone === 'dark' ? 'text-slate-300' : 'text-slate-500'}>{crumb}</span>
-          )}
-          {titleHi && (
-            <span
-              lang="hi"
-              className={cn('font-medium', tone === 'dark' ? 'text-white' : 'text-slate-700')}
-            >
-              {titleHi}
-            </span>
-          )}
-          {phase && (
-            <Badge variant={tone === 'dark' ? 'neutral' : 'indigo'} size="sm">
-              <span className="sr-only">Delivery phase </span>
-              {phase}
-            </Badge>
-          )}
-          {moduleId && (
-            <span
-              className={cn('font-mono', tone === 'dark' ? 'text-slate-300' : 'text-slate-500')}
-            >
-              <span className="sr-only">Module </span>
-              {moduleId}
-            </span>
-          )}
-        </div>
+    <div
+      data-testid="module-bar"
+      className={cn('flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs', className)}
+    >
+      {crumb && (
+        <span className={tone === 'dark' ? 'text-slate-300' : 'text-slate-500'}>{crumb}</span>
+      )}
+      {titleHi && (
+        <span
+          lang="hi"
+          className={cn('font-medium', tone === 'dark' ? 'text-white' : 'text-slate-700')}
+        >
+          {titleHi}
+        </span>
+      )}
+      {phase && (
+        <Badge variant={tone === 'dark' ? 'neutral' : 'indigo'} size="sm">
+          <span className="sr-only">Delivery phase </span>
+          {phase}
+        </Badge>
+      )}
+      {moduleId && (
+        <span className={cn('font-mono', tone === 'dark' ? 'text-slate-300' : 'text-slate-500')}>
+          <span className="sr-only">Module </span>
+          {moduleId}
+        </span>
       )}
       <RelatedAgents agents={agents} tone={tone} />
     </div>
