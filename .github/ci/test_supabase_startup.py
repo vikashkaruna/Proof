@@ -46,6 +46,101 @@ class StartupDiagnosticTests(unittest.TestCase):
         )
         self.assertEqual(len(diagnostic.log_facts(message, PROJECT)), 1)
 
+    def test_pinned_readiness_log_headers_identify_only_owned_services(self):
+        message = (
+            f"supabase_storage_{PROJECT} container logs:\n{MARKER}\n"
+            f"supabase_unknown_{PROJECT} container logs:\n{MARKER}\n"
+            f"supabase_db_axiom-other container logs:\n{MARKER}\n"
+        )
+        facts = diagnostic.log_facts(message, PROJECT)
+        self.assertEqual(
+            facts[1:], ["Startup service: storage; readiness failure log present"]
+        )
+        self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_ordinary_registry_auth_challenge_is_not_a_registry_failure(self):
+        ordinary = f"HTTP response 401 Unauthorized; fetching registry token {MARKER}"
+        facts = diagnostic.log_facts(ordinary, PROJECT)
+        self.assertNotIn("image registry/auth/rate-limit failure", "\n".join(facts))
+        for failed in (
+            "toomanyrequests",
+            "pull access denied",
+            "manifest unknown",
+            "429 too many requests",
+        ):
+            with self.subTest(failed=failed):
+                facts = diagnostic.log_facts(failed + " " + MARKER, PROJECT)
+                self.assertIn("image registry/auth/rate-limit failure", facts[0])
+                self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_readiness_blocks_emit_exact_database_and_image_facts_only(self):
+        message = (
+            f"supabase_db_{PROJECT} container logs:\n"
+            f"initdb: error: could not create directory '{MARKER}': Permission denied\n"
+            "FATAL: database files are incompatible with server\n"
+            f"supabase_auth_{PROJECT} container logs:\n"
+            f"FATAL: password authentication failed for user '{MARKER}' (SQLSTATE 28P01)\n"
+            f"supabase_storage_{PROJECT} container logs:\n"
+            f"permission denied for schema {MARKER} (SQLSTATE 42501)\n"
+            f"supabase_kong_{PROJECT} container logs:\n"
+            f"exec /{MARKER}: exec format error\n"
+        )
+        facts = diagnostic.log_facts(message, PROJECT)
+        for expected in (
+            "Startup service: postgres; failure fact: database initialization permission",
+            "Startup service: postgres; failure fact: database storage version mismatch",
+            "Startup service: auth; failure fact: database password authentication",
+            "Startup service: storage; failure fact: database object permission",
+            "Startup service: gateway; failure fact: image execution format",
+        ):
+            self.assertIn(expected, facts)
+        self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_failure_facts_require_exact_owned_header_and_error_code(self):
+        message = (
+            f"credential=supabase_db_{PROJECT} container logs:\n"
+            "initdb: error: could not create directory: Permission denied\n"
+            f"supabase_auth_{PROJECT} container logs:\n"
+            f"password authentication failed for user '{MARKER}' (SQLSTATE 99999)\n"
+            "unrelated log: SQLSTATE 28P01\n"
+            f"supabase_unknown_{PROJECT} container logs:\nexec format error\n"
+            "supabase_db_axiom-other container logs:\n"
+            "initdb: error: could not create directory: Permission denied\n"
+        )
+        facts = diagnostic.log_facts(message, PROJECT)
+        self.assertFalse(any("failure fact:" in fact for fact in facts))
+        self.assertEqual(
+            [f for f in facts if f.startswith("Startup service:")],
+            ["Startup service: auth; readiness failure log present"],
+        )
+        self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_nested_http_probe_status_is_bounded_to_owned_service(self):
+        message = json.dumps(
+            {
+                "unhealthy": [
+                    {
+                        "containerId": f"supabase_rest_{PROJECT}",
+                        "reason": "unexpected status 401",
+                    },
+                    {
+                        "containerId": f"supabase_auth_{PROJECT}",
+                        "reason": "unexpected status " + MARKER,
+                    },
+                    {
+                        "containerId": "supabase_rest_axiom-other",
+                        "reason": "unexpected status 503",
+                    },
+                ]
+            }
+        )
+        facts = diagnostic.log_facts(message, PROJECT)
+        self.assertEqual(
+            [f for f in facts if f.startswith("Startup service:")],
+            ["Startup service: postgrest; reported HTTP readiness: 401"],
+        )
+        self.assertNotIn(MARKER, "\n".join(facts))
+
     def test_invalid_project_refuses_before_inspection(self):
         with patch.object(diagnostic.subprocess, "run") as run:
             for project in (

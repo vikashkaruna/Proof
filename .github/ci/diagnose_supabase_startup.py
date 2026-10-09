@@ -48,7 +48,6 @@ CATEGORIES = {
         "manifest unknown",
         "failed to pull",
         "error pulling",
-        "unauthorized",
         "429 too many",
     ),
     "container health/startup failure": (
@@ -92,6 +91,53 @@ def validate_project(project):
         raise ValueError("Invalid isolated Supabase diagnostic project")
 
 
+def readiness_block_facts(message, project):
+    """Only exact readiness-log blocks can supply these fixed failure facts."""
+    validate_project(project)
+    names = {
+        f"supabase_{suffix}_{project}": service for suffix, service in SERVICES.items()
+    }
+    headers = list(re.finditer(r"(?m)^([a-z0-9_.-]+) container logs:[ \t]*$", message))
+    facts = []
+    for index, header in enumerate(headers):
+        service = names.get(header[1])
+        if service is None:
+            continue
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(message)
+        block = message[header.end() : end]
+        facts.append(f"Startup service: {service}; readiness failure log present")
+        if "exec format error" in block:
+            facts.append(
+                f"Startup service: {service}; failure fact: image execution format"
+            )
+        if service == "postgres" and re.search(
+            r"(?m)^initdb: error: [^\n]*permission denied\b", block
+        ):
+            facts.append(
+                "Startup service: postgres; failure fact: database initialization permission"
+            )
+        if service == "postgres" and re.search(
+            r"\bfatal:\s+database files are incompatible with server\b", block
+        ):
+            facts.append(
+                "Startup service: postgres; failure fact: database storage version mismatch"
+            )
+        if re.search(
+            r"password authentication failed for user\b[^\n]*\bsqlstate 28p01\b", block
+        ):
+            facts.append(
+                f"Startup service: {service}; failure fact: database password authentication"
+            )
+        if re.search(
+            r"permission denied for (?:schema|table|relation|database|sequence)\b[^\n]*\bsqlstate 42501\b",
+            block,
+        ):
+            facts.append(
+                f"Startup service: {service}; failure fact: database object permission"
+            )
+    return facts
+
+
 def log_facts(message, project):
     validate_project(project)
     lower = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", message).lower()
@@ -109,6 +155,7 @@ def log_facts(message, project):
     for tag, label in ERROR_TAGS.items():
         if re.search(rf"(?<![a-z0-9_]){tag.lower()}(?![a-z0-9_])", lower):
             facts.append(f"Startup failure tag: {label}")
+    facts.extend(readiness_block_facts(lower, project))
     for suffix, service in SERVICES.items():
         name = re.escape(f"supabase_{suffix}_{project}")
         for phrase, allowed, label in (
@@ -128,6 +175,11 @@ def log_facts(message, project):
                 facts.append(f"Startup service: {service}; {label}: {value}")
         http_codes = re.findall(
             rf"(?<![a-z0-9_-]){name} unexpected status ([1-5][0-9]{{2}})(?![a-z0-9_-])",
+            lower,
+        )
+        http_codes += re.findall(
+            rf"[\"']?containerid[\"']?\s*:\s*[\"']{name}[\"'][,\s]+"
+            rf"[\"']?reason[\"']?\s*:\s*[\"']unexpected status ([1-5][0-9]{{2}})[\"']",
             lower,
         )
         for code in sorted(set(http_codes)):

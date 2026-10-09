@@ -21,7 +21,7 @@ const reportSchema = z.object({
   engagement_id: uuid.nullable(),
   kind: z.literal('dpb'),
   title: z.string().min(1),
-  status: z.enum(['draft', 'approved', 'published']),
+  status: z.enum(['draft', 'approved', 'rejected', 'published', 'archived']),
   generated_by_agent: z.literal('dpb-report-builder'),
   content_text: z.string().min(1),
   content_sha256: hash,
@@ -306,10 +306,27 @@ export class DpbArtifactService {
     return result.data;
   }
 
+  /** Terminal reports retain their history, but cannot resume artifact work. */
+  private async rejectTerminalReport(tenantId: string, reportId: string, signal?: AbortSignal) {
+    const report = await this.row(
+      'reports',
+      tenantId,
+      'id',
+      reportId,
+      z.object({ status: reportSchema.shape.status }),
+      signal,
+    );
+    if (!report) throw new EvidenceError('report_not_found', 404);
+    if (report.status === 'rejected' || report.status === 'archived')
+      throw new EvidenceError('not_approved', 409);
+  }
+
   private async context(tenantId: string, reportId: string, signal?: AbortSignal) {
     await this.dpbIdentity(tenantId, reportId, signal);
     const report = await this.row('reports', tenantId, 'id', reportId, reportSchema, signal);
     if (!report) throw new EvidenceError('report_not_found', 404);
+    if (report.status === 'rejected' || report.status === 'archived')
+      throw new EvidenceError('not_approved', 409);
     const request = await this.row(
       'dpb_report_requests',
       tenantId,
@@ -520,6 +537,7 @@ export class DpbArtifactService {
     signal?: AbortSignal,
   ) {
     await this.authority(tenantId, actorId, true, signal);
+    await this.rejectTerminalReport(tenantId, reportId, signal);
     const current = await this.buildRow(tenantId, reportId, signal);
     if (current) {
       if (current.operation_key !== operationKey)
@@ -645,6 +663,7 @@ export class DpbArtifactService {
     signal?: AbortSignal,
   ) {
     await this.authority(tenantId, actorId, true, signal);
+    await this.rejectTerminalReport(tenantId, reportId, signal);
     const build = await this.buildRow(tenantId, reportId, signal);
     if (!build || build.operation_key !== operationKey)
       throw new EvidenceError('operation_not_found', 404);
@@ -700,6 +719,7 @@ export class DpbArtifactService {
     signal?: AbortSignal,
   ) {
     await this.authority(tenantId, actorId, true, signal);
+    await this.rejectTerminalReport(tenantId, reportId, signal);
     const build = await this.buildRow(tenantId, reportId, signal);
     if (!build || build.operation_key !== operationKey)
       throw new EvidenceError('operation_not_found', 404);
@@ -798,6 +818,8 @@ export class DpbArtifactService {
     const report = await this.row('reports', tenantId, 'id', reportId, reportSchema, signal);
     if (!report) throw new EvidenceError('report_not_found', 404);
     if (report.status !== 'published') await this.authority(tenantId, actorId, true, signal);
+    if (report.status === 'rejected' || report.status === 'archived')
+      throw new EvidenceError('report_artifact_unverified', 409);
     const build = await this.buildRow(tenantId, reportId, signal);
     if (!build || build.status !== 'settled')
       throw new EvidenceError('report_artifact_unverified', 409);

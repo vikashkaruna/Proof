@@ -4,6 +4,177 @@ import { TechnicalArtifactService } from './technical-artifacts.js';
 import { config, evidenceFixture, tenant } from '../test/evidence-fixture.js';
 
 describe('Technical retained artifacts', () => {
+  it.each(
+    (['rejected', 'archived'] as const).flatMap((status) =>
+      (['none', 'pending', 'settled'] as const).map((buildState) => ({ status, buildState })),
+    ),
+  )(
+    'refuses $status artifact work with a $buildState historical build',
+    async ({ status, buildState }) => {
+      const fixture = evidenceFixture(),
+        actor = randomUUID(),
+        reportId = randomUUID(),
+        operationKey = randomUUID();
+      fixture.rows('tenant_users').push({ tenant_id: tenant, user_id: actor, role: 'founder' });
+      fixture.rows('users').push({ id: actor, is_axiom_internal: true });
+      fixture.rows('reports').push({
+        id: reportId,
+        tenant_id: tenant,
+        engagement_id: randomUUID(),
+        kind: 'technical',
+        title: 'Retained synthetic review',
+        status,
+        generated_by_agent: 'technical-report-builder',
+        content_text: '{}',
+        content_sha256: 'a'.repeat(64),
+        reviewed_content_hash: 'a'.repeat(64),
+        released_archive_hash: null,
+      });
+      if (buildState !== 'none')
+        fixture.rows('technical_artifact_builds').push({
+          id: randomUUID(),
+          tenant_id: tenant,
+          report_id: reportId,
+          operation_key: operationKey,
+          status: buildState,
+          retain_until: '2034-01-01T00:00:00.000Z',
+          correlation_id: randomUUID(),
+          last_error_code: null,
+          request: {
+            provider: config.provider,
+            bucket: config.bucket,
+            artifacts: [
+              {
+                kind: 'source_json',
+                object_key: 'retained/source',
+                content_hash: 'a'.repeat(64),
+                byte_size: 2,
+              },
+              {
+                kind: 'technical_pdf',
+                object_key: 'retained/pdf',
+                content_hash: 'b'.repeat(64),
+                byte_size: 12,
+              },
+            ],
+          },
+        });
+      if (buildState === 'settled') {
+        const buildId = fixture.rows('technical_artifact_builds')[0]!.id;
+        for (const [kind, digest, bytes, key] of [
+          ['source_json', 'a'.repeat(64), 2, 'retained/source'],
+          ['technical_pdf', 'b'.repeat(64), 12, 'retained/pdf'],
+        ] as const)
+          fixture.rows('technical_artifact_versions').push({
+            id: randomUUID(),
+            tenant_id: tenant,
+            build_id: buildId,
+            artifact_kind: kind,
+            provider: config.provider,
+            bucket: config.bucket,
+            object_key: key,
+            version_id: 'historical-exact-version',
+            content_hash: digest,
+            byte_size: bytes,
+            retain_until: '2034-01-01T00:00:00.000Z',
+            legal_hold: false,
+            encryption: 'AES256',
+          });
+      }
+      const storage = vi.fn(() => {
+        throw new Error('terminal report must not access provider');
+      });
+      const renderPdf = vi.fn(async () => {
+        throw new Error('terminal report must not render');
+      });
+      const rpc = vi.spyOn(fixture.db, 'rpc');
+      const service = new TechnicalArtifactService(fixture.db, storage, renderPdf);
+      const retained = structuredClone({
+        reports: fixture.rows('reports'),
+        builds: fixture.rows('technical_artifact_builds'),
+      });
+      for (const operation of [
+        () => service.build(tenant, actor, reportId, operationKey),
+        () => service.build(tenant, actor, reportId, randomUUID()),
+        () => service.reconcile(tenant, actor, reportId, operationKey),
+        () => service.retryMissing(tenant, actor, reportId, operationKey),
+      ])
+        await expect(operation()).rejects.toMatchObject({ code: 'not_approved', status: 409 });
+      await expect(service.pdf(tenant, actor, reportId)).rejects.toMatchObject({
+        code: 'report_artifact_unverified',
+        status: 409,
+      });
+      expect(storage).not.toHaveBeenCalled();
+      expect(renderPdf).not.toHaveBeenCalled();
+      expect(rpc).not.toHaveBeenCalled();
+      expect({
+        reports: fixture.rows('reports'),
+        builds: fixture.rows('technical_artifact_builds'),
+      }).toEqual(retained);
+      fixture.rows('tenant_users')[0]!.role = 'owner';
+      await expect(service.pdf(tenant, actor, reportId)).rejects.toMatchObject({
+        code: 'forbidden',
+        status: 403,
+      });
+      fixture.rows('tenant_users')[0]!.role = 'founder';
+      fixture.rows('reports')[0]!.status = 'withdrawn';
+      await expect(service.pdf(tenant, actor, reportId)).rejects.toMatchObject({
+        code: 'invalid_report_record',
+        status: 503,
+      });
+      expect(storage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses artifact replay when its report no longer exists', async () => {
+    const fixture = evidenceFixture(),
+      actor = randomUUID(),
+      reportId = randomUUID(),
+      operationKey = randomUUID();
+    fixture.rows('tenant_users').push({ tenant_id: tenant, user_id: actor, role: 'founder' });
+    fixture.rows('users').push({ id: actor, is_axiom_internal: true });
+    fixture.rows('technical_artifact_builds').push({
+      id: randomUUID(),
+      tenant_id: tenant,
+      report_id: reportId,
+      operation_key: operationKey,
+      status: 'settled',
+      retain_until: '2034-01-01T00:00:00.000Z',
+      correlation_id: randomUUID(),
+      last_error_code: null,
+      request: {
+        provider: config.provider,
+        bucket: config.bucket,
+        artifacts: [
+          {
+            kind: 'source_json',
+            object_key: 'retained/source',
+            content_hash: 'a'.repeat(64),
+            byte_size: 2,
+          },
+          {
+            kind: 'technical_pdf',
+            object_key: 'retained/pdf',
+            content_hash: 'b'.repeat(64),
+            byte_size: 12,
+          },
+        ],
+      },
+    });
+    const storage = vi.fn(() => {
+      throw new Error('orphan artifacts must not access provider');
+    });
+    const service = new TechnicalArtifactService(fixture.db, storage);
+    for (const operation of [
+      () => service.build(tenant, actor, reportId, operationKey),
+      () => service.reconcile(tenant, actor, reportId, operationKey),
+      () => service.retryMissing(tenant, actor, reportId, operationKey),
+      () => service.pdf(tenant, actor, reportId),
+    ])
+      await expect(operation()).rejects.toMatchObject({ code: 'report_not_found', status: 404 });
+    expect(storage).not.toHaveBeenCalled();
+  });
+
   it('refuses missing or wrong-kind reports before any provider access', async () => {
     const fixture = evidenceFixture();
     const actor = randomUUID();
