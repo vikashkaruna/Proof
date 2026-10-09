@@ -131,9 +131,17 @@ test('a complete gap-scan submission persists and refuses another browser', asyn
   } finally {
     await outsider.close();
   }
-  const owner = await page.request.post(`${marketingUrl}/api/gap-scan/send-email`, {
-    data: { id: body.id, email: 'owner@example.invalid' },
-  });
-  expect(owner.status()).toBe(503);
-  expect((await owner.json()).error.code).toBe('delivery_unavailable');
+  // Use the browser's cookie policy, including Secure cookies on loopback HTTP.
+  const owner = await page.evaluate(async (id: string) => {
+    const response = await fetch('/api/gap-scan/send-email', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, email: 'owner@example.invalid' }),
+    });
+    const payload = await response.json();
+    return { status: response.status, errorCode: payload.error?.code };
+  }, body.id);
+  expect(owner.status).toBe(503);
+  expect(owner.errorCode).toBe('delivery_unavailable');
 });
