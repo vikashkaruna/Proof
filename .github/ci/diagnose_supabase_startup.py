@@ -41,15 +41,21 @@ ERROR_TAGS = {
     "LegacyStartConfigLoadError": "configuration load",
     "LegacyStartInvalidConfigError": "invalid configuration",
 }
+REGISTRY_TERMS = (
+    "toomanyrequests",
+    "pull access denied",
+    "manifest unknown",
+    "failed to pull",
+    "error pulling",
+    "429 too many",
+)
+PREPULL_REASONS = {
+    "docker_daemon": "Docker daemon",
+    "registry_pull": "registry pull",
+    "image_inspect": "image inspection",
+}
 CATEGORIES = {
-    "image registry/auth/rate-limit failure": (
-        "toomanyrequests",
-        "pull access denied",
-        "manifest unknown",
-        "failed to pull",
-        "error pulling",
-        "429 too many",
-    ),
+    "registry error text present": REGISTRY_TERMS,
     "container health/startup failure": (
         "unhealthy",
         "health check",
@@ -138,6 +144,45 @@ def readiness_block_facts(message, project):
     return facts
 
 
+def prepull_facts(message):
+    """Read exact typed JSON objects, never tag/reason text in message strings.
+
+    The pinned image-prepull.ts declares _tag=LegacyImagePrepullError and
+    these three reason values. Plain text and ordinary 401 challenges cannot
+    establish a typed pre-pull cause; they only contribute literal counts.
+    """
+    reasons = set()
+
+    def visit(value, depth=0):
+        if depth > 8:
+            return
+        if isinstance(value, dict):
+            reason = value.get("reason")
+            if (
+                value.get("_tag") == "LegacyImagePrepullError"
+                and isinstance(reason, str)
+                and reason in PREPULL_REASONS
+            ):
+                reasons.add(reason)
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    visit(nested, depth + 1)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested, depth + 1)
+
+    for candidate in [message, *message.splitlines()]:
+        try:
+            visit(json.loads(candidate))
+        except (ValueError, RecursionError):
+            continue
+    return [
+        f"Startup reported pre-pull reason: {PREPULL_REASONS[reason]}"
+        for reason in PREPULL_REASONS
+        if reason in reasons
+    ]
+
+
 def log_facts(message, project):
     validate_project(project)
     lower = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", message).lower()
@@ -184,6 +229,11 @@ def log_facts(message, project):
         )
         for code in sorted(set(http_codes)):
             facts.append(f"Startup service: {service}; reported HTTP readiness: {code}")
+    facts.append(
+        "Startup registry literal counts: "
+        + "; ".join(f"{term}={min(lower.count(term), 999)}" for term in REGISTRY_TERMS)
+    )
+    facts.extend(prepull_facts(re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", message)))
     return facts
 
 

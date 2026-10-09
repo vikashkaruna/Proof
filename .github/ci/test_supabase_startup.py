@@ -44,7 +44,12 @@ class StartupDiagnosticTests(unittest.TestCase):
             f"supabase_db_{PROJECT} container is not ready: {MARKER}\n"
             f"prefix_supabase_db_{PROJECT} container is not ready: unhealthy\n"
         )
-        self.assertEqual(len(diagnostic.log_facts(message, PROJECT)), 1)
+        self.assertFalse(
+            any(
+                f.startswith("Startup service:")
+                for f in diagnostic.log_facts(message, PROJECT)
+            )
+        )
 
     def test_pinned_readiness_log_headers_identify_only_owned_services(self):
         message = (
@@ -54,14 +59,15 @@ class StartupDiagnosticTests(unittest.TestCase):
         )
         facts = diagnostic.log_facts(message, PROJECT)
         self.assertEqual(
-            facts[1:], ["Startup service: storage; readiness failure log present"]
+            [f for f in facts if f.startswith("Startup service:")],
+            ["Startup service: storage; readiness failure log present"],
         )
         self.assertNotIn(MARKER, "\n".join(facts))
 
     def test_ordinary_registry_auth_challenge_is_not_a_registry_failure(self):
         ordinary = f"HTTP response 401 Unauthorized; fetching registry token {MARKER}"
         facts = diagnostic.log_facts(ordinary, PROJECT)
-        self.assertNotIn("image registry/auth/rate-limit failure", "\n".join(facts))
+        self.assertNotIn("registry error text present", "\n".join(facts))
         for failed in (
             "toomanyrequests",
             "pull access denied",
@@ -70,7 +76,7 @@ class StartupDiagnosticTests(unittest.TestCase):
         ):
             with self.subTest(failed=failed):
                 facts = diagnostic.log_facts(failed + " " + MARKER, PROJECT)
-                self.assertIn("image registry/auth/rate-limit failure", facts[0])
+                self.assertIn("registry error text present", facts[0])
                 self.assertNotIn(MARKER, "\n".join(facts))
 
     def test_readiness_blocks_emit_exact_database_and_image_facts_only(self):
@@ -140,6 +146,79 @@ class StartupDiagnosticTests(unittest.TestCase):
             ["Startup service: postgrest; reported HTTP readiness: 401"],
         )
         self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_registry_literal_counts_are_bounded_presence_without_failure_inference(
+        self,
+    ):
+        message = "\x1b[31mFAILED TO PULL\x1b[0m " * 1200 + MARKER
+        facts = diagnostic.log_facts(message, PROJECT)
+        counts = [f for f in facts if f.startswith("Startup registry literal counts:")]
+        self.assertEqual(len(counts), 1)
+        self.assertIn("failed to pull=999", counts[0])
+        for term in (
+            "toomanyrequests",
+            "pull access denied",
+            "manifest unknown",
+            "error pulling",
+            "429 too many",
+        ):
+            self.assertIn(term + "=0", counts[0])
+        self.assertFalse(
+            any(f.startswith("Startup reported pre-pull reason:") for f in facts)
+        )
+        self.assertNotIn(MARKER, "\n".join(facts))
+
+    def test_exact_typed_prepull_json_reports_only_allowlisted_reasons(self):
+        for reason, label in (
+            ("docker_daemon", "Docker daemon"),
+            ("registry_pull", "registry pull"),
+            ("image_inspect", "image inspection"),
+        ):
+            with self.subTest(reason=reason):
+                message = json.dumps(
+                    {
+                        "cause": {
+                            "message": MARKER,
+                            "reason": reason,
+                            "_tag": "LegacyImagePrepullError",
+                        }
+                    }
+                )
+                facts = diagnostic.log_facts(message, PROJECT)
+                self.assertIn("Startup reported pre-pull reason: " + label, facts)
+                self.assertNotIn(MARKER, "\n".join(facts))
+        self.assertEqual(
+            diagnostic.prepull_facts(
+                '{"_tag":"LegacyImagePrepullError", "reason":"registry_pull"}\n' * 3
+            ),
+            ["Startup reported pre-pull reason: registry pull"],
+        )
+
+    def test_prepull_cause_cannot_be_stitched_from_strings_or_untyped_errors(self):
+        messages = [
+            json.dumps({"_tag": "LegacyImagePrepullError", "reason": MARKER}),
+            json.dumps({"_tag": "OtherError", "reason": "registry_pull"}),
+            json.dumps({"_tag": "LegacyImagePrepullError"})
+            + "\n"
+            + json.dumps({"reason": "registry_pull"}),
+            json.dumps(
+                {
+                    "message": json.dumps(
+                        {"_tag": "LegacyImagePrepullError", "reason": "registry_pull"}
+                    )
+                }
+            ),
+            "LegacyImagePrepullError reason: registry_pull " + MARKER,
+            '{"_tag":"LegacyImagePrepullError","reason":["registry_pull"]}',
+            '{"_tag":"LegacyImagePrepullError","reason":"registry_pull"' + MARKER,
+            "401 Unauthorized " + MARKER,
+        ]
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertEqual(diagnostic.prepull_facts(message), [])
+                self.assertNotIn(
+                    MARKER, "\n".join(diagnostic.log_facts(message, PROJECT))
+                )
 
     def test_invalid_project_refuses_before_inspection(self):
         with patch.object(diagnostic.subprocess, "run") as run:
