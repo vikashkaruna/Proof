@@ -51,6 +51,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -99,6 +100,7 @@ jobs:
       - run: ./scripts/start-parity-supabase.sh
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: python3 scripts/test-evidence-storage.py --browser
@@ -251,6 +253,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -330,6 +333,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: pnpm --filter @axiom/e2e exec playwright test

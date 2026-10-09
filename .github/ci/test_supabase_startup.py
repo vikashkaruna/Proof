@@ -129,7 +129,30 @@ class StartupDiagnosticTests(unittest.TestCase):
                 ["Startup container inspection: unavailable"],
             )
 
-    def test_actual_startup_shell_keeps_failure_and_protected_log(self):
+    def test_nested_pinned_cli_error_facts_do_not_emit_dynamic_fields(self):
+        message = json.dumps(
+            {
+                "_tag": "LegacyHealthCheckTimeoutError",
+                "cause": MARKER,
+                "unhealthy": [
+                    {
+                        "containerId": f"supabase_db_{PROJECT}",
+                        "reason": "container is not ready: unhealthy",
+                    }
+                ],
+                "unknownError": MARKER,
+            }
+        )
+        facts = diagnostic.log_facts(message, PROJECT)
+        self.assertIn("Startup failure tag: health timeout", facts)
+        self.assertIn("Startup service: postgres; reported health: unhealthy", facts)
+        self.assertNotIn(MARKER, "\n".join(facts))
+        self.assertNotIn(
+            "Startup failure tag:",
+            "\n".join(diagnostic.log_facts("UnknownError " + MARKER, PROJECT)),
+        )
+
+    def _startup_shell(self, extra=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bin_dir = root / "bin"
@@ -138,6 +161,7 @@ class StartupDiagnosticTests(unittest.TestCase):
                 "supabase": f"""#!/bin/bash
 if [ "$1" = start ]; then
  echo start >> "$ATTEMPT_LOG"
+ printf '%s\\n' "$@" >> "$ARGUMENT_LOG"
  echo 'supabase_db_{PROJECT} container is not ready: unhealthy' >&2
  echo '{MARKER}' >&2
  exit 1
@@ -145,6 +169,7 @@ fi
 """,
                 "sleep": "#!/bin/bash\nexit 0\n",
                 "docker": "#!/bin/bash\nexit 1\n",
+                "uname": '#!/bin/bash\necho "${STUB_UNAME:-Linux}"\n',
             }
             for name, body in stubs.items():
                 path = bin_dir / name
@@ -154,6 +179,8 @@ fi
                 "PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin",
                 "AXIOM_PARITY_STATE_DIR": str(root / "state"),
                 "ATTEMPT_LOG": str(root / "attempts"),
+                "ARGUMENT_LOG": str(root / "arguments"),
+                **(extra or {}),
             }
             result = subprocess.run(
                 ["/bin/bash", str(ROOT / "scripts/start-parity-supabase.sh")],
@@ -163,18 +190,88 @@ fi
                 timeout=10,
                 check=False,
             )
-            self.assertEqual(result.returncode, 1)
-            self.assertNotIn(MARKER, result.stdout + result.stderr)
-            self.assertIn(
-                "Startup service: postgres; reported health: unhealthy", result.stderr
+            logs = {
+                p.name: (p.read_text(), p.stat().st_mode & 0o777)
+                for p in (root / "state").glob("start*.log")
+            }
+            attempts = (
+                (root / "attempts").read_text().splitlines()
+                if (root / "attempts").exists()
+                else []
             )
-            self.assertIn("no retained service state", result.stderr)
-            self.assertEqual(
-                (root / "attempts").read_text().splitlines(), ["start"] * 3
+            args = (
+                (root / "arguments").read_text().splitlines()
+                if (root / "arguments").exists()
+                else []
             )
-            log = root / "state/start.log"
-            self.assertIn(MARKER, log.read_text())
-            self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+            return result, logs, attempts, args
+
+    def test_actual_startup_shell_keeps_failure_and_protected_log(self):
+        for extra in (
+            {},
+            {
+                "AXIOM_PARITY_STARTUP_DEBUG": "1",
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_ENVIRONMENT": "github-hosted",
+                "RUNNER_OS": "Linux",
+            },
+        ):
+            with self.subTest(extra=extra):
+                result, logs, attempts, args = self._startup_shell(extra)
+                self.assertEqual(result.returncode, 1)
+                self.assertNotIn(MARKER, result.stdout + result.stderr)
+                self.assertIn(
+                    "Startup service: postgres; reported health: unhealthy",
+                    result.stderr,
+                )
+                self.assertIn("no retained service state", result.stderr)
+                self.assertEqual(
+                    result.stderr.count(
+                        "Startup service: postgres; reported health: unhealthy"
+                    ),
+                    3,
+                )
+                self.assertEqual(attempts, ["start"] * 3)
+                self.assertEqual(args.count("--debug"), 3 if extra else 0)
+                self.assertEqual(args.count("--exclude"), 3)
+                self.assertNotIn("--ignore-health-check", args)
+                self.assertEqual(
+                    set(logs),
+                    {
+                        "start.log",
+                        "start-attempt-1.log",
+                        "start-attempt-2.log",
+                        "start-attempt-3.log",
+                    },
+                )
+                for text, mode in logs.values():
+                    self.assertIn(MARKER, text)
+                    self.assertEqual(mode, 0o600)
+
+    def test_debug_opt_in_refuses_incomplete_or_nonhosted_context_before_start(self):
+        approved = {
+            "AXIOM_PARITY_STARTUP_DEBUG": "1",
+            "GITHUB_ACTIONS": "true",
+            "RUNNER_ENVIRONMENT": "github-hosted",
+            "RUNNER_OS": "Linux",
+        }
+        invalid = [
+            {"AXIOM_PARITY_STARTUP_DEBUG": "1"},
+            {**approved, "AXIOM_PARITY_STARTUP_DEBUG": "true"},
+            {**approved, "RUNNER_ENVIRONMENT": "self-hosted"},
+            {**approved, "RUNNER_OS": "macOS"},
+            {**approved, "STUB_UNAME": "Darwin"},
+        ]
+        for key in ("GITHUB_ACTIONS", "RUNNER_ENVIRONMENT", "RUNNER_OS"):
+            invalid.append({k: v for k, v in approved.items() if k != key})
+        for extra in invalid:
+            with self.subTest(extra=extra):
+                result, logs, attempts, args = self._startup_shell(extra)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(
+                    "requires explicit opt-in on GitHub-hosted Linux", result.stderr
+                )
+                self.assertEqual((logs, attempts, args), ({}, [], []))
 
 
 if __name__ == "__main__":

@@ -34,6 +34,13 @@ SERVICES = {
 }
 STATES = {"created", "running", "paused", "restarting", "removing", "exited", "dead"}
 HEALTH = {"starting", "healthy", "unhealthy", "none"}
+ERROR_TAGS = {
+    "LegacyHealthCheckTimeoutError": "health timeout",
+    "LegacyHealthCheckProbeError": "health probe",
+    "LegacyStartWorkdirError": "project workdir",
+    "LegacyStartConfigLoadError": "configuration load",
+    "LegacyStartInvalidConfigError": "invalid configuration",
+}
 CATEGORIES = {
     "image registry/auth/rate-limit failure": (
         "toomanyrequests",
@@ -99,6 +106,9 @@ def log_facts(message, project):
             or "unclassified; protected log required"
         )
     ]
+    for tag, label in ERROR_TAGS.items():
+        if re.search(rf"(?<![a-z0-9_]){tag.lower()}(?![a-z0-9_])", lower):
+            facts.append(f"Startup failure tag: {label}")
     for suffix, service in SERVICES.items():
         name = re.escape(f"supabase_{suffix}_{project}")
         for phrase, allowed, label in (
@@ -107,6 +117,11 @@ def log_facts(message, project):
         ):
             values = re.findall(
                 rf"(?<![a-z0-9_-]){name} container is {phrase}: ([a-z]+)(?![a-z0-9_-])",
+                lower,
+            )
+            values += re.findall(
+                rf"[\"']?containerid[\"']?\s*:\s*[\"']{name}[\"'][,\s]+"
+                rf"[\"']?reason[\"']?\s*:\s*[\"']container is {phrase}: ([a-z]+)[\"']",
                 lower,
             )
             for value in sorted(set(values) & allowed):
