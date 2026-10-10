@@ -26,7 +26,10 @@ def checkout(tmp_path: Path) -> tuple[Path, Path, Path]:
     (repo / "infra/docker/environments").mkdir(parents=True)
     for name in ("ops-env.sh", "ops-env-parse.py"):
         shutil.copyfile(ROOT / "scripts/lib" / name, repo / "scripts/lib" / name)
-    shutil.copyfile(ROOT / "scripts/build-marketing-preprod.sh", repo / "scripts/build-marketing-preprod.sh")
+    shutil.copyfile(
+        ROOT / "scripts/build-marketing-preprod.sh",
+        repo / "scripts/build-marketing-preprod.sh",
+    )
     (repo / "infra/docker/environments/.env.preprod.example").write_text(
         "ENVIRONMENT=preprod\nGCP_PROJECT_ID=<project>\nGCP_REGION=asia-south1\n"
         "AXIOM_DEPLOYMENT_PROFILE=marketing\nAXIOM_ARTIFACT_REPOSITORY=<repo>\n"
@@ -63,7 +66,8 @@ def release_file(repo: Path, tmp_path: Path, **changes: str) -> Path:
         "AXIOM_PROOF_PLATFORM_URL": "https://platform.axiomproof.ai",
         "UPSTREAM_GOTRUE_IMAGE": f"registry.example.invalid/auth@sha256:{PIN}",
         "MARKETING_AUTH_GO_BUILD_IMAGE": f"golang@sha256:{PIN}",
-        "MARKETING_AUTH_SOURCE_ARCHIVE_URL": "https://codeload.github.com/supabase/auth/tar.gz/" + "a" * 40,
+        "MARKETING_AUTH_SOURCE_ARCHIVE_URL": "https://codeload.github.com/supabase/auth/tar.gz/"
+        + "a" * 40,
         "MARKETING_POSTGRES_CLIENT_APK_PACKAGE": "postgresql16-client=16.15-r0",
         "UPSTREAM_POSTGREST_IMAGE": f"registry.example.invalid/rest@sha256:{'b' * 64}",
         "MARKETING_PYTHON_RUNTIME_IMAGE": f"python@sha256:{PIN}",
@@ -100,7 +104,9 @@ def dry_run(
     args.append("--dry-run")
     if build_only:
         args.append("--build-only")
-    result = subprocess.run(args, cwd=repo, text=True, capture_output=True, env=env, check=False)
+    result = subprocess.run(
+        args, cwd=repo, text=True, capture_output=True, env=env, check=False
+    )
     assert not marker.exists(), "Dry-run invoked Docker, gcloud, or Firebase"
     return result
 
@@ -133,16 +139,16 @@ def test_build_only_plan_retains_source_and_environment_guards(checkout, tmp_pat
     assert "Build-only stops" not in result.stdout
 
 
-def test_build_only_runs_candidate_pipeline_without_review_or_publication(checkout, tmp_path):
+def test_build_only_runs_candidate_pipeline_without_review_or_publication(
+    checkout, tmp_path
+):
     """Exercise real shell control flow with explicitly simulated image tools."""
     repo, bin_dir, marker = checkout
     selected = release_file(repo, tmp_path)
     for name in ("docker", "gcloud", "pnpm"):
         tool = bin_dir / name
         tool.write_text(
-            "#!/bin/sh\n"
-            f"printf '%s\\n' \"{name} $*\" >> '{marker}'\n"
-            "exit 0\n"
+            f"#!/bin/sh\nprintf '%s\\n' \"{name} $*\" >> '{marker}'\nexit 0\n"
         )
         tool.chmod(0o755)
     python = bin_dir / "python3"
@@ -169,9 +175,18 @@ def test_build_only_runs_candidate_pipeline_without_review_or_publication(checko
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     result = subprocess.run(
-        ["/bin/bash", str(repo / "scripts/build-marketing-preprod.sh"),
-         "--env-file", str(selected), "--build-only"],
-        cwd=repo, env=env, text=True, capture_output=True, check=False,
+        [
+            "/bin/bash",
+            str(repo / "scripts/build-marketing-preprod.sh"),
+            "--env-file",
+            str(selected),
+            "--build-only",
+        ],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     calls = marker.read_text()
@@ -180,8 +195,13 @@ def test_build_only_runs_candidate_pipeline_without_review_or_publication(checko
     assert "docker tag " in calls
     assert "review-invoked" not in calls
     assert "docker push " not in calls
-    assert (repo / ".axiom-runtime/marketing-preprod/image-scans/candidate.private.json").is_file()
-    assert "Independent Auth review and image clearance are still required" in result.stdout
+    assert (
+        repo / ".axiom-runtime/marketing-preprod/image-scans/candidate.private.json"
+    ).is_file()
+    assert (
+        "Independent Auth review and image clearance are still required"
+        in result.stdout
+    )
 
 
 @pytest.mark.parametrize("selected_kind", ("missing", "example"))
@@ -205,7 +225,10 @@ def test_missing_or_example_file_never_falls_back(checkout, tmp_path, selected_k
         ("GCP_REGION", "us-central1"),
         ("MARKETING_AUTH_GO_BUILD_IMAGE", "golang:latest"),
         ("MARKETING_TRIVY_IMAGE", "aquasec/trivy:latest"),
-        ("MARKETING_AUTH_SOURCE_ARCHIVE_URL", "https://evil.example.invalid/auth.tar.gz"),
+        (
+            "MARKETING_AUTH_SOURCE_ARCHIVE_URL",
+            "https://evil.example.invalid/auth.tar.gz",
+        ),
         ("MARKETING_POSTGRES_CLIENT_APK_PACKAGE", "postgresql16-client"),
         ("UPSTREAM_POSTGREST_IMAGE", "registry.example.invalid/rest@sha256:short"),
         ("AXIOM_ARTIFACT_REPOSITORY", "production-images"),
@@ -237,3 +260,71 @@ def test_dirty_checkout_refused_even_for_dry_run(checkout, tmp_path):
     result = dry_run(checkout, selected)
     assert result.returncode != 0, result.stdout
     assert "Validated seven-image release plan" not in result.stdout
+
+
+def scanner_program() -> str:
+    source = (ROOT / "scripts/build-marketing-preprod.sh").read_text()
+    return source.split("python3 - <<'PYSCAN'\n", 1)[1].split("\nPYSCAN", 1)[0]
+
+
+def run_scanner_program(program, tmp_path, monkeypatch):
+    """Execute the production scanner block; simulate only Docker transport."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REGISTRY", "registry.example.invalid/review")
+    monkeypatch.setenv("SOURCE_SHA", "a" * 40)
+    monkeypatch.setenv("MARKETING_TRIVY_IMAGE", f"aquasec/trivy@sha256:{PIN}")
+    calls = []
+
+    def inspect(args, **kwargs):
+        assert args[:3] == ["docker", "image", "inspect"]
+        return "sha256:" + PIN + "\n"
+
+    def scan(args, **kwargs):
+        assert args[:3] == ["docker", "run", "--rm"]
+        assert "--read-only" in args
+        assert args[args.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=256m"
+        assert args[args.index("--cap-drop") + 1] == "ALL"
+        assert args[args.index("--security-opt") + 1] == "no-new-privileges"
+        assert "--memory=1g" in args and "--cpus=1" in args
+        assert kwargs == {"check": True, "timeout": 900}
+        calls.append(args)
+        report = Path(args[args.index("--output") + 1]).name
+        (tmp_path / ".axiom-runtime/marketing-preprod/image-scans" / report).write_text(
+            "{}\n"
+        )
+
+    monkeypatch.setattr(subprocess, "check_output", inspect)
+    monkeypatch.setattr(subprocess, "run", scan)
+    exec(compile(program, "reviewed-scanner-block", "exec"), {})  # noqa: S102 - fixed repository scanner block and explicit removal mutants only
+    return calls
+
+
+def test_actual_scanner_block_has_bounded_writable_tmp_and_readonly_root(
+    tmp_path, monkeypatch
+):
+    calls = run_scanner_program(scanner_program(), tmp_path, monkeypatch)
+    assert len(calls) == 7
+    directory = tmp_path / ".axiom-runtime/marketing-preprod/image-scans"
+    assert len(list(directory.glob("*.scan.private.json"))) == 7
+    assert all(
+        path.stat().st_mode & 0o777 == 0o600
+        for path in directory.glob("*.private.json")
+    )
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "'--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',",
+        "'--read-only',",
+        "'--cap-drop', 'ALL',",
+        "'--security-opt', 'no-new-privileges',",
+    ],
+)
+def test_scanner_sandbox_removal_mutants_fail_actual_command_check(
+    tmp_path, monkeypatch, removed
+):
+    program = scanner_program()
+    assert program.count(removed) == 1
+    with pytest.raises((AssertionError, ValueError)):
+        run_scanner_program(program.replace(removed, ""), tmp_path, monkeypatch)

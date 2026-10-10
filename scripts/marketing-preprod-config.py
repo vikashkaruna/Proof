@@ -52,6 +52,7 @@ def profile(env: dict[str, str], release: dict, versions: dict, services: bool, 
         "project_id": namespace, "environment": env["ENVIRONMENT"], "region": env["GCP_REGION"],
         "release_sha": sha, "images": release["images"], "firebase_origin": required("AXIOM_PROOF_MARKETING_URL"),
         "deploy_services": services,
+        "auth_bootstrap_only": False,
         "migration_account_id": required("MARKETING_MIGRATION_ACCOUNT_ID"),
         "bootstrap_secrets": {"admin_db_url": required("MARKETING_ADMIN_DB_URL_SECRET"), "auth_password": required("MARKETING_AUTH_PASSWORD_SECRET"), "rest_password": required("MARKETING_REST_PASSWORD_SECRET")},
     }

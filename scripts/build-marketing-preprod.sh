@@ -150,7 +150,9 @@ for component in ['marketing', 'bff', 'gateway', 'auth', 'rest', 'migrations', '
     tag = f"{os.environ['REGISTRY']}/axiom-proof-preprod-{component}:release-{os.environ['SOURCE_SHA']}"
     image_id = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', tag], text=True).strip()
     report = directory / f'{component}.scan.private.json'
-    subprocess.run(['docker', 'run', '--rm', '--cpus=1', '--memory=2g', '--read-only',
+    subprocess.run(['docker', 'run', '--rm', '--cpus=1', '--memory=1g', '--read-only',
+        '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+        '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
         '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
         '-v', str(cache.resolve()) + ':/root/.cache/trivy',
         '-v', str(directory.resolve()) + ':/reports',

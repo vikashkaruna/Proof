@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import unittest
 from unittest.mock import patch
 
@@ -86,6 +87,22 @@ class MarketingProfileTests(unittest.TestCase):
         )
         for key in ("GOTRUE_DB_DATABASE_URL", "GOTRUE_JWT_SECRET", "PGRST_DB_URI", "PGRST_JWT_SECRET", "SUPABASE_SERVICE_KEY"):
             self.assertFalse(any(key in values for values in result["service_env"].values()))
+
+    def test_auth_bootstrap_flag_is_derived_false_for_both_generated_phases(self) -> None:
+        # Only the coordinator's explicit bootstrap phase may enable this flag.
+        self.env["auth_bootstrap_only"] = "true"
+        with patch.dict(os.environ, {"auth_bootstrap_only": "true"}):
+            for services in (False, True):
+                with self.subTest(services=services):
+                    self.assertIs(self.profile(services)["auth_bootstrap_only"], False)
+
+    def test_generated_profile_covers_every_declared_terraform_variable(self) -> None:
+        variables = (ROOT / "infra/terraform/envs/marketing-preprod/variables.tf").read_text()
+        declared = set(re.findall(r'^variable "([a-z0-9_]+)"', variables, re.M))
+        self.assertTrue(declared)
+        for services in (False, True):
+            with self.subTest(services=services):
+                self.assertEqual(set(self.profile(services)), declared)
 
     def test_delivery_email_requires_version_and_uses_secret_ref(self) -> None:
         self.env["AXIOM_CONTACT_EMAIL_MODE"] = "delivery"
