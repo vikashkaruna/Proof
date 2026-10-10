@@ -19,6 +19,7 @@
     "@axiom/supabase": "workspace:*",
     "@axiom/types": "workspace:*",
     "@axiom/ui": "workspace:*",
+    "jspdf": "4.2.1",
     "lucide-react": "^1.50.0",
     "next": "^16.3.8",
     "react": "^19.3.0",

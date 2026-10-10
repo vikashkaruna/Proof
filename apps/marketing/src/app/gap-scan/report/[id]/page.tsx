@@ -12,6 +12,7 @@ import {
   PostureScore,
   SeverityChip,
   Button,
+  AxiomLogo,
 } from '@axiom/ui';
 import { GapScanReportSchema } from '@axiom/types';
 import { BRAND } from '@axiom/config';
@@ -55,7 +56,8 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
         ← Back to home
       </Link>
 
-      <div>
+      <div className="border-b border-slate-200 pb-6">
+        <AxiomLogo size="lg" className="mb-5" />
         <Badge variant="indigo">Statutory Gap-Scan Assessment</Badge>
         <h1 className="mt-2 font-heading text-3xl font-semibold tracking-tight text-indigo-500 sm:text-4xl">
           Your DPDPA Readiness Report
@@ -82,6 +84,7 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
       {/* Interactive Email Dispatch Card */}
       <EmailReportAction
         reportId={scan.id}
+        pdfReport={scan}
         defaultEmail={scan.contact_email ?? undefined}
         defaultName={scan.contact_name ?? undefined}
         defaultPhone={scan.contact_phone ?? undefined}
@@ -220,11 +223,11 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
         </Card>
       )}
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle>All findings ({report.findings?.length ?? 0})</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-mist-50 text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
@@ -283,6 +286,9 @@ export default async function GapScanReportPage({ params }: { params: Promise<{ 
       <p className="text-center text-xs text-slate-500">
         Report ID: {scan.id} · Library v{scan.library_version} · Scored{' '}
         {new Date(scan.created_at).toLocaleString('en-IN')}
+        <br />
+        {BRAND.company} · <a href={`https://${BRAND.primaryDomain}`}>{BRAND.primaryDomain}</a> ·{' '}
+        <a href={BRAND.website}>{BRAND.companyDomain}</a>
         <br />
         {BRAND.copyright}
       </p>
