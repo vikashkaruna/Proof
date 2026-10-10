@@ -93,7 +93,7 @@ def review_fixture(root, manifest):
         "patch": (
             ROOT / "infra/docker/auth-security/pgproto3-data-row.patch"
         ).read_bytes(),
-        "compiled_modules": b"dep google.golang.org/grpc v1.83.2\ndep github.com/jackc/pgproto3/v2 v2.3.3\n",
+        "compiled_modules": b"/out/auth: go1.27.2\n\tdep google.golang.org/grpc v1.83.2\n\tdep github.com/jackc/pgproto3/v2 v2.3.3\n\tdep golang.org/x/net v0.60.0\n",
         "original_regression": b"panic: runtime error: slice bounds out of range\n(*DataRow).Decode\nTestAxiomNegativeLengthsReturnError",
         "fixed_tests": b"ok github.com/jackc/pgproto3/v2 0.1s\nPASS\n",
         "runtime_acceptance": json.dumps(
@@ -297,3 +297,54 @@ def test_internal_symlinks_are_never_protected_proof_files(tmp_path, directory_l
     save_manifest(tmp_path, manifest)
     with pytest.raises((OSError, ValueError)):
         MODULE.classify(tmp_path / "manifest.json", None, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "old-go",
+        "future-go",
+        "missing-go",
+        "old-net",
+        "missing-net",
+        "duplicate-net",
+        "replacement",
+        "embedded-version",
+    ],
+)
+def test_auth_module_metadata_requires_reviewed_fixed_toolchain_and_net(
+    tmp_path, change
+):
+    manifest = fixture(tmp_path, auth=True)
+    review = review_fixture(tmp_path, manifest)
+    data = (tmp_path / "compiled_modules.proof").read_bytes()
+    changed = {
+        "old-go": data.replace(b"go1.27.2", b"go1.27.1"),
+        "future-go": data.replace(b"go1.27.2", b"go1.27.3"),
+        "missing-go": data.replace(b"/out/auth: go1.27.2\n", b""),
+        "old-net": data.replace(b"v0.60.0", b"v0.58.0"),
+        "missing-net": data.replace(b"\tdep golang.org/x/net v0.60.0\n", b""),
+        "duplicate-net": data + b"\tdep golang.org/x/net v0.58.0\n",
+        "replacement": data + b"\t=> example.invalid/net v0.1.0\n",
+        "embedded-version": data.replace(b"v0.60.0", b"v0.60.0-unsafe"),
+    }[change]
+    review["proofs"]["compiled_modules"] = stored(
+        tmp_path, "compiled_modules.proof", changed
+    )
+    stored(tmp_path, "review.json", json.dumps(review).encode())
+    with pytest.raises(ValueError, match="toolchain|metadata|replacement"):
+        MODULE.classify(tmp_path / "manifest.json", tmp_path / "review.json", tmp_path)
+
+
+def test_auth_build_locks_match_reviewed_descriptor_and_template_builder():
+    source = json.loads((ROOT / "infra/docker/auth-security/source.json").read_text())
+    dockerfile = (ROOT / "infra/docker/Dockerfile.auth").read_text()
+    assert source["go_version"] == "1.27.2"
+    assert source["x_net_version"] == "v0.60.0"
+    assert "-require=golang.org/x/net@" + source["x_net_version"] in dockerfile
+    assert "-require=google.golang.org/grpc@" + source["grpc_version"] in dockerfile
+    for environment in ("local", "preprod", "staging", "production", "onprem"):
+        template = (
+            ROOT / f"infra/docker/environments/.env.{environment}.example"
+        ).read_text()
+        assert "MARKETING_AUTH_GO_BUILD_IMAGE=" + source["go_builder_index"] in template

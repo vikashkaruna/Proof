@@ -160,12 +160,24 @@ def reviewed_auth(
     ):
         raise ValueError("Auth parser fix does not match reviewed source")
     modules = data["compiled_modules"].decode()
-    if not re.search(
-        r"dep\s+google.golang.org/grpc\s+v1\.83\.2(?:\s|$)", modules
-    ) or not re.search(
-        r"dep\s+github.com/jackc/pgproto3/v2\s+v2\.3\.3(?:\s|$)", modules
+    if not re.search(r"^[^\n]+: go1\.27\.2$", modules, re.MULTILINE):
+        raise ValueError(
+            "Auth actual Go toolchain differs from the reviewed fixed version"
+        )
+    for module, version in (
+        ("google.golang.org/grpc", "v1.83.2"),
+        ("github.com/jackc/pgproto3/v2", "v2.3.3"),
+        ("golang.org/x/net", "v0.60.0"),
     ):
-        raise ValueError("Auth actual module metadata differs")
+        entries = re.findall(
+            r"^\s*dep[ \t]+" + re.escape(module) + r"[ \t]+([^\s]+)(?:[ \t]+[^\n]*)?$",
+            modules,
+            re.MULTILINE,
+        )
+        if entries != [version]:
+            raise ValueError("Auth actual module metadata differs")
+    if re.search(r"^\s*=>", modules, re.MULTILINE):
+        raise ValueError("Auth actual module replacement is not reviewed")
     causal = data["original_regression"].decode()
     fixed = data["fixed_tests"].decode()
     if (
