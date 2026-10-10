@@ -39,7 +39,7 @@ if [ -n "${AXIOM_RELEASE_SHA:-}" ] && [ "$AXIOM_RELEASE_SHA" != "$SOURCE_SHA" ];
 fi
 if [ "$DRY_RUN" = true ]; then
   echo "Validated seven-image release plan for project=$GCP_PROJECT_ID region=$GCP_REGION repository=$AXIOM_ARTIFACT_REPOSITORY source=$SOURCE_SHA"
-  echo 'Would build marketing, marketing-only BFF, private gateway, migration job, lifecycle controller and reviewed patched Auth; mirror pinned REST; record immutable digests.'
+  echo 'Would build marketing, marketing-only BFF, private gateway, migration job, lifecycle controller and reviewed patched Auth; resolve pinned REST into one amd64 image; record immutable digests.'
   if [ "$BUILD_ONLY" = true ]; then
     echo 'Build-only stops after protected candidate scans for independent Auth review; no image publication or cloud deployment.'
   fi
@@ -132,12 +132,29 @@ docker build --platform linux/amd64 --provenance=false --target runtime \
   --build-arg "SOURCE_SNAPSHOT_SHA256=$AUTH_SNAPSHOT_SHA256" \
   --label "org.opencontainers.image.revision=$SOURCE_SHA" \
   -t "$REGISTRY/axiom-proof-preprod-auth:$TAG" "$AUTH_CONTEXT/context"
-for component in rest; do
-  upstream="$UPSTREAM_POSTGREST_IMAGE"
-  target="$REGISTRY/axiom-proof-preprod-${component}:$TAG"
-  docker pull --platform linux/amd64 "$upstream"
-  docker tag "$upstream" "$target"
-done
+REST_CONTEXT="$(mktemp -d .axiom-runtime/marketing-preprod/rest-source.XXXXXXXX)"
+export REST_CONTEXT
+python3 - <<'PYREST'
+import hashlib, json, os
+from pathlib import Path
+source = Path('infra/docker/Dockerfile.marketing-rest').read_bytes()
+context = Path(os.environ['REST_CONTEXT'])
+context.chmod(0o700)
+dockerfile = context / 'Dockerfile'
+dockerfile.write_bytes(source)
+dockerfile.chmod(0o600)
+manifest = context / 'rest-context.private.json'
+manifest.write_text(json.dumps({'release_sha': os.environ['SOURCE_SHA'],
+    'upstream_image': os.environ['UPSTREAM_POSTGREST_IMAGE'], 'platform': 'linux/amd64',
+    'dockerfile_sha256': hashlib.sha256(source).hexdigest()}, sort_keys=True) + '\n')
+manifest.chmod(0o600)
+if hashlib.sha256(dockerfile.read_bytes()).hexdigest() != json.loads(manifest.read_text())['dockerfile_sha256']:
+    raise ValueError('REST private build context source hash mismatch')
+PYREST
+docker build --platform linux/amd64 --provenance=false \
+  --build-arg "UPSTREAM_POSTGREST_IMAGE=$UPSTREAM_POSTGREST_IMAGE" \
+  --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+  -f "$REST_CONTEXT/Dockerfile" -t "$REGISTRY/axiom-proof-preprod-rest:$TAG" "$REST_CONTEXT"
 python3 - <<'PYSCAN'
 import hashlib, json, os, subprocess
 from pathlib import Path
@@ -145,6 +162,12 @@ directory = Path('.axiom-runtime/marketing-preprod/image-scans')
 directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 cache = directory / 'cache'
 cache.mkdir(mode=0o700, exist_ok=True)
+scratch = cache / 'tmp'
+if cache.is_symlink() or scratch.is_symlink():
+    raise ValueError('Scanner cache temporary workspace must not be a symlink')
+cache.chmod(0o700)
+scratch.mkdir(mode=0o700, exist_ok=True)
+scratch.chmod(0o700)
 images = {}
 for component in ['marketing', 'bff', 'gateway', 'auth', 'rest', 'migrations', 'lifecycle']:
     tag = f"{os.environ['REGISTRY']}/axiom-proof-preprod-{component}:release-{os.environ['SOURCE_SHA']}"
@@ -153,6 +176,7 @@ for component in ['marketing', 'bff', 'gateway', 'auth', 'rest', 'migrations', '
     subprocess.run(['docker', 'run', '--rm', '--cpus=1', '--memory=1g', '--read-only',
         '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
         '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+        '--env', 'TMPDIR=/root/.cache/trivy/tmp',
         '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
         '-v', str(cache.resolve()) + ':/root/.cache/trivy',
         '-v', str(directory.resolve()) + ':/reports',

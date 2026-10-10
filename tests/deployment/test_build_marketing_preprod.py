@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -24,6 +26,10 @@ def checkout(tmp_path: Path) -> tuple[Path, Path, Path]:
     repo = tmp_path / "checkout with spaces"
     (repo / "scripts/lib").mkdir(parents=True)
     (repo / "infra/docker/environments").mkdir(parents=True)
+    shutil.copyfile(
+        ROOT / "infra/docker/Dockerfile.marketing-rest",
+        repo / "infra/docker/Dockerfile.marketing-rest",
+    )
     for name in ("ops-env.sh", "ops-env-parse.py"):
         shutil.copyfile(ROOT / "scripts/lib" / name, repo / "scripts/lib" / name)
     shutil.copyfile(
@@ -167,6 +173,8 @@ def test_build_only_runs_candidate_pipeline_without_review_or_publication(
         " (p/'snapshot-sha256').write_text('a'*64+'\\n')\n"
         "elif 'approved-target.json' in body:\n"
         " Path('.axiom-runtime/marketing-preprod/target-manifest-sha256').write_text('b'*64+'\\n')\n"
+        "elif 'rest-context.private.json' in body:\n"
+        " exec(compile(body, 'fixed-rest-context', 'exec'))\n"
         "elif 'PYSCAN' not in body and 'scanner_image' in body:\n"
         " p=Path('.axiom-runtime/marketing-preprod/image-scans');p.mkdir(parents=True)\n"
         " (p/'candidate.private.json').write_text('{}\\n')\n"
@@ -190,9 +198,40 @@ def test_build_only_runs_candidate_pipeline_without_review_or_publication(
     )
     assert result.returncode == 0, result.stderr
     calls = marker.read_text()
-    assert calls.count("docker build ") == 6
-    assert "docker pull --platform linux/amd64" in calls
-    assert "docker tag " in calls
+    assert calls.count("docker build ") == 7
+    assert "docker pull " not in calls
+    assert "docker tag " not in calls
+    rest_calls = [
+        line
+        for line in calls.splitlines()
+        if "docker build " in line and "/axiom-proof-preprod-rest:" in line
+    ]
+    assert len(rest_calls) == 1
+    assert "--platform linux/amd64 --provenance=false" in rest_calls[0]
+    assert (
+        f"--build-arg UPSTREAM_POSTGREST_IMAGE=registry.example.invalid/rest@sha256:{'b' * 64}"
+        in rest_calls[0]
+    )
+    source_sha = command("git", "rev-parse", "HEAD", cwd=repo)
+    assert f"--label org.opencontainers.image.revision={source_sha}" in rest_calls[0]
+    contexts = list((repo / ".axiom-runtime/marketing-preprod").glob("rest-source.*"))
+    assert len(contexts) == 1
+    context = contexts[0]
+    assert context.stat().st_mode & 0o777 == 0o700
+    dockerfile = context / "Dockerfile"
+    assert (
+        dockerfile.read_bytes()
+        == (ROOT / "infra/docker/Dockerfile.marketing-rest").read_bytes()
+    )
+    assert dockerfile.stat().st_mode & 0o777 == 0o600
+    manifest = context / "rest-context.private.json"
+    assert manifest.stat().st_mode & 0o777 == 0o600
+    assert json.loads(manifest.read_text()) == {
+        "release_sha": source_sha,
+        "upstream_image": f"registry.example.invalid/rest@sha256:{'b' * 64}",
+        "platform": "linux/amd64",
+        "dockerfile_sha256": hashlib.sha256(dockerfile.read_bytes()).hexdigest(),
+    }
     assert "review-invoked" not in calls
     assert "docker push " not in calls
     assert (
@@ -202,6 +241,20 @@ def test_build_only_runs_candidate_pipeline_without_review_or_publication(
         "Independent Auth review and image clearance are still required"
         in result.stdout
     )
+
+
+def test_rest_wrapper_only_resolves_same_upstream_without_content_changes():
+    instructions = [
+        line.strip()
+        for line in (ROOT / "infra/docker/Dockerfile.marketing-rest")
+        .read_text()
+        .splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert instructions == [
+        "ARG UPSTREAM_POSTGREST_IMAGE",
+        "FROM ${UPSTREAM_POSTGREST_IMAGE}",
+    ]
 
 
 @pytest.mark.parametrize("selected_kind", ("missing", "example"))
@@ -273,6 +326,7 @@ def run_scanner_program(program, tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY", "registry.example.invalid/review")
     monkeypatch.setenv("SOURCE_SHA", "a" * 40)
     monkeypatch.setenv("MARKETING_TRIVY_IMAGE", f"aquasec/trivy@sha256:{PIN}")
+    monkeypatch.setenv("TMPDIR", "/ambient/unapproved-workspace")
     calls = []
 
     def inspect(args, **kwargs):
@@ -285,6 +339,12 @@ def run_scanner_program(program, tmp_path, monkeypatch):
         assert args[args.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=256m"
         assert args[args.index("--cap-drop") + 1] == "ALL"
         assert args[args.index("--security-opt") + 1] == "no-new-privileges"
+        assert args[args.index("--env") + 1] == "TMPDIR=/root/.cache/trivy/tmp"
+        cache = tmp_path / ".axiom-runtime/marketing-preprod/image-scans/cache"
+        assert str(cache.resolve()) + ":/root/.cache/trivy" in args
+        assert (cache / "tmp").is_dir() and not (cache / "tmp").is_symlink()
+        assert cache.stat().st_mode & 0o777 == 0o700
+        assert (cache / "tmp").stat().st_mode & 0o777 == 0o700
         assert "--memory=1g" in args and "--cpus=1" in args
         assert kwargs == {"check": True, "timeout": 900}
         calls.append(args)
@@ -319,6 +379,8 @@ def test_actual_scanner_block_has_bounded_writable_tmp_and_readonly_root(
         "'--read-only',",
         "'--cap-drop', 'ALL',",
         "'--security-opt', 'no-new-privileges',",
+        "'--env', 'TMPDIR=/root/.cache/trivy/tmp',",
+        "scratch.mkdir(mode=0o700, exist_ok=True)",
     ],
 )
 def test_scanner_sandbox_removal_mutants_fail_actual_command_check(
@@ -326,5 +388,24 @@ def test_scanner_sandbox_removal_mutants_fail_actual_command_check(
 ):
     program = scanner_program()
     assert program.count(removed) == 1
-    with pytest.raises((AssertionError, ValueError)):
+    with pytest.raises((AssertionError, ValueError, FileNotFoundError)):
         run_scanner_program(program.replace(removed, ""), tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize("linked", ["cache", "scratch"])
+def test_scanner_disk_workspace_symlink_refused_before_docker(
+    tmp_path, monkeypatch, linked
+):
+    cache = tmp_path / ".axiom-runtime/marketing-preprod/image-scans/cache"
+    cache.parent.mkdir(parents=True)
+    external = tmp_path / "external"
+    external.mkdir()
+    external.chmod(0o755)
+    if linked == "cache":
+        cache.symlink_to(external, target_is_directory=True)
+    else:
+        cache.mkdir()
+        (cache / "tmp").symlink_to(external, target_is_directory=True)
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        run_scanner_program(scanner_program(), tmp_path, monkeypatch)
+    assert external.stat().st_mode & 0o777 == 0o755
