@@ -57,7 +57,17 @@ def runtime():
 
 @pytest.mark.parametrize("phase", job.PHASES)
 def test_prepared_job_is_private_single_task_no_retry_and_secret_refs_only(phase):
-    payload = job.job_payload(configuration(), phase)
+    source = configuration()
+    if phase == "adopt":
+        spec = importlib.util.spec_from_file_location(
+            "admission_test_inputs", ROOT / "tests/deployment/test_marketing_admission_gate.py"
+        )
+        inputs_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inputs_module)
+        additional, binding = inputs_module.inputs()
+        source.update(additional)
+        source["MARKETING_ADOPTION_BINDING"] = json.dumps(binding)
+    payload = job.job_payload(source, phase)
     task = payload["template"]["template"]
     assert payload["template"]["taskCount"] == 1
     assert payload["template"]["parallelism"] == 1

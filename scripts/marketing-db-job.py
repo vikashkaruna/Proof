@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
-PHASES = ("roles", "series", "inspect")
+PHASES = ("roles", "series", "inspect", "adopt")
 COMPONENT = re.compile(r"axiom-proof-preprod-[a-z0-9-]+\Z")
 SECRET_BINDINGS = {
     "SUPABASE_DB_URL": "ADMIN_DB_URL",
@@ -153,6 +153,20 @@ def job_payload(source: dict[str, str], phase: str) -> dict:
             "CLOUD_SQL_ADMIN_USER": required(source, "CLOUD_SQL_ADMIN_USER"),
         }.items()
     ]
+    if phase == "adopt":
+        for key in (
+            "GCP_PROJECT_ID", "AXIOM_RELEASE_SHA", "MARKETING_MIGRATION_SERVICE_ACCOUNT",
+            "MARKETING_MIGRATION_JOB_NAME", "MARKETING_AUTH_SERVICE_NAME",
+            "MARKETING_LIFECYCLE_SCHEDULER_NAME", "AXIOM_IDLE_STATE_BUCKET",
+            "MARKETING_ADOPTION_BINDING",
+        ):
+            env.append({"name": key, "value": required(source, key)})
+        spec = importlib.util.spec_from_file_location(
+            "marketing_adoption_payload", ROOT / "scripts/marketing-state-adoption.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.admission_binding(source, json.loads(source["MARKETING_ADOPTION_BINDING"]))
     for name, prefix in SECRET_BINDINGS.items():
         if phase != "roles" and name != "SUPABASE_DB_URL":
             continue
@@ -595,6 +609,14 @@ def run_phase(source: dict[str, str], phase: str) -> None:
     if phase not in PHASES:
         raise ValueError("Unsupported bootstrap phase")
     env = runtime_environment(source)
+    if phase == "adopt":
+        spec = importlib.util.spec_from_file_location(
+            "marketing_fenced_adoption", ROOT / "scripts/marketing-state-adoption.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.run_adoption_job(source, env)
+        return
     if phase == "inspect":
         inspect_clients(source, env)
         return
@@ -643,6 +665,30 @@ select json_build_object(
 commit;
 """
 
+
+
+def admission_programs(database: str) -> dict[str, str]:
+    """Fixed PG15 maintenance SQL; only the exact new target admission flag changes."""
+    if not re.fullmatch(r"axiom_proof_preprod(?:_[a-z0-9_]+)?", database):
+        raise ValueError("Exact preprod database identifier required")
+    name = '"' + database + '"'
+    value = "'" + database + "'"
+    identity = """select json_build_object(
+ 'pid',pg_backend_pid(),'maintenance_database',current_database(),'role',current_user,
+ 'server_version_num',current_setting('server_version_num'),
+ 'encrypted_transport',(select ssl from pg_stat_ssl where pid=pg_backend_pid()),
+ 'stats_visible',(select rolsuper from pg_roles where rolname=current_user) or pg_has_role('pg_read_all_stats','usage'),
+ 'database_oid',oid::bigint,'database_name',datname,'allow_connections',datallowconn,
+ 'owner_capable',(select rolsuper from pg_roles where rolname=current_user) or pg_has_role(datdba,'usage'),
+ 'shared_preloads',current_setting('shared_preload_libraries'))
+ from pg_database where datname=""" + value + ";"
+    return {
+        'identity': identity,
+        'close': "begin;set local lock_timeout='5s';set local statement_timeout='10s';alter database " + name + " allow_connections false;commit;" + identity,
+        'startup_locks': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'startup_locks',(select count(*) from pg_locks where locktype='object' and classid='pg_database'::regclass and objid=(select oid from pg_database where datname=" + value + ") and objsubid=0 and mode='RowExclusiveLock'));",
+        'clients': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'clients',coalesce((select json_agg(json_build_object('pid',pid,'role',usename,'backend_type',backend_type,'state',state)) from pg_stat_activity where datname=" + value + " and backend_type='client backend'),'[]'::json),'unknown_workers',coalesce((select json_agg(json_build_object('pid',pid,'backend_type',backend_type)) from pg_stat_activity where datname=" + value + " and backend_type not in ('client backend','autovacuum worker')),'[]'::json),'maintenance_clients',(select count(*) from pg_stat_activity where backend_type='client backend' and usename=current_user and pid<>pg_backend_pid()),'prepared_transactions',(select count(*) from pg_prepared_xacts where database=" + value + "));",
+        'open': "begin;set local lock_timeout='5s';set local statement_timeout='10s';alter database " + name + " allow_connections true;commit;" + identity,
+    }
 
 def inspect_clients(source: dict[str, str], env: dict[str, str]) -> None:
     result = subprocess.run(  # nosec B603 B607 - fixed read-only psql, TLS env, no query text or credentials in output

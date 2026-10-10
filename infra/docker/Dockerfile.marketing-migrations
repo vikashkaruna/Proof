@@ -13,9 +13,10 @@ RUN printf '%s\n' "$POSTGRES_CLIENT_APK_PACKAGE" | grep -Eq '^postgresql16-clien
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
 WORKDIR /app
 COPY scripts/migrate-database.py scripts/marketing-db-job.py /app/scripts/
+COPY scripts/marketing-state-adoption.py scripts/marketing-acceptance-job.py scripts/marketing-acceptance-readback.py scripts/marketing-acceptance-config.py /app/scripts/
 COPY scripts/lib/ops-env-parse.py /app/scripts/lib/ops-env-parse.py
 COPY infra/supabase/bootstrap-selfhosted.sql /app/infra/supabase/bootstrap-selfhosted.sql
-COPY infra/supabase/marketing-library.json /app/infra/supabase/marketing-library.json
+COPY --chown=65532:65532 infra/supabase/marketing-library.json /app/infra/supabase/marketing-library.json
 COPY infra/supabase/migrations /app/infra/supabase/migrations/
 ENV AXIOM_RELEASE_SHA=${AXIOM_RELEASE_SHA} PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 65532:65532

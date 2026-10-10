@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Read-only, fail-closed inventory for first marketing lifecycle-state adoption.
+"""Inventory and guarded initial marketing lifecycle-state adoption.
 
-This is a bounded observation, not a lock. The seed coordinator deliberately
-does not consume it yet: a real inspection Job and race-closing rollout protocol
-must be reviewed before that gate can be enabled.
+Read-only inventory is never an exclusive gate. The adopt Job closes ordinary
+PG15 database admission, drains startup/live sessions, creates and verifies an
+immutable lifecycle state object, then reopens through the same maintenance PID.
+Any uncertain outcome preserves the durable admission state for review.
 """
 
 from __future__ import annotations
@@ -17,13 +18,14 @@ import re
 import shutil
 import stat
 import subprocess  # nosec B404
+import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-# Subprocess use is limited to validated, fixed read-only gcloud commands.
+# Inventory uses fixed read-only gcloud; admission uses fixed native psql SQL.
 
 SHA40 = re.compile(r"[a-f0-9]{40}\Z")
 NAME = re.compile(r"[a-z][a-z0-9-]{4,62}\Z")
@@ -97,10 +99,10 @@ def monitoring_instances(project: str, service: str, now: int) -> dict:
                 f'AND resource.labels.service_name="{service}"'
             ),
             "interval.startTime": datetime.fromtimestamp(
-                now - 600, tz=timezone.utc
+                now - 600, tz=UTC
             ).isoformat(),
             "interval.endTime": datetime.fromtimestamp(
-                now, tz=timezone.utc
+                now, tz=UTC
             ).isoformat(),
             "view": "FULL",
             "pageSize": "100",
@@ -361,7 +363,7 @@ def timestamp(value: str) -> int:
     if not isinstance(value, str):
         raise TypeError("Missing observation timestamp")
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise ValueError("Malformed observation timestamp") from error
     if parsed.tzinfo is None:
@@ -836,9 +838,10 @@ def validate(
         "observed_unix": now,
         "valid_until_unix": now + 30,
         "auth_zero_instance_observed_unix": metric_at,
-        "exclusive_client_adoption": True,
+        "exclusive_client_adoption": False,
         "no_other_clients": True,
-        "seed_gate_enabled": True,
+        "seed_gate_enabled": False,
+        "unfenced_inventory_only": True,
         "scope": "isolated preprod bootstrap; recheck immediately before create-only seed",
     }
 
@@ -971,6 +974,345 @@ def collect(env: dict[str, str], execution: str) -> dict:
     inventory["collected_start_unix"] = started
     inventory["collected_finish_unix"] = int(time.time())
     return inventory
+
+
+class MaintenanceSession:
+    """One native maintenance backend; an uncertain command is never retried."""
+
+    def __init__(self, env: dict[str, str], *, spawn=None):
+        import queue
+        import threading
+        self.queue = queue.Queue()
+        self.process = (spawn or subprocess.Popen)(
+            ['psql', '-X', '-q', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, env={**env, 'PGDATABASE': 'postgres', 'PGAPPNAME': 'axiom-preprod-admission'},
+        )
+        def reader():
+            for line in self.process.stdout:
+                self.queue.put(line.rstrip('\n'))
+            self.queue.put(None)
+        threading.Thread(target=reader, daemon=True).start()
+
+    def query(self, sql: str) -> dict:
+        import queue
+        import secrets
+        marker = 'ADMISSION_' + secrets.token_hex(24)
+        self.process.stdin.write("set statement_timeout='10s';\n" + sql + '\n\\echo ' + marker + '\n')
+        self.process.stdin.flush()
+        rows = []
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                line = self.queue.get(timeout=max(0.001, deadline-time.monotonic()))
+            except queue.Empty as exc:
+                raise ValueError('Admission SQL outcome uncertain; gate preserved') from exc
+            require(line is not None, 'Admission backend exited; gate preserved')
+            if line == marker:
+                break
+            if line:
+                rows.append(line)
+        require(len(rows) == 1, 'Admission command must yield exactly one JSON row')
+        row = json.loads(rows[0])
+        require(isinstance(row, dict), 'Admission SQL object required')
+        return row
+
+    def close(self):
+        # Closing the maintenance connection does not undo a committed admission fence.
+        if self.process.stdin and not self.process.stdin.closed:
+            self.process.stdin.close()
+
+
+class CloudRefusal(ValueError):
+    def __init__(self, status):
+        super().__init__('Cloud request refused; status ' + str(status))
+        self.status = status
+
+
+class JobCloud:
+    """Metadata credentials and fixed REST endpoints; no redirects, proxies or retry."""
+
+    def __init__(self, project: str, account: str):
+        self.opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.project = project
+        def metadata(path):
+            return json.loads(self.request(
+                'http://metadata.google.internal/computeMetadata/v1/' + path,
+                headers={'Metadata-Flavor': 'Google'}, metadata=True))
+        actual_project = self.request(
+            'http://metadata.google.internal/computeMetadata/v1/project/project-id',
+            headers={'Metadata-Flavor': 'Google'}, metadata=True).decode().strip()
+        actual_account = self.request(
+            'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email',
+            headers={'Metadata-Flavor': 'Google'}, metadata=True).decode().strip()
+        require(actual_project == project and actual_account == account, 'Job metadata identity mismatch')
+        token = metadata('instance/service-accounts/default/token')
+        require(token.get('token_type') == 'Bearer' and isinstance(token.get('access_token'), str)
+                and token['access_token'] and type(token.get('expires_in')) is int
+                and token['expires_in'] >= 1500, 'Bounded metadata token unavailable')
+        self.token = token['access_token']
+
+    def request(self, url, *, method='GET', body=None, headers=None, metadata=False):
+        from urllib.error import HTTPError
+        if not metadata:
+            require(url.startswith(('https://storage.googleapis.com/', 'https://run.googleapis.com/',
+                                    'https://cloudscheduler.googleapis.com/', 'https://cloudresourcemanager.googleapis.com/')), 'Unreviewed cloud endpoint')
+        values = dict(headers or {})
+        if not metadata:
+            values['Authorization'] = 'Bearer ' + self.token
+        req = Request(url, data=body, headers=values, method=method)
+        try:
+            with self.opener.open(req, timeout=20) as response:
+                result = response.read(MAX_JSON_BYTES+1)
+                require(len(result) <= MAX_JSON_BYTES, 'Oversize cloud response')
+                if metadata:
+                    require(response.headers.get('Metadata-Flavor') == 'Google', 'Metadata response mismatch')
+                return result
+        except HTTPError as exc:
+            # Error payloads may contain request/configuration data: never echo them.
+            raise CloudRefusal(exc.code) from None
+
+    def control_ready(self, binding):
+        from urllib.parse import quote
+        project = quote(self.project, safe='')
+        prefix = 'https://run.googleapis.com/v2/projects/' + project + '/locations/asia-south1/services'
+        services = json.loads(self.request(prefix))
+        require(not services.get('unreachable'), 'Incomplete service inventory refused')
+        project_resource = json.loads(self.request(
+            'https://cloudresourcemanager.googleapis.com/v3/projects/' + project))
+        require(project_resource.get('projectId') == self.project, 'Project resource identity mismatch')
+        project_policy = json.loads(self.request(
+            'https://cloudresourcemanager.googleapis.com/v3/projects/' + project + ':getIamPolicy',
+            method='POST', body=b'{}', headers={'Content-Type':'application/json'}))
+        require(all(not {'allUsers','allAuthenticatedUsers'} & set(item.get('members', []))
+                    for item in project_policy.get('bindings', [])), 'Inherited project public IAM blocks handoff')
+        require(not services.get('nextPageToken'), 'Unbounded service inventory refused')
+        allowed = binding['auth_service']
+        for service in services.get('services', []):
+            require(service.get('name') == f'projects/{self.project}/locations/asia-south1/services/{allowed}',
+                    'Published or unknown service blocks initial handoff')
+            require(service.get('ingress') in ('INGRESS_TRAFFIC_INTERNAL_ONLY','INGRESS_TRAFFIC_ALL')
+                    and service.get('invokerIamDisabled') is not True, 'Bootstrap auth must remain private')
+            require(not project_resource.get('parent')
+                    or service.get('ingress') == 'INGRESS_TRAFFIC_INTERNAL_ONLY',
+                    'Ancestor IAM cannot prove IAM-private ALL ingress; internal bootstrap required')
+            scaling = service.get('template', {}).get('scaling', {})
+            require(scaling.get('minInstanceCount', 0) == 0
+                    and service.get('scaling', {}).get('minInstanceCount', 0) == 0, 'Bootstrap auth must have zero minimum')
+            policy = json.loads(self.request('https://run.googleapis.com/v2/' + service['name'] + ':getIamPolicy'))
+            require(all(not {'allUsers','allAuthenticatedUsers'} & set(item.get('members', []))
+                        for item in policy.get('bindings', [])), 'Public Auth invocation blocks handoff')
+        try:
+            scheduler = json.loads(self.request(
+            'https://cloudscheduler.googleapis.com/v1/projects/' + project +
+            '/locations/asia-south1/jobs/' + quote(binding['scheduler_job'], safe='')))
+        except CloudRefusal as exc:
+            require(exc.status == 404, 'Scheduler absence cannot be established')
+            scheduler = {'state':'PAUSED', 'absent':True}
+        require(scheduler.get('state') == 'PAUSED', 'Lifecycle scheduler must be present and paused')
+        return {'scheduler_paused': True, 'published_frontends': False}
+
+    def seed(self, binding, body):
+        from urllib.parse import quote
+        bucket = quote(binding['target']['bucket'], safe='')
+        name = quote(binding['target']['object'], safe='')
+        endpoint = 'https://storage.googleapis.com/storage/v1/b/' + bucket + '/o/' + name
+        uploaded = json.loads(self.request(
+            'https://storage.googleapis.com/upload/storage/v1/b/' + bucket +
+            '/o?uploadType=media&ifGenerationMatch=0&name=' + name,
+            method='POST', body=body, headers={'Content-Type':'application/json'}))
+        generation = uploaded.get('generation')
+        require(isinstance(generation, str) and generation.isdecimal() and int(generation)>0,
+                'Immutable object generation missing')
+        require(uploaded.get('bucket') == binding['target']['bucket']
+                and uploaded.get('name') == binding['target']['object'], 'Uploaded target mismatch')
+        params = '?generation=' + generation
+        metadata = json.loads(self.request(endpoint + params))
+        require(metadata.get('bucket') == binding['target']['bucket']
+                and metadata.get('name') == binding['target']['object']
+                and metadata.get('generation') == generation, 'Generation-pinned metadata mismatch')
+        actual = self.request(endpoint + params + '&alt=media')
+        require(actual == body, 'Generation-pinned seed bytes differ')
+        return {'seed_generation':generation, 'seed_body_sha256': hashlib.sha256(body).hexdigest()}
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('Redirect refused for credentialed request')
+
+
+def canonical_bytes(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+
+
+def admission_binding(source: dict[str,str], binding: dict) -> dict:
+    """Validate explicit nonsecret deployment inputs before the first SQL change."""
+    require(source.get('ENVIRONMENT') == 'preprod' and source.get('GCP_REGION') == 'asia-south1',
+            'Initial admission is Mumbai preprod only')
+    project = source.get('GCP_PROJECT_ID', '')
+    release = source.get('AXIOM_RELEASE_SHA', '')
+    require(SHA40.fullmatch(release) is not None and NAME.fullmatch(project) is not None,
+            'Explicit project and release required')
+    account = source.get('MARKETING_MIGRATION_SERVICE_ACCOUNT', '')
+    require(re.fullmatch(r'axiom-proof-preprod-[a-z0-9-]+@' + re.escape(project)
+                         + r'\.iam\.gserviceaccount\.com', account),
+            'Dedicated same-project migration account required')
+    instance = source.get('CLOUD_SQL_INSTANCE_NAME', '')
+    database = source.get('CLOUD_SQL_DATABASE_NAME', '')
+    require(instance.startswith('axiom-proof-preprod-') and NAME.fullmatch(instance)
+            and re.fullmatch(r'axiom_proof_preprod(?:_[a-z0-9_]+)?', database), 'Exact isolated target required')
+    connection = f'{project}:asia-south1:{instance}'
+    require(binding.get('release_sha') == release and binding.get('project') == project
+            and binding.get('database_connection_name') == connection
+            and binding.get('database_name') == database, 'Admission binding target/release mismatch')
+    target = binding.get('target', {})
+    require(target == {'environment':'preprod', 'project':project,'instance':instance,
+                       'bucket':source.get('AXIOM_IDLE_STATE_BUCKET'),
+                       'object':'marketing-preprod/lifecycle/state.json'}, 'Exact lifecycle target required')
+    require(isinstance(target['bucket'],str) and target['bucket'].startswith('axiom-proof-preprod-')
+            and re.fullmatch(r'[a-z0-9][a-z0-9-]{2,62}', target['bucket']), 'Preprod state bucket required')
+    require(binding.get('target_manifest_sha256') == hashlib.sha256(canonical_bytes(target)).hexdigest(),
+            'Target manifest hash mismatch')
+    require(binding.get('auth_service') == source.get('MARKETING_AUTH_SERVICE_NAME')
+            and binding.get('scheduler_job') == source.get('MARKETING_LIFECYCLE_SCHEDULER_NAME')
+            and all(isinstance(binding.get(key), str) and NAME.fullmatch(binding[key])
+                    and binding[key].startswith('axiom-proof-preprod-')
+                    for key in ('auth_service','scheduler_job')), 'Exact private control-plane names required')
+    require(type(binding.get('drain_seconds')) is int and 0<=binding['drain_seconds']<=1200,
+            'Explicit bounded natural drain required')
+    created = binding.get('seed_created_unix')
+    require(type(created) is int and created > 0, 'Planned seed timestamp required')
+    planned_body = canonical_bytes({'version':1,'targetHash':binding['target_manifest_sha256'],
+                                   'phase':'running','lastActivity':created,'leases':{},
+                                   'transition':None,'operation':None})
+    require(binding.get('seed_body_sha256') == hashlib.sha256(planned_body).hexdigest(),
+            'Planned canonical seed body hash mismatch')
+    adopt_job = source.get('MARKETING_MIGRATION_JOB_NAME', '')
+    require(adopt_job.endswith('-adopt') and NAME.fullmatch(adopt_job)
+            and adopt_job.startswith('axiom-proof-preprod-'), 'Exact adoption Job name required')
+    base_job = adopt_job.removesuffix('-adopt')
+    receipts = binding.get('bootstrap_receipts', {})
+    for phase in ('roles','series','auth'):
+        receipt = receipts.get(phase, {})
+        require(receipt.get('release_sha') == release and receipt.get('project') == project
+                and receipt.get('database_connection_name') == connection, 'Bootstrap receipt binding mismatch')
+        if phase != 'auth':
+            require(receipt.get('phase') == phase and isinstance(receipt.get('execution'),str)
+                    and receipt.get('job') == f'projects/{project}/locations/asia-south1/jobs/{base_job}-{phase}'
+                    and receipt['execution'].startswith(receipt['job']+'/executions/')
+                    and EXECUTION.fullmatch(receipt['execution'].removeprefix(receipt['job']+'/executions/'))
+                    and re.fullmatch('[a-f0-9]{64}', str(receipt.get('descriptor_sha256','')))
+                    and isinstance(receipt.get('completion_time'),str) and receipt['completion_time'],
+                    'Completed exact bootstrap Job receipt required')
+        else:
+            require(receipt.get('service') == binding['auth_service'] and receipt.get('service_ready') is True,
+                    'Exact Auth bootstrap receipt required')
+    return binding
+
+
+def fenced_seed(source, binding, session, cloud, record, *, clock=time.monotonic, sleep=time.sleep):
+    """Close admission, drain, create/read immutable state, and reopen the same backend.
+
+    `record` must durably record each transition before the next effect. Refusal
+    after closure preserves the persistent database fence; no repair is attempted.
+    """
+    binding = admission_binding(source, binding)
+    from importlib.util import module_from_spec, spec_from_file_location
+    spec = spec_from_file_location('marketing_admission_db', Path(__file__).with_name('marketing-db-job.py'))
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sql = module.admission_programs(binding['database_name'])
+    initial = session.query(sql['identity'])
+    pid = initial.get('pid')
+    def identity(value, allowed):
+        require(type(pid) is int and pid>0 and value.get('pid') == pid
+                and value.get('maintenance_database') == 'postgres'
+                and value.get('role') == source.get('CLOUD_SQL_ADMIN_USER')
+                and value.get('database_name') == binding['database_name']
+                and type(value.get('database_oid')) is int and value['database_oid']>0
+                and value.get('database_oid') == initial.get('database_oid')
+                and str(value.get('server_version_num','')).isdigit()
+                and 150000<=int(value['server_version_num'])<160000
+                and value.get('encrypted_transport') is True and value.get('stats_visible') is True
+                and value.get('owner_capable') is True and value.get('allow_connections') is allowed,
+                'Admission identity/authority/fence mismatch')
+        libs = {item.strip() for item in value.get('shared_preloads','').split(',') if item.strip()}
+        require(libs <= {'pg_stat_statements','pgaudit'}, 'Unknown preloaded worker capability refused')
+    identity(initial, True)
+    cloud.control_ready(binding)
+    record('closing', {'native_pid':pid, 'database_oid':initial['database_oid']})
+    identity(session.query(sql['close']), False)
+    record('closed', {'native_pid':pid})
+    deadline = clock()+binding['drain_seconds']
+    while True:
+        identity(session.query(sql['identity']), False)
+        locks = session.query(sql['startup_locks'])
+        clients = session.query(sql['clients'])
+        require(locks.get('pid') == pid and type(locks.get('startup_locks')) is int
+                and clients.get('pid') == pid and isinstance(clients.get('clients'),list)
+                and clients.get('unknown_workers') == []
+                and type(clients.get('maintenance_clients')) is int and clients['maintenance_clients'] == 0
+                and type(clients.get('prepared_transactions')) is int
+                and clients['prepared_transactions'] == 0, 'Invisible/unknown/prepared activity refused')
+        if locks['startup_locks'] == 0 and clients['clients'] == []:
+            break
+        require(clock() < deadline, 'Natural bootstrap drain timed out; admission remains closed')
+        sleep(min(1, max(0, deadline-clock())))
+    record('quiescent', {'native_pid':pid,'startup_locks':0,'clients':[]})
+    cloud.control_ready(binding)
+    identity(session.query(sql['identity']), False)
+    body = canonical_bytes({'version':1,'targetHash':binding['target_manifest_sha256'],
+                            'phase':'running','lastActivity':binding['seed_created_unix'],'leases':{},
+                            'transition':None,'operation':None})
+    record('creating_seed', {'seed_body_sha256':hashlib.sha256(body).hexdigest()})
+    receipt = cloud.seed(binding, body)
+    require(isinstance(receipt.get('seed_generation'),str) and receipt['seed_generation'].isdecimal()
+            and int(receipt['seed_generation'])>0
+            and receipt.get('seed_body_sha256') == hashlib.sha256(body).hexdigest(), 'Seed receipt mismatch')
+    identity(session.query(sql['identity']), False)
+    cloud.control_ready(binding)
+    result = {**receipt,'release_sha':binding['release_sha'],'project':binding['project'],
+              'bucket':binding['target']['bucket'],'object':binding['target']['object'],
+              'database_connection_name':binding['database_connection_name'],
+              'seed_target_sha256':binding['target_manifest_sha256'], 'native_pid':pid,
+              'state_initialized':True, 'exclusive_client_adoption':True,
+              'admission_protocol':'pg15-startup-lock-then-visible-clients',
+              'bootstrap_receipts_sha256':hashlib.sha256(canonical_bytes(binding['bootstrap_receipts'])).hexdigest(),
+              'admission_source_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              'admission_sql_sha256':hashlib.sha256(canonical_bytes(sql)).hexdigest()}
+    record('ready_before_reopen', result)
+    identity(session.query(sql['identity']), False)
+    identity(session.query(sql['open']), True)
+    result['admission_reopened'] = True
+    record('reopened', result)
+    return result
+
+
+def run_adoption_job(source: dict[str,str], env: dict[str,str]):
+    binding = admission_binding(source, json.loads(source.get('MARKETING_ADOPTION_BINDING','{}')))
+    work = Path(tempfile.mkdtemp(prefix='marketing-admission-'))
+    number = 0
+    def record(stage, value):
+        nonlocal number
+        number += 1
+        path = work / (f'{number:02d}-' + stage + '.json')
+        descriptor = os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+        with os.fdopen(descriptor,'wb') as fd:
+            fd.write(canonical_bytes({'stage':stage, 'binding_sha256':hashlib.sha256(canonical_bytes(binding)).hexdigest(), **value}))
+            fd.flush()
+            os.fsync(fd.fileno())
+        # Nonsecret transition survives ephemeral Job filesystem loss via Cloud Logging.
+        print(json.dumps({'kind':'marketing-admission-transition','stage':stage,'facts':value}, sort_keys=True), flush=True)
+    session = MaintenanceSession(env)
+    try:
+        cloud = JobCloud(source['GCP_PROJECT_ID'], source['MARKETING_MIGRATION_SERVICE_ACCOUNT'])
+        result = fenced_seed(source,binding,session,cloud,record)
+        print(json.dumps({'marketing_seed_receipt':result},sort_keys=True),flush=True)
+    except Exception:  # noqa: BLE001 - redact all runtime failures; preserve closed admission.
+        record('refused_preserved', {'repair_attempted':False})
+        raise ValueError('Fenced adoption refused; preserve admission state and receipts') from None
+    finally:
+        session.close()
 
 
 def main() -> int:

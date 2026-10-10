@@ -7,6 +7,7 @@ locals {
   common_env = { ENVIRONMENT = var.environment, NODE_ENV = "production", AXIOM_RELEASE_SHA = var.release_sha }
 }
 module "auth" {
+  ingress               = var.auth_bootstrap_only ? "INGRESS_TRAFFIC_INTERNAL_ONLY" : "INGRESS_TRAFFIC_ALL"
   invokers              = {}
   count                 = var.deploy_services ? 1 : 0
   service_account_email = google_service_account.runtime["auth"].email

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,7 @@ def dry_run(
     selected: Path | None,
     *,
     inherited: dict[str, str] | None = None,
+    build_only: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     repo, bin_dir, marker = checkout
     env = os.environ.copy()
@@ -96,6 +98,8 @@ def dry_run(
     if selected is not None:
         args.extend(("--env-file", str(selected)))
     args.append("--dry-run")
+    if build_only:
+        args.append("--build-only")
     result = subprocess.run(args, cwd=repo, text=True, capture_output=True, env=env, check=False)
     assert not marker.exists(), "Dry-run invoked Docker, gcloud, or Firebase"
     return result
@@ -114,6 +118,70 @@ def test_valid_file_owned_plan_never_invokes_cloud_tools(checkout, tmp_path):
     assert "region=asia-south1" in result.stdout
     assert command("git", "rev-parse", "HEAD", cwd=repo) in result.stdout
     assert "wrong-project" not in result.stdout + result.stderr
+
+
+def test_build_only_plan_retains_source_and_environment_guards(checkout, tmp_path):
+    repo, _, _ = checkout
+    selected = release_file(repo, tmp_path)
+    result = dry_run(checkout, selected, build_only=True)
+    assert result.returncode == 0, result.stderr
+    assert "independent Auth review" in result.stdout
+    assert "no image publication or cloud deployment" in result.stdout
+    mismatched = release_file(repo, tmp_path, AXIOM_RELEASE_SHA="f" * 40)
+    result = dry_run(checkout, mismatched, build_only=True)
+    assert result.returncode != 0
+    assert "Build-only stops" not in result.stdout
+
+
+def test_build_only_runs_candidate_pipeline_without_review_or_publication(checkout, tmp_path):
+    """Exercise real shell control flow with explicitly simulated image tools."""
+    repo, bin_dir, marker = checkout
+    selected = release_file(repo, tmp_path)
+    for name in ("docker", "gcloud", "pnpm"):
+        tool = bin_dir / name
+        tool.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"{name} $*\" >> '{marker}'\n"
+            "exit 0\n"
+        )
+        tool.chmod(0o755)
+    python = bin_dir / "python3"
+    python.write_text(
+        f"#!{sys.executable}\n"
+        "import os,subprocess,sys\n"
+        "from pathlib import Path\n"
+        "if len(sys.argv)>1 and sys.argv[1]!='-':\n"
+        " if sys.argv[1].endswith('ops-env-parse.py'):\n"
+        f"  raise SystemExit(subprocess.call([{sys.executable!r},*sys.argv[1:]]))\n"
+        f" with Path({str(marker)!r}).open('a') as stream: stream.write('review-invoked\\n')\n"
+        " raise SystemExit(96)\n"
+        "body=sys.stdin.read()\n"
+        "if 'AUTH_CONTEXT' in body:\n"
+        " p=Path(os.environ['AUTH_CONTEXT']);(p/'context').mkdir()\n"
+        " (p/'snapshot-sha256').write_text('a'*64+'\\n')\n"
+        "elif 'approved-target.json' in body:\n"
+        " Path('.axiom-runtime/marketing-preprod/target-manifest-sha256').write_text('b'*64+'\\n')\n"
+        "elif 'PYSCAN' not in body and 'scanner_image' in body:\n"
+        " p=Path('.axiom-runtime/marketing-preprod/image-scans');p.mkdir(parents=True)\n"
+        " (p/'candidate.private.json').write_text('{}\\n')\n"
+    )
+    python.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["/bin/bash", str(repo / "scripts/build-marketing-preprod.sh"),
+         "--env-file", str(selected), "--build-only"],
+        cwd=repo, env=env, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = marker.read_text()
+    assert calls.count("docker build ") == 6
+    assert "docker pull --platform linux/amd64" in calls
+    assert "docker tag " in calls
+    assert "review-invoked" not in calls
+    assert "docker push " not in calls
+    assert (repo / ".axiom-runtime/marketing-preprod/image-scans/candidate.private.json").is_file()
+    assert "Independent Auth review and image clearance are still required" in result.stdout
 
 
 @pytest.mark.parametrize("selected_kind", ("missing", "example"))

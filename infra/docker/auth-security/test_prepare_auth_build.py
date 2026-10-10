@@ -43,6 +43,54 @@ class BuildContextTests(unittest.TestCase):
                 expected,
             )
 
+    def test_bounded_resource_context_preserves_actual_security_tests(self):
+        context = self.base / "context"
+        prepare(self.archive, context, BUILDER)
+        dockerfile = (context / "Dockerfile").read_text()
+        self.assertIn("GOMAXPROCS=1 GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50", dockerfile)
+        self.assertIn(
+            "go test -mod=vendor -count=1 github.com/jackc/pgproto3/v2\n", dockerfile
+        )
+        self.assertIn(
+            "-fuzz FuzzAxiomDataRowNeverPanics -fuzztime=10s -parallel=1", dockerfile
+        )
+        self.assertIn("FROM dependencies AS original-regression", dockerfile)
+        self.assertIn("^TestAxiomNegativeLengthsReturnError$", dockerfile)
+        snapshot = json.loads((context / "review/source-snapshot.json").read_bytes())
+        self.assertEqual(
+            snapshot["Dockerfile.auth"],
+            hashlib.sha256((context / "Dockerfile").read_bytes()).hexdigest(),
+        )
+
+    def test_fuzz_targets_exact_patched_source_as_an_immutable_main_module(self):
+        context = self.base / "context"
+        prepare(self.archive, context, BUILDER)
+        dockerfile = (context / "Dockerfile").read_text()
+        self.assertNotIn(
+            "go test -mod=vendor github.com/jackc/pgproto3/v2 -run '^$' -fuzz",
+            dockerfile,
+        )
+        self.assertIn(
+            "cp -a /src/vendor/github.com/jackc/pgproto3/v2/. /tmp/pgproto3-fuzz/",
+            dockerfile,
+        )
+        for filename in ["go.mod", "go.sum"]:
+            self.assertIn(
+                "/go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/" + filename,
+                dockerfile,
+            )
+        self.assertIn("GOWORK=off go test -mod=readonly -count=1", dockerfile)
+        self.assertEqual(
+            dockerfile.count("sha256sum -c /review/pgproto3-fuzz-source.sha256"), 3
+        )
+        self.assertIn("sha256sum -c /review/pgproto3-fuzz-module.sha256", dockerfile)
+        self.assertEqual(
+            dockerfile.count(
+                "id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked"
+            ),
+            5,
+        )
+
     def test_existing_context_never_overwritten(self):
         context = self.base / "context"
         context.mkdir()

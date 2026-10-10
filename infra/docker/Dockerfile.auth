@@ -2,7 +2,7 @@
 ARG GO_BUILD_IMAGE
 FROM --platform=$BUILDPLATFORM ${GO_BUILD_IMAGE} AS dependencies
 WORKDIR /src
-ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=2 GOFLAGS=-p=2
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=1 GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
 COPY upstream/ /src/
 RUN go mod edit -require=google.golang.org/grpc@v1.83.2 && go mod tidy && go mod download && go mod verify && go mod vendor
 COPY review/ /review/
@@ -11,21 +11,28 @@ COPY review/pgproto3_regression_test.go /src/vendor/github.com/jackc/pgproto3/v2
 
 # Deliberately fails on the original source; retain its actual panic as proof.
 FROM dependencies AS original-regression
-RUN go test -mod=vendor -run '^TestAxiomNegativeLengthsReturnError$' github.com/jackc/pgproto3/v2
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go test -mod=vendor -count=1 -run '^TestAxiomNegativeLengthsReturnError$' github.com/jackc/pgproto3/v2
 
 FROM dependencies AS patched-tests
-RUN go build -mod=vendor -o /tmp/apply-patch /review/apply-patch.go && /tmp/apply-patch vendor/github.com/jackc/pgproto3/v2/data_row.go /review/pgproto3-data-row.patch > /review/patch-application.txt
-RUN go test -mod=vendor github.com/jackc/pgproto3/v2
-RUN go test -mod=vendor github.com/jackc/pgproto3/v2 -run '^$' -fuzz FuzzAxiomDataRowNeverPanics -fuzztime=10s -parallel=2
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go build -mod=vendor -o /tmp/apply-patch /review/apply-patch.go && /tmp/apply-patch vendor/github.com/jackc/pgproto3/v2/data_row.go /review/pgproto3-data-row.patch > /review/patch-application.txt
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go test -mod=vendor -count=1 github.com/jackc/pgproto3/v2
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked mkdir -p /tmp/pgproto3-fuzz && \
+    cp -a /src/vendor/github.com/jackc/pgproto3/v2/. /tmp/pgproto3-fuzz/ && \
+    cp /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/go.mod /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/go.sum /tmp/pgproto3-fuzz/ && \
+    (cd /src/vendor/github.com/jackc/pgproto3/v2 && find . -type f -print0 | sort -z | xargs -0 sha256sum) > /review/pgproto3-fuzz-source.sha256 && \
+    (cd /tmp/pgproto3-fuzz && sha256sum -c /review/pgproto3-fuzz-source.sha256 && sha256sum go.mod go.sum > /review/pgproto3-fuzz-module.sha256 && \
+     GOWORK=off go test -mod=readonly -count=1 -run '^$' -fuzz FuzzAxiomDataRowNeverPanics -fuzztime=10s -parallel=1 . && \
+     sha256sum -c /review/pgproto3-fuzz-source.sha256 && sha256sum -c /review/pgproto3-fuzz-module.sha256) && \
+    (cd /src/vendor/github.com/jackc/pgproto3/v2 && sha256sum -c /review/pgproto3-fuzz-source.sha256)
 
 FROM patched-tests AS build
 ARG TARGETARCH
-RUN mkdir -p /out/provenance /out/tmp && chmod 1777 /out/tmp && \
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked mkdir -p /out/provenance /out/tmp && chmod 1777 /out/tmp && \
     GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor -trimpath -buildvcs=false \
     -ldflags '-X github.com/supabase/auth/internal/utilities.Version=v2.197.0+axiom-pgproto3-fix' -o /out/auth . && \
     go version -m /out/auth > /out/provenance/compiled-modules.txt && \
     sha256sum /out/auth > /out/provenance/binary-sha256.txt && \
-    cp /review/source.json /review/source-snapshot.json /review/pgproto3-data-row.patch /review/patch-application.txt /out/provenance/ && \
+    cp /review/source.json /review/source-snapshot.json /review/pgproto3-data-row.patch /review/patch-application.txt /review/pgproto3-fuzz-source.sha256 /review/pgproto3-fuzz-module.sha256 /out/provenance/ && \
     cp /src/go.mod /out/provenance/patched-go-mod.txt && cp /src/go.sum /out/provenance/patched-go-sum.txt && \
     cp /src/vendor/github.com/jackc/pgproto3/v2/data_row.go /out/provenance/patched-data-row.go && \
     cp /src/vendor/github.com/jackc/pgproto3/v2/LICENSE /out/provenance/pgproto3-LICENSE.txt

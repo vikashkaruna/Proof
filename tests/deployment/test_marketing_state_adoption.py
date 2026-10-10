@@ -299,10 +299,10 @@ class AdoptionTests(unittest.TestCase):
             now=observation_time(),
         )
 
-    def test_bounded_inventory_can_establish_short_lived_seed_eligibility(self) -> None:
+    def test_bounded_inventory_cannot_establish_exclusive_seed_eligibility(self) -> None:
         result = self.check()
-        self.assertTrue(result["exclusive_client_adoption"])
-        self.assertTrue(result["seed_gate_enabled"])
+        self.assertFalse(result["exclusive_client_adoption"])
+        self.assertFalse(result["seed_gate_enabled"])
         self.assertEqual(result["valid_until_unix"], observation_time() + 30)
         self.assertEqual(result["inspection_execution"], INSPECTED)
 
@@ -327,7 +327,7 @@ class AdoptionTests(unittest.TestCase):
         }
         data = inventory()
         data["job"] = job.job_payload(source, "inspect")
-        self.assertTrue(self.check(data)["exclusive_client_adoption"])
+        self.assertFalse(self.check(data)["exclusive_client_adoption"])
         args = data["job"]["template"]["template"]["containers"][0]["args"]
         phase = args[args.index("--phase") + 1]
         with (

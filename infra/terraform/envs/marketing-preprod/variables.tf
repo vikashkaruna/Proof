@@ -262,3 +262,9 @@ variable "lifecycle_settings" {
     error_message = "Lifecycle requires the approved1 CPU/256Mi/8080 budget and1..8 integer concurrency."
   }
 }
+
+# Derived deployment phase flag; never an operator environment override.
+variable "auth_bootstrap_only" {
+  type    = bool
+  default = false
+}

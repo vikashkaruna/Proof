@@ -20,7 +20,7 @@ resource "google_secret_manager_secret_iam_member" "runtime" {
 resource "google_cloud_run_v2_service" "request" {
   name     = var.name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.ingress
   template {
     service_account       = var.service_account_email
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
@@ -88,6 +88,7 @@ output "name" { value = google_cloud_run_v2_service.request.name }
 output "request_contract" {
   value = {
     name            = google_cloud_run_v2_service.request.name
+    ingress         = google_cloud_run_v2_service.request.ingress
     invokers        = var.invokers
     min_instances   = google_cloud_run_v2_service.request.template[0].scaling[0].min_instance_count
     max_instances   = google_cloud_run_v2_service.request.template[0].scaling[0].max_instance_count
@@ -103,3 +104,12 @@ variable "memory" { type = string }
 variable "min_instances" { type = number }
 variable "max_instances" { type = number }
 variable "invokers" { type = map(string) }
+
+variable "ingress" {
+  type    = string
+  default = "INGRESS_TRAFFIC_ALL"
+  validation {
+    condition     = contains(["INGRESS_TRAFFIC_ALL", "INGRESS_TRAFFIC_INTERNAL_ONLY"], var.ingress)
+    error_message = "Reviewed request ingress must be ALL or bootstrap INTERNAL_ONLY."
+  }
+}

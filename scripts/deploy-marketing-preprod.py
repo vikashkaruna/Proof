@@ -19,9 +19,25 @@ import re
 import stat
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+
+class NoCloudRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        raise ValueError("Cloud credential transport redirects refused")
+
+
+def urlopen(request: Request, *, timeout: int):
+    """Keep bearer credentials on the reviewed HTTPS Google API origin."""
+    target = urlparse(request.full_url)
+    if (target.scheme != "https"
+        or target.hostname not in {"run.googleapis.com", "storage.googleapis.com"}
+        or target.port not in (None, 443) or target.username or target.password):
+        raise ValueError("Cloud credential endpoint refused")
+    return build_opener(ProxyHandler({}), NoCloudRedirect()).open(request, timeout=timeout)
 
 ROOT = Path(__file__).resolve().parent.parent
 TF_ROOT = ROOT / "infra/terraform/envs/marketing-preprod"
@@ -57,10 +73,16 @@ PHASES = (
     "seed",
     "services-plan",
     "services",
-    "acceptance",
+    "hosting-plan",
     "hosting",
+    "browser-acceptance",
+    "readback-plan",
+    "readback",
+    "readback-postwake-plan",
+    "readback-postwake",
+    "acceptance",
 )
-DEFERRED = frozenset({"seed", "acceptance", "hosting"})
+DEFERRED = frozenset({"acceptance"})
 SHA40 = re.compile(r"[a-f0-9]{40}\Z")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 PROJECT = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]\Z")
@@ -85,6 +107,10 @@ BASE_ADDRESSES = frozenset(
         "google_service_account.runtime",
         "google_service_account.migration",
         "google_secret_manager_secret_iam_member.migration",
+        "google_project_iam_custom_role.adoption_state",
+        "google_storage_bucket_iam_member.adoption_state",
+        "google_project_iam_custom_role.adoption_observe",
+        "google_project_iam_member.adoption_observe",
     }
 )
 LIFECYCLE_ADDRESSES = frozenset(
@@ -626,8 +652,9 @@ def bootstrap_job_descriptor(
     database: dict,
     versions: dict,
     migration_identity: dict,
+    adoption_binding: dict | None = None,
 ) -> dict:
-    if phase not in ("roles", "series"):
+    if phase not in ("roles", "series", "adopt"):
         raise ValueError("Unsupported bootstrap job phase")
     project = env["GCP_PROJECT_ID"]
     instance = env["CLOUD_SQL_INSTANCE_NAME"]
@@ -662,6 +689,20 @@ def bootstrap_job_descriptor(
             + phase,
         }
     )
+    if phase == "adopt":
+        if not isinstance(adoption_binding, dict):
+            raise ValueError("Exact initial admission binding required")
+        source.update(
+            {
+                "MARKETING_ADOPTION_BINDING": json.dumps(
+                    adoption_binding, sort_keys=True, separators=(",", ":")
+                ),
+                "AXIOM_RELEASE_SHA": release["release_sha"],
+                "MARKETING_AUTH_SERVICE_NAME": env["MARKETING_AUTH_SERVICE_NAME"],
+                "MARKETING_LIFECYCLE_SCHEDULER_NAME": env["MARKETING_LIFECYCLE_SCHEDULER_NAME"],
+                "AXIOM_IDLE_STATE_BUCKET": env["AXIOM_IDLE_STATE_BUCKET"],
+            }
+        )
     secret_names = {
         "ADMIN_DB_URL": "MARKETING_ADMIN_DB_URL_SECRET",
         "GOTRUE_DB_PASSWORD": "MARKETING_AUTH_PASSWORD_SECRET",
@@ -867,6 +908,231 @@ def bootstrap_job_phase(
     execute_bootstrap_job(descriptor, work=work)
 
 
+def fenced_seed_binding(
+    env: dict, release: dict, database: dict, work: Path, created: int,
+) -> dict:
+    """Bind the real bootstrap receipts; inventory booleans cannot authorize seed."""
+    project = env["GCP_PROJECT_ID"]
+    connection = f"{project}:asia-south1:{env['CLOUD_SQL_INSTANCE_NAME']}"
+    if (
+        database.get("connection_name") != connection
+        or database.get("name") != env["CLOUD_SQL_DATABASE_NAME"]
+        or database.get("instance") != env["CLOUD_SQL_INSTANCE_NAME"]
+        or type(created) is not int or created < 1_700_000_000
+    ):
+        raise ValueError("Exact applied database and seed timestamp required")
+    target = {
+        "environment": "preprod", "project": project,
+        "instance": env["CLOUD_SQL_INSTANCE_NAME"],
+        "bucket": env["AXIOM_IDLE_STATE_BUCKET"],
+        "object": env["AXIOM_IDLE_STATE_OBJECT"],
+    }
+    target_hash = hashlib.sha256(
+        (json.dumps(target, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ).hexdigest()
+    if release.get("lifecycle_target_manifest_sha256") != target_hash:
+        raise ValueError("Packaged target differs from initial admission target")
+    receipts = {
+        phase: protected_json(work / f"bootstrap-{phase}.receipt.private.json")
+        for phase in ("roles", "series", "auth")
+    }
+    for phase, receipt in receipts.items():
+        if any(receipt.get(key) != value for key, value in {
+            "project": project, "release_sha": release["release_sha"],
+            "database_connection_name": connection,
+        }.items()):
+            raise ValueError("Initial admission requires exact bootstrap receipts")
+        if phase == "auth":
+            if receipt.get("service") != env["MARKETING_AUTH_SERVICE_NAME"] or receipt.get("service_ready") is not True:
+                raise ValueError("Exact completed Auth bootstrap required")
+        else:
+            job = f"projects/{project}/locations/asia-south1/jobs/{env['MARKETING_MIGRATION_JOB_NAME']}-{phase}"
+            if (
+                receipt.get("phase") != phase or receipt.get("job") != job
+                or not re.fullmatch(re.escape(job) + r"/executions/[a-z0-9-]+", str(receipt.get("execution", "")))
+                or not SHA256.fullmatch(str(receipt.get("descriptor_sha256", "")))
+                or not isinstance(receipt.get("completion_time"), str)
+                or not receipt["completion_time"]
+            ):
+                raise ValueError("Exact completed bootstrap Job identity required")
+    body = {
+        "version": 1, "targetHash": target_hash, "phase": "running",
+        "lastActivity": created, "leases": {}, "transition": None, "operation": None,
+    }
+    # Leave time for provider operations after a bounded natural connection drain.
+    timeout = int(env["MARKETING_MIGRATION_TIMEOUT_SECONDS"])
+    return {
+        "release_sha": release["release_sha"], "project": project,
+        "database_connection_name": connection, "database_name": database["name"],
+        "target": target, "target_manifest_sha256": target_hash,
+        "seed_created_unix": created,
+        "seed_body_sha256": hashlib.sha256(
+            (json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest(),
+        "auth_service": env["MARKETING_AUTH_SERVICE_NAME"],
+        "scheduler_job": env["MARKETING_LIFECYCLE_SCHEDULER_NAME"],
+        "drain_seconds": min(1200, max(0, timeout - 120)),
+        "bootstrap_receipts": receipts,
+    }
+
+
+def read_fenced_seed_receipt(
+    descriptor: dict, execution: dict, *, work: Path, env: dict, release: dict,
+) -> dict:
+    """Require actual execution output and independently reread its GCS bytes."""
+    project = descriptor["project"]
+    job_path = descriptor["job"]["name"]
+    expected_execution = {
+        "project": project, "release_sha": release["release_sha"], "phase": "adopt",
+        "job": job_path, "database_connection_name": descriptor["database_connection_name"],
+        "descriptor_sha256": hashlib.sha256(
+            (json.dumps(descriptor, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest(),
+    }
+    if (any(execution.get(key) != value for key, value in expected_execution.items())
+        or not re.fullmatch(re.escape(job_path) + r"/executions/[a-z0-9-]+",
+                            str(execution.get("execution", "")))):
+        raise ValueError("Admission execution receipt differs from approved Job")
+    token = run_command(["gcloud", "auth", "print-access-token"], cwd=ROOT, stdout=True).strip()
+    if not re.fullmatch(rb"[A-Za-z0-9._~+/-]{20,16384}", token):
+        raise ValueError("Cloud identity token unavailable")
+    actual = run_job_api("GET", execution["execution"], token)
+    if (actual.get("name") != execution["execution"]
+        or actual.get("completionTime") != execution.get("completion_time")
+        or actual.get("taskCount") != 1 or actual.get("succeededCount") != 1
+        or actual.get("failedCount", 0) != 0 or actual.get("cancelledCount", 0) != 0):
+        raise ValueError("Actual admission execution must have one successful task")
+    started = datetime.fromisoformat(actual["startTime"])
+    completed = datetime.fromisoformat(actual["completionTime"])
+    if started.tzinfo is None or completed.tzinfo is None or started > completed:
+        raise ValueError("Actual admission execution interval invalid")
+    job = job_path.rsplit("/", 1)[1]
+    execution_name = execution["execution"].rsplit("/", 1)[1]
+    filter_text = (
+        'resource.type="cloud_run_job" AND resource.labels.job_name="' + job
+        + '" AND resource.labels.location="asia-south1" AND labels."run.googleapis.com/execution_name"="'
+        + execution_name + '"'
+    )
+    raw = run_command([
+        "gcloud", "logging", "read", filter_text, "--project=" + project,
+        "--freshness=1h", "--limit=100", "--format=json",
+    ], cwd=ROOT, stdout=True)
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Admission execution output exceeds bounded read")
+    entries = json.loads(raw)
+    if not isinstance(entries, list) or len(entries) > 100 or any(not isinstance(row, dict) for row in entries):
+        raise ValueError("Bounded provider execution entries required")
+    matches = []
+    for entry in entries:
+        if (
+            entry.get("resource", {}).get("labels", {}).get("job_name") != job
+            or entry.get("resource", {}).get("labels", {}).get("location") != "asia-south1"
+            or entry.get("resource", {}).get("labels", {}).get("project_id") != project
+            or entry.get("resource", {}).get("type") != "cloud_run_job"
+            or entry.get("labels", {}).get("run.googleapis.com/execution_name") != execution_name
+        ):
+            raise ValueError("Foreign execution log refused")
+        timestamp = datetime.fromisoformat(str(entry.get("timestamp", "")))
+        if timestamp.tzinfo is None or not started <= timestamp <= completed:
+            raise ValueError("Admission log is outside actual execution interval")
+        value = entry.get("jsonPayload")
+        if value is None and isinstance(entry.get("textPayload"), str):
+            try:
+                value = json.loads(entry["textPayload"])
+            except json.JSONDecodeError:
+                continue
+        if isinstance(value, dict) and "marketing_seed_receipt" in value:
+            matches.append(value["marketing_seed_receipt"])
+    if len(matches) != 1 or not isinstance(matches[0], dict):
+        raise ValueError("One actual initial admission Job receipt required")
+    receipt = matches[0]
+    container_env = descriptor["job"]["template"]["template"]["containers"][0]["env"]
+    binding = json.loads(next(row["value"] for row in container_env if row["name"] == "MARKETING_ADOPTION_BINDING"))
+    expected = {
+        "release_sha": release["release_sha"], "project": project,
+        "database_connection_name": descriptor["database_connection_name"],
+        "bucket": env["AXIOM_IDLE_STATE_BUCKET"], "object": env["AXIOM_IDLE_STATE_OBJECT"],
+        "seed_target_sha256": binding["target_manifest_sha256"],
+        "seed_body_sha256": binding["seed_body_sha256"],
+        "state_initialized": True, "exclusive_client_adoption": True,
+        "admission_reopened": True,
+        "admission_protocol": "pg15-startup-lock-then-visible-clients",
+        "admission_source_sha256": hashlib.sha256(
+            (ROOT / "scripts/marketing-state-adoption.py").read_bytes()
+        ).hexdigest(),
+        "admission_sql_sha256": hashlib.sha256(
+            (json.dumps(job_module.admission_programs(binding["database_name"]),
+                        sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest(),
+        "bootstrap_receipts_sha256": hashlib.sha256(
+            (json.dumps(binding["bootstrap_receipts"], sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest(),
+    }
+    if (
+        set(receipt) != set(expected) | {"seed_generation", "native_pid"}
+        or any(receipt.get(key) != value or type(receipt.get(key)) is not type(value)
+               for key, value in expected.items())
+        or type(receipt.get("native_pid")) is not int or receipt["native_pid"] <= 0
+        or not isinstance(receipt.get("seed_generation"), str)
+        or not re.fullmatch(r"[1-9][0-9]{0,29}", receipt["seed_generation"])
+    ):
+        raise ValueError("Actual admission receipt differs from approved Job")
+    bucket, obj = quote(receipt["bucket"], safe=""), quote(receipt["object"], safe="")
+    endpoint = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{obj}?generation={receipt['seed_generation']}"
+    headers = {"Authorization": "Bearer " + token.decode("ascii")}
+    with urlopen(Request(endpoint, headers=headers), timeout=25) as response:
+        metadata = json.loads(response.read(65537))
+    if any(metadata.get(key) != receipt[value] for key, value in {
+        "bucket": "bucket", "name": "object", "generation": "seed_generation",
+    }.items()):
+        raise ValueError("Independent generation-pinned metadata differs")
+    with urlopen(Request(endpoint + "&alt=media", headers=headers), timeout=25) as response:
+        body = response.read(65537)
+    if hashlib.sha256(body).hexdigest() != receipt["seed_body_sha256"]:
+        raise ValueError("Independent generation-pinned state bytes differ")
+    protected_output(work / "admission.execution-output.private.json", {"entries": entries})
+    return {**receipt, "job_execution": execution["execution"]}
+
+
+def fenced_seed_phase(
+    *, planning: bool, work: Path, env: dict, release: dict, database: dict,
+    versions: dict, migration_identity: dict, approval: dict | None,
+) -> None:
+    plan_file = work / "seed.plan.private.json"
+    if planning:
+        if plan_file.exists() or plan_file.is_symlink():
+            raise ValueError("Use a fresh initial admission plan")
+        created = int(time.time())
+    else:
+        plan = protected_json(plan_file)
+        created = plan["seed_created_unix"]
+    binding = fenced_seed_binding(env, release, database, work, created)
+    descriptor = bootstrap_job_descriptor(
+        phase="adopt", env=env, release=release, database=database,
+        versions=versions, migration_identity=migration_identity, adoption_binding=binding,
+    )
+    descriptor["seed_created_unix"] = created
+    if planning:
+        protected_output(plan_file, descriptor)
+        return
+    if plan != descriptor:
+        raise ValueError("Initial admission Job changed since plan review")
+    validate_approval(
+        approval or {}, env=env, source_sha=release["release_sha"],
+        plan_sha=hashlib.sha256(plan_file.read_bytes()).hexdigest(), phase="seed",
+    )
+    if any((work / name).exists() or (work / name).is_symlink() for name in (
+        "bootstrap-adopt.receipt.private.json", "seed.receipt.private.json",
+    )):
+        raise ValueError("Initial admission already has an execution receipt; no rerun")
+    execute_bootstrap_job(descriptor, work=work)
+    execution = protected_json(work / "bootstrap-adopt.receipt.private.json")
+    receipt = read_fenced_seed_receipt(
+        descriptor, execution, work=work, env=env, release=release,
+    )
+    protected_output(work / "seed.receipt.private.json", receipt)
+
+
 def inspect_base_plan(
     plan: dict,
     *,
@@ -935,6 +1201,7 @@ def inspect_service_plan(plan: dict, *, values: dict, phase: str) -> dict[str, i
         "images": values["images"],
         "service_secrets": values["service_secrets"],
         "lifecycle_scheduler_paused": True,
+        "auth_bootstrap_only": phase == "bootstrap-auth",
     }
     if phase == "services":
         expected.update(
@@ -981,6 +1248,24 @@ def inspect_service_plan(plan: dict, *, values: dict, phase: str) -> dict[str, i
             if phase == "bootstrap-auth" and root in LIFECYCLE_ADDRESSES:
                 raise ValueError("Targeted auth plan includes lifecycle changes")
         actions = item.get("change", {}).get("actions")
+        if actions == ["update"]:
+            # The isolated Auth bootstrap is INTERNAL_ONLY. After the fenced
+            # handoff, allow solely its reviewed ingress opening; no image,
+            # identity, template, secret or other service mutation is admitted.
+            change = item["change"]
+            before, after = change.get("before"), change.get("after")
+            if (phase != "services"
+                or address != "module.auth[0].google_cloud_run_v2_service.request"
+                or not isinstance(before, dict) or not isinstance(after, dict)
+                or before.get("ingress") != "INGRESS_TRAFFIC_INTERNAL_ONLY"
+                or after.get("ingress") != "INGRESS_TRAFFIC_ALL"
+                or after.get("project") != values["project_id"]
+                or after.get("location") != "asia-south1"
+                or {key: value for key, value in before.items() if key != "ingress"}
+                   != {key: value for key, value in after.items() if key != "ingress"}):
+                raise ValueError("Only exact post-admission Auth ingress update is reviewed")
+            summary["update"] = summary.get("update", 0) + 1
+            continue
         if actions not in (["create"], ["no-op"]):
             raise ValueError("Service replacement, deletion or update refused")
         after = item["change"].get("after")
@@ -1121,7 +1406,9 @@ def service_values(
         or not re.fullmatch(r"[1-9][0-9]*", str(proof.get("seed_generation", "")))
     ):
         raise ValueError("Full services require exact create-only state seed receipt")
-    return config_module.profile(env, release, versions, True, proof)
+    values = config_module.profile(env, release, versions, True, proof)
+    values["auth_bootstrap_only"] = phase == "bootstrap-auth"
+    return values
 
 
 def verify_seed_receipt(env: dict[str, str], release: dict, receipt: dict) -> None:
@@ -1464,6 +1751,142 @@ def apply_base(
     )
 
 
+def hosting_phase(
+    *, phase: str, env_file: Path, release_file: Path, work: Path,
+    approval_file: Path | None, dry_run: bool,
+) -> None:
+    """Publish only a reviewed immutable export; browser proof is a separate gate."""
+    helper_spec = importlib.util.spec_from_file_location(
+        "marketing_hosting_acceptance", ROOT / "scripts/marketing-preprod-acceptance.py"
+    )
+    assert helper_spec and helper_spec.loader
+    helper = importlib.util.module_from_spec(helper_spec)
+    helper_spec.loader.exec_module(helper)
+    services_file = work / "services.receipt.private.json"
+    env, release, _services, _hashes = helper.inputs(
+        env_file, release_file, services_file
+    )
+    if phase not in ("hosting-plan", "hosting", "browser-acceptance"):
+        raise ValueError("Unsupported Hosting phase")
+    if phase != "hosting-plan" and approval_file is None:
+        raise ValueError("Recorded exact Hosting or synthetic acceptance scope required")
+    if dry_run:
+        # No build, provider read, synthetic write or publication on preflight.
+        return
+    if phase == "hosting-plan":
+        helper.prepare_hosting_export(env_file, release_file, services_file, work)
+        return
+    token = run_command(
+        ["gcloud", "auth", "print-access-token"], cwd=ROOT, stdout=True
+    ).strip()
+    if not re.fullmatch(rb"[A-Za-z0-9._~+/-]{20,16384}", token):
+        raise ValueError("Cloud identity token unavailable")
+    if phase == "hosting":
+        approval = protected_json(approval_file)
+        validate_approval(
+            approval, env=env, source_sha=release["release_sha"],
+            plan_sha=hashlib.sha256((work / "hosting.plan.private.json").read_bytes()).hexdigest(),
+            phase="hosting",
+        )
+        helper.publish_hosting_export(
+            env_file, release_file, services_file, work, approval, token.decode("ascii")
+        )
+    else:
+        helper.run_browser_acceptance(
+            env_file, release_file, services_file,
+            work / "hosting.receipt.private.json", approval_file, work,
+            token.decode("ascii"),
+        )
+
+
+def readback_phase(
+    *, planning: bool, env_file: Path, env: dict, release: dict, work: Path,
+    versions: dict, approval: dict | None, postwake: bool = False,
+) -> None:
+    phase = "readback-postwake" if postwake else "readback"
+    helper_spec = importlib.util.spec_from_file_location(
+        "marketing_readback_acceptance", ROOT / "scripts/marketing-preprod-acceptance.py"
+    )
+    assert helper_spec and helper_spec.loader
+    helper = importlib.util.module_from_spec(helper_spec)
+    helper_spec.loader.exec_module(helper)
+    database = protected_json(work / "database.private.json")
+    identity = protected_json(work / "migration-identity.private.json")
+    if (
+        database.get("connection_name") != f"{env['GCP_PROJECT_ID']}:asia-south1:{env['CLOUD_SQL_INSTANCE_NAME']}"
+        or database.get("name") != env["CLOUD_SQL_DATABASE_NAME"]
+        or database.get("instance") != env["CLOUD_SQL_INSTANCE_NAME"]
+    ):
+        raise ValueError("Readback must use exactly the applied isolated database")
+    account = f"{env['MARKETING_MIGRATION_ACCOUNT_ID']}@{env['GCP_PROJECT_ID']}.iam.gserviceaccount.com"
+    if identity != {"project": env["GCP_PROJECT_ID"], "release_sha": release["release_sha"], "email": account}:
+        raise ValueError("Exact applied acceptance identity required")
+    source = dict(env)
+    secret = env["MARKETING_ADMIN_DB_URL_SECRET"]
+    version = versions.get(secret)
+    if not re.fullmatch(r"[1-9][0-9]*", str(version)):
+        raise ValueError("Exact numeric readback secret version required")
+    source.update({
+        "CLOUD_SQL_PRIVATE_IP": job_module.private_ip(database["private_ip"]),
+        "CLOUD_SQL_ADMIN_USER": env["CLOUD_SQL_DATABASE_USER"],
+        "MARKETING_MIGRATION_IMAGE": release["auxiliary_images"]["migrations"],
+        "MARKETING_MIGRATION_SERVICE_ACCOUNT": account,
+        "MARKETING_ACCEPTANCE_JOB_NAME": env["MARKETING_MIGRATION_JOB_NAME"] + "-" + phase,
+        "MARKETING_ADMIN_DB_URL_SECRET_ID": secret,
+        "MARKETING_ADMIN_DB_URL_SECRET_VERSION": str(version),
+    })
+    basename = "acceptance-" + phase
+    plan_file = work / (basename + ".plan.private.json")
+    if planning:
+        helper.prepare_readback_job(
+            env_file, work / "browser/acceptance.private.json",
+            ROOT / "infra/supabase/marketing-library.json", source, work, phase=phase,
+        )
+        return
+    descriptor = protected_json(plan_file)
+    validate_approval(
+        approval or {}, env=env, source_sha=release["release_sha"],
+        plan_sha=hashlib.sha256(plan_file.read_bytes()).hexdigest(), phase=phase,
+    )
+    if (work / ("bootstrap-" + basename + ".receipt.private.json")).exists():
+        raise ValueError("Readback already has an execution receipt; no rerun")
+    # Reconstruct from current actual browser/library inputs before execution.
+    job_helper = helper.module("marketing_readback_plan_recheck", "scripts/marketing-acceptance-job.py")
+    expected = job_helper.descriptor(
+        source, protected_json(work / "browser/acceptance.private.json"),
+        protected_json(ROOT / "infra/supabase/marketing-library.json"),
+    )
+    expected["phase"] = basename
+    if any(descriptor.get(key) != value for key, value in expected.items()):
+        raise ValueError("Readback Job/source changed since plan review")
+    file_hashes = {
+        "browser": hashlib.sha256((work / "browser/acceptance.private.json").read_bytes()).hexdigest(),
+        "library": hashlib.sha256((ROOT / "infra/supabase/marketing-library.json").read_bytes()).hexdigest(),
+        "env": hashlib.sha256(env_file.read_bytes()).hexdigest(),
+    }
+    if descriptor.get("input_file_hashes") != file_hashes:
+        raise ValueError("Readback input bytes changed since plan review")
+    execute_bootstrap_job(descriptor, work=work)
+    receipt = protected_json(work / ("bootstrap-" + basename + ".receipt.private.json"))
+    token = run_command(["gcloud", "auth", "print-access-token"], cwd=ROOT, stdout=True).strip()
+    if not re.fullmatch(rb"[A-Za-z0-9._~+/-]{20,16384}", token):
+        raise ValueError("Cloud identity token unavailable")
+    job = run_job_api("GET", descriptor["job"]["name"], token)
+    execution = run_job_api("GET", receipt["execution"], token)
+    job_name = job["name"].rsplit("/", 1)[1]
+    execution_name = execution["name"].rsplit("/", 1)[1]
+    logs = json.loads(run_command([
+        "gcloud", "logging", "read",
+        'resource.type="cloud_run_job" AND resource.labels.job_name="' + job_name
+        + '" AND labels."run.googleapis.com/execution_name"="' + execution_name + '"',
+        "--project=" + env["GCP_PROJECT_ID"], "--freshness=1h", "--limit=100", "--format=json",
+    ], cwd=ROOT, stdout=True))
+    paths = [work / (phase + "-job.actual.private.json"), work / (phase + "-execution.actual.private.json"), work / (phase + "-logs.actual.private.json")]
+    for path, value in zip(paths, [job, execution, {"entries": logs}], strict=True):
+        protected_output(path, value)
+    helper.record_readback_execution(plan_file, *paths, work, phase=phase)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=PHASES, required=True)
@@ -1516,11 +1939,40 @@ def main() -> int:
             raise ValueError("Exact immutable release manifest required")
         release = protected_json(args.release_manifest)
         values = validate_inputs(env, release, clearance, source_sha)
+        # Terraform -chdir resolves relative var/plan paths against its module,
+        # while all artifacts belong to the selected checkout's protected work.
+        args.work_dir = args.work_dir.absolute()
         if args.work_dir.is_symlink() or (
             args.work_dir.exists() and not args.work_dir.is_dir()
         ):
             raise ValueError("Protected work directory is unsafe")
+        if args.phase in ("hosting-plan", "hosting", "browser-acceptance"):
+            hosting_phase(
+                phase=args.phase, env_file=args.env_file,
+                release_file=args.release_manifest, work=args.work_dir,
+                approval_file=args.approval_record, dry_run=args.dry_run,
+            )
+            print(
+                f"Marketing {args.phase} {'preflight accepted; no cloud or browser actions performed' if args.dry_run else 'completed'}; full retained-row and idle/wake acceptance remain separate required gates."
+            )
+            return 0
         approval = None
+        if args.phase in ("readback-plan", "readback", "readback-postwake-plan", "readback-postwake"):
+            if args.secret_manifest is None:
+                raise ValueError("Exact readback secret versions required")
+            if args.dry_run:
+                print("Readback preflight only; no Job or SQL execution performed.")
+                return 0
+            readback_phase(
+                planning=args.phase.endswith("-plan"), env_file=args.env_file,
+                env=env, release=release, work=args.work_dir,
+                versions=protected_json(args.secret_manifest),
+                approval=protected_json(args.approval_record) if args.approval_record else None,
+                postwake=args.phase.startswith("readback-postwake"),
+            )
+            print("Readback plan prepared; no SQL executed." if args.phase.endswith("-plan")
+                  else "Actual retained-row readback completed; lifecycle acceptance remains required.")
+            return 0
         if args.phase in (
             "bootstrap-roles-plan",
             "bootstrap-roles",
@@ -1544,10 +1996,11 @@ def main() -> int:
                     protected_json(args.approval_record) if args.approval_record else {}
                 )
         if args.phase in ("seed-plan", "seed"):
-            if args.seed_proof is None:
-                raise ValueError("Exact bootstrap and exclusive-client proof required")
+            if args.secret_manifest is None:
+                raise ValueError("Materialized exact Job secret versions required")
             database = protected_json(args.work_dir / "database.private.json")
-            seed_proof = protected_json(args.seed_proof)
+            migration_identity = protected_json(args.work_dir / "migration-identity.private.json")
+            versions = protected_json(args.secret_manifest)
             if args.phase == "seed":
                 approval = (
                     protected_json(args.approval_record) if args.approval_record else {}
@@ -1629,13 +2082,14 @@ def main() -> int:
         elif args.phase == "base":
             apply_base(work=args.work_dir, env=env, values=values, approval=approval)
         elif args.phase in ("seed-plan", "seed"):
-            seed_phase(
+            fenced_seed_phase(
                 planning=args.phase == "seed-plan",
                 work=args.work_dir,
                 env=env,
                 release=release,
                 database=database,
-                proof=seed_proof,
+                versions=versions,
+                migration_identity=migration_identity,
                 approval=approval,
             )
         elif args.phase in (

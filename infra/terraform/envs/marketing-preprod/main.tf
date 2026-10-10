@@ -1,6 +1,6 @@
 locals { prefix = "axiom-proof-${var.environment}" }
 resource "google_project_service" "apis" {
-  for_each           = toset(["run.googleapis.com", "compute.googleapis.com", "sqladmin.googleapis.com", "servicenetworking.googleapis.com", "secretmanager.googleapis.com"])
+  for_each           = toset(["run.googleapis.com", "compute.googleapis.com", "sqladmin.googleapis.com", "servicenetworking.googleapis.com", "secretmanager.googleapis.com", "storage.googleapis.com", "cloudscheduler.googleapis.com", "iam.googleapis.com"])
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
@@ -142,4 +142,37 @@ resource "google_secret_manager_secret_iam_member" "migration" {
   role       = "roles/secretmanager.secretAccessor"
   member     = "serviceAccount:${google_service_account.migration[0].email}"
   depends_on = [google_secret_manager_secret.runtime]
+}
+
+# The initial admission Job may create/read exactly one state object. It cannot
+# overwrite or delete a generation, list the bucket, or mutate live services.
+resource "google_project_iam_custom_role" "adoption_state" {
+  count       = var.migration_account_id != "" ? 1 : 0
+  project     = var.project_id
+  role_id     = "${replace(var.migration_account_id, "-", "_")}_seed"
+  title       = "Preprod initial state create and read"
+  permissions = ["storage.objects.create", "storage.objects.get"]
+}
+resource "google_storage_bucket_iam_member" "adoption_state" {
+  count  = var.migration_account_id != "" ? 1 : 0
+  bucket = var.lifecycle_state_bucket
+  role   = google_project_iam_custom_role.adoption_state[0].name
+  member = "serviceAccount:${google_service_account.migration[0].email}"
+  condition {
+    title      = "ExactInitialLifecycleObject"
+    expression = "resource.name == 'projects/_/buckets/${var.lifecycle_state_bucket}/objects/${var.lifecycle_state_object}'"
+  }
+}
+resource "google_project_iam_custom_role" "adoption_observe" {
+  count       = var.migration_account_id != "" ? 1 : 0
+  project     = var.project_id
+  role_id     = "${replace(var.migration_account_id, "-", "_")}_observe"
+  title       = "Preprod initial admission observations"
+  permissions = ["run.services.list", "run.services.getIamPolicy", "cloudscheduler.jobs.get", "resourcemanager.projects.get", "resourcemanager.projects.getIamPolicy"]
+}
+resource "google_project_iam_member" "adoption_observe" {
+  count   = var.migration_account_id != "" ? 1 : 0
+  project = var.project_id
+  role    = google_project_iam_custom_role.adoption_observe[0].name
+  member  = "serviceAccount:${google_service_account.migration[0].email}"
 }

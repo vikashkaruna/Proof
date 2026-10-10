@@ -3,12 +3,13 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/ops-env.sh"
-ENV_FILE=""; DRY_RUN=false
+ENV_FILE=""; DRY_RUN=false; BUILD_ONLY=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --env-file) ENV_FILE="${2:?missing environment file}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
-    *) echo 'Usage: build-marketing-preprod.sh --env-file PRIVATE_FILE [--dry-run]' >&2; exit 2 ;;
+    --build-only) BUILD_ONLY=true; shift ;;
+    *) echo 'Usage: build-marketing-preprod.sh --env-file PRIVATE_FILE [--dry-run] [--build-only]' >&2; exit 2 ;;
   esac
 done
 [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ] || { echo 'Explicit private environment file required' >&2; exit 2; }
@@ -39,6 +40,9 @@ fi
 if [ "$DRY_RUN" = true ]; then
   echo "Validated seven-image release plan for project=$GCP_PROJECT_ID region=$GCP_REGION repository=$AXIOM_ARTIFACT_REPOSITORY source=$SOURCE_SHA"
   echo 'Would build marketing, marketing-only BFF, private gateway, migration job, lifecycle controller and reviewed patched Auth; mirror pinned REST; record immutable digests.'
+  if [ "$BUILD_ONLY" = true ]; then
+    echo 'Build-only stops after protected candidate scans for independent Auth review; no image publication or cloud deployment.'
+  fi
   exit 0
 fi
 gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
@@ -103,6 +107,24 @@ for component in marketing bff gateway migrations lifecycle; do
   context=.
   [ "$component" != lifecycle ] || context=.axiom-runtime/marketing-preprod/lifecycle-build
   docker build "${args[@]}" -f "$file" -t "$target" "$context"
+  if [ "$component" = migrations ]; then
+    # Exercise the packaged helpers/library as the actual unprivileged Job user.
+    docker run --rm --network none --read-only --cap-drop ALL \
+      --security-opt no-new-privileges --user 65532:65532 \
+      --entrypoint python3 "$target" -c '
+import importlib.util, json, os
+from pathlib import Path
+for name in ("marketing-db-job", "marketing-state-adoption", "marketing-acceptance-job"):
+    spec = importlib.util.spec_from_file_location(name, "/app/scripts/" + name + ".py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    if name == "marketing-db-job":
+        helper.library_seed_program(Path("/app/infra/supabase/marketing-library.json"), os.environ["AXIOM_RELEASE_SHA"])
+assert os.getuid() == 65532
+assert json.loads(Path("/app/infra/supabase/marketing-library.json").read_bytes())
+assert Path("/etc/ssl/certs/ca-certificates.crt").stat().st_size > 0
+print("Migration image unprivileged helper/library/TLS smoke passed")'
+  fi
 done
 AUTH_SNAPSHOT_SHA256="$(cat "$AUTH_CONTEXT/snapshot-sha256")"
 docker build --platform linux/amd64 --provenance=false --target runtime \
@@ -143,6 +165,10 @@ manifest.write_text(json.dumps({'release_sha': os.environ['SOURCE_SHA'],
     'scanner_image': os.environ['MARKETING_TRIVY_IMAGE'], 'images': images}, indent=2) + '\n')
 manifest.chmod(0o600)
 PYSCAN
+if [ "$BUILD_ONLY" = true ]; then
+  echo 'Seven images built and candidate scans retained privately. Independent Auth review and image clearance are still required before publication.'
+  exit 0
+fi
 python3 scripts/marketing-image-clearance.py \
   --manifest .axiom-runtime/marketing-preprod/image-scans/candidate.private.json \
   --auth-review .axiom-runtime/marketing-preprod/auth-review.private.json \

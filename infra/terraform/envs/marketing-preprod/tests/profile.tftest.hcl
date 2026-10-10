@@ -61,6 +61,22 @@ run "minimum_private_database" {
     error_message = "Stable naming and no unsafe auto-stop."
   }
 }
+run "initial_admission_identity_is_narrow" {
+  command = plan
+  variables { migration_account_id = "axiom-proof-preprod-migrate" }
+  assert {
+    condition     = toset(google_project_iam_custom_role.adoption_state[0].permissions) == toset(["storage.objects.create", "storage.objects.get"])
+    error_message = "Initial state identity must not list, delete or overwrite state objects."
+  }
+  assert {
+    condition     = google_storage_bucket_iam_member.adoption_state[0].bucket == var.lifecycle_state_bucket && google_storage_bucket_iam_member.adoption_state[0].condition[0].expression == "resource.name == 'projects/_/buckets/${var.lifecycle_state_bucket}/objects/${var.lifecycle_state_object}'"
+    error_message = "Initial state authority must bind exactly the selected lifecycle object."
+  }
+  assert {
+    condition     = toset(google_project_iam_custom_role.adoption_observe[0].permissions) == toset(["run.services.list", "run.services.getIamPolicy", "cloudscheduler.jobs.get", "resourcemanager.projects.get", "resourcemanager.projects.getIamPolicy"]) && google_project_iam_custom_role.adoption_state[0].role_id == "axiom_proof_preprod_migrate_seed"
+    error_message = "Admission observations must be read-only with names derived from the selected identity."
+  }
+}
 run "request_scaled_services_and_real_uri_wiring" {
   command = apply
   assert {
@@ -72,6 +88,15 @@ run "request_scaled_services_and_real_uri_wiring" {
     error_message = "Downstream URLs must derive from real provider resources."
   }
 }
+run "bootstrap_auth_has_internal_ingress" {
+  command = plan
+  variables { auth_bootstrap_only = true }
+  assert {
+    condition     = output.request_contracts.auth.ingress == "INGRESS_TRAFFIC_INTERNAL_ONLY"
+    error_message = "Auth bootstrap must be internal even under inherited organization IAM."
+  }
+}
+
 run "production_refused" {
   command = plan
   variables { environment = "production" }
