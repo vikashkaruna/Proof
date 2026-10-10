@@ -38,7 +38,13 @@ PY
 started=false
 for attempt in 1 2 3; do
   attempt_log="$state_dir/start-attempt-$attempt.log"
-  if supabase "${start_args[@]}" > "$attempt_log" 2>&1; then
+  observer_log="$state_dir/start-attempt-$attempt.observer.json"
+  if [ "${AXIOM_PARITY_STARTUP_DEBUG:-}" = 1 ]; then
+    if python3 .github/ci/observe_supabase_startup.py "$project_id" "$observer_log" -- \
+      supabase "${start_args[@]}" > "$attempt_log" 2>&1; then
+      started=true
+    fi
+  elif supabase "${start_args[@]}" > "$attempt_log" 2>&1; then
     started=true
   fi
   cp "$attempt_log" "$state_dir/start.log"
@@ -49,6 +55,9 @@ for attempt in 1 2 3; do
   echo "Startup attempt $attempt diagnostics:" >&2
   # Emit bounded facts before retries can replace the first failure's context.
   python3 .github/ci/diagnose_supabase_startup.py "$attempt_log" "$project_id" || true
+  if [ "${AXIOM_PARITY_STARTUP_DEBUG:-}" = 1 ]; then
+    python3 .github/ci/observe_supabase_startup.py --report "$project_id" "$observer_log" || true
+  fi
   if [ "$attempt" -lt 3 ]; then
     echo "Supabase start attempt $attempt failed; retrying in $((attempt * 5))s..." >&2
     supabase stop --workdir "$state_dir" > /dev/null 2>&1 || true

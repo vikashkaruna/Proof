@@ -1,14 +1,16 @@
 """Failing startup diagnostics disclose bounded facts, never protected content."""
 
 import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -334,6 +336,7 @@ class StartupDiagnosticTests(unittest.TestCase):
             stubs = {
                 "supabase": f"""#!/bin/bash
 if [ "$1" = start ]; then
+ if [ "${{STUB_OBSERVER_EVENT:-}}" = 1 ]; then /bin/sleep 0.15; fi
  echo start >> "$ATTEMPT_LOG"
  printf '%s\\n' "$@" >> "$ARGUMENT_LOG"
  echo 'supabase_db_{PROJECT} container is not ready: unhealthy' >&2
@@ -342,7 +345,21 @@ if [ "$1" = start ]; then
 fi
 """,
                 "sleep": "#!/bin/bash\nexit 0\n",
-                "docker": "#!/bin/bash\nexit 1\n",
+                "docker": f"""#!/bin/bash
+if [ "${{STUB_OBSERVER_EVENT:-}}" = 1 ]; then
+ if [ "$3" = events ]; then
+  python3 - <<'OBS'
+import json,time
+print(json.dumps({{"id":"a"*64,"name":"supabase_db_{PROJECT}","project":"{PROJECT}","action":"create","exit":"0","nano":time.time_ns()}}))
+OBS
+  exit 0
+ elif [ "$3" = inspect ]; then
+  printf '%s\\n' '{{"id":"{"a" * 64}","name":"/supabase_db_{PROJECT}","project":"{PROJECT}","status":"exited","health":"unhealthy","exit":137,"pid":0,"oom":true,"Error":"{MARKER}"}}'
+  exit 0
+ fi
+fi
+exit 1
+""",
                 "uname": '#!/bin/bash\necho "${STUB_UNAME:-Linux}"\n',
             }
             for name, body in stubs.items():
@@ -422,6 +439,25 @@ fi
                     self.assertIn(MARKER, text)
                     self.assertEqual(mode, 0o600)
 
+    def test_hosted_debug_shell_emits_sanitized_observation_before_retry(self):
+        result, _logs, attempts, args = self._startup_shell(
+            {
+                "AXIOM_PARITY_STARTUP_DEBUG": "1",
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_ENVIRONMENT": "github-hosted",
+                "RUNNER_OS": "Linux",
+                "STUB_OBSERVER_EVENT": "1",
+            }
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(attempts, ["start"] * 3)
+        self.assertEqual(args.count("--debug"), 3)
+        self.assertNotIn(MARKER, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count("OOM killed: true"), 3)
+        self.assertEqual(result.stdout.count("event: create"), 3)
+        self.assertIn("state: exited; health: unhealthy", result.stdout)
+        self.assertNotIn("--ignore-health-check", args)
+
     def test_debug_opt_in_refuses_incomplete_or_nonhosted_context_before_start(self):
         approved = {
             "AXIOM_PARITY_STARTUP_DEBUG": "1",
@@ -446,6 +482,413 @@ fi
                     "requires explicit opt-in on GitHub-hosted Linux", result.stderr
                 )
                 self.assertEqual((logs, attempts, args), ({}, [], []))
+
+
+spec = importlib.util.spec_from_file_location(
+    "observer", ROOT / ".github/ci/observe_supabase_startup.py"
+)
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+OBS_PROJECT = "axiom-private-observer"
+OBS_NAME = "supabase_db_" + OBS_PROJECT
+OBS_OLD = "a" * 64
+OBS_NEW = "b" * 64
+OBS_MARKER = "secret-marker-must-never-reflect"
+
+
+def event(**changes):
+    value = {
+        "id": OBS_OLD,
+        "name": OBS_NAME,
+        "project": OBS_PROJECT,
+        "action": "die",
+        "exit": "137",
+        "nano": 10,
+    }
+    value.update(changes)
+    return json.dumps(value)
+
+
+def snapshot(**changes):
+    value = {
+        "id": OBS_OLD,
+        "name": "/" + OBS_NAME,
+        "project": OBS_PROJECT,
+        "status": "exited",
+        "health": "unhealthy",
+        "exit": 137,
+        "pid": 0,
+        "oom": False,
+        "Output": OBS_MARKER,
+        "Error": OBS_MARKER,
+        "Env": [OBS_MARKER],
+    }
+    value.update(changes)
+    return json.dumps(value)
+
+
+def inspections(trace):
+    return [row for row in trace.rows if row.get("source") == "inspection"]
+
+
+class StartupObserverTests(unittest.TestCase):
+    def test_names_labels_ids_and_schema_all_required(self):
+        for changes in (
+            {"name": "supabase_db_axiom-other"},
+            {"project": "axiom-other"},
+            {"name": "supabase_unknown_" + OBS_PROJECT},
+            {"project": None},
+            {"action": [OBS_MARKER]},
+            {"action": OBS_MARKER},
+            {"nano": True},
+            {"nano": -1},
+            {"nano": 2**63},
+            {"name": OBS_NAME + OBS_MARKER},
+            {"id": OBS_MARKER},
+            {"id": "a" * 63},
+            {"id": "A" * 64},
+            {"id": True},
+        ):
+            trace = m.Trace(OBS_PROJECT)
+            self.assertIsNone(trace.event(event(**changes)))
+            self.assertEqual(trace.rows, [])
+        for raw in ("{bad" + OBS_MARKER, "x" * 16385):
+            self.assertIsNone(m.Trace(OBS_PROJECT).event(raw))
+
+    def test_stale_future_and_out_of_order_events_refused(self):
+        trace = m.Trace(OBS_PROJECT, start_nano=100)
+        for nano in (99, 100 + 1200 * 10**9 + 1):
+            self.assertIsNone(trace.event(event(nano=nano)))
+        self.assertEqual(trace.event(event(nano=100)), OBS_OLD)
+        self.assertIsNone(trace.event(event(nano=99)))
+        self.assertEqual(len(trace.rows), 1)
+        self.assertEqual(trace.event(event(nano=102, action="start")), OBS_OLD)
+        self.assertIsNone(trace.event(event(nano=101)))
+        self.assertEqual(len(trace.rows), 2)
+        self.assertEqual(trace.rows[0]["event_nano"], 100)
+        self.assertTrue(0 <= trace.rows[0]["observed_ms"] <= 1200000)
+
+    def test_rapid_name_reuse_cannot_rebind_old_event_inspection(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        trace.event(event(action="die", nano=2))
+        trace.event(event(id=OBS_NEW, action="create", nano=3))
+        trace.snapshot(
+            snapshot(id=OBS_NEW, status="running", health="healthy"), OBS_OLD
+        )
+        self.assertEqual(inspections(trace), [])
+        trace.snapshot(
+            snapshot(id=OBS_NEW, status="running", health="healthy"), OBS_NEW
+        )
+        trace.event(event(action="destroy", nano=4))
+        trace.snapshot(snapshot(), OBS_OLD)
+        self.assertEqual(trace.active_ids(), [OBS_NEW])
+        self.assertEqual(len(inspections(trace)), 1)
+        self.assertEqual(inspections(trace)[0]["id"], OBS_NEW)
+        self.assertEqual(
+            [row["id"] for row in trace.rows if row.get("source") == "event"],
+            [OBS_OLD, OBS_OLD, OBS_NEW, OBS_OLD],
+        )
+        self.assertEqual(
+            [row["event_nano"] for row in trace.rows if row.get("source") == "event"],
+            [1, 2, 3, 4],
+        )
+
+    def test_snapshot_rejects_wrong_id_and_identity_name_label_mismatch(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        for changes in (
+            {"id": OBS_NEW},
+            {"id": OBS_MARKER},
+            {"name": "/supabase_auth_" + OBS_PROJECT},
+            {"project": "axiom-other"},
+            {"name": "/" + OBS_NAME + OBS_MARKER},
+            {"status": [OBS_MARKER]},
+            {"health": [OBS_MARKER]},
+        ):
+            trace.snapshot(snapshot(**changes), OBS_OLD)
+        self.assertEqual(inspections(trace), [])
+        self.assertIsNone(
+            trace.event(event(name="supabase_auth_" + OBS_PROJECT, nano=2))
+        )
+
+    def test_safe_snapshot_fields_bounds_and_oom_not_inferred_from_137(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        trace.snapshot(snapshot(), OBS_OLD)
+        row = inspections(trace)[0]
+        self.assertFalse(row["oom"])
+        self.assertEqual(row["exit"], 137)
+        self.assertEqual(row["pid"], 0)
+        self.assertNotIn(OBS_MARKER, json.dumps(trace.rows))
+        trace.snapshot(snapshot(exit=True, pid=2**31, oom=OBS_MARKER), OBS_OLD)
+        row = inspections(trace)[-1]
+        for field in ("exit", "pid", "oom"):
+            self.assertNotIn(field, row)
+        trace.event(event(action="oom", nano=2))
+        self.assertEqual(trace.rows[-1]["event"], "oom")
+
+    def test_per_identity_dedup_retains_replacement_and_late_failure(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        for _ in range(10000):
+            trace.snapshot(snapshot(status="running", health="healthy"), OBS_OLD)
+        self.assertEqual(len(inspections(trace)), 1)
+        trace.event(event(id=OBS_NEW, action="create", nano=2))
+        trace.snapshot(
+            snapshot(id=OBS_NEW, status="running", health="healthy"), OBS_NEW
+        )
+        self.assertEqual(len(inspections(trace)), 2)
+        trace.snapshot(snapshot(id=OBS_NEW, oom=True), OBS_NEW)
+        self.assertEqual(len(inspections(trace)), 3)
+        self.assertTrue(inspections(trace)[-1]["oom"])
+        for count in range(5000):
+            trace.add({"service": "postgres", "exit": count % 256})
+        self.assertEqual(len(trace.rows), 4096)
+
+    def test_restricted_inspection_binds_id_and_drops_remote_environment(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        with (
+            patch.dict(
+                os.environ,
+                {"DOCKER_HOST": "tcp://unsafe:2375", "DOCKER_CONTEXT": OBS_MARKER},
+            ),
+            patch.object(
+                m.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, snapshot(), OBS_MARKER),
+            ) as run,
+        ):
+            m.inspect(trace, OBS_OLD)
+        self.assertEqual(run.call_args.args[0][:3], m.BASE)
+        self.assertEqual(run.call_args.args[0][-1], OBS_OLD)
+        for key in ("DOCKER_HOST", "DOCKER_CONTEXT"):
+            self.assertNotIn(key, run.call_args.kwargs["env"])
+        for unsafe in (
+            ".State.Error",
+            ".State.Health.Log",
+            ".Config.Env",
+            "{{json .State}}",
+        ):
+            self.assertNotIn(unsafe, m.INSPECT_FORMAT)
+        self.assertNotIn(OBS_MARKER, json.dumps(trace.rows))
+
+    def test_invalid_or_unregistered_inspection_id_refuses_before_docker(self):
+        trace = m.Trace(OBS_PROJECT)
+        with patch.object(m.subprocess, "run") as run:
+            for identity in (OBS_MARKER, "a" * 63, OBS_NEW, True):
+                m.inspect(trace, identity)
+            run.assert_not_called()
+
+    def test_fast_die_destroy_retained_even_when_no_state_survives(self):
+        watcher = Mock()
+        watcher.stdout = io.StringIO(
+            event(action="create", nano=1)
+            + "\n"
+            + event(action="die", nano=2)
+            + "\n"
+            + event(action="destroy", nano=3)
+            + "\n"
+        )
+        watcher.poll.return_value = None
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(m.time, "time_ns", return_value=0),
+            patch.object(m.subprocess, "Popen", return_value=watcher) as popen,
+            patch.object(
+                m.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 1, "", OBS_MARKER),
+            ),
+        ):
+            evidence = Path(d) / "trace.json"
+
+            def wait_cli():
+                time.sleep(0.03)
+                return 17
+
+            self.assertEqual(m.observe_during(wait_cli, OBS_PROJECT, evidence), 17)
+            rows = json.loads(evidence.read_text())
+            self.assertEqual(
+                [row["event"] for row in rows], ["create", "die", "destroy"]
+            )
+            self.assertNotIn(OBS_MARKER, evidence.read_text())
+            self.assertEqual(evidence.stat().st_mode & 0o777, 0o600)
+            argv = popen.call_args.args[0]
+            self.assertIn("--since", argv)
+            self.assertIn("label=" + m.LABEL + "=" + OBS_PROJECT, argv)
+            watcher.terminate.assert_called_once()
+            watcher.wait.assert_called_once()
+
+    def test_after_callback_observer_failures_preserve_cli_return_and_timeout(self):
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(m.subprocess, "Popen", side_effect=OSError(OBS_MARKER)),
+        ):
+            evidence = Path(d) / "trace.json"
+            self.assertEqual(m.observe_during(lambda: 1, OBS_PROJECT, evidence), 1)
+            self.assertEqual(
+                json.loads(evidence.read_text()), [{"observer": "unavailable"}]
+            )
+        watcher = Mock()
+        watcher.stdout = io.StringIO("")
+        watcher.poll.return_value = None
+        watcher.wait.side_effect = subprocess.TimeoutExpired([OBS_MARKER], 3)
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(m.subprocess, "Popen", return_value=watcher),
+        ):
+            self.assertEqual(
+                m.observe_during(lambda: 7, OBS_PROJECT, Path(d) / "trace.json"), 7
+            )
+            watcher.kill.assert_called_once()
+        watcher = Mock()
+        watcher.stdout = io.StringIO("")
+        watcher.poll.return_value = None
+        failure = subprocess.TimeoutExpired(["supabase", "start"], 10)
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(m.subprocess, "Popen", return_value=watcher),
+        ):
+
+            def wait_cli():
+                raise failure
+
+            with self.assertRaises(subprocess.TimeoutExpired) as caught:
+                m.observe_during(wait_cli, OBS_PROJECT, Path(d) / "trace.json")
+            self.assertIs(caught.exception, failure)
+            watcher.terminate.assert_called_once()
+            watcher.wait.assert_called_once()
+
+    def test_direct_executor_refuses_arbitrary_commands_and_context_before_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / "supabase").mkdir()
+            (state / "supabase/config.toml").write_text(
+                f'project_id = "{OBS_PROJECT}"\n'
+            )
+            argv = [
+                OBS_PROJECT,
+                str(state / "start-attempt-1.observer.json"),
+                "--",
+                "supabase",
+                "start",
+                "--workdir",
+                str(state),
+                "--exclude",
+                m.EXCLUDES,
+                "--debug",
+            ]
+            with (
+                patch.object(m, "hosted_guard"),
+                patch.object(m, "observe_during", return_value=23) as observe,
+            ):
+                self.assertEqual(m.main(argv), 23)
+                for position, value in (
+                    (3, "sh"),
+                    (4, "stop"),
+                    (6, str(state / "foreign")),
+                    (8, "other"),
+                    (9, "--ignore-health-check"),
+                ):
+                    bad = argv.copy()
+                    bad[position] = value
+                    with self.assertRaises(ValueError):
+                        m.main(bad)
+                self.assertEqual(observe.call_count, 1)
+                (state / "supabase/config.toml").write_text(
+                    'project_id = "axiom-other"\n'
+                )
+                with self.assertRaises(ValueError):
+                    m.main(argv)
+                self.assertEqual(observe.call_count, 1)
+            context = {
+                "AXIOM_PARITY_STARTUP_DEBUG": "1",
+                "GITHUB_ACTIONS": "true",
+                "RUNNER_ENVIRONMENT": "github-hosted",
+                "RUNNER_OS": "Linux",
+            }
+            for key in context:
+                invalid = context.copy()
+                invalid.pop(key)
+                with (
+                    patch.dict(os.environ, invalid, clear=True),
+                    patch.object(m.subprocess, "run") as run,
+                ):
+                    with self.assertRaises(ValueError):
+                        m.hosted_guard()
+                    run.assert_not_called()
+            with (
+                patch.dict(
+                    os.environ, {**context, "DOCKER_HOST": "tcp://unsafe"}, clear=True
+                ),
+                patch.object(m.subprocess, "run") as run,
+            ):
+                with self.assertRaises(ValueError):
+                    m.hosted_guard()
+                run.assert_not_called()
+
+    def test_serialized_report_revalidates_project_ids_and_sensitive_fields(self):
+        trace = m.Trace(OBS_PROJECT)
+        trace.event(event(action="create", nano=1))
+        trace.snapshot(snapshot(), OBS_OLD)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trace.json"
+            path.write_text(json.dumps(trace.rows))
+            path.chmod(0o600)
+            facts = m.report_facts(path, OBS_PROJECT)
+            self.assertIn("OOM killed: false", facts[-1])
+            self.assertNotIn(OBS_MARKER, "\n".join(facts))
+            for field, value in (
+                ("project", "axiom-other"),
+                ("id", OBS_MARKER),
+                ("name", OBS_MARKER),
+                ("service", OBS_MARKER),
+                ("exit", True),
+                ("Error", OBS_MARKER),
+                ("observed_ms", 1200001),
+            ):
+                bad = [dict(trace.rows[-1])]
+                bad[0][field] = value
+                path.write_text(json.dumps(bad))
+                with self.assertRaises((ValueError, TypeError)):
+                    m.report_facts(path, OBS_PROJECT)
+            secret_project = "axiom-" + OBS_MARKER
+            secret_trace = m.Trace(secret_project)
+            secret_trace.event(
+                event(
+                    project=secret_project,
+                    name="supabase_db_" + secret_project,
+                    action="create",
+                    nano=1,
+                )
+            )
+            path.write_text(json.dumps(secret_trace.rows))
+            self.assertNotIn(
+                OBS_MARKER, "\n".join(m.report_facts(path, secret_project))
+            )
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                m.report_facts(path, OBS_PROJECT)
+
+    def test_preflight_refusal_has_no_cli_verdict_or_callback(self):
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(m.subprocess, "Popen") as popen,
+        ):
+            path = Path(d) / "trace.json"
+            path.write_text(OBS_MARKER)
+            callback = Mock()
+            for project in ("axiom-../../escape", OBS_PROJECT):
+                with self.assertRaises(ValueError):
+                    m.observe_during(callback, project, path)
+            path.unlink()
+            path.symlink_to(Path(d) / "target")
+            with self.assertRaises(ValueError):
+                m.observe_during(callback, OBS_PROJECT, path)
+            callback.assert_not_called()
+            popen.assert_not_called()
 
 
 if __name__ == "__main__":
