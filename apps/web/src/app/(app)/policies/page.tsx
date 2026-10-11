@@ -16,6 +16,7 @@ import { formatDateTime, relativeTime, truncateHash } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { WorkflowPanel } from '../operator-workflows/panel';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,7 +109,7 @@ function ScopeSummary({ scope }: { scope: Record<string, unknown> | null }) {
  */
 export default async function PoliciesPage() {
   const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
-    Capability.POSTURE_READ,
+    routeCapability('/policies'),
   );
   const documents = (
     <div className="space-y-4">
@@ -131,7 +132,7 @@ export default async function PoliciesPage() {
   );
   if (!can(Capability.TENANT_SETTINGS_WRITE, { role })) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <PageHeader
           module={moduleBarProps('policies')}
           title="Policies & Notices"
@@ -167,7 +168,7 @@ export default async function PoliciesPage() {
     !Array.isArray(evaluationsRes.data)
   ) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <PageHeader
           module={moduleBarProps('policies')}
           title="Policies & Notices"
@@ -192,7 +193,7 @@ export default async function PoliciesPage() {
   const withinPolicy = evaluations.filter((e) => e.decision === 'within_policy').length;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         module={moduleBarProps('policies')}
         title="Policies & Notices"

@@ -5,6 +5,8 @@ import { requireCapabilityContext } from '@/lib/tenant-context';
 import { ProposalClient, type ProposalData } from './proposal-client';
 import type { EstateRow } from '../estate-client';
 import { z } from 'zod';
+import { routeCapability } from '@/app/(app)/nav';
+import { moduleBarProps } from '@/lib/module-bar';
 export const dynamic = 'force-dynamic';
 
 const intakeSystemSchema = z.object({
@@ -51,7 +53,7 @@ const proposalDataSchema: z.ZodType<ProposalData> = z.object({
   ),
 });
 export default async function OnboardingProposalsPage() {
-  const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
+  const ctx = await requireCapabilityContext(routeCapability('/estate'));
   const {
     data: { session },
   } = await ctx.supabase.auth.getSession();
@@ -82,6 +84,7 @@ export default async function OnboardingProposalsPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('estate')}
         title="Onboarding proposals"
         description="Axiom staff prepare the inventory. A client owner or admin reviews the original intake and proposed mappings before systems are added."
       />

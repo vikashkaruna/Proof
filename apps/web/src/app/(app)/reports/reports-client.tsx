@@ -109,13 +109,13 @@ function TenantReportsClient(access: Access) {
     refresh();
   }
   return (
-    <div className="min-w-0 space-y-6">
+    <div className="min-w-0 space-y-4">
       <PageHeader
         module={{
           ...moduleBarProps('reports'),
           agents: activeTab === 'pramaan' ? ['pramaan'] : ['prativedan'],
         }}
-        title="Reports and evidence"
+        title={activeTab === 'pramaan' ? 'Statutory Proof Dossiers' : 'Working Reports & Registers'}
         description="Review recorded reports and evidence packs. A content hash alone does not establish a retained PDF, source provenance, or a released proof artifact. Report email dispatch is unavailable while source-bound delivery is being rebuilt."
       />
 

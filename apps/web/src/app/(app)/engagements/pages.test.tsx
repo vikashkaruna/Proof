@@ -9,32 +9,16 @@ const state = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: Error | null }>,
   calls: [] as Array<[string, string, unknown]>,
   role: 'viewer' as UserRole,
+  guards: [] as string[],
 }));
 vi.mock('@/lib/tenant-context', () => ({
-  Capability: { POSTURE_READ: 'posture.read', ENGAGEMENT_CREATE: 'engagement.create' },
-  requireTenantContext: async () => ({
-    tenantId: 'tenant-1',
-    role: state.role,
-    supabase: {
-      from: (table: string) => {
-        const result = () =>
-          state.results[table] ?? { data: table === 'engagements' ? null : [], error: null };
-        const query = {
-          select: () => query,
-          eq: (field: string, value: unknown) => {
-            state.calls.push([table, field, value]);
-            return query;
-          },
-          order: () => query,
-          single: async () => result(),
-          maybeSingle: async () => result(),
-          then: (resolve: (value: unknown) => unknown) => Promise.resolve(result()).then(resolve),
-        };
-        return query;
-      },
-    },
-  }),
-  requireCapabilityContext: async () => ({
+  Capability: {
+    POSTURE_READ: 'posture.read',
+    ENGAGEMENT_CREATE: 'engagement.create',
+    ASSESSMENT_RUN: 'assessment.run',
+  },
+  requireCapabilityContext: async (capability: string) => ({
+    guard: state.guards.push(capability),
     tenantId: 'tenant-1',
     role: state.role,
     supabase: {
@@ -47,6 +31,8 @@ vi.mock('@/lib/tenant-context', () => ({
             return query;
           },
           order: () => query,
+          // A detail read of a missing row returns null, not the list default.
+          single: async () => state.results[table] ?? { data: null, error: null },
           maybeSingle: async () => result(),
           then: (resolve: (value: unknown) => unknown) => Promise.resolve(result()).then(resolve),
         };
@@ -70,6 +56,7 @@ vi.mock('next/link', () => ({
 beforeEach(() => {
   state.results = {};
   state.calls = [];
+  state.guards = [];
   state.role = 'viewer';
 });
 
@@ -142,4 +129,13 @@ it('shows findings and plan query failures as unavailable for a recorded engagem
   expect(view).not.toContain('No findings recorded');
   expect(state.calls).toContainEqual(['findings', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['remediation_plans', 'tenant_id', 'tenant-1']);
+});
+
+it('guards the list and the detail with the capability that offers Engagements in the menu', async () => {
+  await EngagementsListPage();
+  state.results.engagements = { data: null, error: null };
+  await expect(
+    EngagementDetailPage({ params: Promise.resolve({ id: 'missing' }) }),
+  ).rejects.toThrow('NOT_FOUND');
+  expect(state.guards).toEqual(['assessment.run', 'assessment.run']);
 });

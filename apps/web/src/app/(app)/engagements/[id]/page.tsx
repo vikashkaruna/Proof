@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext } from '@/lib/tenant-context';
 import {
   PageHeader,
   Card,
@@ -14,6 +14,8 @@ import {
   AgentPill,
 } from '@axiom/ui';
 import { formatDate, formatINR } from '@axiom/ui';
+import { routeCapability } from '@/app/(app)/nav';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +25,7 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId } = await requireCapabilityContext(routeCapability('/engagements'));
 
   const { data: engagement, error: engagementError } = await supabase
     .from('engagements')
@@ -50,8 +52,9 @@ export default async function EngagementDetailPage({
     .eq('engagement_id', id);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
+        module={moduleBarProps('engagements')}
         title={engagement.title}
         description={`Engagement for ${engagement.tenants?.name ?? 'tenant'} using library v${engagement.library_version}.`}
         actions={

@@ -100,8 +100,17 @@ test('an assessment creator can start an intake and open its saved assessment', 
   expect(changed.status()).toBe(409);
 });
 
-test('a viewer can read agent modules without being offered a run action', async ({ page }) => {
+test('a viewer is not offered agent modules and is refused at their URLs', async ({ page }) => {
   await signIn(page, 'viewer');
+  await selectTenant(page, 'a');
+  for (const route of ['/discovery', '/classification', '/assessment']) {
+    await page.goto(route);
+    await expect(page).toHaveURL(/\/portal\?error=forbidden/);
+  }
+});
+
+test('a reviewer can read agent modules without being offered a run action', async ({ page }) => {
+  await signIn(page, 'reviewer');
   await selectTenant(page, 'a');
   for (const route of ['/discovery', '/classification']) {
     await page.goto(route);
@@ -111,7 +120,7 @@ test('a viewer can read agent modules without being offered a run action', async
     ).toHaveCount(0);
   }
   await page.goto('/assessment');
-  await expect(page.getByRole('heading', { name: 'Assessment pipeline' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Assessment', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Request unknown-answer assessment' })).toHaveCount(
     0,
   );

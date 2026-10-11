@@ -12,33 +12,39 @@ const state = vi.hoisted(() => ({
   limits: [] as number[],
   selects: [] as string[],
 }));
-vi.mock('@/lib/tenant-context', () => ({
-  requireTenantContext: async () => ({
-    tenantId: '11111111-1111-4111-8111-111111111111',
-    role: state.role,
-    supabase: {
-      from: () => {
-        const query = {
-          select: (fields: string) => {
-            state.selects.push(fields);
+vi.mock('@/lib/tenant-context', async () => {
+  const { can } = await import('@axiom/types');
+  return {
+    requireCapabilityContext: async (capability: Parameters<typeof can>[0]) => {
+      if (!can(capability, { role: state.role as UserRole })) throw new Error('forbidden');
+      return {
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        role: state.role,
+        supabase: {
+          from: () => {
+            const query = {
+              select: (fields: string) => {
+                state.selects.push(fields);
+                return query;
+              },
+              eq: (...args: unknown[]) => {
+                state.filters.push(args);
+                return query;
+              },
+              order: () => query,
+              limit: async (limit: number) => {
+                state.limits.push(limit);
+                if (state.thrown) throw new Error('private database details');
+                return { data: state.data, error: state.error };
+              },
+            };
             return query;
           },
-          eq: (...args: unknown[]) => {
-            state.filters.push(args);
-            return query;
-          },
-          order: () => query,
-          limit: async (limit: number) => {
-            state.limits.push(limit);
-            if (state.thrown) throw new Error('private database details');
-            return { data: state.data, error: state.error };
-          },
-        };
-        return query;
-      },
+        },
+      };
     },
-  }),
-}));
+  };
+});
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 import DsarPage from './page';
 
@@ -99,12 +105,14 @@ describe('DSAR server page', () => {
     expect(html).toContain('More requests exist');
     expect((html.match(/<section/g) ?? []).length).toBe(200);
   });
-  it('does not query personal data for a role without read capability', async () => {
-    state.role = UserRole.AGENT;
-    const html = renderToStaticMarkup(await DsarPage());
-    expect(state.selects).toEqual([]);
-    expect(html).toContain('Your role cannot view');
-  });
+  it.each([UserRole.AGENT, UserRole.VIEWER, UserRole.APPROVER, UserRole.PARTNER])(
+    'does not query personal data for %s, which the menu does not offer rights requests',
+    async (role) => {
+      state.role = role;
+      await expect(DsarPage()).rejects.toThrow('forbidden');
+      expect(state.selects).toEqual([]);
+    },
+  );
   it('renders a read-only analyst with actual data and no action controls', async () => {
     state.role = UserRole.AXIOM_ANALYST;
     state.data = [row];

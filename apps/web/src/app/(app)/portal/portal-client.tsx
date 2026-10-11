@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AgentIcon, AgentLabel } from '@axiom/ui';
+import { AgentIcon, AgentLabel, PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export interface TenantSummary {
   id: string;
@@ -90,6 +91,8 @@ export interface LedgerSummary {
 
 export interface PortalClientProps {
   canViewClosureDossiers?: boolean;
+  /** Routes the persona's menu offers; links elsewhere are not rendered. */
+  reachableRoutes?: readonly string[];
   tenants: TenantSummary[];
   activeTenant: TenantSummary;
   engagement: EngagementSummary | null;
@@ -106,6 +109,22 @@ export interface PortalClientProps {
 
 type TabType = 'overview' | 'approvals' | 'evidence' | 'dsars' | 'ledger';
 
+/**
+ * The routes this persona is offered. The portal is read by every role, and it
+ * links into screens — the approval queue, assessment, rights requests — that
+ * a viewer is not offered; a link they would be refused at is not shown.
+ * `null` means unrestricted, for callers that have not resolved a persona.
+ */
+const ReachableRoutes = createContext<readonly string[] | null>(null);
+
+function RouteLink(props: React.ComponentProps<typeof Link>) {
+  const reachable = useContext(ReachableRoutes);
+  const href = typeof props.href === 'string' ? props.href : (props.href.pathname ?? '');
+  const path = href.split('?')[0] ?? href;
+  if (reachable && !reachable.includes(href) && !reachable.includes(path)) return null;
+  return <Link {...props} />;
+}
+
 function formatBlastRadius(value: unknown): string {
   if (typeof value !== 'object' || value === null) return 'Scoped';
   const radius = value as Record<string, unknown>;
@@ -120,7 +139,15 @@ function formatBlastRadius(value: unknown): string {
   return 'Scoped';
 }
 
-export function PortalClient({
+export function PortalClient({ reachableRoutes, ...props }: PortalClientProps) {
+  return (
+    <ReachableRoutes.Provider value={reachableRoutes ?? null}>
+      <PortalView {...props} />
+    </ReachableRoutes.Provider>
+  );
+}
+
+function PortalView({
   canViewClosureDossiers = false,
   tenants,
   activeTenant,
@@ -132,7 +159,7 @@ export function PortalClient({
   ledger,
   assessmentUnavailable,
   loadError,
-}: PortalClientProps) {
+}: Omit<PortalClientProps, 'reachableRoutes'>) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -181,109 +208,75 @@ export function PortalClient({
   ).length;
 
   return (
-    <div className="w-full min-w-0 space-y-6 animate-in fade-in-0 duration-200">
-      {/* ============================================================ */}
-      {/* 1. HERO BANNER                                               */}
-      {/* ============================================================ */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-[280px]">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-bold text-[#04322d] uppercase tracking-wider">
-                P4 · M4.7
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
-                <span>Agent ·</span>
-                <AgentLabel agent="saakshi" size="xs" tone="dark" />
-                <span className="text-[#0FB5A5]/70">+</span>
-                <AgentLabel agent="sudhaar" size="xs" tone="dark" />
-              </div>
-              <span className="text-xs text-[#8a97b8]">Autonomy L1 — Agent-Proposes</span>
-              <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-200">
-                DPDPA §8(2) & §6 Client Portal
-              </span>
-            </div>
-
-            <div className="flex items-baseline gap-3">
-              <h1 className="font-heading text-2xl md:text-[26px] font-bold text-white tracking-tight">
-                Client Portal
-              </h1>
-              <span className="font-heading text-lg text-[#0FB5A5] font-normal">ग्राहक पोर्टल</span>
-            </div>
-
-            <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">
-              Tenant-scoped executive portal for client leadership, compliance officers, and
-              statutory auditors. Figures below come from saved tenant records. Verify assessment,
-              stored evidence versions, and approval authority in their dedicated workflows.
-            </p>
-          </div>
-
-          {/* Tenant Selector & Actions */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs">
-              <span className="text-[#8a97b8]">Organization:</span>
-              {tenants.length > 1 ? (
+    <div className="w-full min-w-0 space-y-4 animate-in fade-in-0 duration-200">
+      <PageHeader
+        title="Client Portal"
+        module={moduleBarProps('portal')}
+        description="Tenant-scoped summary for client leadership, compliance officers and statutory auditors. Figures come from saved tenant records; verify assessment, stored evidence versions and approval authority in their dedicated workflows."
+        meta={
+          <>
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10.5px] font-medium text-[#D6DBE8]">
+              Autonomy L1 · agent proposes
+            </span>
+            <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10.5px] text-[#D6DBE8]">
+              DPDPA §8(2) & §6
+            </span>
+          </>
+        }
+        actions={
+          <>
+            {tenants.length > 1 && (
+              <label className="flex items-center gap-2 px-2 text-xs text-slate-500">
+                Organization
                 <select
                   value={activeTenant.slug}
                   onChange={(e) => handleTenantChange(e.target.value)}
-                  className="bg-transparent font-medium text-white outline-none cursor-pointer focus:ring-0"
+                  className="cursor-pointer rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-800"
                 >
                   {tenants.map((t) => (
-                    <option key={t.id} value={t.slug} className="bg-[#1E2A4A] text-white">
+                    <option key={t.id} value={t.slug}>
                       {t.name}
                     </option>
                   ))}
                 </select>
-              ) : (
-                <span className="font-semibold text-white">{activeTenant.name}</span>
-              )}
-            </div>
-
-            <Link
+              </label>
+            )}
+            <RouteLink
               href="/approval"
-              className="rounded-[9px] bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold py-2.5 px-4 shadow-sm transition-all text-center"
+              data-primary
+              className="inline-flex min-h-9 items-center rounded-md bg-[#0FB5A5] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0C9184]"
             >
               Approval Queue →
-            </Link>
-          </div>
-        </div>
-
-        {/* Status Bar */}
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-xs">
-          <div className="flex flex-wrap items-center gap-4 text-[#c7cfe0]">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-[#0FB5A5] animate-pulse" />
-              <span className="font-medium text-white">Recorded data</span>
-            </span>
-            <span>·</span>
+            </RouteLink>
+          </>
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[#D6DBE8]">
+            <span className="font-semibold text-white">{activeTenant.name}</span>
             <span>
               Deployment region: <strong className="text-white">verify operationally</strong>
             </span>
-            <span>·</span>
             <span>
-              Tenant Tier:{' '}
-              <strong className="text-[#0FB5A5] capitalize">
+              Tier:{' '}
+              <strong className="capitalize text-[#40D5C3]">
                 {activeTenant.tier || 'Not set'}
               </strong>
             </span>
             {activeTenant.is_sdf && (
-              <>
-                <span>·</span>
-                <span className="rounded bg-teal-500/20 px-2 py-0.5 text-[10px] font-semibold text-teal-200">
-                  SDF profile flag recorded
-                </span>
-              </>
+              <span className="rounded bg-teal-500/20 px-2 py-0.5 text-[10px] font-semibold text-teal-200">
+                SDF profile flag recorded
+              </span>
             )}
           </div>
-
-          <div className="text-[11px] font-mono text-[#8a97b8]">
+          <div className="font-mono text-[11px] text-[#A6B0CC]">
             Tenant ID:{' '}
             <span className="text-white">
               {activeTenant.id.slice(0, 8)}…{activeTenant.id.slice(-4)}
             </span>
           </div>
         </div>
-      </div>
+      </PageHeader>
 
       {loadError && (
         <div
@@ -550,7 +543,7 @@ export function PortalClient({
 
               {/* Quick Links inside Engagement */}
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4 border-t border-[#eef1f5]">
-                <Link
+                <RouteLink
                   href="/assessment"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -559,9 +552,9 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Parikshan gap telemetry</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
-                <Link
+                <RouteLink
                   href="/controls"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -570,9 +563,9 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Published control library</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
-                <Link
+                <RouteLink
                   href="/reports"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -581,10 +574,10 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
                 {canViewClosureDossiers && (
-                  <Link
+                  <RouteLink
                     href="/reports?tab=pramaan"
                     className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
                   >
@@ -596,7 +589,7 @@ export function PortalClient({
                       <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                     </div>
                     <span className="text-teal-700 text-xs font-bold">Seal →</span>
-                  </Link>
+                  </RouteLink>
                 )}
               </div>
             </div>
@@ -622,12 +615,12 @@ export function PortalClient({
                     </p>
                   </div>
                 </div>
-                <Link
+                <RouteLink
                   href="/assessment"
                   className="rounded-lg bg-[#0FB5A5] hover:bg-[#0a8d80] text-white text-xs font-semibold px-3.5 py-2 transition-colors"
                 >
                   Start Assessment (Parikshan) →
-                </Link>
+                </RouteLink>
               </div>
 
               {/* Statutory Framework Compliance Domains Table Control */}
@@ -698,7 +691,7 @@ export function PortalClient({
 
               {/* Quick Links inside Engagement */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-                <Link
+                <RouteLink
                   href="/assessment"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -707,9 +700,9 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Parikshan gap telemetry</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
-                <Link
+                <RouteLink
                   href="/controls"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -718,9 +711,9 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Published control library</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
-                <Link
+                <RouteLink
                   href="/reports"
                   className="rounded-xl border border-slate-200 p-3 hover:border-[#0FB5A5] hover:bg-teal-50/20 transition-all flex items-center justify-between"
                 >
@@ -729,10 +722,10 @@ export function PortalClient({
                     <div className="text-[11px] text-slate-500">Prativedan · Clerical Drafter</div>
                   </div>
                   <span className="text-[#0FB5A5] text-xs font-bold">View →</span>
-                </Link>
+                </RouteLink>
 
                 {canViewClosureDossiers && (
-                  <Link
+                  <RouteLink
                     href="/reports?tab=pramaan"
                     className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 hover:border-teal-500 hover:bg-teal-50 transition-all flex items-center justify-between"
                   >
@@ -744,7 +737,7 @@ export function PortalClient({
                       <div className="text-[11px] text-teal-700">Pramaan · Closure Seal</div>
                     </div>
                     <span className="text-teal-700 text-xs font-bold">Seal →</span>
-                  </Link>
+                  </RouteLink>
                 )}
               </div>
             </div>
@@ -785,9 +778,12 @@ export function PortalClient({
                 approval backed by a completed dry-run and a validated rollback.
               </p>
             </div>
-            <Link href="/approval" className="text-xs font-bold text-[#0FB5A5] hover:underline">
+            <RouteLink
+              href="/approval"
+              className="text-xs font-bold text-[#0FB5A5] hover:underline"
+            >
               Open Full Approval Queue →
-            </Link>
+            </RouteLink>
           </div>
 
           {plans.length === 0 ? (
@@ -845,12 +841,12 @@ export function PortalClient({
                     </h3>
                   </div>
 
-                  <Link
+                  <RouteLink
                     href={`/approval?plan=${plan.id}`}
                     className="rounded-lg bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold px-3 py-1.5 transition-all"
                   >
                     Inspect source plan →
-                  </Link>
+                  </RouteLink>
                 </div>
 
                 {/* Actions List */}
@@ -919,9 +915,12 @@ export function PortalClient({
                 retention through the evidence console before relying on a seal.
               </p>
             </div>
-            <Link href="/evidence" className="text-xs font-bold text-[#0FB5A5] hover:underline">
+            <RouteLink
+              href="/evidence"
+              className="text-xs font-bold text-[#0FB5A5] hover:underline"
+            >
               Open Evidence Console →
-            </Link>
+            </RouteLink>
           </div>
 
           {evidence.length === 0 ? (
@@ -1047,9 +1046,9 @@ export function PortalClient({
                 with recorded server deadlines. Confirm the applicable deadline for each request.
               </p>
             </div>
-            <Link href="/dsars" className="text-xs font-bold text-[#0FB5A5] hover:underline">
+            <RouteLink href="/dsars" className="text-xs font-bold text-[#0FB5A5] hover:underline">
               Open DSAR Console →
-            </Link>
+            </RouteLink>
           </div>
 
           {dsars.length === 0 ? (
@@ -1155,9 +1154,9 @@ export function PortalClient({
                 Append-only PostgreSQL cryptographic ledger with SHA-256 chaining.
               </p>
             </div>
-            <Link href="/ledger" className="text-xs font-bold text-[#0FB5A5] hover:underline">
+            <RouteLink href="/ledger" className="text-xs font-bold text-[#0FB5A5] hover:underline">
               Open Full Audit Ledger →
-            </Link>
+            </RouteLink>
           </div>
 
           {ledger.length === 0 ? (

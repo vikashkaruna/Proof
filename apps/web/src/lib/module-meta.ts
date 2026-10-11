@@ -11,10 +11,12 @@ import type { ModulePhase } from '@axiom/ui';
  */
 export type ModuleKey =
   | 'dashboard'
+  | 'estate'
   | 'discovery'
   | 'classification'
   | 'datamap'
   | 'assessment'
+  | 'engagements'
   | 'controls'
   | 'remediation'
   | 'approval'
@@ -30,7 +32,10 @@ export type ModuleKey =
   | 'workbench'
   | 'partner'
   | 'connectors'
-  | 'policies';
+  | 'policies'
+  | 'portal'
+  | 'settings'
+  | 'onboarding';
 
 export interface ModuleMeta {
   title: string;
@@ -48,6 +53,13 @@ export const MODULES: Record<ModuleKey, ModuleMeta> = {
     phase: 'P0',
     section: 'Overview',
     agents: [],
+  },
+  estate: {
+    title: 'Client Estate',
+    hi: 'क्लाइंट एस्टेट',
+    phase: 'P1',
+    section: 'Discover & Classify',
+    agents: ['drishti'],
   },
   discovery: {
     title: 'Data Discovery',
@@ -81,6 +93,13 @@ export const MODULES: Record<ModuleKey, ModuleMeta> = {
     moduleId: 'M0.3',
     agents: ['parikshan'],
   },
+  engagements: {
+    title: 'Engagements',
+    hi: 'आकलन संलग्नताएँ',
+    phase: 'P0',
+    section: 'Assess',
+    agents: ['parikshan'],
+  },
   controls: {
     title: 'Control Library',
     hi: 'नियंत्रण संग्रह',
@@ -98,8 +117,8 @@ export const MODULES: Record<ModuleKey, ModuleMeta> = {
     agents: ['sudhaar'],
   },
   approval: {
-    title: 'Approval Console',
-    hi: 'अनुमोदन कंसोल',
+    title: 'Approval Queue',
+    hi: 'अनुमोदन कतार',
     phase: 'P3',
     section: 'Remediate',
     moduleId: 'M3.3',
@@ -170,10 +189,10 @@ export const MODULES: Record<ModuleKey, ModuleMeta> = {
     agents: ['nazar'],
   },
   reports: {
-    title: 'Reports',
-    hi: 'रिपोर्ट',
+    title: 'Working Reports & Registers',
+    hi: 'कार्यकारी रिपोर्ट',
     phase: 'P2',
-    section: 'Report',
+    section: 'Reporting & Proof',
     moduleId: 'M2.7',
     agents: ['prativedan'],
   },
@@ -213,11 +232,34 @@ export const MODULES: Record<ModuleKey, ModuleMeta> = {
     agents: [],
   },
   policies: {
-    title: 'Standing Policies',
+    title: 'Policies & Notices',
     hi: 'स्थायी नीतियाँ',
     phase: 'P4',
     section: 'Operate',
     moduleId: 'M4.1',
+    agents: [],
+  },
+  portal: {
+    title: 'Client Portal',
+    hi: 'क्लाइंट पोर्टल',
+    phase: 'P0',
+    section: 'Operate',
+    moduleId: 'M4.2',
+    agents: ['saakshi', 'sudhaar'],
+  },
+  settings: {
+    title: 'Settings',
+    hi: 'सेटिंग्स',
+    phase: 'P0',
+    section: 'Operate',
+    moduleId: 'M0.1',
+    agents: [],
+  },
+  onboarding: {
+    title: 'Enterprise Onboarding',
+    hi: 'संस्था ऑनबोर्डिंग',
+    phase: 'P1',
+    section: 'Overview',
     agents: [],
   },
 };

@@ -21,6 +21,7 @@ vi.mock('@axiom/ui', async () => {
     AgentLabel: real.AgentLabel,
     ModuleBar: real.ModuleBar,
     DataPlaceholder: real.DataPlaceholder,
+    PageHeader: real.PageHeader,
   };
 });
 const meta: GenericModuleMeta = {
@@ -129,7 +130,8 @@ it('keeps related agents static and shows run state only while a run is in fligh
   expect(labels()).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: /Run it/ }));
   await waitFor(() =>
-    expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['working', 'idle']),
+    // Only the agent actually invoked is shown, and only while it runs.
+    expect(labels().map((l) => l.getAttribute('data-state'))).toEqual(['working']),
   );
   finish({ latency_ms: 1, ledger_entry_ids: [] });
   await waitFor(() => expect(labels()).toHaveLength(0));

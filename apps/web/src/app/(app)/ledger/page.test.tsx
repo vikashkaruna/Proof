@@ -14,13 +14,18 @@ const state = vi.hoisted(() => ({
   active: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   verification: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   context: vi.fn(),
+  tables: [] as string[],
 }));
 
 vi.mock('@/lib/tenant-context', () => ({
   Capability: { LEDGER_READ: 'ledger.read' },
   requireCapabilityContext: state.context,
 }));
-vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  redirect: (url: string) => {
+    throw new Error(`REDIRECT ${url}`);
+  },
+}));
 vi.mock('./verify-button', () => ({ VerifyButton: () => null }));
 vi.mock('./export-ledger-button', () => ({ ExportLedgerButton: () => null }));
 vi.mock('./ledger-refresh', () => ({ LedgerRefresh: () => null }));
@@ -44,7 +49,8 @@ function makeQuery(value: () => unknown) {
     range: () => query,
     ilike: () => query,
     or: () => query,
-    maybeSingle: async () => ({ data: { is_axiom_internal: true }, error: null }),
+    // A client tenant member, not Axiom staff.
+    maybeSingle: async () => ({ data: { is_axiom_internal: false }, error: null }),
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(value()).then(resolve),
   };
   return query;
@@ -55,6 +61,7 @@ beforeEach(() => {
   state.total = { count: 0, error: null };
   state.active = { data: [], error: null };
   state.verification = { data: [], error: null };
+  state.tables = [];
   state.context.mockReset();
   state.context.mockImplementation(async () => ({
     userId: 'auditor-1',
@@ -63,7 +70,7 @@ beforeEach(() => {
     tenantSlug: 'actual',
     supabase: {
       from: (table: string) =>
-        table === 'users'
+        state.tables.push(table) && table === 'users'
           ? makeQuery(() => ({}))
           : table === 'agent_runs'
             ? makeQuery(() => state.active)
@@ -87,6 +94,14 @@ it('renders zero recorded events without fictional fallback rows or tenants', as
   expect(html).not.toContain('Meridian Pay');
   expect(html).not.toContain('evidence.sealed');
   expect(state.context).toHaveBeenCalledWith('ledger.read', undefined);
+});
+
+it('shows the ledger to a client tenant member instead of redirecting to the Client Portal', async () => {
+  // Regression: an `is_axiom_internal` check sent every client role holding
+  // LEDGER_READ (owner, admin, approver, reviewer, viewer) to /portal.
+  const html = await renderPage();
+  expect(html).toContain('0 recorded entries');
+  expect(state.tables).not.toContain('users');
 });
 
 it('does not call verification intact when the RPC fails or returns no result', async () => {
@@ -144,7 +159,10 @@ it('renders the shared context line with the module id and agents, and prints th
   expect(html.split(moduleMeta('ledger').hi)).toHaveLength(2);
 });
 
-it('names Lekha in the hero through AgentLabel, static because no run is claimed', async () => {
+it('names Lekha in the header as a static related agent, because no run is claimed', async () => {
   const html = await renderPage();
-  expect(html).toMatch(/data-testid="agent-label" data-agent="lekha" data-state="idle"/);
+  const header = html.slice(html.indexOf('data-testid="page-header"'), html.indexOf('</header>'));
+  expect(header).toContain('data-testid="related-agents"');
+  expect(header).toContain('lekha');
+  expect(header).not.toContain('data-state="working"');
 });

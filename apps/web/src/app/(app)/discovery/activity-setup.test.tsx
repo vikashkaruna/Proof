@@ -79,7 +79,11 @@ afterEach(() => {
   state.internal = false;
 });
 
-it.each(Object.values(UserRole).filter((role) => role !== UserRole.AGENT))(
+const assessmentRoles = Object.values(UserRole).filter((role) =>
+  can(Capability.ASSESSMENT_RUN, { role }),
+);
+
+it.each(assessmentRoles)(
   'keeps activity pages readable with truthful preparation controls for %s',
   async (role) => {
     state.role = role;
@@ -106,16 +110,19 @@ it.each(Object.values(UserRole).filter((role) => role !== UserRole.AGENT))(
     }
     expect(state.invoke).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
-    expect(state.required).toEqual([Capability.POSTURE_READ, Capability.POSTURE_READ]);
+    expect(state.required).toEqual([Capability.ASSESSMENT_RUN, Capability.ASSESSMENT_RUN]);
   },
 );
 
-it('requires posture read before exposing either activity page to a machine role', async () => {
-  state.role = UserRole.AGENT;
-  await expect(DiscoveryPage()).rejects.toThrow('forbidden');
-  await expect(ClassificationPage()).rejects.toThrow('forbidden');
-  expect(state.required).toEqual([Capability.POSTURE_READ, Capability.POSTURE_READ]);
-});
+it.each(Object.values(UserRole).filter((role) => !assessmentRoles.includes(role)))(
+  'refuses both activity pages to %s, matching the menu that does not offer them',
+  async (role) => {
+    state.role = role;
+    await expect(DiscoveryPage()).rejects.toThrow('forbidden');
+    await expect(ClassificationPage()).rejects.toThrow('forbidden');
+    expect(state.required).toEqual([Capability.ASSESSMENT_RUN, Capability.ASSESSMENT_RUN]);
+  },
+);
 
 const humanReview = {
   id: '33333333-3333-4333-8333-333333333333',
@@ -133,7 +140,7 @@ const humanReview = {
 };
 
 it('renders fetched human review history and forwards only validated page inputs to the bounded query', async () => {
-  state.role = UserRole.VIEWER;
+  state.role = UserRole.REVIEWER;
   state.reviews = [humanReview];
   render(await ClassificationPage({ searchParams: Promise.resolve({ reviewPage: '2' }) }));
   expect(

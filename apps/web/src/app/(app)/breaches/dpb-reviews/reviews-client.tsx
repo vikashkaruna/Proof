@@ -11,6 +11,8 @@ import {
   retainedBuildResultSchema,
 } from '../../reports/retained-artifact-state';
 import { useReceiptRefresh } from '../../reports/use-receipt-refresh';
+import { PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export type DpbBreach = { id: string; title: string; detected_at: string };
 export type DpbNotification = {
@@ -245,20 +247,13 @@ export function DpbReviewsClient({
   const breachById = new Map(breaches.map((item) => [item.id, item]));
 
   return (
-    <section className="w-full min-w-0 space-y-6">
-      <nav>
-        <Link className="text-sm text-teal-700 underline" href="/breaches">
-          ← Breach operations
-        </Link>
-      </nav>
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-900">DPB notification review packs</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          These packs freeze a recorded breach and a second-human-reviewed DPB notification.
-          Delivery outcomes are operator records. A pack does not certify forensic facts, regulator
-          receipt or acceptance, or statutory filing.
-        </p>
-      </header>
+    <section className="w-full min-w-0 space-y-4">
+      <PageHeader
+        module={moduleBarProps('breach')}
+        title="DPB notification review packs"
+        description="These packs freeze a recorded breach and a second-human-reviewed DPB notification. Delivery outcomes are operator records. A pack does not certify forensic facts, regulator receipt or acceptance, or statutory filing."
+        actions={<Link href="/breaches">← Breach & Incident</Link>}
+      />
       {error && (
         <p
           role="alert"

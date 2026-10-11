@@ -3,8 +3,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentLabel } from '@axiom/ui';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { AgentLabel, PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 import { AssessmentRequestPanel } from './request-panel';
 
@@ -102,24 +102,12 @@ export function AssessmentClient({
 
   return (
     <div className="min-w-0 w-full animate-in fade-in-0 duration-200">
-      {/* ============================================================ */}
-      {/* 1. RUN PIPELINE HERO CARD (EXACT AXIOM PROOF APP DESIGN)     */}
-      {/* ============================================================ */}
-      <div className="mb-[18px] rounded-2xl bg-[#1E2A4A] p-5 text-white shadow-sm md:p-6">
-        {/* Header: Title, Description & Action Button */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex-1 min-w-[240px]">
-            <h1 className="font-heading text-[16px] font-semibold text-white leading-tight">
-              Assessment pipeline
-            </h1>
-            <div className="mt-0.5 text-[11.5px] text-[#a9b3ce]">
-              Request Parikshan for the displayed saved assessment below. Discovery, evidence
-              sealing and report generation run separately.
-            </div>
-            <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
-          </div>
-        </div>
-
+      <PageHeader
+        className="mb-4"
+        title="Assessment"
+        module={moduleBarProps('assessment')}
+        description="Request Parikshan for the displayed saved assessment below. Discovery, evidence sealing and report generation run separately."
+      >
         {/* 5-Stage Stepper Pipeline Row */}
         <div
           className="relative my-2 flex w-full min-w-0 items-center gap-0 overflow-x-auto pb-2"
@@ -174,7 +162,7 @@ export function AssessmentClient({
             );
           })}
         </div>
-      </div>
+      </PageHeader>
 
       {snapshot?.engagement && actorId && (
         <AssessmentRequestPanel
@@ -297,7 +285,7 @@ export function AssessmentClient({
               pass
             </span>
             <span>
-              <b className="font-heading text-[16px] text-[#8a6d10] font-bold">
+              <b className="font-heading text-[16px] text-[#B45309] font-bold">
                 {snapshot ? partialCount : '—'}
               </b>{' '}
               partial
@@ -404,7 +392,7 @@ export function AssessmentClient({
               : c.status === 'pass'
                 ? '#0a8d80'
                 : c.status === 'partial'
-                  ? '#8a6d10'
+                  ? '#B45309'
                   : '#D9534F';
             const stBg = ['unassessed', 'unknown', 'not_applicable'].includes(c.status)
               ? '#f1f5f9'

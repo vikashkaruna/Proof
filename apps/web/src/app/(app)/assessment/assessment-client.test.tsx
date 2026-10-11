@@ -94,7 +94,7 @@ it('shows saved controls without inventing an assessment or exposure when no eng
 it('renders the shared module context outside the heading', () => {
   render(<AssessmentClient snapshot={null} />);
   const meta = moduleMeta('assessment');
-  const heading = screen.getByRole('heading', { name: 'Assessment pipeline' });
+  const heading = screen.getByRole('heading', { name: 'Assessment' });
   const provenance = screen.getByTestId('assessment-provenance');
   expect(meta.moduleId).toBe('M0.3');
   expect(screen.getByText(meta.hi)).toBeTruthy();

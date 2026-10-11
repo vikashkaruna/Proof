@@ -10,8 +10,8 @@ const keys = Object.keys(MODULES) as ModuleKey[];
 const visible = (markup: string) => markup.replace(/<style>[\s\S]*?<\/style>/g, '');
 
 describe('module metadata', () => {
-  it('covers the 21 design routes', () => {
-    expect(keys).toHaveLength(21);
+  it('covers the 21 design routes plus estate, engagements, portal, settings and onboarding', () => {
+    expect(keys).toHaveLength(26);
     for (const route of ['dashboard', 'approval', 'evidence', 'ledger', 'assessment', 'workbench'])
       expect(keys).toContain(route);
   });

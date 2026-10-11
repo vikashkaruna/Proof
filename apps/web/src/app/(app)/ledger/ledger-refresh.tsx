@@ -52,15 +52,16 @@ export function LedgerRefresh({ runningCount, initialRefreshedAt }: LedgerRefres
         </span>
       )}
 
-      {/* Unified Single UI Element: Manual Refresh + Auto-Refresh Dropdown */}
-      <div className="inline-flex items-center rounded-lg border border-slate-300 bg-white shadow-xs text-xs">
+      {/* Manual refresh and the auto-refresh interval, as two controls that
+          take the header's on-dark button and select styles. */}
+      <div className="inline-flex items-center gap-2 text-xs">
         {/* Manual Refresh Button */}
         <button
           type="button"
           onClick={handleManualRefresh}
           disabled={isPending}
           title="Click for manual refresh"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-slate-700 hover:text-slate-950 transition-colors border-r border-slate-200 disabled:opacity-60 cursor-pointer"
+          className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 font-medium text-slate-700 transition-colors hover:text-slate-950 disabled:opacity-60"
         >
           <span
             className={`inline-block transition-transform ${isPending ? 'animate-spin text-teal-600' : ''}`}
@@ -71,7 +72,7 @@ export function LedgerRefresh({ runningCount, initialRefreshedAt }: LedgerRefres
         </button>
 
         {/* Unified Auto-Refresh Selector (Default Off) */}
-        <div className="flex items-center px-2 py-1.5 gap-1.5">
+        <div className="flex items-center gap-1.5">
           {intervalSeconds > 0 && (
             <span className="relative flex h-2 w-2 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
@@ -82,7 +83,7 @@ export function LedgerRefresh({ runningCount, initialRefreshedAt }: LedgerRefres
             value={intervalSeconds}
             onChange={(e) => setIntervalSeconds(Number(e.target.value))}
             title="Auto-refresh interval"
-            className="bg-transparent font-medium text-slate-700 hover:text-slate-950 cursor-pointer focus:outline-none pr-1"
+            className="cursor-pointer rounded-md border border-slate-300 bg-transparent px-2 py-1.5 font-medium text-slate-700"
             aria-label="Auto-refresh interval"
           >
             <option value={0}>Auto: Off</option>
@@ -96,7 +97,7 @@ export function LedgerRefresh({ runningCount, initialRefreshedAt }: LedgerRefres
 
       {/* Subtle Timestamp */}
       <span
-        className="hidden sm:inline-block text-[11px] text-slate-400"
+        className="hidden text-[11px] text-[#A6B0CC] sm:inline-block"
         title={`Last updated at ${lastRefreshed}`}
       >
         Updated {lastRefreshed.slice(11, 19)} UTC

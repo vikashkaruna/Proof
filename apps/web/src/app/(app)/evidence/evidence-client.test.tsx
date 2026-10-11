@@ -431,8 +431,8 @@ it('renders the shared module context outside the heading', async () => {
   const meta = moduleMeta('evidence');
   expect(meta.moduleId).toBe('M2.4');
   expect(screen.getByText(meta.hi)).toBeTruthy();
-  expect(screen.getByText(`Module ${meta.moduleId}`)).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Evidence vault' }).textContent).not.toContain(
+  expect(screen.getByTestId('module-bar').textContent).toContain(`Module ${meta.moduleId}`);
+  expect(screen.getByRole('heading', { name: 'Evidence Explorer' }).textContent).not.toContain(
     meta.hi,
   );
   await waitFor(() => expect(screen.getByText('No evidence matches these filters.')).toBeTruthy());

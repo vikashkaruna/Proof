@@ -303,10 +303,10 @@ export function EvidenceClient({
     });
   }
   return (
-    <div className="space-y-5 text-slate-800">
+    <div className="space-y-4 text-slate-800">
       <PageHeader
         module={moduleBarProps('evidence')}
-        title="Evidence vault"
+        title="Evidence Explorer"
         description="Inspect recorded evidence, check exact stored versions, or compare a local file against its recorded SHA-256."
       />
       {stagedWorkflow}

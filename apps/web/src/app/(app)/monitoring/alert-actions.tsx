@@ -56,6 +56,7 @@ export function DispatchAlertsButton({
         type="button"
         onClick={handleDispatch}
         disabled={loading}
+        data-primary
         className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition-colors ${
           loading
             ? 'cursor-wait border-slate-300 bg-slate-100 text-slate-400'

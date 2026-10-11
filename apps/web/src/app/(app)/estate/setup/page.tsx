@@ -4,12 +4,14 @@ import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { SetupWizard, type WizardEstate, type WizardSystem } from './setup-wizard';
 import { GrantReview, ToolRegistry } from './sustenance';
+import { routeCapability } from '@/app/(app)/nav';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
 /** C-W3-5: resumable company → estate → inventory → connection → grant review → readiness. */
 export default async function EstateSetupPage() {
-  const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
+  const ctx = await requireCapabilityContext(routeCapability('/estate'));
   const [tenant, estates, systems, connectors, workloads] = await Promise.all([
     ctx.supabase
       .from('tenants')
@@ -65,6 +67,7 @@ export default async function EstateSetupPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
+        module={moduleBarProps('estate')}
         title="Onboarding setup"
         description="A resumable checklist that records what you have confirmed. It does not connect systems, issue agent access or verify anything on its own."
       />

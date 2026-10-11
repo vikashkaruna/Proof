@@ -289,7 +289,7 @@ it('rechecks tenant kill status instead of trusting an unscoped browser event', 
   vi.stubGlobal('fetch', fetcher);
   render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /^⏻ Kill switch$/ }).hasAttribute('disabled')).toBe(
+    expect(screen.getByRole('button', { name: /^Kill switch$/ }).hasAttribute('disabled')).toBe(
       false,
     ),
   );
@@ -388,11 +388,11 @@ it('does not claim kill-switch engagement from an unconfirmed HTTP success', asy
   vi.stubGlobal('fetch', fetcher);
   render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /^⏻ Kill switch$/ }).hasAttribute('disabled')).toBe(
+    expect(screen.getByRole('button', { name: /^Kill switch$/ }).hasAttribute('disabled')).toBe(
       false,
     ),
   );
-  fireEvent.click(screen.getByRole('button', { name: /^⏻ Kill switch$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^Kill switch$/ }));
   await waitFor(() =>
     expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/engage')).toBe(true),
   );
@@ -442,7 +442,7 @@ it('withholds further kill-switch action after an ambiguous network failure', as
   );
   vi.stubGlobal('fetch', fetcher);
   render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
-  fireEvent.click(await screen.findByRole('button', { name: /^⏻ Kill switch$/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Kill switch$/ }));
   await waitFor(() =>
     expect(screen.getByRole('button', { name: /Kill switch status unavailable/i })).toBeTruthy(),
   );
@@ -468,7 +468,7 @@ it('shows a confirmed release and makes tenant mutations available again', async
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: /^⏻ Kill switch$/ }).hasAttribute('disabled')).toBe(
+    expect(screen.getByRole('button', { name: /^Kill switch$/ }).hasAttribute('disabled')).toBe(
       false,
     ),
   );
@@ -525,9 +525,10 @@ it('keeps mobile navigation keyboard focus inside its dialog', () => {
 });
 
 it('loads protected shell destinations only on selection, including opened header trays', () => {
-  const capabilities = APP_NAV_GROUPS.flatMap((group) =>
-    group.items.map((item) => item.capability),
-  );
+  const capabilities = [
+    ...APP_NAV_GROUPS.flatMap((group) => group.items.map((item) => item.capability)),
+    'tenant.create',
+  ];
   render(<AppShell {...props} capabilities={capabilities} />);
   fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continuous monitoring alerts' }));
@@ -706,7 +707,7 @@ it.each(['/engagements', '/engagements/recorded-id'])(
   'selects Engagements navigation and title for %s',
   (path) => {
     state.pathname = path;
-    render(<AppShell {...props} capabilities={['posture.read']} />);
+    render(<AppShell {...props} capabilities={['posture.read', 'assessment.run']} />);
     const nav = screen.getAllByRole('navigation', { name: 'Main navigation', hidden: true })[0]!;
     expect(
       within(nav)
@@ -714,15 +715,15 @@ it.each(['/engagements', '/engagements/recorded-id'])(
         .getAttribute('aria-current'),
     ).toBe('page');
     const header = document.querySelector('header')!;
-    expect(within(header).getByText('Assess · Parikshan')).toBeTruthy();
+    expect(within(header).getByText('Assess')).toBeTruthy();
     expect(within(header).getByText('Engagements')).toBeTruthy();
   },
 );
 
 it.each([
-  ['/dashboard', 'Alpha Org', DashboardPage, 'Tenant dashboard'],
-  ['/plans', 'Remediation plans', PlansPage, 'Remediation plans'],
-  ['/approval', 'Approval queue', ApprovalPage, 'Approval queue'],
+  ['/dashboard', 'Dashboard', DashboardPage, 'Dashboard'],
+  ['/plans', 'Remediation Plans', PlansPage, 'Remediation plans'],
+  ['/approval', 'Approval Queue', ApprovalPage, 'Approval queue'],
   ['/regwatch', 'Regulatory Watch', RegWatchPage, null],
   [
     '/breaches/dpb-reviews',
@@ -766,3 +767,21 @@ it.each([
     }
   },
 );
+
+it('offers "Onboard New Organization" only to a persona that may create a tenant', () => {
+  render(<AppShell {...props} capabilities={['posture.read']} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  expect(screen.queryByRole('link', { name: /Onboard New Organization/ })).toBeNull();
+  cleanup();
+  render(<AppShell {...props} capabilities={['posture.read', 'tenant.create']} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  expect(screen.getByRole('link', { name: /Onboard New Organization/ })).toBeTruthy();
+});
+
+it('shows the agent launcher only to a persona that runs agents', () => {
+  render(<AppShell {...props} capabilities={['posture.read', 'evidence.read']} />);
+  expect(screen.queryAllByText('Agents')).toHaveLength(0);
+  cleanup();
+  render(<AppShell {...props} capabilities={['posture.read', 'agent.invoke']} />);
+  expect(screen.getAllByText('Agents').length).toBeGreaterThan(0);
+});

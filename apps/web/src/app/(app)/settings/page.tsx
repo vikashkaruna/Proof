@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { requireTenantContext } from '@/lib/tenant-context';
 import Link from 'next/link';
 import { Capability, can } from '@axiom/types';
+import { PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,32 +17,12 @@ export default async function SettingsPage() {
   if (!user) redirect('/login');
 
   return (
-    <div className="w-full min-w-0 space-y-5 animate-fade-in">
-      {/* Design System Hero Banner */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] to-[#243356] p-6 sm:p-7 text-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
-          <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-semibold text-[#04322d] tracking-wide">
-            P0
-          </span>
-          <span className="text-[11px] text-[#0FB5A5] font-medium">System Configuration</span>
-          <span className="text-[11px] text-[#8a97b8]">Autonomy · Admin Enforced</span>
-        </div>
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h1 className="font-heading text-2xl sm:text-[26px] font-bold text-white tracking-tight">
-            Settings & Preferences
-          </h1>
-          <span className="font-heading text-lg sm:text-[18px] text-[#0FB5A5]">
-            सेटिंग्स एवं विन्यास
-          </span>
-        </div>
-        <p className="mt-2 text-[13px] text-[#c7cfe0] max-w-3xl leading-relaxed">
-          Review account identity and tenant membership. Deployment, gateway and storage assurances
-          require separate operational verification.
-        </p>
-        <div className="mt-3.5 inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-1 text-[11px] text-slate-200">
-          <span>Module M0.1</span>
-        </div>
-      </div>
+    <div className="w-full min-w-0 space-y-4 animate-fade-in">
+      <PageHeader
+        title="Settings"
+        module={moduleBarProps('settings')}
+        description="Review account identity and tenant membership. Deployment, gateway and storage assurances require separate operational verification."
+      />
 
       {can(Capability.USER_MANAGE, { role }) && (
         <section

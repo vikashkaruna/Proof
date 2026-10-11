@@ -11,11 +11,34 @@ body {
 }
 
 .font-heading,
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--head);
 }
 
 .font-mono,
-code, pre, kbd {
+code,
+pre,
+kbd {
   font-family: var(--mono);
+}
+
+/*
+ * Form labels. Many workflow forms wrap an input in a bare <label>, which
+ * rendered at body size and weight — louder than the field it names. `:where()`
+ * keeps these at zero specificity, so a label with its own utility classes
+ * still wins.
+ */
+:where(label) {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #3d4458;
+}
+:where(label > input, label > select, label > textarea) {
+  margin-top: 0.25rem;
+  font-weight: 400;
 }

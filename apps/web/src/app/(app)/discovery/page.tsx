@@ -3,12 +3,13 @@ import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { can, UserRole } from '@axiom/types';
 import { PublicSourceWorkflow } from '../public-source-workflow/source-workflow';
 import { DataPlaceholder } from '@axiom/ui';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DiscoveryPage() {
   const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
-    Capability.POSTURE_READ,
+    routeCapability('/discovery'),
   );
   const { data, error } = await supabase
     .from('audit_ledger')
