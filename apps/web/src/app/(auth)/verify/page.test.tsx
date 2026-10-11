@@ -47,17 +47,17 @@ it('binds verification to a recorded membership and refuses an external redirect
     await VerifyPage({ searchParams: Promise.resolve({ redirect: '//evil.example' }) }),
   );
   expect(view).toContain('&quot;tenantId&quot;:&quot;tenant-1&quot;');
-  expect(view).toContain('&quot;redirectTo&quot;:&quot;/dashboard&quot;');
+  expect(view).toContain('&quot;redirectTo&quot;:&quot;/start&quot;');
   expect(view).not.toContain('evil.example');
 });
 
 it.each(['//evil.example', '/\\evil.example', '/\nevil.example'])(
-  'keeps an unsafe redirect target on the dashboard: %s',
+  'keeps an unsafe redirect target on the role landing: %s',
   async (target) => {
     const view = renderToStaticMarkup(
       await VerifyPage({ searchParams: Promise.resolve({ redirect: target }) }),
     );
-    expect(view).toContain('&quot;redirectTo&quot;:&quot;/dashboard&quot;');
+    expect(view).toContain('&quot;redirectTo&quot;:&quot;/start&quot;');
     expect(view).not.toContain('evil.example');
   },
 );
@@ -77,7 +77,7 @@ it('falls back safely when the redirect query is repeated', async () => {
       }),
     }),
   );
-  expect(view).toContain('&quot;redirectTo&quot;:&quot;/dashboard&quot;');
+  expect(view).toContain('&quot;redirectTo&quot;:&quot;/start&quot;');
 });
 
 it('refuses missing authentication or factor enrolment', async () => {
