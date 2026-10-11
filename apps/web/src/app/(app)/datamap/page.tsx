@@ -2,11 +2,12 @@ import { GenericModuleView } from '../generic-module-view';
 import { Capability, can } from '@axiom/types';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { WorkflowPanel } from '../operator-workflows/panel';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DataMapPage() {
-  const { tenantId, userId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { tenantId, userId, role } = await requireCapabilityContext(routeCapability('/datamap'));
   return (
     <GenericModuleView
       meta={{

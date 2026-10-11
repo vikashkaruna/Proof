@@ -4,6 +4,14 @@ import { expect, it, vi } from 'vitest';
 import { controls, LIBRARY_VERSION } from '@axiom/control-library';
 import ControlLibraryPage from './page';
 
+const guard = vi.hoisted(() => ({ required: [] as string[] }));
+vi.mock('@/lib/tenant-context', () => ({
+  requireCapabilityContext: async (capability: string) => {
+    guard.required.push(capability);
+    return { tenantId: 'tenant-1', role: 'owner' };
+  },
+}));
+
 vi.mock('../generic-module-view', () => ({
   GenericModuleView: ({ meta, children }: { meta: unknown; children: React.ReactNode }) => (
     <div>
@@ -45,4 +53,10 @@ it('shows zero matched controls instead of substituting another version', async 
   const view = await html({ q: 'not-a-real-control' });
   expect(view).toContain(`Showing <strong>0</strong> of ${controls.length} controls`);
   expect(view).not.toContain('DPDPA-GOV-001</code>');
+});
+
+it('is guarded by the capability that offers the Control Library in the menu', async () => {
+  guard.required = [];
+  await html();
+  expect(guard.required).toEqual(['assessment.run']);
 });

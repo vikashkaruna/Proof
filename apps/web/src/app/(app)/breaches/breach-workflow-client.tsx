@@ -60,7 +60,7 @@ const NEXT_STATUS: Record<string, string> = {
 
 const SEVERITY_COLOR: Record<string, string> = {
   low: '#64748B',
-  medium: '#C9A227',
+  medium: '#D97706',
   high: '#D9534F',
   critical: '#D9534F',
 };
@@ -130,10 +130,10 @@ export function BreachWorkflowClient({
   }
 
   return (
-    <div className="w-full min-w-0 space-y-6">
+    <div className="w-full min-w-0 space-y-4">
       <PageHeader
         module={moduleBarProps('breach')}
-        title="Breach operations"
+        title="Breach & Incident"
         description="72-hour Data Protection Board clock starts when the incident is recorded — server-owned, never editable."
         actions={
           <>
@@ -146,8 +146,8 @@ export function BreachWorkflowClient({
             <button
               type="button"
               onClick={() => setIntakeOpen((v) => !v)}
-              className="rounded-md px-4 py-2 text-sm font-medium text-white"
-              style={{ backgroundColor: '#1E2A4A' }}
+              data-primary
+              className="rounded-md bg-[#1E2A4A] px-4 py-2 text-sm font-medium text-white"
             >
               {intakeOpen ? 'Close' : 'Record incident'}
             </button>

@@ -1,6 +1,8 @@
 import { requireTenantContext } from '@/lib/tenant-context';
 import { loadAssessmentSnapshot } from '@/lib/assessment-snapshot';
 import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
+import { capabilitiesFor } from '@axiom/types';
+import { visibleRoutes } from '../nav';
 import {
   PortalClient,
   type TenantSummary,
@@ -212,6 +214,10 @@ export default async function ClientPortalPage({
   return (
     <PortalClient
       canViewClosureDossiers={canAccessClosureDossiers(ctx.role, ctx.isAxiomInternal)}
+      reachableRoutes={visibleRoutes(
+        capabilitiesFor(ctx.role),
+        canAccessClosureDossiers(ctx.role, ctx.isAxiomInternal),
+      )}
       tenants={tenants}
       activeTenant={activeTenant}
       engagement={engagement}

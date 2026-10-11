@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Capability, UserRole, capabilitiesFor } from '@axiom/types';
-import { APP_NAV_GROUPS, visibleNavGroups, visibleRoutes } from './nav';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { APP_NAV_GROUPS, routeCapability, visibleNavGroups, visibleRoutes } from './nav';
 import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
 
 /**
@@ -51,21 +53,128 @@ describe('visibleNavGroups', () => {
   });
 });
 
+/**
+ * The menu each persona is offered, written out by hand on purpose.
+ *
+ * Every other assertion in this file derives from the matrix; this one is the
+ * product decision itself, so that a change to who sees what shows up in
+ * review as a change to this table rather than as a side effect.
+ */
+const MENUS: Record<string, string[]> = {
+  [UserRole.AXIOM_ANALYST]: [
+    '/dashboard',
+    '/estate',
+    '/discovery',
+    '/classification',
+    '/datamap',
+    '/assessment',
+    '/engagements',
+    '/controls',
+    '/plans',
+    '/evidence',
+    '/ledger',
+    '/dsars',
+    '/consent',
+    '/breaches',
+    '/monitoring',
+    '/regwatch',
+    '/reports',
+    '/workbench',
+    '/portal',
+    '/policies',
+    '/settings',
+  ],
+  [UserRole.OWNER]: [
+    '/dashboard',
+    '/estate',
+    '/discovery',
+    '/classification',
+    '/datamap',
+    '/assessment',
+    '/engagements',
+    '/controls',
+    '/plans',
+    '/approval',
+    '/execution',
+    '/evidence',
+    '/ledger',
+    '/dsars',
+    '/consent',
+    '/breaches',
+    '/monitoring',
+    '/regwatch',
+    '/reports',
+    '/reports?tab=pramaan',
+    '/portal',
+    '/connectors',
+    '/policies',
+    '/settings',
+  ],
+  [UserRole.VIEWER]: ['/dashboard', '/evidence', '/ledger', '/reports', '/portal', '/settings'],
+  [UserRole.PARTNER]: ['/dashboard', '/evidence', '/reports', '/portal', '/partner', '/settings'],
+  [UserRole.APPROVER]: [
+    '/dashboard',
+    '/plans',
+    '/approval',
+    '/evidence',
+    '/ledger',
+    '/breaches',
+    '/reports',
+    '/portal',
+    '/settings',
+  ],
+  [UserRole.REVIEWER]: [
+    '/dashboard',
+    '/estate',
+    '/discovery',
+    '/classification',
+    '/datamap',
+    '/assessment',
+    '/engagements',
+    '/controls',
+    '/plans',
+    '/evidence',
+    '/ledger',
+    '/regwatch',
+    '/reports',
+    '/portal',
+    '/settings',
+  ],
+};
+
+describe('persona menus', () => {
+  it.each(Object.entries(MENUS))('offers %s exactly its own menu', (role, expected) => {
+    expect(routesFor(role as UserRole)).toEqual(expected);
+  });
+
+  it('gives each client persona a different menu', () => {
+    const menus = [
+      UserRole.OWNER,
+      UserRole.APPROVER,
+      UserRole.REVIEWER,
+      UserRole.VIEWER,
+      UserRole.PARTNER,
+    ].map((role) => routesFor(role).join(','));
+    expect(new Set(menus).size).toBe(menus.length);
+  });
+});
+
 describe('the viewer persona', () => {
   const routes = routesFor(UserRole.VIEWER);
 
-  it('can read the approval queue, but has no approval authority', () => {
-    expect(routes).toContain('/approval');
-  });
-
-  it('is not offered execution, connectors, workbench or the partner portal', () => {
-    for (const route of ['/execution', '/connectors', '/workbench', '/partner']) {
+  it('is not offered the approval queue, execution, connectors, workbench or the partner portal', () => {
+    for (const route of ['/approval', '/execution', '/connectors', '/workbench', '/partner']) {
       expect(routes, `viewer should not see ${route}`).not.toContain(route);
     }
   });
 
-  it('can still read plans, evidence, the ledger and their own settings', () => {
-    for (const route of ['/plans', '/evidence', '/ledger', '/settings', '/policies']) {
+  it('is not offered operational workflows it cannot run', () => {
+    for (const route of ['/dsars', '/consent', '/breaches', '/monitoring', '/policies', '/estate'])
+      expect(routes, `viewer should not see ${route}`).not.toContain(route);
+  });
+
+  it('can still read evidence, the ledger, reports and their own settings', () => {
+    for (const route of ['/evidence', '/ledger', '/reports', '/settings']) {
       expect(routes, `viewer should see ${route}`).toContain(route);
     }
   });
@@ -89,10 +198,10 @@ describe('the viewer persona', () => {
 describe('the reviewer persona', () => {
   const routes = routesFor(UserRole.REVIEWER);
 
-  it('reads plans and the approval queue without approval authority', () => {
+  it('reads and comments on plans but is not offered the approval queue', () => {
     // BR-1's maker-checker property: a reviewer comments, an approver decides.
     expect(routes).toContain('/plans');
-    expect(routes).toContain('/approval');
+    expect(routes).not.toContain('/approval');
   });
 });
 
@@ -110,7 +219,7 @@ describe('the approver persona', () => {
   it('is not offered tenant configuration', () => {
     expect(routes).not.toContain('/connectors');
     expect(routes).not.toContain('/integrations');
-    expect(routes).toContain('/policies');
+    expect(routes).not.toContain('/policies');
   });
 });
 
@@ -119,7 +228,7 @@ describe('the partner persona', () => {
 
   it('is offered the partner portal and no routes that change a client estate', () => {
     expect(routes).toContain('/partner');
-    expect(routes).toContain('/approval');
+    expect(routes).not.toContain('/approval');
     expect(routes).not.toContain('/execution');
     expect(routes).not.toContain('/connectors');
   });
@@ -143,12 +252,12 @@ describe('internal surfaces', () => {
     }
   });
 
-  it('offers an analyst a read-only approval queue and no execution', () => {
+  it('offers an analyst plans but no approval queue and no execution', () => {
     // Render gating agreeing with the matrix: Axiom prepares, the client
-    // authorises. An analyst seeing an Approve button would be the first sign
-    // that boundary had slipped.
+    // authorises. An analyst offered the approval queue would be the first
+    // sign that boundary had slipped.
     const routes = routesFor(UserRole.AXIOM_ANALYST);
-    expect(routes).toContain('/approval');
+    expect(routes).not.toContain('/approval');
     expect(routes).not.toContain('/execution');
     expect(routes).toContain('/plans');
   });
@@ -191,9 +300,11 @@ describe('every persona', () => {
     UserRole.PARTNER,
   ];
 
-  it('offers engagement records to every seated reader and to no agent', () => {
+  it('offers engagement records to the roles that run or review assessments', () => {
     for (const role of personas) {
-      expect(routesFor(role), `${role} should see engagements`).toContain('/engagements');
+      expect(routesFor(role).includes('/engagements'), role).toBe(
+        capabilitiesFor(role).includes(Capability.ASSESSMENT_RUN),
+      );
     }
     expect(routesFor(UserRole.AGENT)).not.toContain('/engagements');
     expect(visibleRoutes([])).not.toContain('/engagements');
@@ -229,7 +340,7 @@ describe('Audit Ledger and Client Portal are separate menu items', () => {
     UserRole.VIEWER,
   ];
 
-  it.each(tenantRoles)('offers %s both /ledger and /portal', (role) => {
+  it.each(tenantRoles)('offers %s both /ledger and /portal', (role: UserRole) => {
     const routes = routesFor(role);
     expect(routes).toContain('/ledger');
     expect(routes).toContain('/portal');
@@ -239,5 +350,38 @@ describe('Audit Ledger and Client Portal are separate menu items', () => {
     const items = APP_NAV_GROUPS.flatMap((g) => g.items);
     expect(items.find((i) => i.route === '/ledger')?.en).toBe('Audit Ledger');
     expect(items.find((i) => i.route === '/portal')?.en).toBe('Client Portal');
+  });
+});
+
+describe('page guards match the menu', () => {
+  // A hidden menu item with an open page is a door left unlocked; an offered
+  // item whose page refuses is a door that slams. Each page states its guard
+  // as `routeCapability('<its route>')`, so the two read the same table.
+  const pageRoutes = APP_NAV_GROUPS.flatMap((g) => g.items)
+    .map((i) => i.route)
+    .filter((route) => !route.includes('?'));
+  const exempt: Record<string, string> = {
+    '/dashboard': 'requireTenantContext: every seated reader',
+    '/portal': 'requireTenantContext: every seated reader',
+    '/settings': 'requireTenantContext: enrolment must stay reachable',
+    '/evidence': 'checks evidence.read in the page',
+    '/ledger': 'checks ledger.read in the page',
+    '/reports': 'checks report.read in the page',
+    '/execution': 'requires plan.execute directly',
+    '/workbench': 'requireInternalContext',
+    '/partner': 'partner portal checks its own access',
+    '/connectors':
+      'read-only inventory for every reader (linked from Discovery); registering needs tenant settings',
+  };
+
+  it.each(pageRoutes.filter((r) => !(r in exempt)))('%s guards with routeCapability', (route) => {
+    const file = resolve(__dirname, `.${route}/page.tsx`);
+    expect(existsSync(file), file).toBe(true);
+    expect(readFileSync(file, 'utf8')).toContain(`routeCapability('${route}')`);
+  });
+
+  it('resolves every declared route and refuses an undeclared one', () => {
+    for (const route of pageRoutes) expect(routeCapability(route)).toBeTruthy();
+    expect(() => routeCapability('/nowhere')).toThrow();
   });
 });

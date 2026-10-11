@@ -2,11 +2,12 @@ import Link from 'next/link';
 import { DataPlaceholder, PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ApprovalPage() {
-  const { supabase, tenantId } = await requireCapabilityContext(Capability.PLAN_READ);
+  const { supabase, tenantId } = await requireCapabilityContext(routeCapability('/approval'));
   const { data: actions, error } = await supabase
     .from('remediation_actions')
     .select('id, plan_id, description, action_type, approval_status, risk_class')
@@ -15,10 +16,10 @@ export default async function ApprovalPage() {
     .order('sequence', { ascending: true });
 
   return (
-    <section className="w-full min-w-0 space-y-5" aria-label="Approval queue">
+    <section className="w-full min-w-0 space-y-4" aria-label="Approval queue">
       <PageHeader
         module={moduleBarProps('approval')}
-        title="Approval queue"
+        title="Approval Queue"
         description="Recorded actions awaiting human review. Open the source plan to inspect the dry-run, rollback, scope, and approval authority before taking action."
       />
       {error || !actions ? (

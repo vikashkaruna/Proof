@@ -10,7 +10,7 @@ import { moduleBarProps } from '@/lib/module-bar';
 
 export function RegWatchClient() {
   return (
-    <section className="w-full min-w-0 space-y-6">
+    <section className="w-full min-w-0 space-y-4">
       <PageHeader
         module={moduleBarProps('regwatch')}
         title="Regulatory Watch"

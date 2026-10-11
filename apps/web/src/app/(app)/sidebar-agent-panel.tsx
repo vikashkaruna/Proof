@@ -341,12 +341,14 @@ export function SidebarAgentPanel({
 
   return (
     <div
-      className={`border-t border-slate-200 bg-[#F8FAFC] p-3 select-none text-slate-800 transition-colors ${
-        transparent ? 'bg-transparent border-white/10 text-white' : ''
+      className={`p-3 select-none transition-colors ${
+        transparent
+          ? 'border-white/10 bg-transparent text-white'
+          : 'border-t border-slate-200 bg-[#F8FAFC] text-slate-800'
       } ${className}`}
     >
-      {/* Panel Header */}
-      <div className="flex items-center justify-between">
+      {/* Panel Header — the sidebar's disclosure already names the panel. */}
+      <div className={transparent ? 'sr-only' : 'flex items-center justify-between'}>
         <div className="flex items-center gap-1.5">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Agents ({ALL_AGENTS.length})
@@ -375,8 +377,12 @@ export function SidebarAgentPanel({
               title={`${agent.name} (${agent.persona}) · Status: ${activeAgentNames === null ? 'unavailable' : state}`}
               className={`group relative flex flex-col items-center justify-center rounded-lg p-1 transition-all cursor-pointer ${
                 isSelected
-                  ? 'bg-slate-200/90 ring-1 ring-slate-400 shadow-2xs'
-                  : 'hover:bg-slate-200/60'
+                  ? transparent
+                    ? 'bg-white/15 ring-1 ring-white/30'
+                    : 'bg-slate-200/90 ring-1 ring-slate-400 shadow-2xs'
+                  : transparent
+                    ? 'hover:bg-white/10'
+                    : 'hover:bg-slate-200/60'
               }`}
             >
               <AgentIcon
@@ -389,7 +395,16 @@ export function SidebarAgentPanel({
               <span
                 className="mt-1 truncate text-[9px] font-medium capitalize max-w-full"
                 style={{
-                  color: state === 'working' ? accent : isSelected ? '#0F172A' : '#64748B',
+                  color:
+                    state === 'working'
+                      ? accent
+                      : transparent
+                        ? isSelected
+                          ? '#FFFFFF'
+                          : '#A6B0CC'
+                        : isSelected
+                          ? '#0F172A'
+                          : '#64748B',
                 }}
               >
                 {agent.name}
@@ -401,13 +416,21 @@ export function SidebarAgentPanel({
 
       {/* System-wide Agent Message / Status Bar */}
       {showSystemMessage && (
-        <div className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100/90 px-2 py-1 text-[9px] text-slate-700 font-mono">
+        <div
+          className={`mt-2.5 flex items-center gap-1.5 rounded-lg border px-2 py-1 font-mono text-[9px] ${
+            transparent
+              ? 'border-white/10 bg-white/5 text-[#A6B0CC]'
+              : 'border-slate-200 bg-slate-100/90 text-slate-700'
+          }`}
+        >
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${
               activeCount > 0 ? 'bg-teal-500 animate-pulse' : 'bg-slate-400'
             }`}
           />
-          <span className="truncate font-mono tracking-tight text-slate-600">
+          <span
+            className={`truncate font-mono tracking-tight ${transparent ? 'text-[#A6B0CC]' : 'text-slate-600'}`}
+          >
             {currentBroadcast}
           </span>
         </div>

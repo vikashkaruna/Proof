@@ -37,6 +37,32 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/*
+ * Who sees what (W1 persona menus).
+ *
+ * Every role used to hold `posture.read`, and 17 of the 27 items were gated on
+ * it, so a viewer, a reviewer, an approver and an owner were all offered the
+ * same menu. Each item is now gated on the capability that matches the work the
+ * screen is for, taken from the role definitions in `packages/types/src/rbac.ts`:
+ *
+ *   - discovery, classification and assessment screens — `assessment.run`:
+ *     the people who run or review agent output (founder, analyst, owner,
+ *     admin, reviewer);
+ *   - plans — `plan.comment`: everyone who takes part in the approval chain;
+ *     the approval queue — `plan.approve`; execution — `plan.execute`;
+ *   - rights, consent, monitoring and policies — `agent.invoke`: the operators
+ *     who run those workflows (founder, analyst, owner, admin);
+ *   - breach and incident — `kill_switch.engage.tenant`: anyone who can halt
+ *     the platform in an incident, which includes the approver;
+ *   - evidence, ledger, reports, the client portal and settings stay open to
+ *     every reader, which is what a viewer is for.
+ *
+ * The page guard for each route requires the same capability (see
+ * `nav.test.ts`, "page guards match the menu"), so a hidden item is also a
+ * refused URL rather than a door left unlocked. The exceptions are listed in
+ * that test with their reason — Connectors, for instance, keeps a read-only
+ * inventory for every reader because Discovery links to it.
+ */
 export const APP_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Overview',
@@ -51,75 +77,76 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Discover & Classify · Drishti + Vibhaag',
+    label: 'Discover & Classify',
     items: [
       {
         route: '/estate',
         en: 'Client Estate',
         hi: 'क्लाइंट एस्टेट',
         phase: 'P1',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
       {
         route: '/discovery',
         en: 'Data Discovery',
         hi: 'डेटा खोज',
         phase: 'P1',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
       {
         route: '/classification',
         en: 'Classification',
         hi: 'वर्गीकरण',
         phase: 'P1',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
       {
         route: '/datamap',
         en: 'Data Map & RoPA',
         hi: 'डेटा मानचित्र',
         phase: 'P1',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
     ],
   },
   {
-    label: 'Assess · Parikshan',
+    label: 'Assess',
     items: [
       {
         route: '/assessment',
         en: 'Assessment',
         hi: 'मूल्यांकन',
         phase: 'P0',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
       {
         route: '/engagements',
         en: 'Engagements',
         hi: 'आकलन संलग्नताएँ',
         phase: 'P0',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
       {
         route: '/controls',
         en: 'Control Library',
         hi: 'नियंत्रण संग्रह',
         phase: 'P0',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
     ],
   },
   {
-    label: 'Remediate · Sudhaar + Karya',
+    label: 'Remediate',
     items: [
       {
         route: '/plans',
         en: 'Remediation Plans',
         hi: 'सुधार योजना',
         phase: 'P3',
-        // A viewer may read a plan. What they may not do is approve it, which
-        // is gated on the buttons inside and at the BFF.
-        capability: Capability.PLAN_READ,
+        // Everyone in the approval chain: the maker drafts, the reviewer
+        // comments, the approver decides. Approval itself is gated on the
+        // buttons inside and at the BFF.
+        capability: Capability.PLAN_COMMENT,
       },
       {
         route: '/approval',
@@ -127,9 +154,9 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         hi: 'अनुमोदन कतार',
         phase: 'P3',
         star: true,
-        // This route lists recorded pending actions and links to readable
-        // plans. Approval authority is checked on each plan action.
-        capability: Capability.PLAN_READ,
+        // Offered only to those who can decide. Someone who can only read a
+        // plan follows it from Remediation Plans.
+        capability: Capability.PLAN_APPROVE,
       },
       {
         route: '/execution',
@@ -141,7 +168,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Evidence & Audit · Saakshi + Lekha',
+    label: 'Evidence & Audit',
     items: [
       {
         route: '/evidence',
@@ -167,14 +194,14 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'DSAR / Rights',
         hi: 'अधिकार अनुरोध',
         phase: 'P3',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.AGENT_INVOKE,
       },
       {
         route: '/consent',
         en: 'Consent Manager',
         hi: 'सहमति प्रबंधन',
         phase: 'P3',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.AGENT_INVOKE,
       },
     ],
   },
@@ -186,37 +213,38 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Breach & Incident',
         hi: 'उल्लंघन',
         phase: 'P3',
-        capability: Capability.POSTURE_READ,
+        // Whoever can halt the platform during an incident must see it.
+        capability: Capability.KILL_SWITCH_ENGAGE_TENANT,
       },
     ],
   },
   {
-    label: 'Monitor · Nazar',
+    label: 'Monitor',
     items: [
       {
         route: '/monitoring',
         en: 'Continuous Monitoring',
         hi: 'सतत निगरानी',
         phase: 'P3',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.AGENT_INVOKE,
       },
       {
         route: '/regwatch',
         en: 'Regulatory Watch',
         hi: 'नियामक निगरानी',
         phase: 'P2',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.ASSESSMENT_RUN,
       },
     ],
   },
   {
-    label: 'Reporting & Statutory Proof · Prativedan + Pramaan',
+    label: 'Reporting & Proof',
     items: [
       {
         route: '/reports',
         en: 'Working Reports & Registers',
         agentRole: 'Prativedan · Clerical Drafter',
-        hi: 'कार्यकारी रिपोर्ट · प्रतिवेदन',
+        hi: 'कार्यकारी रिपोर्ट',
         phase: 'P2',
         capability: Capability.REPORT_READ,
       },
@@ -224,7 +252,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         route: '/reports?tab=pramaan',
         en: 'Statutory Proof Dossiers',
         agentRole: 'Pramaan · Closure Seal',
-        hi: 'वैधानिक प्रमाण · संप्रभु मुहर',
+        hi: 'वैधानिक प्रमाण',
         phase: 'Final Proof',
         star: true,
         gold: true,
@@ -249,8 +277,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Client Portal',
         hi: 'क्लाइंट पोर्टल',
         phase: 'P0',
-        // The tenant's own read-only summary. The page needs only verified
-        // membership, so it carries the same read capability as Dashboard.
+        // The tenant's own read-only summary, for every seated reader.
         capability: Capability.POSTURE_READ,
       },
       {
@@ -274,7 +301,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Policies & Notices',
         hi: 'स्थायी नीतियाँ',
         phase: 'P4',
-        capability: Capability.POSTURE_READ,
+        capability: Capability.AGENT_INVOKE,
       },
       {
         route: '/settings',
@@ -322,4 +349,16 @@ export function visibleRoutes(
   return visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers).flatMap((g) =>
     g.items.map((i) => i.route),
   );
+}
+
+/**
+ * The capability a route's page guard requires — the same one that decides
+ * whether the menu offers it. Pages call `requireCapabilityContext(
+ * routeCapability('/estate'))` so the menu and the guard cannot drift apart:
+ * a screen hidden from a persona is also refused when they type its URL.
+ */
+export function routeCapability(route: string): Capability {
+  const item = APP_NAV_GROUPS.flatMap((g) => g.items).find((i) => i.route === route);
+  if (!item) throw new Error(`No navigation item declares ${route}`);
+  return item.capability;
 }

@@ -114,7 +114,7 @@ for (const role of ['viewer', 'analyst'] as const) {
     else await signIn(page, role);
     await selectTenant(page, 'a');
     await page.goto('/estate');
-    await expect(page.getByRole('heading', { name: 'Client estate', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Client Estate', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Create estate', exact: true })).toHaveCount(0);
     await expect(page.getByText('Edit estate', { exact: true })).toHaveCount(0);
     await expect(

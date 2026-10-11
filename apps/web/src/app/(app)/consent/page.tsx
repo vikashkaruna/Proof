@@ -1,11 +1,12 @@
 import { Capability, can } from '@axiom/types';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext } from '@/lib/tenant-context';
 import { ConsentClient } from './consent-client';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ConsentPage() {
-  const { tenantId, role } = await requireTenantContext();
+  const { tenantId, role } = await requireCapabilityContext(routeCapability('/consent'));
   if (!can(Capability.POSTURE_READ, { role }))
     return <p role="alert">Your role cannot view consent records.</p>;
   return (

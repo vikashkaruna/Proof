@@ -1,6 +1,8 @@
 import { Card, CardContent, Badge, SeverityChip } from '@axiom/ui';
 import { controls as controlLib, LIBRARY_VERSION } from '@axiom/control-library';
 import { GenericModuleView } from '../generic-module-view';
+import { requireCapabilityContext } from '@/lib/tenant-context';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +11,7 @@ export default async function ControlLibraryPage({
 }: {
   searchParams: Promise<{ domain?: string; severity?: string; q?: string }>;
 }) {
+  await requireCapabilityContext(routeCapability('/controls'));
   const resolvedSearchParams = await searchParams;
   // The catalogue is the explicitly versioned, immutable package release. It
   // does not represent tenant findings or a silently substituted DB result.

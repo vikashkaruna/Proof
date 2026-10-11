@@ -94,7 +94,7 @@ async function openVault(page: Page, role: 'owner' | 'viewer', evidenceId?: stri
   );
   await page.goto(evidenceId ? `/evidence?q=${encodeURIComponent(evidenceId)}` : '/evidence');
   expect((await loaded).status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'Evidence vault', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Evidence Explorer', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Evidence records' })).not.toContainText(
     'Loading evidence',
   );

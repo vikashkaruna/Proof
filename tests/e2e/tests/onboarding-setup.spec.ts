@@ -116,8 +116,15 @@ test('an admin completes onboarding step by step and can resume between steps', 
   await expect(page.getByTestId('drift-added')).toContainText(`Setup Late ${suffix}`);
 });
 
-test('a viewer sees progress but cannot start or change onboarding', async ({ page }) => {
+test('a viewer is not offered onboarding setup and is refused at its URL', async ({ page }) => {
   await signIn(page, 'viewer');
+  await selectTenant(page, 'a');
+  await page.goto('/estate/setup');
+  await expect(page).toHaveURL(/\/portal\?error=forbidden/);
+});
+
+test('a reviewer sees progress but cannot start or change onboarding', async ({ page }) => {
+  await signIn(page, 'reviewer');
   await selectTenant(page, 'a');
   await page.goto('/estate/setup');
   await expect(page.getByTestId('setup-wizard')).toBeVisible();

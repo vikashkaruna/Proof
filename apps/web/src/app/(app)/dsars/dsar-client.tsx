@@ -84,10 +84,10 @@ export function DsarClient({
   }
 
   return (
-    <div className="w-full min-w-0 space-y-6">
+    <div className="w-full min-w-0 space-y-4">
       <PageHeader
         module={moduleBarProps('dsar')}
-        title="Data subject requests"
+        title="DSAR / Rights"
         description="Recorded identity checks, fulfilment and deadlines for this tenant."
         actions={
           <>
@@ -102,6 +102,7 @@ export function DsarClient({
             {canManage && (
               <button
                 type="button"
+                data-primary
                 className={buttonClass}
                 disabled={disabled}
                 onClick={() => {

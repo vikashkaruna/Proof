@@ -193,9 +193,20 @@ it('does not infer residency, provider retention or full statutory scope from sa
   expect(screen.getByRole('button', { name: 'Copy' }).hasAttribute('disabled')).toBe(true);
 });
 
-it('shows Saakshi and Sudhaar in the hero as static AgentLabels, not as running', () => {
+it('shows Saakshi and Sudhaar in the header as static related agents, not as running', () => {
   render(<PortalClient {...props} />);
-  const labels = screen.getAllByTestId('agent-label');
-  expect(labels.map((l) => l.getAttribute('data-agent'))).toEqual(['saakshi', 'sudhaar']);
-  expect(labels.map((l) => l.getAttribute('data-state'))).toEqual(['idle', 'idle']);
+  const related = screen.getByTestId('page-header').querySelector('[data-testid="related-agents"]');
+  expect(related?.textContent).toContain('saakshi');
+  expect(related?.textContent).toContain('sudhaar');
+  expect(document.querySelector('[data-state="working"]')).toBeNull();
+});
+
+it('does not render links into screens the persona is not offered', () => {
+  render(
+    <PortalClient {...props} reachableRoutes={['/dashboard', '/evidence', '/ledger', '/portal']} />,
+  );
+  const hrefs = Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+  expect(hrefs).not.toContain('/approval');
+  expect(hrefs.some((h) => h?.startsWith('/approval'))).toBe(false);
+  expect(hrefs).not.toContain('/assessment');
 });

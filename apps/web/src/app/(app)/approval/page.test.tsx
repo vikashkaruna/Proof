@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
   capability: vi.fn(),
 }));
 vi.mock('@/lib/tenant-context', () => ({
-  Capability: { PLAN_READ: 'plan.read' },
+  Capability: { PLAN_READ: 'plan.read', PLAN_APPROVE: 'plan.approve' },
   requireCapabilityContext: state.capability,
 }));
 vi.mock('next/link', () => ({
@@ -64,7 +64,8 @@ it('shows empty approval and plan lists without demo actions or validated rollba
   }
   expect(state.calls).toContainEqual(['remediation_actions', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['remediation_plans', 'tenant_id', 'tenant-1']);
-  expect(state.capability).toHaveBeenCalledWith('plan.read');
+  // The queue is offered to, and guarded for, those who can decide.
+  expect(state.capability).toHaveBeenCalledWith('plan.approve');
 });
 
 it('keeps query errors distinct from empty queues', async () => {
@@ -96,7 +97,7 @@ it('links a recorded awaiting action to its actual source plan', async () => {
 
 it('renders the shared module context line with the approval module id', async () => {
   const view = renderToStaticMarkup(await ApprovalPage());
-  expect(view).toContain('अनुमोदन कंसोल');
+  expect(view).toContain('अनुमोदन कतार');
   expect(view).toContain('M3.3');
   expect(view).not.toMatch(/<h1[^>]*>[^<]*अनुमोदन/);
 });

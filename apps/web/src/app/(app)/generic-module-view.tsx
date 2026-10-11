@@ -3,11 +3,11 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentLabel, DataPlaceholder } from '@axiom/ui';
+import { AgentLabel, DataPlaceholder, PageHeader } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
-import { ModuleBarFor } from '@/lib/module-bar';
-import type { ModuleKey } from '@/lib/module-meta';
+import { moduleBarProps } from '@/lib/module-bar';
+import { moduleMeta, type ModuleKey } from '@/lib/module-meta';
 
 export interface ModuleCardRow {
   t: string;
@@ -115,113 +115,56 @@ export function GenericModuleView({
   };
 
   return (
-    <div className="w-full min-w-0 space-y-5 animate-in fade-in-0 duration-200">
-      {/* ============================================================ */}
-      {/* 1. HERO BANNER WITH LIVE ACTION CONTROLS                     */}
-      {/* ============================================================ */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] via-[#1E2A4A] to-[#243356] p-6 md:p-7 text-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            {/* The module bar carries phase and related agents; show live agent state only while running. */}
-            <div className="mb-2.5 flex flex-wrap items-center gap-2">
-              {isExecuting && meta.agent && (
-                <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-[#0FB5A5]">
-                  <span>Agent ·</span>
-                  {meta.agent.includes('+') ? (
-                    meta.agent.split('+').map((partRaw, idx) => {
-                      const part = partRaw.trim();
-                      const key =
-                        meta.agentKeys?.[idx] ??
-                        (meta.agentKey && idx === 0 ? meta.agentKey : part.toLowerCase());
-                      return (
-                        <React.Fragment key={idx}>
-                          {idx > 0 && <span className="text-[#0FB5A5]/70">+</span>}
-                          <AgentLabel
-                            agent={key}
-                            size="xs"
-                            tone="dark"
-                            state={isExecuting && key === meta.agentKey ? 'working' : 'idle'}
-                          />
-                        </React.Fragment>
-                      );
-                    })
-                  ) : meta.agentKey ? (
-                    <AgentLabel
-                      agent={meta.agentKey}
-                      size="xs"
-                      tone="dark"
-                      state={isExecuting ? 'working' : 'idle'}
-                    />
-                  ) : (
-                    <span>{meta.agent}</span>
-                  )}
-                </div>
-              )}
-              <span className="text-xs text-[#8a97b8]">Autonomy {meta.autonomy}</span>
-              {meta.statutoryCitation && (
-                <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-200">
-                  {meta.statutoryCitation}
-                </span>
-              )}
-            </div>
-
-            {/* Title & Indic Transliteration */}
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h1 className="font-heading text-2xl md:text-[26px] font-bold text-white tracking-tight">
-                {meta.title}
-              </h1>
-              <span className="font-heading text-lg text-[#0FB5A5] font-normal">{meta.hi}</span>
-            </div>
-            <ModuleBarFor
-              module={meta.moduleKey}
-              tone="dark"
-              omit={['hi', 'moduleId']}
-              className="mt-3"
-            />
-
-            {/* Description */}
-            <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#c7cfe0]">{meta.desc}</p>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] text-white">
-                <span className="text-teal-300">◆</span> Module {meta.moduleId}
-              </div>
-            </div>
-          </div>
-
-          {/* Action Trigger Button */}
-          {meta.actionHref ? (
+    <div className="w-full min-w-0 space-y-4 animate-in fade-in-0 duration-200">
+      <PageHeader
+        title={moduleMeta(meta.moduleKey).title}
+        module={moduleBarProps(meta.moduleKey)}
+        description={meta.desc}
+        meta={
+          <>
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10.5px] font-medium text-[#D6DBE8]">
+              Autonomy {meta.autonomy}
+            </span>
+            {meta.statutoryCitation && (
+              <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10.5px] text-[#D6DBE8]">
+                {meta.statutoryCitation}
+              </span>
+            )}
+            {isExecuting && meta.agentKey && (
+              <AgentLabel agent={meta.agentKey} size="xs" tone="dark" state="working" />
+            )}
+          </>
+        }
+        actions={
+          meta.actionHref ? (
             <Link
               href={meta.actionHref}
-              className="rounded-[9px] bg-[#0FB5A5] hover:bg-[#0da294] text-white text-xs font-bold py-2.5 px-4 flex items-center gap-2 shadow-sm transition-all"
+              data-primary
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[#0FB5A5] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0C9184]"
             >
-              <span>⚡</span>
-              <span>{meta.actionLabel || 'Review & Approve in Console →'}</span>
+              {meta.actionLabel || 'Review & Approve in Console'}
             </Link>
           ) : meta.actionLabel && meta.agentKey && canInvokeAgent ? (
             <button
               type="button"
               onClick={handleRunAgent}
               disabled={isExecuting}
-              className="cursor-pointer rounded-[9px] bg-[#0FB5A5] hover:bg-[#0da294] disabled:opacity-60 text-white text-xs font-bold py-2.5 px-4 flex items-center gap-2 shadow-sm transition-all"
+              data-primary
+              className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md bg-[#0FB5A5] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0C9184] disabled:opacity-60"
             >
-              <span>⚡</span>
-              <span>{isExecuting ? 'Invoking Agent…' : meta.actionLabel}</span>
+              {isExecuting ? 'Invoking agent…' : meta.actionLabel}
             </button>
-          ) : null}
-        </div>
-
-        {/* Live Execution Feedback */}
-        {isExecuting && (
-          <div className="mt-4 rounded-lg border border-teal-400/40 bg-teal-950/40 p-2.5 text-xs text-teal-200 flex items-center gap-2 animate-in fade-in-0 duration-150">
+          ) : undefined
+        }
+      >
+        {isExecuting ? (
+          <div className="flex items-center gap-2 rounded-lg border border-teal-400/40 bg-teal-950/40 p-2.5 text-xs text-teal-200">
             <span className="animate-spin font-bold text-[#0FB5A5]">↻</span>
             <span>Invoking {meta.agent || 'compliance agent'}…</span>
           </div>
-        )}
-
-        {runResult && !isExecuting && (
+        ) : runResult ? (
           <div
-            className={`mt-4 rounded-lg border p-2.5 text-xs flex flex-col gap-1 animate-in fade-in-0 duration-150 ${
+            className={`flex flex-col gap-1 rounded-lg border p-2.5 text-xs ${
               runResult.success
                 ? 'border-emerald-400/50 bg-emerald-950/40 text-emerald-200'
                 : runResult.status === 'denied'
@@ -232,10 +175,10 @@ export function GenericModuleView({
             <div className="flex items-center justify-between font-semibold">
               <span>
                 {runResult.success
-                  ? '✓ Task executed successfully'
+                  ? 'Task executed successfully'
                   : runResult.status === 'denied'
-                    ? '🔒 Architectural gate enforced'
-                    : '✕ Invocation error'}
+                    ? 'Architectural gate enforced'
+                    : 'Invocation error'}
               </span>
               {runResult.latency_ms !== undefined && (
                 <span className="font-mono text-[10px] opacity-75">{runResult.latency_ms}ms</span>
@@ -243,19 +186,19 @@ export function GenericModuleView({
             </div>
             <p className="text-[11.5px] leading-tight opacity-90">{runResult.message}</p>
             {runResult.ledgerIds && runResult.ledgerIds.length > 0 && (
-              <div className="flex items-center gap-1 text-[11px] pt-1">
+              <div className="flex items-center gap-1 pt-1 text-[11px]">
                 <span className="opacity-75">Immutable ledger proof:</span>
                 <Link
                   href={`/ledger?q=${runResult.ledgerIds[0]}`}
-                  className="font-mono underline text-teal-300 hover:text-white"
+                  className="font-mono text-teal-300 underline hover:text-white"
                 >
                   #{runResult.ledgerIds.join(', #')}
                 </Link>
               </div>
             )}
           </div>
-        )}
-      </div>
+        ) : null}
+      </PageHeader>
 
       {/* ============================================================ */}
       {/* 2. DYNAMIC CARDS GRID                                        */}

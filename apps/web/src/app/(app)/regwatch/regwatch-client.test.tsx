@@ -1,7 +1,11 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import RegWatchPage from './page';
+
+vi.mock('@/lib/tenant-context', () => ({
+  requireCapabilityContext: async () => ({ tenantId: 'tenant-1', role: 'owner' }),
+}));
 
 it('fails closed when no authoritative regulatory feed is connected', async () => {
   const html = renderToStaticMarkup(await RegWatchPage());

@@ -159,7 +159,10 @@ it('renders the shared context line with the module id and agents, and prints th
   expect(html.split(moduleMeta('ledger').hi)).toHaveLength(2);
 });
 
-it('names Lekha in the hero through AgentLabel, static because no run is claimed', async () => {
+it('names Lekha in the header as a static related agent, because no run is claimed', async () => {
   const html = await renderPage();
-  expect(html).toMatch(/data-testid="agent-label" data-agent="lekha" data-state="idle"/);
+  const header = html.slice(html.indexOf('data-testid="page-header"'), html.indexOf('</header>'));
+  expect(header).toContain('data-testid="related-agents"');
+  expect(header).toContain('lekha');
+  expect(header).not.toContain('data-state="working"');
 });

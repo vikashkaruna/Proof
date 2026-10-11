@@ -1,6 +1,7 @@
 import { PageHeader, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@axiom/ui';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { MfaEnrolment } from './mfa-enrolment';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,7 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6 animate-fade-in">
       <PageHeader
+        module={moduleBarProps('settings')}
         title="Account security"
         description="Your second factor. Required before you can issue an approval token, and re-checked at the moment of every approval."
       />

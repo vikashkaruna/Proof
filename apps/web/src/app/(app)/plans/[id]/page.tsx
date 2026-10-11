@@ -25,6 +25,7 @@ import { KillSwitchButton } from './kill-switch-button';
 import { DryRunHistory, type DryRunRow } from './dry-run-history';
 import { ApprovalProofArchive } from './approval-proof-archive';
 import { DryRunDiffView } from '../../execution/dry-run-diff';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
@@ -181,16 +182,17 @@ export default async function PlanDetailPage({ params }: PageProps) {
   const actionLabels = new Map(actions.map((a) => [a.id, a.action_type]));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
+        module={moduleBarProps('remediation')}
         title={typedPlan.title}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D6DBE8]">
               Agent ·
-              <AgentLabel agent="sudhaar" size="xs" />
+              <AgentLabel agent="sudhaar" size="xs" tone="dark" />
             </span>
-            <span className="text-slate-400">·</span>
+            <span className="text-[#7585B0]">·</span>
             <span>{typedPlan.description ?? 'Deterministic, rollbackable remediation plan.'}</span>
           </span>
         }

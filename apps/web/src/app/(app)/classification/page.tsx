@@ -5,6 +5,7 @@ import { PublicSourceWorkflow } from '../public-source-workflow/source-workflow'
 import { DataPlaceholder } from '@axiom/ui';
 import { loadClassificationReviewHistory } from '@/lib/classification-reviews';
 import { ClassificationReviewHistoryView } from './review-history';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ export default async function ClassificationPage({
   searchParams?: Promise<{ reviewPage?: string | string[] }>;
 } = {}) {
   const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
-    Capability.POSTURE_READ,
+    routeCapability('/classification'),
   );
   const reviewPage = (await searchParams)?.reviewPage;
   const [{ data, error }, history] = await Promise.all([

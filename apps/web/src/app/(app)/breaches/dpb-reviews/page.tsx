@@ -1,11 +1,14 @@
 import { Capability, UserRole, can } from '@axiom/types';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext } from '@/lib/tenant-context';
+import { routeCapability } from '@/app/(app)/nav';
 import { DpbReviewsClient, type DpbBreach, type DpbNotification } from './reviews-client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DpbReviewsPage() {
-  const { supabase, tenantId, role, isAxiomInternal } = await requireTenantContext();
+  const { supabase, tenantId, role, isAxiomInternal } = await requireCapabilityContext(
+    routeCapability('/breaches'),
+  );
   if (!can(Capability.REPORT_READ, { role }))
     return <p role="alert">Your role cannot view reports.</p>;
   const [breaches, notifications] = await Promise.all([

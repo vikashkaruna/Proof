@@ -180,7 +180,7 @@ export function LedgerStreamView({
                           ? 'text-[#0a8d80]'
                           : l.result === 'failure'
                             ? 'text-[#D9534F]'
-                            : 'text-[#8a6d10]'
+                            : 'text-[#B45309]'
                       }`}
                     >
                       {l.result === 'success' ? '✓ ' : l.result === 'failure' ? '✕ ' : ''}

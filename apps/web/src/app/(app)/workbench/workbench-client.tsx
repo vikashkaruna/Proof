@@ -2,10 +2,10 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { AgentIcon, AgentLabel } from '@axiom/ui';
+import { AgentIcon, AgentLabel, PageHeader } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
-import { ModuleBarFor } from '@/lib/module-bar';
+import { moduleBarProps } from '@/lib/module-bar';
 
 interface RecentRun {
   seq: number;
@@ -189,47 +189,25 @@ export function AgentWorkbenchClient({
   };
 
   return (
-    <div className="w-full min-w-0 space-y-5 animate-fade-in">
-      {/* Design System Hero Banner */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#1E2A4A] to-[#243356] p-6 sm:p-7 text-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
-          <span className="rounded bg-[#0FB5A5] px-2 py-0.5 text-[9px] font-semibold text-[#04322d] tracking-wide">
-            P0
-          </span>
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#0FB5A5]">
-            <span>Agent ·</span>
-            <span className="inline-flex items-center gap-1">
-              <AgentLabel
-                agent={selectedAgent}
-                size="xs"
-                tone="dark"
-                state={isExecuting ? 'working' : 'idle'}
-              />
-              <span>(fleet)</span>
+    <div className="w-full min-w-0 space-y-4 animate-fade-in">
+      <PageHeader
+        title="Agent Workbench"
+        module={moduleBarProps('workbench')}
+        description="Inspect recorded activity and launch supported read-only agents. Approval-gated actions, evidence storage, reports and unavailable feeds use their dedicated workflows."
+        meta={
+          <>
+            <AgentLabel
+              agent={selectedAgent}
+              size="xs"
+              tone="dark"
+              state={isExecuting ? 'working' : 'idle'}
+            />
+            <span className="rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-teal-300">
+              Env: {environment} · configured region target: {dataResidencyRegion}
             </span>
-          </div>
-          <span className="text-[11px] text-[#8a97b8]">Autonomy —</span>
-          <span className="ml-auto rounded border border-teal-500/30 bg-teal-500/10 px-2.5 py-0.5 text-[11px] font-medium text-teal-300">
-            Env: {environment} · configured region target: {dataResidencyRegion}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h1 className="font-heading text-2xl sm:text-[26px] font-bold text-white tracking-tight">
-            Agent Workbench
-          </h1>
-          <span lang="hi" className="font-heading text-lg sm:text-[18px] text-[#0FB5A5]">
-            एजेंट कार्यक्षेत्र
-          </span>
-        </div>
-        <p className="mt-2 text-[13px] text-[#c7cfe0] max-w-3xl leading-relaxed">
-          Inspect recorded activity and launch supported read-only agents. Approval-gated actions,
-          evidence storage, reports, and unavailable feeds use their dedicated workflows.
-        </p>
-        <ModuleBarFor module="workbench" tone="dark" omit={['hi', 'moduleId']} className="mt-3" />
-        <div className="mt-3.5 inline-flex items-center gap-2 rounded-full bg-white/[0.08] px-3 py-1 text-[11px] text-slate-200">
-          <span className="text-teal-300">◆</span> Module M0.6
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {loadError && (
         <div
@@ -274,7 +252,7 @@ export function AgentWorkbenchClient({
                 </span>
               </div>
               <span
-                className="font-mono text-[11.5px] font-semibold text-[#8a6d10]"
+                className="font-mono text-[11.5px] font-semibold text-[#B45309]"
                 data-testid="workbench-awaiting-review"
               >
                 {awaitingReviewCount ?? 'Unavailable'}

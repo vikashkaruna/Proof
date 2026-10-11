@@ -13,11 +13,14 @@ import {
 import { formatDate, formatINR } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import { CreateAssessmentForm } from './create-assessment-form';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EngagementsListPage() {
-  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { supabase, tenantId, role } = await requireCapabilityContext(
+    routeCapability('/engagements'),
+  );
   const canCreate = can(Capability.ENGAGEMENT_CREATE, { role });
 
   const [engagementResult, libraryResult, estateResult] = await Promise.all([
@@ -48,9 +51,9 @@ export default async function EngagementsListPage() {
   const { data: engagements, error } = engagementResult;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
-        module={moduleBarProps('assessment')}
+        module={moduleBarProps('engagements')}
         title="Engagements"
         description="An engagement is a (tenant × library-version) assessment run. Each flows through discovery → classification → assessment → planning → approval → execution → verification."
       />

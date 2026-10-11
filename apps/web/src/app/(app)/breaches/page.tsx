@@ -1,9 +1,10 @@
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext } from '@/lib/tenant-context';
 import {
   BreachWorkflowClient,
   type BreachRow,
   type NotificationRow,
 } from './breach-workflow-client';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,7 @@ export default async function BreachesPage() {
   // filter and then fabricated an affected count and a countdown; the data
   // below is the recorded state, and every mutation goes through the BFF
   // routes whose RPCs own the clocks and the state machine.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId } = await requireCapabilityContext(routeCapability('/breaches'));
 
   const [breachesRes, notificationsRes] = await Promise.all([
     supabase

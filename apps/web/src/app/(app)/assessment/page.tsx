@@ -2,6 +2,7 @@ import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { loadAssessmentSnapshot } from '@/lib/assessment-snapshot';
 import { AssessmentClient } from './assessment-client';
 import { can } from '@axiom/types';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ export default async function AssessmentPage({
   searchParams: Promise<{ engagement?: string }>;
 }) {
   const { supabase, tenantId, role, userId } = await requireCapabilityContext(
-    Capability.POSTURE_READ,
+    routeCapability('/assessment'),
   );
   const { engagement } = await searchParams;
   // Missing/unreadable saved results are never replaced with demo posture.
