@@ -216,3 +216,28 @@ describe('every persona', () => {
     }
   });
 });
+
+describe('Audit Ledger and Client Portal are separate menu items', () => {
+  // Regression: the design-sync rebuild dropped the Client Portal item, and the
+  // ledger page redirected client roles to /portal, so "Audit Ledger" opened
+  // the Client Portal.
+  const tenantRoles = [
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.APPROVER,
+    UserRole.REVIEWER,
+    UserRole.VIEWER,
+  ];
+
+  it.each(tenantRoles)('offers %s both /ledger and /portal', (role) => {
+    const routes = routesFor(role);
+    expect(routes).toContain('/ledger');
+    expect(routes).toContain('/portal');
+  });
+
+  it('labels each route with its own screen', () => {
+    const items = APP_NAV_GROUPS.flatMap((g) => g.items);
+    expect(items.find((i) => i.route === '/ledger')?.en).toBe('Audit Ledger');
+    expect(items.find((i) => i.route === '/portal')?.en).toBe('Client Portal');
+  });
+});

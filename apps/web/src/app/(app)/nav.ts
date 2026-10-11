@@ -245,6 +245,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         capability: Capability.WORKBENCH_ACCESS,
       },
       {
+        route: '/portal',
+        en: 'Client Portal',
+        hi: 'क्लाइंट पोर्टल',
+        phase: 'P0',
+        // The tenant's own read-only summary. The page needs only verified
+        // membership, so it carries the same read capability as Dashboard.
+        capability: Capability.POSTURE_READ,
+      },
+      {
         route: '/partner',
         en: 'Partner Portal',
         hi: 'भागीदार पोर्टल',

@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
 import { PageHeader, Card, CardContent, Badge, AgentLabel } from '@axiom/ui';
@@ -46,26 +45,18 @@ export default async function LedgerPage({
   // W1 · SEC-9/SEC-8: this page read the session directly, so it was gated on
   // being signed in and nothing else — no role check, and, once login MFA
   // landed, no MFA check either.
-  const { supabase, userId, tenantId, tenantName, tenantSlug } = await requireCapabilityContext(
+  const { supabase, tenantId, tenantName, tenantSlug } = await requireCapabilityContext(
     Capability.LEDGER_READ,
     resolvedSearchParams.tenant,
   );
   if (resolvedSearchParams.tenant && tenantSlug !== resolvedSearchParams.tenant) {
     throw new Error('Requested ledger tenant is unavailable');
   }
-  const user = { id: userId };
-
-  const { data: profile, error: profileError } = await supabase
-    .from('users')
-    .select('is_axiom_internal')
-    .eq('id', user.id)
-    .maybeSingle();
-  if (profileError || !profile?.is_axiom_internal) redirect('/portal');
-
-  // SEC-3: was `createSupabaseAdmin()`. This page is already gated on
-  // `is_axiom_internal` above, and `tenants_select_member` grants exactly
-  // that audience cross-tenant visibility — so RLS enforces the same rule the
-  // page intends, rather than the page asserting it and the client ignoring it.
+  // The ledger is a tenant surface: every client role holds LEDGER_READ, and
+  // `audit_ledger_select_member` lets tenant members read their own chain.
+  // An older `is_axiom_internal` check here sent every client user who opened
+  // Audit Ledger to the Client Portal instead. Every query below is scoped to
+  // the verified `tenantId`, and RLS enforces the same rule.
 
   // Pagination parameters
   const page = ledgerPageNumber(resolvedSearchParams.page, 1, 1_000_000);
