@@ -61,6 +61,7 @@ const EnvFields = z.object({
       .regex(/^[a-f0-9]{40}$/)
       .optional(),
   ),
+  AXIOM_LICENSE_ROOT_PUBLIC_KEY: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   // Supabase

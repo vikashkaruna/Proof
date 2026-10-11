@@ -1,6 +1,7 @@
 # Axiom Proof — Marketing site Dockerfile (standalone output)
 
-FROM node:24-alpine AS base
+ARG NODE_RUNTIME_IMAGE=node:24-alpine
+FROM ${NODE_RUNTIME_IMAGE} AS base
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 ENV PNPM_HOME="/pnpm"
@@ -22,10 +23,14 @@ RUN --mount=type=cache,id=axiom-pnpm,target=/pnpm/store pnpm install --store-dir
 
 FROM base AS build
 ARG NEXT_PUBLIC_APP_URL
+ARG AXIOM_PROOF_MARKETING_URL
+ARG AXIOM_PROOF_PLATFORM_URL
 ARG NEXT_PUBLIC_BFF_URL
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV AXIOM_PROOF_MARKETING_URL=$AXIOM_PROOF_MARKETING_URL
+ENV AXIOM_PROOF_PLATFORM_URL=$AXIOM_PROOF_PLATFORM_URL
 ENV NEXT_PUBLIC_BFF_URL=$NEXT_PUBLIC_BFF_URL
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -34,18 +39,28 @@ COPY tsconfig.base.json ./
 COPY apps/marketing ./apps/marketing
 COPY packages ./packages
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm --filter @axiom/marketing build
+RUN if [ -n "$AXIOM_PROOF_MARKETING_URL$AXIOM_PROOF_PLATFORM_URL" ]; then \
+      test -n "$AXIOM_PROOF_MARKETING_URL" && test -n "$AXIOM_PROOF_PLATFORM_URL"; \
+      export NEXT_PUBLIC_APP_URL="$AXIOM_PROOF_PLATFORM_URL" AXIOM_STRICT_PUBLIC_URLS=1; \
+    fi; \
+    pnpm --filter @axiom/marketing build
 
-FROM base AS runtime
+FROM ${NODE_RUNTIME_IMAGE} AS runtime
 ARG AXIOM_RELEASE_SHA
+ARG AXIOM_PROOF_MARKETING_URL
+ARG AXIOM_PROOF_PLATFORM_URL
 ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
+ENV AXIOM_PROOF_MARKETING_URL=$AXIOM_PROOF_MARKETING_URL
+ENV AXIOM_PROOF_PLATFORM_URL=$AXIOM_PROOF_PLATFORM_URL
 LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini=0.19.0-r3 \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --chown=node:node --from=build /app/apps/marketing/.next/standalone ./
 COPY --chown=node:node --from=build /app/apps/marketing/.next/static ./apps/marketing/.next/static
 COPY --chown=node:node --from=build /app/apps/marketing/public ./apps/marketing/public

@@ -17,7 +17,8 @@ ops_find_env_file() {
   fi
   local a="${root}/.env.${env}" b="${root}/infra/docker/environments/.env.${env}"
   if [ -f "$a" ] && [ -f "$b" ] && [ ! "$a" -ef "$b" ] && ! cmp -s "$a" "$b"; then
-    printf 'warning: %s and %s both exist and differ; using the first.\n' "$a" "$b" >&2
+    printf 'error: root and canonical environment files differ; select one explicitly.\n' >&2
+    return 1
   fi
   for candidate in "$a" "$b"; do
     if [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
@@ -25,27 +26,46 @@ ops_find_env_file() {
   return 1
 }
 
-# Exports KEY=VALUE pairs from the file. A variable already set in the calling
-# process keeps its value, so `GCP_REGION=... axiom-ops.sh ...` can override a
-# single run without editing the file.
+# Validate the entire selected file before changing the caller environment.
+# Configuration declared by any committed environment template is authoritative:
+# absent keys are unset, present keys replace inherited values. Tool transport
+# (PATH, HOME, credential selectors, etc.) remains outside file configuration.
 ops_load_env_file() {
-  local file="$1" line key val
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%$'\r'}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    case "$line" in ''|'#'*) continue ;; esac
-    line="${line#export }"
-    key="${line%%=*}"
-    val="${line#*=}"
-    [ "$key" = "$line" ] && continue
-    key="${key%"${key##*[![:space:]]}"}"
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    val="${val#"${val%%[![:space:]]*}"}"
-    val="${val%"${val##*[![:space:]]}"}"
-    if [[ "$val" == \"*\" && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"; fi
-    if [[ "$val" == \'*\' && ${#val} -ge 2 ]]; then val="${val:1:${#val}-2}"; fi
-    if [ -z "${!key+x}" ]; then export "$key=$val"; fi
-  done < "$file"
+  local OPS_ENV_file="$1" OPS_ENV_root="${2:-}" OPS_ENV_protocol
+  local OPS_ENV_operation OPS_ENV_key OPS_ENV_val OPS_ENV_declaration
+  if [ -z "$OPS_ENV_root" ]; then
+    OPS_ENV_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || return 1
+  fi
+  OPS_ENV_protocol="$(mktemp "${TMPDIR:-/tmp}/axiom-env-protocol.XXXXXX")" || return 1
+  chmod 600 "$OPS_ENV_protocol" || { rm -f "$OPS_ENV_protocol"; return 1; }
+  if ! python3 "${OPS_ENV_root}/scripts/lib/ops-env-parse.py" --root "$OPS_ENV_root" --file "$OPS_ENV_file" > "$OPS_ENV_protocol"; then
+    rm -f "$OPS_ENV_protocol"
+    return 1
+  fi
+  # Preflight readonly caller variables before changing any configuration.
+  while IFS= read -r -d '' OPS_ENV_operation && IFS= read -r -d '' OPS_ENV_key && IFS= read -r -d '' OPS_ENV_val; do
+    OPS_ENV_declaration="$(declare -p "$OPS_ENV_key" 2>/dev/null)" || OPS_ENV_declaration=''
+    if [[ "$OPS_ENV_declaration" =~ ^declare\ -[^\ ]*r ]]; then
+      rm -f "$OPS_ENV_protocol"
+      printf 'error: Environment key %s is readonly in the caller.\n' "$OPS_ENV_key" >&2
+      return 1
+    fi
+    # Integer/array/nameref/case-conversion attributes would reinterpret bytes.
+    if [[ "$OPS_ENV_declaration" =~ ^declare\ -[^\ ]*[aiAnlu] ]]; then
+      rm -f "$OPS_ENV_protocol"
+      printf 'error: Environment key %s has unsupported caller attributes.\n' "$OPS_ENV_key" >&2
+      return 1
+    fi
+  done < "$OPS_ENV_protocol"
+  # Bash 3.2 compatible: the helper writes triples separated by NUL, never code.
+  while IFS= read -r -d '' OPS_ENV_operation && IFS= read -r -d '' OPS_ENV_key && IFS= read -r -d '' OPS_ENV_val; do
+    case "$OPS_ENV_operation" in
+      clear) unset "$OPS_ENV_key" ;;
+      set) export "$OPS_ENV_key=$OPS_ENV_val" ;;
+      *) rm -f "$OPS_ENV_protocol"; printf 'error: Invalid environment protocol.\n' >&2; return 1 ;;
+    esac
+  done < "$OPS_ENV_protocol"
+  rm -f "$OPS_ENV_protocol"
 }
 
 # A value that is still a template placeholder (`<...>`) is not a value.

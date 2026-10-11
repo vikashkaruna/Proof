@@ -1,0 +1,12 @@
+ARG PYTHON_RUNTIME_IMAGE
+FROM ${PYTHON_RUNTIME_IMAGE}
+RUN rm -rf /usr/local/lib/python3.11/site-packages/pip* /usr/local/lib/python3.11/site-packages/setuptools* /usr/local/lib/python3.11/site-packages/wheel* \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
+ARG AXIOM_RELEASE_SHA
+LABEL org.opencontainers.image.revision=${AXIOM_RELEASE_SHA}
+WORKDIR /app
+COPY services/marketing-db-gateway/gateway.py /app/gateway.py
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8080
+USER 65532:65532
+EXPOSE 8080
+CMD ["python", "gateway.py"]

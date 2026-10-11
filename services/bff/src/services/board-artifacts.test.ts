@@ -243,6 +243,106 @@ function setup() {
 }
 
 describe('board artifact provider boundary', () => {
+  it.each(
+    (['rejected', 'archived'] as const).flatMap((status) =>
+      (['none', 'pending', 'settled'] as const).map((buildState) => ({ status, buildState })),
+    ),
+  )(
+    'refuses $status artifact work with a $buildState historical build',
+    async ({ status, buildState }) => {
+      const { fixture, service, vault, calls, renderPdf } = setup();
+      if (buildState !== 'none') {
+        await service.build(tenant, actorId, reportId, operationKey);
+        fixture.rows('board_artifact_builds')[0]!.status = buildState;
+      }
+      fixture.rows('reports')[0]!.status = status;
+      calls.length = 0;
+      renderPdf.mockClear();
+      for (const mock of [
+        vault.seal,
+        vault.findEvidenceVersion,
+        vault.verifyReceipt,
+        vault.retrieve,
+      ])
+        mock.mockClear();
+      const retained = structuredClone({
+        reports: fixture.rows('reports'),
+        builds: fixture.rows('board_artifact_builds'),
+        versions: fixture.rows('board_artifact_versions'),
+      });
+      for (const operation of [
+        () => service.build(tenant, actorId, reportId, operationKey),
+        () => service.build(tenant, actorId, reportId, randomUUID()),
+        () => service.reconcile(tenant, actorId, reportId, operationKey),
+        () => service.retryMissing(tenant, actorId, reportId, operationKey),
+      ])
+        await expect(operation()).rejects.toMatchObject({ code: 'not_approved', status: 409 });
+      await expect(service.pdf(tenant, actorId, reportId)).rejects.toMatchObject({
+        code: 'report_artifact_unverified',
+        status: 409,
+      });
+      expect(calls).toEqual([]);
+      expect(renderPdf).not.toHaveBeenCalled();
+      for (const mock of [
+        vault.seal,
+        vault.findEvidenceVersion,
+        vault.verifyReceipt,
+        vault.retrieve,
+      ])
+        expect(mock).not.toHaveBeenCalled();
+      expect({
+        reports: fixture.rows('reports'),
+        builds: fixture.rows('board_artifact_builds'),
+        versions: fixture.rows('board_artifact_versions'),
+      }).toEqual(retained);
+    },
+  );
+
+  it.each(['rejected', 'archived'])(
+    'keeps non-founder PDF access refused for %s reports',
+    async (status) => {
+      const { fixture, service, vault } = setup();
+      fixture.rows('reports')[0]!.status = status;
+      fixture.rows('tenant_users')[0]!.role = 'owner';
+      await expect(service.pdf(tenant, actorId, reportId)).rejects.toMatchObject({
+        code: 'forbidden',
+        status: 403,
+      });
+      expect(vault.retrieve).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses artifact replay when its report no longer exists', async () => {
+    const { fixture, service, vault, calls, renderPdf } = setup();
+    await service.build(tenant, actorId, reportId, operationKey);
+    fixture.rows('reports').splice(0);
+    calls.length = 0;
+    renderPdf.mockClear();
+    for (const mock of [vault.seal, vault.findEvidenceVersion, vault.verifyReceipt, vault.retrieve])
+      mock.mockClear();
+    for (const operation of [
+      () => service.build(tenant, actorId, reportId, operationKey),
+      () => service.reconcile(tenant, actorId, reportId, operationKey),
+      () => service.retryMissing(tenant, actorId, reportId, operationKey),
+      () => service.pdf(tenant, actorId, reportId),
+    ])
+      await expect(operation()).rejects.toMatchObject({ code: 'report_not_found', status: 404 });
+    expect(calls).toEqual([]);
+    expect(renderPdf).not.toHaveBeenCalled();
+    for (const mock of [vault.seal, vault.findEvidenceVersion, vault.verifyReceipt, vault.retrieve])
+      expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('does not accept an unknown report status as a terminal state', async () => {
+    const { fixture, service, vault } = setup();
+    fixture.rows('reports')[0]!.status = 'withdrawn';
+    await expect(service.pdf(tenant, actorId, reportId)).rejects.toMatchObject({
+      code: 'invalid_report_record',
+      status: 503,
+    });
+    expect(vault.retrieve).not.toHaveBeenCalled();
+  });
+
   it('projects exact version metadata to the founder without leaking storage coordinates', async () => {
     const { fixture, service } = setup();
     const managerId = randomUUID();

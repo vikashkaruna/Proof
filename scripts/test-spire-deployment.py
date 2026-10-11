@@ -20,17 +20,19 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from lib.ci_fixture_images import fixture_image, report_public_image_startup
 
 from lib.spire_deployment import RELEASE_SHA256, SERVER_SOCKET, VERSION, WORKLOAD_SOCKET, deployment_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_IMAGE = "python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322"
-IMAGE = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+PYTHON_IMAGE = fixture_image("python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322")
+IMAGE = fixture_image("alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8")
 
 
 def run(args: list[str], *, data: str | None = None, required: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False)  # nosec B603 - every call site passes fixed repo/docker argv, no shell
     if required and result.returncode:
+        report_public_image_startup(args, result.stderr)
         raise RuntimeError("SPIRE deployment acceptance command refused")
     return result
 

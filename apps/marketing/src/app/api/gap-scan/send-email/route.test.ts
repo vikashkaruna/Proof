@@ -26,7 +26,10 @@ it('validates the report and destination before forwarding', async () => {
 });
 
 it('passes an ownership cookie and only validated fields to the BFF', async () => {
-  cookieJar.get.mockReturnValue({ value: 'ownership-token' });
+  const token = 'b'.repeat(64);
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: `gap-scan.${token}` } : undefined,
+  );
   backend.mockResolvedValue(Response.json({ status: 'queued' }, { status: 202 }));
   const result = await submit({ id, email: 'reader@example.invalid', extra: 'ignored' });
   expect(result.status).toBe(202);
@@ -34,9 +37,21 @@ it('passes an ownership cookie and only validated fields to the BFF', async () =
   expect(backend).toHaveBeenCalledWith(
     '/public/gap-scan/send-email',
     expect.objectContaining({
-      headers: { 'Content-Type': 'application/json', 'X-Gap-Scan-Access': 'ownership-token' },
+      headers: { 'Content-Type': 'application/json', 'X-Gap-Scan-Access': token },
       body: JSON.stringify({ id, email: 'reader@example.invalid' }),
     }),
+  );
+});
+
+it('keeps a non-gap-scan __session out of an email request', async () => {
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: 'product-session' } : undefined,
+  );
+  backend.mockResolvedValue(Response.json({ error: { code: 'not_found' } }, { status: 404 }));
+  const result = await submit({ id, email: 'reader@example.invalid' });
+  expect(result.status).toBe(404);
+  expect((backend.mock.calls[0]?.[1] as RequestInit).headers).not.toHaveProperty(
+    'X-Gap-Scan-Access',
   );
 });
 

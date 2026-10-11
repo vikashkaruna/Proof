@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import patch
+
 from axiom.config import Settings
 
 
@@ -61,17 +62,17 @@ def test_settings_falls_back_to_legacy_aws_and_gcp_variables():
 
 
 def _production_kwargs(**overrides):
-    values = dict(
-        environment="production",
-        supabase_url="https://db.example.invalid",
-        supabase_service_key="service-key-not-the-demo-one",
-        supabase_anon_key="anon-key",
-        supabase_agent_ledger_writer_key="writer-key",
-        axiom_region="ap-south-1",
-        internal_token="t" * 32,
-        approval_signing_key="k" * 48,
-        model_gateway_api_key="m" * 32,
-    )
+    values = {
+        "environment": "production",
+        "supabase_url": "https://db.example.invalid",
+        "supabase_service_key": "service-key-not-the-demo-one",
+        "supabase_anon_key": "anon-key",
+        "supabase_agent_ledger_writer_key": "writer-key",
+        "axiom_region": "ap-south-1",
+        "internal_token": "t" * 32,
+        "approval_signing_key": "k" * 48,
+        "model_gateway_api_key": "m" * 32,
+    }
     values.update(overrides)
     return values
 

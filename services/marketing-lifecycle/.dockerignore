@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!lifecycle.py
+!google_rest.py
+!server.py
+!approved-target.json

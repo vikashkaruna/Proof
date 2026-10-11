@@ -13,49 +13,49 @@ function at(url: string) {
 
 describe('Workbench URL isolation', () => {
   it.each([
-    [
-      'https://axiom-marketing-preprod-123.asia-south1.run.app',
-      'https://axiom-web-preprod-123.asia-south1.run.app',
-    ],
-    [
-      'https://axiom-marketing-staging-123.asia-south1.run.app',
-      'https://axiom-web-staging-123.asia-south1.run.app',
-    ],
-    [
-      'https://axiom-marketing-123.asia-south1.run.app',
-      'https://axiom-web-123.asia-south1.run.app',
-    ],
-    ['https://axiomproof.ai', 'https://app.axiomproof.ai'],
-    ['https://www.axiomminds.ai', 'https://app.axiomproof.ai'],
-    ['https://staging.axiomproof.ai', 'https://app-staging.axiomproof.ai'],
-  ])('maps %s to %s', (marketing, app) => {
-    expect(at(marketing)).toBe(app);
+    'https://stg.axiomproof.ai',
+    'https://axiomproof.ai',
+    'https://axiom-proof.web.app',
+    'https://axiom-proof-preprod-marketing-123.asia-south1.run.app',
+  ])('uses the configured platform URL on %s', (host) => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://platform.axiomproof.ai');
+    expect(at(host)).toBe('https://platform.axiomproof.ai');
   });
 
-  it('maps an on-premises marketing port to the configured app port', () => {
-    vi.stubEnv('WEB_PORT', '4001');
-    expect(at('http://192.168.2.10:3000')).toBe('http://192.168.2.10:4001');
-  });
-
-  it('ignores localhost configuration on a remote host', () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:3001');
-    expect(at('https://generic.example.invalid')).toBe('https://app.axiomproof.ai');
-  });
-
-  it('uses the configured remote target for Firebase and server rendering', () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app-preview.example.invalid');
-    expect(at('https://axiom-proof.web.app')).toBe('https://app-preview.example.invalid');
-    vi.stubGlobal('window', undefined);
-    expect(resolveAppUrl()).toBe('https://app-preview.example.invalid');
-  });
-
-  it('derives the server preprod target when no explicit app URL is supplied', () => {
+  it('uses the server-side platform setting during SSR', () => {
     vi.stubGlobal('window', undefined);
     vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
-    vi.stubEnv('APP_URL', '');
-    vi.stubEnv('ENVIRONMENT', 'preprod');
-    vi.stubEnv('GCP_PROJECT_NUMBER', '456');
-    vi.stubEnv('GCP_REGION', 'asia-south1');
-    expect(resolveAppUrl()).toBe('https://axiom-web-preprod-456.asia-south1.run.app');
+    vi.stubEnv('AXIOM_PROOF_PLATFORM_URL', 'https://platform.axiomproof.ai');
+    expect(resolveAppUrl()).toBe('https://platform.axiomproof.ai');
+  });
+
+  it('keeps local development links local', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:3001');
+    expect(at('http://localhost:3000')).toBe('http://localhost:3001');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    expect(at('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3001');
+  });
+
+  it('refuses localhost or malformed settings on a remote host', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:3001');
+    expect(() => at('https://stg.axiomproof.ai')).toThrow('not configured');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://user:pass@platform.axiomproof.ai');
+    expect(() => at('https://stg.axiomproof.ai')).toThrow('not configured');
+  });
+
+  it('does not permit a loopback platform target during strict server deployment', () => {
+    vi.stubGlobal('window', undefined);
+    vi.stubEnv('AXIOM_STRICT_PUBLIC_URLS', '1');
+    vi.stubEnv('AXIOM_PROOF_PLATFORM_URL', 'http://localhost:3001');
+    expect(() => resolveAppUrl()).toThrow('required');
+  });
+
+  it('never infers a Workbench from a Cloud Run or Firebase hostname', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    vi.stubEnv('AXIOM_PROOF_PLATFORM_URL', '');
+    expect(() => at('https://axiom-proof.web.app')).toThrow('not configured');
+    expect(() => at('https://axiom-proof-preprod-marketing-123.asia-south1.run.app')).toThrow(
+      'not configured',
+    );
   });
 });

@@ -1,0 +1,96 @@
+{
+  "source": "Actual packages/approval-engine/src/index.ts signer; synthetic crypto vectors only, no human approval or execution",
+  "secret": "owned-approval-mirror-only-test-key-40bytes",
+  "tenant": "test-tenant",
+  "vectors": [
+    {
+      "name": "legacy omitted optionals",
+      "token": {
+        "spec": {
+          "planId": "owned-plan-test",
+          "actionIds": ["b", "a"],
+          "approverId": "test-approver",
+          "mode": "individual",
+          "concurrency": 1,
+          "stopOnFailure": true,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "nonce": "owned-mirror-test-nonce"
+        },
+        "signature": "eb8ea3c70a59df2de29bf8eb80a98f11fadb417ae3e37ed336aaa1be4b3b4003"
+      }
+    },
+    {
+      "name": "content digest",
+      "token": {
+        "spec": {
+          "planId": "owned-plan-test",
+          "actionIds": ["b", "a"],
+          "approverId": "test-approver",
+          "mode": "individual",
+          "concurrency": 1,
+          "stopOnFailure": true,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "nonce": "owned-mirror-test-nonce",
+          "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "signature": "bfa8f98bffdcd42e11b59c1bb5cbd9c45ed6a3da44ce659576dfe12c6fbc797e"
+      }
+    },
+    {
+      "name": "empty conditions",
+      "token": {
+        "spec": {
+          "planId": "owned-plan-test",
+          "actionIds": ["b", "a"],
+          "approverId": "test-approver",
+          "mode": "individual",
+          "concurrency": 1,
+          "stopOnFailure": true,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "nonce": "owned-mirror-test-nonce",
+          "conditions": {}
+        },
+        "signature": "c7ea0ca30166dca0b5e791a34dae53450c60f25e3edac51443939b0b0944d25c"
+      }
+    },
+    {
+      "name": "digest and empty conditions",
+      "token": {
+        "spec": {
+          "planId": "owned-plan-test",
+          "actionIds": ["b", "a"],
+          "approverId": "test-approver",
+          "mode": "individual",
+          "concurrency": 1,
+          "stopOnFailure": true,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "nonce": "owned-mirror-test-nonce",
+          "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "conditions": {}
+        },
+        "signature": "3c98f37cfc296358b119c2127e9a3970de53302ab845bf47c357a932a2ae7247"
+      }
+    },
+    {
+      "name": "digest and unicode conditions",
+      "token": {
+        "spec": {
+          "planId": "owned-plan-test",
+          "actionIds": ["b", "a"],
+          "approverId": "test-approver",
+          "mode": "individual",
+          "concurrency": 1,
+          "stopOnFailure": true,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "nonce": "owned-mirror-test-nonce",
+          "contentDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "conditions": {
+            "maxRows": 1,
+            "label": "स्रोत जाँच"
+          }
+        },
+        "signature": "22ebe57ed03d167ff9e38d4e7611ab93c62c5df51821419efad3b621bbe59049"
+      }
+    }
+  ]
+}

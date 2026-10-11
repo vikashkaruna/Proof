@@ -1,0 +1,54 @@
+# Build from a verified official archive; no production credentials in context.
+ARG GO_BUILD_IMAGE
+FROM --platform=$BUILDPLATFORM ${GO_BUILD_IMAGE} AS dependencies
+WORKDIR /src
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=1 GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+COPY upstream/ /src/
+RUN go mod edit -require=google.golang.org/grpc@v1.83.2 -require=golang.org/x/net@v0.60.0 && go mod tidy && go mod download && go mod verify && go mod vendor
+COPY review/ /review/
+RUN cp /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/*_test.go /src/vendor/github.com/jackc/pgproto3/v2/
+COPY review/pgproto3_regression_test.go /src/vendor/github.com/jackc/pgproto3/v2/axiom_security_test.go
+
+# Deliberately fails on the original source; retain its actual panic as proof.
+FROM dependencies AS original-regression
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go test -mod=vendor -count=1 -run '^TestAxiomNegativeLengthsReturnError$' github.com/jackc/pgproto3/v2
+
+FROM dependencies AS patched-tests
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go build -mod=vendor -o /tmp/apply-patch /review/apply-patch.go && /tmp/apply-patch vendor/github.com/jackc/pgproto3/v2/data_row.go /review/pgproto3-data-row.patch > /review/patch-application.txt
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked go test -mod=vendor -count=1 github.com/jackc/pgproto3/v2
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked mkdir -p /tmp/pgproto3-fuzz && \
+    cp -a /src/vendor/github.com/jackc/pgproto3/v2/. /tmp/pgproto3-fuzz/ && \
+    cp /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/go.mod /go/pkg/mod/github.com/jackc/pgproto3/v2@v2.3.3/go.sum /tmp/pgproto3-fuzz/ && \
+    (cd /src/vendor/github.com/jackc/pgproto3/v2 && find . -type f -print0 | sort -z | xargs -0 sha256sum) > /review/pgproto3-fuzz-source.sha256 && \
+    (cd /tmp/pgproto3-fuzz && sha256sum -c /review/pgproto3-fuzz-source.sha256 && sha256sum go.mod go.sum > /review/pgproto3-fuzz-module.sha256 && \
+     GOWORK=off go test -mod=readonly -count=1 -run '^$' -fuzz FuzzAxiomDataRowNeverPanics -fuzztime=10s -parallel=1 . && \
+     sha256sum -c /review/pgproto3-fuzz-source.sha256 && sha256sum -c /review/pgproto3-fuzz-module.sha256) && \
+    (cd /src/vendor/github.com/jackc/pgproto3/v2 && sha256sum -c /review/pgproto3-fuzz-source.sha256)
+
+FROM patched-tests AS build
+ARG TARGETARCH
+RUN --mount=type=cache,id=axiom-auth-go-build,target=/root/.cache/go-build,sharing=locked mkdir -p /out/provenance /out/tmp && chmod 1777 /out/tmp && \
+    GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor -trimpath -buildvcs=false \
+    -ldflags '-X github.com/supabase/auth/internal/utilities.Version=v2.197.0+axiom-pgproto3-fix' -o /out/auth . && \
+    go version -m /out/auth > /out/provenance/compiled-modules.txt && \
+    sha256sum /out/auth > /out/provenance/binary-sha256.txt && \
+    cp /review/source.json /review/source-snapshot.json /review/pgproto3-data-row.patch /review/patch-application.txt /review/pgproto3-fuzz-source.sha256 /review/pgproto3-fuzz-module.sha256 /out/provenance/ && \
+    cp /src/go.mod /out/provenance/patched-go-mod.txt && cp /src/go.sum /out/provenance/patched-go-sum.txt && \
+    cp /src/vendor/github.com/jackc/pgproto3/v2/data_row.go /out/provenance/patched-data-row.go && \
+    cp /src/vendor/github.com/jackc/pgproto3/v2/LICENSE /out/provenance/pgproto3-LICENSE.txt
+
+FROM scratch AS runtime
+ARG SOURCE_SNAPSHOT_SHA256
+LABEL org.opencontainers.image.source="https://github.com/supabase/auth" \
+      org.opencontainers.image.revision="4eee58f296d9698a1c2c0ae14d7a0b379c7622d3" \
+      org.opencontainers.image.version="v2.197.0+axiom-pgproto3-fix" \
+      org.axiom.source-snapshot="sha256:${SOURCE_SNAPSHOT_SHA256}"
+COPY --from=build /out/auth /usr/local/bin/auth
+COPY --from=build /out/auth /usr/local/bin/gotrue
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /src/migrations /usr/local/etc/auth/migrations/
+COPY --from=build /out/provenance/ /usr/local/share/axiom-auth-build/
+COPY --from=build /out/tmp/ /tmp/
+ENV GOTRUE_DB_MIGRATIONS_PATH=/usr/local/etc/auth/migrations
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/auth"]

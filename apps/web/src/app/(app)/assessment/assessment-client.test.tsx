@@ -1,3 +1,4 @@
+import type * as ActualUi from '@axiom/ui';
 // @vitest-environment jsdom
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -18,7 +19,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 vi.mock('@axiom/ui', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@axiom/ui')>()),
+  ...(await importOriginal<typeof ActualUi>()),
   AgentIcon: () => <span aria-hidden="true" />,
 }));
 

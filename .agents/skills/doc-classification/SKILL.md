@@ -67,3 +67,5 @@ brief or runbook. Each folder has an `INDEX.md`; add a row when you add a file.
 - Ignored files do not travel: new clones and worktrees start without private
   docs. Restore from the encrypted private backup
   (`~/.axiom-proof-private/documentation/`).
+
+Session chronology: locate the insertion marker as an exact standalone line, never by substring (instructions may quote it). Keep timed entries newest first within each day, with explicit UTC. Preserve historical date-only entries without inventing a time. Run the chronology checker after every prepend.

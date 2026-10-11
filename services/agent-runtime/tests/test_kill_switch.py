@@ -219,6 +219,7 @@ async def test_karya_checks_the_switch_before_the_token() -> None:
 @pytest.mark.parametrize("url", ["http://localhost:54321", "http://127.0.0.1:54321", "https://auth.example.test"])
 def test_constructor_failure_never_selects_a_clear_memory_switch(monkeypatch, url):
     from types import SimpleNamespace
+
     import supabase
 
     def unavailable(*args, **kwargs):
@@ -231,6 +232,7 @@ def test_constructor_failure_never_selects_a_clear_memory_switch(monkeypatch, ur
 
 def test_local_supabase_uses_shared_state_too(monkeypatch):
     from types import SimpleNamespace
+
     import supabase
 
     client = FakeClient()

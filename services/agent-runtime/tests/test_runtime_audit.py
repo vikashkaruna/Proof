@@ -4,7 +4,7 @@ import base64
 import json
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -50,7 +50,7 @@ class AuditAgent(BaseAgent[AuditInput, AuditOutput]):
 @pytest.fixture
 def fixture():
     append = AsyncMock(
-        return_value=AppendResult(id=RECEIPT, occurred_at=datetime.now(timezone.utc))
+        return_value=AppendResult(id=RECEIPT, occurred_at=datetime.now(UTC))
     )
     agent = AuditAgent(
         settings=Settings(_env_file=None),
@@ -87,7 +87,8 @@ async def test_input_validation_refuses_before_audit_and_never_echoes_pydantic_v
     agent, append, payload = fixture
     payload["count"] = PRIVATE
     result = await agent.invoke(payload)
-    assert result.status == "failed" and result.error == "validation_failed"
+    assert result.status == "failed"
+    assert result.error == "validation_failed"
     assert agent.invocations == 0
     append.assert_not_called()
     assert PRIVATE not in str(agent.log.mock_calls)
@@ -112,8 +113,10 @@ async def test_started_audit_failure_prevents_execution_and_sanitizes_error(fixt
     agent, append, payload = fixture
     append.side_effect = RuntimeError(PRIVATE)
     result = await agent.invoke(payload)
-    assert result.status == "failed" and result.error == "ledger_append_failed"
-    assert agent.invocations == 0 and result.output is None
+    assert result.status == "failed"
+    assert result.error == "ledger_append_failed"
+    assert agent.invocations == 0
+    assert result.output is None
     assert PRIVATE not in str(agent.log.mock_calls)
     assert PRIVATE not in str(asdict(result))
 
@@ -121,11 +124,13 @@ async def test_started_audit_failure_prevents_execution_and_sanitizes_error(fixt
 @pytest.mark.asyncio
 async def test_completion_audit_failure_never_returns_success_or_output(fixture):
     agent, append, payload = fixture
-    receipt = AppendResult(id=RECEIPT, occurred_at=datetime.now(timezone.utc))
+    receipt = AppendResult(id=RECEIPT, occurred_at=datetime.now(UTC))
     append.side_effect = [receipt, RuntimeError(PRIVATE), receipt]
     result = await agent.invoke(payload)
-    assert result.status == "failed" and result.error == "audit_completion_failed"
-    assert result.output is None and agent.invocations == 1
+    assert result.status == "failed"
+    assert result.error == "audit_completion_failed"
+    assert result.output is None
+    assert agent.invocations == 1
     assert append.call_args_list[-1].args[0].result == "failure"
     assert PRIVATE not in json.dumps([asdict(call.args[0]) for call in append.call_args_list])
     assert PRIVATE not in str(agent.log.mock_calls)
@@ -136,11 +141,12 @@ async def test_agent_failure_and_failed_error_audit_do_not_leak_exception_detail
     agent, append, payload = fixture
     agent.fail = True
     append.side_effect = [
-        AppendResult(id=RECEIPT, occurred_at=datetime.now(timezone.utc)),
+        AppendResult(id=RECEIPT, occurred_at=datetime.now(UTC)),
         RuntimeError(PRIVATE),
     ]
     result = await agent.invoke(payload)
-    assert result.status == "failed" and result.error == "agent_failed"
+    assert result.status == "failed"
+    assert result.error == "agent_failed"
     assert result.output is None
     assert PRIVATE not in json.dumps([asdict(call.args[0]) for call in append.call_args_list])
     assert PRIVATE not in str(agent.log.mock_calls)
@@ -152,7 +158,8 @@ async def test_invalid_output_fails_without_disclosing_or_recording_raw_values(f
     agent, append, payload = fixture
     agent._run = AsyncMock(return_value={"count": PRIVATE, "private_value": PRIVATE})
     result = await agent.invoke(payload)
-    assert result.status == "failed" and result.error == "agent_failed"
+    assert result.status == "failed"
+    assert result.error == "agent_failed"
     assert result.output is None
     assert append.call_args_list[-1].args[0].result == "failure"
     assert PRIVATE not in json.dumps([asdict(call.args[0]) for call in append.call_args_list])
@@ -170,13 +177,13 @@ def _jwt(role: str, exp: int | None = None) -> str:
 
 
 def _strict_settings(environment: str, **overrides):
-    values = dict(
-        environment=environment,
-        supabase_url="http://127.0.0.1:56321",
-        supabase_service_key="synthetic-service",
-        supabase_anon_key="synthetic-anon",
-        supabase_agent_ledger_writer_key=_jwt("agent_ledger_writer"),
-    )
+    values = {
+        "environment": environment,
+        "supabase_url": "http://127.0.0.1:56321",
+        "supabase_service_key": "synthetic-service",
+        "supabase_anon_key": "synthetic-anon",
+        "supabase_agent_ledger_writer_key": _jwt("agent_ledger_writer"),
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -204,7 +211,7 @@ def test_strict_environment_never_selects_memory_for_loopback_or_client_failure(
     assert read_call.args == (settings.supabase_url, settings.supabase_service_key)
     assert settings.supabase_agent_ledger_writer_key not in str(read_call)
     create.side_effect = RuntimeError(PRIVATE)
-    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
 
 
@@ -230,7 +237,7 @@ def test_missing_or_wrong_writer_credential_fails_closed_without_fallback(
     settings = _strict_settings(environment, supabase_url=url, **overrides)
     create = Mock()
     monkeypatch.setattr("axiom.ledger_client.create_client", create)
-    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
     create.assert_not_called()
 
@@ -292,7 +299,7 @@ def test_configured_loopback_writer_cannot_fall_back(monkeypatch, environment, o
 async def test_human_labelled_events_are_refused_by_the_agent_ledger(in_memory):
     db = Mock()
     ledger = LedgerClient.in_memory() if in_memory else LedgerClient(db)
-    with pytest.raises(RuntimeError, match="^Audit ledger append refused for actor type$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger append refused for actor type$"):
         await ledger.append(
             AppendInput(
                 tenant_id=TENANT,
@@ -314,7 +321,7 @@ def test_remote_development_configuration_also_cannot_silently_fall_back(monkeyp
     monkeypatch.setattr(
         "axiom.ledger_client.create_client", Mock(side_effect=RuntimeError(PRIVATE))
     )
-    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
 
 
@@ -338,7 +345,7 @@ async def test_missing_or_malformed_remote_receipt_is_not_success(data):
     db = Mock()
     db.rpc.return_value.execute.return_value = SimpleNamespace(data=data)
     ledger = LedgerClient(db)
-    with pytest.raises(RuntimeError, match="^Audit ledger append was not confirmed$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger append was not confirmed$"):
         await ledger.append(
             AppendInput(
                 tenant_id=TENANT,
@@ -385,7 +392,7 @@ def _append_input() -> AppendInput:
 async def test_verify_and_query_use_the_read_client_and_appends_use_only_the_writer():
     writer, reader = Mock(), Mock()
     reader.rpc.return_value.execute.return_value.data = []
-    reader.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [  # noqa: E501
+    reader.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
         {"sequence_no": 1}
     ]
     writer.rpc.return_value.execute.return_value.data = 7
@@ -418,7 +425,7 @@ def test_strict_environment_without_a_service_key_for_reads_fails_closed(monkeyp
     settings = _strict_settings(environment, supabase_service_key=None)
     create = Mock()
     monkeypatch.setattr("axiom.ledger_client.create_client", create)
-    with pytest.raises(RuntimeError, match="^Audit ledger configuration was refused$"):
+    with pytest.raises(RuntimeError, match=r"^Audit ledger configuration was refused$"):
         LedgerClient.from_settings(settings)
 
 

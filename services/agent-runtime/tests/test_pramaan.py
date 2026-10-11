@@ -167,7 +167,7 @@ def test_pramaan_agent_metadata_and_non_mutating_guarantee():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "dossier_type,expected_section_type",
+    ("dossier_type", "expected_section_type"),
     [
         (DossierType.BOARD_EXECUTIVE, "board_risk_summary"),
         (DossierType.DPB_STATUTORY, "dpb_statutory_submission"),

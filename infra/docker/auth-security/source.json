@@ -1,0 +1,21 @@
+{
+  "upstream_repository": "https://github.com/supabase/auth",
+  "upstream_version": "v2.197.0",
+  "upstream_commit": "4eee58f296d9698a1c2c0ae14d7a0b379c7622d3",
+  "upstream_archive_sha256": "dd5168b9f0bb294fa1e1d343c23b6bb5f68376f271d97dea897339b28fbd4b8d",
+  "pgproto3_version": "v2.3.3",
+  "pgproto3_original_data_row_sha256": "6cf3e036a8ac399d981060253720d5fbb0cd026d1fb1808540cd6dfc9771aa4c",
+  "grpc_version": "v1.83.2",
+  "advisories": [
+    "CVE-2026-32286",
+    "CVE-2026-84304",
+    "CVE-2026-84445",
+    "CVE-2026-78667",
+    "CVE-2026-78669",
+    "CVE-2026-97031"
+  ],
+  "patch_status": "Source fix; original module version remains visible. Requires exact-artifact independent fixed disposition and runtime acceptance.",
+  "go_version": "1.27.2",
+  "go_builder_index": "golang@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61",
+  "x_net_version": "v0.60.0"
+}

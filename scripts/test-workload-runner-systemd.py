@@ -15,6 +15,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from lib.ci_fixture_images import fixture_image
 from lib.spire_host_bundle import prepare, selected_binary
 from lib.spire_deployment import VERSION, deployment_bundle
 from lib.controller_runtime_acceptance import accept as controller_runtime_acceptance
@@ -27,7 +28,7 @@ host=fixture.host
 STATE=Path('/var/lib/spire');ALIAS=Path('/dev/disk/by-id/google-axiom-runner-state')
 SERVICE='axiom-spire-runner.service';INITIAL='axiom-spire-enroll-runner.service';HEALTH='axiom-spire-health.service';MOUNT='var-lib-spire.mount'
 IP='10.231.7.2/32'
-ALPINE='alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8'
+ALPINE= fixture_image('alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8')
 
 
 def check(condition, message):

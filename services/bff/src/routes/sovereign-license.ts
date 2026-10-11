@@ -12,6 +12,7 @@ export function sovereignLicenseRoutes(
   dependencies: {
     env?: string;
     licenseToken?: string;
+    publicKeyPem?: string;
   } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
@@ -42,7 +43,7 @@ export function sovereignLicenseRoutes(
       );
     }
 
-    const verification = verifyOfflineLicense(token);
+    const verification = verifyOfflineLicense(token, { publicKeyPem: dependencies.publicKeyPem });
     if (!verification.valid || !verification.payload) {
       return c.json(
         {

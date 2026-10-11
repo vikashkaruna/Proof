@@ -1,6 +1,5 @@
 """Tests for the canonical JSON + SHA-256 helpers."""
 
-import pytest
 
 from axiom.canonicalise import canonical_json, sha256_hex
 

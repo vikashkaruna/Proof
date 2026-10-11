@@ -46,6 +46,13 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/evidence\/staged-ingestions\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/expire$/.test(
         c.req.path,
       ));
+  const durableOwnedSynthetic =
+    c.req.method === 'POST' &&
+    [
+      '/v1/plans/owned-synthetic',
+      '/v1/plans/owned-synthetic/cancel',
+      '/v1/plans/owned-synthetic/outcome',
+    ].includes(c.req.path);
   const trustedSourceRequest =
     c.req.method === 'POST' &&
     (c.req.path === '/v1/assessment/jobs' ||
@@ -61,7 +68,8 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     durableOperatorWorkflow ||
     trustedSourceRequest ||
     durableReviewedWorkflow ||
-    durableStagedEvidence
+    durableStagedEvidence ||
+    durableOwnedSynthetic
   )
     c.header('Cache-Control', 'private, no-store');
 
@@ -107,7 +115,8 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     durableOperatorWorkflow ||
     trustedSourceRequest ||
     durableReviewedWorkflow ||
-    durableStagedEvidence
+    durableStagedEvidence ||
+    durableOwnedSynthetic
   ) {
     c.set('idempotencyKey', key);
     return next();

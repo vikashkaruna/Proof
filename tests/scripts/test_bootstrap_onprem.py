@@ -2,6 +2,8 @@
 import shutil
 import subprocess
 import tempfile
+import sys
+import shlex
 import unittest
 from pathlib import Path
 
@@ -35,10 +37,12 @@ class BootstrapOnpremTests(unittest.TestCase):
                           'AXIOM_STORAGE_ACCESS_KEY_ID:', 'AXIOM_STORAGE_SECRET_ACCESS_KEY:'):
             self.assertNotIn(forbidden, recovery)
 
-    def run_bootstrap(self, fail=''):
+    def run_bootstrap(self, fail='', *, quoted_root=False):
         with tempfile.TemporaryDirectory(prefix='axiom-onprem-bootstrap-') as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
+            (root / 'scripts/lib').mkdir()
+            shutil.copyfile(ROOT / 'scripts/lib/ops-env-parse.py', root / 'scripts/lib/ops-env-parse.py')
             (root / 'bin').mkdir()
             env_dir = root / 'infra/docker/environments'
             env_dir.mkdir(parents=True)
@@ -46,8 +50,10 @@ class BootstrapOnpremTests(unittest.TestCase):
             (root / 'infra/supabase').mkdir()
             (root / 'infra/supabase/bootstrap-selfhosted.sql').write_text('select 1;\n')
             shutil.copyfile(ROOT / 'scripts/bootstrap-onprem.sh', root / 'scripts/bootstrap-onprem.sh')
+            root_value = '"synthetic-public-root\\nonly"' if quoted_root else 'synthetic-public-root\\nonly'
             (env_dir / '.env.onprem').write_text(
                 'AXIOM_OFFLINE_LICENSE=v1.synthetic.token\n'
+                f'AXIOM_LICENSE_ROOT_PUBLIC_KEY={root_value}\n'
                 'POSTGRES_PASSWORD=synthetic-password\n'
                 'APPROVAL_SIGNING_KEY=synthetic-signing-key-with-at-least-32-bytes\n'
             )
@@ -60,7 +66,7 @@ case "${0##*/} $*" in
   "docker compose "*" logs --no-color supabase-auth") echo 'GoTrue API started'; exit 0 ;;
   "docker compose "*" run --rm --no-deps minio-init") [ "$STUB_FAIL" != worm ]; exit $? ;;
   "docker compose "*" run --rm --no-deps --entrypoint /app/node_modules/.bin/tsx bff "*) [ "$STUB_FAIL" != controls ]; exit $? ;;
-  "pnpm tsx scripts/verify-license.ts") [ "$STUB_FAIL" != license ]; exit $? ;;
+  "pnpm tsx scripts/verify-license.ts") [ "$AXIOM_LICENSE_ROOT_PUBLIC_KEY" = 'synthetic-public-root\\nonly' ] || exit 2; [ "$STUB_FAIL" != license ]; exit $? ;;
   "python3 scripts/migrate-database.py "*) [ "$STUB_FAIL" != migration ]; exit $? ;;
   "python3 scripts/onprem-preflight.py "*) [ "$STUB_FAIL" != preflight ]; exit $? ;;
   "python3 scripts/provision-reconciliation-key.py "*) [ "$STUB_FAIL" != reconciliation ]; exit $? ;;
@@ -69,7 +75,7 @@ exit 0
 '''
             for name in ('docker', 'pnpm', 'python3', 'node', 'psql'):
                 executable = root / 'bin' / name
-                executable.write_text(stub)
+                executable.write_text(stub if name != 'python3' else '#!/bin/sh\nif [ \"$1\" = - ]; then exec ' + shlex.quote(str(Path(sys.executable))) + ' \"$@\"; fi\n' + stub.split('\n', 1)[1])
                 executable.chmod(0o700)
             log = root / 'calls.log'
             env = {'PATH': f"{root / 'bin'}:/usr/bin:/bin", 'STUB_LOG': str(log), 'STUB_FAIL': fail}
@@ -91,6 +97,11 @@ exit 0
         self.assertLess(reconcile, next(i for i, c in enumerate(calls) if '/app/node_modules/.bin/tsx bff' in c))
         self.assertLess(next(i for i, c in enumerate(calls) if 'minio-init' in c),
                         next(i for i, c in enumerate(calls) if 'up -d --no-deps agent-runtime bff' in c))
+
+    def test_quoted_root_retains_literal_pem_newline_escapes(self):
+        result, calls = self.run_bootstrap(quoted_root=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any('verify-license.ts' in call for call in calls))
 
     def test_fail_closed_stages(self):
         for stage in ('preflight', 'license', 'migration', 'reconciliation', 'controls', 'worm', 'existing_volume', 'existing_container'):

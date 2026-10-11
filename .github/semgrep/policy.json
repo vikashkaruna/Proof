@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "upstreamRepository": "https://github.com/semgrep/semgrep-rules",
+  "upstreamCommit": "9bbf021d0acffa3095fcffd17b2bc7787eb4796d",
+  "scannerVersion": "1.180.0",
+  "purpose": "Mandatory community security baseline on every internal CI run; source rules are downloaded and hash-verified into an ignored ephemeral cache, never redistributed. Additional managed policy runs only when configured; no equivalence to unavailable platform rules is claimed. All reviewed rule severities block.",
+  "licenseSha256": "1a6466ae5f1c68631bbd13e3f1aa8f380d84219853c08f0456b853fccfacee1d",
+  "rules": {
+    "python/lang/security/audit/eval-detected.yaml": "4a7d2769392c93fecb74a76b313b36b499c0ca22b42966d48f174761d85a5eec",
+    "python/lang/security/audit/exec-detected.yaml": "4f104a4f848ec09d02ec1317458572a6f581aba21bc884f2ea07503a1478095f",
+    "python/lang/security/audit/subprocess-shell-true.yaml": "753ba9d29d592b3d7f5086e671e424ee05138acbf75a39b663d92aa3275f5380",
+    "javascript/lang/security/detect-child-process.yaml": "baee696b05b3c38fa5a82435ae458026ec81ce9a6e6a73116d68dc963496296c",
+    "javascript/browser/security/eval-detected.yaml": "356589363d16cda8bd2ca1d296ce2b6953105ee4c751ddbbc9bcde5849341811",
+    "problem-based-packs/insecure-transport/js-node/bypass-tls-verification.yaml": "e8d786626fb286aecbd7065ca1ab935bb608f5b4ee0668931ff64df58bdfcf45",
+    "generic/secrets/security/detected-private-key.yaml": "2a383aee580eea3d200345007789c836daf1a48ff2676748d79a369bfc1e5c21",
+    "generic/secrets/security/detected-aws-access-key-id-value.yaml": "9a262ef0b568a6b3e8c6156c0e6b1054ddd57ac0abea71bf9cff8d8c09a5e2f4"
+  }
+}

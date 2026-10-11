@@ -16,11 +16,14 @@ class SyncPermissionsTests(unittest.TestCase):
     def run_sync(self, action, mode='exists', rotation=False):
         with tempfile.TemporaryDirectory(prefix='axiom-sync-test-') as directory:
             root = Path(directory)
-            (root / 'scripts').mkdir()
+            (root / 'scripts/lib').mkdir(parents=True)
+            for name in ('ops-env.sh', 'ops-env-parse.py'):
+                shutil.copyfile(ROOT / 'scripts/lib' / name, root / 'scripts/lib' / name)
             (root / 'bin').mkdir()
             shutil.copyfile(ROOT / 'scripts/sync-env.sh', root / 'scripts/sync-env.sh')
             config = root / 'infra/docker/environments'
             config.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'infra/docker/environments/.env.preprod.example', config / '.env.preprod.example')
             (config / '.env.preprod').write_text(
                 'AXIOM_PROJECT_ID=axiom-sync-fixture\nAXIOM_REGION=asia-south1\n'
                 'RESEND_FROM_EMAIL=sender@test.invalid\nCONTACT_RECIPIENT_EMAIL=receiver@test.invalid\n'

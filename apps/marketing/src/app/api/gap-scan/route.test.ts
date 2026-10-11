@@ -7,14 +7,20 @@ vi.mock('next/headers', () => ({ cookies: async () => cookieJar }));
 import { POST } from './route';
 
 const token = 'a'.repeat(64);
+const originalEnvironment = process.env.ENVIRONMENT;
 const request = (body: unknown, url = 'https://axiomproof.ai/api/gap-scan') =>
   new Request(url, { method: 'POST', body: JSON.stringify(body) });
 
 beforeEach(() => {
   backend.mockReset();
   cookieJar.get.mockReset();
+  delete process.env.ENVIRONMENT;
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  if (originalEnvironment === undefined) delete process.env.ENVIRONMENT;
+  else process.env.ENVIRONMENT = originalEnvironment;
+  vi.restoreAllMocks();
+});
 
 it('rejects invalid submissions before calling the BFF', async () => {
   const response = await POST(request({ sessionId: 'x', answers: {} }));
@@ -23,7 +29,9 @@ it('rejects invalid submissions before calling the BFF', async () => {
 });
 
 it('relays a valid scan, strips the ownership token, and sets an HttpOnly secure cookie', async () => {
-  cookieJar.get.mockReturnValue({ value: token });
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: `gap-scan.${token}` } : undefined,
+  );
   backend.mockResolvedValue(
     Response.json({ id: 'report-id', accessToken: token }, { status: 201 }),
   );
@@ -47,8 +55,52 @@ it('relays a valid scan, strips the ownership token, and sets an HttpOnly secure
   );
   expect(response.headers.get('set-cookie')).toContain('HttpOnly');
   expect(response.headers.get('set-cookie')).toContain('Secure');
+  expect(response.headers.get('set-cookie')).toContain('__session=gap-scan.');
+  expect(response.headers.get('set-cookie')).toContain('SameSite=lax');
+  expect(response.headers.get('set-cookie')).toContain('Path=/');
+  expect(response.headers.get('set-cookie')).not.toContain('Domain=');
   expect(response.headers.get('set-cookie')).not.toContain('report-id');
   expect(response.headers.get('cache-control')).toBe('private, no-store');
+});
+
+it('does not forward a product session as gap-scan ownership', async () => {
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: token } : undefined,
+  );
+  backend.mockResolvedValue(
+    Response.json({ id: 'report-id', accessToken: token }, { status: 201 }),
+  );
+  const response = await POST(request({ sessionId: 'session-123', answers: {} }));
+  expect(response.status).toBe(201);
+  const init = backend.mock.calls[0]?.[1] as RequestInit;
+  expect(init.headers).not.toHaveProperty('X-Gap-Scan-Access');
+});
+
+it.each(['preprod', 'production'])(
+  'sets Secure in %s even when the internal Cloud Run request is HTTP',
+  async (environment) => {
+    process.env.ENVIRONMENT = environment;
+    backend.mockResolvedValue(
+      Response.json({ id: 'report-id', accessToken: token }, { status: 201 }),
+    );
+    const response = await POST(
+      request({ sessionId: 'session-123', answers: {} }, 'http://internal/api/gap-scan'),
+    );
+    expect(response.headers.get('set-cookie')).toContain('Secure');
+    expect(response.headers.get('set-cookie')).toContain('__session=gap-scan.');
+  },
+);
+
+it('allows a host-only HTTP cookie during local development', async () => {
+  process.env.ENVIRONMENT = 'local';
+  backend.mockResolvedValue(
+    Response.json({ id: 'report-id', accessToken: token }, { status: 201 }),
+  );
+  const response = await POST(
+    request({ sessionId: 'session-123', answers: {} }, 'http://localhost:3000/api/gap-scan'),
+  );
+  expect(response.headers.get('set-cookie')).not.toContain('Secure');
+  expect(response.headers.get('set-cookie')).not.toContain('Domain=');
 });
 
 it('fails closed when a successful backend response lacks a valid ownership token', async () => {
@@ -58,6 +110,7 @@ it('fails closed when a successful backend response lacks a valid ownership toke
   const response = await POST(request({ sessionId: 'session-123', answers: {} }));
   expect(response.status).toBe(503);
   expect(response.headers.get('set-cookie')).toBeNull();
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
 });
 
 it('preserves BFF rate limits without setting a cookie', async () => {

@@ -1,11 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { generateKeyPairSync } from 'node:crypto';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { mintOfflineLicense, type OfflineLicensePayload } from '@axiom/config';
 
-const AXIOM_TEST_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIM+Xo6dK7vqEwOeJ8a19E9qrLHsyqXCiAVJwJ7WpMsxg
------END PRIVATE KEY-----`;
+const TEST_AUTHORITY = generateKeyPairSync('ed25519', {
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+const BURNED_PUBLIC_TEST_KEY =
+  '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAjKalzxmYgARg00u6yaVSMF/2b1Q7BtNN8HMPR3XhIAc=\n-----END PUBLIC KEY-----\n';
+const BURNED_EXPIRED_REGRESSION_TOKEN =
+  'v1.eyJsaWNlbnNlSWQiOiJFWFBJUkVELUNPTVBST01JU0VELVJPT1QtUkVHUkVTU0lPTiIsImxpY2Vuc2VlIjoiU3ludGhldGljIHNlY3VyaXR5IHJlZ3Jlc3Npb24iLCJlbnZpcm9ubWVudCI6Im9ucHJlbSIsInRpZXIiOiJjb21tdW5pdHkiLCJpc3N1ZWRBdCI6IjE5OTktMDEtMDFUMDA6MDA6MDAuMDAwWiIsImV4cGlyZXNBdCI6IjIwMDAtMDEtMDFUMDA6MDA6MDAuMDAwWiIsIm1heFRlbmFudHMiOjEsIm1heE5vZGVzIjoxLCJmZWF0dXJlcyI6W119.W4C8MbFN3_B-m4WWxBNVjqABQ0JWEYxRW8Xyrz8Rj6QJN8MeJehYUFosaYh6gosu6hq52eGYvQy2-SWA4S-dDg';
 
 interface SovereignLicenseResponse {
   status: string;
@@ -22,6 +28,11 @@ interface SovereignLicenseResponse {
 }
 
 describe('Sovereign License BFF Route', () => {
+  beforeEach(() => {
+    vi.stubEnv('AXIOM_LICENSE_ROOT_PUBLIC_KEY', '');
+    vi.stubEnv('AXIOM_OFFLINE_LICENSE', '');
+  });
+  afterEach(() => vi.unstubAllEnvs());
   it('returns cloud-managed status in non-onprem environments', async () => {
     const app = new Hono();
     app.route('/', sovereignLicenseRoutes({ env: 'production' }));
@@ -60,6 +71,25 @@ describe('Sovereign License BFF Route', () => {
     expect(body.licensed).toBe(false);
   });
 
+  it.each([
+    { label: 'absent', key: '' },
+    { label: 'malformed', key: 'not a key' },
+    { label: 'revoked', key: BURNED_PUBLIC_TEST_KEY },
+  ])('fails closed for $label trust', async ({ key: publicKeyPem }) => {
+    const app = new Hono();
+    app.route(
+      '/',
+      sovereignLicenseRoutes({
+        env: 'onprem',
+        licenseToken: BURNED_EXPIRED_REGRESSION_TOKEN,
+        publicKeyPem,
+      }),
+    );
+    const response = await app.request('/system/license');
+    expect(response.status).toBe(403);
+    expect(((await response.json()) as SovereignLicenseResponse).licensed).toBe(false);
+  });
+
   it('returns 200 with full license metadata for verified sovereign token', async () => {
     const payload: OfflineLicensePayload = {
       licenseId: 'LIC-2026-TEST-SOVEREIGN',
@@ -73,10 +103,17 @@ describe('Sovereign License BFF Route', () => {
       features: ['evidence_vault_worm', 'offline_llm', 'airgapped_mfa'],
     };
 
-    const token = mintOfflineLicense(payload, AXIOM_TEST_PRIVATE_KEY);
+    const token = mintOfflineLicense(payload, TEST_AUTHORITY.privateKey);
 
     const app = new Hono();
-    app.route('/', sovereignLicenseRoutes({ env: 'onprem', licenseToken: token }));
+    app.route(
+      '/',
+      sovereignLicenseRoutes({
+        env: 'onprem',
+        licenseToken: token,
+        publicKeyPem: TEST_AUTHORITY.publicKey,
+      }),
+    );
 
     const res = await app.request('/system/license');
     expect(res.status).toBe(200);

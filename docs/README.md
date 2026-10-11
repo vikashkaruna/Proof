@@ -22,7 +22,8 @@ documents live, what may enter Git, and how files are named.
 2. `.husky/pre-commit` runs `scripts/guard-private-docs.sh --staged`: blocks
    private paths, secret-bearing file names, secret-looking text in added
    documentation lines, shared docs without the marker, and (for
-   private-zone files that are somehow tracked) naming violations.
+   private-zone files that are somehow tracked) naming violations. Rejections report the rule and file; matching
+   source lines and credential values are never echoed.
 3. `scripts/check-private-docs.sh` (CI job "Maintenance regressions and ignored
    documentation") fails when any private path is tracked or the ignore rules
    are missing, without reading document prose.

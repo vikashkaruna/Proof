@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 
-import { marketingUrl } from '../target';
+import { acceptanceTarget, marketingUrl } from '../target';
 
 test.describe('Public gap-scan funnel', () => {
   test('the marketing site loads with the gap-scan CTA', async ({ page }) => {
@@ -109,8 +109,17 @@ test('a complete gap-scan submission persists and refuses another browser', asyn
   await expect(
     page.getByRole('heading', { name: 'Your DPDPA Readiness Report', exact: true }),
   ).toBeVisible();
-  const cookie = (await page.context().cookies()).find((c) => c.name === 'gap_scan_access');
+  const cookie = (await page.context().cookies()).find((c) => c.name === '__session');
+  expect(Boolean(cookie && /^gap-scan\.[a-f0-9]{64}$/.test(cookie.value))).toBe(true);
   expect(cookie?.httpOnly).toBe(true);
+  expect(cookie?.path).toBe('/');
+  expect(cookie?.sameSite).toBe('Lax');
+  const secureExpected =
+    new URL(marketingUrl).protocol === 'https:' ||
+    ['preprod', 'staging', 'production'].includes(acceptanceTarget?.environment ?? 'local');
+  expect(cookie?.secure).toBe(secureExpected);
+  expect(cookie?.expires ?? 0).toBeGreaterThan(Date.now() / 1000);
+  expect(cookie?.expires ?? 0).toBeLessThanOrEqual(Date.now() / 1000 + 7 * 24 * 60 * 60 + 60);
   const outsider = await browser.newContext();
   try {
     const other = await outsider.newPage();
@@ -122,9 +131,17 @@ test('a complete gap-scan submission persists and refuses another browser', asyn
   } finally {
     await outsider.close();
   }
-  const owner = await page.request.post(`${marketingUrl}/api/gap-scan/send-email`, {
-    data: { id: body.id, email: 'owner@example.invalid' },
-  });
-  expect(owner.status()).toBe(503);
-  expect((await owner.json()).error.code).toBe('delivery_unavailable');
+  // Use the browser's cookie policy, including Secure cookies on loopback HTTP.
+  const owner = await page.evaluate(async (id: string) => {
+    const response = await fetch('/api/gap-scan/send-email', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, email: 'owner@example.invalid' }),
+    });
+    const payload = await response.json();
+    return { status: response.status, errorCode: payload.error?.code };
+  }, body.id);
+  expect(owner.status).toBe(503);
+  expect(owner.errorCode).toBe('delivery_unavailable');
 });

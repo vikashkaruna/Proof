@@ -1,3 +1,4 @@
+import { ownedSyntheticPlanRoutes, type OwnedSyntheticRouteDeps } from './owned-synthetic-plans.js';
 import { stagedEvidenceRoutes, type StagedEvidenceRoutesDeps } from './staged-evidence.js';
 import { reviewedWorkflowDraftRoutes } from './reviewed-workflow-drafts.js';
 import { sudhaarReviewAdoptionRoutes } from './sudhaar-review-adoption.js';
@@ -205,6 +206,8 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  licensePublicKeyPem?: string;
+  ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   approvalEngine: ApprovalEngine;
@@ -216,6 +219,8 @@ interface Deps {
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
+  // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
+  app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
   // Specific staged options must precede the legacy /evidence/:id route.
@@ -273,7 +278,7 @@ export function v1Routes(deps: Deps) {
     }),
   );
   app.route('/', policyPreviewRoutes());
-  app.route('/', sovereignLicenseRoutes());
+  app.route('/', sovereignLicenseRoutes({ publicKeyPem: deps.licensePublicKeyPem }));
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //

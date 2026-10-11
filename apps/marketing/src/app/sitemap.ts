@@ -1,10 +1,10 @@
 import type { MetadataRoute } from 'next';
-import { BRAND } from '@axiom/config';
+import { marketingOrigin } from '@/lib/public-urls';
 
 export const dynamic = 'force-static';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = `https://${BRAND.primaryDomain}`;
+  const base = marketingOrigin();
   return [
     { url: `${base}/`, changeFrequency: 'weekly', priority: 1 },
     { url: `${base}/about`, changeFrequency: 'monthly', priority: 0.7 },

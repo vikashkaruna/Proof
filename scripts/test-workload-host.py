@@ -13,12 +13,13 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+from lib.ci_fixture_images import fixture_image
 
 from lib.spire_deployment import VERSION
 from lib.spire_host_bundle import prepare
 
 ROOT=Path(__file__).resolve().parents[1]
-UBUNTU='ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3'
+UBUNTU= fixture_image('ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3')
 OUT=ROOT/'.axiom-runtime/workload-host'
 DOCKER=shutil.which('docker')
 VERIFY='''import hashlib,json,os,subprocess,sys

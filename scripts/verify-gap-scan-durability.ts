@@ -29,8 +29,39 @@ async function main() {
     assert.equal(res.status, 201);
     const body = (await res.json()) as { id: string; accessToken?: string };
     assert(!body.accessToken, 'Browser JSON must not contain ownership proof');
-    const proof = /gap_scan_access=([a-f0-9]{64})/.exec(res.headers.get('set-cookie') ?? '')?.[1];
-    assert(proof);
+    const sessionCookies = res.headers
+      .getSetCookie()
+      .filter((line) => line.startsWith('__session='));
+    assert(sessionCookies.length === 1, 'Exactly one marked report session cookie required');
+    const fields = sessionCookies[0]!.split(';').map((field) => field.trim());
+    const proof = /^__session=gap-scan\.([a-f0-9]{64})$/.exec(fields[0]!)?.[1];
+    assert(proof, 'Marked report session ownership proof required');
+    const attributes = new Map(
+      fields.slice(1).map((field) => {
+        const separator = field.indexOf('=');
+        return separator < 0
+          ? [field.toLowerCase(), '']
+          : [field.slice(0, separator).toLowerCase(), field.slice(separator + 1)];
+      }),
+    );
+    assert(attributes.has('httponly'), 'Ownership cookie must be HttpOnly');
+    assert(attributes.get('path') === '/', 'Ownership cookie requires host root path');
+    assert(
+      attributes.get('samesite')?.toLowerCase() === 'lax',
+      'Ownership cookie requires SameSite Lax',
+    );
+    assert(
+      attributes.get('max-age') === String(7 * 24 * 60 * 60),
+      'Bounded ownership cookie lifetime required',
+    );
+    assert(!attributes.has('domain'), 'Ownership cookie must remain host-only');
+    const secureExpected =
+      new URL(target.marketingUrl).protocol === 'https:' ||
+      ['preprod', 'staging', 'production'].includes(target.environment);
+    assert(
+      attributes.has('secure') === secureExpected,
+      'Ownership cookie transport security differs',
+    );
     await mkdir(dirname(stateFile), { recursive: true, mode: 0o700 });
     await writeFile(
       stateFile,
@@ -58,7 +89,7 @@ async function main() {
     assert.equal(stored.revision, target.expectedRevision);
     assert.equal(stored.marketingUrl, target.marketingUrl);
     const path = `/gap-scan/report/${stored.id}`;
-    const owner = await get(path, { headers: { cookie: `gap_scan_access=${stored.proof}` } });
+    const owner = await get(path, { headers: { cookie: `__session=gap-scan.${stored.proof}` } });
     assert.equal(owner.status, 200);
     assert((await owner.text()).includes(stored.id));
     assert.equal((await get(path)).status, 404);

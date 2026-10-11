@@ -116,14 +116,13 @@ if [ "$ENV_NAME" = all ]; then
   exit 0
 fi
 
-# Never reads a value that is already in the process environment from the file
-# (see ops_load_env_file), so a one-off override on the command line wins.
+# The selected environment file is authoritative; inherited configuration cannot override it.
 ENV_FILE=""
 load_env() {
   ENV_FILE="$(ops_find_env_file "$ENV_NAME" "$ENV_ROOT")" \
     || die "no env file for '$ENV_NAME'. Create it from the template:  cp infra/docker/environments/.env.${ENV_NAME}.example infra/docker/environments/.env.${ENV_NAME}  and fill it in."
   AXIOM_ENV_FILE="$ENV_FILE"; export AXIOM_ENV_FILE
-  ops_load_env_file "$ENV_FILE"
+  ops_load_env_file "$ENV_FILE" "$REPO_ROOT" || die "invalid environment file"
   # A file whose ENVIRONMENT disagrees with its name would drive cloud tooling
   # at the wrong tier (a `.env.staging` that says production).
   if [ "$ENV_NAME" != local ] && [ -n "${ENVIRONMENT:-}" ] && [ "$ENVIRONMENT" != "$ENV_NAME" ]; then
@@ -217,6 +216,13 @@ cmd_build() {
   load_env
   if [ "$ENV_NAME" = preprod ]; then
     gcp_params; require_clean_tree
+    if [ "${AXIOM_DEPLOYMENT_PROFILE:-}" = marketing ]; then
+      local marketing_args=(--env-file "$ENV_FILE")
+      [ "$DRY_RUN" = true ] && marketing_args+=(--dry-run)
+      [ "$DRY_RUN" = true ] || confirm "Build and push the marketing acceptance profile to project ${PROJECT_ID}?"
+      bash ./scripts/build-marketing-preprod.sh "${marketing_args[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+      return
+    fi
     local sha; sha="$(git rev-parse HEAD)"
     echo "Builds the nine images from ${sha} and PUSHES them to ${REGION}-docker.pkg.dev/${PROJECT_ID}."
     [ "$DRY_RUN" = true ] && { echo "[dry-run] would run build-preprod-images.sh ${PROJECT_ID} ${REGION} release-${sha}"; return 0; }
@@ -234,6 +240,12 @@ cmd_deploy() {
   load_env
   if [ "$ENV_NAME" = preprod ]; then
     gcp_params; require_clean_tree
+    if [ "${AXIOM_DEPLOYMENT_PROFILE:-}" = marketing ]; then
+      local marketing_args=(--env-file "$ENV_FILE")
+      [ "$DRY_RUN" = true ] && marketing_args+=(--dry-run)
+      python3 ./scripts/deploy-marketing-preprod.py "${marketing_args[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+      return
+    fi
     local sha; sha="$(git rev-parse HEAD)"
     export AXIOM_RELEASE_SHA="$sha"
     local args=(--env-file "$ENV_FILE")

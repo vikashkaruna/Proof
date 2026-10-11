@@ -25,6 +25,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
+      # No daemon registry mirror in the Supabase CLI jobs: since it was added
+      # (a3d58338) `supabase start` failed on every run, rolling back postgres
+      # ~1s after create; without it the same start passed (b37091fe).
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -49,6 +52,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -67,6 +71,8 @@ jobs:
           fi
 
   evidence-storage:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Exact-version evidence storage and human ingestion (W8)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -93,6 +99,7 @@ jobs:
       - run: ./scripts/start-parity-supabase.sh
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: python3 scripts/test-evidence-storage.py --browser
@@ -117,11 +124,15 @@ jobs:
           fi
 
   workload-identity:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Isolated SPIRE workload identity (W4.3)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -148,11 +159,15 @@ jobs:
           retention-days: 14
 
   workload-host:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Protected SPIRE host and native restart (W4.3)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - run: /usr/bin/python3 scripts/test-workload-host.py
       - name: Disposable native systemd and loop-device fixture
         run: sudo -E /usr/bin/python3 scripts/test-workload-host-systemd.py --isolated-ci
@@ -167,11 +182,15 @@ jobs:
           retention-days: 14
 
   workload-runner-host:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Native SPIRE runner and observer lifecycle (W4.3)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - run: /usr/bin/python3 scripts/test-workload-host.py
       - name: Disposable runner systemd and loop-device fixture
         run: sudo -E /usr/bin/python3 scripts/test-workload-runner-systemd.py --isolated-ci
@@ -184,10 +203,18 @@ jobs:
           retention-days: 14
 
   database-security:
+    env:
+      AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
     name: Fresh migrations and direct-client RLS
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
+      - run: |
+          python3 -m unittest discover -s .github/ci -p 'test_configure_docker_mirror.py'
+          python3 -m unittest discover -s .github/ci -p 'test_fixture_images.py'
+          python3 -m unittest discover -s .github/ci -p 'test_supabase_startup.py'
       - run: ./scripts/test-database.sh
       - run: bash tests/scripts/test-backup-restore.sh
       - run: bash tests/scripts/test-dev-docker-lifecycle.sh
@@ -195,6 +222,8 @@ jobs:
       - run: python3 -m unittest discover -s tests/scripts -p 'test_*.py'
 
   strict-auth-parity:
+    env:
+      AXIOM_CI_DOCKER_MIRROR: '1'
     name: Real Auth/PostgREST strict topology parity
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -221,6 +250,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -298,6 +328,7 @@ jobs:
         # keep the pinned image tags and every health/acceptance check intact.
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
+          AXIOM_PARITY_STARTUP_DEBUG: '1'
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - run: pnpm --filter @axiom/e2e exec playwright test
@@ -343,7 +374,14 @@ jobs:
       - run: ./scripts/check-tfvars-coverage.sh
       - run: python3 scripts/check-cloudrun-auth-wiring.py
       - run: python3 scripts/check-cloudrun-iam.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install pytest==8.4.2 PyYAML==6.0.3
       - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
+      - name: Marketing profile and environment authority regressions
+        run: python3 -m pytest -q tests/deployment services/marketing-lifecycle/tests
+
       # Every surface that runs the BFF must be able to carry BOTH halves of
       # the MFA key ring. Rotation landed with the retiring list wired into
       # the Compose files only, so Cloud Run and Helm could start the BFF with
@@ -399,6 +437,9 @@ jobs:
 
       - name: Offline Terraform runtime IAM and MFA rotation tests
         run: terraform -chdir=infra/terraform/envs/preprod test -no-color
+
+      - name: Offline marketing acceptance profile tests
+        run: terraform -chdir=infra/terraform/envs/marketing-preprod test -no-color
 
       - name: Offline private issuer and runner boundary tests
         run: |
@@ -505,6 +546,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -515,6 +558,11 @@ jobs:
       # The BFF-shaped supabase-js probe resolves the client from services/bff.
       - run: pnpm install --frozen-lockfile --filter @axiom/bff...
       - run: ./tests/deployment/selfhosted-supabase.sh
+        env:
+          AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
+          AXIOM_TEST_GOTRUE_IMAGE: mirror.gcr.io/supabase/gotrue:v2.169.0@sha256:92f58a6c7f3fd99575347a0eb0849326a88c25efae6413c140b31261e518f91e
+          AXIOM_TEST_POSTGREST_IMAGE: mirror.gcr.io/postgrest/postgrest:v12.2.8@sha256:e5978740a590628f2114730bb942f35342ea70b8b7a86697a3df283c0caea109
+          AXIOM_TEST_INGRESS_IMAGE: mirror.gcr.io/library/nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 
   # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
   # The library's total is derived from the controls array. Six other
@@ -613,7 +661,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       postgres:
-        image: postgres:16-alpine
+        image: mirror.gcr.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: w46-ci-only
         ports: ['5432:5432']
@@ -638,7 +686,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       postgres:
-        image: postgres:16-alpine
+        image: mirror.gcr.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: w9-ci-only
           POSTGRES_DB: axiom_w9_probe
@@ -680,7 +728,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       mysql:
-        image: mysql:8
+        image: mirror.gcr.io/library/mysql:8@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
         env:
           MYSQL_ROOT_PASSWORD: w46-ci-only
         ports: ['3306:3306']
@@ -816,10 +864,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
       - uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -830,7 +884,7 @@ jobs:
           IMAGE_TAG=${{ github.sha }}
           OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           for component in web marketing bff agent-runtime model-gateway temporal-worker; do
-            docker build -f infra/docker/Dockerfile.${component} \
+            docker buildx build --load -f infra/docker/Dockerfile.${component} \
               -t ghcr.io/${OWNER_LC}/axiom-${component}:${IMAGE_TAG} \
               .
             docker push ghcr.io/${OWNER_LC}/axiom-${component}:${IMAGE_TAG}

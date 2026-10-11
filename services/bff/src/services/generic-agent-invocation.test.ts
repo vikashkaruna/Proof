@@ -991,3 +991,191 @@ it('already prepared staged source never redispatches after lost response', asyn
   expect(f.fetchImpl).not.toHaveBeenCalled();
   expect(f.rpc).not.toHaveBeenCalled();
 });
+
+function sanketContext() {
+  return {
+    ...context(),
+    agent: 'sanket',
+    input: {
+      schema_version: 1,
+      tenant_id: TENANT,
+      engagement_id: ENGAGEMENT,
+      correlation_id: CORRELATION,
+      sectors: ['BFSI', 'Healthcare', 'SaaS / Tech'],
+      geo: 'India',
+      since: null,
+      source: {
+        check_id: FOREIGN,
+        capture_actor_id: ACTOR,
+        capture_correlation_id: CORRELATION,
+        capture_receipt: '10',
+        result_sha256: 'a'.repeat(64),
+        requested_url: 'https://axiomminds.ai/',
+        final_url: 'https://axiomminds.ai/',
+        checked_at: '2026-10-08T07:41:58.139Z',
+        content_sha256: 'b'.repeat(64),
+        byte_size: 170,
+        title: 'Synthetic public source',
+        headings: ['Synthetic bounded heading'],
+      },
+    },
+  };
+}
+it.each([
+  'missing',
+  'agent',
+  'tenant',
+  'engagement',
+  'correlation',
+  'source',
+  'public',
+  'reviewed',
+  'staged',
+  'sudhaar',
+  'capture',
+  'validator',
+])('refuses retained Sanket %s before writer or peer action', async (change) => {
+  const f = fixture(),
+    c = sanketContext(),
+    start = vi.fn(),
+    settleSuccess = vi.fn();
+  const deps: GenericAgentInvocationDeps = {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess },
+    validateOutput: vi.fn(),
+  };
+  if (change === 'missing') Object.assign(deps, { retainedSanket: undefined });
+  if (change === 'agent') c.agent = 'nazar';
+  if (change === 'tenant') c.input.tenant_id = FOREIGN;
+  if (change === 'engagement') c.input.engagement_id = FOREIGN;
+  if (change === 'correlation') c.input.correlation_id = FOREIGN;
+  if (change === 'source') c.input.source.capture_receipt = '9999999999999999999';
+  if (change === 'public') Object.assign(deps, { prepareDispatch: vi.fn() });
+  if (change === 'reviewed') Object.assign(deps, { reviewedWorkflow: { start, settleSuccess } });
+  if (change === 'staged') Object.assign(deps, { stagedEvidence: { start, settleSuccess } });
+  if (change === 'sudhaar') Object.assign(deps, { sudhaarDispatch: vi.fn() });
+  if (change === 'capture') Object.assign(deps, { settleSudhaarSuccess: vi.fn() });
+  if (change === 'validator') Object.assign(deps, { validateOutput: undefined });
+  expect((await invokeGenericAgent(c, deps)).status).toBe(403);
+  expect(f.writerFactory).not.toHaveBeenCalled();
+  expect(start).not.toHaveBeenCalled();
+  expect(settleSuccess).not.toHaveBeenCalled();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+});
+it('dedicated retained Sanket sends only lookup IDs and uses atomic source output settlement', async () => {
+  const f = fixture(),
+    c = sanketContext();
+  const start = vi.fn(async () => ({ run_id: RUN, created: true, status: 'running' }));
+  const settleSuccess = vi.fn(async () => ({ run_id: RUN, status: 'succeeded', replayed: false }));
+  const validateOutput = vi.fn();
+  f.fetchImpl.mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify(
+          runtimeResult({ body: '{}' }, { agent: 'sanket', correlation_id: CORRELATION }),
+        ),
+      ),
+  );
+  const result = await invokeGenericAgent(c, {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess },
+    validateOutput,
+  });
+  expect(result.status).toBe(200);
+  expect(f.rpc).not.toHaveBeenCalled();
+  expect(start).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      tenantId: TENANT,
+      actorId: ACTOR,
+      engagementId: ENGAGEMENT,
+      correlationId: CORRELATION,
+      canonicalInput: canonicalJson(c.input),
+      requestHash: await sha256(canonicalJson(c.input)),
+    }),
+  );
+  const [url, init] = f.fetchImpl.mock.calls[0]!;
+  expect(url).toBe('http://runtime.invalid/retained-public-sources/agents/sanket/invoke');
+  expect(JSON.parse(String(init?.body))).toEqual({
+    tenant_id: TENANT,
+    run_id: RUN,
+    operation_key: CORRELATION,
+  });
+  expect(validateOutput).toHaveBeenCalledOnce();
+  expect(settleSuccess).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      runId: RUN,
+      canonicalInput: canonicalJson(c.input),
+      canonicalOutput: canonicalJson({ inventory: [], normalized: { a: 1, z: 2 } }),
+    }),
+  );
+});
+it('existing retained Sanket request never redispatches or falls back to generic start', async () => {
+  const f = fixture(),
+    start = vi.fn(async () => ({ run_id: RUN, created: false, status: 'running' }));
+  const result = await invokeGenericAgent(sanketContext(), {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess: vi.fn() },
+    validateOutput: vi.fn(),
+  });
+  expect(result.status).toBe(409);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(f.rpc).not.toHaveBeenCalled();
+});
+it('lost retained Sanket settlement stays unconfirmed without generic finish or retry', async () => {
+  const f = fixture();
+  const start = vi.fn(async () => ({ run_id: RUN, created: true, status: 'running' }));
+  const settleSuccess = vi.fn(async () => {
+    throw new Error('private-source-sentinel');
+  });
+  f.fetchImpl.mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify(
+          runtimeResult({ body: '{}' }, { agent: 'sanket', correlation_id: CORRELATION }),
+        ),
+      ),
+  );
+  const result = await invokeGenericAgent(sanketContext(), {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess },
+    validateOutput: vi.fn(),
+  });
+  expect(result.status).toBe(503);
+  expect(f.rpc).not.toHaveBeenCalled();
+  expect(settleSuccess).toHaveBeenCalledOnce();
+  expect(f.fetchImpl).toHaveBeenCalledOnce();
+  expect(JSON.stringify(result)).not.toContain('private-source-sentinel');
+  expect(f.broadcast.mock.calls.filter(([event]) => event.type === 'agent.completed')).toHaveLength(
+    0,
+  );
+});
+it('awaits async retained output validation before atomic success settlement', async () => {
+  const f = fixture();
+  f.db.onRpc('record_generic_agent_run_finish', () => ({
+    run_id: RUN,
+    status: 'failed',
+    replayed: false,
+  }));
+  const start = vi.fn(async () => ({ run_id: RUN, created: true, status: 'running' }));
+  const settleSuccess = vi.fn();
+  f.fetchImpl.mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify(
+          runtimeResult({ body: '{}' }, { agent: 'sanket', correlation_id: CORRELATION }),
+        ),
+      ),
+  );
+  const result = await invokeGenericAgent(sanketContext(), {
+    ...f.deps,
+    retainedSanket: { start, settleSuccess },
+    validateOutput: async () => {
+      await Promise.resolve();
+      throw new Error('private-output-invalid');
+    },
+  });
+  expect(result.status).toBe(502);
+  expect(settleSuccess).not.toHaveBeenCalled();
+  expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['record_generic_agent_run_finish']);
+  expect(JSON.stringify(result)).not.toContain('private-output-invalid');
+});

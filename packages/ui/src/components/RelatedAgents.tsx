@@ -11,7 +11,7 @@ export interface RelatedAgentsProps {
 }
 
 /**
- * The agents that work on a module. Names and personas only: this strip states which
+ * The agents that work on a module. Names and icons only: this strip states which
  * agents are involved, never whether they are online, running or healthy.
  */
 export function RelatedAgents({
@@ -25,26 +25,23 @@ export function RelatedAgents({
     <section
       aria-label={label}
       data-testid="related-agents"
-      className={cn('flex flex-wrap items-center gap-2', className)}
+      className={cn(
+        'flex min-w-0 max-w-full flex-wrap items-center',
+        tone === 'dark' ? 'text-slate-300' : 'text-slate-500',
+        className,
+      )}
     >
-      <span
-        className={cn(
-          'text-xs font-medium uppercase tracking-wider',
-          tone === 'dark' ? 'text-slate-300' : 'text-slate-500',
-        )}
-      >
-        {label}
-      </span>
-      <ul className="flex flex-wrap items-center gap-2">
+      <ul className="flex min-w-0 flex-wrap items-center gap-2">
         {agents.map((agent) => (
           <li key={agent}>
-            <AgentPill agent={agent} title={AGENT_PERSONAS[agent]?.persona ?? agent} />
+            <AgentPill
+              agent={agent}
+              showPersona={false}
+              title={AGENT_PERSONAS[agent]?.persona ?? agent}
+            />
           </li>
         ))}
       </ul>
-      <span className={cn('text-xs', tone === 'dark' ? 'text-slate-300' : 'text-slate-500')}>
-        Agents propose; nothing changes without a recorded human approval.
-      </span>
     </section>
   );
 }

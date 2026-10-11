@@ -354,6 +354,13 @@ function TenantBoardWorkflow({
                 className="w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-teal-600"
                 aria-pressed={selectedRequest === item.id}
                 onClick={() => {
+                  if (selectedRequest === item.id) {
+                    setReleaseConfirmed(false);
+                    setError('');
+                    setMessage('');
+                    refresh();
+                    return;
+                  }
                   setSelectedRequest(item.id);
                   setDetailState(null);
                   setReleaseConfirmed(false);

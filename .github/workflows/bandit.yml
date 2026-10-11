@@ -57,7 +57,7 @@ jobs:
       - name: Enforce Bandit severity thresholds (services medium+, repository high)
         run: |
           echo "bandit: checking services (medium+)"
-          bandit -r services/agent-runtime/src services/model-gateway/src services/temporal-workers/src \
+          bandit -r services/agent-runtime/src services/model-gateway/src services/temporal-workers/src services/marketing-lifecycle services/marketing-db-gateway \
             --ini .bandit -x '*/tests/*,*/.venv/*,*/node_modules/*' -ll -ii
           echo "bandit: checking full repository (high)"
           bandit -r . --ini .bandit -x '*/tests/*,*/.venv/*,*/node_modules/*' -lll -ii
