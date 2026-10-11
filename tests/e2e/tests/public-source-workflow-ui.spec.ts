@@ -157,7 +157,7 @@ async function journal(page: Page) {
         });
   }, journalKey);
 }
-async function signedIn(page: Page, role: 'owner' | 'viewer') {
+async function signedIn(page: Page, role: 'owner' | 'reviewer') {
   await signIn(page, role);
   await selectTenant(page, 'a');
   // Ordinary CI owner needs no factor; isolated operator fixtures may have one.
@@ -421,7 +421,9 @@ test('owner recovers a lost source response after reload with the same request a
 test('viewer reads retained source receipts and static attributes using keyboard without mutation controls', async ({
   page,
 }) => {
-  await signedIn(page, 'viewer');
+  // A reviewer reads saved source results without run controls; a viewer is
+  // not offered Discovery at all.
+  await signedIn(page, 'reviewer');
   const api = await sourceApi(page, { viewer: true });
   await selectSource(page);
   for (const name of [

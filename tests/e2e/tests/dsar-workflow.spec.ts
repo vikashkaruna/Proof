@@ -84,13 +84,13 @@ test('DSAR intake, identity verification, refusal and evidence-bound completion'
   ).toBeLessThan(5000);
 });
 
-test('viewer sees recorded rights requests but cannot mutate them', async ({ page }) => {
+test('viewer is refused rights requests, at the page and at the BFF', async ({ page }) => {
   await signIn(page, 'viewer');
   await selectTenant(page, 'a');
+  // Rights requests carry data principals' personal data; a viewer is not
+  // offered the screen and its URL refuses.
   await page.goto('/dsars');
-  await expect(page.getByRole('heading', { name: 'Data subject requests' })).toBeVisible();
-  await expect(page.getByText('Read-only access.', { exact: false })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Record request', exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/portal\?error=forbidden/);
   const refused = await page.request.post('/api/bff/v1/dsars', {
     headers: { 'x-tenant-id': state.tenantA.id, 'Idempotency-Key': crypto.randomUUID() },
     data: { kind: 'access', principalEmail: 'forbidden@example.test', dueDays: 30 },

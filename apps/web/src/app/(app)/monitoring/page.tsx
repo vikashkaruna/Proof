@@ -18,6 +18,7 @@ import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { computeMonitoringHealth, isScheduleOverdue } from '@/lib/execution-view';
 import { DispatchAlertsButton, DismissAlertButton } from './alert-actions';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,7 +96,9 @@ const ALERT_TYPE_LABELS: Record<string, string> = {
  * same definition as the BFF's GET /v1/monitoring/health.
  */
 export default async function MonitoringPage() {
-  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { supabase, tenantId, role } = await requireCapabilityContext(
+    routeCapability('/monitoring'),
+  );
   const canManage = can(Capability.ESTATE_MANAGE, { role });
 
   const [schedulesRes, driftRes, alertsRes] = await Promise.all([
@@ -134,7 +137,7 @@ export default async function MonitoringPage() {
     !alertsRes.data
   ) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <PageHeader
           module={moduleBarProps('monitoring')}
           title="Continuous Monitoring"
@@ -160,10 +163,10 @@ export default async function MonitoringPage() {
   const highAlerts = unreadAlerts.filter((a) => a.severity === 'high');
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         module={moduleBarProps('monitoring')}
-        title="Continuous Monitoring & Alerting"
+        title="Continuous Monitoring"
         description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
         actions={
           canManage ? <DispatchAlertsButton tenantId={tenantId} canManage={canManage} /> : undefined

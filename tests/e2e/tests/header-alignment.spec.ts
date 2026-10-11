@@ -58,11 +58,15 @@ test('module pages and report views use the branded header with one accessible p
   await expect(page.getByTestId('related-agents')).toContainText('pramaan');
   await page.getByRole('button', { name: 'Working reports and registers' }).click();
   await expect(page).toHaveURL(/\/reports(?:$|\?)/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Reports and evidence' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Working Reports & Registers' }),
+  ).toBeVisible();
   await expect(page.getByTestId('related-agents')).toContainText('prativedan');
   await page.getByRole('button', { name: 'Closure dossiers' }).click();
   await expect(page).toHaveURL(/\/reports\?tab=pramaan/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Reports and evidence' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Statutory Proof Dossiers' }),
+  ).toBeVisible();
   await expect(page.getByTestId('related-agents')).toContainText('pramaan');
 
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -110,8 +114,9 @@ test('module pages and report views use the branded header with one accessible p
         };
       });
     expect(frame, `${route} has a page frame`).not.toBeNull();
-    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(24);
-    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(24);
+    // 20px at desktop width (xl:px-5): the content gutter was tightened from 24px.
+    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(20);
+    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(20);
     expect(frame!.pageWidth, `${route} fills the content width`).toBeGreaterThanOrEqual(
       frame!.contentWidth - 2,
     );
@@ -124,7 +129,7 @@ test('module pages and report views use the branded header with one accessible p
   }
 
   await page.goto('/assessment');
-  const heading = page.getByRole('heading', { level: 1, name: 'Assessment pipeline' });
+  const heading = page.getByRole('heading', { level: 1, name: 'Assessment', exact: true });
   const provenance = page.getByTestId('assessment-provenance');
   await expect(provenance).toBeVisible();
   const headerBeforeStatus = await heading.evaluate((element) => {
@@ -164,7 +169,9 @@ test('module pages and report views use the branded header with one accessible p
     ).toBe(true);
   }
   await page.goto('/assessment');
-  await expect(page.getByRole('heading', { level: 1, name: 'Assessment pipeline' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Assessment', exact: true }),
+  ).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);
@@ -180,7 +187,7 @@ test('generic module pages fill desktop width and fit a narrow mobile viewport',
   page,
 }) => {
   test.setTimeout(2 * 60_000);
-  await signIn(page, 'viewer');
+  await signIn(page, 'reviewer');
   await selectTenant(page, 'a');
   for (const width of [1920, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -236,7 +243,7 @@ test('settings keeps long account identities readable without horizontal page sc
   await selectTenant(page, 'a');
   await page.goto('/settings');
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Settings & Preferences' }),
+    page.getByRole('heading', { level: 1, name: 'Settings', exact: true }),
   ).toBeVisible();
   const email = page.getByText(account.email, { exact: true });
   for (const width of [320, 375, 768, 1440]) {

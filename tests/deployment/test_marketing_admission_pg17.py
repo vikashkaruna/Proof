@@ -1,4 +1,4 @@
-"""Opt-in real PG15 TLS tests, restricted to the recorded new rehearsal fixture.
+"""Opt-in real PG17 TLS tests, restricted to the recorded new rehearsal fixture.
 
 No cloud calls. The GCS adapter is a fake: these tests prove the database
 admission boundary, not provider deployment or named workflow acceptance.
@@ -12,11 +12,11 @@ import time
 import pytest
 
 ROOT=Path(__file__).resolve().parents[2]
-FIXTURE_ID='8ab959c224db35de0bd28386794d19fb59d94b7e3e801141a96d8fcd4c21e117'
-IMAGE_ID='sha256:d4a8e1f88f475ee3e0137fa89d21ebc59f6c6ab16bf369ee92907607cc3455ae'
-VOLUME='ccdbce2e99de9273a249369586e853a919393f17acf4774c3264b1724ee874cc'
-pytestmark=pytest.mark.skipif(os.getenv('AXIOM_ADMISSION_PG15_FIXTURE_ID')!=FIXTURE_ID,
-                            reason='Exact isolated PG15 rehearsal fixture explicitly required')
+FIXTURE_ID='9d71af2f085a60427f38b38e7c1696ae99945b16f0fc6624f151dbdf3adb0376'
+IMAGE_ID='sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f'
+VOLUME='axiom-preprod-admission-pg17-20261011-data'
+pytestmark=pytest.mark.skipif(os.getenv('AXIOM_ADMISSION_PG17_FIXTURE_ID')!=FIXTURE_ID,
+                            reason='Exact isolated PG17 rehearsal fixture explicitly required')
 spec=importlib.util.spec_from_file_location('admission_native_inputs',ROOT/'tests/deployment/test_marketing_admission_gate.py')
 inputs_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(inputs_module)
 gate=inputs_module.gate
@@ -24,8 +24,8 @@ gate=inputs_module.gate
 def guard():
     data=json.loads(subprocess.run(['docker','inspect',FIXTURE_ID],capture_output=True,text=True,check=True,timeout=10).stdout)[0]
     assert data['Id']==FIXTURE_ID and data['Image']==IMAGE_ID
-    assert data['Name']=='/axiom-preprod-admission-pg15-20261010'
-    assert data['Config']['Labels'].get('axiom.scope')=='marketing-admission-pg15-rehearsal'
+    assert data['Name']=='/axiom-preprod-admission-pg17-20261011'
+    assert data['Config']['Labels'].get('axiom.scope')=='marketing-admission-pg17-rehearsal'
     assert data['HostConfig']['NetworkMode']=='none' and not data['HostConfig']['PortBindings']
     assert not data['HostConfig']['Binds'] and len(data['Mounts'])==1
     mount=data['Mounts'][0]
@@ -70,21 +70,21 @@ def programs(name):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     return module.admission_programs(name)
 
-def test_native_pg15_tls_zero_clients_fenced_seed_and_same_pid_reopen():
+def test_native_pg17_tls_zero_clients_fenced_seed_and_same_pid_reopen():
     name='axiom_proof_preprod_native_v2_success';source,binding=setup_database(name)
     maintenance=session();events=[]
     try:
         receipt=gate.fenced_seed(source,binding,maintenance,inputs_module.Cloud(),lambda stage,value:events.append(stage))
         after=maintenance.query(programs(name)['identity'])
         assert receipt['native_pid']==after['pid'] and after['allow_connections'] is True
-        assert after['encrypted_transport'] is True and 150000<=int(after['server_version_num'])<160000
+        assert after['encrypted_transport'] is True and 170000<=int(after['server_version_num'])<180000
         assert 'closed' in events and 'ready_before_reopen' in events and events[-1]=='reopened'
     finally:maintenance.close()
 
 def test_native_hidden_startup_lock_is_observed_before_visible_client_and_refuses():
     name='axiom_proof_preprod_native_v2_startup';source,binding=setup_database(name)
     maintenance=session();sql=programs(name);events=[]
-    # PG15 applies post_auth_delay after admission check while the startup
+    # PG17 (as PG15) applies post_auth_delay after admission check while the startup
     # RowExclusiveLock is held, before pgstat_bestart publishes activity.
     startup=direct(name,'select pg_sleep(2);\n','-c post_auth_delay=5')
     try:
@@ -150,7 +150,7 @@ def test_native_auth_role_natural_drain_completes_then_reopens_without_terminati
         assert existing.returncode==0 and result['admission_reopened'] is True
         after=maintenance.query(sql['identity'])
         assert after['allow_connections'] is True and after['pid']==result['native_pid']
-        path=ROOT/'.axiom-runtime/review/marketing-pg15-admission-20261010/native-v3-auth-drain-proof.private.json'
+        path=ROOT/'.axiom-runtime/review/marketing-pg17-admission-20261011/native-v3-auth-drain-proof.private.json'
         descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(descriptor,'w') as fd:
             json.dump({'before':before,'events':events,'after':after,'client_finished_naturally':True},fd,sort_keys=True)

@@ -4,12 +4,14 @@ import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import type { GraphInput } from '@/lib/estate-graph';
 import { EstateGraph } from './estate-graph-client';
+import { routeCapability } from '@/app/(app)/nav';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 
 /** W3.5: the live estate as a graph, with agent access derived from enforced grants. */
 export default async function EstateGraphPage() {
-  const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
+  const ctx = await requireCapabilityContext(routeCapability('/estate'));
   const tenant = ctx.tenantId;
   const [estates, systems, connectors, grants] = await Promise.all([
     ctx.supabase
@@ -77,7 +79,7 @@ export default async function EstateGraphPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
-        module={{ crumb: 'Discover & Classify', titleHi: 'क्लाइंट एस्टेट', phase: 'P1' }}
+        module={moduleBarProps('estate')}
         title="Estate graph"
         description="Estates, systems, connector registrations and data categories, with agent access drawn only from active grants in this view. Other estates or filters may have additional grants."
       />

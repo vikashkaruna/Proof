@@ -5,11 +5,14 @@ import { OwnedTargetPanel } from './owned-target-panel';
 import { DataPlaceholder, PageHeader } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PlansListPage() {
-  const { supabase, tenantId, userId, role } = await requireCapabilityContext(Capability.PLAN_READ);
+  const { supabase, tenantId, userId, role } = await requireCapabilityContext(
+    routeCapability('/plans'),
+  );
   const { data: plans, error } = await supabase
     .from('remediation_plans')
     .select('id, title, status, version, created_at, library_version, purpose')
@@ -34,10 +37,10 @@ export default async function PlansListPage() {
       : null;
 
   return (
-    <section className="w-full min-w-0 space-y-5" aria-label="Remediation plans">
+    <section className="w-full min-w-0 space-y-4" aria-label="Remediation plans">
       <PageHeader
         module={moduleBarProps('remediation')}
-        title="Remediation plans"
+        title="Remediation Plans"
         description="Plans recorded for this tenant. A plan is a proposal until its actions pass the required dry-run, rollback, and human approval gates."
       />
       <ProposalPanel

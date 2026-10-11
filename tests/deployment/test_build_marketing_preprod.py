@@ -74,7 +74,7 @@ def release_file(repo: Path, tmp_path: Path, **changes: str) -> Path:
         "MARKETING_AUTH_GO_BUILD_IMAGE": f"golang@sha256:{PIN}",
         "MARKETING_AUTH_SOURCE_ARCHIVE_URL": "https://codeload.github.com/supabase/auth/tar.gz/"
         + "a" * 40,
-        "MARKETING_POSTGRES_CLIENT_APK_PACKAGE": "postgresql16-client=16.15-r0",
+        "MARKETING_POSTGRES_CLIENT_APK_PACKAGE": "postgresql17-client=17.11-r0",
         "UPSTREAM_POSTGREST_IMAGE": f"registry.example.invalid/rest@sha256:{'b' * 64}",
         "MARKETING_PYTHON_RUNTIME_IMAGE": f"python@sha256:{PIN}",
         "MARKETING_POSTGRES_CLIENT_IMAGE": f"postgres@sha256:{PIN}",
@@ -282,7 +282,8 @@ def test_missing_or_example_file_never_falls_back(checkout, tmp_path, selected_k
             "MARKETING_AUTH_SOURCE_ARCHIVE_URL",
             "https://evil.example.invalid/auth.tar.gz",
         ),
-        ("MARKETING_POSTGRES_CLIENT_APK_PACKAGE", "postgresql16-client"),
+        ("MARKETING_POSTGRES_CLIENT_APK_PACKAGE", "postgresql17-client"),
+        ("MARKETING_POSTGRES_CLIENT_APK_PACKAGE", "postgresql16-client=16.15-r0"),
         ("UPSTREAM_POSTGREST_IMAGE", "registry.example.invalid/rest@sha256:short"),
         ("AXIOM_ARTIFACT_REPOSITORY", "production-images"),
         ("AXIOM_PROOF_MARKETING_URL", ""),
@@ -320,7 +321,7 @@ def scanner_program() -> str:
     return source.split("python3 - <<'PYSCAN'\n", 1)[1].split("\nPYSCAN", 1)[0]
 
 
-def run_scanner_program(program, tmp_path, monkeypatch):
+def run_scanner_program(program, tmp_path, monkeypatch, rest_report='{"Results": [{"Target": "scanned"}]}\n'):
     """Execute the production scanner block; simulate only Docker transport."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("REGISTRY", "registry.example.invalid/review")
@@ -350,7 +351,7 @@ def run_scanner_program(program, tmp_path, monkeypatch):
         calls.append(args)
         report = Path(args[args.index("--output") + 1]).name
         (tmp_path / ".axiom-runtime/marketing-preprod/image-scans" / report).write_text(
-            "{}\n"
+            rest_report if report == "rest.scan.private.json" else '{"Results": []}\n'
         )
 
     monkeypatch.setattr(subprocess, "check_output", inspect)
@@ -370,6 +371,32 @@ def test_actual_scanner_block_has_bounded_writable_tmp_and_readonly_root(
         path.stat().st_mode & 0o777 == 0o600
         for path in directory.glob("*.private.json")
     )
+
+
+def test_static_rest_scan_records_version_bound_no_os_evidence(tmp_path, monkeypatch):
+    """A Results-less REST report invokes the reviewed collector; nothing else does."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/marketing-rest-evidence.py").write_text(
+        "import json\n"
+        "def collect(image_id, artifact_id, directory):\n"
+        "    record = {'image_id': image_id, 'artifact_id': artifact_id, 'directory': str(directory)}\n"
+        "    (directory.parent / 'collector-call.json').write_text(json.dumps(record))\n"
+        "    return {'path': str(directory / 'rest-evidence.private.json'), 'sha256': 'e' * 64}\n"
+    )
+    artifact = "sha256:" + "c" * 64
+    run_scanner_program(scanner_program(), tmp_path, monkeypatch, json.dumps({"ArtifactID": artifact}))
+    directory = tmp_path / ".axiom-runtime/marketing-preprod/image-scans"
+    call = json.loads((directory / "collector-call.json").read_text())
+    assert call == {"image_id": "sha256:" + PIN, "artifact_id": artifact, "directory": ".axiom-runtime/marketing-preprod/image-scans/rest-evidence-" + "a" * 40}
+    manifest = json.loads((directory / "candidate.private.json").read_text())
+    assert manifest["images"]["rest"]["no_os_evidence"]["sha256"] == "e" * 64
+    assert all("no_os_evidence" not in item for name, item in manifest["images"].items() if name != "rest")
+
+
+def test_scanned_rest_results_never_invoke_the_alternate_collector(tmp_path, monkeypatch):
+    run_scanner_program(scanner_program(), tmp_path, monkeypatch)
+    manifest = json.loads((tmp_path / ".axiom-runtime/marketing-preprod/image-scans/candidate.private.json").read_text())
+    assert all("no_os_evidence" not in item for item in manifest["images"].values())
 
 
 @pytest.mark.parametrize(

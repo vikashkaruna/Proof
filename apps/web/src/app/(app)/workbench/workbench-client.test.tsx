@@ -76,13 +76,13 @@ it('invokes a supported read-only agent and shows only returned proof references
   );
 });
 
-it('renders the shared context line with phase and agents, leaving the Hindi name and module id to the banner', () => {
+it('renders the shared context line with phase, module id and agents, leaving the Hindi name to the title', () => {
   const { container } = render(<AgentWorkbenchClient {...props} />);
   const ctx = screen.getByTestId('module-bar');
   expect(ctx.textContent).toContain(moduleMeta('workbench').phase);
   expect(ctx.querySelector('[data-testid="related-agents"]')).toBeTruthy();
   expect(ctx.textContent).not.toContain(moduleMeta('workbench').hi);
-  expect(ctx.textContent).not.toContain('M0.6');
+  expect(ctx.textContent).toContain('M0.6');
   expect(container.textContent?.split(moduleMeta('workbench').hi)).toHaveLength(2);
   expect(screen.getByRole('heading', { name: /Agent Workbench/i })).toBeTruthy();
 });

@@ -176,9 +176,34 @@ services:
     networks:
       - axiom-network
 
+  # ─── Temporal schema (one-shot) ────────────────────────────────
+  # temporalio/auto-setup stopped at 1.29; the server image no longer creates
+  # or upgrades its schema. This job does, idempotently, on every `up`: it
+  # applies only versions newer than the database's (1.24 data upgraded in
+  # place, rehearsed 2026-10-11 on a cloned volume).
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.1@sha256:9ef0dc5b063bf4ffd5c1512de72e0e73e225bd2c7006a18ce69bd592a8862a83
+    container_name: axiom-temporal-schema
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - |
+        T="temporal-sql-tool --plugin postgres12 --ep temporal-db -p 5432 -u postgres --pw postgres"
+        for pair in temporal:temporal temporal_visibility:visibility; do
+          db=$${pair%%:*}; dir=$${pair##*:}
+          $$T --db "$$db" create-database 2>/dev/null || true
+          $$T --db "$$db" setup-schema -v 0.0
+          $$T --db "$$db" update-schema -d "/etc/temporal/schema/postgresql/v12/$$dir/versioned"
+        done
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    networks:
+      - axiom-network
+
   # ─── Temporal Server (Durable Orchestration Dev Engine) ────────
   temporal:
-    image: temporalio/auto-setup:1.24.2
+    image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
     container_name: axiom-temporal
     restart: unless-stopped
     ports:
@@ -187,26 +212,20 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_SEEDS=temporal-db
-      - POSTGRES_PORT=5432
-      - POSTGRES_VISIBILITY_PORT=5432
       - POSTGRES_USER=postgres
       - POSTGRES_PWD=postgres
-      - POSTGRES_DB=temporal
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
-      - ENABLE_ES=false
-      # Create the 'axiom-proof' namespace on first boot, since the
-      # worker is hard-coded to register there. auto-setup.sh creates
-      # whatever DEFAULT_NAMESPACE is set to (defaults to 'default').
-      - DEFAULT_NAMESPACE=axiom-proof
-      - DEFAULT_NAMESPACE_RETENTION=24h
+      # The server image ships no dynamic config file but requires one.
+      - DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/dynamicconfig/development.yaml
       # BIND_ON_IP left unset: the entrypoint auto-resolves it to the
       # container's hostname IP (the docker network address), which is
       # both the bind address AND the ringpop broadcastAddress. Setting
       # it to 0.0.0.0 makes ringpop refuse to start with
       # "broadcastAddress required when listening on all interfaces".
+    volumes:
+      - ./infra/temporal/dynamicconfig:/etc/temporal/dynamicconfig:ro
     depends_on:
-      temporal-db:
-        condition: service_healthy
+      temporal-schema:
+        condition: service_completed_successfully
     healthcheck:
       # Temporal's gRPC frontend binds to BIND_ON_IP (auto-resolved by
       # the entrypoint to the container's hostname IP, i.e. the docker
@@ -221,9 +240,28 @@ services:
     networks:
       - axiom-network
 
+  # ─── Temporal namespace (one-shot) ─────────────────────────────
+  # The worker is hard-coded to register in 'axiom-proof'; auto-setup used to
+  # create it from DEFAULT_NAMESPACE. Create it once with 24h retention.
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.1@sha256:9ef0dc5b063bf4ffd5c1512de72e0e73e225bd2c7006a18ce69bd592a8862a83
+    container_name: axiom-temporal-namespace
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - |
+        A="--address temporal:7233"
+        temporal operator namespace describe $$A --namespace axiom-proof >/dev/null 2>&1 \
+          || temporal operator namespace create $$A --namespace axiom-proof --retention 24h
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks:
+      - axiom-network
+
   # ─── Temporal Web UI ───────────────────────────────────────────
   temporal-ui:
-    image: temporalio/ui:latest
+    image: temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
     container_name: axiom-temporal-ui
     restart: unless-stopped
     ports:

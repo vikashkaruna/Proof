@@ -101,7 +101,7 @@ export default async function ExecutionPage() {
     reconciliationsRes.error
   ) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <PageHeader
           module={moduleBarProps('execution')}
           title="Execution & Rollback"
@@ -141,7 +141,7 @@ export default async function ExecutionPage() {
   }));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         module={moduleBarProps('execution')}
         title="Execution & Rollback"

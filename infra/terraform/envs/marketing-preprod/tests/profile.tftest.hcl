@@ -24,11 +24,11 @@ variables {
   cloud_sql_database_name          = "axiom_proof_preprod"
   cloud_sql_tier                   = "db-f1-micro"
   cloud_sql_disk_size_gb           = 10
-  cloud_sql_database_version       = "POSTGRES_15"
+  cloud_sql_database_version       = "POSTGRES_17"
   subnet_cidr                      = "10.73.0.0/24"
   sql_range_prefix_length          = 24
   cloud_sql_backup_enabled         = true
-  cloud_sql_backup_retention       = 7
+  cloud_sql_backup_retention       = 1
   cloud_sql_pitr_enabled           = false
   cloud_sql_admin_user             = "axiom_admin"
   cloud_sql_admin_password         = "synthetic-password-only-for-offline-tests"
@@ -55,6 +55,14 @@ run "minimum_private_database" {
   assert {
     condition     = google_sql_database_instance.marketing.settings[0].tier == "db-f1-micro" && google_sql_database_instance.marketing.settings[0].disk_size == 10 && !google_sql_database_instance.marketing.settings[0].ip_configuration[0].ipv4_enabled && google_sql_database_instance.marketing.region == "asia-south1"
     error_message = "Dedicated Mumbai DB must be minimum10GB micro and private only."
+  }
+  assert {
+    condition     = google_sql_database_instance.marketing.database_version == "POSTGRES_17" && google_sql_database_instance.marketing.settings[0].edition == "ENTERPRISE"
+    error_message = "PostgreSQL 17 must pin the Enterprise edition, the only edition with the shared-core micro tier."
+  }
+  assert {
+    condition     = google_sql_database_instance.marketing.settings[0].disk_type == "PD_HDD" && google_sql_database_instance.marketing.settings[0].backup_configuration[0].backup_retention_settings[0].retained_backups == 1 && one([for flag in google_sql_database_instance.marketing.settings[0].database_flags : flag.value if flag.name == "max_connections"]) == "25"
+    error_message = "Cost profile is HDD with one retained backup, and the instance connection ceiling is pinned to 25."
   }
   assert {
     condition     = google_sql_database_instance.marketing.name == "axiom-proof-preprod-postgres" && google_sql_database_instance.marketing.settings[0].activation_policy == "ALWAYS" && output.idle_automation_enabled == false
@@ -162,6 +170,16 @@ run "unmaterialized_versions_refused_when_enabled" {
     }
   }
   expect_failures = [terraform_data.configuration]
+}
+run "older_postgres_major_refused" {
+  command = plan
+  variables { cloud_sql_database_version = "POSTGRES_15" }
+  expect_failures = [var.cloud_sql_database_version]
+}
+run "unaligned_newer_postgres_major_refused" {
+  command = plan
+  variables { cloud_sql_database_version = "POSTGRES_18" }
+  expect_failures = [var.cloud_sql_database_version]
 }
 run "larger_cost_profile_refused" {
   command = plan

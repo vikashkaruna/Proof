@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.14'
       - run: python3 -m unittest discover -s tests/scripts -p 'test_help_manuals.py'
       - run: python3 -m unittest discover -s tests/scripts -p 'test_private_docs_guard.py'
       - run: python3 -m unittest discover -s tests/scripts -p 'test_doc_guards.py'

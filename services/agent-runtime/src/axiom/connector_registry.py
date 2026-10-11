@@ -83,7 +83,7 @@ class ConnectorManifest(StrictModel):
         return value
 
     @model_validator(mode="after")
-    def validate_policy(self) -> "ConnectorManifest":
+    def validate_policy(self) -> ConnectorManifest:
         identifier = UUID(self.id)
         if identifier.version not in range(1, 9) or str(identifier) != self.id.lower():
             raise ValueError("Invalid descriptor id")

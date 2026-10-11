@@ -126,7 +126,9 @@ test.describe('real provider evidence ingestion', () => {
     await signIn(page, 'owner');
     await selectTenant(page, 'a');
     await page.goto('/evidence');
-    await expect(page.getByRole('heading', { name: 'Evidence vault', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Evidence Explorer', exact: true }),
+    ).toBeVisible();
 
     const suffix = crypto.randomUUID();
     const filename = `provider-journey-${suffix}.bin`;
@@ -403,7 +405,7 @@ test.describe('real provider evidence ingestion', () => {
       await selectTenant(viewer, 'a');
       await viewer.goto('/evidence');
       await expect(
-        viewer.getByRole('heading', { name: 'Evidence vault', exact: true }),
+        viewer.getByRole('heading', { name: 'Evidence Explorer', exact: true }),
       ).toBeVisible();
       await expect(viewer.getByRole('form', { name: 'Upload evidence', exact: true })).toHaveCount(
         0,

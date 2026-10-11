@@ -149,6 +149,12 @@ export function AppShell({
   // was previously shown this button; the BFF refused, so all it taught them
   // was that the product is broken.
   const canKillSwitch = held.has('kill_switch.engage.tenant');
+  // Creating another organisation is a commercial act (tenant.create): the
+  // founder's and an owner's, not something to advertise to every reader.
+  const canCreateTenant = held.has('tenant.create');
+  // The agent panel's actions open agent workflows; a pure reader has no use
+  // for a launcher whose every action they would be refused.
+  const canSeeAgents = held.has('agent.invoke') || held.has('workbench.access');
 
   // Resolved from memberships alone. A slug the user does not belong to is
   // ignored rather than honoured — the same rule `requireTenantContext()`
@@ -334,7 +340,7 @@ export function AppShell({
   const sidebarContent = (
     <>
       {/* Brand Header */}
-      <div className="flex h-16 shrink-0 items-center px-5 border-b border-white/10">
+      <div className="flex h-14 shrink-0 items-center px-5 border-b border-white/10">
         <Link href="/dashboard" prefetch={false} className="flex items-center gap-3">
           <AxiomLogo size="md" theme="dark" showSubtitle={true} />
         </Link>
@@ -344,7 +350,7 @@ export function AppShell({
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto py-2">
         {navGroups.map((group) => (
           <div key={group.label} className="mb-1">
-            <div className="px-5 pt-3.5 pb-1 text-[9.5px] font-semibold tracking-[0.08em] uppercase text-[#6f7ba0]">
+            <div className="truncate px-5 pt-3 pb-1 text-[10px] font-semibold tracking-[0.08em] uppercase text-[#7d89ad]">
               {group.label}
             </div>
             {group.items.map((item) => {
@@ -392,17 +398,21 @@ export function AppShell({
                 >
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClasses}`} />
                   <span className="flex flex-1 flex-col min-w-0">
-                    <span className="flex items-center gap-1.5 text-[13px] truncate">
+                    {/* One line per item: the Hindi name gives way first (it
+                        collapses before the English label wraps), so items keep
+                        an even rhythm. */}
+                    <span className="flex min-w-0 items-baseline gap-x-1.5 text-[13px] leading-snug">
                       <span
-                        className={
+                        className={`max-w-full shrink-0 ${
                           isActive ? 'text-white' : isGold ? 'text-[#f0dfaa]' : 'text-[#c7cfe0]'
-                        }
+                        }`}
                       >
                         {item.en}
                       </span>
                       {item.hi && (
                         <span
-                          className={`font-heading text-[10.5px] font-normal ${isGold ? 'text-[#bfa460]' : 'text-[#6f7ba0]'}`}
+                          lang="hi"
+                          className={`min-w-0 shrink-[999] truncate font-heading text-[10.5px] font-normal ${isGold ? 'text-[#bfa460]' : 'text-[#6f7ba0]'}`}
                         >
                           {item.hi}
                         </span>
@@ -429,8 +439,19 @@ export function AppShell({
         ))}
       </nav>
 
+      {canSeeAgents && (
+        <details className="group shrink-0 border-t border-white/10">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7d89ad] hover:text-white [&::-webkit-details-marker]:hidden">
+            <span>Agents</span>
+            <span aria-hidden className="transition-transform group-open:rotate-180">
+              ▾
+            </span>
+          </summary>
+          <SidebarAgentPanel capabilities={capabilities} transparent className="border-t-0 pt-0" />
+        </details>
+      )}
       {/* User Profile Bar */}
-      <div className="flex items-center gap-2.5 border-t border-white/10 px-4 py-3 bg-[#182238]/60">
+      <div className="flex shrink-0 items-center gap-2.5 border-t border-white/10 bg-[#182238]/70 px-4 py-2.5">
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0FB5A5] font-heading text-xs font-bold text-[#1E2A4A]">
           {(user.user_metadata?.full_name ?? user.email ?? 'P')[0]?.toUpperCase()}
         </div>
@@ -446,7 +467,7 @@ export function AppShell({
           <button
             type="submit"
             title="Sign out"
-            className="text-[11px] text-[#8a909b] hover:text-white transition-colors"
+            className="rounded px-2 py-1 text-[11px] text-[#A6B0CC] transition-colors hover:bg-white/10 hover:text-white"
           >
             Sign out
           </button>
@@ -458,9 +479,8 @@ export function AppShell({
   return (
     <div className="flex min-h-screen bg-[#F4F6F8]">
       {/* ============ SIDEBAR ============ */}
-      <aside className="sticky top-0 z-30 hidden h-screen w-[266px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10 lg:flex">
+      <aside className="sticky top-0 z-30 hidden h-screen w-[252px] shrink-0 flex-col bg-[#1E2A4A] text-[#c7cfe0] border-r border-white/10 lg:flex">
         {sidebarContent}
-        <SidebarAgentPanel capabilities={capabilities} />
       </aside>
       <dialog
         id="mobile-navigation"
@@ -502,7 +522,7 @@ export function AppShell({
       {/* ============ MAIN AREA ============ */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Topbar */}
-        <header className="sticky top-0 z-20 flex min-h-[60px] flex-wrap shrink-0 items-center gap-2 border-b border-[#e4e8ee] bg-white px-3 py-2 sm:flex-nowrap sm:gap-4 sm:px-6">
+        <header className="sticky top-0 z-20 flex min-h-14 flex-wrap shrink-0 items-center gap-2 border-b border-[#e4e8ee] bg-white/95 px-3 py-2 backdrop-blur sm:flex-nowrap sm:gap-3 sm:px-4 xl:px-5">
           <button
             type="button"
             aria-label="Open navigation"
@@ -517,12 +537,18 @@ export function AppShell({
           >
             Menu
           </button>
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] text-[#8a909b] truncate">{activeBreadcrumb}</div>
-            <p className="font-heading text-[17px] font-semibold leading-tight text-[#1E2A4A] truncate">
-              {activeTitle}
-            </p>
-          </div>
+          {/* One breadcrumb line. The page's own header carries the h1, so the
+              bar no longer repeats the title at heading weight. */}
+          <nav
+            aria-label="Breadcrumb"
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]"
+          >
+            <span className="truncate text-slate-500">{activeBreadcrumb}</span>
+            <span aria-hidden className="text-slate-300">
+              /
+            </span>
+            <span className="truncate font-semibold text-[#1E2A4A]">{activeTitle}</span>
+          </nav>
 
           {/* Tenant Switcher */}
           <div className="relative">
@@ -532,7 +558,7 @@ export function AppShell({
               aria-expanded={tenantsOpen}
               aria-controls="organization-choices"
               onClick={() => setTenantsOpen(!tenantsOpen)}
-              className="flex min-h-11 max-w-[180px] sm:max-w-[240px] items-center gap-2.5 rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 cursor-pointer shadow-sm hover:border-[#0FB5A5] transition-colors"
+              className="flex min-h-10 max-w-[180px] sm:max-w-[240px] items-center gap-2.5 rounded-lg border border-[#e4e8ee] bg-white px-2.5 py-1 cursor-pointer hover:border-[#0FB5A5] transition-colors"
             >
               <span
                 style={{
@@ -603,16 +629,18 @@ export function AppShell({
                   </div>
                 )}
 
-                <div className="mt-1 border-t border-[#eef1f5] pt-1">
-                  <Link
-                    href="/onboarding"
-                    prefetch={false}
-                    onClick={() => setTenantsOpen(false)}
-                    className="flex items-center justify-center gap-1.5 w-full rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition-colors"
-                  >
-                    <span>+ Onboard New Organization</span>
-                  </Link>
-                </div>
+                {canCreateTenant && (
+                  <div className="mt-1 border-t border-[#eef1f5] pt-1">
+                    <Link
+                      href="/onboarding"
+                      prefetch={false}
+                      onClick={() => setTenantsOpen(false)}
+                      className="flex items-center justify-center gap-1.5 w-full rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition-colors"
+                    >
+                      <span>+ Onboard New Organization</span>
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -624,10 +652,22 @@ export function AppShell({
               aria-label="Continuous monitoring alerts"
               aria-expanded={alertsOpen}
               onClick={() => setAlertsOpen(!alertsOpen)}
-              className="relative flex min-h-11 items-center justify-center rounded-lg border border-[#e4e8ee] bg-white px-3 py-1.5 shadow-sm hover:border-[#0FB5A5] transition-colors"
+              className="relative flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[#e4e8ee] bg-white px-2.5 text-slate-500 hover:border-[#0FB5A5] hover:text-[#1E2A4A] transition-colors"
               title="Continuous monitoring alerts"
             >
-              <span className="text-sm">🔔</span>
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                className="h-[18px] w-[18px]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+              </svg>
               {(visibleAlertsSummary?.unread ?? 0) > 0 && (
                 <span
                   className={`absolute -top-1.5 -right-1.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow ${
@@ -710,14 +750,25 @@ export function AppShell({
             <button
               onClick={handleToggleKillSwitch}
               disabled={!selectedTenantId || killOn === null}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+              className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
                 killOn
                   ? 'border-[#D9534F] bg-[#D9534F] text-white shadow-sm animate-pulse'
                   : 'border-[#e4e8ee] bg-white text-[#D9534F] hover:bg-[#FCEEEC]'
               }`}
               title="Halt autonomous agent execution for this tenant"
             >
-              <span>⏻</span>{' '}
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M12 3v9" />
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+              </svg>
               {killOn === null
                 ? 'Kill switch status unavailable'
                 : killOn
@@ -729,7 +780,7 @@ export function AppShell({
 
         {/* Global Kill Switch Alert Banner */}
         {killOn && (
-          <div className="flex items-center justify-between bg-[#D9534F] px-6 py-2.5 text-xs font-semibold text-white shadow-inner">
+          <div className="flex items-center justify-between bg-[#D9534F] px-4 py-2 text-xs font-semibold text-white shadow-inner xl:px-5">
             <div className="flex items-center gap-2">
               <span className="text-sm">⏻</span>
               <span>KILL SWITCH ENGAGED — in-flight agent execution is halted.</span>
@@ -746,7 +797,7 @@ export function AppShell({
         )}
 
         {/* Main Content Viewport */}
-        <main className="min-w-0 flex-1 px-3 py-5 sm:px-6 sm:py-7">{children}</main>
+        <main className="min-w-0 flex-1 px-3 py-3 sm:px-4 sm:py-4 xl:px-5">{children}</main>
       </div>
     </div>
   );

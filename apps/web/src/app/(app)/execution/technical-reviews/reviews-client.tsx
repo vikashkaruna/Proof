@@ -11,6 +11,8 @@ import {
   retainedBuildResultSchema,
 } from '../../reports/retained-artifact-state';
 import { useReceiptRefresh } from '../../reports/use-receipt-refresh';
+import { PageHeader } from '@axiom/ui';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export type TechnicalPlan = { id: string; title: string; status: string; created_at: string };
 
@@ -254,22 +256,13 @@ export function TechnicalReviewsClient({
   const planById = new Map(plans.map((item) => [item.id, item]));
 
   return (
-    <section className="w-full min-w-0 space-y-6">
-      <nav>
-        <Link className="text-sm text-teal-700 underline" href="/execution">
-          ← Execution
-        </Link>
-      </nav>
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Recorded technical remediation registers
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          These registers freeze recorded plans, actions and linked dry-run, approval, execution,
-          rollback, verification and reconciliation state. They do not independently attest
-          execution, evidence-vault retention or closure.
-        </p>
-      </header>
+    <section className="w-full min-w-0 space-y-4">
+      <PageHeader
+        module={moduleBarProps('execution')}
+        title="Recorded technical remediation registers"
+        description="These registers freeze recorded plans, actions and linked dry-run, approval, execution, rollback, verification and reconciliation state. They do not independently attest execution, evidence-vault retention or closure."
+        actions={<Link href="/execution">← Execution</Link>}
+      />
       {error && (
         <p
           role="alert"

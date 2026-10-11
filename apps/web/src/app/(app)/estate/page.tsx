@@ -3,10 +3,12 @@ import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { EstateClient, type EstateRow, type SystemRow, type IntakeRow } from './estate-client';
+import { routeCapability } from '@/app/(app)/nav';
+import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
 export default async function EstatePage() {
-  const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
+  const ctx = await requireCapabilityContext(routeCapability('/estate'));
   const [estates, systems, intakes] = await Promise.all([
     ctx.supabase
       .from('estates')
@@ -31,8 +33,8 @@ export default async function EstatePage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
-        module={{ crumb: 'Discover & Classify', titleHi: 'क्लाइंट एस्टेट', phase: 'P1' }}
-        title="Client estate"
+        module={moduleBarProps('estate')}
+        title="Client Estate"
         description="Declare the systems in each assessment boundary. Inventory declarations do not establish connectivity or authorize agent execution."
       />
       <div className="flex flex-wrap gap-4">

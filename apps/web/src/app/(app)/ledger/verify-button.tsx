@@ -46,7 +46,7 @@ export function VerifyButton({ tenantId }: VerifyButtonProps) {
   }
 
   return (
-    <Button variant="outline" size="sm" onClick={run} loading={busy}>
+    <Button variant="outline" size="sm" onClick={run} loading={busy} data-primary>
       Verify chain integrity
     </Button>
   );

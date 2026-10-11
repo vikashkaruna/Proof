@@ -62,7 +62,7 @@ export async function ReviewOnlyDetail({
     parsed.data.length === receipt.data.taskCount &&
     tasks.data?.every((row, index) => row.sequence === parsed.data[index]?.sequence);
   return (
-    <section className="w-full min-w-0 space-y-5" aria-label="Saved review work">
+    <section className="w-full min-w-0 space-y-4" aria-label="Saved review work">
       <PageHeader
         module={moduleBarProps('remediation')}
         title={title}

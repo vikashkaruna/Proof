@@ -1,13 +1,14 @@
 import { Capability, can } from '@axiom/types';
 import { z } from 'zod';
-import { requireTenantContext } from '@/lib/tenant-context';
+import { requireCapabilityContext } from '@/lib/tenant-context';
 import { DsarClient } from './dsar-client';
 import { dsarRowSchema, type DsarRow } from './dsar-workflow';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DsarPage() {
-  const { supabase, tenantId, role } = await requireTenantContext();
+  const { supabase, tenantId, role } = await requireCapabilityContext(routeCapability('/dsars'));
   const canRead = can(Capability.POSTURE_READ, { role });
   const canManage = can(Capability.ESTATE_MANAGE, { role });
   let rows: DsarRow[] = [];

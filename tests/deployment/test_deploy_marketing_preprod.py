@@ -1589,7 +1589,7 @@ class FencedCoordinatorTests(unittest.TestCase):
             "state_initialized": True,
             "exclusive_client_adoption": True,
             "admission_reopened": True,
-            "admission_protocol": "pg15-startup-lock-then-visible-clients",
+            "admission_protocol": "pg17-startup-lock-then-visible-clients",
             "admission_source_sha256": hashlib.sha256(
                 (ROOT / "scripts/marketing-state-adoption.py").read_bytes()
             ).hexdigest(),

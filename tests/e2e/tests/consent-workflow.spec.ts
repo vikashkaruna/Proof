@@ -181,9 +181,9 @@ test('read-only consent access cannot publish or change a lifecycle through the 
 }) => {
   await signIn(page, 'viewer');
   await selectTenant(page, 'a');
+  // The consent workflow is not offered to a viewer, so its page refuses too.
   await page.goto('/consent');
-  await expect(page.getByRole('button', { name: 'Register purpose', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Record consent', exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/portal\?error=forbidden/);
   const id = crypto.randomUUID();
   for (const path of [
     '/purposes',
@@ -212,7 +212,7 @@ test('consent forms require fresh acknowledgement for the chosen notice and reco
   await signIn(page, 'owner');
   await selectTenant(page, 'a');
   await page.goto('/consent');
-  await expect(page.getByRole('heading', { name: 'Consent register', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Consent Manager', exact: true })).toBeVisible();
   const suffix = crypto.randomUUID();
   const consentAcknowledgement = page.getByRole('checkbox', {
     name: 'I confirm the principal received this notice version in the selected language and gave consent.',

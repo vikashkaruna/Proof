@@ -43,6 +43,15 @@ services:
     profiles:
       - donotstart
 
+  # The local schema and namespace one-shots belong to the self-hosted server.
+  temporal-schema:
+    profiles:
+      - donotstart
+
+  temporal-namespace:
+    profiles:
+      - donotstart
+
   temporal-worker:
     image: axiom-temporal-worker:prod
     depends_on:

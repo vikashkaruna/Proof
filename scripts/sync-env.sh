@@ -335,7 +335,7 @@ tfvar_value() {
     environment)                echo "$TARGET_ENV" ;;
     cloud_sql_tier)             get_val "CLOUD_SQL_TIER" "db-f1-micro" ;;
     cloud_sql_disk_size_gb)     get_val "CLOUD_SQL_DISK_SIZE_GB" "10" ;;
-    cloud_sql_instance_version) get_val "CLOUD_SQL_INSTANCE_VERSION" "POSTGRES_15" ;;
+    cloud_sql_instance_version) get_val "CLOUD_SQL_INSTANCE_VERSION" "POSTGRES_17" ;;
     cluster_name)               get_val "AXIOM_CLUSTER_NAME" "axiom-proof-prod" ;;
     vpc_cidr)                   get_val "AXIOM_VPC_CIDR" "10.10.0.0/16" ;;
     kubernetes_version)         get_val "AXIOM_KUBERNETES_VERSION" "1.29" ;;

@@ -27,6 +27,17 @@ FORK_MODULE = "github.com/joho/godotenv"
 FORK_VERSION = "v1.5.1"
 FORK_PATH = "./internal/forks/godotenv"
 FORK_TREE = "14e220e0d5bdea5d823944c1bc81a5a81bc98c79aa260234e71f6421040b736e"
+# PostgREST ships as a static Haskell binary on an empty base: the scanner
+# finds no OS and no packages, so its report has no Results. Only that one
+# component may instead prove "no OS package database" from its hash-bound
+# layer, read its exact binary version, and carry a raw OSV Hackage response
+# for that version with zero advisories. Every other image needs Results.
+REST_COMPONENT = "rest"
+REST_BINARY = "bin/postgrest"
+REST_VERSION_ARGV = ["/bin/postgrest", "--version"]
+OSV_ECOSYSTEM = "Hackage"
+OSV_PACKAGE = "postgrest"
+REST_EVIDENCE = {"osv_response", "version_output", "layer"}
 
 
 def digest(data: bytes) -> str:
@@ -174,6 +185,114 @@ def reviewed_fork(modules: str, snapshot: bytes, archive: bytes, bound: str) -> 
     if directives != [f"replace {FORK_MODULE} => {FORK_PATH}"]:
         raise ValueError("Auth upstream replacement directives are not reviewed")
     return tree
+
+
+def rest_layer(layer: bytes) -> str:
+    """Return the binary hash; refuse any OS package database or foreign file."""
+    files: dict[str, str] = {}
+    seen: set[str] = set()
+    with tarfile.open(fileobj=io.BytesIO(layer), mode="r:") as bundle:
+        for item in bundle.getmembers():
+            name = item.name
+            while name.startswith("./"):
+                name = name[2:]
+            name = name.strip("/")
+            if name in seen or ".." in name.split("/") or ".wh." in name:
+                raise ValueError("REST layer layout is not reviewed")
+            seen.add(name)
+            if item.isdir():
+                continue
+            if not item.isfile():
+                raise ValueError("REST layer contains links or special files")
+            # Static binary plus Nix store payload only: no apk/dpkg/rpm
+            # database, os-release or any other file an OS scan would read.
+            if name != REST_BINARY and not name.startswith("nix/store/"):
+                raise ValueError("REST layer contains an OS or unreviewed file")
+            handle = bundle.extractfile(item)
+            if handle is None:
+                raise ValueError("REST layer member is unreadable")
+            files[name] = digest(handle.read())
+    if REST_BINARY not in files:
+        raise ValueError("REST layer does not contain the PostgREST binary")
+    return files[REST_BINARY]
+
+
+def reviewed_rest(
+    reference: object,
+    root: Path,
+    image: dict[str, object],
+    report: dict[str, object],
+) -> dict[str, object]:
+    """Version-bound OSV and positive no-OS layer proof for PostgREST only."""
+    if reference is None:
+        raise ValueError("REST scan has no Results and no version-bound OSV proof")
+    raw = proof(reference, root)
+    evidence = json.loads(raw)
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("format") != 1
+        or evidence.get("component") != REST_COMPONENT
+        or evidence.get("image_id") != image["image_id"]
+        or evidence.get("artifact_id") != report["ArtifactID"]
+        or not isinstance(evidence.get("proofs"), dict)
+        or set(evidence["proofs"]) != REST_EVIDENCE
+    ):
+        raise ValueError("REST alternate evidence subject mismatch")
+    metadata = report["Metadata"]
+    diff_ids = metadata.get("DiffIDs")
+    config = metadata.get("ImageConfig")
+    layers = metadata.get("Layers")
+    if (
+        "OS" in metadata
+        or not isinstance(diff_ids, list)
+        or len(diff_ids) != 1
+        or not hexadecimal(diff_ids[0], True)
+        or not isinstance(config, dict)
+        or not isinstance(config.get("rootfs"), dict)
+        or config["rootfs"].get("diff_ids") != diff_ids
+        or not isinstance(layers, list)
+        or [layer.get("DiffID") if isinstance(layer, dict) else None for layer in layers]
+        != diff_ids
+    ):
+        raise ValueError("REST scan does not enumerate one analysed OS-free layer")
+    data = {name: proof(evidence["proofs"][name], root) for name in REST_EVIDENCE}
+    if "sha256:" + digest(data["layer"]) != diff_ids[0]:
+        raise ValueError("REST layer proof is not the scanned layer")
+    binary = rest_layer(data["layer"])
+    output = json.loads(data["version_output"])
+    version = None
+    if isinstance(output, dict) and isinstance(output.get("stdout"), str):
+        found = re.fullmatch(r"PostgREST ([0-9]+(?:\.[0-9]+){1,3})\n?", output["stdout"])
+        version = found.group(1) if found else None
+    if (
+        version is None
+        or output.get("image_id") != image["image_id"]
+        or output.get("argv") != REST_VERSION_ARGV
+        or output.get("exit_code") != 0
+        or output.get("binary_sha256") != binary
+        or evidence.get("postgrest_version") != version
+    ):
+        raise ValueError("REST actual binary version is not proven")
+    query = {"package": {"ecosystem": OSV_ECOSYSTEM, "name": OSV_PACKAGE}, "version": version}
+    if evidence.get("osv_query") != query:
+        raise ValueError("OSV query is not bound to the actual PostgREST version")
+    response = json.loads(data["osv_response"])
+    if (
+        not isinstance(response, dict)
+        or set(response) - {"vulns"}
+        or response.get("vulns", []) != []
+    ):
+        raise ValueError("OSV reports advisories for the actual PostgREST version")
+    return {
+        "evidence_sha256": digest(raw),
+        "no_os_layer_diff_id": diff_ids[0],
+        "binary_sha256": binary,
+        "postgrest_version": version,
+        "osv_query": query,
+        "osv_response_sha256": digest(data["osv_response"]),
+        "osv_advisories": 0,
+        "proofs": evidence["proofs"],
+    }
 
 
 def reviewed_auth(
@@ -347,9 +466,18 @@ def classify(
             or not hexadecimal(report.get("ArtifactID"), True)
             or not isinstance(report.get("Metadata"), dict)
             or report["Metadata"].get("ImageID") != image["image_id"]
-            or not isinstance(report.get("Results"), list)
         ):
             raise ValueError("Image scan is missing or belongs to a different image")
+        no_os = None
+        if "no_os_evidence" in image and name != REST_COMPONENT:
+            raise ValueError("Alternate no-OS evidence is reviewed for PostgREST only")
+        if name == REST_COMPONENT and report.get("Results") in (None, []):
+            no_os = reviewed_rest(image.get("no_os_evidence"), root, image, report)
+            report = {**report, "Results": []}
+        elif not isinstance(report.get("Results"), list):
+            raise ValueError("Image scan is missing or belongs to a different image")
+        elif "no_os_evidence" in image:
+            raise ValueError("REST scan Results contradict the no-OS evidence")
         findings = []
         secrets = []
         for group in report["Results"]:
@@ -406,6 +534,8 @@ def classify(
             "fixed_advisories": fixed,
             "report_sha256": digest(raw),
         }
+        if no_os is not None:
+            records[name]["no_os_osv_evidence"] = no_os
     return {
         "format": 1,
         "release_sha": manifest["release_sha"],

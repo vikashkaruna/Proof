@@ -6,12 +6,14 @@ import DashboardPage from './page';
 type Result = { data?: unknown; count?: number | null; error?: Error | null };
 const state = vi.hoisted(() => ({
   results: {} as Record<string, Result>,
+  role: 'owner' as string,
   from: vi.fn(),
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async () => ({
     tenantId: 'tenant-1',
     tenantName: 'Actual organization',
+    role: state.role,
     supabase: { from: state.from },
   }),
 }));
@@ -23,6 +25,7 @@ vi.mock('next/link', () => ({
 
 beforeEach(() => {
   state.results = {};
+  state.role = 'owner';
   state.from.mockReset().mockImplementation((table: string) => {
     const result = () => state.results[table] ?? { data: [], count: 0, error: null };
     const query = {
@@ -94,10 +97,10 @@ it('counts only recorded pending approvals and open findings', async () => {
   };
   const view = await html();
   expect(view).toContain('83/100');
-  expect(view).toMatch(/Recorded open findings<\/h2><p[^>]*>1<\/p>/);
-  expect(view).toMatch(/Awaiting approval<\/h2><p[^>]*>1<\/p>/);
+  expect(view).toMatch(/Open findings<\/dt><dd[^>]*>1<\/dd>/);
+  expect(view).toMatch(/Awaiting approval<\/dt><dd[^>]*>1<\/dd>/);
   expect(view).toContain('drishti');
-  expect(view).toContain('Recorded actions awaiting human review');
+  expect(view).toContain('Actions need a recorded human decision');
   expect(view).not.toContain('executing task in ap-south-1');
 });
 
@@ -106,4 +109,27 @@ it('renders the shared module context line under the title', async () => {
   expect(view).toContain('डैशबोर्ड');
   expect(view).toContain('P0');
   expect(view).not.toMatch(/<h1[^>]*>[^<]*डैशबोर्ड/);
+});
+
+it('makes the tenant name visible in the header and the title readable on the indigo band', async () => {
+  const view = await html();
+  expect(view).toMatch(/<h1[^>]*class="[^"]*text-white[^"]*"[^>]*>Dashboard<\/h1>/);
+  expect(view).toContain('Actual organization');
+});
+
+it('shows only the record tiles for screens the persona is offered', async () => {
+  state.role = 'viewer';
+  const viewer = await html();
+  // A viewer reads evidence and the ledger, but is not offered rights or
+  // consent, so those tiles (and their links) are not on their dashboard.
+  expect(viewer).toContain('href="/evidence"');
+  expect(viewer).toContain('href="/ledger"');
+  for (const label of ['DSAR records', 'Consent records']) expect(viewer).not.toContain(label);
+  for (const route of ['/dsars', '/consent'])
+    expect(viewer, route).not.toContain(`href="${route}"`);
+
+  state.role = 'owner';
+  const owner = await html();
+  for (const route of ['/dsars', '/consent', '/evidence', '/ledger'])
+    expect(owner, route).toContain(`href="${route}"`);
 });

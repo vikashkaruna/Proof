@@ -96,7 +96,9 @@ describe('page header with module context', () => {
     );
     expect(markup).toMatch(/<h1[^>]*>Approval queue<\/h1>/);
     expect(markup).toContain('data-testid="module-bar"');
-    expect(markup.indexOf('</h1>')).toBeLessThan(markup.indexOf('module-bar'));
+    // The context line sits above the title as an eyebrow, outside the h1.
+    expect(markup.indexOf('module-bar')).toBeLessThan(markup.indexOf('<h1'));
+    expect(markup).toMatch(/<h1[^>]*class="[^"]*text-white/);
     expect(markup.slice(markup.indexOf('data-testid="module-bar"'))).toContain('P3');
   });
 

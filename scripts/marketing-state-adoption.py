@@ -2,7 +2,7 @@
 """Inventory and guarded initial marketing lifecycle-state adoption.
 
 Read-only inventory is never an exclusive gate. The adopt Job closes ordinary
-PG15 database admission, drains startup/live sessions, creates and verifies an
+PG17 database admission, drains startup/live sessions, creates and verifies an
 immutable lifecycle state object, then reopens through the same maintenance PID.
 Any uncertain outcome preserves the durable admission state for review.
 """
@@ -33,6 +33,8 @@ REGION = re.compile(r"[a-z]+-[a-z0-9]+[0-9]\Z")
 EXECUTION = re.compile(r"[a-z][a-z0-9-]{4,62}\Z")
 MAX_JSON_BYTES = 2_000_000
 MAX_LOG_AGE_SECONDS = 300
+# Must equal the max_connections flag in infra/terraform/envs/marketing-preprod/main.tf.
+MAX_CONNECTIONS = "25"
 RFC1918 = tuple(
     ipaddress.IPv4Network(value)
     for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
@@ -538,7 +540,7 @@ def validate(
         and exact_name(instance, instance_name)
         and instance.get("region") == region
         and instance.get("state") == "RUNNABLE"
-        and instance.get("databaseVersion") == "POSTGRES_15"
+        and instance.get("databaseVersion") == "POSTGRES_17"
         and instance.get("connectionName") == f"{project}:{region}:{instance_name}",
         "Cloud SQL identity or state differs",
     )
@@ -792,16 +794,20 @@ def validate(
         "Unknown PostgreSQL LOGIN role or Cloud SQL user",
     )
     limits = {role["name"]: role.get("connection_limit") for role in login_roles}
+    # The bootstrap admin cannot cap itself on PostgreSQL 16+ without a
+    # superuser; the pinned instance ceiling (Terraform max_connections)
+    # bounds it instead, so both facts are checked together.
     require(
         limits.get("supabase_auth_admin") == 2
         and limits.get("authenticator") == 3
-        and limits.get(env["CLOUD_SQL_DATABASE_USER"]) == 3
+        and limits.get(env["CLOUD_SQL_DATABASE_USER"]) == -1
+        and facts.get("max_connections") == MAX_CONNECTIONS
         and all(
             role.get("superuser") is False and role.get("bypassrls") is False
             for role in login_roles
             if role["name"] != "postgres"
         ),
-        "PostgreSQL login privilege or connection limit differs",
+        "PostgreSQL login privilege, connection limit or instance ceiling differs",
     )
     metric_at = verify_zero_instance_metric(
         inventory["auth_instances"], service=auth_name, now=now
@@ -1232,7 +1238,7 @@ def fenced_seed(source, binding, session, cloud, record, *, clock=time.monotonic
                 and type(value.get('database_oid')) is int and value['database_oid']>0
                 and value.get('database_oid') == initial.get('database_oid')
                 and str(value.get('server_version_num','')).isdigit()
-                and 150000<=int(value['server_version_num'])<160000
+                and 170000<=int(value['server_version_num'])<180000
                 and value.get('encrypted_transport') is True and value.get('stats_visible') is True
                 and value.get('owner_capable') is True and value.get('allow_connections') is allowed,
                 'Admission identity/authority/fence mismatch')
@@ -1276,7 +1282,7 @@ def fenced_seed(source, binding, session, cloud, record, *, clock=time.monotonic
               'database_connection_name':binding['database_connection_name'],
               'seed_target_sha256':binding['target_manifest_sha256'], 'native_pid':pid,
               'state_initialized':True, 'exclusive_client_adoption':True,
-              'admission_protocol':'pg15-startup-lock-then-visible-clients',
+              'admission_protocol':'pg17-startup-lock-then-visible-clients',
               'bootstrap_receipts_sha256':hashlib.sha256(canonical_bytes(binding['bootstrap_receipts'])).hexdigest(),
               'admission_source_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'admission_sql_sha256':hashlib.sha256(canonical_bytes(sql)).hexdigest()}
