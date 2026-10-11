@@ -14,6 +14,17 @@ export function formatINR(value: number | null | undefined): string {
   return `₹${value}`;
 }
 
+/**
+ * Format rupees in crores with at most three decimals (₹185 Cr, ₹1.875 Cr).
+ * Penalty exposure is read in crores; a full-digit rupee figure is hard to scan.
+ */
+export function formatINRCrore(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const crore = value / 1_00_00_000;
+  if (value > 0 && crore < 0.0005) return '< ₹0.001 Cr';
+  return `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 }).format(crore)} Cr`;
+}
+
 export function formatINRFull(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('en-IN', {

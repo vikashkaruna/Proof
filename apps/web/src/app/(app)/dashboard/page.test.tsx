@@ -97,8 +97,11 @@ it('counts only recorded pending approvals and open findings', async () => {
   };
   const view = await html();
   expect(view).toContain('83/100');
-  expect(view).toMatch(/Open findings<\/dt><dd[^>]*>1<\/dd>/);
-  expect(view).toMatch(/Awaiting approval<\/dt><dd[^>]*>1<\/dd>/);
+  expect(view).toMatch(/Open findings<\/dt><dd[^>]*><span[^>]*>1<\/span>/);
+  expect(view).toMatch(/Awaiting approval<\/dt><dd[^>]*><span[^>]*>1<\/span>/);
+  // 83 is in the Good band: green score and a labelled chip, never gold.
+  expect(view).toMatch(/class="[^"]*text-green-300[^"]*" data-testid="posture-score">83\/100/);
+  expect(view).toMatch(/data-testid="posture-band">Good</);
   expect(view).toContain('drishti');
   expect(view).toContain('Actions need a recorded human decision');
   expect(view).not.toContain('executing task in ap-south-1');
@@ -132,4 +135,20 @@ it('shows only the record tiles for screens the persona is offered', async () =>
   const owner = await html();
   for (const route of ['/dsars', '/consent', '/evidence', '/ledger'])
     expect(owner, route).toContain(`href="${route}"`);
+});
+
+it.each([
+  [0.74, 'text-teal-300', 'Moderate'],
+  [0.5, 'text-amber-300', 'Weak'],
+  [0.2, 'text-ember-300', 'Critical'],
+])('colours a posture of %s by its band', async (score, tone, label) => {
+  state.results.engagements = { data: { posture_score: score }, error: null };
+  const view = await html();
+  expect(view).toMatch(new RegExp(`class="[^"]*${tone}[^"]*" data-testid="posture-score"`));
+  expect(view).toContain(`data-testid="posture-band">${label}<`);
+});
+
+it('shows no band when the posture is unavailable', async () => {
+  const view = await html();
+  expect(view).not.toContain('data-testid="posture-band"');
 });

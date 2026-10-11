@@ -6,6 +6,27 @@ import { reportRequest, readReleasedArchive } from './report-request';
 import { SOURCE_REPORT_PAGE_SIZE, listSchema, type ReportSummary } from './report-contract';
 import { DossierViewerModal } from './dossier-viewer-modal';
 
+/** The read-only sealed record a report reader sees (`GET /dossiers/sealed`). */
+type SealedDossier = {
+  id: string;
+  dossierType: PramaanDossier['dossierType'];
+  title: string;
+  merkleRoot: string;
+  proofSealHash: string;
+  sealedAt: string | null;
+  createdAt: string;
+};
+
+function dossierKind(type: string): string {
+  return type === 'auditor_assurance'
+    ? 'Assessment-derived auditor dossier'
+    : type === 'technical_register'
+      ? 'Recorded-plan technical dossier'
+      : type === 'dpb_statutory'
+        ? 'Recorded breach and DPB notification dossier'
+        : type.replace(/_/g, ' ');
+}
+
 type Build = {
   dossierId: string;
   reportId: string;
@@ -18,13 +39,19 @@ export function ClosureDossiersTab({
   tenantId,
   canGenerate,
   canRelease,
+  canReadSealed = false,
 }: {
   tenantId: string;
   canGenerate: boolean;
   canRelease: boolean;
+  /** Any report reader: sealed dossiers only, read-only, no archive download. */
+  canReadSealed?: boolean;
 }) {
+  // The founder's full list already includes sealed records.
+  const showSealed = canReadSealed && !canRelease;
   const [dossiers, setDossiers] = useState<PramaanDossier[]>([]);
   const [builds, setBuilds] = useState<Build[]>([]);
+  const [sealed, setSealed] = useState<SealedDossier[]>([]);
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [reportOffset, setReportOffset] = useState(0);
   const [hasMoreReports, setHasMoreReports] = useState(false);
@@ -57,6 +84,17 @@ export function ClosureDossiersTab({
             }
           }),
       );
+    if (showSealed)
+      requests.push(
+        reportRequest(tenantId, '/dossiers/sealed?limit=25', { signal: controller.signal })
+          .then((response) => response.json())
+          .then((value: unknown) => {
+            if (!controller.signal.aborted) {
+              const data = value as { dossiers?: SealedDossier[] };
+              setSealed(Array.isArray(data.dossiers) ? data.dossiers : []);
+            }
+          }),
+      );
     if (canGenerate)
       requests.push(
         reportRequest(tenantId, '/dossiers/mine', { signal: controller.signal })
@@ -78,7 +116,7 @@ export function ClosureDossiersTab({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [tenantId, canGenerate, canRelease, revision]);
+  }, [tenantId, canGenerate, canRelease, showSealed, revision]);
 
   useEffect(() => {
     if (!canGenerate) return;
@@ -352,10 +390,30 @@ export function ClosureDossiersTab({
           <p role="alert" className="mt-4 text-sm text-[#D9534F]">
             {error}
           </p>
-        ) : dossiers.length === 0 && builds.length === 0 ? (
+        ) : dossiers.length === 0 && builds.length === 0 && sealed.length === 0 ? (
           <p className="mt-4 text-sm text-slate-600">No dossier records are visible.</p>
         ) : (
           <ul className="mt-4 divide-y divide-slate-100">
+            {sealed.map((dossier) => (
+              <li key={dossier.id} className="py-3" data-testid="sealed-dossier">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="break-words font-medium text-slate-900">{dossier.title}</p>
+                  {/* Gold is reserved for sealed proof; this is that case. */}
+                  <span className="rounded-full bg-gold-50 px-2 py-0.5 text-[11px] font-semibold text-gold-800 ring-1 ring-inset ring-gold-200">
+                    Sealed
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">
+                  {dossierKind(dossier.dossierType)}
+                  {dossier.sealedAt
+                    ? ` · Sealed ${new Date(dossier.sealedAt).toLocaleDateString()}`
+                    : ''}
+                </p>
+                <p className="mt-1 break-all font-mono text-[11px] text-slate-500">
+                  Merkle root {dossier.merkleRoot} · Proof seal {dossier.proofSealHash}
+                </p>
+              </li>
+            ))}
             {dossiers.map((dossier) => (
               <li
                 key={dossier.id}
@@ -364,14 +422,7 @@ export function ClosureDossiersTab({
                 <div className="min-w-0">
                   <p className="break-words font-medium text-slate-900">{dossier.title}</p>
                   <p className="mt-1 text-sm text-slate-600">
-                    {dossier.dossierType === 'auditor_assurance'
-                      ? 'Assessment-derived auditor dossier'
-                      : dossier.dossierType === 'technical_register'
-                        ? 'Recorded-plan technical dossier'
-                        : dossier.dossierType === 'dpb_statutory'
-                          ? 'Recorded breach and DPB notification dossier'
-                          : dossier.dossierType.replace(/_/g, ' ')}{' '}
-                    · Recorded status: {dossier.status} ·{' '}
+                    {dossierKind(dossier.dossierType)} · Recorded status: {dossier.status} ·{' '}
                     {new Date(dossier.createdAt).toLocaleDateString()}
                   </p>
                 </div>

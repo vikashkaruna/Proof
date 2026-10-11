@@ -68,6 +68,27 @@ describe('the kill switch — SEC-4', () => {
     // But they retain authority over their own tenant.
     expect(can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role: UserRole.OWNER })).toBe(true);
   });
+
+  // An approver decides on plans; halting and resuming automation is not theirs.
+  it('keeps the tenant kill switch with the owner, admin and Axiom operators', () => {
+    expect(rolesWith(Capability.KILL_SWITCH_ENGAGE_TENANT)).toEqual([
+      'founder',
+      'axiom_analyst',
+      'owner',
+      'admin',
+    ]);
+    expect(rolesWith(Capability.KILL_SWITCH_RELEASE_TENANT)).toEqual(['founder', 'owner']);
+  });
+
+  it('lets the approver follow incidents without holding the emergency stop', () => {
+    expect(rolesWith(Capability.INCIDENT_READ)).toEqual([
+      'founder',
+      'axiom_analyst',
+      'owner',
+      'admin',
+      'approver',
+    ]);
+  });
 });
 
 describe('approval_scopes — the column defined in migration 0001 and never read', () => {

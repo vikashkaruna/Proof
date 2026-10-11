@@ -32,11 +32,11 @@ export default function HomePage() {
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+          {/* One platform: the menu and screens follow the signed-in role, so a
+              separate Client Portal entry led to the same app. /dashboard is the
+              role-aware landing; /workbench is Axiom's internal console. */}
           <Button variant="accent" size="lg" asChild>
-            <Link href="/workbench">Open the Workbench</Link>
-          </Button>
-          <Button variant="outline" size="lg" asChild>
-            <Link href="/portal">Client Portal</Link>
+            <Link href="/dashboard">Open Workbench</Link>
           </Button>
         </div>
       </main>

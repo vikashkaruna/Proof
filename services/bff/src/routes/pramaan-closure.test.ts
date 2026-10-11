@@ -167,4 +167,43 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
     const revoked = await app(fixture.founder, UserRole.FOUNDER).request(`/v1/dossiers/${id}`);
     expect(revoked.status).toBe(404);
   });
+
+  it('lists only sealed dossiers, read-only and without sealer identity, to a member viewer', async () => {
+    const sealed = historicalDossier();
+    fixture.base.rows('pramaan_dossiers').push({
+      id: randomUUID(),
+      tenant_id: tenant,
+      engagement_id: randomUUID(),
+      dossier_type: 'board_executive',
+      title: 'Unsealed draft',
+      status: 'draft',
+      merkle_root: 'f'.repeat(64),
+      manifest_hash: 'a'.repeat(64),
+      proof_seal_hash: 'b'.repeat(64),
+      metadata: { private: true },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const response = await app(fixture.viewer, UserRole.VIEWER).request('/v1/dossiers/sealed');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    const body = (await response.json()) as { dossiers: Record<string, unknown>[] };
+    expect(body.dossiers.map((d) => d.id)).toEqual([sealed]);
+    expect(body.dossiers[0]).not.toHaveProperty('sealedBy');
+    expect(body.dossiers[0]).not.toHaveProperty('metadata');
+
+    // Detail and archive stay closed to the viewer.
+    expect(
+      (await app(fixture.viewer, UserRole.VIEWER).request(`/v1/dossiers/${sealed}`)).status,
+    ).toBe(403);
+    expect(
+      (await app(fixture.viewer, UserRole.VIEWER).request(`/v1/dossiers/${sealed}/archive`)).status,
+    ).toBe(403);
+  });
+
+  it('refuses the sealed list to someone who is not a member of the tenant', async () => {
+    historicalDossier();
+    const outsider = await app(randomUUID(), UserRole.VIEWER).request('/v1/dossiers/sealed');
+    expect(outsider.status).toBe(403);
+  });
 });

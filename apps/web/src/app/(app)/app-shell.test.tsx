@@ -359,7 +359,12 @@ it('keeps the kill switch engaged when the BFF refuses release', async () => {
     ),
   );
   vi.stubGlobal('fetch', fetcher);
-  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  render(
+    <AppShell
+      {...props}
+      capabilities={['kill_switch.engage.tenant', 'kill_switch.release.tenant']}
+    />,
+  );
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
   await waitFor(() =>
@@ -368,11 +373,33 @@ it('keeps the kill switch engaged when the BFF refuses release', async () => {
     ),
   );
   expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy();
+  // A refused release says so instead of doing nothing.
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('HTTP 403'));
   const release = fetcher.mock.calls.find(([url]) => url === '/api/bff/v1/kill-switch/release');
   expect(release?.[1]).toMatchObject({
     method: 'POST',
     headers: { 'X-Tenant-Id': 'tenant-alpha' },
   });
+});
+
+it('offers no Disengage to a role that can engage but not release', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) =>
+      Promise.resolve(
+        url.includes('kill-switch/status')
+          ? Response.json({ engaged: true })
+          : Response.json({ data: { summary: { unread: 0, critical: 0, high: 0 }, alerts: [] } }),
+      ),
+    ),
+  );
+  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
+  expect(screen.queryByRole('button', { name: 'Disengage' })).toBeNull();
+  expect(screen.getByText('Only an owner can release it.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Kill switch active/ }).hasAttribute('disabled')).toBe(
+    true,
+  );
 });
 
 it('does not claim kill-switch engagement from an unconfirmed HTTP success', async () => {
@@ -413,7 +440,12 @@ it('does not claim kill-switch release from an unconfirmed HTTP success', async 
     ),
   );
   vi.stubGlobal('fetch', fetcher);
-  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  render(
+    <AppShell
+      {...props}
+      capabilities={['kill_switch.engage.tenant', 'kill_switch.release.tenant']}
+    />,
+  );
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
   await waitFor(() =>
@@ -464,7 +496,12 @@ it('shows a confirmed release and makes tenant mutations available again', async
     );
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
+  render(
+    <AppShell
+      {...props}
+      capabilities={['kill_switch.engage.tenant', 'kill_switch.release.tenant']}
+    />,
+  );
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Disengage' }));
   await waitFor(() =>
@@ -484,15 +521,15 @@ it('refreshes the dashboard after a verified tenant switch', async () => {
   expect(state.push).not.toHaveBeenCalled();
 });
 
-it('routes the portal to the verified selected tenant', async () => {
+it('refreshes the portal in place after a verified switch, with no tenant parameter', async () => {
   state.switchTenant.mockResolvedValue({ ok: true });
   state.pathname = '/portal';
   render(<AppShell {...props} />);
   fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
   fireEvent.click(screen.getByRole('button', { name: /Beta Org/ }));
   await waitFor(() => expect(state.switchTenant).toHaveBeenCalledWith('beta'));
-  expect(state.refresh).not.toHaveBeenCalled();
-  await waitFor(() => expect(state.push).toHaveBeenCalledWith('/portal?tenant=beta'));
+  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+  expect(state.push).not.toHaveBeenCalled();
 });
 
 it('keeps mobile navigation keyboard focus inside its dialog', () => {

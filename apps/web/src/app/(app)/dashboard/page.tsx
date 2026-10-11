@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { capabilitiesFor, type UserRole } from '@axiom/types';
-import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
+import { cn, DataPlaceholder, PageHeader, formatDateTime, postureBand } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { visibleRoutes } from '../nav';
@@ -105,6 +105,7 @@ export default async function DashboardPage() {
     {
       label: 'Latest recorded posture',
       value: posture === null ? 'Unavailable' : `${posture}/100`,
+      band: postureBand(posture),
       note:
         posture === null
           ? 'No verified posture score is available.'
@@ -144,8 +145,27 @@ export default async function DashboardPage() {
               <dt className="text-[11px] font-medium uppercase tracking-wide text-[#A6B0CC]">
                 {item.label}
               </dt>
-              <dd className="mt-0.5 font-heading text-2xl font-semibold text-white">
-                {item.value}
+              <dd className="mt-0.5 flex items-center gap-2">
+                <span
+                  className={cn(
+                    'font-heading text-2xl font-semibold',
+                    'band' in item && item.band ? item.band.onDark : 'text-white',
+                  )}
+                  data-testid={'band' in item ? 'posture-score' : undefined}
+                >
+                  {item.value}
+                </span>
+                {'band' in item && item.band && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset',
+                      item.band.chipOnDark,
+                    )}
+                    data-testid="posture-band"
+                  >
+                    {item.band.label}
+                  </span>
+                )}
               </dd>
               <dd className="text-[11.5px] text-[#D6DBE8]">{item.note}</dd>
             </div>

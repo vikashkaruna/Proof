@@ -2,8 +2,7 @@
 
 import React, { createContext, useContext, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { AgentIcon, AgentLabel, PageHeader } from '@axiom/ui';
+import { AgentIcon, AgentLabel, formatINRCrore, PageHeader, postureBand } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 
 export interface TenantSummary {
@@ -93,7 +92,6 @@ export interface PortalClientProps {
   canViewClosureDossiers?: boolean;
   /** Routes the persona's menu offers; links elsewhere are not rendered. */
   reachableRoutes?: readonly string[];
-  tenants: TenantSummary[];
   activeTenant: TenantSummary;
   engagement: EngagementSummary | null;
   plans: PlanSummary[];
@@ -149,7 +147,6 @@ export function PortalClient({ reachableRoutes, ...props }: PortalClientProps) {
 
 function PortalView({
   canViewClosureDossiers = false,
-  tenants,
   activeTenant,
   engagement,
   plans,
@@ -160,17 +157,8 @@ function PortalView({
   assessmentUnavailable,
   loadError,
 }: Omit<PortalClientProps, 'reachableRoutes'>) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
-
-  const handleTenantChange = (slug: string) => {
-    document.cookie = `axiom_active_tenant=${slug}; path=/; max-age=31536000; SameSite=Lax`;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('tenant', slug);
-    router.push(`/portal?${params.toString()}`);
-  };
 
   const copyHash = (hash: string) => {
     navigator.clipboard.writeText(hash);
@@ -180,13 +168,9 @@ function PortalView({
 
   // C-W0-7: only persisted values are shown; missing values render as such.
   const postureScore = engagement?.postureScore ?? null;
+  const postureTone = postureBand(postureScore === null ? null : Math.round(postureScore));
   const exposureInr = engagement?.estimatedExposureInr ?? null;
-  const exposureDisplay =
-    exposureInr === null
-      ? 'Not recorded'
-      : exposureInr >= 10000000
-        ? `₹${(exposureInr / 10000000).toFixed(1)} Cr`
-        : `₹${exposureInr.toLocaleString('en-IN')}`;
+  const exposureDisplay = exposureInr === null ? 'Not recorded' : formatINRCrore(exposureInr);
 
   const passingControls = engagement?.summary.pass ?? 0;
   const assessedControls = engagement
@@ -225,22 +209,6 @@ function PortalView({
         }
         actions={
           <>
-            {tenants.length > 1 && (
-              <label className="flex items-center gap-2 px-2 text-xs text-slate-500">
-                Organization
-                <select
-                  value={activeTenant.slug}
-                  onChange={(e) => handleTenantChange(e.target.value)}
-                  className="cursor-pointer rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-medium text-slate-800"
-                >
-                  {tenants.map((t) => (
-                    <option key={t.id} value={t.slug}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <RouteLink
               href="/approval"
               data-primary
@@ -299,12 +267,20 @@ function PortalView({
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
             <span
-              className="font-heading text-2xl font-bold text-[#1E2A4A]"
+              className={`font-heading text-2xl font-bold ${postureTone?.text ?? 'text-[#1E2A4A]'}`}
               data-testid="portal-posture"
             >
               {postureScore === null ? '—' : Math.round(postureScore)}
             </span>
             {postureScore !== null && <span className="text-xs text-[#94a3b8]">/100</span>}
+            {postureTone && (
+              <span
+                className={`ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset ${postureTone.chip}`}
+                data-testid="portal-posture-band"
+              >
+                {postureTone.label}
+              </span>
+            )}
           </div>
           <div className="mt-2 text-[11px] text-[#64748b]">
             {postureScore === null ? 'Not yet assessed' : 'Latest saved assessment'}
