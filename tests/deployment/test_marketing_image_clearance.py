@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import gzip
 import importlib.util
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -15,6 +18,65 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+REAL_UPSTREAM_ARCHIVE = MODULE.UPSTREAM_ARCHIVE
+REAL_FORK_TREE = MODULE.FORK_TREE
+PREFIX = f"auth-{MODULE.COMMIT}/"
+FORK_FILES = {
+    "go.mod": b"module github.com/joho/godotenv\n\ngo 1.12\n",
+    "godotenv.go": b"package godotenv // synthetic reviewed fork\n",
+    "parser.go": b"package godotenv // synthetic parser\n",
+    "fixtures/plain.env": b"OPTION_A=1\n",
+}
+ROOT_GO_MOD = (
+    b"module github.com/supabase/auth\n\nrequire github.com/joho/godotenv v1.5.1\n\n"
+    b"replace github.com/joho/godotenv => ./internal/forks/godotenv\n"
+)
+FORK_MODULES = (
+    b"\tdep\tgithub.com/joho/godotenv\tv1.5.1\n"
+    b"\t=>\t./internal/forks/godotenv\t(devel)\t\n"
+)
+
+
+def synthetic_archive(fork=None, go_mod=ROOT_GO_MOD, extra=()):
+    """Deterministic stand-in for the official archive; never the real pin."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as bundle:
+        for name, data, kind in [
+            (PREFIX[:-1], b"", tarfile.DIRTYPE),
+            (PREFIX + "go.mod", go_mod, tarfile.REGTYPE),
+            (PREFIX + "internal/forks/godotenv", b"", tarfile.DIRTYPE),
+            *[
+                (PREFIX + "internal/forks/godotenv/" + key, value, tarfile.REGTYPE)
+                for key, value in (FORK_FILES if fork is None else fork).items()
+            ],
+            *extra,
+        ]:
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            if kind == tarfile.SYMTYPE:
+                info.linkname = data.decode()
+                bundle.addfile(info)
+            elif kind == tarfile.REGTYPE:
+                info.size = len(data)
+                bundle.addfile(info, io.BytesIO(data))
+            else:
+                bundle.addfile(info)
+    return gzip.compress(buffer.getvalue(), mtime=0)
+
+
+def tree(files):
+    return MODULE.digest(
+        "".join(
+            f"{name}\0{MODULE.digest(files[name])}\n" for name in sorted(files)
+        ).encode()
+    )
+
+
+@pytest.fixture(autouse=True)
+def synthetic_source_pins(monkeypatch):
+    """Tests bind to synthetic pins; the real pins are checked separately."""
+    monkeypatch.setattr(MODULE, "UPSTREAM_ARCHIVE", MODULE.digest(synthetic_archive()))
+    monkeypatch.setattr(MODULE, "FORK_TREE", tree(FORK_FILES))
 
 
 def stored(root, name, data):
@@ -74,7 +136,18 @@ def amend_report(root, manifest, component, change):
     save_manifest(root, manifest)
 
 
-def review_fixture(root, manifest):
+def snapshot_for(archive_hash, commit=None):
+    return json.dumps(
+        {
+            "upstream_commit": commit or MODULE.COMMIT,
+            "upstream_archive_sha256": archive_hash,
+        }
+    ).encode()
+
+
+def review_fixture(root, manifest, archive=None, snapshot=None):
+    archive = synthetic_archive() if archive is None else archive
+    snapshot = snapshot_for(MODULE.UPSTREAM_ARCHIVE) if snapshot is None else snapshot
     original = (
         ROOT / "tests/fixtures/security/pgproto3-v2.3.3-data-row.go.txt"
     ).read_bytes()
@@ -93,7 +166,11 @@ def review_fixture(root, manifest):
         "patch": (
             ROOT / "infra/docker/auth-security/pgproto3-data-row.patch"
         ).read_bytes(),
-        "compiled_modules": b"/out/auth: go1.27.2\n\tdep google.golang.org/grpc v1.83.2\n\tdep github.com/jackc/pgproto3/v2 v2.3.3\n\tdep golang.org/x/net v0.60.0\n",
+        "compiled_modules": b"/out/auth: go1.27.2\n\tdep google.golang.org/grpc v1.83.2\n\tdep github.com/jackc/pgproto3/v2 v2.3.3\n"
+        + FORK_MODULES
+        + b"\tdep golang.org/x/net v0.60.0\n",
+        "source_snapshot": snapshot,
+        "upstream_archive": archive,
         "original_regression": b"panic: runtime error: slice bounds out of range\n(*DataRow).Decode\nTestAxiomNegativeLengthsReturnError",
         "fixed_tests": b"ok github.com/jackc/pgproto3/v2 0.1s\nPASS\n",
         "runtime_acceptance": json.dumps(
@@ -121,7 +198,7 @@ def review_fixture(root, manifest):
                 "upstream_commit": MODULE.COMMIT,
                 "patch_sha256": MODULE.PATCH,
                 "patched_source_sha256": MODULE.digest(patched),
-                "source_snapshot_sha256": "a" * 64,
+                "source_snapshot_sha256": MODULE.digest(snapshot),
             }
         ).encode(),
     }
@@ -348,3 +425,180 @@ def test_auth_build_locks_match_reviewed_descriptor_and_template_builder():
             ROOT / f"infra/docker/environments/.env.{environment}.example"
         ).read_text()
         assert "MARKETING_AUTH_GO_BUILD_IMAGE=" + source["go_builder_index"] in template
+
+
+def test_reviewed_upstream_fork_is_admitted_and_recorded(tmp_path):
+    manifest = fixture(tmp_path, auth=True)
+    review_fixture(tmp_path, manifest)
+    result = MODULE.classify(
+        tmp_path / "manifest.json", tmp_path / "review.json", tmp_path
+    )
+    fork = result["auth_fixed_disposition"]["reviewed_fork"]
+    assert fork == {
+        "module": "github.com/joho/godotenv",
+        "version": "v1.5.1",
+        "replacement": "./internal/forks/godotenv",
+        "upstream_archive_sha256": MODULE.UPSTREAM_ARCHIVE,
+        "fork_tree_sha256": MODULE.FORK_TREE,
+    }
+
+
+def changed_modules(data, kind):
+    return {
+        "different-module": data.replace(
+            b"dep\tgithub.com/joho/godotenv", b"dep\tgithub.com/other/godotenv"
+        ),
+        "different-version": data.replace(b"\tv1.5.1\n\t=>", b"\tv1.5.2\n\t=>"),
+        "different-path": data.replace(
+            b"./internal/forks/godotenv", b"./internal/forks/godotenv-evil"
+        ),
+        "versioned-target": data.replace(
+            b"./internal/forks/godotenv\t(devel)",
+            b"github.com/evil/godotenv\tv1.5.1\th1:" + b"A" * 44,
+        ),
+        "extra-replacement": data
+        + b"\tdep\tgolang.org/x/crypto\tv0.57.0\n\t=>\t./internal/forks/crypto\t(devel)\t\n",
+        "second-godotenv-replacement": data + FORK_MODULES,
+        "detached-replacement": data.replace(FORK_MODULES, b"")
+        + b"\tdep\tgithub.com/joho/godotenv\tv1.5.1\n\tdep\tgolang.org/x/text\tv0.42.0\n"
+        + b"\t=>\t./internal/forks/godotenv\t(devel)\t\n",
+        "missing-replacement": data.replace(
+            FORK_MODULES, b"\tdep\tgithub.com/joho/godotenv\tv1.5.1\n"
+        ),
+    }[kind]
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "different-module",
+        "different-version",
+        "different-path",
+        "versioned-target",
+        "extra-replacement",
+        "second-godotenv-replacement",
+        "detached-replacement",
+        "missing-replacement",
+    ],
+)
+def test_only_the_exact_upstream_fork_replacement_is_admitted(tmp_path, kind):
+    manifest = fixture(tmp_path, auth=True)
+    review = review_fixture(tmp_path, manifest)
+    data = (tmp_path / "compiled_modules.proof").read_bytes()
+    review["proofs"]["compiled_modules"] = stored(
+        tmp_path, "compiled_modules.proof", changed_modules(data, kind)
+    )
+    stored(tmp_path, "review.json", json.dumps(review).encode())
+    with pytest.raises(ValueError, match="replacement is not reviewed"):
+        MODULE.classify(tmp_path / "manifest.json", tmp_path / "review.json", tmp_path)
+
+
+def rebound(tmp_path, monkeypatch, archive):
+    """Re-pin the archive itself so only the fork-tree/go.mod checks can refuse."""
+    monkeypatch.setattr(MODULE, "UPSTREAM_ARCHIVE", MODULE.digest(archive))
+    manifest = fixture(tmp_path, auth=True)
+    review_fixture(tmp_path, manifest, archive=archive)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "modified-file",
+        "added-file",
+        "removed-file",
+        "symlink",
+        "extra-go-mod-replace",
+        "missing-go-mod-replace",
+    ],
+)
+def test_changed_fork_source_is_refused_even_with_a_consistent_archive_pin(
+    tmp_path, monkeypatch, kind
+):
+    fork = dict(FORK_FILES)
+    go_mod = ROOT_GO_MOD
+    extra = ()
+    if kind == "modified-file":
+        fork["parser.go"] = b"package godotenv // attacker controlled\n"
+    elif kind == "added-file":
+        fork["init.go"] = b"package godotenv\nfunc init() {}\n"
+    elif kind == "removed-file":
+        del fork["parser.go"]
+    elif kind == "symlink":
+        extra = (
+            (
+                PREFIX + "internal/forks/godotenv/link.go",
+                b"/etc/passwd",
+                tarfile.SYMTYPE,
+            ),
+        )
+    elif kind == "extra-go-mod-replace":
+        go_mod += b"replace golang.org/x/net => ./internal/forks/net\n"
+    else:
+        go_mod = ROOT_GO_MOD.replace(
+            b"replace github.com/joho/godotenv => ./internal/forks/godotenv\n", b""
+        )
+    rebound(tmp_path, monkeypatch, synthetic_archive(fork, go_mod, extra))
+    with pytest.raises(
+        ValueError, match="content differs|links or special|replacement directives"
+    ):
+        MODULE.classify(tmp_path / "manifest.json", tmp_path / "review.json", tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("unpinned-archive", "bound to the reviewed upstream archive"),
+        ("snapshot-other-archive", "not the extracted provenance|bound to the"),
+        ("snapshot-other-commit", "bound to the reviewed upstream archive"),
+        ("snapshot-not-extracted", "not the extracted provenance"),
+        ("foreign-layout", "archive layout is not reviewed"),
+        ("duplicate-member", "archive layout is not reviewed"),
+        ("missing-source-proofs", "review is incomplete"),
+    ],
+)
+def test_fork_must_be_bound_to_extracted_snapshot_and_pinned_archive(
+    tmp_path, monkeypatch, kind, reason
+):
+    manifest = fixture(tmp_path, auth=True)
+    if kind == "unpinned-archive":
+        review = review_fixture(
+            tmp_path, manifest, archive=synthetic_archive(go_mod=ROOT_GO_MOD + b"\n")
+        )
+    elif kind == "snapshot-other-archive":
+        review = review_fixture(tmp_path, manifest, snapshot=snapshot_for("e" * 64))
+    elif kind == "snapshot-other-commit":
+        review = review_fixture(
+            tmp_path,
+            manifest,
+            snapshot=snapshot_for(MODULE.UPSTREAM_ARCHIVE, commit="0" * 40),
+        )
+    elif kind == "snapshot-not-extracted":
+        review = review_fixture(tmp_path, manifest)
+        review["proofs"]["source_snapshot"] = stored(
+            tmp_path,
+            "source_snapshot.proof",
+            snapshot_for(MODULE.UPSTREAM_ARCHIVE) + b" ",
+        )
+    elif kind in {"foreign-layout", "duplicate-member"}:
+        extra = (
+            (("other-root/internal/forks/godotenv/x.go", b"x", tarfile.REGTYPE),)
+            if kind == "foreign-layout"
+            else ((PREFIX + "go.mod", ROOT_GO_MOD, tarfile.REGTYPE),)
+        )
+        archive = synthetic_archive(extra=extra)
+        monkeypatch.setattr(MODULE, "UPSTREAM_ARCHIVE", MODULE.digest(archive))
+        review = review_fixture(tmp_path, manifest, archive=archive)
+    else:
+        review = review_fixture(tmp_path, manifest)
+        del review["proofs"]["source_snapshot"]
+        del review["proofs"]["upstream_archive"]
+    stored(tmp_path, "review.json", json.dumps(review).encode())
+    with pytest.raises(ValueError, match=reason):
+        MODULE.classify(tmp_path / "manifest.json", tmp_path / "review.json", tmp_path)
+
+
+def test_real_archive_pin_matches_committed_auth_source_descriptor():
+    source = json.loads((ROOT / "infra/docker/auth-security/source.json").read_text())
+    assert REAL_UPSTREAM_ARCHIVE == source["upstream_archive_sha256"]
+    assert source["upstream_commit"] == MODULE.COMMIT
+    assert len(REAL_FORK_TREE) == 64 and REAL_FORK_TREE != tree(FORK_FILES)

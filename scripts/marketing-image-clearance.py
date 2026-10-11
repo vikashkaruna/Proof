@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
 import stat
+import tarfile
 from pathlib import Path
 
 SCANNER = "aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa"
@@ -16,6 +18,15 @@ COMPONENTS = {"marketing", "bff", "auth", "rest", "gateway", "lifecycle", "migra
 ORIGINAL = "6cf3e036a8ac399d981060253720d5fbb0cd026d1fb1808540cd6dfc9771aa4c"
 PATCH = "3607dfa9731f02c2cadcb91a57a74603f141ff9a9727d5155a98b49c77e29885"
 COMMIT = "4eee58f296d9698a1c2c0ae14d7a0b379c7622d3"
+# The pinned upstream Auth source carries exactly one local fork. It is only
+# admissible when the compiled metadata names it exactly and the official
+# archive (bound through the extracted source snapshot) contains the reviewed
+# fork tree byte for byte. No other module replacement is ever accepted.
+UPSTREAM_ARCHIVE = "dd5168b9f0bb294fa1e1d343c23b6bb5f68376f271d97dea897339b28fbd4b8d"
+FORK_MODULE = "github.com/joho/godotenv"
+FORK_VERSION = "v1.5.1"
+FORK_PATH = "./internal/forks/godotenv"
+FORK_TREE = "14e220e0d5bdea5d823944c1bc81a5a81bc98c79aa260234e71f6421040b736e"
 
 
 def digest(data: bytes) -> str:
@@ -102,6 +113,69 @@ def proof(reference: object, root: Path) -> bytes:
     return data
 
 
+def reviewed_fork(modules: str, snapshot: bytes, archive: bytes, bound: str) -> str:
+    """Admit only the pinned upstream godotenv fork, bound to official source."""
+    replacements = re.findall(r"^[ \t]*=>.*$", modules, re.MULTILINE)
+    exact = re.findall(
+        r"^\tdep\t"
+        + re.escape(FORK_MODULE)
+        + "\t"
+        + re.escape(FORK_VERSION)
+        + r"\n\t=>\t"
+        + re.escape(FORK_PATH)
+        + r"\t\(devel\)\t?$",
+        modules,
+        re.MULTILINE,
+    )
+    named = re.findall(
+        r"^\s*dep\s+" + re.escape(FORK_MODULE) + r"\s", modules, re.MULTILINE
+    )
+    if len(replacements) != 1 or len(exact) != 1 or len(named) != 1:
+        raise ValueError("Auth actual module replacement is not reviewed")
+    if digest(snapshot) != bound:
+        raise ValueError("Auth source snapshot is not the extracted provenance")
+    descriptor = json.loads(snapshot)
+    if (
+        not isinstance(descriptor, dict)
+        or descriptor.get("upstream_commit") != COMMIT
+        or descriptor.get("upstream_archive_sha256") != UPSTREAM_ARCHIVE
+        or digest(archive) != UPSTREAM_ARCHIVE
+    ):
+        raise ValueError("Auth fork is not bound to the reviewed upstream archive")
+    prefix = f"auth-{COMMIT}/"
+    fork = prefix + FORK_PATH[2:] + "/"
+    files: dict[str, str] = {}
+    seen: set[str] = set()
+    root_go_mod = None
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+        for item in bundle.getmembers():
+            if item.name in seen or not (item.name + "/").startswith(prefix):
+                raise ValueError("Auth upstream archive layout is not reviewed")
+            seen.add(item.name)
+            if item.name == prefix + "go.mod" and item.isfile():
+                handle = bundle.extractfile(item)
+                root_go_mod = handle.read() if handle else None
+            if not (item.name + "/").startswith(fork) or item.isdir():
+                continue
+            if not item.isfile():
+                raise ValueError("Auth fork contains links or special files")
+            handle = bundle.extractfile(item)
+            if handle is None:
+                raise ValueError("Auth fork member is unreadable")
+            files[item.name[len(fork) :]] = digest(handle.read())
+    tree = digest(
+        "".join(f"{name}\0{files[name]}\n" for name in sorted(files)).encode()
+    )
+    if not files or tree != FORK_TREE:
+        raise ValueError("Auth fork content differs from the reviewed upstream fork")
+    directives = re.findall(
+        r"^[ \t]*replace\b.*$", (root_go_mod or b"").decode(), re.MULTILINE
+    )
+    if directives != [f"replace {FORK_MODULE} => {FORK_PATH}"]:
+        raise ValueError("Auth upstream replacement directives are not reviewed")
+    return tree
+
+
 def reviewed_auth(
     review_path: Path | None,
     root: Path,
@@ -145,6 +219,8 @@ def reviewed_auth(
         "runtime_acceptance",
         "provenance",
         "fixture",
+        "source_snapshot",
+        "upstream_archive",
     }
     if not isinstance(refs, dict) or set(refs) != names:
         raise ValueError("Auth review is incomplete")
@@ -176,8 +252,6 @@ def reviewed_auth(
         )
         if entries != [version]:
             raise ValueError("Auth actual module metadata differs")
-    if re.search(r"^\s*=>", modules, re.MULTILINE):
-        raise ValueError("Auth actual module replacement is not reviewed")
     causal = data["original_regression"].decode()
     fixed = data["fixed_tests"].decode()
     if (
@@ -201,6 +275,12 @@ def reviewed_auth(
         or not hexadecimal(provenance.get("source_snapshot_sha256"))
     ):
         raise ValueError("Auth extracted provenance mismatch")
+    fork_tree = reviewed_fork(
+        modules,
+        data["source_snapshot"],
+        data["upstream_archive"],
+        provenance["source_snapshot_sha256"],
+    )
     checks = {
         "actual_named_runtime",
         "normal_auth_signup_and_token",
@@ -224,6 +304,13 @@ def reviewed_auth(
         "source_snapshot_sha256": provenance["source_snapshot_sha256"],
         "patch_sha256": PATCH,
         "patched_source_sha256": digest(data["patched_source"]),
+        "reviewed_fork": {
+            "module": FORK_MODULE,
+            "version": FORK_VERSION,
+            "replacement": FORK_PATH,
+            "upstream_archive_sha256": UPSTREAM_ARCHIVE,
+            "fork_tree_sha256": fork_tree,
+        },
         "proofs": refs,
     }
 
