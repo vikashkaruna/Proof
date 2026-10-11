@@ -25,8 +25,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
-      - name: Configure Docker Hub cache on disposable CI runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
+      # No daemon registry mirror in the Supabase CLI jobs: since it was added
+      # (a3d58338) `supabase start` failed on every run, rolling back postgres
+      # ~1s after create; without it the same start passed (b37091fe).
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -77,8 +78,6 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
-      - name: Configure Docker Hub cache on disposable CI runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -230,8 +229,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - name: Configure Docker Hub cache on disposable CI runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -310,8 +307,6 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - name: Configure Docker Hub cache on disposable CI runner
-        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
