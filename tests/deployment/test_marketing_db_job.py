@@ -329,7 +329,9 @@ def test_roles_program_requires_vector_and_limits_connections_and_query_duration
     assert "supabase_auth_admin login connection limit 2" in sql
     assert "authenticator login noinherit connection limit 3" in sql
     assert "authenticator set statement_timeout='20s'" in sql
-    assert "format('alter role %I connection limit 3',current_user)" in sql
+    # PG16+ refuses a CREATEROLE role's own ALTER; the instance flag bounds it.
+    assert "connection limit 3',current_user" not in sql
+    assert sql.count("connection limit") == 2
     assert "bypassrls;" not in sql.lower()
     assert "superuser;" not in sql.lower()
 

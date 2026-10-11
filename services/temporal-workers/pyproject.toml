@@ -2,7 +2,7 @@
 name = "axiom-temporal-workers"
 version = "0.1.0"
 description = "Axiom Proof Temporal workers — durable orchestration of agentic workflows."
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.14,<3.15"
 license = { text = "Proprietary" }
 
 dependencies = [

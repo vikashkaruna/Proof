@@ -35,12 +35,23 @@ resource "google_sql_database_instance" "marketing" {
   database_version    = var.cloud_sql_database_version
   deletion_protection = true
   settings {
+    # PostgreSQL 16+ defaults to Enterprise Plus, which has no shared-core
+    # tiers; the cost-capped db-f1-micro profile needs Enterprise explicitly.
+    edition           = "ENTERPRISE"
     tier              = var.cloud_sql_tier
     availability_type = "ZONAL"
     disk_size         = var.cloud_sql_disk_size_gb
-    disk_type         = "PD_SSD"
+    # HDD is the cheapest storage; it cannot change after creation.
+    disk_type         = "PD_HDD"
     disk_autoresize   = false
     activation_policy = "ALWAYS"
+    # Instance-wide ceiling replaces the bootstrap admin's own role cap: on
+    # PostgreSQL 16+ a CREATEROLE role cannot alter itself, and Cloud SQL has no
+    # superuser. Equal to the micro tier default; state adoption re-checks it.
+    database_flags {
+      name  = "max_connections"
+      value = "25"
+    }
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.marketing.id
@@ -78,8 +89,8 @@ resource "terraform_data" "configuration" {
       error_message = "Request service deployment needs actual materialized numeric secret versions; base provisioning may leave versions empty."
     }
     precondition {
-      condition     = var.cloud_sql_tier == "db-f1-micro" && var.cloud_sql_disk_size_gb == 10 && var.cloud_sql_database_version == "POSTGRES_15" && var.cloud_sql_backup_retention == 7 && !var.cloud_sql_pitr_enabled && var.min_instance_count == 0 && var.max_instance_count == 1
-      error_message = "This profile requires env-supplied micro10GB PostgreSQL15, seven backups/noPITR and request scaling0..1."
+      condition     = var.cloud_sql_tier == "db-f1-micro" && var.cloud_sql_disk_size_gb == 10 && var.cloud_sql_database_version == "POSTGRES_17" && var.cloud_sql_backup_retention == 1 && !var.cloud_sql_pitr_enabled && var.min_instance_count == 0 && var.max_instance_count == 1
+      error_message = "This profile requires env-supplied Enterprise micro10GB PostgreSQL17, one backup/noPITR and request scaling0..1."
     }
     precondition {
       condition     = can(cidrnetmask(var.subnet_cidr)) && var.sql_range_prefix_length >= 16 && var.sql_range_prefix_length <= 24 && alltrue([for name in concat([var.cloud_sql_instance_name, var.network_name, var.subnetwork_name, var.sql_range_name], values(var.service_names), values(var.service_account_ids)) : can(regex("^axiom-proof-preprod-[a-z0-9-]+$", name))]) && toset(keys(var.service_settings)) == toset(keys(var.images)) && toset(keys(var.service_names)) == toset(keys(var.images)) && toset(keys(var.service_account_ids)) == toset(keys(var.images))

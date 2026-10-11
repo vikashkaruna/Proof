@@ -34,8 +34,8 @@ skill. Agents **extend** existing files and never fork them.
    checks are engineering evidence, not deployment or release clearance.
    Withdrawn claims are never restored.
 4. Hard rules in `AGENTS.md` are untouched by documentation work: approval
-   gate, Sudhaar read-only, append-only ledger, Object Lock Compliance,
-   `ap-south-1` residency. Never write secrets, `.env` contents or private
+   gate, Sudhaar read-only, append-only ledger, Object Lock Compliance, Mumbai
+   residency (AWS `ap-south-1` prod / GCP `asia-south1` preprod). Never write secrets, `.env` contents or private
    target or persona state into any document, shared or private.
 
 ## Checkpoint procedure (every merge, milestone or handoff)

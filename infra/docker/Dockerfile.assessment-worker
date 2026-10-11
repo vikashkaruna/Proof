@@ -15,7 +15,7 @@ RUN set -eu; \
     tar -xzf /tmp/spire.tar.gz -C /tmp spire-1.15.3/bin/spire-agent; \
     cp /tmp/spire-1.15.3/bin/spire-agent /spire-agent
 
-FROM python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322
+FROM python:3.14-alpine3.24@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
 COPY --from=identity-client /spire-agent /usr/local/bin/spire-agent
 WORKDIR /worker
 RUN mkdir axiom && touch axiom/__init__.py

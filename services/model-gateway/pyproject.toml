@@ -3,7 +3,7 @@ name = "axiom-model-gateway"
 version = "0.1.0"
 description = "Axiom Proof Model Gateway — self-hosted LLM routing with PII redaction, token accounting, and prompt-version registry."
 authors = [{ name = "Axiom Minds Private Limited" }]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.14,<3.15"
 license = { text = "Proprietary" }
 
 dependencies = [
@@ -40,7 +40,7 @@ packages = ["src/model_gateway"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -27,8 +27,8 @@ AUTH="axiom-sh-auth-$$"
 REST="axiom-sh-rest-$$"
 GW="axiom-sh-gw-$$"
 PG_IMAGE="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
-GOTRUE_IMAGE="${AXIOM_TEST_GOTRUE_IMAGE:-supabase/gotrue:v2.169.0}"
-REST_IMAGE="${AXIOM_TEST_POSTGREST_IMAGE:-postgrest/postgrest:v12.2.8}"
+GOTRUE_IMAGE="${AXIOM_TEST_GOTRUE_IMAGE:-supabase/gotrue:v2.197.0}"
+REST_IMAGE="${AXIOM_TEST_POSTGREST_IMAGE:-postgrest/postgrest:v16.4}"
 INGRESS_IMAGE="${AXIOM_TEST_INGRESS_IMAGE:-nginx:alpine}"
 
 cleanup() {

@@ -46,7 +46,7 @@ class Session:
         else:
             if 'allow_connections false' in sql:self.allow=False
             if 'allow_connections true' in sql:self.allow=True
-            row={'pid':123,'maintenance_database':'postgres','role':'axiom_admin','server_version_num':'150018',
+            row={'pid':123,'maintenance_database':'postgres','role':'axiom_admin','server_version_num':'170006',
                  'encrypted_transport':True,'stats_visible':True,'database_oid':16500,
                  'database_name':'axiom_proof_preprod','allow_connections':self.allow,
                  'owner_capable':True,'shared_preloads':'pg_stat_statements'}
@@ -84,7 +84,7 @@ def test_activity_refusal_preserves_committed_fence_without_seed_or_reopen(attri
     assert session.allow is False and 'seed' not in cloud.calls
     assert not any('allow_connections true' in sql for sql in session.calls)
 
-@pytest.mark.parametrize('key,value',[('pid',None),('encrypted_transport',False),('stats_visible',False),('owner_capable',False),('server_version_num','170001'),('shared_preloads','unknown_worker'),('database_oid',None)])
+@pytest.mark.parametrize('key,value',[('pid',None),('encrypted_transport',False),('stats_visible',False),('owner_capable',False),('server_version_num','150018'),('server_version_num','180000'),('shared_preloads','unknown_worker'),('database_oid',None)])
 def test_authority_or_native_identity_refusal_before_any_change(key,value):
     session=Session();session.mutate=lambda row,sql:row.update({key:value}) if key in row else None
     with pytest.raises(ValueError):run(session)

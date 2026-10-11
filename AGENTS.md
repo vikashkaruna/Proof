@@ -35,9 +35,10 @@ comprehensive [`README.md`](./README.md).
    the retention or delete the object before the lock expires.
    Do not change this.
 
-5. **All client personal data stays in `ap-south-1`.** No
-   third-party model provider sees raw values. The Model Gateway
-   redacts PII before egress (Doc 05 §6).
+5. **All client personal data stays in Mumbai:** AWS `ap-south-1`
+   (prod) / GCP `asia-south1` (preprod). No third-party model
+   provider sees raw values. The Model Gateway redacts PII before
+   egress (Doc 05 §6).
 
 6. **Approval cannot be issued for an action without a completed
    dry-run AND a validated rollback.** This is BR-2 and is enforced
@@ -72,7 +73,7 @@ See `packages/design-tokens/src/colors.ts` for the full system.
 - **TypeScript:** strict mode, no `any`, branded ID types, Zod
   for runtime validation. Shared types live in
   `packages/types/src/`.
-- **Python:** Python 3.11+, Pydantic v2, structlog, pydantic-settings
+- **Python:** Python 3.14+, Pydantic v2, structlog, pydantic-settings
   for env. The control library mirror lives at
   `services/agent-runtime/src/axiom/control_library_loader.py`.
 - **SQL:** Migrations are append-only. Once a row is in the
@@ -146,6 +147,7 @@ terraform init && terraform plan && terraform apply
 | How do the E2E tests work?                                     | `tests/e2e/tests/*.spec.ts`                                                                           |
 | What is the architectural segregation?                         | `.agents/skills/proof-architecture-segregation/SKILL.md`                                              |
 | How do I record a checkpoint?                                  | `.agents/skills/axiom-docs-increment/SKILL.md`                                                        |
+| How do I name a cloud or Docker resource?                      | `.agents/skills/cloud-resource-naming/SKILL.md`                                                       |
 
 ## Private documentation and manual acceptance maintenance
 
