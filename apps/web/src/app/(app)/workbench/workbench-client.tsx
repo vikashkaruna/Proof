@@ -202,6 +202,9 @@ export function AgentWorkbenchClient({
               tone="dark"
               state={isExecuting ? 'working' : 'idle'}
             />
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10.5px] font-medium text-[#D6DBE8]">
+              Autonomy: set per agent
+            </span>
             <span className="rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-teal-300">
               Env: {environment} · configured region target: {dataResidencyRegion}
             </span>

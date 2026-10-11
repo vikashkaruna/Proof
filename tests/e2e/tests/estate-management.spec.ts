@@ -108,7 +108,14 @@ test('owner declares, edits and archives an estate and system', async ({ page })
   await expect(estate.getByText('Add a system', { exact: true })).toHaveCount(0);
 });
 
-for (const role of ['viewer', 'analyst'] as const) {
+test('viewer is not offered the estate inventory and is refused at its URL', async ({ page }) => {
+  await signIn(page, 'viewer');
+  await selectTenant(page, 'a');
+  await page.goto('/estate');
+  await expect(page).toHaveURL(/\/portal\?error=forbidden/);
+});
+
+for (const role of ['reviewer', 'analyst'] as const) {
   test(`${role} can read estate inventory but cannot edit it`, async ({ page }) => {
     if (role === 'analyst') await signInFreshAnalyst(page, 'estate-reader');
     else await signIn(page, role);

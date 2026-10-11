@@ -10,12 +10,13 @@ const historyName = 'Recorded human classification reviews';
  * The values below are explicitly human-declared test records. This journey
  * does not represent a website scan, agent observation or applied correction.
  */
-test('saved human classification reviews survive reload with viewer and tenant boundaries', async ({
+test('saved human classification reviews survive reload with viewer, reviewer and tenant boundaries', async ({
   browser,
 }, testInfo) => {
   const ownerContext = await browser.newContext({ baseURL: webOrigin });
   const foreignContext = await browser.newContext({ baseURL: webOrigin });
   const viewerContext = await browser.newContext({ baseURL: webOrigin });
+  const readerContext = await browser.newContext({ baseURL: webOrigin });
   const owner = await ownerContext.newPage();
   const foreign = await foreignContext.newPage();
   const viewer = await viewerContext.newPage();
@@ -101,10 +102,17 @@ test('saved human classification reviews survive reload with viewer and tenant b
     expect(reviews.some((review) => review.id === foreignId)).toBe(false);
     expect(reviews.some((review) => review.system_id === rejectedDeclaration.systemId)).toBe(false);
 
+    // Classification is offered to the roles that review agent output. A
+    // viewer is refused at its URL; a reviewer reads the saved history.
     await viewer.goto('/classification');
+    await expect(viewer).toHaveURL(/\/portal\?error=forbidden/);
+    const reader = await readerContext.newPage();
+    await signIn(reader, 'reviewer');
+    await selectTenant(reader, 'a');
+    await reader.goto('/classification');
     for (let visit = 0; visit < 2; visit++) {
-      if (visit === 1) await viewer.reload();
-      const history = viewer.getByRole('region', { name: historyName });
+      if (visit === 1) await reader.reload();
+      const history = reader.getByRole('region', { name: historyName });
       const row = history.locator('li').filter({ hasText: declaration.systemId });
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(declaration.resourcePath);
@@ -125,15 +133,15 @@ test('saved human classification reviews survive reload with viewer and tenant b
       );
       await expect(history.getByText('Final sensitivity', { exact: false })).toHaveCount(0);
     }
-    const historyScreenshot = testInfo.outputPath('viewer-recorded-review.png');
-    await viewer.getByRole('region', { name: historyName }).screenshot({ path: historyScreenshot });
-    await testInfo.attach('viewer-recorded-review', {
+    const historyScreenshot = testInfo.outputPath('reviewer-recorded-review.png');
+    await reader.getByRole('region', { name: historyName }).screenshot({ path: historyScreenshot });
+    await testInfo.attach('reviewer-recorded-review', {
       path: historyScreenshot,
       contentType: 'image/png',
     });
 
-    await viewer.goto('/classification?reviewPage=1001');
-    const invalidHistory = viewer.getByRole('region', { name: historyName });
+    await reader.goto('/classification?reviewPage=1001');
+    const invalidHistory = reader.getByRole('region', { name: historyName });
     await expect(invalidHistory.getByRole('alert')).toContainText('between 1 and 1000');
     await expect(invalidHistory.getByRole('link', { name: 'Open the first page' })).toHaveAttribute(
       'href',
@@ -141,8 +149,8 @@ test('saved human classification reviews survive reload with viewer and tenant b
     );
     await expect(invalidHistory.locator('li')).toHaveCount(0);
     await invalidHistory.getByRole('link', { name: 'Open the first page' }).click();
-    await expect(viewer).toHaveURL(/\/classification$/);
-    await expect(viewer.getByRole('region', { name: historyName })).toContainText(reviewId);
+    await expect(reader).toHaveURL(/\/classification$/);
+    await expect(reader.getByRole('region', { name: historyName })).toContainText(reviewId);
 
     await testInfo.attach('classification-review-boundary-summary', {
       contentType: 'application/json',
@@ -163,5 +171,6 @@ test('saved human classification reviews survive reload with viewer and tenant b
     await ownerContext.close();
     await foreignContext.close();
     await viewerContext.close();
+    await readerContext.close();
   }
 });

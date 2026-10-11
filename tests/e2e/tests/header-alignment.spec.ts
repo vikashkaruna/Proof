@@ -114,8 +114,9 @@ test('module pages and report views use the branded header with one accessible p
         };
       });
     expect(frame, `${route} has a page frame`).not.toBeNull();
-    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(24);
-    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(24);
+    // 20px at desktop width (xl:px-5): the content gutter was tightened from 24px.
+    expect(frame!.paddingLeft, `${route} reduced left margin`).toBe(20);
+    expect(frame!.paddingRight, `${route} reduced right margin`).toBe(20);
     expect(frame!.pageWidth, `${route} fills the content width`).toBeGreaterThanOrEqual(
       frame!.contentWidth - 2,
     );
