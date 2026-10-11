@@ -107,8 +107,8 @@ export class EvidenceError extends Error {
     super(code);
   }
 }
-export function evidenceStorage() {
-  const env = loadEnv();
+export function evidenceStorage(source: NodeJS.ProcessEnv = process.env) {
+  const env = loadEnv(source);
   const credentials =
     env.AXIOM_STORAGE_ACCESS_KEY_ID && env.AXIOM_STORAGE_SECRET_ACCESS_KEY
       ? {

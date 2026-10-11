@@ -39,6 +39,7 @@ def check(source):
                 env[name[1]] = block
         required = {'SUPABASE_ANON_KEY': 'supabase_anon_key'}
         if service == 'bff':
+            required['AXIOM_PLANNING_SOURCE_SIGNING_KEY'] = 'planning_source_signing_key'
             required['SUPABASE_SERVICE_KEY'] = 'supabase_service_key'
             required['SUPABASE_STATUTORY_PROOF_WRITER_KEY'] = 'supabase_statutory_proof_writer_key'
             required['SUPABASE_ARCHIVE_WRITER_KEY'] = 'supabase_archive_writer_key'
@@ -47,7 +48,7 @@ def check(source):
             required['SUPABASE_AGENT_LEDGER_WRITER_KEY'] = 'supabase_agent_ledger_writer_key'
         else:
             required['NEXT_PUBLIC_SUPABASE_ANON_KEY'] = 'supabase_anon_key'
-            for private in ('SUPABASE_SERVICE_KEY', 'SUPABASE_STATUTORY_PROOF_WRITER_KEY', 'SUPABASE_ARCHIVE_WRITER_KEY', 'SUPABASE_HUMAN_ACTION_WRITER_KEY', 'SUPABASE_EVIDENCE_INGESTION_WRITER_KEY', 'SUPABASE_AGENT_LEDGER_WRITER_KEY', 'APPROVAL_SIGNING_KEY', 'AXIOM_MFA_ENCRYPTION_KEY', 'AGENT_RUNTIME_INTERNAL_TOKEN'):
+            for private in ('SUPABASE_SERVICE_KEY', 'SUPABASE_STATUTORY_PROOF_WRITER_KEY', 'SUPABASE_ARCHIVE_WRITER_KEY', 'SUPABASE_HUMAN_ACTION_WRITER_KEY', 'SUPABASE_EVIDENCE_INGESTION_WRITER_KEY', 'SUPABASE_AGENT_LEDGER_WRITER_KEY', 'APPROVAL_SIGNING_KEY', 'AXIOM_MFA_ENCRYPTION_KEY', 'AGENT_RUNTIME_INTERNAL_TOKEN', 'AXIOM_PLANNING_SOURCE_SIGNING_KEY'):
                 if private in env:
                     refuse(f'{service}: backend credential {private} must not be injected into SSR')
         for name, secret in required.items():

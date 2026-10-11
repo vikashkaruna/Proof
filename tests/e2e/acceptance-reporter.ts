@@ -1,6 +1,7 @@
 import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
+import { acceptanceErrorLocation } from '../../scripts/lib/acceptance-error-location.js';
 
-/** Only static test titles and outcomes may enter the public CI log. */
+/** Publish static test outcomes and allowlisted source locations only. */
 export default class AcceptanceReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult) {
     const title = test
@@ -8,6 +9,12 @@ export default class AcceptanceReporter implements Reporter {
       .join(' / ')
       .replace(/[\r\n]/g, ' ');
     console.log(`${result.status}: ${title}`);
+    if (result.status === 'failed' || result.status === 'timedOut') {
+      const locations = new Set(
+        result.errors.map((error) => acceptanceErrorLocation(error.location)).filter(Boolean),
+      );
+      for (const location of locations) console.log(`Acceptance failure location: ${location}`);
+    }
   }
   onEnd(result: FullResult) {
     console.log(`Browser acceptance finished: ${result.status}`);

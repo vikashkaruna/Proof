@@ -71,9 +71,9 @@ begin
  perform pg_temp.assert_true(public.settle_evidence_ingest(t,a,r.id,receipt||jsonb_build_object('readback_at',now()-interval '1 hour'),gen_random_uuid())->>'error'='receipt_mismatch','stale readback refused');
  perform pg_temp.assert_true(public.settle_evidence_ingest(t,a,r.id,receipt||'{"tenant_id":"99730000-0000-4000-8000-000000000020"}',gen_random_uuid())->>'error'='receipt_mismatch','foreign metadata refused');
  perform pg_temp.assert_true(public.settle_evidence_ingest(t,a,r.id,receipt||jsonb_build_object('operation_id',gen_random_uuid()),gen_random_uuid())->>'error'='receipt_mismatch','foreign operation metadata refused');
- x:=public.settle_evidence_ingest(t,a,r.id,receipt,gen_random_uuid()); e:=(x->>'evidence_id')::uuid;
+ x:=public.settle_evidence_ingest(p_tenant_id=>t,p_actor_id=>a,p_operation_id=>r.id,p_receipt=>receipt,p_correlation_id=>gen_random_uuid()); e:=(x->>'evidence_id')::uuid;
  perform pg_temp.assert_true(e is not null and x->>'status'='settled','matching readback settles atomically');
- perform pg_temp.assert_true((public.settle_evidence_ingest(t,a,r.id,receipt,gen_random_uuid())->>'replayed')::boolean,'identical settlement idempotent');
+ perform pg_temp.assert_true((public.settle_evidence_ingest(p_tenant_id=>t,p_actor_id=>a,p_operation_id=>r.id,p_receipt=>receipt,p_correlation_id=>gen_random_uuid())->>'replayed')::boolean,'identical settlement idempotent');
  perform pg_temp.assert_true(public.settle_evidence_ingest(t,a,r.id,receipt||'{"version_id":"new-version"}',gen_random_uuid())->>'error'='receipt_conflict','settled version immutable');
  perform pg_temp.assert_true((select count(*)=1 from public.evidence_object_versions where tenant_id=t),'one receipt');
  perform pg_temp.assert_true((select count(*)=1 from public.audit_ledger where tenant_id=t and action_type='evidence.ingestion.settled'),'one settlement audit');

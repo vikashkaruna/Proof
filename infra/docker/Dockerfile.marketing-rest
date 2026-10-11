@@ -1,0 +1,3 @@
+# Resolve the reviewed multiarch upstream pin into one amd64 image for export/push.
+ARG UPSTREAM_POSTGREST_IMAGE
+FROM ${UPSTREAM_POSTGREST_IMAGE}

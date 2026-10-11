@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createKillSwitchService } from './kill-switch.js';
+import { createKillSwitchService, KillSwitchStateUnavailable } from './kill-switch.js';
 import { TENANT_A, TENANT_B } from '../test/harness.js';
 
 /**
@@ -34,6 +34,10 @@ function createSharedStore() {
       const builder: Record<string, unknown> = {};
 
       builder.select = () => builder;
+      builder.abortSignal = (signal: AbortSignal) => {
+        signal.throwIfAborted();
+        return builder;
+      };
       builder.eq = (field: string, value: unknown) => {
         state.filters.push([field, value]);
         // `.select().eq('engaged', true)` resolves as a promise.
@@ -250,5 +254,87 @@ describe('kill switch — caching', () => {
     await svc.isActive(TENANT_A);
 
     expect(factory).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('kill switch status truthfulness during read outages', () => {
+  it('reports unavailable on a cold failed read while execution is fail-safe halted', async () => {
+    const store = createSharedStore();
+    store.setFailReads(true);
+    const service = createKillSwitchService(store.factory);
+    await expect(service.state(TENANT_A)).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+    expect(await service.isActive(TENANT_A)).toBe(true);
+  });
+  it.each([false, true])(
+    'does not report stale cached engaged=%s after a read failure',
+    async (engaged) => {
+      const store = createSharedStore();
+      if (engaged)
+        store.rows.set('global', {
+          scope_key: 'global',
+          scope: 'global',
+          tenant_id: null,
+          engaged: true,
+          reason: 'Old snapshot',
+          engaged_by: FOUNDER,
+          engaged_at: '2026-10-05T00:00:00Z',
+        });
+      const service = createKillSwitchService(store.factory);
+      expect((await service.state(TENANT_A)).engaged).toBe(engaged);
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 2001);
+      try {
+        store.setFailReads(true);
+        await expect(service.state(TENANT_A)).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+        expect(await service.isActive(TENANT_A)).toBe(true);
+        store.setFailReads(false);
+        expect((await service.state(TENANT_A)).engaged).toBe(engaged);
+        expect(await service.isActive(TENANT_A)).toBe(engaged);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+  it('recovers after a cold read outage without any mutation or fabricated halt', async () => {
+    const store = createSharedStore();
+    const service = createKillSwitchService(store.factory);
+    store.setFailReads(true);
+    await expect(service.state(TENANT_A)).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+    store.setFailReads(false);
+    expect(await service.state(TENANT_A)).toMatchObject({ engaged: false });
+    expect(await service.isActive(TENANT_A)).toBe(false);
+    expect(store.rows.size).toBe(0);
+  });
+  it('handles thrown transport/factory failures with the same safe outcome', async () => {
+    const service = createKillSwitchService(() => {
+      throw new Error('private adapter connection details');
+    });
+    expect(await service.isActive(TENANT_A)).toBe(true);
+    await expect(service.state(TENANT_A)).rejects.toThrow('Kill switch status is unavailable');
+  });
+  it('keeps a failed concurrent read separate from a later successful cached status', async () => {
+    let settleFailure!: (result: unknown) => void;
+    const failure = new Promise((resolve) => {
+      settleFailure = resolve;
+    });
+    let reads = 0;
+    const service = createKillSwitchService(
+      () =>
+        ({
+          from: () => ({
+            select: () => ({
+              abortSignal: () => ({
+                eq: () => (++reads === 1 ? failure : Promise.resolve({ data: [], error: null })),
+              }),
+            }),
+          }),
+        }) as never,
+    );
+    const first = service.isActive(TENANT_A);
+    expect((await service.state(TENANT_A)).engaged).toBe(false);
+    settleFailure({ data: null, error: { message: 'isolated failure' } });
+    expect(await first).toBe(true);
+    expect((await service.state(TENANT_A)).engaged).toBe(false);
+    expect(await service.isActive(TENANT_A)).toBe(false);
   });
 });

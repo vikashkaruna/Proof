@@ -30,8 +30,16 @@ begin
  return r;
 end $$;
 create function pg_temp.fingerprint() returns text language sql as $$select fingerprint from public.assessment_dispatch_key_policies where tenant_id=pg_temp.id(11)$$;
-create function pg_temp.queued(job int,revision integer default null,digest text default null,key_id integer default 61) returns jsonb language sql as $$
- select public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),repeat('a',64),encode(sha256(convert_to('policy-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes',pg_temp.ref(key_id),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),revision,digest)$$;
+create function pg_temp.queued(job int,revision integer default null,digest text default null,key_id integer default 61) returns jsonb language plpgsql as $$
+declare prior text:=current_user; reply jsonb;
+begin
+ if prior not in ('postgres','service_role','human_action_writer') then raise exception 'fixture writer denied' using errcode='42501'; end if;
+ execute 'set local role human_action_writer';
+ begin
+  reply:=public.enqueue_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),repeat('a',64),encode(sha256(convert_to('policy-'||job::text,'UTF8')),'hex'),clock_timestamp()+interval '10 minutes',pg_temp.ref(key_id),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),revision,digest);
+ exception when others then execute format('set local role %I',prior); raise; end;
+ execute format('set local role %I',prior); return reply;
+end $$;
 create function pg_temp.claim(job int,revision integer default null,digest text default null) returns jsonb language sql as $$select public.claim_assessment_dispatch(pg_temp.id(11),pg_temp.id(job),revision,digest)$$;
 -- POLICY_FIXTURE_READY
 set local role service_role;

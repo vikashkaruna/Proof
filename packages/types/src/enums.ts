@@ -144,6 +144,7 @@ export const LedgerResult = {
 export type LedgerResult = (typeof LedgerResult)[keyof typeof LedgerResult];
 
 export const LedgerActionType = {
+  PUBLIC_SOURCE_BOUND: 'public_source.bound',
   DISCOVERY_STARTED: 'discovery.started',
   DISCOVERY_BATCH_COMPLETED: 'discovery.batch.completed',
   DISCOVERY_TARGETED_COMPLETED: 'discovery.targeted.completed',
@@ -151,6 +152,8 @@ export const LedgerActionType = {
   CLASSIFICATION_STARTED: 'classification.started',
   CLASSIFICATION_BATCH_COMPLETED: 'classification.batch.completed',
   CLASSIFICATION_REVIEW_QUEUED: 'classification.review_queued',
+  ASSESSMENT_REQUESTED: 'assessment.requested',
+  ASSESSMENT_REQUEST_CANCELLED: 'assessment.request_cancelled',
   ASSESSMENT_STARTED: 'assessment.started',
   ASSESSMENT_SCORED: 'assessment.scored',
   ASSESSMENT_REPORT_GENERATED: 'assessment.report.generated',
@@ -161,6 +164,7 @@ export const LedgerActionType = {
   EVIDENCE_SEALED: 'evidence.sealed',
   EVIDENCE_LINKED: 'evidence.linked',
   PLAN_GENERATED: 'plan.generated',
+  PLAN_REVIEW_ADOPTED: 'plan.review_adopted',
   PLAN_DRY_RUN_COMPLETED: 'plan.dry_run.completed',
   PLAN_APPROVAL_REQUESTED: 'plan.approval_requested',
   PLAN_REJECTED: 'plan.rejected',
@@ -317,6 +321,7 @@ export const LedgerActionType = {
   EVIDENCE_PACK_BUILD_SETTLED: 'evidence.pack.build.settled',
   EVIDENCE_PACK_EXPORTED: 'evidence_pack.exported',
   ROPA_RECORDED: 'ropa.recorded',
+  OPERATOR_REQUEST_CANCELLED: 'operator.request.cancelled',
   POLICY_DRAFTED: 'policy.drafted',
   POLICY_REVIEWED: 'policy.reviewed',
   PLAYBOOK_CREATED: 'playbook.created',

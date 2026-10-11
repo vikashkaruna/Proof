@@ -25,6 +25,21 @@ it('publishes only public pages to robots and sitemap', () => {
   expect(urls.every((url) => !url.includes('/api/'))).toBe(true);
 });
 
+it('uses the configured preprod marketing origin in public metadata', () => {
+  vi.stubEnv('AXIOM_PROOF_MARKETING_URL', 'https://stg.axiomproof.ai');
+  expect(robots().sitemap).toBe('https://stg.axiomproof.ai/sitemap.xml');
+  expect(sitemap().map((entry) => entry.url)).toContain('https://stg.axiomproof.ai/privacy');
+});
+
+it('rejects a malformed or missing deployment marketing origin', () => {
+  // A different HTTPS origin is syntactically valid; a scheme downgrade is not.
+  vi.stubEnv('AXIOM_PROOF_MARKETING_URL', 'http://stg.axiomproof.ai');
+  expect(() => sitemap()).toThrow('bare HTTPS origin');
+  vi.stubEnv('AXIOM_PROOF_MARKETING_URL', '');
+  vi.stubEnv('AXIOM_STRICT_PUBLIC_URLS', '1');
+  expect(() => robots()).toThrow('required');
+});
+
 it('exposes deployment identity without credentials or cacheable status', async () => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'private-key');
   const response = health();

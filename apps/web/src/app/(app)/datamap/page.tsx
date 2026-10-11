@@ -1,9 +1,12 @@
 import { GenericModuleView } from '../generic-module-view';
-import { DataPlaceholder } from '@axiom/ui';
+import { Capability, can } from '@axiom/types';
+import { requireCapabilityContext } from '@/lib/tenant-context';
+import { WorkflowPanel } from '../operator-workflows/panel';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DataMapPage() {
+  const { tenantId, userId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
   return (
     <GenericModuleView
       meta={{
@@ -15,13 +18,21 @@ export default async function DataMapPage() {
         agentKey: 'vibhaag',
         autonomy: 'L1',
         moduleId: 'M1.3',
-        desc: 'A tenant RoPA and data-flow map are unavailable here until processing activities, purposes, processors, locations, and retained source records can be read back and verified.',
+        desc: 'Capture reviewable processing activities with explicit unknowns and retained sources. Record delivery work and time to prioritise the automation backlog.',
         cards: [],
       }}
     >
-      <DataPlaceholder
-        title="No source-bound processing map is available."
-        description="Discovery and classification records alone do not establish lawful basis, processor contracts, transfer safeguards, or residency."
+      <WorkflowPanel
+        tenantId={tenantId}
+        actorId={userId}
+        kind="ropa"
+        canWrite={can(Capability.ESTATE_MANAGE, { role })}
+      />
+      <WorkflowPanel
+        tenantId={tenantId}
+        actorId={userId}
+        kind="delivery_task"
+        canWrite={can(Capability.ESTATE_MANAGE, { role })}
       />
     </GenericModuleView>
   );

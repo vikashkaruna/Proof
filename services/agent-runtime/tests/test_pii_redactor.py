@@ -1,6 +1,6 @@
 """Tests for the PII redactor."""
 
-from axiom.pii_redactor import redact_text, redact_dict
+from axiom.pii_redactor import redact_dict, redact_text
 
 
 def test_redacts_pan():

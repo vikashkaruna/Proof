@@ -14,10 +14,22 @@ docker info >/dev/null
 docker compose version >/dev/null
 python3 scripts/onprem-preflight.py "$ENV_FILE" >/dev/null
 read_env() {
-  sed -n "s/^${1}=//p" "$ENV_FILE"
+  python3 - "$ENV_FILE" "$1" <<'PYENV'
+import importlib.util
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("ops_env_parse", "scripts/lib/ops-env-parse.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+try:
+    print(module.parse(Path(sys.argv[1])).get(sys.argv[2], ""))
+except (OSError, ValueError):
+    raise SystemExit("Selected environment file could not be parsed safely")
+PYENV
 }
 LICENSE="$(read_env AXIOM_OFFLINE_LICENSE)"
-AXIOM_OFFLINE_LICENSE="$LICENSE" pnpm tsx scripts/verify-license.ts >/dev/null || {
+LICENSE_ROOT="$(read_env AXIOM_LICENSE_ROOT_PUBLIC_KEY)"
+AXIOM_LICENSE_ROOT_PUBLIC_KEY="$LICENSE_ROOT" AXIOM_OFFLINE_LICENSE="$LICENSE" pnpm tsx scripts/verify-license.ts >/dev/null || {
   echo 'Offline license verification failed' >&2; exit 1;
 }
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")

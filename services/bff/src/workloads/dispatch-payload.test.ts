@@ -150,16 +150,161 @@ describe('private dispatch payload', () => {
   });
 });
 describe('trusted durable dispatch adapter', () => {
+  it('uses only the human writer for enqueue and never falls back to the read/claim client', async () => {
+    const f = fixture();
+    const readerFetch = vi.fn<typeof fetch>(async () => new Response('{}'));
+    const writerFetch = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes('recover_assessment_dispatch')
+              ? null
+              : {
+                  job_id: context.jobId,
+                  run_id: id(7),
+                  expires_at: new Date(Date.now() + 200000).toISOString(),
+                },
+          ),
+        ),
+    );
+    const reader = createClient('https://reader.invalid', 'reader', {
+      global: { fetch: readerFetch },
+      auth: { persistSession: false },
+    });
+    const writer = createClient('https://human.invalid', 'human', {
+      global: { fetch: writerFetch },
+      auth: { persistSession: false },
+    });
+    const factory = vi.fn(() => writer);
+    const dispatch = new AssessmentDispatch(
+      reader,
+      { ...f.wrapper, policyFingerprint: () => 'f'.repeat(64) },
+      new Map([[context.tenantId, 1]]),
+      factory,
+    );
+    await dispatch.enqueue(context, input);
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(readerFetch).not.toHaveBeenCalled();
+    expect(String(writerFetch.mock.calls[0]![0])).toContain('/rpc/recover_assessment_dispatch');
+    expect(String(writerFetch.mock.calls[1]![0])).toContain('/rpc/enqueue_assessment_dispatch');
+    expect(writerFetch.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(writerFetch.mock.calls[1]![1]?.signal).toBeInstanceOf(AbortSignal);
+    await expect(dispatch.claim(context.tenantId, context.jobId)).rejects.toThrow();
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(String(readerFetch.mock.calls[0]![0])).toContain('/rpc/claim_assessment_dispatch');
+  });
+  it('refuses missing human writer before KMS without using the read/claim client', async () => {
+    const f = fixture();
+    const wrap = vi.spyOn(f.wrapper, 'wrap');
+    const readerFetch = vi.fn<typeof fetch>(async () => new Response('{}'));
+    const reader = createClient('https://reader.invalid', 'reader', {
+      global: { fetch: readerFetch },
+      auth: { persistSession: false },
+    });
+    const dispatch = new AssessmentDispatch(
+      reader,
+      { ...f.wrapper, policyFingerprint: () => 'f'.repeat(64) },
+      new Map([[context.tenantId, 1]]),
+      () => {
+        throw new Error('private-human-credential-unavailable');
+      },
+    );
+    await expect(dispatch.enqueue(context, input)).rejects.toThrow(
+      'Private assessment dispatch was refused.',
+    );
+    expect(wrap).not.toHaveBeenCalled();
+    expect(readerFetch).not.toHaveBeenCalled();
+  });
+  it('refuses unconfigured policy for a new job after receipt-only lookup and before KMS', async () => {
+    const f = fixture();
+    const wrap = vi.spyOn(f.wrapper, 'wrap');
+    const fetcher = vi.fn<typeof fetch>(async () => new Response('null'));
+    const reader = createClient('https://reader.invalid', 'reader', {
+      global: { fetch: fetcher },
+      auth: { persistSession: false },
+    });
+    await expect(
+      new AssessmentDispatch(reader, f.wrapper, new Map(), () => reader).enqueue(context, input),
+    ).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]![0])).toContain('/rpc/recover_assessment_dispatch');
+    expect(wrap).not.toHaveBeenCalled();
+  });
+  it('recovers an expired original receipt with unavailable policy and KMS without enqueue or renewal', async () => {
+    const f = fixture();
+    const expiresAt = new Date(Date.now() - 100000).toISOString();
+    const wrap = vi.spyOn(f.wrapper, 'wrap').mockRejectedValue(new Error('kms unavailable'));
+    const fetcher = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({ job_id: context.jobId, run_id: id(7), expires_at: expiresAt }),
+        ),
+    );
+    const writer = createClient('https://human.invalid', 'human', {
+      global: { fetch: fetcher },
+      auth: { persistSession: false },
+    });
+    const result = await new AssessmentDispatch(writer, f.wrapper, new Map(), () => writer).enqueue(
+      context,
+      input,
+    );
+    expect(result.expires_at).toBe(expiresAt);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]![0])).toContain('/rpc/recover_assessment_dispatch');
+    const body = JSON.parse(String(fetcher.mock.calls[0]![1]?.body));
+    expect(body).toEqual({
+      p_job_id: context.jobId,
+      p_tenant_id: context.tenantId,
+      p_actor_id: context.actorId,
+      p_workload_id: context.workloadId,
+      p_estate_id: context.estateId,
+      p_engagement_id: context.engagementId,
+      p_correlation_id: context.correlationId,
+      p_input_hash: context.inputHash,
+    });
+    expect(wrap).not.toHaveBeenCalled();
+  });
+  it.each(['forbidden', 'kill_switch_engaged', 'dispatch_conflict', 'dispatch_incomplete'])(
+    'refuses recovery failure %s without encryption or fallback',
+    async (error) => {
+      const f = fixture(),
+        wrap = vi.spyOn(f.wrapper, 'wrap');
+      const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ error })));
+      const writer = createClient('https://human.invalid', 'human', {
+        global: { fetch: fetcher },
+        auth: { persistSession: false },
+      });
+      await expect(
+        new AssessmentDispatch(writer, f.wrapper, new Map(), () => writer).enqueue(context, input),
+      ).rejects.toThrow('Private assessment dispatch was refused.');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(wrap).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses input hash mismatch before a stable receipt lookup', async () => {
+    const f = fixture(),
+      writer = vi.fn();
+    const db = createClient('https://human.invalid', 'human', { auth: { persistSession: false } });
+    await expect(
+      new AssessmentDispatch(db, f.wrapper, new Map(), writer).enqueue(context, input + ' '),
+    ).rejects.toThrow();
+    expect(writer).not.toHaveBeenCalled();
+  });
+
   it('stores only ciphertext and a proof hash; retries use the same job identity', async () => {
     const f = fixture(),
       fetcher = vi.fn<typeof fetch>(
-        async () =>
+        async (url) =>
           new Response(
-            JSON.stringify({
-              job_id: context.jobId,
-              run_id: id(7),
-              expires_at: new Date(Date.now() + 200000).toISOString(),
-            }),
+            JSON.stringify(
+              String(url).includes('recover_assessment_dispatch')
+                ? null
+                : {
+                    job_id: context.jobId,
+                    run_id: id(7),
+                    expires_at: new Date(Date.now() + 200000).toISOString(),
+                  },
+            ),
             { headers: { 'content-type': 'application/json' } },
           ),
       );
@@ -167,7 +312,12 @@ describe('trusted durable dispatch adapter', () => {
       global: { fetch: fetcher },
       auth: { persistSession: false },
     });
-    const dispatch = new AssessmentDispatch(db, f.wrapper);
+    const dispatch = new AssessmentDispatch(
+      db,
+      { ...f.wrapper, policyFingerprint: () => 'f'.repeat(64) },
+      new Map([[context.tenantId, 1]]),
+      () => db,
+    );
     const a = await dispatch.enqueue(context, input),
       b = await dispatch.enqueue(context, input);
     expect(a.run_id).toBe(b.run_id);
@@ -293,3 +443,31 @@ describe('private dispatch reconciliation lookup', () => {
     ).rejects.toThrow('Private assessment dispatch was refused.');
   });
 });
+
+it('preserves explicit unknown applicability flags through the private dispatch envelope', async () => {
+  const text = JSON.stringify({
+    ...JSON.parse(input),
+    sdf_self_attested: null,
+    processes_children: null,
+    processes_health: null,
+  });
+  const c = { ...context, inputHash: createHash('sha256').update(text).digest('hex') },
+    f = fixture();
+  const sealed = await sealDispatch(c, text, f.proof, f.wrapper);
+  const opened = await openDispatch(c, sealed, f.hash, f.wrapper);
+  expect(JSON.parse(opened.reveal().inputJson)).toMatchObject({
+    sdf_self_attested: null,
+    processes_children: null,
+    processes_health: null,
+  });
+  expect(JSON.stringify(opened)).not.toContain('sdf_self_attested');
+});
+it.each(['false', 0, {}, []])(
+  'refuses non-boolean applicability %j before encryption',
+  async (value) => {
+    const text = JSON.stringify({ ...JSON.parse(input), processes_children: value });
+    const c = { ...context, inputHash: createHash('sha256').update(text).digest('hex') },
+      f = fixture();
+    await expect(sealDispatch(c, text, f.proof, f.wrapper)).rejects.toThrow();
+  },
+);

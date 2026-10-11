@@ -42,6 +42,25 @@ async function buildApp(
   });
   app.use('/v1/*', idempotency);
   app.post('/v1/execute', (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+  for (const path of [
+    '/v1/plans/owned-synthetic',
+    '/v1/plans/owned-synthetic/cancel',
+    '/v1/plans/owned-synthetic/outcome',
+    '/v1/plans/owned-synthetic-extra',
+    '/v1/plans/owned-synthetic/extra',
+    '/v1/assessment/jobs',
+    '/v1/plans/proposals',
+    '/v1/plans/proposals-extra',
+    '/v1/plans/proposals/extra',
+    '/v1/assessment/jobs-extra',
+    '/v1/assessment/jobs/extra',
+    '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel',
+    '/v1/assessment/jobs/not-a-uuid/cancel',
+    '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel-extra',
+  ]) {
+    app.post(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+    app.put(path, (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
+  }
   app.get('/v1/read', (c) => c.json({ ok: true }));
   return app;
 }
@@ -148,6 +167,77 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     expect(await res.json()).toEqual({ executed: true, replayed: true });
   });
 
+  it('bypasses only the exact human assessment POST cache so durable SQL rechecks current authorization', async () => {
+    const double = createSupabaseDouble({
+      idempotencyHit: { response_status: 200, response_body: { cached: true } },
+    });
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const res = await app.request('/v1/assessment/jobs', {
+      method: 'POST',
+      headers: { 'idempotency-key': 'client-operation-key' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ executed: true, key: 'client-operation-key' });
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('rechecks live source/capability on exact planning POST rather than returning cached business success', async () => {
+    const double = createSupabaseDouble({
+      idempotencyHit: { response_status: 200, response_body: { cached: true } },
+    });
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const response = await app.request('/v1/plans/proposals', {
+      method: 'POST',
+      headers: { 'idempotency-key': 'client-operation-key' },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ executed: true, key: 'client-operation-key' });
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+  it.each([
+    ['POST', '/v1/assessment/jobs-extra'],
+    ['POST', '/v1/assessment/jobs/extra'],
+    ['PUT', '/v1/assessment/jobs'],
+    ['POST', '/v1/plans/proposals-extra'],
+    ['POST', '/v1/plans/proposals/extra'],
+    ['PUT', '/v1/plans/proposals'],
+    ['PUT', '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel'],
+    ['POST', '/v1/assessment/jobs/not-a-uuid/cancel'],
+    ['POST', '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel-extra'],
+  ])('keeps generic idempotency on %s %s', async (method, path) => {
+    const double = createSupabaseDouble({});
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const res = await app.request(path!, {
+      method,
+      headers: { 'idempotency-key': 'client-operation-key' },
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as ErrorBody).error.code).toBe('idempotency_unavailable');
+  });
+
+  it('still requires a client key on durable assessment requests', async () => {
+    const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+    const res = await app.request('/v1/assessment/jobs', { method: 'POST' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as ErrorBody).error.code).toBe('idempotency_required');
+  });
+
+  it.each([undefined, 'short'])(
+    'still validates the key before durable cancellation with key %s',
+    async (key) => {
+      const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+      const response = await app.request(
+        '/v1/assessment/jobs/99990000-0000-4000-8000-000000000004/cancel',
+        { method: 'POST', headers: key ? { 'idempotency-key': key } : {} },
+      );
+      expect(response.status).toBe(400);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    },
+  );
+
   // Even under bypass, FR-8.3 stays on. The bypass relaxes *authentication*;
   // it is not a general "make the product easier to call" switch.
   it('still requires a key under e2e-bypass', async () => {
@@ -158,4 +248,39 @@ describe('idempotency — SEC-13 · FR-8.3 must be enforced everywhere', () => {
     const res = await app.request('/v1/execute', { method: 'POST' });
     expect(res.status).toBe(400);
   });
+});
+
+it.each([
+  '/v1/plans/owned-synthetic',
+  '/v1/plans/owned-synthetic/cancel',
+  '/v1/plans/owned-synthetic/outcome',
+])('original owned operation %s rechecks source instead of generic cached reply', async (path) => {
+  const double = createSupabaseDouble({
+    idempotencyHit: { response_status: 200, response_body: { cached: true } },
+  });
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ ENVIRONMENT: 'test' }, double);
+  const response = await app.request(path, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': 'owned-original-operation' },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ executed: true, key: 'owned-original-operation' });
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  expect((await app.request(path, { method: 'POST' })).status).toBe(400);
+});
+it.each([
+  ['POST', '/v1/plans/owned-synthetic-extra'],
+  ['POST', '/v1/plans/owned-synthetic/extra'],
+  ['PUT', '/v1/plans/owned-synthetic'],
+])('owned-like %s %s retains generic idempotency claim', async (method, path) => {
+  const double = createSupabaseDouble({});
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ ENVIRONMENT: 'test' }, double);
+  const response = await app.request(path, {
+    method,
+    headers: { 'Idempotency-Key': 'owned-original-operation' },
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: 'idempotency_unavailable' } });
 });

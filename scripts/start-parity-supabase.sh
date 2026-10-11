@@ -10,6 +10,16 @@ if [[ ! "$project_id" =~ ^axiom-[a-z0-9-]+$ || ! "$port_prefix" =~ ^[0-9]{3}$ ]]
   echo 'Invalid isolated Supabase project or port prefix.' >&2
   exit 1
 fi
+start_args=(start --workdir "$state_dir" --exclude studio,postgres-meta,realtime,logflare,vector,edge-runtime,imgproxy)
+if [ "${AXIOM_PARITY_STARTUP_DEBUG+x}" = x ]; then
+  if [ "$AXIOM_PARITY_STARTUP_DEBUG" != 1 ] || [ "${GITHUB_ACTIONS:-}" != true ] || \
+     [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ] || [ "${RUNNER_OS:-}" != Linux ] || \
+     [ "$(uname -s)" != Linux ]; then
+    echo 'Protected startup debug requires explicit opt-in on GitHub-hosted Linux.' >&2
+    exit 1
+  fi
+  start_args+=(--debug)
+fi
 db_container="supabase_db_${project_id}"
 mkdir -p "$state_dir/supabase"
 chmod 700 "$state_dir"
@@ -27,9 +37,26 @@ config += '\n[db.seed]\nenabled = false\n\n[db.migrations]\nenabled = false\n'
 PY
 started=false
 for attempt in 1 2 3; do
-  if supabase start --workdir "$state_dir" --exclude studio,postgres-meta,realtime,logflare,vector,edge-runtime,imgproxy > "$state_dir/start.log" 2>&1; then
+  attempt_log="$state_dir/start-attempt-$attempt.log"
+  observer_log="$state_dir/start-attempt-$attempt.observer.json"
+  if [ "${AXIOM_PARITY_STARTUP_DEBUG:-}" = 1 ]; then
+    if python3 .github/ci/observe_supabase_startup.py "$project_id" "$observer_log" -- \
+      supabase "${start_args[@]}" > "$attempt_log" 2>&1; then
+      started=true
+    fi
+  elif supabase "${start_args[@]}" > "$attempt_log" 2>&1; then
     started=true
+  fi
+  cp "$attempt_log" "$state_dir/start.log"
+  chmod 600 "$attempt_log" "$state_dir/start.log"
+  if [ "$started" = true ]; then
     break
+  fi
+  echo "Startup attempt $attempt diagnostics:" >&2
+  # Emit bounded facts before retries can replace the first failure's context.
+  python3 .github/ci/diagnose_supabase_startup.py "$attempt_log" "$project_id" || true
+  if [ "${AXIOM_PARITY_STARTUP_DEBUG:-}" = 1 ]; then
+    python3 .github/ci/observe_supabase_startup.py --report "$project_id" "$observer_log" || true
   fi
   if [ "$attempt" -lt 3 ]; then
     echo "Supabase start attempt $attempt failed; retrying in $((attempt * 5))s..." >&2
@@ -41,20 +68,6 @@ if [ "$started" != true ]; then
   echo "Supabase startup failed. Inspect the protected log at $state_dir/start.log" >&2
   # Logs may contain generated credentials. Emit only fixed diagnostic labels,
   # never raw startup logs or status JSON into CI logs/artifacts.
-  python3 - "$state_dir/start.log" <<'PYDIAG'
-from pathlib import Path
-import sys
-message = Path(sys.argv[1]).read_text().lower()
-patterns = {
-    'image registry/auth/rate-limit failure': ['toomanyrequests', 'pull access denied', 'manifest unknown', 'failed to pull', 'error pulling', 'unauthorized', '429 too many'],
-    'container health/startup failure': ['unhealthy', 'health check', 'failed to start'],
-    'host resource/port failure': ['no space left', 'address already in use', 'port is already allocated', 'out of memory'],
-    'network timeout/connectivity failure': ['timeout', 'connection refused', 'connection reset', 'no such host', 'tls handshake'],
-}
-found = [label for label, terms in patterns.items() if any(term in message for term in terms)]
-print('Startup diagnostic categories: ' + (', '.join(found) or 'unclassified; protected log required'), file=sys.stderr)
-PYDIAG
-  docker ps -a --filter "name=$project_id" --format '{{.Names}}: {{.Status}}' >&2
   exit 1
 fi
 python3 scripts/migrate-database.py --container "$db_container"

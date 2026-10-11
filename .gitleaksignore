@@ -74,3 +74,30 @@ bcf008e31023b974a4a9d850473f9679aea9731a:tests/database/migration-dsn.sh:generic
 bcf008e31023b974a4a9d850473f9679aea9731a:tests/scripts/test_bootstrap_onprem.py:generic-api-key:28
 bcf008e31023b974a4a9d850473f9679aea9731a:tests/scripts/test_provision_reconciliation_key.py:generic-api-key:27
 be2cde9d8e623461936eb03a1a0ec271e4f511fd:packages/evidence/src/storage-acceptance.test.ts:generic-api-key:36
+
+# Verified 2026-10-05: exact historical generated source-index content hashes.
+# Each flagged value equals SHA256 of its named source file at d08e25eb;
+# source paths mentioning keys/auth/secrets trigger generic-api-key. No credentials.
+# The index now lives only in ignored private docs; no path/rule-wide exclusion.
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:151
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:190
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:248
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:256
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:259
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:327
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:340
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:388
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:412
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:418
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:468
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:525
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:536
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:537
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:539
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:563
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:632
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:659
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:660
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:669
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:670
+d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:687

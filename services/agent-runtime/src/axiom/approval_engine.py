@@ -13,8 +13,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from .canonicalise import canonical_json, sha256_hex
@@ -30,7 +30,8 @@ class ApprovalTokenSpec:
     stop_on_failure: bool
     expires_at: str  # ISO datetime
     nonce: str
-    conditions: dict[str, Any] = field(default_factory=dict)
+    conditions: dict[str, Any] | None = None
+    content_digest: str | None = None
 
     def to_canonical(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -43,8 +44,10 @@ class ApprovalTokenSpec:
             "expiresAt": self.expires_at,
             "nonce": self.nonce,
         }
-        if self.conditions:
+        if self.conditions is not None:
             d["conditions"] = self.conditions
+        if self.content_digest is not None:
+            d["contentDigest"] = self.content_digest
         return d
 
 
@@ -69,6 +72,7 @@ class ApprovalEngine:
     """
 
     def __init__(self, signing_key: str | bytes | None = None):
+        self._default_key: bytes | None
         if isinstance(signing_key, str):
             self._default_key = signing_key.encode("utf-8")
         elif isinstance(signing_key, bytes):
@@ -122,9 +126,7 @@ class ApprovalEngine:
             self._key_for(tenant_id), payload.encode("utf-8"), hashlib.sha256
         ).hexdigest()
 
-    async def verify(
-        self, tenant_id: str, token: dict[str, Any]
-    ) -> ValidationResult:
+    async def verify(self, tenant_id: str, token: dict[str, Any]) -> ValidationResult:
         if not isinstance(token, dict):
             return ValidationResult(valid=False, reason="malformed_token")
         spec_raw = token.get("spec")
@@ -132,16 +134,45 @@ class ApprovalEngine:
         if not isinstance(spec_raw, dict) or not isinstance(signature, str):
             return ValidationResult(valid=False, reason="malformed_token")
 
+        required = {
+            "planId",
+            "actionIds",
+            "approverId",
+            "mode",
+            "concurrency",
+            "stopOnFailure",
+            "expiresAt",
+            "nonce",
+        }
+        # Reconstruct only the shared schema, without dropping signed fields or
+        # coercing caller values into a different authenticated payload.
+        if not required <= spec_raw.keys() or spec_raw.keys() - required - {
+            "conditions",
+            "contentDigest",
+        }:
+            return ValidationResult(valid=False, reason="malformed_token")
+        string_fields = ("planId", "approverId", "mode", "expiresAt", "nonce")
+        if (
+            any(not isinstance(spec_raw[k], str) for k in string_fields)
+            or not isinstance(spec_raw["actionIds"], list)
+            or any(not isinstance(a, str) for a in spec_raw["actionIds"])
+            or type(spec_raw["concurrency"]) is not int
+            or type(spec_raw["stopOnFailure"]) is not bool
+            or ("conditions" in spec_raw and not isinstance(spec_raw["conditions"], dict))
+            or ("contentDigest" in spec_raw and not isinstance(spec_raw["contentDigest"], str))
+        ):
+            return ValidationResult(valid=False, reason="malformed_token")
         spec = ApprovalTokenSpec(
             plan_id=spec_raw["planId"],
             action_ids=list(spec_raw["actionIds"]),
             approver_id=spec_raw["approverId"],
             mode=spec_raw["mode"],
-            concurrency=int(spec_raw["concurrency"]),
-            stop_on_failure=bool(spec_raw["stopOnFailure"]),
+            concurrency=spec_raw["concurrency"],
+            stop_on_failure=spec_raw["stopOnFailure"],
             expires_at=spec_raw["expiresAt"],
             nonce=spec_raw["nonce"],
-            conditions=spec_raw.get("conditions", {}),
+            conditions=spec_raw.get("conditions"),
+            content_digest=spec_raw.get("contentDigest"),
         )
         expected = await self.sign(tenant_id, spec)
         if not hmac.compare_digest(expected, signature):
@@ -152,8 +183,10 @@ class ApprovalEngine:
             exp = datetime.fromisoformat(spec.expires_at.replace("Z", "+00:00"))
         except Exception:
             return ValidationResult(valid=False, reason="invalid_expiry_format")
-        if exp < datetime.now(timezone.utc):
-            return ValidationResult(valid=False, reason="expired", details={"expiresAt": spec.expires_at})
+        if exp < datetime.now(UTC):
+            return ValidationResult(
+                valid=False, reason="expired", details={"expiresAt": spec.expires_at}
+            )
 
         # Nonce replay (in-memory; the DB is the source of truth)
         if spec.nonce in self._used_nonces:

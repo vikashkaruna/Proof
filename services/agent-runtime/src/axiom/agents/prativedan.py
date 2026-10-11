@@ -14,14 +14,17 @@ data and uses the model gateway to draft the prose.
 
 from __future__ import annotations
 
-from enum import Enum
 from html import escape
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from ..enum_types import QualifiedStringEnum
+from .base import AgentName, AutonomyLevel, BaseAgent
 
 
-class ReportKind(str, Enum):
+class ReportKind(QualifiedStringEnum):
     BOARD = "board"
     AUDITOR = "auditor"
     DPB = "dpb"
@@ -31,20 +34,35 @@ class ReportKind(str, Enum):
     CUSTOM = "custom"
 
 
-from .base import AgentName, AutonomyLevel, BaseAgent
-from ..model_gateway import ModelRequest, TaskKind
-
-
 class PrativedanInput(BaseModel):
     tenant_id: str = "00000000-0000-0000-0000-000000000001"
     engagement_id: str | None = None
     kind: ReportKind = ReportKind.BOARD
     title: str = "Executive Board Compliance Report"
     findings: list[dict[str, Any]] = Field(default_factory=list)
-    posture_score: float | None = None
-    estimated_exposure_inr: int | None = None
+    posture_score: float | None = Field(
+        default=None, ge=0, le=100, allow_inf_nan=False, strict=True
+    )
+    estimated_exposure_inr: int | None = Field(default=None, ge=0, le=9007199254740991, strict=True)
     library_version: str = "0.1.0"
+    # Draft input only. A future dedicated composer must verify these against
+    # the exact frozen library; their presence is not source authority.
+    library_control_ids: (
+        list[Annotated[str, Field(strict=True, min_length=1, max_length=100)]] | None
+    ) = Field(default=None, min_length=1, max_length=500)
     reviewer_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_declared_control_set(self) -> PrativedanInput:
+        if self.library_control_ids is not None:
+            identifiers = self.library_control_ids
+            if any(value != value.strip() for value in identifiers) or len(set(identifiers)) != len(
+                identifiers
+            ):
+                raise ValueError("Declared control identifiers must be meaningful and unique")
+            if any(finding.get("control_id") not in identifiers for finding in self.findings):
+                raise ValueError("Finding differs from the declared control set")
+        return self
 
 
 class PrativedanOutput(BaseModel):
@@ -54,6 +72,8 @@ class PrativedanOutput(BaseModel):
     cited_evidence_ids: list[str] = Field(default_factory=list)
     generated_by_agent: str = "prativedan"
     rendered_html: str = ""
+    review_required: Literal[True] = True
+    citation_verification: Literal["unverified_references"] = "unverified_references"
 
 
 class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
@@ -61,7 +81,13 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     writes_axiom_state: ClassVar[bool] = True
     description: ClassVar[str] = "Generate a structured compliance report from findings."
     one_liner: ClassVar[str] = "I turn findings into documents."
-    tool_scopes: ClassVar[tuple[str, ...]] = ("findings.read", "evidence.read", "control_library.read", "report.write", "pdf.render")
+    tool_scopes: ClassVar[tuple[str, ...]] = (
+        "findings.read",
+        "evidence.read",
+        "control_library.read",
+        "report.write",
+        "pdf.render",
+    )
     autonomy: ClassVar[AutonomyLevel] = AutonomyLevel.L1
     default_task_kind: ClassVar[Any] = "report"
     default_pii_redact: ClassVar[bool] = True
@@ -76,20 +102,34 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
         self, *, correlation_id: str, input: PrativedanInput, **deps: Any
     ) -> PrativedanOutput:
         # Section: executive summary
-        posture = input.posture_score or 0
+        posture = input.posture_score
         verdict = (
-            "Strong" if posture >= 85
-            else "Acceptable" if posture >= 65
-            else "At Risk" if posture >= 40
+            "Unknown"
+            if posture is None
+            else "Strong"
+            if posture >= 85
+            else "Acceptable"
+            if posture >= 65
+            else "At Risk"
+            if posture >= 40
             else "Critical"
+        )
+        posture_text = (
+            "Posture score: Unknown (not supplied)."
+            if posture is None
+            else f"Declared posture score: {posture:.0f}/100 ({verdict}; provisional)."
+        )
+        exposure_text = (
+            "Estimated statutory exposure: Unknown (not supplied)."
+            if input.estimated_exposure_inr is None
+            else f"Estimated statutory exposure (provisional): ₹{input.estimated_exposure_inr / 1e7:.2f} Cr."
         )
         executive_summary = {
             "type": "executive_summary",
             "title": "Executive summary",
             "body": (
-                f"Posture score: {posture:.0f}/100 ({verdict}). "
-                f"Estimated max statutory exposure: ₹{(input.estimated_exposure_inr or 0) / 1e7:.2f} Cr. "
-                f"{len(input.findings)} findings reviewed. "
+                f"{posture_text} {exposure_text} "
+                f"{len(input.findings)} findings included for review. "
                 f"Library version: {input.library_version}."
             ),
         }
@@ -116,20 +156,32 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
         library_section = {
             "type": "library",
             "title": "Control library",
-            "body": f"Scored against the Axiom Proof Control Library v{input.library_version} (46 controls).",
+            "body": (
+                f"Referenced library version: {input.library_version}. "
+                + (
+                    "Control count unavailable; frozen library source not provided."
+                    if input.library_control_ids is None
+                    else f"Draft input declares {len(input.library_control_ids)} controls; frozen source verification remains required."
+                )
+            ),
         }
 
         # Section: agent attribution + human reviewer
         attribution = {
             "type": "attribution",
-            "title": "Generated and reviewed by",
+            "title": "Draft attribution and review status",
             "body": (
                 f"Generated by Prativedan (v{self.version}). "
-                + (f"Reviewed by {input.reviewer_id}." if input.reviewer_id else "Pending review.")
+                + "Pending recorded human review. Evidence references are unverified."
             ),
         }
 
-        sections = [executive_summary, top_section, library_section, attribution]
+        sections: list[dict[str, Any]] = [
+            executive_summary,
+            top_section,
+            library_section,
+            attribution,
+        ]
 
         # Render HTML
         rendered = self._render_html(input.title, sections, posture, verdict)
@@ -144,28 +196,48 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
 
     @staticmethod
     def _evidence_ids(findings: list[dict[str, Any]]) -> list[str]:
-        """Extract explicit artifact IDs without treating requirements as IDs."""
+        """Extract canonical UUID references, not verified artifact claims.
+
+        Dedicated source composition must separately validate existence, content
+        and retention. Neither a valid UUID nor a caller flag proves evidence.
+        """
         ids: list[str] = []
+
+        def add(value: object) -> None:
+            if not isinstance(value, str):
+                return
+            try:
+                identifier = UUID(value)
+            except ValueError:
+                return
+            if identifier.int != 0 and str(identifier) == value:
+                ids.append(value)
+
         for finding in findings:
-            for item in finding.get("evidence_ids", []):
-                if isinstance(item, str):
-                    ids.append(item)
-            for item in finding.get("evidence_required", []):
-                if isinstance(item, str):
-                    ids.append(item)
-                elif isinstance(item, dict):
-                    value = item.get("evidence_id") or item.get("id")
-                    if isinstance(value, str):
-                        ids.append(value)
+            explicit = finding.get("evidence_ids", [])
+            for item in explicit if isinstance(explicit, list) else []:
+                add(item)
+            required = finding.get("evidence_required", [])
+            for item in required if isinstance(required, list) else []:
+                if isinstance(item, dict):
+                    value = item.get("evidence_id")
+                    add(value)
         return list(dict.fromkeys(ids))
 
     def _render_html(
-        self, title: str, sections: list[dict[str, Any]], posture: float, verdict: str
+        self, title: str, sections: list[dict[str, Any]], posture: float | None, verdict: str
     ) -> str:
-        safe = lambda value: escape(str(value if value is not None else ""), quote=True)
+        def safe(value: object) -> str:
+            return escape(str(value if value is not None else ""), quote=True)
+
         out = [f"<h1>{safe(title)}</h1>"]
+        posture_label = (
+            "Unknown (not supplied)"
+            if posture is None
+            else f"{posture:.0f}/100 ({verdict}; provisional)"
+        )
         out.append(
-            f'<div class="axiom-cover"><p>Posture: <strong>{posture:.0f}/100 ({verdict})</strong></p></div>'
+            f'<div class="axiom-cover"><p>Posture: <strong>{safe(posture_label)}</strong></p></div>'
         )
         for s in sections:
             out.append(f"<h2>{safe(s.get('title', ''))}</h2>")

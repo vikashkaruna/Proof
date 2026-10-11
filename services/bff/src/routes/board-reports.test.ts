@@ -282,12 +282,136 @@ describe('Board Reports HTTP Routes', () => {
     expect(body.status).toBe('draft');
     expect(calls).toContain('record_board_report_draft');
     expect(calls).not.toContain('attach_board_report_pdf');
+    expect(JSON.parse(recordedContent ?? '{}')).toMatchObject({
+      schema_version: 2,
+      questionnaire_interpretation: { provenance: 'unavailable' },
+      executive_summary: { provenance_unavailable_controls: 1 },
+    });
+    expect(JSON.parse(recordedContent ?? '{}').executive_summary).not.toHaveProperty(
+      'failed_controls',
+    );
     expect(JSON.parse(recordedContent ?? '{}').signatures.prepared_by).toEqual({
       name: 'Axiom Proof board report builder',
       role: 'Deterministic assessment renderer',
       agent: 'board-report-builder',
     });
   });
+
+  it.each([false, true])(
+    'preserves bound unknowns and refuses corrupt metadata before writing (corrupt=%s)',
+    async (corrupt) => {
+      const reqId = randomUUID(),
+        runId = randomUUID(),
+        engId = randomUUID();
+      const controls = [
+        {
+          id: 'C-1',
+          title: 'Security',
+          domain: 'Security',
+          severity: 'critical',
+          library_version: '2023.1',
+          sdf_only: false,
+          children_only: false,
+          assessment_questions: [{ id: 'Q-1', type: 'boolean' }],
+          remediation_patterns: ['Delete the store.'],
+        },
+      ];
+      const digest = createHash('sha256').update(JSON.stringify(controls)).digest('hex');
+      const result = {
+        library_version: '2023.1',
+        posture_score: 30,
+        estimated_exposure_inr: 100,
+        findings: [
+          { control_id: 'C-1', score: 30, rationale: 'Unknown answer; evidence required.' },
+        ],
+        questionnaire_provenance: {
+          version: 1,
+          source_library_version: '2023.1',
+          source_library_digest: digest,
+          estimates: 'provisional',
+          review_required: true,
+          controls: [
+            {
+              control_id: 'C-1',
+              questions: [{ question_id: corrupt ? 'foreign' : 'Q-1', declaration: 'unknown' }],
+              known_boolean_question_count: 1,
+              caller_affirmed_count: 0,
+              caller_denied_count: 0,
+              unknown_count: 1,
+              answer_state: 'unknown',
+              applicability_state: 'unconditional',
+            },
+          ],
+          applicability: {
+            sdf_self_attested: { value: null, provenance: 'unknown' },
+            processes_children: { value: null, provenance: 'unknown' },
+            processes_health: { value: null, provenance: 'unknown' },
+          },
+        },
+      };
+      fixture.base.rows('board_report_requests').push({
+        id: reqId,
+        tenant_id: tenant,
+        engagement_id: engId,
+        assessment_run_id: runId,
+        title: 'Unknown review',
+        status: 'requested',
+        library_version: '2023.1',
+      });
+      fixture.base.rows('workload_assessment_packets').push({
+        run_id: runId,
+        engagement_id: engId,
+        tenant_id: tenant,
+        library_version: '2023.1',
+        controls,
+        result,
+        finalized_at: new Date().toISOString(),
+        finalized_receipt: '3',
+      });
+      addFrozenSource(reqId, runId, engId);
+      let recorded: string | undefined;
+      fixture.db.rpc = ((name: string, args: Record<string, unknown>) => {
+        if (name === 'record_board_report_draft') recorded = args.p_content_text as string;
+        return abortableResult(
+          Promise.resolve({
+            data: {
+              reportId: randomUUID(),
+              requestId: reqId,
+              status: 'draft',
+              contentHash: '3'.repeat(64),
+              replayed: false,
+            },
+            error: null,
+          }),
+        );
+      }) as never;
+      const response = await app(fixture.founder, UserRole.FOUNDER).request(
+        `/v1/reports/board/${reqId}/generate`,
+        { method: 'POST' },
+      );
+      expect(response.status).toBe(corrupt ? 409 : 200);
+      if (corrupt) {
+        expect(recorded).toBeUndefined();
+        expect(await response.json()).toEqual({ error: { code: 'assessment_provenance_refused' } });
+      } else {
+        const doc = JSON.parse(recorded!);
+        expect(doc.schema_version).toBe(2);
+        expect(doc.executive_summary).toMatchObject({
+          unknown_controls: 1,
+          provisional_score_bands: { under_40: 0 },
+          posture_score: 30,
+          estimated_exposure_inr: 100,
+        });
+        expect(doc.executive_summary).not.toHaveProperty('critical_gaps');
+        expect(doc.key_findings[0]).toMatchObject({
+          display_state: 'unknown',
+          score_band: null,
+          score: 30,
+        });
+        expect(doc.key_findings[0].remediation_recommendation).not.toContain('Delete');
+      }
+    },
+  );
 
   it('denies a non-founder before reading the frozen source', async () => {
     const reqId = randomUUID();

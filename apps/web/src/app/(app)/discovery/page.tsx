@@ -1,12 +1,15 @@
 import { GenericModuleView, type ModuleTelemetryEvent } from '../generic-module-view';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
-import { can } from '@axiom/types';
+import { can, UserRole } from '@axiom/types';
+import { PublicSourceWorkflow } from '../public-source-workflow/source-workflow';
 import { DataPlaceholder } from '@axiom/ui';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DiscoveryPage() {
-  const { supabase, tenantId, role } = await requireCapabilityContext(Capability.POSTURE_READ);
+  const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
+    Capability.POSTURE_READ,
+  );
   const { data, error } = await supabase
     .from('audit_ledger')
     .select('sequence_no, correlation_id, action_type, target_ref, occurred_at, entry_hash, result')
@@ -47,20 +50,18 @@ export default async function DiscoveryPage() {
         telemetryTitle: 'Recorded Discovery Events',
       }}
     >
-      <section
-        aria-label="Prepare discovery"
-        className="rounded-xl bg-white p-4 text-sm text-slate-600"
-      >
-        <p>
-          Drishti needs a selected engagement and source inventory or interview answers. An
-          interactive discovery run form is not yet available.
-        </p>
-        <p className="mt-2">
-          {can(Capability.ESTATE_MANAGE, { role })
-            ? 'Review estate setup to record the systems you have confirmed. Setup does not start a discovery scan.'
-            : 'Ask an estate manager to prepare the source inventory for review.'}
-        </p>
-      </section>
+      <PublicSourceWorkflow
+        tenantId={tenantId}
+        actorId={userId}
+        canReview={
+          can(Capability.ASSESSMENT_RUN, { role }) &&
+          ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)
+        }
+        canInvoke={
+          can(Capability.AGENT_INVOKE, { role }) &&
+          ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)
+        }
+      />
       {error || !data ? (
         <p role="alert">Discovery ledger records are unavailable.</p>
       ) : events.length === 0 ? (

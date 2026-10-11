@@ -282,6 +282,7 @@ class SamadhanAgent(BaseAgent[SamadhanInput, SamadhanOutput]):
             statement_signature = hmac.new(raw_key, statement.encode("utf-8"), hashlib.sha256).hexdigest()
 
         # 7. Formulate Verdict
+        verdict: Literal["clean", "drift_detected", "partial_execution", "out_of_scope"]
         if is_out_of_scope:
             verdict = "out_of_scope"
         elif content_digest_drift:

@@ -5,7 +5,11 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BoardReportContentV1, renderBoardReportHtml } from '@axiom/report-kit/board-report';
+import { BoardReportContentV2, renderBoardReportHtml } from '@axiom/report-kit/board-report';
+import {
+  interpretAssessmentReport,
+  assessmentReviewRecommendation,
+} from '@axiom/report-kit/assessment-interpretation';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 
 export interface BoardReportServiceDependencies {
@@ -66,69 +70,7 @@ export class BoardReportService {
     signal?: AbortSignal,
   ) {
     await this.readRole(tenantId, actorId, signal);
-    const { limit, offset } = options;
-    let query = this.db
-      .from('workload_assessment_packets')
-      .select('run_id,engagement_id,library_version,finalized_at,finalized_receipt', {
-        count: 'exact',
-      })
-      .eq('tenant_id', tenantId)
-      .gte('finalized_at', '1970-01-01T00:00:00Z')
-      .order('finalized_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (signal) query = query.abortSignal(signal);
-    const result = await query;
-    if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
-    const parsed = z
-      .array(
-        z.object({
-          run_id: z.uuid(),
-          engagement_id: z.uuid(),
-          library_version: z.string().min(1),
-          finalized_at: z.string().datetime({ offset: true }),
-          finalized_receipt: z.union([
-            z.number().int().positive(),
-            z.string().regex(/^[1-9][0-9]*$/),
-          ]),
-        }),
-      )
-      .max(limit)
-      .safeParse(result.data ?? []);
-    if (!parsed.success) throw new EvidenceError('invalid_report_record', 503);
-    const engagementIds = [...new Set(parsed.data.map((row) => row.engagement_id))];
-    let engagements: Array<{ id: string; title: string }> = [];
-    if (engagementIds.length) {
-      let titles = this.db
-        .from('engagements')
-        .select('id,title')
-        .eq('tenant_id', tenantId)
-        .in('id', engagementIds)
-        .range(0, limit - 1);
-      if (signal) titles = titles.abortSignal(signal);
-      const titleResult = await titles;
-      if (titleResult.error) throw new EvidenceError('report_storage_unavailable', 503);
-      const titleRows = z
-        .array(z.object({ id: z.uuid(), title: z.string() }))
-        .max(limit)
-        .safeParse(titleResult.data ?? []);
-      if (!titleRows.success) throw new EvidenceError('invalid_report_record', 503);
-      engagements = titleRows.data;
-    }
-    const titleById = new Map(engagements.map((row) => [row.id, row.title]));
-    if (parsed.data.some((row) => !titleById.has(row.engagement_id)))
-      throw new EvidenceError('invalid_report_record', 503);
-    return {
-      assessments: parsed.data.map((row) => ({
-        assessmentRunId: row.run_id,
-        engagementId: row.engagement_id,
-        engagementTitle: titleById.get(row.engagement_id)!,
-        finalizedAt: row.finalized_at,
-        libraryVersion: row.library_version,
-      })),
-      total: result.count ?? 0,
-      limit,
-      offset,
-    };
+    return listFinalizedAssessmentOptions(this.db, tenantId, options, signal);
   }
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -321,11 +263,11 @@ export class BoardReportService {
         controls: z
           .array(
             z.object({
-              id: z.string().min(1),
-              title: z.string().min(1),
-              domain: z.string().min(1),
+              id: z.string().min(1).max(100),
+              title: z.string().min(1).max(300),
+              domain: z.string().min(1).max(50),
               severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
-              remediation_patterns: z.array(z.string()).optional(),
+              remediation_patterns: z.array(z.string().max(2000)).optional(),
             }),
           )
           .min(1)
@@ -337,9 +279,9 @@ export class BoardReportService {
           findings: z
             .array(
               z.object({
-                control_id: z.string().min(1),
+                control_id: z.string().min(1).max(100),
                 score: z.number().finite().min(0).max(100),
-                rationale: z.string().min(1),
+                rationale: z.string().min(1).max(4000),
               }),
             )
             .min(1)
@@ -369,31 +311,38 @@ export class BoardReportService {
     ) {
       throw new EvidenceError('assessment_source_conflict', 409);
     }
-    const postureScore = packet.result.posture_score;
-    const exposureInr = packet.result.estimated_exposure_inr;
+    let interpreted: ReturnType<typeof interpretAssessmentReport>;
+    try {
+      interpreted = interpretAssessmentReport(
+        result,
+        frozenControls,
+        frozen.data.controls_sha256,
+        requestRow.title,
+      );
+    } catch {
+      throw new EvidenceError('assessment_provenance_refused', 409);
+    }
+    const interpretations = new Map(
+      interpreted.findings.map((finding) => [finding.control_id, finding]),
+    );
     const findings = packet.result.findings.map((finding) => {
       const control = controls.get(finding.control_id)!;
+      const interpretation = interpretations.get(finding.control_id)!;
       return {
-        control_id: finding.control_id,
+        ...interpretation,
         domain: control.domain,
         severity: control.severity,
         title: control.title,
         score: finding.score,
         gap_summary: finding.rationale,
-        remediation_recommendation:
-          control.remediation_patterns?.[0] ||
-          'No remediation pattern is recorded in the frozen control library.',
+        remediation_recommendation: assessmentReviewRecommendation(
+          interpretation.display_state,
+          control.remediation_patterns,
+        ),
       };
     });
-
-    const criticalCount = findings.filter((f) => f.score < 80 && f.severity === 'critical').length;
-    const highCount = findings.filter((f) => f.score < 80 && f.severity === 'high').length;
-    const totalControls = packet.controls.length;
-    const passedControls = findings.filter((f) => f.score >= 80).length;
-
-    // Construct BoardReportContentV1 payload
-    const contentPayload: BoardReportContentV1 = {
-      schema_version: 1,
+    const contentPayload: BoardReportContentV2 = {
+      schema_version: 2,
       kind: 'board_report',
       title: requestRow.title,
       tenant_id: tenantId,
@@ -409,18 +358,8 @@ export class BoardReportService {
         company: 'Axiom Minds Private Limited',
         company_url: 'https://axiomminds.ai',
       },
-      executive_summary: {
-        posture_score: postureScore,
-        total_controls: totalControls,
-        passed_controls: passedControls,
-        failed_controls: totalControls - passedControls,
-        critical_gaps: criticalCount,
-        high_gaps: highCount,
-        medium_gaps: findings.filter((f) => f.score < 80 && f.severity === 'medium').length,
-        low_gaps: findings.filter((f) => f.score < 80 && f.severity === 'low').length,
-        estimated_exposure_inr: exposureInr,
-        narrative: `This report summarizes the recorded assessment for ${requestRow.title}. The computed posture score is ${postureScore}%. Evidence requirements in the control library do not establish that evidence was collected or independently verified.`,
-      },
+      questionnaire_interpretation: interpreted.interpretation,
+      executive_summary: interpreted.summary,
       key_findings: findings,
       action_plan: [],
       signatures: {
@@ -528,4 +467,76 @@ export class BoardReportService {
       offset,
     };
   }
+}
+
+/** Tenant-scoped packet metadata query; callers enforce their own capability. */
+export async function listFinalizedAssessmentOptions(
+  db: EvidenceDatabase,
+  tenantId: string,
+  options: { limit: number; offset: number },
+  signal?: AbortSignal,
+) {
+  const { limit, offset } = options;
+  let query = db
+    .from('workload_assessment_packets')
+    .select('run_id,engagement_id,library_version,finalized_at,finalized_receipt', {
+      count: 'exact',
+    })
+    .eq('tenant_id', tenantId)
+    .gte('finalized_at', '1970-01-01T00:00:00Z')
+    .order('finalized_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (signal) query = query.abortSignal(signal);
+  const result = await query;
+  if (result.error) throw new EvidenceError('report_storage_unavailable', 503);
+  const parsed = z
+    .array(
+      z.object({
+        run_id: z.uuid(),
+        engagement_id: z.uuid(),
+        library_version: z.string().min(1),
+        finalized_at: z.string().datetime({ offset: true }),
+        finalized_receipt: z.union([
+          z.number().int().positive(),
+          z.string().regex(/^[1-9][0-9]*$/),
+        ]),
+      }),
+    )
+    .max(limit)
+    .safeParse(result.data ?? []);
+  if (!parsed.success) throw new EvidenceError('invalid_report_record', 503);
+  const engagementIds = [...new Set(parsed.data.map((row) => row.engagement_id))];
+  let engagements: Array<{ id: string; title: string }> = [];
+  if (engagementIds.length) {
+    let titles = db
+      .from('engagements')
+      .select('id,title')
+      .eq('tenant_id', tenantId)
+      .in('id', engagementIds)
+      .range(0, limit - 1);
+    if (signal) titles = titles.abortSignal(signal);
+    const titleResult = await titles;
+    if (titleResult.error) throw new EvidenceError('report_storage_unavailable', 503);
+    const titleRows = z
+      .array(z.object({ id: z.uuid(), title: z.string() }))
+      .max(limit)
+      .safeParse(titleResult.data ?? []);
+    if (!titleRows.success) throw new EvidenceError('invalid_report_record', 503);
+    engagements = titleRows.data;
+  }
+  const titleById = new Map(engagements.map((row) => [row.id, row.title]));
+  if (parsed.data.some((row) => !titleById.has(row.engagement_id)))
+    throw new EvidenceError('invalid_report_record', 503);
+  return {
+    assessments: parsed.data.map((row) => ({
+      assessmentRunId: row.run_id,
+      engagementId: row.engagement_id,
+      engagementTitle: titleById.get(row.engagement_id)!,
+      finalizedAt: row.finalized_at,
+      libraryVersion: row.library_version,
+    })),
+    total: result.count ?? 0,
+    limit,
+    offset,
+  };
 }

@@ -220,6 +220,16 @@ describe('agent invocation authority', () => {
 });
 
 describe('scoped generic lifecycle boundary', () => {
+  it('preserves the successful HTTP body without exposing internal lifecycle metadata', async () => {
+    const response = await request(UserRole.OWNER, 'drishti', {});
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual(success(transport.mock.calls[0]![1]));
+    expect(body).not.toHaveProperty('run');
+    expect(body).not.toHaveProperty('requestHash');
+    expect(body).not.toHaveProperty('responseHash');
+  });
+
   it('does not replay a recorded dispatch with the same correlation', async () => {
     const body = { correlation_id: ENGAGEMENT };
     expect((await request(UserRole.OWNER, 'drishti', body)).status).toBe(200);
@@ -452,3 +462,20 @@ describe('confirmed runtime completion', () => {
     expect(broadcast.mock.calls.at(-1)?.[0].step).toBe('drishti.succeeded');
   });
 });
+
+it.each(['sudhaar', 'SUDHAAR'])(
+  'requires source-bound planning workflow for generic %s even for an owner',
+  async (name) => {
+    const response = await request(UserRole.OWNER, name, {
+      engagement_id: ENGAGEMENT,
+      findings: [{ id: 'forged', score: 0 }],
+      scope_hints: {},
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'planning_source_workflow_required' },
+    });
+    expect(transport).not.toHaveBeenCalled();
+    expect(state.adminCalls).toBe(0);
+  },
+);

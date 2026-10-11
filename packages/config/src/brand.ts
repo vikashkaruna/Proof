@@ -9,6 +9,7 @@ export const BRAND = {
   productDomain: 'app.axiomproof.ai',
   companyDomain: 'axiomminds.ai',
   contactEmail: 'hello@axiomminds.ai',
+  contactPhone: '+91 97572 81284',
   salesEmail: 'sales@axiomproof.ai',
   founderEmail: 'founder@axiomminds.ai',
   platformEmail: 'platform@axiomproof.ai',

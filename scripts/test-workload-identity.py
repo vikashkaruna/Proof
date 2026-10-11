@@ -22,6 +22,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from lib.ci_fixture_images import fixture_image, report_public_image_startup
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "1.15.3"
@@ -29,7 +30,7 @@ HASHES = {
     "arm64": "a9982b3ca7de489def22265fd4586d8e13091ecb6fddf6adcea9291313b18886",
     "amd64": "ca1a4d1155317bdd2afc7f36663828a10410c7c840e54725b90b4064b0a301c7",
 }
-IMAGE = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+IMAGE = fixture_image("alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8")
 AGENTS = [
     "drishti",
     "vibhaag",
@@ -51,6 +52,7 @@ def run(
         args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False
     )
     if required and result.returncode:
+        report_public_image_startup(args, result.stderr)
         # Never relay command arguments, stderr or stdout containing identity material.
         raise RuntimeError("isolated command failed")
     return result

@@ -88,3 +88,49 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Documentation confidentiality boundary (see docs/README.md).
+# docs/shared-docs/ and the docs/ README files are tracked. Everything else
+# under docs/ is operator-internal and never committed or published.
+/private-docs/
+/docs/*
+!/docs/README.md
+!/docs/shared-docs/
+!/docs/private-docs/
+/docs/private-docs/*
+!/docs/private-docs/README.md
+!/docs/private-plans/
+/docs/private-plans/*
+!/docs/private-plans/README.md
+*.private.md
+*-CONFIDENTIAL.*
+/.design-sync/NOTES.md
+/.design-sync/conventions.md
+/.github/branch-protection.md
+/Axiom Proof App/README.md
+/Axiom Proof Handoff Map/README.md
+/Axiom Proof Site/README.md
+/Axiom-Proof_Readiness_Matrix.md
+/VK_QUICK_REF_PROOF_MODULES_SETUP.md
+/design-system/README.md
+/infra/credential-issuer/README.md
+/infra/helm/axiom-proof/ci/README.md
+/infra/terraform/modules/workload-vms/README.md
+/infra/workload/CONTROLLER_TRANSITIONS.md
+/infra/workload/README.md
+/packages/report-kit/README.md
+/services/agent-runtime/README.md
+/services/model-gateway/README.md
+
+# Claude Code machine-local state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Release-generated public library seed (source hashes are in the image manifest).
+/infra/supabase/marketing-library.json
+
+# CI security reports may contain source snippets; upload only through scan jobs.
+/semgrep-community.json
+/semgrep-community.sarif
+/semgrep-managed.json
+/semgrep-managed.sarif

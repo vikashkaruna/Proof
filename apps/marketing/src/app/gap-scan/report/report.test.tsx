@@ -32,7 +32,9 @@ it('requires an ownership cookie before reading a stored report', async () => {
 
 it('renders a live report only after a scoped, validated BFF read', async () => {
   const access = 'a'.repeat(64);
-  cookieJar.get.mockReturnValue({ value: access });
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: `gap-scan.${access}` } : undefined,
+  );
   backend.mockResolvedValue(Response.json(SAMPLE_GAP_SCAN_RECORD));
   const html = renderToStaticMarkup(await GapScanReportPage(params(id)));
   expect(html).toContain('Your DPDPA Readiness Report');
@@ -42,7 +44,9 @@ it('renders a live report only after a scoped, validated BFF read', async () => 
 });
 
 it('refuses a malformed backend report rather than presenting incomplete proof', async () => {
-  cookieJar.get.mockReturnValue({ value: 'a'.repeat(64) });
+  cookieJar.get.mockImplementation((name: string) =>
+    name === '__session' ? { value: `gap-scan.${'a'.repeat(64)}` } : undefined,
+  );
   backend.mockResolvedValue(Response.json({ ...SAMPLE_GAP_SCAN_RECORD, report_snapshot: {} }));
   await expect(GapScanReportPage(params(id))).rejects.toThrow();
 });

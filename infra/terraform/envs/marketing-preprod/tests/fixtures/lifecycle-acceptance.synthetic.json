@@ -1,0 +1,18 @@
+{
+  "target": {
+    "environment": "preprod",
+    "project": "axiom-proof",
+    "instance": "axiom-proof-preprod-postgres",
+    "bucket": "axiom-proof-preprod-state-188516662106",
+    "object": "marketing-preprod/lifecycle/state.json"
+  },
+  "target_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "image": "asia-south1-docker.pkg.dev/axiom-proof/marketing/lifecycle@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "release_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "controller_uri": "https://actual-provider-fixture.run.app",
+  "bff_uri": "https://actual-provider-fixture.run.app",
+  "exclusive_gate_verified": true,
+  "inflight_stop_refused": true,
+  "real_wake_verified": true,
+  "human_approval_recorded": true
+}

@@ -75,3 +75,56 @@ it.each([
   expect(response.status).toBe(413);
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+it.each([
+  ['staged-ingestions', 12 * 1024 * 1024],
+  ['staged-ingestions/88888888-8888-4888-8888-888888888888/expire', 4096],
+] as const)(
+  'bounds staged workflow actual bytes before arrayBuffer despite false content length: %s',
+  async (suffix, limit) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const path = ['v1', 'evidence', ...suffix.split('/')];
+    const request = new NextRequest(`http://localhost/api/bff/${path.join('/')}`, {
+      method: 'POST',
+      headers: { 'x-tenant-id': 'fixture', 'content-length': '1' },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(limit + 1));
+          controller.close();
+        },
+      }),
+      ...{ duplex: 'half' },
+    });
+    const unbounded = vi.spyOn(request, 'arrayBuffer');
+    const result = await POST(request, { params: Promise.resolve({ path }) });
+    expect(result.status).toBe(413);
+    expect(unbounded).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['', '/cancel', '/outcome'])(
+  'bounds owned original workflow stream%s before arrayBuffer or upstream dispatch',
+  async (suffix) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const path = ['v1', 'plans', 'owned-synthetic', ...suffix.split('/').filter(Boolean)];
+    const request = new NextRequest(`http://localhost/api/bff/${path.join('/')}`, {
+      method: 'POST',
+      headers: { 'x-tenant-id': 'fixture', 'content-length': '1' },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(16385));
+          controller.close();
+        },
+      }),
+      ...{ duplex: 'half' },
+    });
+    const unbounded = vi.spyOn(request, 'arrayBuffer');
+    const result = await POST(request, { params: Promise.resolve({ path }) });
+    expect(result.status).toBe(413);
+    expect(unbounded).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);

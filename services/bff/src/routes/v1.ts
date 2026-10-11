@@ -1,3 +1,8 @@
+import { ownedSyntheticPlanRoutes, type OwnedSyntheticRouteDeps } from './owned-synthetic-plans.js';
+import { stagedEvidenceRoutes, type StagedEvidenceRoutesDeps } from './staged-evidence.js';
+import { reviewedWorkflowDraftRoutes } from './reviewed-workflow-drafts.js';
+import { sudhaarReviewAdoptionRoutes } from './sudhaar-review-adoption.js';
+import { sudhaarProposalRoutes } from './sudhaar-proposals.js';
 import { evidenceRoutes } from './evidence.js';
 import { evidencePackRoutes } from './evidence-packs.js';
 import { boardReportRoutes } from './board-reports.js';
@@ -5,9 +10,16 @@ import { dpbReportRoutes } from './dpb-reports.js';
 import { technicalReportRoutes } from './technical-reports.js';
 import { w2ParityRoutes } from './w2-parity.js';
 import { consentRoutes } from './consent.js';
+import { assessmentRequestRoutes } from './assessment-request.js';
+import type { AssessmentRequestProducer } from '../workloads/assessment-producer.js';
 import { assessmentRoutes } from './assessment.js';
+import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
+import { publicSourceBindingRoutes } from './public-source-bindings.js';
+import { publicSourceAgentRoutes } from './public-source-agents.js';
+import { publicSourceReadRoutes } from './public-source-reads.js';
+import { publicSourceReviewRoutes } from './public-source-reviews.js';
 import { onboardingProposalRoutes } from './onboarding-proposals.js';
 import { estateRoutes } from './estates.js';
 import { invitationRoutes } from './invitations.js';
@@ -18,11 +30,13 @@ import { approvalExportRoutes } from './approval-exports.js';
 import { approvalProofArchiveRoutes } from './approval-proof-archive.js';
 import { statutoryReportRoutes } from './statutory-reports.js';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
+import { operatorWorkflowRoutes } from './operator-workflows.js';
+import { policyPreviewRoutes } from './policy-preview.js';
 import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
-import { serviceAuthHeaders } from '../services/service-auth.js';
+import { invokeGenericAgent } from '../services/generic-agent-invocation.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -38,7 +52,7 @@ import {
   LedgerResult,
 } from '@axiom/types';
 import type { ApprovalEngine } from '../services/approval.js';
-import type { KillSwitchService } from '../services/kill-switch.js';
+import { KillSwitchStateUnavailable, type KillSwitchService } from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
 import type { MfaService } from '../services/mfa.js';
 import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
@@ -51,7 +65,6 @@ import { requireCapability } from '../middleware/authorize.js';
 import { Capability, authorize } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
-import { canonicalJson, sha256 } from '@axiom/ledger';
 import { loadEnv } from '@axiom/config';
 import { LIBRARY_VERSION } from '@axiom/control-library';
 
@@ -193,6 +206,10 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  licensePublicKeyPem?: string;
+  ownedSynthetic?: OwnedSyntheticRouteDeps | null;
+  stagedEvidence?: StagedEvidenceRoutesDeps;
+  assessmentRequests?: AssessmentRequestProducer;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -202,17 +219,45 @@ interface Deps {
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
+  // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
+  app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
+  // Specific staged options must precede the legacy /evidence/:id route.
+  if (deps.stagedEvidence) app.route('/', stagedEvidenceRoutes(deps.stagedEvidence));
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
   app.route('/', dpbReportRoutes());
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
+  app.route('/', assessmentRequestRoutes(deps.assessmentRequests));
   app.route('/', assessmentRoutes());
+  app.route(
+    '/',
+    sudhaarProposalRoutes({
+      killSwitch: deps.killSwitch,
+      sourceSigningKey: env.AXIOM_PLANNING_SOURCE_SIGNING_KEY,
+      runtimeUrl: env.AGENT_RUNTIME_URL,
+      runtimeToken: env.AGENT_RUNTIME_INTERNAL_TOKEN,
+      realtime: deps.realtime,
+    }),
+  );
+  app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
+  app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', publicWebsiteCheckRoutes());
+  app.route('/', publicSourceBindingRoutes());
+  app.route('/', publicSourceReadRoutes());
+  app.route('/', publicSourceReviewRoutes());
+  app.route(
+    '/',
+    publicSourceAgentRoutes({
+      runtimeUrl: env.AGENT_RUNTIME_URL,
+      runtimeToken: env.AGENT_RUNTIME_INTERNAL_TOKEN,
+      realtime: deps.realtime,
+    }),
+  );
   app.route('/', onboardingProposalRoutes());
   app.route('/', invitationRoutes());
   app.route('/', onboardingWizardRoutes());
@@ -222,7 +267,18 @@ export function v1Routes(deps: Deps) {
   app.route('/', approvalProofArchiveRoutes({ approvalEngine: deps.approvalEngine }));
   app.route('/', statutoryReportRoutes());
   app.route('/', pramaanClosureRoutes());
-  app.route('/', sovereignLicenseRoutes());
+  app.route('/', operatorWorkflowRoutes());
+  app.route(
+    '/',
+    reviewedWorkflowDraftRoutes({
+      killSwitch: deps.killSwitch,
+      runtimeUrl: env.AGENT_RUNTIME_URL,
+      runtimeToken: env.AGENT_RUNTIME_INTERNAL_TOKEN,
+      realtime: deps.realtime,
+    }),
+  );
+  app.route('/', policyPreviewRoutes());
+  app.route('/', sovereignLicenseRoutes({ publicKeyPem: deps.licensePublicKeyPem }));
 
   // ─── MFA (W1 · SEC-8) ───────────────────────────────────────────
   //
@@ -3525,7 +3581,22 @@ export function v1Routes(deps: Deps) {
   });
 
   app.get('/kill-switch/status', async (c) => {
-    return c.json(await deps.killSwitch.state(c.get('tenantId')));
+    c.header('Cache-Control', 'private, no-store');
+    try {
+      return c.json(await deps.killSwitch.state(c.get('tenantId')));
+    } catch (error) {
+      if (!(error instanceof KillSwitchStateUnavailable)) throw error;
+      return c.json(
+        {
+          error: {
+            code: 'kill_switch_status_unavailable',
+            message:
+              'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
+          },
+        },
+        503,
+      );
+    }
   });
 
   // ─── Ledger ──────────────────────────────────────────────────────
@@ -3968,6 +4039,16 @@ export function v1Routes(deps: Deps) {
         403,
       );
     }
+    if (name === 'sudhaar')
+      return c.json(
+        {
+          error: {
+            code: 'planning_source_workflow_required',
+            message: 'Use the finalized assessment proposal workflow.',
+          },
+        },
+        403,
+      );
     // Generated reports must stay in the private source/review/artifact lifecycle.
     // Generic runtime output would bypass that visibility and release boundary.
     if (name === 'prativedan') {
@@ -4072,220 +4153,23 @@ export function v1Routes(deps: Deps) {
     }
     // Assign the authority last; untrusted input never overrides it.
     const input = { ...body, tenant_id: tenantId };
-    const requestHash = await sha256(canonicalJson(input));
-    let runId: string;
-    let writer: ReturnType<typeof createHumanActionWriter>;
-    try {
-      writer = createHumanActionWriter();
-      const { data, error } = await writer.rpc('record_generic_agent_run_start', {
-        p_tenant_id: tenantId,
-        p_actor_id: c.get('user').id,
-        p_agent: name,
-        p_engagement_id: body.engagement_id ?? null,
-        p_correlation_id: correlationId,
-        p_request_hash: requestHash,
-      });
-      if (error) throw new Error('start_unconfirmed');
-      const parsed = z
-        .object({ run_id: z.uuid(), created: z.boolean(), status: z.string() })
-        .safeParse(data);
-      if (!parsed.success) {
-        const refusal = z
-          .object({ error: z.enum(['forbidden', 'context_refused', 'dispatch_conflict']) })
-          .safeParse(data);
-        if (refusal.success)
-          return c.json(
-            { error: { code: refusal.data.error, message: 'Agent dispatch was refused.' } },
-            refusal.data.error === 'forbidden' ? 403 : 409,
-          );
-        throw new Error('start_unconfirmed');
-      }
-      runId = parsed.data.run_id;
-      if (!parsed.data.created)
-        return c.json(
-          {
-            error: {
-              code: 'agent_dispatch_exists',
-              message:
-                'This invocation is already recorded. Inspect the existing run before retrying.',
-              runId,
-              correlationId,
-            },
-          },
-          409,
-        );
-      if (parsed.data.status !== 'running') throw new Error('start_unconfirmed');
-    } catch {
-      logger.error({ agent: name, correlationId }, 'could not record initial agent_run row');
-      return c.json(
-        { error: { code: 'persistence_failed', message: 'Could not record agent invocation.' } },
-        503,
-      );
-    }
-
-    deps.realtime.broadcast({
-      type: 'agent.progress',
-      agent: name,
-      correlationId,
-      runId,
-      step: `${name}.started`,
-      progress: 0.1,
-      message: `Agent ${name} started execution`,
-      occurredAt: new Date().toISOString(),
-    });
-
-    // The runtime is an authenticated transport peer, not a source of arbitrary
-    // public fields or lifecycle authority. Bind its response to this dispatch.
-    const resultSchema = z.object({
-      agent: z.literal(name),
-      correlation_id: z.literal(correlationId),
-      status: z.enum(['succeeded', 'failed']),
-      latency_ms: z.number().int().nonnegative().max(2147483647),
-      input_tokens: z.number().int().nonnegative().max(2147483647),
-      output_tokens: z.number().int().nonnegative().max(2147483647),
-      cost_usd: z.number().nonnegative().max(9999.999999),
-      error: z.string().max(256).nullable(),
-      output: z.record(z.string(), z.unknown()).nullable(),
-      ledger_entry_ids: z
-        .array(
-          z
-            .string()
-            .regex(/^[1-9][0-9]{0,18}$/)
-            .refine((id) => BigInt(id) <= 9223372036854775807n),
-        )
-        .max(2),
-    });
-    type RuntimeResult = z.infer<typeof resultSchema>;
-    let result: RuntimeResult | null = null;
-    let failureCode = 'agent_invocation_failed';
-    try {
-      const res = await fetch(`${runtimeUrl}/agents/${name}/invoke`, {
-        method: 'POST',
-        redirect: 'error',
-        signal: AbortSignal.timeout(120_000),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-Token': runtimeToken,
-          ...(await serviceAuthHeaders(runtimeUrl)),
-        },
-        body: JSON.stringify({
-          correlation_id: correlationId,
-          input,
-          dispatch_context: { run_id: runId, request_hash: requestHash },
-        }),
-      });
-      if (!res.ok) {
-        await res.body?.cancel();
-        throw new Error('runtime_http_refused');
-      }
-      const parsedResult = resultSchema.parse(await res.json());
-      if (
-        parsedResult.status === 'succeeded' &&
-        (parsedResult.error !== null ||
-          parsedResult.output === null ||
-          parsedResult.ledger_entry_ids.length !== 2 ||
-          new Set(parsedResult.ledger_entry_ids).size !== parsedResult.ledger_entry_ids.length)
-      )
-        throw new Error('runtime_result_refused');
-      if (parsedResult.input_tokens + parsedResult.output_tokens > 2147483647)
-        throw new Error('runtime_accounting_refused');
-      result = parsedResult;
-      if (result.status === 'failed') failureCode = 'agent_reported_failure';
-    } catch {
-      // Fetch, validation and provider errors may include private payloads or
-      // bearer credentials. Only fixed failure codes cross this boundary.
-      logger.error({ agent: name, correlationId }, 'agent runtime invocation refused');
-    }
-
-    const succeeded = result?.status === 'succeeded';
-    const terminalStatus = succeeded ? 'succeeded' : 'failed';
-    try {
-      const { data: recorded, error } = await writer.rpc('record_generic_agent_run_finish', {
-        p_tenant_id: tenantId,
-        p_actor_id: c.get('user').id,
-        p_run_id: runId,
-        p_agent: name,
-        p_engagement_id: body.engagement_id ?? null,
-        p_correlation_id: correlationId,
-        p_request_hash: requestHash,
-        p_status: terminalStatus,
-        p_error_code: succeeded ? null : failureCode,
-        p_latency_ms: result?.latency_ms ?? null,
-        p_input_tokens: result?.input_tokens ?? null,
-        p_output_tokens: result?.output_tokens ?? null,
-        p_cost_usd: result?.cost_usd ?? null,
-        p_started_receipt: succeeded ? result!.ledger_entry_ids[0] : null,
-        p_completed_receipt: succeeded ? result!.ledger_entry_ids[1] : null,
-        p_response_hash: succeeded && result ? await sha256(canonicalJson(result.output)) : null,
-      });
-      const confirmed = z
-        .object({
-          run_id: z.literal(runId),
-          status: z.literal(terminalStatus),
-          replayed: z.boolean(),
-        })
-        .safeParse(recorded);
-      if (error || !confirmed.success) throw new Error('completion_not_confirmed');
-    } catch {
-      // An ambiguous commit is not proof of failure or rollback. Do not write
-      // over a concurrently cancelled/terminal row, retry dispatch or publish
-      // an unconfirmed completion event. Reconcile the recorded run instead.
-      logger.error(
-        { agent: name, correlationId, runId },
-        'agent completion persistence unconfirmed',
-      );
-      return c.json(
-        {
-          error: {
-            code: 'agent_completion_unconfirmed',
-            message: 'Could not confirm the recorded outcome. Inspect this run before retrying.',
-            runId,
-            correlationId,
-          },
-        },
-        503,
-      );
-    }
-
-    const outcomeStep = succeeded
-      ? 'succeeded'
-      : failureCode === 'agent_reported_failure'
-        ? 'runtime_reported_failure'
-        : 'outcome_unconfirmed';
-    deps.realtime.broadcast({
-      type: 'agent.progress',
-      agent: name,
-      correlationId,
-      runId,
-      step: `${name}.${outcomeStep}`,
-      progress: 1,
-      message: succeeded
-        ? `Agent ${name} succeeded`
-        : outcomeStep === 'outcome_unconfirmed'
-          ? `The runtime outcome for agent ${name} is unconfirmed. Inspect this run before retrying.`
-          : `The runtime reported failure for agent ${name}.`,
-      occurredAt: new Date().toISOString(),
-    });
-    if (!succeeded)
-      return c.json(
-        {
-          error: {
-            code: failureCode,
-            message:
-              failureCode === 'agent_invocation_failed'
-                ? 'The runtime outcome is unconfirmed. Inspect this run before retrying.'
-                : `Could not complete agent ${name}.`,
-            runtimeOutcome:
-              failureCode === 'agent_invocation_failed'
-                ? 'unconfirmed'
-                : 'runtime_reported_failure',
-            runId,
-            correlationId,
-          },
-        },
-        502,
-      );
-    return c.json(result, 200);
+    const outcome = await invokeGenericAgent(
+      {
+        agent: name,
+        tenantId,
+        actorId: c.get('user').id,
+        engagementId: body.engagement_id ?? null,
+        correlationId,
+        input,
+      },
+      {
+        runtimeUrl,
+        runtimeToken,
+        realtime: deps.realtime,
+        writerFactory: createHumanActionWriter,
+      },
+    );
+    return c.json(outcome.body, outcome.status);
   });
 
   return app;

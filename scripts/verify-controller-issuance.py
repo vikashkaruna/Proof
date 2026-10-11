@@ -36,7 +36,7 @@ DOCKER=shutil.which('docker');OPENSSL=shutil.which('openssl');PNPM=shutil.which(
 
 
 def sql(statement):
-    result=subprocess.run([DOCKER,'exec','-i','supabase_db_axiom-w0-parity','psql','-X','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1','-q','-A','-t'],input=statement.encode(),capture_output=True,timeout=10)  # nosec B603 - DOCKER resolved via PATH above, fixed fixture container, no shell
+    result=subprocess.run([PNPM,'exec','tsx',str(ROOT/'scripts/lib/parity-fixture-target.ts'),'--sql-admin'],cwd=ROOT,input=statement.encode(),capture_output=True,timeout=30)  # nosec B603 - fixed guarded fixture CLI; SQL remains private stdin
     if result.returncode:raise RuntimeError('fixture SQL refused')
     return result.stdout.decode().strip()
 
@@ -52,8 +52,10 @@ def main():
     args=json.load(sys.stdin)
     if set(args)!={'tenantId','foreignTenantId'}:raise RuntimeError('unexpected acceptance input')
     tenant=issuer.identifier(args['tenantId']);foreign=issuer.identifier(args['foreignTenantId'])
-    status=json.loads((ROOT/'.axiom-runtime/parity/status.json').read_text())
-    if status['API_URL']!='http://127.0.0.1:56321':raise RuntimeError('isolated loopback target required')
+    admission=subprocess.run([PNPM,'exec','tsx',str(ROOT/'scripts/lib/parity-fixture-target.ts'),'--validate'],cwd=ROOT,capture_output=True,timeout=30)  # nosec B603 - common fixed fixture ownership guard
+    if admission.returncode:raise RuntimeError('owned isolated fixture required')
+    state=(ROOT/os.environ.get('AXIOM_PARITY_STATE_DIR','.axiom-runtime/parity')).resolve(strict=True)
+    status=json.loads((state/'status.json').read_text())
     os.umask(0o077)
     outcome={};reviews=[];issued=[];servers=[]
     username='axiom_issuer_fixture_'+uuid.uuid4().hex[:20];password=uuid.uuid4().hex+uuid.uuid4().hex

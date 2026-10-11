@@ -1,17 +1,18 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
+import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel } from '@axiom/ui';
 import { ModuleBarFor } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
+import { AssessmentRequestPanel } from './request-panel';
 
 export interface AssessmentClientProps {
   snapshot: AssessmentSnapshot | null;
   canCreate?: boolean;
   canInvokeAgent?: boolean;
+  actorId?: string;
 }
 
 export interface PipelineStage {
@@ -64,6 +65,7 @@ export function AssessmentClient({
   snapshot,
   canCreate = false,
   canInvokeAgent = false,
+  actorId,
 }: AssessmentClientProps) {
   const router = useRouter();
   const controls = snapshot?.controls ?? [];
@@ -71,6 +73,10 @@ export function AssessmentClient({
   const partialCount = snapshot?.summary.partial ?? 0;
   const failCount = snapshot?.summary.fail ?? 0;
   const unassessedCount = snapshot?.summary.unassessed ?? 0;
+  const unknownCount = snapshot?.summary.unknown ?? 0;
+  const notApplicableCount = snapshot?.summary.not_applicable ?? 0;
+  const provenance = snapshot?.provenance;
+  const hasDeclarations = provenance?.status === 'caller_declared_unverified';
   const totalControlsCount = controls.length;
   const exposure =
     snapshot?.exposureInr == null
@@ -89,48 +95,10 @@ export function AssessmentClient({
       partial: rows.filter((row) => row.status === 'partial').length,
       fail: rows.filter((row) => row.status === 'fail').length,
       unassessed: rows.filter((row) => row.status === 'unassessed').length,
+      unknown: rows.filter((row) => row.status === 'unknown').length,
+      notApplicable: rows.filter((row) => row.status === 'not_applicable').length,
     };
   });
-  const [assessRunning, setAssessRunning] = useState(false);
-  const [hasCompleted, setHasCompleted] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [ledgerEntryId, setLedgerEntryId] = useState<string | null>(null);
-  const inFlight = useRef(false);
-
-  const runAssessment = async () => {
-    if (inFlight.current || !snapshot?.engagement || !canInvokeAgent) return;
-    inFlight.current = true;
-    setAssessRunning(true);
-    setHasCompleted(false);
-    setRunError(null);
-    setLedgerEntryId(null);
-    try {
-      const result = await invokeAgent('parikshan', {
-        scope: 'assessment_pipeline',
-        ...(snapshot?.engagement
-          ? {
-              engagement_id: snapshot.engagement.id,
-              library_version: snapshot.engagement.libraryVersion,
-            }
-          : {}),
-      });
-      setLedgerEntryId(result.ledger_entry_ids.at(-1) ?? null);
-      setHasCompleted(true);
-      router.refresh();
-    } catch (error) {
-      setRunError(
-        error instanceof AgentInvocationError
-          ? error.message
-          : 'Could not confirm the assessment outcome.',
-      );
-    } finally {
-      inFlight.current = false;
-      setAssessRunning(false);
-    }
-  };
-  const pipelineMsg = assessRunning
-    ? 'Parikshan invocation in progress'
-    : 'Parikshan invocation completed. Saved results are refreshed separately.';
 
   return (
     <div className="min-w-0 w-full animate-in fade-in-0 duration-200">
@@ -145,26 +113,11 @@ export function AssessmentClient({
               Assessment pipeline
             </h1>
             <div className="mt-0.5 text-[11.5px] text-[#a9b3ce]">
-              Runs Parikshan only for the displayed saved assessment. Discovery, evidence sealing
-              and report generation run separately.
+              Request Parikshan for the displayed saved assessment below. Discovery, evidence
+              sealing and report generation run separately.
             </div>
             <ModuleBarFor module="assessment" tone="dark" className="mt-2" />
           </div>
-
-          {canInvokeAgent && (
-            <button
-              type="button"
-              onClick={runAssessment}
-              disabled={assessRunning || !snapshot?.engagement}
-              className={`rounded-[9px] px-[18px] py-[10px] text-[12.5px] font-bold text-white transition-all shadow-xs ${
-                assessRunning || !snapshot?.engagement
-                  ? 'cursor-default bg-white/15 opacity-80'
-                  : 'cursor-pointer bg-[#0FB5A5] hover:bg-[#0a8d80]'
-              }`}
-            >
-              {assessRunning ? 'Running Parikshan…' : 'Run Parikshan'}
-            </button>
-          )}
         </div>
 
         {/* 5-Stage Stepper Pipeline Row */}
@@ -175,17 +128,16 @@ export function AssessmentClient({
           tabIndex={0}
         >
           {PIPELINE_STAGES.map((p, i) => {
-            const isCompleted = p.agentKey === 'parikshan' && hasCompleted;
-            const isActive = p.agentKey === 'parikshan' && assessRunning;
-            const dotBg = isCompleted || isActive ? '#0FB5A5' : 'rgba(255,255,255,.12)';
-            const dotColor = isCompleted || isActive ? '#04322d' : '#ffffff';
+            const isCompleted = p.agentKey === 'parikshan' && hasDeclarations;
+            const dotBg = isCompleted ? '#0FB5A5' : 'rgba(255,255,255,.12)';
+            const dotColor = isCompleted ? '#04322d' : '#ffffff';
             const mark = isCompleted ? '✓' : String(i + 1);
 
             return (
               <div
                 key={p.agent}
                 data-testid={`pipeline-${p.agentKey}`}
-                data-state={isCompleted ? 'completed' : isActive ? 'running' : 'not-run'}
+                data-state={isCompleted ? 'completed' : 'not-run'}
                 className="group relative flex min-w-[110px] flex-1 flex-col items-center text-center"
               >
                 {/* Horizontal connector line to next step */}
@@ -200,11 +152,7 @@ export function AssessmentClient({
 
                 {/* Step Circle: 34px diameter, font-heading, 13px bold */}
                 <div
-                  className={`relative z-10 flex h-[34px] w-[34px] items-center justify-center rounded-full font-heading text-[13px] font-bold transition-all duration-300 select-none ${
-                    isActive
-                      ? 'animate-pulse ring-4 ring-[#0FB5A5]/40 shadow-lg shadow-[#0FB5A5]/20 scale-105'
-                      : ''
-                  }`}
+                  className="relative z-10 flex h-[34px] w-[34px] items-center justify-center rounded-full font-heading text-[13px] font-bold select-none"
                   style={{
                     backgroundColor: dotBg,
                     color: dotColor,
@@ -215,12 +163,7 @@ export function AssessmentClient({
 
                 {/* Agent Name with Mini Icon */}
                 <div className="mt-2 flex items-center justify-center text-white">
-                  <AgentLabel
-                    agent={p.agentKey}
-                    size="xs"
-                    tone="dark"
-                    state={isActive ? 'thinking' : 'idle'}
-                  />
+                  <AgentLabel agent={p.agentKey} size="xs" tone="dark" state="idle" />
                 </div>
 
                 {/* Stage Label & Indic Subtitle */}
@@ -231,31 +174,19 @@ export function AssessmentClient({
             );
           })}
         </div>
-
-        {runError && (
-          <p
-            data-testid="assessment-invocation-error"
-            role="alert"
-            className="mt-4 rounded-lg bg-white p-3 text-sm text-[#D9534F]"
-          >
-            {runError}
-          </p>
-        )}
-        {/* Confirmed invocation state */}
-        {(assessRunning || hasCompleted) && (
-          <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2 text-center text-[12px] text-[#0FB5A5] font-medium animate-in fade-in-0 duration-150">
-            <span>● {pipelineMsg}</span>
-            {ledgerEntryId && (
-              <Link
-                href={`/ledger?q=${ledgerEntryId}`}
-                className="font-mono text-[11px] underline text-[#0FB5A5] hover:text-white"
-              >
-                (Ledger entry #{ledgerEntryId})
-              </Link>
-            )}
-          </div>
-        )}
       </div>
+
+      {snapshot?.engagement && actorId && (
+        <AssessmentRequestPanel
+          tenantId={snapshot.tenantId}
+          actorId={actorId}
+          engagementId={snapshot.engagement.id}
+          libraryVersion={snapshot.engagement.libraryVersion}
+          canRequest={canInvokeAgent}
+          hasSavedResults={controls.some((control) => control.score !== null)}
+          onFinalized={() => router.refresh()}
+        />
+      )}
 
       <div
         data-testid="assessment-provenance"
@@ -279,11 +210,44 @@ export function AssessmentClient({
             before running Parikshan.
           </p>
         ) : (
-          <p>
-            {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
-            {snapshot.engagement.status}. Showing saved findings only; missing results are
-            unassessed. Score bands retain the existing 80/40 presentation thresholds.
-          </p>
+          <div>
+            <p>
+              {snapshot.engagement.title} · Library {snapshot.engagement.libraryVersion} ·{' '}
+              {snapshot.engagement.status}. Showing saved findings only; missing results are
+              unassessed. Score bands use the 80/40 presentation thresholds, not a compliance
+              determination.
+            </p>
+            <p className="mt-2" data-testid="assessment-questionnaire-provenance">
+              {hasDeclarations
+                ? 'Questionnaire declarations are unverified. Scores and exposure are provisional estimates requiring review. Unknown answers or applicability are not a failed control.'
+                : 'Questionnaire provenance is unavailable for these saved results. Score bands do not establish verified answers or compliance.'}
+            </p>
+            {hasDeclarations && provenance.applicability && (
+              <dl
+                className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs"
+                aria-label="Questionnaire applicability declarations"
+              >
+                {(
+                  [
+                    ['SDF self-attestation', provenance.applicability.sdfSelfAttested],
+                    ['Processes children’s data', provenance.applicability.processesChildren],
+                    ['Processes health data', provenance.applicability.processesHealth],
+                  ] as const
+                ).map(([label, declaration]) => (
+                  <div key={label}>
+                    <dt className="font-semibold">{label}</dt>
+                    <dd>
+                      {declaration.value === null
+                        ? 'Unknown'
+                        : declaration.value
+                          ? 'Declared yes · unverified'
+                          : 'Declared no · unverified'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
         )}
       </div>
 
@@ -314,8 +278,18 @@ export function AssessmentClient({
               className="bg-slate-300"
               title={`${unassessedCount} Unassessed`}
             />
+            <div
+              style={{ flex: unknownCount }}
+              className="bg-slate-400"
+              title={`${unknownCount} Unknown`}
+            />
+            <div
+              style={{ flex: notApplicableCount }}
+              className="bg-slate-200"
+              title={`${notApplicableCount} Not applicable · declaration unverified`}
+            />
           </div>
-          <div className="flex gap-[18px] text-[12px] text-[#2F3542]">
+          <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12px] text-[#2F3542]">
             <span>
               <b className="font-heading text-[16px] text-[#0a8d80] font-bold">
                 {snapshot ? passCount : '—'}
@@ -335,7 +309,16 @@ export function AssessmentClient({
               fail
             </span>
             <span>{snapshot ? unassessedCount : '—'} unassessed</span>
+            {unknownCount > 0 && <span>{unknownCount} unknown</span>}
+            {notApplicableCount > 0 && (
+              <span>{notApplicableCount} not applicable · unverified</span>
+            )}
           </div>
+          {hasDeclarations && (
+            <p className="mt-2 text-xs text-slate-600">
+              Pass, partial and fail are provisional score bands.
+            </p>
+          )}
         </div>
 
         {/* SDF Self-Assessment Card */}
@@ -360,7 +343,9 @@ export function AssessmentClient({
             {snapshot ? exposure : 'Unavailable'}
           </div>
           <p className="mt-1 text-[11px] text-[#a03734] leading-tight">
-            Saved engagement estimate; no estimate is inferred from missing findings.
+            {hasDeclarations
+              ? 'Provisional estimate from unverified declarations; review applicability and supporting evidence.'
+              : 'Saved engagement estimate; questionnaire provenance is unavailable. No estimate is inferred from missing findings.'}
           </p>
         </div>
       </div>
@@ -378,6 +363,9 @@ export function AssessmentClient({
               <p>
                 {domain.total} controls · {domain.pass} pass · {domain.partial} partial ·{' '}
                 {domain.fail} fail · {domain.unassessed} unassessed
+                {domain.unknown > 0 && ` · ${domain.unknown} unknown`}
+                {domain.notApplicable > 0 &&
+                  ` · ${domain.notApplicable} not applicable (unverified)`}
               </p>
             </div>
           ))}
@@ -411,30 +399,21 @@ export function AssessmentClient({
             </p>
           )}
           {controls.map((c) => {
-            const stColor =
-              c.status === 'unassessed'
-                ? '#64748b'
-                : c.status === 'pass'
-                  ? '#0a8d80'
-                  : c.status === 'partial'
-                    ? '#8a6d10'
-                    : '#D9534F';
-            const stBg =
-              c.status === 'unassessed'
-                ? '#f1f5f9'
-                : c.status === 'pass'
-                  ? '#e6f7f5'
-                  : c.status === 'partial'
-                    ? '#fbf3df'
-                    : '#fbeceb';
-            const stLabel =
-              c.status === 'unassessed'
-                ? 'UNASSESSED'
-                : c.status === 'pass'
-                  ? 'PASS'
-                  : c.status === 'partial'
-                    ? 'PARTIAL'
-                    : 'FAIL';
+            const stColor = ['unassessed', 'unknown', 'not_applicable'].includes(c.status)
+              ? '#64748b'
+              : c.status === 'pass'
+                ? '#0a8d80'
+                : c.status === 'partial'
+                  ? '#8a6d10'
+                  : '#D9534F';
+            const stBg = ['unassessed', 'unknown', 'not_applicable'].includes(c.status)
+              ? '#f1f5f9'
+              : c.status === 'pass'
+                ? '#e6f7f5'
+                : c.status === 'partial'
+                  ? '#fbf3df'
+                  : '#fbeceb';
+            const stLabel = c.status.replaceAll('_', ' ').toUpperCase();
 
             return (
               <div
@@ -456,8 +435,31 @@ export function AssessmentClient({
                     {c.name}
                   </div>
                   <p className="text-xs text-slate-500">
-                    {c.score === null ? 'No saved score' : `Saved score: ${c.score}`}
+                    {c.score === null
+                      ? 'No saved score'
+                      : `${hasDeclarations ? 'Provisional score' : 'Saved score'}: ${c.score}`}
                   </p>
+                  {c.answerCounts && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      {c.answerCounts.unknown} of {c.answerCounts.knownBooleanQuestions} boolean
+                      answers unknown ·{' '}
+                      {c.answerCounts.callerAffirmed + c.answerCounts.callerDenied} declared,
+                      unverified
+                    </p>
+                  )}
+                  {c.applicabilityState === 'unknown' && (
+                    <p className="text-xs text-slate-600">Applicability unknown</p>
+                  )}
+                  {c.applicabilityState === 'caller_declared_not_applicable_unverified' && (
+                    <p className="text-xs text-slate-600">
+                      Not applicable by caller declaration · requires review
+                    </p>
+                  )}
+                  {c.answerState === 'not_boolean_assessable' && (
+                    <p className="text-xs text-slate-600">
+                      No boolean questionnaire basis for this score
+                    </p>
+                  )}
                   <div className="mt-1.5 h-[5px] max-w-[160px] overflow-hidden rounded-[20px] bg-[#F4F6F8]">
                     <div
                       style={{

@@ -1,3 +1,10 @@
+import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
+import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
+import { stagedEvidencePrivateRoutes } from './routes/staged-evidence-private.js';
+import {
+  createSaakshiComposition,
+  evidenceControllerRpc,
+} from './services/saakshi-staging-composition.js';
 import { discoveryRoutes } from './routes/discovery.js';
 import type { DiscoveryService } from './connectors/discovery.js';
 import { Hono } from 'hono';
@@ -7,7 +14,11 @@ import { cors } from 'hono/cors';
 import { loadEnv } from '@axiom/config';
 import { authMiddleware } from './middleware/auth.js';
 import { tenantResolver } from './middleware/tenant.js';
-import { evidenceBodyLimit, reportBodyLimit } from './middleware/evidence-body-limit.js';
+import {
+  boundedJsonBody,
+  evidenceBodyLimit,
+  reportBodyLimit,
+} from './middleware/evidence-body-limit.js';
 import { idempotency } from './middleware/idempotency.js';
 import { reportAuthority } from './middleware/report-authority.js';
 import { requireSessionMfa } from './middleware/session-mfa.js';
@@ -19,6 +30,7 @@ import { createKillSwitchService } from './services/kill-switch.js';
 import { createLedgerService } from './services/ledger.js';
 import { createMfaService } from './services/mfa.js';
 import { workloadToolsRoutes } from './routes/workload-tools.js';
+import type { AssessmentRequestProducer } from './workloads/assessment-producer.js';
 import type { AssessmentTools } from './workloads/assessment-tools.js';
 import { startRealtimeChannel } from './services/realtime.js';
 import { offlineLicenseGate } from './middleware/offline-license.js';
@@ -37,7 +49,9 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
  */
 export function createApp(
   options: {
+    ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     assessmentTools?: AssessmentTools;
+    assessmentRequests?: AssessmentRequestProducer;
     discovery?: Pick<DiscoveryService, 'run'>;
     licensePublicKeyPem?: string;
   } = {},
@@ -50,7 +64,8 @@ export function createApp(
     // Private tool traffic must never enter request logs, including query strings.
     if (
       c.req.path.startsWith('/internal/workload-tools') ||
-      c.req.path.startsWith('/internal/discovery')
+      c.req.path.startsWith('/internal/discovery') ||
+      c.req.path === '/internal/staged-evidence/stage'
     )
       return next();
     return logger()(c, next);
@@ -61,7 +76,14 @@ export function createApp(
     cors({
       origin: env.BFF_CORS_ORIGINS.split(',').map((o) => o.trim()),
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Idempotency-Key',
+        'X-Request-Id',
+        'X-Tenant-Id',
+        'X-Expected-Actor-Id',
+      ],
       credentials: true,
     }),
   );
@@ -81,6 +103,11 @@ export function createApp(
   const ledger = createLedgerService();
   const mfa = createMfaService();
   const realtime = startRealtimeChannel({ ledger, killSwitch });
+  const stagedEvidence = createSaakshiComposition();
+  const ownedSynthetic =
+    options.ownedSynthetic === undefined
+      ? createConfiguredOwnedSynthetic((tenantId) => killSwitch.isActive(tenantId))
+      : options.ownedSynthetic;
 
   // Health endpoints (no auth)
   app.get('/health', (c) =>
@@ -101,6 +128,7 @@ export function createApp(
   // Private workload authority is independent of human session middleware.
   app.route('/internal/workload-tools', workloadToolsRoutes(options.assessmentTools));
   app.route('/internal/discovery', discoveryRoutes(options.discovery));
+  app.route('/internal/staged-evidence', stagedEvidencePrivateRoutes(stagedEvidence?.internal));
 
   // Public routes (no auth) — gap-scan, public marketing endpoints
   app.route('/public', publicRoutes());
@@ -112,11 +140,47 @@ export function createApp(
   // never get to use.
   app.use('/v1/*', requireSessionMfa(mfa));
   app.use('/v1/evidence/ingestions', evidenceBodyLimit);
+  app.use('/v1/evidence/staged-ingestions', evidenceBodyLimit);
+  app.use('/v1/*', async (c, next) => {
+    if (
+      /^\/v1\/evidence\/staged-ingestions\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/expire$/.test(
+        c.req.path,
+      )
+    )
+      return boundedJsonBody(4096)(c, next);
+    return next();
+  });
+  // Bound owned original-request bodies before idempotency can clone/buffer them.
+  for (const path of [
+    '/v1/plans/owned-synthetic',
+    '/v1/plans/owned-synthetic/cancel',
+    '/v1/plans/owned-synthetic/outcome',
+  ])
+    app.use(path, boundedJsonBody(16384));
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
 
-  app.route('/v1', v1Routes({ approvalEngine, killSwitch, ledger, mfa, realtime }));
+  app.route(
+    '/v1',
+    v1Routes({
+      licensePublicKeyPem: options.licensePublicKeyPem,
+      approvalEngine,
+      killSwitch,
+      ledger,
+      mfa,
+      realtime,
+      assessmentRequests: options.assessmentRequests,
+      ownedSynthetic,
+      stagedEvidence: {
+        rpc: evidenceControllerRpc,
+        configuration: stagedEvidence?.configuration,
+        invocation: stagedEvidence ? { ...stagedEvidence.invocation, realtime } : undefined,
+        killSwitch,
+        mfa,
+      },
+    }),
+  );
 
   return app;
 }

@@ -14,6 +14,7 @@ sql() { docker exec -i "$container" psql -X -U postgres -d scheduling_upgrade_te
 sql < tests/database/bootstrap.sql
 python3 scripts/migrate-database.py --container "$container" --user postgres --database scheduling_upgrade_test --migrations "$fixture_dir" > "$fixture_dir/migrate.log"
 sql -c 'create schema scheduling_upgrade'
+sql -c 'grant usage on schema scheduling_upgrade to human_action_writer'
 sed '/set local role service_role/,$d' tests/database/assessment-dispatch.test.sql | sed '/^begin;$/d;s/pg_temp/scheduling_upgrade/g' | sql
 sql <<'SQL'
 do $$begin

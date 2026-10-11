@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createSign, createVerify, sign, verify } from 'node:crypto';
+import { createHash, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
 
 /**
  * Axiom Proof — Sovereign Offline Licensing Module
@@ -8,14 +8,40 @@ import { createSign, createVerify, sign, verify } from 'node:crypto';
  * for on-premise, air-gapped sovereign environments (W10).
  *
  * Designed with asymmetric Ed25519 cryptography:
- * - Public key is embedded as root trust anchor in the distributed binary.
+ * - An uncompromised public trust root must be explicitly provisioned by the operator.
  * - Private key is retained by Axiom Minds authority to mint genuine licenses.
  * - Verification executes 100% offline without phoning home or requiring internet egress.
  */
 
-export const DEFAULT_AXIOM_LICENSE_ROOT_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAjKalzxmYgARg00u6yaVSMF/2b1Q7BtNN8HMPR3XhIAc=
------END PUBLIC KEY-----`;
+/** Published historical authority is burned; no embedded/default trust root remains. */
+const BURNED_LICENSE_ROOT_SPKI_SHA256 =
+  '137bfb57f9b76d8e8e17cc1ca3e1aa05016199ad6790f0239c67e4e7021cf41f';
+
+function trustedLicensePublicKey(
+  configured: string | undefined,
+): { key: KeyObject } | { error: string } {
+  if (!configured?.trim()) return { error: 'Trusted license root public key is required' };
+  const pem = configured.replace(/\\n/g, '\n').trim();
+  // Public SPKI PEM only. Never derive trust from a supplied private key.
+  if (!pem.startsWith('-----BEGIN PUBLIC KEY-----') || !pem.endsWith('-----END PUBLIC KEY-----')) {
+    return { error: 'License root must be an Ed25519 public key in SPKI PEM format' };
+  }
+  try {
+    const key = createPublicKey(pem);
+    if (key.asymmetricKeyType !== 'ed25519') {
+      return { error: 'License root must be an Ed25519 public key' };
+    }
+    const fingerprint = createHash('sha256')
+      .update(key.export({ format: 'der', type: 'spki' }))
+      .digest('hex');
+    if (fingerprint === BURNED_LICENSE_ROOT_SPKI_SHA256) {
+      return { error: 'License root public key is revoked' };
+    }
+    return { key };
+  } catch {
+    return { error: 'License root public key is malformed' };
+  }
+}
 
 export const OfflineLicenseTierSchema = z.enum([
   'community',
@@ -114,8 +140,11 @@ export function verifyOfflineLicense(
     const signature = Buffer.from(signatureB64, 'base64url');
     const canonicalBytes = Buffer.from(canonicalJsonStringify(payload), 'utf-8');
 
-    const publicKey = options?.publicKeyPem ?? DEFAULT_AXIOM_LICENSE_ROOT_PUBLIC_KEY;
-    const isSignatureValid = verify(null, canonicalBytes, publicKey, signature);
+    const root = trustedLicensePublicKey(
+      options?.publicKeyPem ?? process.env.AXIOM_LICENSE_ROOT_PUBLIC_KEY,
+    );
+    if ('error' in root) return { valid: false, error: root.error };
+    const isSignatureValid = verify(null, canonicalBytes, root.key, signature);
 
     if (!isSignatureValid) {
       return {

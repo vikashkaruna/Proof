@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { GapScanEmailRequestSchema } from '@axiom/types';
 import { gapScanBackend } from '@/lib/gap-scan-backend';
+import { readGapScanAccess } from '@/lib/gap-scan-access';
 export const runtime = 'nodejs';
 export async function POST(request: Request) {
   const parsed = GapScanEmailRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json(
       { error: { code: 'validation_failed', message: 'Invalid request' } },
-      { status: 400 },
+      { status: 400, headers: { 'Cache-Control': 'private, no-store' } },
     );
   try {
-    const access = (await cookies()).get('gap_scan_access')?.value;
+    const access = await readGapScanAccess();
     const res = await gapScanBackend('/public/gap-scan/send-email', {
       method: 'POST',
       headers: {
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
           message: 'Report service unavailable. Please try again.',
         },
       },
-      { status: 503 },
+      { status: 503, headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
 }

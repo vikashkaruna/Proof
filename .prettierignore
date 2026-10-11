@@ -29,3 +29,12 @@ services/agent-runtime/src/axiom/data/controls.json
 docs/11_Phase0-5_Gap_Closure_Plan.md
 Axiom-Proof_Readiness_Matrix.md
 VK_QUICK_REF_PROOF_MODULES_SETUP.md
+
+# Deterministic generated help review receipts; source and prose are checked by help-manuals.py.
+docs/help/maintenance/source-index.json
+docs/help/maintenance/manual-coverage.json
+
+# Private documentation is formatted explicitly by its local maintenance tools.
+private-docs/
+docs/private-docs/
+docs/private-plans/

@@ -46,8 +46,9 @@ mismatches=$(
   | grep -v node_modules \
   | grep -v '/\.kilo' \
   | grep -v '/\.claude/' \
-  | grep -v 'docs/11_Phase0-5_Gap_Closure_Plan.md' \
-  | grep -v 'docs/audits/' \
+  | grep -vE '(^|/)(docs/private-(docs|plans)|private-docs)/' \
+  | grep -vE '(docs|private-docs/reference)/11_Phase0-5_Gap_Closure_Plan.md' \
+  | grep -vE '(docs|private-docs/reference)/audits/' \
   | grep -vE ":${CANONICAL} controls\$" \
   | while IFS= read -r hit; do
       file="${hit%%:*}"
@@ -65,7 +66,8 @@ worded=$(
   grep -rnoiE "\b(forty|fifty)[- ](one|two|three|four|five|six|seven|eight|nine)? ?controls?\b" \
     --include='*.md' . 2>/dev/null \
   | grep -v node_modules \
-  | grep -v 'docs/11_Phase0-5_Gap_Closure_Plan.md' \
+  | grep -vE '(^|/)(docs/private-(docs|plans)|private-docs)/' \
+  | grep -vE '(docs|private-docs/reference)/11_Phase0-5_Gap_Closure_Plan.md' \
   | grep -viE "forty[- ]six controls" \
   | while IFS= read -r hit; do
       file="${hit%%:*}"

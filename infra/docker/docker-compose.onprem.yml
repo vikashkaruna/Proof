@@ -171,6 +171,7 @@ services:
     environment:
       ENVIRONMENT: onprem
       AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AXIOM_LICENSE_ROOT_PUBLIC_KEY: ${AXIOM_LICENSE_ROOT_PUBLIC_KEY:?set trusted Ed25519 license public key}
       API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
       SELF_HOSTED_MODEL: ${SELF_HOSTED_MODEL:-Qwen/Qwen2.5-32B-Instruct-AWQ}
       SELF_HOSTED_BASE_URL: ${SELF_HOSTED_BASE_URL:-}
@@ -183,9 +184,11 @@ services:
     environment:
       <<: *common
       AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AXIOM_LICENSE_ROOT_PUBLIC_KEY: ${AXIOM_LICENSE_ROOT_PUBLIC_KEY:?set trusted Ed25519 license public key}
       MODEL_GATEWAY_URL: http://model-gateway:8001
       MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
+      AXIOM_PLANNING_SOURCE_SIGNING_KEY: ${AXIOM_PLANNING_SOURCE_SIGNING_KEY:-}
       APPROVAL_SIGNING_KEY: ${APPROVAL_SIGNING_KEY:?set signing key}
       FEATURE_LIVE_CONNECTORS: 'false'
       SUPABASE_AGENT_LEDGER_WRITER_KEY: ${SUPABASE_AGENT_LEDGER_WRITER_KEY:?set agent ledger writer JWT}
@@ -204,8 +207,10 @@ services:
       NODE_ENV: production
       AXIOM_AUTH_MODE: strict
       AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AXIOM_LICENSE_ROOT_PUBLIC_KEY: ${AXIOM_LICENSE_ROOT_PUBLIC_KEY:?set trusted Ed25519 license public key}
       AGENT_RUNTIME_URL: http://agent-runtime:8000
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
+      AXIOM_PLANNING_SOURCE_SIGNING_KEY: ${AXIOM_PLANNING_SOURCE_SIGNING_KEY:-}
       MODEL_GATEWAY_URL: http://model-gateway:8001
       MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:?set gateway key}
       APPROVAL_SIGNING_KEY: ${APPROVAL_SIGNING_KEY:?set signing key}
@@ -235,6 +240,7 @@ services:
     environment:
       <<: *common
       AXIOM_OFFLINE_LICENSE: ${AXIOM_OFFLINE_LICENSE:?set signed license}
+      AXIOM_LICENSE_ROOT_PUBLIC_KEY: ${AXIOM_LICENSE_ROOT_PUBLIC_KEY:?set trusted Ed25519 license public key}
       AGENT_RUNTIME_URL: http://agent-runtime:8000
       AGENT_RUNTIME_INTERNAL_TOKEN: ${AGENT_RUNTIME_INTERNAL_TOKEN:?set runtime token}
     depends_on:

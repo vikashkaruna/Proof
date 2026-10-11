@@ -58,6 +58,16 @@ class OnpremPreflightTests(unittest.TestCase):
     def test_valid_private_environment(self):
         self.assertEqual(self.check()['AXIOM_BIND_ADDRESS'], '127.0.0.1')
 
+    def test_explicit_license_trust_root_is_required(self):
+        for value in (None, ''):
+            with self.subTest(value=value):
+                if value is None:
+                    self.values.pop('AXIOM_LICENSE_ROOT_PUBLIC_KEY', None)
+                else:
+                    self.values['AXIOM_LICENSE_ROOT_PUBLIC_KEY'] = value
+                with self.assertRaisesRegex(ValueError, 'AXIOM_LICENSE_ROOT_PUBLIC_KEY is required'):
+                    self.check()
+
     def test_demo_secret_and_hosted_key_fail(self):
         self.values['POSTGRES_PASSWORD'] = 'postgres'
         with self.assertRaisesRegex(ValueError, 'weak'):

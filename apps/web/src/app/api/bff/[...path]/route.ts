@@ -42,11 +42,17 @@ async function forward(request: NextRequest, context: RouteContext) {
   target.search = request.nextUrl.search;
   let bodyBytes: ArrayBuffer | undefined;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const bodyLimit = /^\/v1\/evidence\/ingestions\/?$/.test(target.pathname)
+    const bodyLimit = /^\/v1\/evidence\/(?:ingestions|staged-ingestions)\/?$/.test(target.pathname)
       ? 12 * 1024 * 1024
-      : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
-        ? 64 * 1024
-        : null;
+      : /^\/v1\/evidence\/staged-ingestions\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/expire$/.test(
+            target.pathname,
+          )
+        ? 4096
+        : /^\/v1\/plans\/owned-synthetic(?:\/(?:cancel|outcome))?$/.test(target.pathname)
+          ? 16384
+          : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
+            ? 64 * 1024
+            : null;
     try {
       bodyBytes =
         bodyLimit !== null

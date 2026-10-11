@@ -1,3 +1,0 @@
-# Axiom Proof — live functional flow guide (stub)
-
-**Superseded stub (consolidated 2026-10-01).** The functional flow and the headless staging script usage are merged into the architecture and flow document. The current, single source is [22_Architecture_and_Flow.md](22_Architecture_and_Flow.md). The full original text of this file, including its dated revision history, is preserved in git: `git show 41b70b6:docs/LIVE_FUNCTIONAL_FLOW_GUIDE.md`. Do not add new content here; follow the `axiom-docs-increment` skill (`.agents/skills/axiom-docs-increment/SKILL.md`): append dated entries to [21_Progress.md](21_Progress.md), update the status table in [20_Plan.md](20_Plan.md), and tick items in [23_Operator_Runbook.md](23_Operator_Runbook.md).

@@ -1,15 +1,1 @@
-{
-  "projects": {
-    "default": "axiom-proof",
-    "preprod": "axiom-proof"
-  },
-  "targets": {
-    "axiom-proof": {
-      "hosting": {
-        "marketing": [
-          "axiom-proof"
-        ]
-      }
-    }
-  }
-}
+{}

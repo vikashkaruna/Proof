@@ -16,17 +16,71 @@ import re
 import subprocess  # nosec B404 - fixed spire-agent CLI for SVID fetch; constant argv, no shell
 import sys
 from functools import partial
+from typing import Literal, NoReturn, NotRequired, Protocol, TypedDict, cast, overload
 from uuid import UUID
 
 from .assessment_scoring import AssessmentInput, score_assessment
-from .control_library_loader import ControlLibrary, _parse_control
+from .control_library_loader import ControlLibrary, RawControl, _parse_control
 from .process_lifetime import bind_parent_lifetime
 
 MAX_FRAME = 4 * 1024 * 1024
 
 
-def parse_json(value: str):
-    def pairs(items):
+class Assignment(TypedDict):
+    tenantId: str
+    runId: str
+    taskProof: str
+    inputJson: str
+    inputHash: str
+    spiffeId: str
+
+
+class RawAssessmentInput(TypedDict):
+    tenant_id: str
+    engagement_id: str
+    library_version: str
+    answers: NotRequired[dict[str, dict[str, object]]]
+    sdf_self_attested: NotRequired[bool | None]
+    processes_children: NotRequired[bool | None]
+    processes_health: NotRequired[bool | None]
+
+
+class Authorization(TypedDict):
+    tenantId: str
+    runId: str
+    taskProof: str
+    workloadProof: NotRequired[str]
+
+
+class ToolRequest(TypedDict):
+    authorization: Authorization
+    inputHash: NotRequired[str]
+    libraryDigest: NotRequired[str]
+    result: NotRequired[dict[str, object]]
+
+
+class StartPacket(TypedDict):
+    engagement_id: str
+    library_version: str
+    library_digest: str
+    controls: list[RawControl]
+
+
+class CompletedReceipt(TypedDict):
+    completed_receipt: str
+    result_digest: str
+
+
+class ToolCaller(Protocol):
+    @overload
+    def __call__(self, operation: Literal["assessment.start"], request: ToolRequest, spiffe_id: str) -> StartPacket: ...
+
+    @overload
+    def __call__(self, operation: Literal["assessment.complete"], request: ToolRequest, spiffe_id: str) -> CompletedReceipt: ...
+
+
+def parse_json(value: str) -> object:
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
         result = {}
         for key, item in items:
             if key in result:
@@ -34,20 +88,20 @@ def parse_json(value: str):
             result[key] = item
         return result
 
-    def invalid_constant(_):
+    def invalid_constant(_: str) -> NoReturn:
         raise ValueError("Non-finite number")
 
-    return json.loads(value, object_pairs_hook=pairs, parse_constant=invalid_constant)
+    return cast(object, json.loads(value, object_pairs_hook=pairs, parse_constant=invalid_constant))
 
 
-def read_frame():
+def read_frame() -> object:
     line = sys.stdin.buffer.readline(MAX_FRAME + 1)
     if not line.endswith(b"\n") or len(line) > MAX_FRAME:
         raise ValueError("Invalid frame")
     return parse_json(line.decode("utf-8"))
 
 
-def write_frame(value):
+def write_frame(value: object) -> None:
     sys.stdout.write(json.dumps(value, separators=(",", ":"), allow_nan=False) + "\n")
     sys.stdout.flush()
 
@@ -78,7 +132,7 @@ def fetch_svid(spiffe_id: str) -> str:
     )
     if result.returncode or len(result.stdout) > MAX_FRAME:
         raise ValueError("Identity unavailable")
-    payload = parse_json(result.stdout.decode("utf-8"))
+    payload = cast(list[dict[str, list[dict[str, object]]]], parse_json(result.stdout.decode("utf-8")))
     svids = next(part["svids"] for part in payload if "svids" in part)
     if len(svids) != 1 or svids[0]["spiffe_id"] != spiffe_id:
         raise ValueError("Identity mismatch")
@@ -88,7 +142,15 @@ def fetch_svid(spiffe_id: str) -> str:
     return token
 
 
-def private_tool(operation: str, request: dict, spiffe_id: str):
+@overload
+def private_tool(operation: Literal["assessment.start"], request: ToolRequest, spiffe_id: str) -> StartPacket: ...
+
+
+@overload
+def private_tool(operation: Literal["assessment.complete"], request: ToolRequest, spiffe_id: str) -> CompletedReceipt: ...
+
+
+def private_tool(operation: str, request: ToolRequest, spiffe_id: str) -> object:
     request["authorization"]["workloadProof"] = fetch_svid(spiffe_id)
     write_frame({"tool": operation, "request": request})
     response = read_frame()
@@ -101,7 +163,7 @@ def private_tool(operation: str, request: dict, spiffe_id: str):
     return response["value"]
 
 
-def execute(envelope: dict, call=private_tool) -> dict:
+def execute(envelope: Assignment, call: ToolCaller = private_tool) -> dict[str, str]:
     if not isinstance(envelope, dict) or set(envelope) != {
         "tenantId",
         "runId",
@@ -121,7 +183,7 @@ def execute(envelope: dict, call=private_tool) -> dict:
         raise ValueError("Invalid assignment")
     if hashlib.sha256(wire_input.encode("utf-8")).hexdigest() != envelope["inputHash"]:
         raise ValueError("Input binding mismatch")
-    raw = parse_json(wire_input)
+    raw = cast(RawAssessmentInput, parse_json(wire_input))
     required = {"tenant_id", "engagement_id", "library_version"}
     allowed = required | {"answers", "sdf_self_attested", "processes_children", "processes_health"}
     if not isinstance(raw, dict) or not required <= set(raw) or not set(raw) <= allowed:
@@ -137,16 +199,15 @@ def execute(envelope: dict, call=private_tool) -> dict:
     if not isinstance(answers, dict) or any(not isinstance(a, dict) for a in answers.values()):
         raise ValueError("Invalid answers")
     flags = {
-        key: raw.get(key, False)
-        for key in ("sdf_self_attested", "processes_children", "processes_health")
+        key: raw.get(key) for key in ("sdf_self_attested", "processes_children", "processes_health")
     }
-    if any(type(value) is not bool for value in flags.values()):
+    if any(value is not None and type(value) is not bool for value in flags.values()):
         raise ValueError("Invalid input flags")
-    authorization = {key: envelope[key] for key in ("tenantId", "runId", "taskProof")}
+    authorization: Authorization = {"tenantId": envelope["tenantId"], "runId": envelope["runId"], "taskProof": envelope["taskProof"]}
     packet = call(
         "assessment.start",
         {
-            "authorization": dict(authorization),
+            "authorization": authorization.copy(),
             "inputHash": envelope["inputHash"],
         },
         envelope["spiffeId"],
@@ -163,6 +224,10 @@ def execute(envelope: dict, call=private_tool) -> dict:
         c["library_version"] != raw["library_version"] for c in definitions
     ):
         raise ValueError("Invalid library snapshot")
+    if not re.fullmatch(r"[a-f0-9]{64}", packet.get("library_digest", "")) or any(
+        type(c.get(flag)) is not bool for c in definitions for flag in ("sdf_only", "children_only")
+    ):
+        raise ValueError("Invalid provenance library snapshot")
     controls = [_parse_control(c) for c in definitions]
     for control in controls:
         if any(
@@ -175,19 +240,33 @@ def execute(envelope: dict, call=private_tool) -> dict:
         ):
             raise ValueError("Invalid scoring definition")
     library = ControlLibrary(packet["library_version"], controls)
-    computed = score_assessment(library, AssessmentInput(raw["library_version"], answers, **flags))
+    computed = score_assessment(
+        library,
+        AssessmentInput(
+            raw["library_version"], answers,
+            sdf_self_attested=raw.get("sdf_self_attested"),
+            processes_children=raw.get("processes_children"),
+            processes_health=raw.get("processes_health"),
+        ),
+    )
     # Persist only the typed finding fields, never raw questionnaire answers.
-    result = {
-        key: computed[key] for key in ("library_version", "posture_score", "estimated_exposure_inr")
+    result: dict[str, object] = {
+        "library_version": computed["library_version"],
+        "posture_score": computed["posture_score"],
+        "estimated_exposure_inr": computed["estimated_exposure_inr"],
     }
     result["findings"] = [
         {key: finding[key] for key in ("control_id", "score", "risk_points", "rationale")}
         for finding in computed["findings"]
     ]
+    result["questionnaire_provenance"] = {
+        **computed["questionnaire_provenance"],
+        "source_library_digest": packet["library_digest"],
+    }
     receipt = call(
         "assessment.complete",
         {
-            "authorization": dict(authorization),
+            "authorization": authorization.copy(),
             "libraryDigest": packet["library_digest"],
             "result": result,
         },
@@ -199,12 +278,16 @@ def execute(envelope: dict, call=private_tool) -> dict:
         r"[a-f0-9]{64}", receipt["result_digest"]
     ):
         raise ValueError("Invalid receipt")
-    return {"status": "persisted", "runId": envelope["runId"], **receipt}
+    return {
+        "status": "persisted", "runId": envelope["runId"],
+        "completed_receipt": receipt["completed_receipt"],
+        "result_digest": receipt["result_digest"],
+    }
 
 
-def main():
+def main() -> int:
     try:
-        write_frame({"result": execute(read_frame())})
+        write_frame({"result": execute(cast(Assignment, read_frame()))})
     except Exception:
         # No traceback, private input, tool response, or exception interpolation.
         write_frame({"error": "assessment_worker_failed"})

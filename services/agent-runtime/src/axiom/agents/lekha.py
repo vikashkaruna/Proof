@@ -13,8 +13,7 @@ reconstructs chains, generates audit reports, and verifies integrity.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +22,7 @@ from .base import AgentName, AutonomyLevel, BaseAgent
 
 class LekhaInput(BaseModel):
     tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    engagement_id: str | None = None  # invocation audit context; verification stays tenant-wide
     operation: str = "verify"  # 'verify' | 'reconstruct' | 'export'
     correlation_id: str | None = None  # for reconstruct
     from_sequence: int = 1
@@ -56,9 +56,7 @@ class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
     def output_schema(self) -> type[LekhaOutput]:
         return LekhaOutput
 
-    async def _run(
-        self, *, correlation_id: str, input: LekhaInput, **deps: Any
-    ) -> LekhaOutput:
+    async def _run(self, *, correlation_id: str, input: LekhaInput, **deps: Any) -> LekhaOutput:
         if input.operation == "verify":
             result = await self.ledger.verify(input.tenant_id, input.from_sequence)
             return LekhaOutput(
@@ -76,7 +74,7 @@ class LekhaAgent(BaseAgent[LekhaInput, LekhaOutput]):
             )
             return LekhaOutput(
                 operation="reconstruct",
-                chain=sorted(entries, key=lambda e: e.get("sequence_no", 0)),
+                chain=sorted(entries, key=lambda e: cast(int, e.get("sequence_no", 0))),
                 notes=f"Reconstructed {len(entries)} entries for correlation {input.correlation_id}",
             )
         elif input.operation == "export":

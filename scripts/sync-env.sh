@@ -81,31 +81,22 @@ HELP
   exit 0
 fi
 
-ENV_FILE="${AXIOM_ENV_FILE:-infra/docker/environments/.env.${TARGET_ENV}}"
-if [[ ! -f "$ENV_FILE" ]]; then
-  if [[ -n "${AXIOM_ENV_FILE:-}" ]]; then
-    fail "Explicit environment file not found: ${ENV_FILE}"
+# Resolve one environment file; differing implicit copies are a hard failure.
+source "${REPO_ROOT}/scripts/lib/ops-env.sh"
+if ! ENV_FILE="$(ops_find_env_file "$TARGET_ENV" "$REPO_ROOT")"; then
+  if [[ -n "${AXIOM_ENV_FILE:-}" ]] || [[ -e ".env.${TARGET_ENV}" ]] || [[ -e "infra/docker/environments/.env.${TARGET_ENV}" ]]; then
+    fail "Explicit environment file is missing or implicit environment files conflict."
     exit 1
   fi
-  if [[ -f ".env.${TARGET_ENV}" ]]; then
-    ENV_FILE=".env.${TARGET_ENV}"
-  elif [[ -f "infra/docker/environments/.env.${TARGET_ENV}.example" ]]; then
-    info "Creating ${ENV_FILE} from template ${ENV_FILE}.example..."
-    cp "infra/docker/environments/.env.${TARGET_ENV}.example" "$ENV_FILE"
-    pass "Created ${ENV_FILE}"
-  else
-    fail "Configuration file not found: ${ENV_FILE}"
+  ENV_FILE="infra/docker/environments/.env.${TARGET_ENV}"
+  if [[ ! -f "${ENV_FILE}.example" ]]; then
+    fail "Canonical environment template is missing."
     exit 1
   fi
+  (umask 077; cp "${ENV_FILE}.example" "$ENV_FILE")
+  pass "Created ${ENV_FILE} from its template; review before deployment."
 fi
-
-# Load variables into environment
-while IFS='=' read -r key val || [ -n "$key" ]; do
-  key="$(echo "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  if [[ "$key" =~ ^#.*$ ]] || [ -z "$key" ]; then continue; fi
-  val="$(echo "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
-  export "$key"="$val"
-done < "$ENV_FILE"
+ops_load_env_file "$ENV_FILE" "$REPO_ROOT" || exit 1
 
 get_val() {
   local key="$1"
@@ -392,6 +383,7 @@ tfvar_value() {
     # creates no secret at all; see infra/terraform/envs/preprod/secrets.tf.
     mfa_encryption_keys_previous) get_val "AXIOM_MFA_ENCRYPTION_KEYS_PREVIOUS" ;;
     agent_runtime_internal_token) get_val "AGENT_RUNTIME_INTERNAL_TOKEN" ;;
+    planning_source_signing_key) get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY" ;;
     model_gateway_api_key)        get_val "MODEL_GATEWAY_API_KEY" ;;
 
     # Self-hosted Supabase. These three are minted TOGETHER by
@@ -574,6 +566,12 @@ do_secrets() {
     "axiom-${TARGET_ENV}-upstash-redis-url:$(get_val "UPSTASH_REDIS_URL" "$(get_val "REDIS_URL")")"
   )
 
+  # Optional source composer key, BFF/runtime only. Empty leaves Compose/Helm
+  # proposals disabled; Terraform has its own independent stable random default.
+  if [ -n "$(get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY")" ]; then
+    secret_pairs+=("axiom-${TARGET_ENV}-planning-source-signing-key:$(get_val "AXIOM_PLANNING_SOURCE_SIGNING_KEY")")
+  fi
+
   # Added only while a rotation is in flight. Appending it unconditionally
   # would print "Skipping empty or placeholder secret" on every ordinary sync,
   # which teaches operators to read past the warnings that do matter.
@@ -678,8 +676,8 @@ do_scaffold() {
   local added=()
   local key
   while read -r key; do
-    grep -qE "^[[:space:]]*${key}=" "$ENV_FILE" || added+=("$key")
-  done < <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$template" | sed 's/=$//' | sort -u)
+    grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$ENV_FILE" || added+=("$key")
+  done < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\2/p' "$template" | sort -u)
 
   if [ ${#added[@]} -eq 0 ]; then
     pass "${ENV_FILE} already carries every key in the template."
@@ -691,7 +689,7 @@ do_scaffold() {
     echo "# ─── Added by sync-env.sh scaffold on $(date -u +"%Y-%m-%dT%H:%M:%SZ") ───"
     echo "# Present in the template and absent here. Review each value."
     for key in "${added[@]}"; do
-      grep -E "^[[:space:]]*${key}=" "$template" | head -1
+      grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$template" | head -1
     done
   } >> "$ENV_FILE"
 
@@ -749,7 +747,7 @@ do_mint() {
       continue
     fi
 
-    if grep -qE "^[[:space:]]*${key}=" "$ENV_FILE"; then
+    if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$ENV_FILE"; then
       # Values are base64/hex/JWT, so `|` is safe as a delimiter here.
       python3 - "$ENV_FILE" "$key" "$value" <<'REPLACE'
 import re, sys

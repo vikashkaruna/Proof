@@ -6,6 +6,7 @@ trap 'rm -rf "$result_dir"' EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -Atq "$@"; }
 source tests/database/lib/concurrency-barrier.sh
 sql -c 'create schema scheduling_race'
+sql -c 'grant usage on schema scheduling_race to human_action_writer'
 sed '/set local role service_role/,$d' tests/database/assessment-scheduling.test.sql | sed '/^begin;$/d;s/pg_temp/scheduling_race/g' | sql
 sql -c 'grant usage on schema scheduling_race to service_role; grant execute on all functions in schema scheduling_race to service_role; set role service_role; select scheduling_race.enqueue()' > /dev/null
 race_run "set local role service_role; select scheduling_race.reserve()" "set role service_role; select jsonb_array_length(scheduling_race.reserve()->'jobs')" "$result_dir/first" "$result_dir/reserve-probe" nonblocking success 0

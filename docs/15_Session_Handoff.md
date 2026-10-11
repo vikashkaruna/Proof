@@ -1,3 +1,0 @@
-# Axiom Proof — session handoff (stub)
-
-**Superseded stub (consolidated 2026-10-01).** The resume baseline, standing decisions and next steps are in the progress log (section 2 and the dated entries) and the plan. The current, single source is [21_Progress.md](21_Progress.md). The full original text of this file, including its dated revision history, is preserved in git: `git show 41b70b6:docs/15_Session_Handoff.md`. Do not add new content here; follow the `axiom-docs-increment` skill (`.agents/skills/axiom-docs-increment/SKILL.md`): append dated entries to [21_Progress.md](21_Progress.md), update the status table in [20_Plan.md](20_Plan.md), and tick items in [23_Operator_Runbook.md](23_Operator_Runbook.md).

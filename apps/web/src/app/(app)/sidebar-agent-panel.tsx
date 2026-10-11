@@ -30,12 +30,12 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 1 · Discovery',
     description:
-      'Builds discovery proposals from supplied system inventory or interview answers. Review recorded discovery activity here.',
+      'Reviews retained public website HTML facts through a selected engagement and source binding.',
     statutoryBoundary:
       'Deployment region and data flows must be verified from the connected estate.',
     modulePath: '/discovery',
     moduleLabel: 'Data Discovery',
-    actionLabel: 'View discovery activity',
+    actionLabel: 'Open public website discovery',
   },
   {
     name: 'vibhaag',
@@ -44,12 +44,12 @@ export const ALL_AGENTS: AgentActionMeta[] = [
     autonomy: 'L1 Autonomous',
     phase: 'Phase 1 · Classification',
     description:
-      'Produces field classifications from supplied inventory or field hints and flags review needs.',
+      'Reviews retained Drishti observations for tentative email and telephone structural indicators requiring human review.',
     statutoryBoundary:
       'A classification is a recorded finding; legal interpretation requires human review.',
     modulePath: '/classification',
     moduleLabel: 'Data Classification',
-    actionLabel: 'View classification activity',
+    actionLabel: 'Open public website classification',
   },
   {
     name: 'parikshan',
@@ -514,10 +514,9 @@ export function SidebarAgentPanel({
             {['drishti', 'vibhaag'].includes(selectedAgent.name) && (
               <p className="text-[10px] leading-relaxed text-slate-600">
                 {selectedAgent.name === 'drishti'
-                  ? 'Discovery needs an engagement and source inventory or interview answers.'
-                  : 'Classification needs an engagement and observed inventory or field hints.'}{' '}
-                An interactive run form is not yet available. Open recorded activity for setup
-                guidance.
+                  ? 'Discovery can use a selected engagement and saved public HTML check.'
+                  : 'Classification uses a retained Drishti observation from the same source.'}{' '}
+                Open the module to select retained source facts and review proof-bound results.
               </p>
             )}
             {!DIRECT_AGENT_NAMES.has(selectedAgent.name) ? (

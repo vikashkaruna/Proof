@@ -74,7 +74,7 @@ def _expiry(token: str, now: float) -> float:
         if isinstance(exp, bool) or not isinstance(exp, (int, float)):
             raise ValueError
         return float(exp) - _SKEW
-    except Exception:  # noqa: BLE001 - unparsable exp falls back to a fixed TTL
+    except Exception:
         return now + _FALLBACK_TTL
 
 
@@ -116,7 +116,7 @@ async def _mint(audience: str, fetch: Fetch) -> str:
             {"Metadata-Flavor": "Google"},
             _TIMEOUT,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ServiceAuthError(
             f"service auth: metadata server unreachable ({type(exc).__name__})"
         ) from None

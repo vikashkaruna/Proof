@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -W error::ResourceWarning -m unittest discover -s tests/database/lib -p 'test_*.py'
+python3 -W error::ResourceWarning tests/database/sudhaar-review-adoption-upgrade-identity.test.py
 container="axiom-db-test-$$"
 image="${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
 # Public ECR can throttle clean CI runners. Prefer Docker Hub; a pinned mirror
@@ -17,7 +18,7 @@ fi
 test_log=$(mktemp)
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; }
 trap cleanup EXIT
-docker run --rm -d --name "$container" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
+docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
 for attempt in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
@@ -46,6 +47,9 @@ for suite in tests/database/*.test.sql; do
     sql < "$suite"
   fi
 done
+python3 tests/database/sudhaar-review-adoption-fixture.py | sql
+bash tests/database/operator-workflows-public-source.sh "$container"
+bash tests/database/concurrent-operator-workflows.sh "$container"
 bash tests/database/concurrent-idempotency.sh "$container"
 bash tests/database/concurrent-onboarding.sh "$container"
 bash tests/database/concurrent-execution.sh "$container"
@@ -59,7 +63,13 @@ bash tests/database/concurrent-proposal.sh "$container"
 bash tests/database/concurrent-workload-task.sh "$container"
 bash tests/database/concurrent-workload-assessment.sh "$container"
 bash tests/database/concurrent-assessment-confirmation.sh "$container"
+bash tests/database/concurrent-reviewed-assessment-source.sh "$container"
+bash tests/database/concurrent-control-source-snapshots.sh "$container"
 bash tests/database/concurrent-generic-agent-runs.sh "$container"
+bash tests/database/concurrent-public-source-bindings.sh "$container"
+bash tests/database/concurrent-public-source-observations.sh "$container"
+bash tests/database/concurrent-public-source-reads.sh "$container"
+bash tests/database/concurrent-public-source-reviews.sh "$container"
 bash tests/database/concurrent-assessment-dispatch.sh "$container"
 bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"
@@ -92,5 +102,20 @@ bash tests/database/controller-issuance-upgrade.sh "$container"
 bash tests/database/consent-notice-upgrade.sh "$container"
 bash tests/database/evidence-ingestion-upgrade.sh "$container"
 bash tests/database/evidence-pack-upgrade.sh "$container"
+bash tests/database/sudhaar-review-adoption-upgrade.sh "$container"
+# Bind the new race harness to this exact disposable container, never a retained stack.
+sudhaar_race_evidence=$(mktemp -d)
+python3 - "$container" "$sudhaar_race_evidence/proof.json" "$(pwd)" <<'PYPROOF'
+import json,os,subprocess,sys
+name,path,owner=sys.argv[1:]
+item=json.loads(subprocess.check_output(['docker','inspect',name]))[0]
+with open(path,'w') as stream:
+ json.dump({'containerId':item['Id'],'name':name,'ownerWorktree':owner,'project':'axiom-db-tests','database':'axiom_policy_test','loopbackPort':None},stream)
+os.chmod(path,0o600)
+PYPROOF
+python3 -I tests/database/concurrent-sudhaar-settled-outputs.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence"
+python3 -I tests/database/concurrent-sudhaar-review-adoption.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence/adoption"
+python3 -I tests/database/concurrent-reviewed-workflow-drafts.py --fixture-proof "$sudhaar_race_evidence/proof.json" --evidence "$sudhaar_race_evidence/reviewed-workflows"
+rm -rf "$sudhaar_race_evidence"
 bash tests/database/migration-dsn.sh
 echo "Database migrations and security assertions passed."

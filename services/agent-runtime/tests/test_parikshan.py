@@ -1,6 +1,7 @@
 """Tests for the Parikshan assessment agent."""
 
 import pytest
+from pydantic import ValidationError
 
 from axiom.agents.parikshan import (
     FindingOut,
@@ -12,7 +13,7 @@ from axiom.control_library_loader import load_default_library
 
 
 @pytest.mark.asyncio
-async def test_parikshan_full_compliance():
+async def test_parikshan_unanswered_questionnaire_is_unverified():
     agent = ParikshanAgent()
     # Empty answers — the agent defaults to score 30 (unknown) per control
     out = await agent.invoke(
@@ -28,17 +29,21 @@ async def test_parikshan_full_compliance():
     )
     assert out.status == "succeeded"
     output = ParikshanOutput.model_validate(out.output)
-    # With no answers, every control scores 30 (unknown) — weighted
-    # average should be 30 with a small discount for unverified self-attestation.
+    # Empty answers retain unknown/neutral estimates; caller flags never verify facts.
     assert 0 <= output.posture_score <= 50
     # At least one finding is produced (the placeholder library has
     # at least one control; the real v0.1.0 library has 46).
     assert len(output.findings) >= 1
     assert isinstance(output.findings[0], FindingOut)
+    assert output.sdf_self_assessment["is_sdf_attested"] is False
+    assert output.sdf_self_assessment["declaration_provenance"]["sdf_self_attested"] == (
+        "caller_declared_unverified"
+    )
+    assert "SDF=caller-declared false (unverified)" in output.findings[0].rationale
 
 
 @pytest.mark.asyncio
-async def test_parikshan_with_yes_answers_for_some_controls():
+async def test_parikshan_omitted_flags_are_unknown():
     agent = ParikshanAgent()
     # If we had a fully loaded library we'd test 'DPDPA-CNS-001' here;
     # with the placeholder library, the result is still valid.
@@ -51,6 +56,10 @@ async def test_parikshan_with_yes_answers_for_some_controls():
         )
     )
     assert out.status == "succeeded"
+    output = ParikshanOutput.model_validate(out.output)
+    assert output.sdf_self_assessment["is_sdf_attested"] is None
+    assert output.sdf_self_assessment["applicable_sdf_controls"] is None
+    assert "SDF=unknown" in output.findings[0].rationale
 
 
 @pytest.mark.asyncio
@@ -77,3 +86,17 @@ async def test_parikshan_refuses_a_different_library_version():
     )
     assert out.status == "failed"
     assert out.output is None
+
+
+@pytest.mark.parametrize("flag", ["sdf_self_attested", "processes_children", "processes_health"])
+@pytest.mark.parametrize("value", [None, False, True])
+def test_parikshan_preserves_nullable_boolean_declarations(flag, value):
+    data = ParikshanInput(tenant_id="t1", engagement_id="e1", **{flag: value})
+    assert getattr(data, flag) is value
+
+
+@pytest.mark.parametrize("flag", ["sdf_self_attested", "processes_children", "processes_health"])
+@pytest.mark.parametrize("value", ["false", "true", 0, 1])
+def test_parikshan_never_coerces_unknown_declarations(flag, value):
+    with pytest.raises(ValidationError):
+        ParikshanInput(tenant_id="t1", engagement_id="e1", **{flag: value})

@@ -25,6 +25,54 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     return next();
   }
 
+  const durableSourceReview =
+    c.req.method === 'POST' &&
+    /^\/v1\/public-source-bindings\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/observations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/reviews$/.test(
+      c.req.path,
+    );
+  const durableOperatorWorkflow =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/operator-workflows/records' ||
+      /^\/v1\/operator-workflows\/requests\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      ));
+  const durableReviewedWorkflow =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/reviewed-workflows/runs' ||
+      c.req.path === '/v1/reviewed-workflows/acknowledgements');
+  const durableStagedEvidence =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/evidence/staged-ingestions' ||
+      /^\/v1\/evidence\/staged-ingestions\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/expire$/.test(
+        c.req.path,
+      ));
+  const durableOwnedSynthetic =
+    c.req.method === 'POST' &&
+    [
+      '/v1/plans/owned-synthetic',
+      '/v1/plans/owned-synthetic/cancel',
+      '/v1/plans/owned-synthetic/outcome',
+    ].includes(c.req.path);
+  const trustedSourceRequest =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/assessment/jobs' ||
+      c.req.path === '/v1/plans/proposals' ||
+      /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      ) ||
+      /^\/v1\/plans\/proposals\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/adopt$/.test(
+        c.req.path,
+      ));
+  if (
+    durableSourceReview ||
+    durableOperatorWorkflow ||
+    trustedSourceRequest ||
+    durableReviewedWorkflow ||
+    durableStagedEvidence ||
+    durableOwnedSynthetic
+  )
+    c.header('Cache-Control', 'private, no-store');
+
   // SEC-13 row 3: a missing key used to be auto-generated in development,
   // local, preprod, staging and any container without NODE_ENV. Every
   // generated key is unique by construction, so the retry-safety FR-8.3
@@ -56,6 +104,22 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       },
       400,
     );
+  }
+
+  // These exact routes recheck live authority and trusted source context before
+  // their locked, actor/body-scoped SQL operation ledger.
+  // Cached responses would skip live authority/context and cancellation checks
+  // or freeze structural-review currency. Keep key checks above.
+  if (
+    durableSourceReview ||
+    durableOperatorWorkflow ||
+    trustedSourceRequest ||
+    durableReviewedWorkflow ||
+    durableStagedEvidence ||
+    durableOwnedSynthetic
+  ) {
+    c.set('idempotencyKey', key);
+    return next();
   }
 
   const user = c.get('user');

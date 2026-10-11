@@ -13,11 +13,19 @@ goes to a human queue.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field, RootModel, Tag, model_validator
 
 from .base import AgentName, AutonomyLevel, BaseAgent
+from .public_source import (
+    PublicCollectionIndicator,
+    UnknownPrivateFacts,
+    VibhaagPublicInput,
+    VibhaagPublicOutput,
+    invocation_mode,
+    reject_public_fields_in_legacy,
+)
 
 
 class FieldClassification(BaseModel):
@@ -31,6 +39,7 @@ class FieldClassification(BaseModel):
 
 
 class VibhaagInput(BaseModel):
+    mode: Literal["legacy_inventory"] = Field(default="legacy_inventory", exclude=True)
     tenant_id: str
     engagement_id: str
     inventory: list[dict[str, Any]] = Field(default_factory=list)
@@ -38,6 +47,13 @@ class VibhaagInput(BaseModel):
         default_factory=dict,
         description="Per-system hints: {system_name: {field_name: {category?, sensitivity?}}}",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def public_facts_require_explicit_mode(cls, value: Any) -> Any:
+        return reject_public_fields_in_legacy(
+            value, {"source", "source_binding", "observation", "records", "source_records_sha256"}
+        )
 
 
 class VibhaagOutput(BaseModel):
@@ -47,6 +63,36 @@ class VibhaagOutput(BaseModel):
     classifications: list[FieldClassification]
     escalate: bool = False
     escalation_reason: str | None = None
+
+
+class VibhaagInvocationInput(
+    RootModel[
+        Annotated[
+            Annotated[VibhaagInput, Tag("legacy_inventory")]
+            | Annotated[VibhaagPublicInput, Tag("public_website")],
+            Discriminator(invocation_mode),
+        ]
+    ]
+):
+    @property
+    def tenant_id(self) -> str:
+        return self.root.tenant_id
+
+    @property
+    def engagement_id(self) -> str:
+        return self.root.engagement_id
+
+
+class VibhaagInvocationOutput(
+    RootModel[
+        Annotated[
+            Annotated[VibhaagOutput, Tag("legacy_inventory")]
+            | Annotated[VibhaagPublicOutput, Tag("public_website")],
+            Discriminator(invocation_mode),
+        ]
+    ]
+):
+    pass
 
 
 # Pattern-based classifier used as the structural backbone
@@ -72,7 +118,7 @@ def pattern_classify(field_name: str) -> tuple[str, float]:
     return "other", 0.4
 
 
-class VibhaagAgent(BaseAgent[VibhaagInput, VibhaagOutput]):
+class VibhaagAgent(BaseAgent[VibhaagInvocationInput, VibhaagInvocationOutput]):
     name: ClassVar[AgentName] = AgentName.VIBHAAG
     description: ClassVar[str] = "Classify discovered data fields by DPDPA category."
     one_liner: ClassVar[str] = "I tell you what kind of data it is."
@@ -81,20 +127,57 @@ class VibhaagAgent(BaseAgent[VibhaagInput, VibhaagOutput]):
     default_task_kind: ClassVar[Any] = "classification"
     default_pii_redact: ClassVar[bool] = True
 
-    def input_schema(self) -> type[VibhaagInput]:
-        return VibhaagInput
+    def input_schema(self) -> type[VibhaagInvocationInput]:
+        return VibhaagInvocationInput
 
-    def output_schema(self) -> type[VibhaagOutput]:
-        return VibhaagOutput
+    def output_schema(self) -> type[VibhaagInvocationOutput]:
+        return VibhaagInvocationOutput
 
     async def _run(
-        self, *, correlation_id: str, input: VibhaagInput, **deps: Any
-    ) -> VibhaagOutput:
+        self, *, correlation_id: str, input: VibhaagInvocationInput, **deps: Any
+    ) -> VibhaagInvocationOutput:
+        source_input = input.root
+        if isinstance(source_input, VibhaagPublicInput):
+            indicators = [
+                PublicCollectionIndicator(
+                    page=page.page,
+                    content_sha256=page.content_sha256,
+                    form_ordinal=form.ordinal,
+                    control_ordinal=control.ordinal,
+                    input_type=control.inputType,
+                    indicator="potential_contact_collection",
+                    requires_human_review=True,
+                )
+                for page in source_input.observation.pages
+                if page.status == "checked" and page.form_metadata is not None
+                for form in page.form_metadata.forms
+                for control in form.controls
+                if control.element == "input" and control.inputType in ("email", "tel")
+            ]
+            return VibhaagInvocationOutput(
+                root=VibhaagPublicOutput(
+                    mode="public_website",
+                    source_binding=source_input.source_binding,
+                    indicators=indicators,
+                    private_facts=UnknownPrivateFacts(),
+                    unexamined_pages=[
+                        page.page
+                        for page in source_input.observation.pages
+                        if page.form_state == "unexamined"
+                    ],
+                    unavailable_pages=[
+                        page.page
+                        for page in source_input.observation.pages
+                        if page.form_state == "unavailable"
+                    ],
+                    scope_limited=True,
+                )
+            )
+        legacy_input = source_input
         classifications: list[FieldClassification] = []
-        for system in input.inventory:
+        for system in legacy_input.inventory:
             sys_name = system.get("name", "unknown")
-            data_categories = system.get("data_categories", []) or []
-            hint = input.field_hints.get(sys_name, {})
+            hint = legacy_input.field_hints.get(sys_name, {})
             fields: list[Any]
             if isinstance(hint.get("fields"), list):
                 fields = hint["fields"]
@@ -139,7 +222,7 @@ class VibhaagAgent(BaseAgent[VibhaagInput, VibhaagOutput]):
         # from data_categories on the system (e.g. Drishti said this
         # system handles "children" — flag children for review)
         if not classifications:
-            for system in input.inventory:
+            for system in legacy_input.inventory:
                 sys_name = system.get("name", "unknown")
                 for cat in system.get("data_categories", []) or []:
                     if cat in NAME_PATTERNS:
@@ -148,7 +231,9 @@ class VibhaagAgent(BaseAgent[VibhaagInput, VibhaagOutput]):
                                 field_path=f"{sys_name}.*",
                                 system=sys_name,
                                 category=cat,
-                                sensitivity="high" if cat in {"children", "health", "biometric", "government_id"} else "medium",
+                                sensitivity="high"
+                                if cat in {"children", "health", "biometric", "government_id"}
+                                else "medium",
                                 confidence=0.6,
                                 needs_review=True,
                                 rationale="Inferred from system-level data_categories; field-level classification required.",
@@ -158,15 +243,15 @@ class VibhaagAgent(BaseAgent[VibhaagInput, VibhaagOutput]):
         needs_review = [c for c in classifications if c.needs_review]
 
         escalate = any(c.category == "children" and c.confidence >= 0.9 for c in classifications)
-        escalation_reason = (
-            "ambiguous_field: children-data fields detected" if escalate else None
-        )
+        escalation_reason = "ambiguous_field: children-data fields detected" if escalate else None
 
-        return VibhaagOutput(
-            total_fields=len(classifications),
-            classified=len([c for c in classifications if c.confidence >= 0.7]),
-            needs_review_count=len(needs_review),
-            classifications=classifications,
-            escalate=escalate,
-            escalation_reason=escalation_reason,
+        return VibhaagInvocationOutput(
+            root=VibhaagOutput(
+                total_fields=len(classifications),
+                classified=len([c for c in classifications if c.confidence >= 0.7]),
+                needs_review_count=len(needs_review),
+                classifications=classifications,
+                escalate=escalate,
+                escalation_reason=escalation_reason,
+            )
         )

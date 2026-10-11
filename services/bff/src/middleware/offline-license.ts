@@ -5,7 +5,7 @@ import { verifyOfflineLicense } from '@axiom/config';
 export function offlineLicenseGate(
   environment: string | undefined,
   token: string | undefined,
-  /** In-process test trust root only; deployments always verify against the Axiom root key. */
+  /** Explicit in-process trust root; otherwise use the operator-configured public root. */
   publicKeyPem?: string,
 ): MiddlewareHandler {
   return async (c, next) => {
@@ -16,7 +16,7 @@ export function offlineLicenseGate(
     ) {
       return next();
     }
-    if (!token || !verifyOfflineLicense(token, publicKeyPem ? { publicKeyPem } : undefined).valid) {
+    if (!token || !verifyOfflineLicense(token, { publicKeyPem }).valid) {
       return c.json({ error: 'offline_license_invalid' }, c.req.path === '/ready' ? 503 : 403);
     }
     return next();
