@@ -1,24 +1,25 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({ role: 'owner', internal: false }));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async () => ({ role: state.role, isAxiomInternal: state.internal }),
 }));
-import { GET } from './route';
-
-const land = async () =>
-  new URL((await GET(new NextRequest('http://app.test/start'))).headers.get('location')!).pathname;
+vi.mock('next/navigation', () => ({
+  redirect: (to: string) => {
+    throw new Error(`redirect:${to}`);
+  },
+}));
+import StartPage from './page';
 
 beforeEach(() => {
   state.role = 'owner';
   state.internal = false;
 });
 
-it('opens the Workbench for the internal founder', async () => {
+it('opens the Workbench for the internal founder, as a relative redirect', async () => {
   state.role = 'founder';
   state.internal = true;
-  expect(await land()).toBe('/workbench');
+  await expect(StartPage()).rejects.toThrow('redirect:/workbench');
 });
 
 it.each([
@@ -32,5 +33,5 @@ it.each([
 ])('opens the Client Portal for %s (internal=%s)', async (role, internal) => {
   state.role = role;
   state.internal = internal;
-  expect(await land()).toBe('/portal');
+  await expect(StartPage()).rejects.toThrow('redirect:/portal');
 });
