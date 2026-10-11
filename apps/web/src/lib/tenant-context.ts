@@ -278,10 +278,10 @@ export async function requireCapabilityContext(
 }
 
 /**
- * Axiom-internal surfaces (the workbench, the cross-tenant ledger view).
- *
- * Distinct from a tenant role: an `owner` has full authority inside their own
- * tenant and none at all over Axiom's internal tooling.
+ * The Agent Workbench: the Axiom founder's cross-client cockpit, and nobody
+ * else's. A tenant `owner` has full authority inside their own organisation
+ * and none over Axiom's internal tooling; an analyst works through each
+ * client's menus. Everyone refused here lands on the Client Portal.
  */
 export async function requireInternalContext(requestedSlug?: string): Promise<TenantContext> {
   const ctx = await requireTenantContext(requestedSlug);

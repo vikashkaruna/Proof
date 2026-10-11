@@ -176,7 +176,9 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     // the founder's, and the asymmetry is deliberate.
     Capability.INCIDENT_READ,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
-    Capability.WORKBENCH_ACCESS,
+    // No WORKBENCH_ACCESS: the Agent Workbench is the founder's cross-client
+    // cockpit (ARCH-01 §3.1; owner decision 2026-10-12). An analyst works
+    // through each client's own menus, where their membership puts them.
     Capability.ONBOARDING_PREPARE,
   ],
 

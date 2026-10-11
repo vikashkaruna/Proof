@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { selectTenant, signIn, signInFreshAnalyst } from '../fixtures';
+import { selectTenant, signIn, signInFreshFounder } from '../fixtures';
 
 async function captureForReview(page: import('@playwright/test').Page, route: string) {
   const directory = process.env.AXIOM_VISUAL_REVIEW_DIR;
@@ -66,7 +66,7 @@ test('internal ledger and workbench routes render their module context', async (
     if (message.type() === 'error' && /hydration|server rendered HTML/i.test(message.text()))
       hydrationErrors.push(message.text());
   });
-  await signInFreshAnalyst(page, 'module-context');
+  await signInFreshFounder(page, 'module-context');
   await selectTenant(page, 'a');
   for (const [path, section, phase] of [
     ['/ledger', 'Evidence & Audit', 'P2'],

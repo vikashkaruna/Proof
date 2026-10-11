@@ -96,11 +96,13 @@ it('counts only recorded pending approvals and open findings', async () => {
     error: null,
   };
   const view = await html();
-  expect(view).toContain('83/100');
+  expect(view).toContain('>83</span>');
   expect(view).toMatch(/Open findings<\/dt><dd[^>]*><span[^>]*>1<\/span>/);
   expect(view).toMatch(/Awaiting approval<\/dt><dd[^>]*><span[^>]*>1<\/span>/);
   // 83 is in the Good band: green score and a labelled chip, never gold.
-  expect(view).toMatch(/class="[^"]*text-green-300[^"]*" data-testid="posture-score">83\/100/);
+  expect(view).toMatch(
+    /<span class="text-green-300" data-testid="posture-value">83<\/span><span class="text-\[0\.5em\] font-medium">\/100<\/span>/,
+  );
   expect(view).toMatch(/data-testid="posture-band">Good</);
   expect(view).toContain('drishti');
   expect(view).toContain('Actions need a recorded human decision');
@@ -144,7 +146,7 @@ it.each([
 ])('colours a posture of %s by its band', async (score, tone, label) => {
   state.results.engagements = { data: { posture_score: score }, error: null };
   const view = await html();
-  expect(view).toMatch(new RegExp(`class="[^"]*${tone}[^"]*" data-testid="posture-score"`));
+  expect(view).toContain(`<span class="${tone}" data-testid="posture-value">`);
   expect(view).toContain(`data-testid="posture-band">${label}<`);
 });
 

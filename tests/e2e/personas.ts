@@ -193,7 +193,8 @@ export const PERSONAS: readonly Persona[] = [
     // authorises it. An analyst who could approve their own plan would
     // collapse BR-1 into a single party, and that party would be Axiom.
     canApprove: false,
-    workbench: true,
+    // Founder-only since 2026-10-12 (ARCH-01 §3.1).
+    workbench: false,
     partnerPortal: false,
   },
   {

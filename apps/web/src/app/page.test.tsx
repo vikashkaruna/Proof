@@ -9,10 +9,15 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-it('offers one entry into the role-aware platform', () => {
+it('offers the founder Workbench and the client-organisation portal as separate doors', () => {
   const html = renderToStaticMarkup(<Home />);
-  expect(html).toContain('href="/dashboard"');
+  expect(html).toContain('href="/workbench"');
   expect(html).toContain('Open Workbench');
-  expect(html).not.toContain('href="/portal"');
-  expect(html).not.toContain('href="/workbench"');
+  expect(html).toContain('For the Axiom founder');
+  expect(html).toContain('href="/portal"');
+  expect(html).toContain('Client Portal');
+  expect(html).toContain('For client organisations');
+  // The header shortcut goes through the role-aware landing.
+  expect(html).toContain('href="/start"');
+  expect(html).not.toContain('href="/dashboard"');
 });

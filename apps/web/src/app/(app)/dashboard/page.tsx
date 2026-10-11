@@ -147,13 +147,21 @@ export default async function DashboardPage() {
               </dt>
               <dd className="mt-0.5 flex items-center gap-2">
                 <span
-                  className={cn(
-                    'font-heading text-2xl font-semibold',
-                    'band' in item && item.band ? item.band.onDark : 'text-white',
-                  )}
+                  className="font-heading text-2xl font-semibold text-white"
                   data-testid={'band' in item ? 'posture-score' : undefined}
                 >
-                  {item.value}
+                  {'band' in item && item.band ? (
+                    <>
+                      {/* Only the score carries the band colour; "/100" stays in the
+                          header's text colour at half the size. */}
+                      <span className={item.band.onDark} data-testid="posture-value">
+                        {posture}
+                      </span>
+                      <span className="text-[0.5em] font-medium">/100</span>
+                    </>
+                  ) : (
+                    item.value
+                  )}
                 </span>
                 {'band' in item && item.band && (
                   <span

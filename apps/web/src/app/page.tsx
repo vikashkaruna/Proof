@@ -15,7 +15,7 @@ export default function HomePage() {
               <Link href="/login">Sign in</Link>
             </Button>
             <Button variant="accent" size="sm" asChild>
-              <Link href="/dashboard">Open App</Link>
+              <Link href="/start">Open App</Link>
             </Button>
           </nav>
         </div>
@@ -32,12 +32,21 @@ export default function HomePage() {
         </p>
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-          {/* One platform: the menu and screens follow the signed-in role, so a
-              separate Client Portal entry led to the same app. /dashboard is the
-              role-aware landing; /workbench is Axiom's internal console. */}
-          <Button variant="accent" size="lg" asChild>
-            <Link href="/dashboard">Open Workbench</Link>
-          </Button>
+          {/* Two doors, two audiences (ARCH-01 §3.1). The Workbench is the Axiom
+              founder's cross-client cockpit and refuses everyone else to the
+              Client Portal; the portal is every client-organisation user's view. */}
+          <div className="flex flex-col items-center gap-1.5">
+            <Button variant="accent" size="lg" asChild>
+              <Link href="/workbench">Open Workbench</Link>
+            </Button>
+            <span className="text-xs text-slate-500">For the Axiom founder</span>
+          </div>
+          <div className="flex flex-col items-center gap-1.5">
+            <Button variant="outline" size="lg" asChild>
+              <Link href="/portal">Client Portal</Link>
+            </Button>
+            <span className="text-xs text-slate-500">For client organisations</span>
+          </div>
         </div>
       </main>
 
