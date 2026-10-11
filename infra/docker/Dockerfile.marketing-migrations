@@ -6,11 +6,12 @@ ARG AXIOM_RELEASE_SHA
 ARG POSTGRES_CLIENT_APK_PACKAGE
 RUN test "${#AXIOM_RELEASE_SHA}" -eq 40 && case "$AXIOM_RELEASE_SHA" in *[!0-9a-f]*) exit 1;; esac
 LABEL org.opencontainers.image.revision=${AXIOM_RELEASE_SHA}
-RUN printf '%s\n' "$POSTGRES_CLIENT_APK_PACKAGE" | grep -Eq '^postgresql16-client=[0-9]+\.[0-9]+-r[0-9]+$' \
+RUN printf '%s\n' "$POSTGRES_CLIENT_APK_PACKAGE" | grep -Eq '^postgresql17-client=[0-9]+\.[0-9]+-r[0-9]+$' \
     && test -s /etc/ssl/certs/ca-certificates.crt \
     && apk add --no-cache "$POSTGRES_CLIENT_APK_PACKAGE" \
-    && rm -rf /usr/local/lib/python3.11/site-packages/pip* /usr/local/lib/python3.11/site-packages/setuptools* /usr/local/lib/python3.11/site-packages/wheel* \
-    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
+    && rm -rf /usr/local/lib/python3.*/site-packages/pip* /usr/local/lib/python3.*/site-packages/setuptools* /usr/local/lib/python3.*/site-packages/wheel* \
+    && rm -f /usr/local/bin/pip* \
+    && ! python -m pip --version 2>/dev/null
 WORKDIR /app
 COPY scripts/migrate-database.py scripts/marketing-db-job.py /app/scripts/
 COPY scripts/marketing-state-adoption.py scripts/marketing-acceptance-job.py scripts/marketing-acceptance-readback.py scripts/marketing-acceptance-config.py /app/scripts/

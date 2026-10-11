@@ -7,7 +7,8 @@ COPY lifecycle.py google_rest.py server.py /app/
 COPY approved-target.json /app/approved-target.json
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AXIOM_IDLE_TARGET_MANIFEST=/app/approved-target.json PORT=8080
 RUN adduser -D -H -u 10001 lifecycle \
-    && rm -rf /usr/local/lib/python3.11/site-packages/pip* /usr/local/lib/python3.11/site-packages/setuptools* /usr/local/lib/python3.11/site-packages/wheel* \
-    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
+    && rm -rf /usr/local/lib/python3.*/site-packages/pip* /usr/local/lib/python3.*/site-packages/setuptools* /usr/local/lib/python3.*/site-packages/wheel* \
+    && rm -f /usr/local/bin/pip* \
+    && ! python -m pip --version 2>/dev/null
 USER 10001
 CMD ["python", "server.py"]

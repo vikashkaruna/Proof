@@ -28,7 +28,7 @@ for key in UPSTREAM_POSTGREST_IMAGE MARKETING_PYTHON_RUNTIME_IMAGE MARKETING_POS
 done
 [[ "$MARKETING_AUTH_GO_BUILD_IMAGE" =~ ^golang@sha256:[a-f0-9]{64}$ ]] || { echo 'Explicit immutable official Go builder required' >&2; exit 2; }
 [[ "$MARKETING_AUTH_SOURCE_ARCHIVE_URL" =~ ^https://codeload.github.com/supabase/auth/tar.gz/[a-f0-9]{40}$ ]] || { echo 'Exact official Auth source archive required' >&2; exit 2; }
-[[ "$MARKETING_POSTGRES_CLIENT_APK_PACKAGE" =~ ^postgresql16-client=[0-9]+\.[0-9]+-r[0-9]+$ ]] || { echo 'Explicit minimal PostgreSQL client package version required' >&2; exit 2; }
+[[ "$MARKETING_POSTGRES_CLIENT_APK_PACKAGE" =~ ^postgresql17-client=[0-9]+\.[0-9]+-r[0-9]+$ ]] || { echo 'Explicit minimal PostgreSQL client package version required' >&2; exit 2; }
 cd "$REPO_ROOT"
 SOURCE_SHA="$(git rev-parse HEAD)"
 REGISTRY="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AXIOM_ARTIFACT_REPOSITORY}"
@@ -186,6 +186,16 @@ for component in ['marketing', 'bff', 'gateway', 'auth', 'rest', 'migrations', '
     report.chmod(0o600)
     images[component] = {'image_id': image_id, 'report_path': str(report.resolve()),
                          'report_sha256': hashlib.sha256(report.read_bytes()).hexdigest()}
+# Static PostgREST has no OS for the scanner: record its version-bound OSV and
+# positive no-OS layer proof. Clearance accepts this for the rest image only.
+rest_report = json.loads(Path(images['rest']['report_path']).read_bytes())
+if rest_report.get('Results') in (None, []):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('rest_evidence', 'scripts/marketing-rest-evidence.py')
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    images['rest']['no_os_evidence'] = helper.collect(images['rest']['image_id'], rest_report['ArtifactID'],
+        directory / ('rest-evidence-' + os.environ['SOURCE_SHA']))
 manifest = directory / 'candidate.private.json'
 manifest.write_text(json.dumps({'release_sha': os.environ['SOURCE_SHA'],
     'scanner_image': os.environ['MARKETING_TRIVY_IMAGE'], 'images': images}, indent=2) + '\n')

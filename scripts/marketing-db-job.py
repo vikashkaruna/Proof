@@ -325,7 +325,6 @@ alter role supabase_auth_admin login connection limit 2 password '{auth}';
 alter role supabase_auth_admin set search_path=auth;
 alter role authenticator login noinherit connection limit 3 password '{rest}';
 alter role authenticator set statement_timeout='20s';
-do $$begin execute format('alter role %I connection limit 3',current_user);end $$;
 do $$begin execute format('grant supabase_auth_admin to %I',current_user);end $$;
 alter schema auth owner to supabase_auth_admin;
 grant usage,create on schema auth to supabase_auth_admin;
@@ -648,6 +647,7 @@ def inspection_program() -> str:
 set local statement_timeout='10s';
 select json_build_object(
  'database',current_database(),'server_version_num',current_setting('server_version_num'),
+ 'max_connections',current_setting('max_connections'),
  'encrypted_transport',(select ssl from pg_stat_ssl where pid=pg_backend_pid()),
  'observer_role',current_user,
  'observer_superuser',(select rolsuper from pg_roles where rolname=current_user),
@@ -668,7 +668,7 @@ commit;
 
 
 def admission_programs(database: str) -> dict[str, str]:
-    """Fixed PG15 maintenance SQL; only the exact new target admission flag changes."""
+    """Fixed PG17 maintenance SQL; only the exact new target admission flag changes."""
     if not re.fullmatch(r"axiom_proof_preprod(?:_[a-z0-9_]+)?", database):
         raise ValueError("Exact preprod database identifier required")
     name = '"' + database + '"'

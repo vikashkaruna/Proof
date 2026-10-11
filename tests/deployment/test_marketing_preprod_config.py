@@ -199,8 +199,8 @@ class MarketingProfileTests(unittest.TestCase):
     def test_source_contract_matches_terraform_size_and_naming_gate(self) -> None:
         result = self.profile()
         tf = (ROOT / "infra/terraform/envs/marketing-preprod/main.tf").read_text()
-        self.assertEqual((result["cloud_sql_tier"], result["cloud_sql_disk_size_gb"], result["cloud_sql_database_version"]), ("db-f1-micro", 10, "POSTGRES_15"))
-        self.assertEqual((result["cloud_sql_backup_retention"], result["cloud_sql_pitr_enabled"], result["min_instance_count"], result["max_instance_count"]), (7, False, 0, 1))
+        self.assertEqual((result["cloud_sql_tier"], result["cloud_sql_disk_size_gb"], result["cloud_sql_database_version"]), ("db-f1-micro", 10, "POSTGRES_17"))
+        self.assertEqual((result["cloud_sql_backup_retention"], result["cloud_sql_pitr_enabled"], result["min_instance_count"], result["max_instance_count"]), (1, False, 0, 1))
         self.assertIn('var.cloud_sql_tier == "db-f1-micro"', tf)
         self.assertIn('var.cloud_sql_disk_size_gb == 10', tf)
         self.assertIn('var.max_instance_count == 1', tf)

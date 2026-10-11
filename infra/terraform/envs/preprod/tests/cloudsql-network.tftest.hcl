@@ -33,6 +33,14 @@ run "private_only_by_default" {
   }
 }
 
+run "postgres_17_enterprise_shared_core_capable" {
+  command = plan
+  assert {
+    condition     = google_sql_database_instance.postgres.database_version == "POSTGRES_17" && google_sql_database_instance.postgres.settings[0].edition == "ENTERPRISE" && google_sql_database_instance.postgres.settings[0].tier == "db-f1-micro"
+    error_message = "Preprod aligns on PostgreSQL 17 and pins Enterprise so the default shared-core tier stays valid."
+  }
+}
+
 run "explicit_narrow_runner" {
   command = plan
   variables {

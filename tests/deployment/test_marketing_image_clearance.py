@@ -602,3 +602,232 @@ def test_real_archive_pin_matches_committed_auth_source_descriptor():
     assert REAL_UPSTREAM_ARCHIVE == source["upstream_archive_sha256"]
     assert source["upstream_commit"] == MODULE.COMMIT
     assert len(REAL_FORK_TREE) == 64 and REAL_FORK_TREE != tree(FORK_FILES)
+
+
+# --- PostgREST: version-bound OSV and positive no-OS layer proof -----------
+
+REST_BINARY = b"\x7fELF synthetic static postgrest stand-in"
+NIX_FILE = "nix/store/aaaa-openssl-static-etc/etc/ssl/openssl.cnf"
+
+
+def rest_layer(extra=(), binary=REST_BINARY):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as bundle:
+        for name, data, kind in [
+            (".", b"", tarfile.DIRTYPE),
+            ("./bin", b"", tarfile.DIRTYPE),
+            ("./bin/postgrest", binary, tarfile.REGTYPE),
+            ("./nix/store", b"", tarfile.DIRTYPE),
+            (NIX_FILE, b"# synthetic\n", tarfile.REGTYPE),
+            *extra,
+        ]:
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            if kind == tarfile.REGTYPE:
+                info.size = len(data)
+                bundle.addfile(info, io.BytesIO(data))
+            elif kind == tarfile.SYMTYPE:
+                info.linkname = data.decode()
+                bundle.addfile(info)
+            else:
+                bundle.addfile(info)
+    return buffer.getvalue()
+
+
+def rest_fixture(root, version="16.4", osv=b"{}", layer=None, stdout=None):
+    """Rest report as the scanner writes a static image: no OS, no Results."""
+    manifest = fixture(root)
+    layer = rest_layer() if layer is None else layer
+    diff_id = "sha256:" + MODULE.digest(layer)
+    item = manifest["images"]["rest"]
+    report = json.loads((root / item["report_path"]).read_bytes())
+    del report["Results"]
+    report["Metadata"].update(
+        DiffIDs=[diff_id],
+        ImageConfig={"os": "linux", "rootfs": {"type": "layers", "diff_ids": [diff_id]}},
+        Layers=[{"DiffID": diff_id, "Digest": "sha256:" + "d" * 64}],
+    )
+    ref = stored(root, item["report_path"], json.dumps(report).encode())
+    item["report_sha256"] = ref["sha256"]
+    output = {
+        "image_id": item["image_id"],
+        "argv": ["/bin/postgrest", "--version"],
+        "exit_code": 0,
+        "stdout": stdout if stdout is not None else f"PostgREST {version}\n",
+        "binary_sha256": MODULE.digest(REST_BINARY),
+    }
+    evidence = {
+        "format": 1,
+        "component": "rest",
+        "image_id": item["image_id"],
+        "artifact_id": report["ArtifactID"],
+        "postgrest_version": version,
+        "osv_query": {
+            "package": {"ecosystem": "Hackage", "name": "postgrest"},
+            "version": version,
+        },
+        "proofs": {
+            "osv_response": stored(root, "osv.json", osv),
+            "version_output": stored(root, "version.json", json.dumps(output).encode()),
+            "layer": stored(root, "layer.tar", layer),
+        },
+    }
+    item["no_os_evidence"] = stored(root, "rest-evidence.json", json.dumps(evidence).encode())
+    save_manifest(root, manifest)
+    return manifest, evidence
+
+
+def rewrite_evidence(root, manifest, evidence):
+    manifest["images"]["rest"]["no_os_evidence"] = stored(
+        root, "rest-evidence.json", json.dumps(evidence).encode()
+    )
+    save_manifest(root, manifest)
+
+
+def classify(root):
+    return MODULE.classify(root / "manifest.json", None, root)
+
+
+def test_rest_static_image_is_cleared_by_exact_version_osv_and_no_os_layer(tmp_path):
+    manifest, evidence = rest_fixture(tmp_path)
+    result = classify(tmp_path)
+    record = result["images"]["rest"]["no_os_osv_evidence"]
+    assert result["decision"] == "cleared"
+    assert record["postgrest_version"] == "16.4" and record["osv_advisories"] == 0
+    assert record["osv_query"] == evidence["osv_query"]
+    assert record["binary_sha256"] == MODULE.digest(REST_BINARY)
+    assert record["osv_response_sha256"] == MODULE.digest(b"{}")
+    assert all("no_os_osv_evidence" not in v for k, v in result["images"].items() if k != "rest")
+
+
+def test_rest_without_results_and_without_osv_proof_is_refused(tmp_path):
+    manifest, _ = rest_fixture(tmp_path)
+    del manifest["images"]["rest"]["no_os_evidence"]
+    save_manifest(tmp_path, manifest)
+    with pytest.raises(ValueError, match="no version-bound OSV proof"):
+        classify(tmp_path)
+
+
+def test_rest_empty_results_without_osv_proof_is_refused(tmp_path):
+    manifest = fixture(tmp_path)
+    amend_report(tmp_path, manifest, "rest", lambda r: r.update(Results=[]))
+    with pytest.raises(ValueError, match="no version-bound OSV proof"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize("stdout", ["PostgREST 16.3\n", "PostgREST 16.4.1\n", "postgrest 16.4\n", ""])
+def test_rest_wrong_or_unproven_binary_version_is_refused(tmp_path, stdout):
+    rest_fixture(tmp_path, stdout=stdout)
+    with pytest.raises(ValueError, match="binary version is not proven"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("binary_sha256", "0" * 64),
+        ("image_id", "sha256:" + "f" * 64),
+        ("argv", ["/bin/postgrest", "--help"]),
+        ("exit_code", 1),
+    ],
+)
+def test_rest_version_must_come_from_the_scanned_binary(tmp_path, field, value):
+    manifest, evidence = rest_fixture(tmp_path)
+    output = json.loads((tmp_path / "version.json").read_bytes())
+    output[field] = value
+    evidence["proofs"]["version_output"] = stored(tmp_path, "version.json", json.dumps(output).encode())
+    rewrite_evidence(tmp_path, manifest, evidence)
+    with pytest.raises(ValueError, match="binary version is not proven"):
+        classify(tmp_path)
+
+
+def test_rest_osv_query_for_a_different_version_is_refused(tmp_path):
+    manifest, evidence = rest_fixture(tmp_path)
+    evidence["osv_query"]["version"] = "16.3"
+    rewrite_evidence(tmp_path, manifest, evidence)
+    with pytest.raises(ValueError, match="OSV query"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "osv",
+    [
+        b'{"vulns": [{"id": "HSEC-2099-0001"}]}',
+        b'{"vulns": [{"id": "HSEC-2099-0001", "withdrawn": "2099-01-01T00:00:00Z"}]}',
+        b'{"vulns": [], "next_page_token": "more"}',
+        b"[]",
+    ],
+)
+def test_rest_advisories_or_incomplete_osv_response_are_refused(tmp_path, osv):
+    rest_fixture(tmp_path, osv=osv)
+    with pytest.raises(ValueError, match="OSV reports advisories"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize("proof_name", ["osv_response", "version_output", "layer"])
+def test_rest_missing_proof_is_refused(tmp_path, proof_name):
+    manifest, evidence = rest_fixture(tmp_path)
+    del evidence["proofs"][proof_name]
+    rewrite_evidence(tmp_path, manifest, evidence)
+    with pytest.raises(ValueError, match="subject mismatch"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize("target", ["osv.json", "version.json", "layer.tar", "rest-evidence.json"])
+def test_rest_proof_hash_mismatch_is_refused(tmp_path, target):
+    rest_fixture(tmp_path)
+    path = tmp_path / target
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize("component", ["bff", "auth", "migrations"])
+def test_alternate_no_os_path_is_refused_for_any_other_component(tmp_path, component):
+    manifest, _ = rest_fixture(tmp_path)
+    manifest["images"][component]["no_os_evidence"] = manifest["images"]["rest"]["no_os_evidence"]
+    save_manifest(tmp_path, manifest)
+    with pytest.raises(ValueError, match="PostgREST only"):
+        classify(tmp_path)
+    del manifest["images"][component]["no_os_evidence"]
+    amend_report(tmp_path, manifest, component, lambda r: r.pop("Results"))
+    with pytest.raises(ValueError, match="missing or belongs"):
+        classify(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "kind", ["os-detected", "two-layers", "layer-differs", "os-database", "symlink", "foreign-file", "results-contradict", "other-subject"]
+)
+def test_rest_positive_no_os_fact_is_required(tmp_path, kind):
+    layer = None
+    if kind == "os-database":
+        layer = rest_layer(extra=[("lib/apk/db/installed", b"P:musl\n", tarfile.REGTYPE)])
+    elif kind == "symlink":
+        layer = rest_layer(extra=[("bin/sh", b"/bin/postgrest", tarfile.SYMTYPE)])
+    elif kind == "foreign-file":
+        layer = rest_layer(extra=[("etc/os-release", b"ID=alpine\n", tarfile.REGTYPE)])
+    manifest, evidence = rest_fixture(tmp_path, layer=layer)
+    if kind == "os-detected":
+        amend_report(tmp_path, manifest, "rest", lambda r: r["Metadata"].update(OS={"Family": "alpine", "Name": "3.24.2"}))
+    elif kind == "two-layers":
+        amend_report(tmp_path, manifest, "rest", lambda r: r["Metadata"]["DiffIDs"].append("sha256:" + "e" * 64))
+    elif kind == "layer-differs":
+        evidence["proofs"]["layer"] = stored(tmp_path, "layer.tar", rest_layer(binary=b"other"))
+        rewrite_evidence(tmp_path, manifest, evidence)
+    elif kind == "results-contradict":
+        amend_report(tmp_path, manifest, "rest", lambda r: r.update(Results=[{"Class": "os-pkgs", "Vulnerabilities": []}]))
+    elif kind == "other-subject":
+        evidence["image_id"] = "sha256:" + "f" * 64
+        rewrite_evidence(tmp_path, manifest, evidence)
+    expected = {
+        "os-detected": "OS-free layer",
+        "two-layers": "OS-free layer",
+        "layer-differs": "not the scanned layer",
+        "os-database": "OS or unreviewed file",
+        "symlink": "links or special files",
+        "foreign-file": "OS or unreviewed file",
+        "results-contradict": "contradict",
+        "other-subject": "subject mismatch",
+    }[kind]
+    with pytest.raises(ValueError, match=expected):
+        classify(tmp_path)

@@ -76,6 +76,10 @@ variable "cloud_sql_disk_size_gb" {
 
 variable "cloud_sql_database_version" {
   type = string
+  validation {
+    condition     = var.cloud_sql_database_version == "POSTGRES_17"
+    error_message = "Our database is aligned on PostgreSQL 17 (local Supabase and CI run 17.6); supply POSTGRES_17."
+  }
 }
 
 variable "subnet_cidr" {

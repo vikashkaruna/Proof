@@ -3,7 +3,7 @@ name = "axiom-proof-agent-runtime"
 version = "0.1.0"
 description = "Axiom Proof agent runtime — 10 named agents that discover, classify, assess, collect evidence, plan, execute, audit, watch, report, and signal."
 authors = [{ name = "Axiom Minds Private Limited" }]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.14,<3.15"
 license = { text = "Proprietary" }
 
 dependencies = [
@@ -52,14 +52,16 @@ packages = ["src/axiom"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "PT", "RUF"]
-ignore = ["E501"]
+# UP040/UP046: PEP 695 aliases become TypeAliasType, which Pydantic emits as
+# named $defs; keep TypeAlias/Generic so model JSON schemas stay unchanged.
+ignore = ["E501", "UP040", "UP046"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = true
 ignore_missing_imports = true
 

@@ -96,6 +96,11 @@ jobs:
       # Archived upstream is pinned, synthetic and isolated; this is provider
       # protocol acceptance, not a maintained production distribution.
       - run: python3 scripts/test-evidence-storage.py --keep-running
+      # The parity stack publishes fixed host ports 56320-56329, inside Linux's
+      # ephemeral range (32768-60999); an outbound socket holding one made the
+      # mail container fail to bind (W1 flake on PR #193). Reserve the range.
+      - name: Reserve parity stack host ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=56320-56329
       - run: ./scripts/start-parity-supabase.sh
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ''
@@ -244,6 +249,9 @@ jobs:
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
+      # start-parity-supabase.sh publishes 56320-56329; see the W1 note.
+      - name: Reserve parity stack host ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=56320-56329
       - run: ./scripts/test-strict-parity.sh
         # setup-cli exports a single GHCR override, disabling the pinned CLI's
         # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
@@ -253,7 +261,7 @@ jobs:
           AXIOM_PARITY_STARTUP_DEBUG: '1'
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --locked
         working-directory: services/agent-runtime
@@ -322,6 +330,11 @@ jobs:
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
+      # The parity stack publishes fixed host ports 56320-56329, inside Linux's
+      # ephemeral range (32768-60999); an outbound socket holding one made the
+      # mail container fail to bind (W1 flake on PR #193). Reserve the range.
+      - name: Reserve parity stack host ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=56320-56329
       - run: ./scripts/start-parity-supabase.sh
         # setup-cli exports a single GHCR override, disabling the pinned CLI's
         # ECR/GHCR/source-registry fallback. Clear it only for this test stack;
@@ -376,7 +389,7 @@ jobs:
       - run: python3 scripts/check-cloudrun-iam.py
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - run: python3 -m pip install pytest==8.4.2 PyYAML==6.0.3
       - run: python3 -m unittest discover -s tests/deployment -p 'test_*.py'
       - name: Marketing profile and environment authority regressions
@@ -488,7 +501,7 @@ jobs:
       # newer Ubuntu images.
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - name: Install PyYAML for the rendered-manifest checks
         run: pip install --quiet pyyaml
 
@@ -560,8 +573,8 @@ jobs:
       - run: ./tests/deployment/selfhosted-supabase.sh
         env:
           AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
-          AXIOM_TEST_GOTRUE_IMAGE: mirror.gcr.io/supabase/gotrue:v2.169.0@sha256:92f58a6c7f3fd99575347a0eb0849326a88c25efae6413c140b31261e518f91e
-          AXIOM_TEST_POSTGREST_IMAGE: mirror.gcr.io/postgrest/postgrest:v12.2.8@sha256:e5978740a590628f2114730bb942f35342ea70b8b7a86697a3df283c0caea109
+          AXIOM_TEST_GOTRUE_IMAGE: mirror.gcr.io/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
+          AXIOM_TEST_POSTGREST_IMAGE: mirror.gcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
           AXIOM_TEST_INGRESS_IMAGE: mirror.gcr.io/library/nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 
   # ─── W7.3 control-count consistency (QUA-3) ──────────────────────
@@ -634,7 +647,7 @@ jobs:
       # report-kit cross-language and adversarial verifier tests run inside pnpm test.
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.14'
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
@@ -755,7 +768,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/agent-runtime
@@ -780,7 +793,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/temporal-workers
@@ -805,7 +818,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/model-gateway
@@ -840,13 +853,13 @@ jobs:
         run: python3 scripts/audit_prod.py
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: Audit locked Python runtime dependencies
         run: |
           for service in agent-runtime temporal-workers model-gateway; do
             uv export --locked --no-dev --no-emit-project --project "services/$service" --output-file "$RUNNER_TEMP/$service-requirements.txt"
-            uvx --python 3.11 pip-audit==2.10.1 --strict --disable-pip --no-deps -r "$RUNNER_TEMP/$service-requirements.txt"
+            uvx --python 3.14 pip-audit==2.10.1 --strict --disable-pip --no-deps -r "$RUNNER_TEMP/$service-requirements.txt"
           done
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v3

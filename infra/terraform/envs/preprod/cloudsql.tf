@@ -16,11 +16,14 @@ resource "random_password" "db_password" {
 
 resource "google_sql_database_instance" "postgres" {
   name             = "axiom-proof-${var.environment}-pg-${random_id.db_suffix.hex}"
-  database_version = "POSTGRES_15"
+  database_version = "POSTGRES_17"
   region           = var.region
   depends_on       = [google_service_networking_connection.private_vpc_connection]
 
   settings {
+    # PostgreSQL 16+ defaults to Enterprise Plus, which cannot run the
+    # db-f1-micro default tier; pin Enterprise explicitly.
+    edition           = "ENTERPRISE"
     tier              = var.cloud_sql_tier
     availability_type = "ZONAL" # Single zone in preprod; REGIONAL for HA in prod
     disk_size         = var.cloud_sql_disk_size_gb

@@ -1,0 +1,4 @@
+# Temporal dynamic config for the local compose stack. Intentionally empty:
+# server defaults apply, as with the auto-setup image this replaced (its
+# docker.yaml was empty). The temporalio/server image ships no file of its own.
+{}

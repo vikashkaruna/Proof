@@ -65,7 +65,8 @@ def inventory() -> dict:
     assert now != NOW  # Tests pass the fixed execution-relative clock below.
     facts = {
         "database": "axiom_proof_preprod",
-        "server_version_num": "150019",
+        "server_version_num": "170006",
+        "max_connections": "25",
         "encrypted_transport": True,
         "observer_role": "axiom_admin",
         "observer_superuser": False,
@@ -80,7 +81,7 @@ def inventory() -> dict:
             },
             {
                 "name": "axiom_admin",
-                "connection_limit": 3,
+                "connection_limit": -1,
                 "superuser": False,
                 "bypassrls": False,
             },
@@ -138,7 +139,7 @@ def inventory() -> dict:
             "name": INSTANCE,
             "region": REGION,
             "state": "RUNNABLE",
-            "databaseVersion": "POSTGRES_15",
+            "databaseVersion": "POSTGRES_17",
             "connectionName": f"{PROJECT}:{REGION}:{INSTANCE}",
             "settings": {
                 "ipConfiguration": {
@@ -429,6 +430,19 @@ class AdoptionTests(unittest.TestCase):
             ("observer_can_read_all_stats", False),
             ("encrypted_transport", False),
             ("application_migrations", 118),
+            ("max_connections", "100"),
+            ("max_connections", None),
+            (
+                "login_roles",
+                [
+                    {**role, "connection_limit": 100}
+                    if role["name"] == "axiom_admin"
+                    else role
+                    for role in __import__("json").loads(
+                        inventory()["inspection_logs"][0]["textPayload"]
+                    )["facts"]["login_roles"]
+                ],
+            ),
             (
                 "login_roles",
                 [
