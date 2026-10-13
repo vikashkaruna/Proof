@@ -37,7 +37,7 @@ class ActionOutcomeItem(BaseModel):
 
 
 class SamadhanInput(BaseModel):
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     plan_id: str = "00000000-0000-0000-0000-000000000001"
     batch_id: str = "00000000-0000-0000-0000-000000000001"
     correlation_id: str | None = None

@@ -32,7 +32,7 @@ class ReportKind(QualifiedStringEnum):
 
 
 class PrativedanInput(BaseModel):
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     engagement_id: str | None = None
     kind: ReportKind = ReportKind.BOARD
     title: str = "Executive Board Compliance Report"

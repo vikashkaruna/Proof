@@ -28,7 +28,7 @@ from typing import Any, ClassVar, Generic, TypeVar
 from uuid import UUID
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from ..canonicalise import canonical_json, sha256_hex
 from ..config import Settings, get_settings
@@ -169,11 +169,24 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         # Revalidate even BaseModel inputs; an unrelated model instance is not
         # authority to bypass this agent's declared input contract.
         try:
+            explicit_input = raw_input.root if isinstance(raw_input, RootModel) else raw_input
+            if (
+                isinstance(explicit_input, BaseModel)
+                and "tenant_id" not in explicit_input.model_fields_set
+            ):
+                raise ValueError("Explicit tenant required")
             payload = (
                 raw_input.model_dump(mode="python")
                 if isinstance(raw_input, BaseModel)
                 else (raw_input or {})
             )
+            tenant_id = payload.get("tenant_id")
+            if (
+                not isinstance(tenant_id, str)
+                or str(UUID(tenant_id)) != tenant_id
+                or UUID(tenant_id).int == 0
+            ):
+                raise ValueError("Canonical nonnil tenant required")
             context = (
                 DispatchContext.model_validate(dispatch_context).model_dump(
                     mode="json", exclude_none=True
@@ -194,6 +207,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 ):
                     raise ValueError("Renderer configuration commitment refused")
             input_obj = self.input_schema().model_validate(payload)
+            if getattr(input_obj, "tenant_id", None) != tenant_id:
+                raise ValueError("Validated tenant changed")
             input_hash = sha256_hex(canonical_json(input_obj.model_dump(mode="json")))
         except Exception:
             self.log.error("agent.input_validation_failed")
@@ -204,7 +219,6 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 error="validation_failed",
             )
 
-        tenant_id = getattr(input_obj, "tenant_id", None) or "00000000-0000-0000-0000-000000000001"
         engagement_id = getattr(input_obj, "engagement_id", None)
 
         # Initial "started" ledger entry

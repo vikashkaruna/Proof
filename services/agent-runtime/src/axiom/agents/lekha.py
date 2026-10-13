@@ -21,7 +21,7 @@ from .base import AgentName, AutonomyLevel, BaseAgent
 
 
 class LekhaInput(BaseModel):
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     engagement_id: str | None = None  # invocation audit context; verification stays tenant-wide
     operation: str = "verify"  # 'verify' | 'reconstruct' | 'export'
     correlation_id: str | None = None  # for reconstruct

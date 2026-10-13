@@ -38,7 +38,7 @@ class NazarInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     correlation_id: str | None = None  # Accepted legacy BFF wire field; transport binds authority.
     engagement_id: str | None = None
-    tenant_id: str | None = None  # optional; Nazar is mostly tenant-agnostic
+    tenant_id: str
     sources: list[str] = Field(
         default_factory=lambda: [
             "meity.gov.in",

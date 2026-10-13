@@ -11,10 +11,13 @@ from axiom.agents.base import AgentName
 from axiom.agents.drishti import DrishtiAgent, DrishtiInput, DrishtiOutput
 from axiom.app import app
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000003"
+
 
 def interview_input(**declarations):
     return {
-        "tenant_id": "synthetic-tenant",
+        "tenant_id": SYNTHETIC_TENANT_ID,
         "engagement_id": "synthetic-engagement",
         "interview": {"crm": {"name": "CRM", "type": "crm", **declarations}},
     }
