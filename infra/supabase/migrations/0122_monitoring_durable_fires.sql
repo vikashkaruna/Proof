@@ -107,7 +107,7 @@ begin
  if r.id is null or r.action_type<>'monitoring.schedule.fired' or r.actor_type<>'system'
   or r.actor_id<>'continuous-compliance-scheduler' or r.target_ref is distinct from f.schedule_id::text
   or r.correlation_id is distinct from f.correlation_id
-  or r.result is distinct from case when f.recording_outcome='failed' then 'failure'::public.ledger_result else 'success'::public.ledger_result end
+  or r.result is distinct from (case when f.recording_outcome='failed' then 'failure'::public.ledger_result else 'success'::public.ledger_result end)
   or r.detail is distinct from jsonb_build_object('fire_id',f.id,'schedule_id',f.schedule_id,'estate_id',f.estate_id,
    'kind',f.kind,'cadence',f.cadence,'due_at',f.due_at,'calculation_after',f.calculation_after,'next_run_at',f.next_run_at,
    'observation_outcome',f.observation_outcome,'recording_outcome',f.recording_outcome,'failure_code',f.failure_code,
@@ -120,7 +120,7 @@ begin
    or e.id<=previous_receipt or e.id>=r.id or d.id=any(seen_events) or e.id=any(seen_receipts)
    or e.actor_type<>'system' or e.actor_id<>'continuous-compliance-scheduler' or e.action_type<>'monitoring.drift.detected'
    or e.correlation_id is distinct from f.correlation_id or e.target_ref is distinct from f.estate_id::text
-   or e.result is distinct from case when d.severity in ('high','critical') then 'failure'::public.ledger_result else 'success'::public.ledger_result end
+   or e.result is distinct from (case when d.severity in ('high','critical') then 'failure'::public.ledger_result else 'success'::public.ledger_result end)
    or e.detail is distinct from jsonb_build_object('fire_id',f.id,'drift_event_id',d.id,'kind',d.kind,'severity',d.severity,'summary',d.summary,'source_ref',d.source_ref)
   then return jsonb_build_object('error','fire_proof_refused');end if;
   seen_events:=array_append(seen_events,d.id);seen_receipts:=array_append(seen_receipts,e.id);previous_receipt:=e.id;
