@@ -1,3 +1,5 @@
+import { monitoringOutcomeRoutes } from './monitoring-outcomes.js';
+import { loadMonitoringOutcomes } from '../services/monitoring-outcomes.js';
 import { ownedSyntheticPlanRoutes, type OwnedSyntheticRouteDeps } from './owned-synthetic-plans.js';
 import { stagedEvidenceRoutes, type StagedEvidenceRoutesDeps } from './staged-evidence.js';
 import { reviewedWorkflowDraftRoutes } from './reviewed-workflow-drafts.js';
@@ -2567,6 +2569,8 @@ export function v1Routes(deps: Deps) {
     return c.json({ data });
   });
 
+  app.route('/', monitoringOutcomeRoutes());
+
   // GET /v1/monitoring/health — monitoring the monitoring: are schedules
   // firing, when did each last run, which are overdue, and how much drift
   // has been detected (and acknowledged) recently. This is what makes
@@ -2598,8 +2602,14 @@ export function v1Routes(deps: Deps) {
     }
     const rows = (schedules ?? []) as Array<Record<string, unknown>>;
     const driftRows = (events ?? []) as Array<Record<string, unknown>>;
+    const outcomes = await loadMonitoringOutcomes(
+      tenantId,
+      c.get('token'),
+      rows.map((s) => String(s.id)),
+    );
     return c.json({
       data: {
+        outcomes: outcomes ? { status: 'available', ...outcomes } : { status: 'unavailable' },
         schedules: rows.map((s) => ({
           ...s,
           overdue:
