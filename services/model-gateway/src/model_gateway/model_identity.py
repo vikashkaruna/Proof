@@ -32,19 +32,31 @@ def configured_model_identities(settings: Settings) -> tuple[str, ...]:
 
 
 def configured_model_selectors(settings: Settings) -> dict[str, str]:
-    """Only exact configured names and their exact provider-prefix-free aliases."""
-    selectors: dict[str, str] = {}
+    """Exact configured selectors with unambiguous provider/model ownership."""
+    identities = (
+        ("anthropic", settings.anthropic_model),
+        ("anthropic", settings.anthropic_fallback_model),
+        ("openai", settings.openai_model),
+        ("openai", settings.openai_fallback_model),
+        ("gemini", settings.gemini_model),
+        ("gemini", settings.gemini_fallback_model),
+        ("self_hosted", settings.self_hosted_model),
+        ("bedrock", settings.bedrock_model),
+        ("bedrock", settings.fallback_model),
+    )
+    owners: dict[str, tuple[str, str]] = {}
     ambiguous: set[str] = set()
-    for model in configured_model_identities(settings):
+    for provider, model in identities:
         names = [model]
         prefix, separator, suffix = model.partition("/")
         if separator and prefix in ("anthropic", "openai", "gemini"):
             names.append(suffix)
+        owner = (provider, model)
         for name in names:
-            if name in selectors and selectors[name] != model:
+            if name in owners and owners[name] != owner:
                 ambiguous.add(name)
-            selectors[name] = model
-    return {name: model for name, model in selectors.items() if name not in ambiguous}
+            owners[name] = owner
+    return {name: model for name, (_, model) in owners.items() if name not in ambiguous}
 
 
 def resolve_model_selector(requested: str, settings: Settings) -> str:

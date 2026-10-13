@@ -5,6 +5,7 @@ import pytest
 from model_gateway.completion_provenance import reported_model
 from model_gateway.config import Settings
 from model_gateway.model_identity import configured_model_selectors, resolve_model_selector
+from model_gateway.router import decide_route
 
 
 @pytest.mark.parametrize(
@@ -62,3 +63,26 @@ def test_ambiguous_alias_cannot_select_first_configured_identity():
 )
 def test_safe_reported_revision_preserved_without_claiming_verified_identity(value):
     assert reported_model(value) == value
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        {"openai_model": "same", "gemini_model": "same"},
+        {"anthropic_model": "same", "openai_fallback_model": "same"},
+        {"self_hosted_model": "same", "openai_model": "same"},
+        {"bedrock_model": "same", "anthropic_model": "same"},
+    ],
+)
+def test_same_bare_model_in_distinct_provider_slots_is_ambiguous(configuration):
+    settings = Settings(_env_file=None, **configuration)
+    with pytest.raises(ValueError, match="^model_selector_unavailable$"):
+        resolve_model_selector("same", settings)
+    assert "same" not in configured_model_selectors(settings)
+    with pytest.raises(ValueError, match="^model_selector_unavailable$"):
+        decide_route("reasoning", "same", settings)
+
+
+def test_same_provider_primary_and_fallback_identity_remains_unambiguous():
+    settings = Settings(_env_file=None, openai_model="same", openai_fallback_model="same")
+    assert resolve_model_selector("same", settings) == "same"
