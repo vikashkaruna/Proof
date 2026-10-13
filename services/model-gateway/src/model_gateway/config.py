@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .model_identity import safe_model_identity
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     service_name: str = "axiom-model-gateway"
-    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = "development"
+    environment: Literal["development", "staging", "preprod", "production", "onprem", "test"] = (
+        "development"
+    )
     # Containers must listen on all interfaces; exposure is controlled by the
     # platform ingress/network policy, never by this bind address.
     http_host: str = "0.0.0.0"  # nosec B104
@@ -25,7 +30,9 @@ class Settings(BaseSettings):
 
     # Multi-model Provider API Keys & Fallback Hierarchy (Anthropic -> OpenAI -> Gemini):
     # 1. Anthropic (Primary)
-    anthropic_api_key: str | None = Field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY"))
+    anthropic_api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY")
+    )
     anthropic_model: str = "anthropic/claude-3-5-sonnet-20241022"
     anthropic_fallback_model: str = "anthropic/claude-3-5-haiku-20241022"
 
@@ -92,9 +99,28 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> Settings:
+        for model in (
+            self.anthropic_model,
+            self.anthropic_fallback_model,
+            self.openai_model,
+            self.openai_fallback_model,
+            self.gemini_model,
+            self.gemini_fallback_model,
+            self.self_hosted_model,
+            self.bedrock_model,
+            self.fallback_model,
+        ):
+            if not safe_model_identity(model):
+                raise ValueError("Model identities must be nonempty and bounded")
+        for rates in (self.cost_per_input_token, self.cost_per_output_token):
+            for model, rate in rates.items():
+                if not safe_model_identity(model) or not math.isfinite(rate) or rate < 0:
+                    raise ValueError("Model prices must be finite nonnegative configuration rates")
         if self.environment in ("production", "preprod", "onprem"):
             if self.aws_region not in ("ap-south-1", "asia-south1"):
-                raise ValueError("Production/Preprod model gateway must run in Mumbai (ap-south-1 or asia-south1)")
+                raise ValueError(
+                    "Production/Preprod model gateway must run in Mumbai (ap-south-1 or asia-south1)"
+                )
             if self.environment in ("production", "onprem") and not self.api_key:
                 raise ValueError("API_KEY is required in production")
             if not self.pii_redaction_enabled:
@@ -106,7 +132,11 @@ class Settings(BaseSettings):
                 raise ValueError("Hosted model keys are prohibited in onprem mode")
             if self.self_hosted_base_url:
                 parsed = urlparse(self.self_hosted_base_url)
-                if parsed.scheme != "http" or parsed.hostname not in ("local-model", "127.0.0.1", "localhost"):
+                if parsed.scheme != "http" or parsed.hostname not in (
+                    "local-model",
+                    "127.0.0.1",
+                    "localhost",
+                ):
                     raise ValueError("Onprem model URL must name the local-model service")
         return self
 
