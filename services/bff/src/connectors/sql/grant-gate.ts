@@ -104,14 +104,36 @@ export class SqlDiscoveryGate {
         ? new MySqlReadConnector(this.sessions, this.deps.now)
         : new PostgresReadConnector(this.sessions, this.deps.now);
     const result = await work(connector, context);
+    if ((this.deps.now ?? Date.now)() >= deadline) throw new SqlConnectorRefused('expired');
     const after = await this.resolve(request, workload.spiffeId);
     if (
       !after ||
       after.grantId !== grant.grantId ||
+      after.workloadId !== grant.workloadId ||
+      after.systemId !== grant.systemId ||
+      after.endpointRef !== grant.endpointRef ||
+      after.targetBinding !== grant.targetBinding ||
       after.descriptorSha256 !== grant.descriptorSha256 ||
       after.connectorVersion !== grant.connectorVersion
     )
       throw new SqlConnectorRefused('grant_changed');
+    // The read and its cleanup/recheck may outlive the original SVID. Revalidate
+    // current trust before releasing data, then check the deadline again after
+    // both asynchronous authority checks. A renewed grant cannot extend it.
+    let currentWorkload;
+    try {
+      currentWorkload = await this.identity.verify(request.workloadProof);
+    } catch {
+      throw new SqlConnectorRefused('identity');
+    }
+    if (currentWorkload.spiffeId !== workload.spiffeId) throw new SqlConnectorRefused('identity');
+    const releaseDeadline = Math.min(
+      deadline,
+      currentWorkload.expiresAt,
+      Date.parse(after.grantExpiresAt),
+    );
+    if (!Number.isFinite(releaseDeadline) || (this.deps.now ?? Date.now)() >= releaseDeadline)
+      throw new SqlConnectorRefused('expired');
     return { result, grant };
   }
 

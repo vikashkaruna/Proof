@@ -1,3 +1,6 @@
+import { generateKeyPairSync } from 'node:crypto';
+import { SignJWT } from 'jose';
+import { JwtSvidVerifier } from '../../workloads/jwt-svid.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeDb, type FakeDb } from '../../test/fake-postgrest.js';
 vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: vi.fn() }));
@@ -138,6 +141,189 @@ describe('SqlDiscoveryGate (W4.6)', () => {
     });
     answers = [grant(), grant({ descriptorSha256: 'c'.repeat(64) })];
     await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'grant_changed' });
+  });
+
+  it.each(['postgresql', 'mysql'] as const)(
+    'withholds %s results when session cleanup reaches workload expiry',
+    async (engine) => {
+      let now = NOW;
+      identity.verify.mockResolvedValue({ spiffeId: SPIFFE, expiresAt: NOW + 1_000 });
+      const open = engine === 'mysql' ? mysqlSessions : sessions;
+      const timedSessions = async () => {
+        const session = await open();
+        return {
+          ...session,
+          end: async () => {
+            await session.end();
+            now = NOW + 1_000;
+          },
+        };
+      };
+      const timedGate = new SqlDiscoveryGate(identity, timedSessions, {
+        client: () => fake.client as never,
+        engine,
+        now: () => now,
+      });
+      await expect(timedGate.enumerate(request)).rejects.toMatchObject({ reason: 'expired' });
+      expect(opened).toBe(1);
+    },
+  );
+
+  it.each(['postgresql', 'mysql'] as const)(
+    'withholds %s results when live grant recheck reaches workload expiry',
+    async (engine) => {
+      let now = NOW;
+      let checks = 0;
+      identity.verify.mockResolvedValue({ spiffeId: SPIFFE, expiresAt: NOW + 1_000 });
+      fake.onRpc('resolve_sql_read_grant', () => {
+        checks += 1;
+        if (checks === 2) now = NOW + 1_000;
+        return grant();
+      });
+      const timedGate = new SqlDiscoveryGate(
+        identity,
+        engine === 'mysql' ? mysqlSessions : sessions,
+        {
+          client: () => fake.client as never,
+          engine,
+          now: () => now,
+        },
+      );
+      await expect(timedGate.enumerate(request)).rejects.toMatchObject({ reason: 'expired' });
+      expect(checks).toBe(2);
+    },
+  );
+
+  it('withholds results at the invocation budget even when identity and grant remain valid', async () => {
+    let now = NOW;
+    const timedGate = new SqlDiscoveryGate(identity, sessions, {
+      client: () => fake.client as never,
+      now: () => now,
+    });
+    await expect(
+      timedGate.discover(request, async () => {
+        now = NOW + 30_000;
+        return { records: [] };
+      }),
+    ).rejects.toMatchObject({ reason: 'expired' });
+  });
+
+  it.each(['systemId', 'workloadId', 'endpointRef', 'targetBinding'] as const)(
+    'withholds results when %s changes without a descriptor revision',
+    async (field) => {
+      const values = {
+        systemId: request.tenantId,
+        workloadId: request.estateId,
+        endpointRef: 'other_sql',
+        targetBinding: 'sandbox',
+      };
+      answers = [grant(), grant({ [field]: values[field] })];
+      await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'grant_changed' });
+    },
+  );
+
+  it('withholds results when workload trust is revoked after discovery', async () => {
+    identity.verify.mockReset();
+    identity.verify.mockResolvedValueOnce({ spiffeId: SPIFFE, expiresAt: NOW + 600_000 });
+    identity.verify.mockRejectedValueOnce(new Error('revoked bundle'));
+    await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'identity' });
+    expect(opened).toBe(1);
+  });
+
+  it('withholds results when grant expiry is shortened past the release time', async () => {
+    let now = NOW;
+    let checks = 0;
+    fake.onRpc('resolve_sql_read_grant', () => {
+      checks += 1;
+      if (checks === 2) {
+        now = NOW + 1_000;
+        return grant({ grantExpiresAt: new Date(NOW + 500).toISOString() });
+      }
+      return grant();
+    });
+    const timedGate = new SqlDiscoveryGate(identity, sessions, {
+      client: () => fake.client as never,
+      now: () => now,
+    });
+    await expect(timedGate.enumerate(request)).rejects.toMatchObject({ reason: 'expired' });
+  });
+
+  it('checks actual signed SVID trust again after read-only session cleanup', async () => {
+    const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    let trusted = true;
+    const verifier = new JwtSvidVerifier(
+      {
+        audience: 'sql-discovery',
+        trustDomains: ['axiom.test'],
+        maxLifetimeSeconds: 300,
+      },
+      {
+        load: async () => ({
+          revision: 'test-current',
+          validUntil: NOW + 600_000,
+          jwks: {
+            keys: [
+              { ...pair.publicKey.export({ format: 'jwk' }), kid: 'gate-test', use: 'jwt-svid' },
+            ],
+          },
+        }),
+        stillCurrent: async () => trusted,
+      },
+    );
+    const proof = await new SignJWT({})
+      .setProtectedHeader({ alg: 'ES256', kid: 'gate-test', typ: 'JWT' })
+      .setSubject(SPIFFE)
+      .setAudience('sql-discovery')
+      .setIssuedAt()
+      .setExpirationTime(Math.floor(Date.now() / 1000) + 300)
+      .sign(pair.privateKey);
+    const open = async () => {
+      const session = await sessions();
+      return {
+        ...session,
+        end: async () => {
+          await session.end();
+          trusted = false;
+        },
+      };
+    };
+    const verifiedGate = new SqlDiscoveryGate(verifier, open, {
+      client: () => fake.client as never,
+    });
+    await expect(
+      verifiedGate.enumerate({ ...request, workloadProof: proof }),
+    ).rejects.toMatchObject({ reason: 'identity' });
+    expect(opened).toBe(1);
+  });
+
+  it('checks the deadline after the final asynchronous workload verification', async () => {
+    let now = NOW;
+    identity.verify.mockReset();
+    identity.verify.mockResolvedValueOnce({ spiffeId: SPIFFE, expiresAt: NOW + 1_000 });
+    identity.verify.mockImplementationOnce(async () => {
+      now = NOW + 1_000;
+      return { spiffeId: SPIFFE, expiresAt: NOW + 1_000 };
+    });
+    const timedGate = new SqlDiscoveryGate(identity, sessions, {
+      client: () => fake.client as never,
+      now: () => now,
+    });
+    await expect(timedGate.enumerate(request)).rejects.toMatchObject({ reason: 'expired' });
+  });
+
+  it('withholds results if verified workload identity changes at release', async () => {
+    identity.verify.mockReset();
+    identity.verify.mockResolvedValueOnce({ spiffeId: SPIFFE, expiresAt: NOW + 600_000 });
+    identity.verify.mockResolvedValueOnce({
+      spiffeId: 'spiffe://axiom.test/agent/other',
+      expiresAt: NOW + 600_000,
+    });
+    await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'identity' });
+  });
+
+  it('withholds results when re-resolved grant expiry is malformed', async () => {
+    answers = [grant(), grant({ grantExpiresAt: 'invalid' })];
+    await expect(gate().enumerate(request)).rejects.toMatchObject({ reason: 'expired' });
   });
 
   it('selects the MySQL connector when the descriptor targets MySQL', async () => {
