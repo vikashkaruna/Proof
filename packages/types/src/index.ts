@@ -25,3 +25,5 @@ export * from './assessment-questionnaire';
 
 export * from './sudhaar-review-adoption';
 export * from './reviewed-workflow-drafts';
+export * from './prativedan-drafts';
+export * from './prativedan-renderer-config';
