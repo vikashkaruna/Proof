@@ -11,6 +11,7 @@
   },
   "include": [
     "lib/*.ts",
+    "check-prativedan-assessment-interoperability.ts",
     "seed-personas.ts",
     "verify-workload-identity.ts",
     "verify-workload-trust.ts",

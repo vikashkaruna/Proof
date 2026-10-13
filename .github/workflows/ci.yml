@@ -229,6 +229,36 @@ jobs:
       - run: python3 scripts/check-compose-writer-scoping.py
       - run: python3 -m unittest discover -s tests/scripts -p 'test_*.py'
 
+  prativedan-assessment-interoperability:
+    name: Dedicated assessment SQL and renderer interoperability (W2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AXIOM_TEST_POSTGRES_IMAGE: mirror.gcr.io/supabase/postgres:17.6.1.127@sha256:be60aee15997daca475b710b734bc6bfe52cd544dcd7e9fd2ff58210b6747d83
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure Docker Hub cache on disposable CI runner
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS python3 .github/ci/configure_docker_mirror.py
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --locked --extra dev --project services/agent-runtime
+      - run: uv run --locked --extra dev --project services/agent-runtime pytest services/agent-runtime/tests/test_prativedan_assessment_interop.py
+      - run: bash scripts/test-prativedan-assessment-interoperability.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-prativedan-assessment-v2-contract
+          path: .axiom-runtime/contracts/prativedan-assessment-v2
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   strict-auth-parity:
     env:
       AXIOM_CI_DOCKER_MIRROR: '1'
@@ -619,6 +649,7 @@ jobs:
         control-count-gate,
         control-library-drift-gate,
         database-security,
+        prativedan-assessment-interoperability,
         strict-auth-parity,
         deployed-http-acceptance,
         workload-host,
