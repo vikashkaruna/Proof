@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { withMfaFixtureLock } from './fixtures/login-mfa-lock';
+import { withFreshMfaFixtureCounter } from './fixtures/login-mfa-counter';
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
 import { localRoleBearer } from './local-writer';
 import { insertLocalFixtureRow } from './local-db';
@@ -122,15 +122,11 @@ export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void
   const who = account(key);
   const secret = who.totpSecret;
   if (!secret) throw new Error(`${key} was seeded without a TOTP factor`);
-  // Every shared seeded identity uses this boundary, including callers that
-  // explicitly verify founder/analyst sessions after choosing their tenant.
-  await withMfaFixtureLock(join(dirname(personaStatePath), 'login-mfa-locks'), who.id, async () => {
-    // Hold the lock while waiting for a genuinely new counter; a different
-    // worker may have spent the previous one. Fresh private accounts use the
-    // secret helper directly and do not acquire this shared-identity lock.
-    await freshTotpCode(page, secret);
-    await satisfyLoginMfaWithSecret(page, secret);
-  });
+  // Keep independent workers serialized, but do not wait another entire window
+  // when the last successful verification's counter has already expired.
+  await withFreshMfaFixtureCounter(join(dirname(personaStatePath), 'login-mfa-locks'), who.id, () =>
+    satisfyLoginMfaWithSecret(page, secret),
+  );
 }
 
 export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {

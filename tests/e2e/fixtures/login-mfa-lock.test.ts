@@ -187,3 +187,26 @@ test('independent worker processes serialize one identity without an in-memory m
     assert.deepEqual(await readdir(locks), []);
   });
 });
+
+test('rapid lock release during contention retries exclusive acquisition', async () => {
+  await fixture(async (_, locks, user) => {
+    let active = 0;
+    let completed = 0;
+    await Promise.all(
+      Array.from({ length: 30 }, () =>
+        withMfaFixtureLock(
+          locks,
+          user,
+          async () => {
+            assert.equal(++active, 1);
+            assert.equal(active--, 1);
+            completed++;
+          },
+          { pollMs: 1, timeoutMs: 5_000 },
+        ),
+      ),
+    );
+    assert.equal(completed, 30);
+    assert.deepEqual(await readdir(locks), []);
+  });
+});

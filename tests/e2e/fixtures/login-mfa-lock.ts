@@ -48,7 +48,18 @@ export async function withMfaFixtureLock<T>(
       break;
     } catch (cause) {
       if (!(cause instanceof Error) || !('code' in cause) || cause.code !== 'EEXIST') throw cause;
-      await privateDirectory(lock);
+      try {
+        await privateDirectory(lock);
+      } catch (inspection) {
+        // The owner may release between mkdir(EEXIST) and lstat. Retry normal
+        // exclusive acquisition; never remove or steal a lock in this race.
+        if (
+          !(inspection instanceof Error) ||
+          !('code' in inspection) ||
+          inspection.code !== 'ENOENT'
+        )
+          throw inspection;
+      }
       if (Date.now() >= deadline)
         throw new Error(
           'Timed out acquiring seeded login-MFA fixture lock; no stale lock was stolen',
