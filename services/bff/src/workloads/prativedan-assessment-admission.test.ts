@@ -233,8 +233,6 @@ describe('dedicated Prativedan assessment preflight only', () => {
     { sub: 'spiffe://foreign.test/agent/prativedan' },
     { aud: ['axiom-assessment-tools'] },
     { aud: ['axiom-prativedan-assessment-tools', 'other'] },
-    { exp: Math.floor(Date.now() / 1000) + 301 },
-    { exp: Math.floor(Date.now() / 1000) - 1 },
   ])('refuses wrong identity/lifetime %j', async (claims) => {
     const f = fixture();
     await expect(f.preflight.check(token(claims), f.selection)).rejects.toThrow(
@@ -245,6 +243,42 @@ describe('dedicated Prativedan assessment preflight only', () => {
     expect(f.ports.authorizeCurrentHuman).not.toHaveBeenCalled();
     expect(f.ports.registrations.find).not.toHaveBeenCalled();
   });
+  // Store relative cases at collection; derive both signed timestamps at invocation.
+  // CI can delay test execution enough to turn a collected exp into a valid lifetime.
+  it.each([301, -1])('refuses lifetime offset %i seconds', async (offset) => {
+    const f = fixture();
+    const issuedAt = Math.floor(Date.now() / 1000);
+    await expect(
+      f.preflight.check(token({ iat: issuedAt, exp: issuedAt + offset }), f.selection),
+    ).rejects.toThrow(PrativedanAssessmentAdmissionRefused);
+    expect(f.ports.loadOriginalRequestedJournal).not.toHaveBeenCalled();
+    expect(f.ports.resolveCurrentHuman).not.toHaveBeenCalled();
+    expect(f.ports.authorizeCurrentHuman).not.toHaveBeenCalled();
+    expect(f.ports.registrations.find).not.toHaveBeenCalled();
+  });
+  it.each([2000, 120000])(
+    'retains overlong-token refusal after %i ms collection delay',
+    async (delay) => {
+      const collectedAt = Date.now();
+      const offset = 301;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(collectedAt + delay);
+      try {
+        const f = fixture();
+        const issuedAt = Math.floor(Date.now() / 1000);
+        const claims = { iat: issuedAt, exp: issuedAt + offset };
+        expect(claims.exp - claims.iat).toBe(301);
+        // The previous collected expiration would now describe an allowed lifetime.
+        expect(Math.floor(collectedAt / 1000) + offset - issuedAt).toBeLessThanOrEqual(300);
+        await expect(f.preflight.check(token(claims), f.selection)).rejects.toThrow(
+          PrativedanAssessmentAdmissionRefused,
+        );
+        expect(f.ports.resolveCurrentHuman).not.toHaveBeenCalled();
+        expect(f.ports.registrations.find).not.toHaveBeenCalled();
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
   it.each([
     { jwk: keys.publicKey.export({ format: 'jwk' }) },
     { jku: 'https://foreign.test/keys' },
