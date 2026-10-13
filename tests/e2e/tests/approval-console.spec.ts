@@ -14,13 +14,13 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { selectTenant, signIn, state, signInFreshOwner } from '../fixtures';
 
 import { marketingUrl } from '../target';
 
 test.describe('Approval Console — the trust surface', () => {
   test('a plan lists its remediation actions for a signed-in member', async ({ page }) => {
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'approval-console.spec-1');
     await selectTenant(page, 'a');
     await page.goto('/plans');
     await expect(
@@ -31,7 +31,7 @@ test.describe('Approval Console — the trust surface', () => {
   test('the kill switch is visible on a plan page', async ({ page }) => {
     // An owner holds KILL_SWITCH_ENGAGE_TENANT. Stopping must never be the
     // thing that needs an escalation.
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'approval-console.spec-2');
     await selectTenant(page, 'a');
     await page.goto(`/plans/${state.planA.id}`);
     await expect(page.getByText('Engage kill switch').first()).toBeVisible();

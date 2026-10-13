@@ -10,6 +10,7 @@ import {
   signInAs,
   satisfyLoginMfaWithSecret,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 import { acceptanceTarget } from '../target';
 import { insertLocalFixtureRow } from '../local-db';
@@ -197,7 +198,7 @@ for (const format of ['technical', 'dpb'] as const) {
     const viewerContext = await browser.newContext();
     try {
       const owner = await ownerContext.newPage();
-      await signIn(owner, 'owner');
+      await signInFreshOwner(owner, 'source-bound-formats-provider.spec-1');
       await selectTenant(owner, 'a');
       const founder = await founderContext.newPage();
       const founderAccount = await createMfaAccount(`${format}-source-founder`, {

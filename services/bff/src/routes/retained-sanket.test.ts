@@ -8,6 +8,7 @@ import { createFakeDb } from '../test/fake-postgrest.js';
 import { retainedSanketRoutes } from './retained-sanket.js';
 import type { GenericAgentInvocationDeps } from '../services/generic-agent-invocation.js';
 import { retainedSanketInput } from '../services/retained-sanket-source.js';
+import { createMfaService } from '../services/mfa.js';
 
 vi.hoisted(() =>
   Object.assign(process.env, {
@@ -111,6 +112,7 @@ async function fixture() {
 }
 beforeEach(async () => {
   db = createFakeDb();
+  db.seed('tenants', { id: id(1), mfa_required_roles: [] });
   source = await fixture();
   saved = null;
   role = UserRole.FOUNDER;
@@ -167,6 +169,9 @@ beforeEach(async () => {
 });
 function app(mounted = true) {
   const app = new Hono<{ Variables: Variables }>();
+  const loginMfa = createMfaService(() => db.client as never, {
+    encryptionKey: 'synthetic-mfa-policy-test-key-at-least-32-characters',
+  });
   // Synthetic context only. Actual GoTrue/Auth transport acceptance is pending
   // coherent parent mount; this fixture does not claim a live login or DB proof.
   app.use('/v1/*', async (c, next) => {
@@ -193,9 +198,9 @@ function app(mounted = true) {
         fetchImpl: runtime,
         authHeaders: async () => ({}),
         mfa: {
-          requiresLoginMfa: async () => {
+          requiresLoginMfa: async (context) => {
             if (authorityError) throw new Error('private-authority-sentinel');
-            return true;
+            return loginMfa.requiresLoginMfa(context);
           },
           isEnrolled: async () => enrolled,
           sessionAttestation: async () =>
@@ -244,6 +249,29 @@ function query() {
     sourceDigest: source.preview.source_hash,
   });
 }
+it.each([
+  UserRole.FOUNDER,
+  UserRole.AXIOM_ANALYST,
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.APPROVER,
+])(
+  'requires real mandatory-role policy before retained invocation authority for %s',
+  async (requiredRole) => {
+    role = requiredRole;
+    enrolled = false;
+    const missing = await post();
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toEqual({ error: { code: 'mfa_enrolment_required' } });
+    enrolled = true;
+    verified = false;
+    const unverified = await post();
+    expect(unverified.status).toBe(401);
+    expect(await unverified.json()).toEqual({ error: { code: 'mfa_verification_required' } });
+    expect(runtime).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  },
+);
 it('returns bounded public source projection without server-only PG witness', async () => {
   const response = await app().request(`${base}/source?engagementId=${id(3)}&checkId=${id(6)}`, {
     headers: headers(),

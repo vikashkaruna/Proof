@@ -13,6 +13,7 @@ import {
   signInAs,
   satisfyLoginMfaWithSecret,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 import { repoRoot, acceptanceTarget } from '../target';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
@@ -292,7 +293,7 @@ test.describe('retained evidence pack acceptance', () => {
     browser,
   }, testInfo) => {
     test.setTimeout(240_000);
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'evidence-packs.spec-1');
     await selectTenant(page, 'a');
     const member = await upload(page);
     const title = `Auditor pack ${crypto.randomUUID()}`;
@@ -465,7 +466,7 @@ test.describe('retained evidence pack acceptance', () => {
     browser,
   }) => {
     test.setTimeout(180_000);
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'evidence-packs.spec-2');
     await selectTenant(page, 'a');
     const member = await upload(page);
     const title = `Rejected pack ${crypto.randomUUID()}`;
@@ -554,7 +555,7 @@ test.describe('retained evidence pack acceptance', () => {
     browser,
   }) => {
     test.setTimeout(180_000);
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'evidence-packs.spec-3');
     await selectTenant(page, 'a');
     const member = await upload(page);
     const evidence = await page.request.get(`/api/bff/v1/evidence?q=${member.evidenceId}`);

@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { withMfaFixtureLock } from './fixtures/login-mfa-lock';
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
 import { localRoleBearer } from './local-writer';
 import { insertLocalFixtureRow } from './local-db';
@@ -22,10 +24,31 @@ export const persona = personaByKey;
 export async function signIn(page: Page, key: PersonaKey): Promise<void> {
   const who = account(key);
   await signInAs(page, who.email, who.password);
+  // Founder/analyst journeys already verify explicitly. Client journeys need
+  // the same real attestation now; no tenant policy can waive these roles.
+  if (['owner', 'approver'].includes(persona(key).role) && persona(key).totpEnrolled) {
+    await selectTenant(page, persona(key).membership === 'b' ? 'b' : 'a');
+    await withMfaFixtureLock(
+      join(dirname(personaStatePath), 'login-mfa-locks'),
+      who.id,
+      async () => {
+        // Another worker may have spent the preceding counter. Wait under the
+        // exclusive fixture lock; no replay-defense retry or policy exemption.
+        if (!who.totpSecret) throw new Error('Seeded mandatory persona needs its factor');
+        await freshTotpCode(page, who.totpSecret);
+        await satisfyLoginMfa(page, key);
+      },
+    );
+  }
 }
 
-/** The same real login, for an account a journey provisioned for itself. */
-export async function signInAs(page: Page, email: string, password: string): Promise<void> {
+/** Password-only unless the caller explicitly supplies its enrolled login factor. */
+export async function signInAs(
+  page: Page,
+  email: string,
+  password: string,
+  loginSecret?: string,
+): Promise<void> {
   await page.goto('/login');
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
@@ -33,6 +56,7 @@ export async function signInAs(page: Page, email: string, password: string): Pro
     page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 }),
     page.click('button[type="submit"]'),
   ]);
+  if (loginSecret) await satisfyLoginMfaWithSecret(page, loginSecret);
 }
 
 /** Point the session at a seeded tenant. The cookie is a preference; membership still decides. */
@@ -139,8 +163,15 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
   );
   // Record status only, never request bodies, codes, cookies or response payloads.
   const statuses: string[] = [];
+  let verificationConfirmed = false;
   const record = (response: Response) => {
     const path = new URL(response.url()).pathname;
+    if (
+      path.endsWith('/verify') &&
+      path.startsWith('/api/bff/v1/mfa/challenge') &&
+      response.status() === 200
+    )
+      verificationConfirmed = true;
     if (path.startsWith('/api/bff/v1/mfa/challenge'))
       statuses.push(`${path.endsWith('/verify') ? 'verify' : 'issue'}:${response.status()}`);
   };
@@ -166,6 +197,8 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
       await verifyButton.click({ timeout: 15_000 });
       try {
         await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
+        if (!verificationConfirmed)
+          throw new Error('MFA navigation lacked a successful real verification response');
         return;
       } catch {
         if (attempt === 1)
@@ -189,6 +222,15 @@ export async function signInFreshAnalyst(page: Page, label: string): Promise<voi
   await signInAs(page, who.email, who.password);
   await selectTenant(page, 'a');
   await satisfyLoginMfaWithSecret(page, who.totpSecret);
+}
+
+/** Explicit private owner identity: ordinary journeys do not share a one-use factor. */
+export async function signInFreshOwner(page: Page, label: string) {
+  const who = await createMfaAccount(label, { role: 'owner', withFactor: true });
+  if (!who.totpSecret) throw new Error('Owner journey needs its own enrolled factor');
+  await selectTenant(page, 'a');
+  await signInAs(page, who.email, who.password, who.totpSecret);
+  return who;
 }
 
 /** A fresh internal founder: the only role that reaches the Agent Workbench. */
@@ -216,8 +258,8 @@ export const planUrl = (id: string) => `/plans/${id}`;
  * written against a seeded persona passes on a clean database and fails on
  * every rerun — including, silently and permanently, on a CI retry.
  *
- * Tenant A keeps `mfa_required_roles = '{}'`, so an account with no factor
- * signs in and reaches the app instead of landing on the quarantine page.
+ * Tenant A keeps an empty optional MFA policy. The five mandatory human roles
+ * still require enrolment and session verification, independently of that policy.
  *
  * `withFactor` seeds an active TOTP factor encrypted under the harness ring
  * key, exactly as `scripts/seed-personas.ts` does, for journeys that start
@@ -228,7 +270,7 @@ export async function createMfaAccount(
   opts: {
     withFactor?: boolean;
     isInternal?: boolean;
-    role?: 'approver' | 'founder' | 'admin' | 'axiom_analyst';
+    role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
   } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
@@ -344,4 +386,11 @@ export async function registerWorkload(agent: 'drishti' | 'karya', label: string
     version = body.version;
   }
   return id;
+}
+
+/** Approval/replacement must spend a different counter from successful login MFA. */
+export async function freshTotpCode(page: Page, secret: string): Promise<string> {
+  const counter = Math.floor(Date.now() / 30_000);
+  await page.waitForTimeout((counter + 1) * 30_000 - Date.now() + 100);
+  return generateTotp(secret);
 }

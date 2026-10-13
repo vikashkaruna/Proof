@@ -7,7 +7,7 @@ import { LIBRARY_VERSION } from '../../../packages/control-library/src';
 test('an assessment creator can start an intake and open its saved assessment', async ({
   page,
 }) => {
-  const account = await createMfaAccount('assessment-create', { role: 'admin' });
+  const account = await createMfaAccount('assessment-create', { role: 'admin', withFactor: true });
   const tenantId = crypto.randomUUID();
   const slug = `create-assessment-${tenantId.slice(0, 8)}`;
   const headers = {
@@ -50,7 +50,7 @@ test('an assessment creator can start an intake and open its saved assessment', 
   });
   expect(membership.status).toBe(201);
 
-  await signInAs(page, account.email, account.password);
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await page.context().addCookies([tenantCookie(slug)]);
   await page.goto('/assessment');
   await expect(page.getByTestId('assessment-provenance')).toContainText('No saved assessment');

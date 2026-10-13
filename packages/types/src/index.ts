@@ -1,4 +1,5 @@
 export * from './enums';
+export * from './mfa-policy';
 export * from './domain';
 export * from './api';
 export * from './agents';

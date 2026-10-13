@@ -333,6 +333,8 @@ jobs:
         with:
           version: 2.116.0
       - run: pnpm install --frozen-lockfile
+      - name: Verify disposable MFA fixture lock boundaries
+        run: pnpm exec tsx --test tests/e2e/fixtures/login-mfa-lock.test.ts
       # The parity stack publishes fixed host ports 56320-56329, inside Linux's
       # ephemeral range (32768-60999); an outbound socket holding one made the
       # mail container fail to bind (W1 flake on PR #193). Reserve the range.
