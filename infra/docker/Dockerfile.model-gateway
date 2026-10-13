@@ -12,14 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install uv
 
-COPY services/model-gateway/pyproject.toml ./services/model-gateway/
+COPY services/model-gateway/pyproject.toml services/model-gateway/uv.lock ./services/model-gateway/
 COPY services/model-gateway/src ./services/model-gateway/src
 COPY packages/offline-license-python ./packages/offline-license-python
 WORKDIR /app/services/model-gateway
-RUN uv pip install --system -e .
+RUN uv sync --locked --no-dev --no-editable
 
 WORKDIR /app
-ENV PYTHONPATH="/app/services/model-gateway/src:/app/packages/offline-license-python"
+ENV PATH="/app/services/model-gateway/.venv/bin:$PATH" \
+    PYTHONPATH="/app/services/model-gateway/src:/app/packages/offline-license-python"
 EXPOSE 8001
 
 RUN useradd --create-home --shell /bin/bash axiom
