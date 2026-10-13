@@ -82,7 +82,9 @@ def decide_route(task: TaskKind, requested_model: str, settings: Settings) -> Ro
                 ),
             )
         if "claude" in lower or "anthropic" in lower:
-            provider = "anthropic" if settings.anthropic_api_key else "bedrock"
+            provider: Literal["anthropic", "bedrock"] = (
+                "anthropic" if settings.anthropic_api_key else "bedrock"
+            )
             model = settings.anthropic_model if settings.anthropic_api_key else settings.bedrock_model
             return RouteDecision(
                 provider=provider,

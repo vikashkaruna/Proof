@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { WorkflowPanel } from './panel';
 import { workflowRequestSchema, type WorkflowRecord } from '@axiom/types';
 import { JOURNAL_SAVED } from './request';
@@ -807,22 +807,61 @@ it('clears prior named items when Unknown is explicitly selected', async () => {
   await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
   expect(saved?.payload).toEqual(payload);
 });
-it('resets an explicit None choice after confirmed save rather than carrying it into the next activity', async () => {
-  await processingForm();
-  fireEvent.change(screen.getByLabelText('Processors declaration'), { target: { value: 'none' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
-  await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
-  expect(saved?.payload).toEqual({ ...payload, processors: [] });
-  expect((screen.getByLabelText('Processors declaration') as HTMLSelectElement).value).toBe('list');
-  fireEvent.change(screen.getByLabelText('System or processing activity'), {
-    target: { value: 'Public website' },
-  });
-  fireEvent.change(screen.getByLabelText('Source and reason for this record'), {
-    target: { value: payload.sourceNote },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
-  await waitFor(() =>
-    expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(2),
-  );
-  expect(saved?.payload).toEqual(payload);
-});
+it.each(['immediate', 'held'] as const)(
+  'resets an explicit None choice after confirmed save rather than carrying it into the next activity (%s refresh)',
+  async (refreshMode) => {
+    const originalFetch = fetch;
+    let releaseRefresh!: () => void;
+    const refreshReleased = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let heldRefresh = false;
+    if (refreshMode === 'held') {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, options?: RequestInit) => {
+          if (
+            saved &&
+            options?.method !== 'POST' &&
+            url.includes('/operator-workflows/records?') &&
+            !heldRefresh
+          ) {
+            heldRefresh = true;
+            await refreshReleased;
+          }
+          return originalFetch(url, options);
+        }),
+      );
+    }
+    await processingForm();
+    fireEvent.change(screen.getByLabelText('Processors declaration'), {
+      target: { value: 'none' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+    await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
+    expect(saved?.payload).toEqual({ ...payload, processors: [] });
+    expect((screen.getByLabelText('Processors declaration') as HTMLSelectElement).value).toBe(
+      'list',
+    );
+    const saveButton = screen.getByRole('button', { name: 'Save processing activity' });
+    if (refreshMode === 'held') {
+      expect(heldRefresh).toBe(true);
+      expect(saveButton.hasAttribute('disabled')).toBe(true);
+      fireEvent.click(saveButton);
+      expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(1);
+      await act(async () => releaseRefresh());
+    }
+    await waitFor(() => expect(saveButton.hasAttribute('disabled')).toBe(false));
+    fireEvent.change(screen.getByLabelText('System or processing activity'), {
+      target: { value: 'Public website' },
+    });
+    fireEvent.change(screen.getByLabelText('Source and reason for this record'), {
+      target: { value: payload.sourceNote },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.options?.method === 'POST')).toHaveLength(2),
+    );
+    expect(saved?.payload).toEqual(payload);
+  },
+);

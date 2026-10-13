@@ -107,6 +107,8 @@ jobs:
           AXIOM_PARITY_STARTUP_DEBUG: '1'
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
+      - name: First PDF in fresh app and BFF processes without renderer warm-up
+        run: python3 scripts/test-evidence-storage.py --cold-pdf
       - run: python3 scripts/test-evidence-storage.py --browser
       - uses: actions/upload-artifact@v7
         if: always()
@@ -115,6 +117,7 @@ jobs:
           path: |
             .axiom-runtime/evidence-storage/report.json
             .axiom-runtime/evidence-storage/browser-results.json
+            .axiom-runtime/evidence-storage/cold-pdf-results.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
@@ -822,6 +825,12 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/model-gateway
+      - run: uv run ruff check src/model_gateway tests
+        working-directory: services/model-gateway
+      - run: uv run mypy src/model_gateway --strict
+        working-directory: services/model-gateway
+        env:
+          MYPYPATH: ../../packages/offline-license-python
       - run: uv run pytest --cov --cov-report=xml --cov-fail-under=80
         working-directory: services/model-gateway
 
