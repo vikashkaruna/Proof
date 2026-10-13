@@ -21,22 +21,63 @@ export interface AlertSummary {
   high: number;
 }
 
-export interface MonitoringAlertRow {
-  id: string;
-  tenant_id: string;
-  alert_type: string;
-  severity: string;
-  title: string;
-  summary: string;
-  source_id: string;
-  source_type: string;
-  status: string;
-  dispatched_at: string;
-  acknowledged_at: string | null;
-  acknowledged_by: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-}
+const timestamp = z.iso.datetime({ offset: true });
+const monitoringAlertRowSchema = z
+  .object({
+    id: z.uuid(),
+    tenant_id: z.uuid(),
+    alert_type: z.enum([
+      'drift_critical',
+      'drift_high',
+      'schedule_overdue',
+      'compliance_deadline_burning',
+      'compliance_deadline_breached',
+    ]),
+    severity: z.enum(['low', 'medium', 'high', 'critical']),
+    title: z.string().min(1).max(200),
+    summary: z.string().min(1).max(500),
+    source_id: z.string().min(1).max(100),
+    source_type: z.enum([
+      'drift_event',
+      'monitoring_schedule',
+      'compliance_event',
+      'breach',
+      'dsar',
+    ]),
+    status: z.enum(['unread', 'read', 'dismissed', 'acknowledged']),
+    dispatched_at: timestamp,
+    created_at: timestamp,
+    acknowledged_at: timestamp.nullable(),
+    acknowledged_by: z.uuid().nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type MonitoringAlertRow = z.infer<typeof monitoringAlertRowSchema>;
+
+// RPCs return JSON numbers and exact identities. Missing fields are not confirmations.
+const count = z.number().int().min(0).max(2_147_483_647);
+const dispatchResultSchema = z
+  .object({
+    dispatchedCount: count,
+    totalUnread: count,
+    criticalCount: count,
+    highCount: count,
+  })
+  .strict()
+  .refine((value) => value.criticalCount + value.highCount <= value.totalUnread);
+const dismissalResultSchema = z
+  .object({
+    dismissed: z.literal(true),
+    alertId: z.uuid(),
+    acknowledgedBy: z.uuid(),
+  })
+  .strict();
+const dispatchRefusalSchema = z.object({ error: z.literal('tenant_not_found') }).strict();
+const dismissalRefusalSchema = z
+  .object({
+    error: z.enum(['invalid_user', 'alert_not_found', 'already_dismissed']),
+  })
+  .strict();
 
 export class MonitoringAlertsService {
   constructor(
@@ -50,7 +91,7 @@ export class MonitoringAlertsService {
     if (error) {
       throw new EvidenceError('database_unavailable', 503);
     }
-    return data as Record<string, unknown>;
+    return data as unknown;
   }
 
   async listAlerts(
@@ -74,7 +115,10 @@ export class MonitoringAlertsService {
       throw new EvidenceError('database_unavailable', 503);
     }
 
-    const alerts = data as MonitoringAlertRow[];
+    const parsed = z.array(monitoringAlertRowSchema).safeParse(data);
+    if (!parsed.success || parsed.data.some((alert) => alert.tenant_id !== tenantId.toLowerCase()))
+      throw new EvidenceError('database_unavailable', 503);
+    const alerts = parsed.data;
     const unread = alerts.filter((a) => a.status === 'unread' || a.status === 'read').length;
     const critical = alerts.filter(
       (a) => (a.status === 'unread' || a.status === 'read') && a.severity === 'critical',
@@ -113,16 +157,11 @@ export class MonitoringAlertsService {
       signal,
     );
 
-    if (result.error) {
-      throw new EvidenceError(String(result.error), 409);
-    }
-
-    return {
-      dispatchedCount: Number(result.dispatchedCount ?? 0),
-      totalUnread: Number(result.totalUnread ?? 0),
-      criticalCount: Number(result.criticalCount ?? 0),
-      highCount: Number(result.highCount ?? 0),
-    };
+    const refusal = dispatchRefusalSchema.safeParse(result);
+    if (refusal.success) throw new EvidenceError(refusal.data.error, 409);
+    const confirmed = dispatchResultSchema.safeParse(result);
+    if (!confirmed.success) throw new EvidenceError('database_unavailable', 503);
+    return confirmed.data;
   }
 
   async dismissAlert(
@@ -131,26 +170,29 @@ export class MonitoringAlertsService {
     userId: string,
     correlationId: string = randomUUID(),
     signal?: AbortSignal,
-  ): Promise<{ dismissed: boolean; alertId: string; acknowledgedBy?: string }> {
+  ): Promise<{ dismissed: boolean; alertId: string; acknowledgedBy: string }> {
     const query = this.writer.rpc('dismiss_monitoring_alert', {
       p_tenant_id: tenantId,
-      p_alert_id: alertId,
-      p_user_id: userId,
+      p_alert_id: alertId.toLowerCase(),
+      p_user_id: userId.toLowerCase(),
       p_correlation_id: correlationId,
     });
     const { data, error } = signal ? await query.abortSignal(signal) : await query;
     if (error) throw new EvidenceError('database_unavailable', 503);
-    const result = data as Record<string, unknown>;
-
-    if (result.error) {
-      const status = result.error === 'alert_not_found' ? 404 : 409;
-      throw new EvidenceError(String(result.error), status);
+    const refusal = dismissalRefusalSchema.safeParse(data);
+    if (refusal.success) {
+      throw new EvidenceError(
+        refusal.data.error,
+        refusal.data.error === 'alert_not_found' ? 404 : 409,
+      );
     }
-
-    return {
-      dismissed: Boolean(result.dismissed),
-      alertId: String(result.alertId ?? alertId),
-      acknowledgedBy: result.acknowledgedBy ? String(result.acknowledgedBy) : undefined,
-    };
+    const confirmed = dismissalResultSchema.safeParse(data);
+    if (
+      !confirmed.success ||
+      confirmed.data.alertId !== alertId.toLowerCase() ||
+      confirmed.data.acknowledgedBy !== userId.toLowerCase()
+    )
+      throw new EvidenceError('database_unavailable', 503);
+    return confirmed.data;
   }
 }

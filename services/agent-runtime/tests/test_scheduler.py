@@ -1,16 +1,4 @@
-"""W6 — the continuous-compliance scheduler.
-
-The cron calculator is pure and tested against the standard DOM/DOW rule.
-The scheduler pass is tested against scripted database responses: due
-drift schedules fire, drift becomes recorded events sharing the fire's
-correlation id, a no-baseline estate is stated honestly, rediscovery and
-reassessment do their safe part (readiness probe, honest outcome,
-bookkeeping always advanced) and never improvise the live half they do
-not hold, unknown kinds stay due untouched, a not-due schedule is never
-seen, a refused bookkeeping write is counted instead of faked, and a
-cadence the engine cannot compute records a failed run instead of
-spinning.
-"""
+"""W6 durable fire RPC and readback contracts; no database mutation in this suite."""
 
 from __future__ import annotations
 
@@ -22,7 +10,7 @@ from uuid import UUID
 import pytest
 
 from axiom.cron_next import CronSyntaxError, next_fire
-from axiom.scheduler import SchedulerDb, SchedulerUnavailable, poll_once
+from axiom.scheduler import SchedulerDb, poll_once
 
 AFTER = datetime(2026, 9, 26, 10, 30, tzinfo=UTC)
 
@@ -37,9 +25,7 @@ def test_daily_at_three_uses_utc() -> None:
 
 def test_list_and_range_fields() -> None:
     # Hours 8-9 have passed at 10:30, so the next fire is tomorrow 08:05.
-    assert next_fire("5,25 8-9 * * *", AFTER) == AFTER.replace(
-        day=27, hour=8, minute=5
-    )
+    assert next_fire("5,25 8-9 * * *", AFTER) == AFTER.replace(day=27, hour=8, minute=5)
 
 
 def test_dom_and_dow_follow_the_or_rule() -> None:
@@ -61,63 +47,8 @@ def test_garbage_cadence_raises() -> None:
         next_fire("99 * * * *", AFTER)
 
 
-class FakeClient:
-    """Scripted double: the due filter emulates the database's own
-    (active rows whose next_run_at has been reached); RPC responses come
-    from `rpc_script`, defaulting to success."""
-
-    def __init__(self, schedules: list[dict[str, Any]]) -> None:
-        self.schedules = schedules
-        self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
-        self.rpc_script: dict[str, Any] = {}
-        self._now: str | None = None
-
-    def from_(self, _table: str) -> Any:
-        builder = self
-
-        class Q:
-            def select(self, _c: str) -> Q:
-                return self
-
-            def eq(self, _c: str, _v: Any) -> Q:
-                return self
-
-            def lte(self, _c: str, value: Any) -> Q:
-                builder._now = value
-                return self
-
-            def limit(self, _n: int) -> Q:
-                return self
-
-            def execute(self) -> Any:
-                due = [
-                    s
-                    for s in builder.schedules
-                    if s.get("next_run_at") is not None
-                    and (builder._now is None or s["next_run_at"] <= builder._now)
-                ]
-                return SimpleNamespace(data=due)
-
-        return Q()
-
-    def rpc(self, fn: str, args: dict[str, Any]) -> Any:
-        self.rpc_calls.append((fn, args))
-        response = self.rpc_script.get(fn, {"ok": True})
-        if isinstance(response, list):
-            response = response.pop(0)
-        return SimpleNamespace(execute=lambda: SimpleNamespace(data=response))
-
-
-def drift_response(**overrides: Any) -> dict[str, Any]:
-    body = {
-        "status": "drifted",
-        "added": [],
-        "removed": [],
-        "changed": [],
-        "connectionLost": [],
-    }
-    body.update(overrides)
-    return body
+FIRE = "fire_monitoring_schedule"
+READ = "read_monitoring_schedule_fire"
 
 
 def due_schedule(**overrides: Any) -> dict[str, Any]:
@@ -133,267 +64,622 @@ def due_schedule(**overrides: Any) -> dict[str, Any]:
     return row
 
 
-def recorded_events(client: FakeClient) -> list[tuple[str, dict[str, Any]]]:
-    return [c for c in client.rpc_calls if c[0] == "record_drift_event"]
-
-
-def recorded_runs(client: FakeClient) -> list[tuple[str, dict[str, Any]]]:
-    return [c for c in client.rpc_calls if c[0] == "record_schedule_run"]
-
-
-def called_fns(client: FakeClient) -> set[str]:
-    return {fn for fn, _ in client.rpc_calls}
-
-
-def is_uuid(value: Any) -> bool:
+def fire_reply(args: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+    cadence = args["p_expected_cadence"]
     try:
-        UUID(str(value))
-    except (TypeError, ValueError):
-        return False
-    return True
+        if len(cadence) > 100:
+            raise CronSyntaxError
+        next_at = next_fire(cadence, AFTER)
+        outcome = "no_drift" if args["p_expected_kind"] == "drift_check" else "unwired"
+        failure = None if outcome == "no_drift" else "live_executor_unwired"
+    except CronSyntaxError:
+        next_at = AFTER + timedelta(days=1)
+        outcome, failure = "failed", "cadence_invalid"
+    body = {
+        "tenantId": args["p_tenant_id"],
+        "fireId": "44444444-4444-4444-8444-444444444444",
+        "scheduleId": args["p_schedule_id"],
+        "estateId": args["p_estate_id"],
+        "kind": args["p_expected_kind"],
+        "cadence": cadence,
+        "dueAt": args["p_expected_due_at"],
+        "calculationAfter": AFTER.isoformat(),
+        "nextRunAt": next_at.isoformat(),
+        "correlationId": args.get("p_correlation_id", "55555555-5555-4555-8555-555555555555"),
+        "replayed": False,
+        "observationOutcome": outcome,
+        "recordingOutcome": "recorded" if failure is None else "failed",
+        "failureCode": failure,
+        "detectedCount": 0,
+        "recordedCount": 0,
+        "failedCount": 0,
+        "scheduleReceipt": {"id": "103", "entryHash": "a" * 64},
+        "eventReceipts": [],
+    }
+    body.update(overrides)
+    return body
 
 
-@pytest.mark.asyncio
-async def test_drift_becomes_recorded_events_and_a_fired_run() -> None:
-    client = FakeClient([due_schedule()])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(
-        added=[{"id": "s-1", "name": "New CRM"}],
-        connectionLost=[{"id": "s-2", "name": "Old Warehouse"}],
-    )
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    events = recorded_events(client)
-    assert len(events) == 2
-    kinds = {args["p_kind"] for _, args in events}
-    assert kinds == {"system_added", "connection_lost"}
-    severities = {args["p_kind"]: args["p_severity"] for _, args in events}
-    assert severities["connection_lost"] == "high"
-    runs = recorded_runs(client)
-    assert len(runs) == 1
-    assert runs[0][1]["p_outcome"] == "drift_detected"
-    # The fire's writes share one generated correlation id — the ledger's
-    # correlation column is NOT NULL and record_drift_event refuses a null.
-    run_correlation = runs[0][1]["p_correlation_id"]
-    assert is_uuid(run_correlation)
-    assert {args["p_correlation_id"] for _, args in events} == {run_correlation}
-    assert counts["fired"] == 1
-    assert counts["drift_events"] == 2
+class FakeClient:
+    def __init__(self, schedules: Any) -> None:
+        self.schedules = schedules
+        self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
+        self.rpc_script: dict[str, Any] = {}
+        self.orders: list[str] = []
+
+    def from_(self, table: str) -> Any:
+        assert table == "monitoring_schedules"
+        builder = self
+
+        class Q:
+            def select(self, columns: str) -> Q:
+                assert columns == "id, tenant_id, estate_id, kind, cadence, next_run_at"
+                return self
+
+            def eq(self, column: str, value: Any) -> Q:
+                assert (column, value) == ("status", "active")
+                return self
+
+            def lte(self, column: str, value: str) -> Q:
+                assert column == "next_run_at"
+                return self
+
+            def order(self, column: str) -> Q:
+                builder.orders.append(column)
+                return self
+
+            def limit(self, limit: int) -> Q:
+                assert limit == 20
+                return self
+
+            def execute(self) -> Any:
+                if isinstance(builder.schedules, Exception):
+                    raise builder.schedules
+                return SimpleNamespace(data=builder.schedules)
+
+        return Q()
+
+    def rpc(self, fn: str, args: dict[str, Any]) -> Any:
+        self.rpc_calls.append((fn, args))
+
+        def execute() -> Any:
+            scripted = self.rpc_script.get(fn)
+            if isinstance(scripted, list):
+                scripted = scripted.pop(0)
+            if isinstance(scripted, Exception):
+                raise scripted
+            if callable(scripted):
+                scripted = scripted(args)
+            if scripted is None and fn not in self.rpc_script:
+                scripted = fire_reply(args) if fn == FIRE else {"missing": True}
+            return SimpleNamespace(data=scripted)
+
+        return SimpleNamespace(execute=execute)
 
 
-@pytest.mark.asyncio
-async def test_clean_estate_records_no_drift() -> None:
-    client = FakeClient([due_schedule()])
-    client.rpc_script["onboarding_estate_drift"] = drift_response()
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert recorded_events(client) == []
-    assert recorded_runs(client)[0][1]["p_outcome"] == "no_drift"
-    assert counts["drift_events"] == 0
-
-
-@pytest.mark.asyncio
-async def test_no_baseline_is_stated_not_failed() -> None:
-    client = FakeClient([due_schedule()])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="no_baseline")
-    await poll_once(SchedulerDb(client), now=AFTER)
-    assert recorded_runs(client)[0][1]["p_outcome"] == "no_baseline"
-
-
-@pytest.mark.asyncio
-async def test_refused_drift_event_does_not_block_the_run() -> None:
-    client = FakeClient([due_schedule()])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(
-        added=[{"id": "s-1", "name": "New CRM"}]
-    )
-    client.rpc_script["record_drift_event"] = {"error": "invalid_event"}
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert counts["drift_events"] == 0
-    assert recorded_runs(client)[0][1]["p_outcome"] == "no_drift"
-    assert counts["fired"] == 1
-
-
-@pytest.mark.asyncio
-async def test_unknown_kinds_stay_due_untouched() -> None:
-    client = FakeClient([due_schedule(kind="audit")])
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert counts["skipped"] == 1
-    assert client.rpc_calls == []
-
-
-@pytest.mark.asyncio
-async def test_not_due_schedule_is_never_seen() -> None:
-    client = FakeClient([due_schedule(next_run_at="2026-09-26T11:00:00+00:00")])
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert counts == {
+def counts(**overrides: int) -> dict[str, int]:
+    value = {
         "fired": 0,
         "drift_events": 0,
         "failed": 0,
         "refused": 0,
         "skipped": 0,
+        "replayed": 0,
+        "recovered": 0,
     }
+    value.update(overrides)
+    return value
+
+
+@pytest.mark.asyncio
+async def test_due_schedule_uses_only_transactional_fire_rpc() -> None:
+    client = FakeClient([due_schedule()])
+    actual = await poll_once(SchedulerDb(client), now=AFTER)
+    assert actual == counts(fired=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE]
+    args = client.rpc_calls[0][1]
+    assert set(args) == {
+        "p_tenant_id",
+        "p_schedule_id",
+        "p_estate_id",
+        "p_expected_kind",
+        "p_expected_cadence",
+        "p_expected_due_at",
+        "p_correlation_id",
+    }
+    assert args["p_expected_due_at"] == due_schedule()["next_run_at"]
+    assert UUID(args["p_correlation_id"])
+    assert client.orders == ["next_run_at", "id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    ["schedule_snapshot_changed", "schedule_not_found", "schedule_not_due", "fire_context_refused"],
+)
+async def test_stale_or_retired_snapshot_is_not_claimed_fired(error: str) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = {"error": error}
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(skipped=1, refused=1)
+    assert len(client.rpc_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["rediscovery", "reassessment"])
+async def test_live_executors_remain_honestly_unwired(kind: str) -> None:
+    client = FakeClient([due_schedule(kind=kind)])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE]
+
+
+@pytest.mark.asyncio
+async def test_failed_event_transaction_preserves_detected_drift_and_zero_recorded() -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        observationOutcome="drift_detected",
+        recordingOutcome="failed",
+        failureCode="event_recording_failed",
+        detectedCount=3,
+        recordedCount=0,
+        failedCount=3,
+        eventReceipts=[],
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1, refused=3)
+
+
+@pytest.mark.asyncio
+async def test_transport_loss_recovers_exact_own_fire_without_mutation_retry() -> None:
+    client = FakeClient([due_schedule()])
+
+    def lose_response(args: dict[str, Any]) -> Any:
+        client.rpc_script[READ] = fire_reply(args, replayed=True)
+        raise RuntimeError("response lost after commit")
+
+    client.rpc_script[FIRE] = lose_response
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, recovered=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE, READ]
+    assert "p_correlation_id" not in client.rpc_calls[1][1]
+
+
+@pytest.mark.asyncio
+async def test_transport_loss_readback_foreign_correlation_is_only_replay() -> None:
+    client = FakeClient([due_schedule()])
+
+    def lose_response(args: dict[str, Any]) -> Any:
+        client.rpc_script[READ] = fire_reply(
+            args, replayed=True, correlationId="77777777-7777-4777-8777-777777777777"
+        )
+        raise RuntimeError("concurrent fire won")
+
+    client.rpc_script[FIRE] = lose_response
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(replayed=1)
+
+
+@pytest.mark.asyncio
+async def test_retained_replay_is_not_double_counted() -> None:
+    client = FakeClient([due_schedule(), due_schedule()])
+    client.rpc_script[FIRE] = [
+        lambda args: fire_reply(args),
+        lambda args: fire_reply(args, replayed=True),
+    ]
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, replayed=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result", [{}, None, {"ok": True}, {"missing": True}, {"error": "invented"}]
+)
+async def test_missing_or_malformed_payload_cannot_infer_success(result: Any) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = result
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+    assert [fn for fn, _ in client.rpc_calls].count(FIRE) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tenantId", "77777777-7777-4777-8777-777777777777"),
+        ("scheduleId", "77777777-7777-4777-8777-777777777777"),
+        ("estateId", "77777777-7777-4777-8777-777777777777"),
+        ("kind", "reassessment"),
+        ("cadence", "0 0 * * *"),
+        ("dueAt", "2026-09-26T09:59:00+00:00"),
+        ("nextRunAt", "2026-09-26T11:00:00+00:00"),
+        ("correlationId", "77777777-7777-4777-8777-777777777777"),
+        ("calculationAfter", "2026-09-26T09:59:00+00:00"),
+        ("fireId", "bad"),
+        ("replayed", 1),
+        ("detectedCount", True),
+        ("failedCount", -1),
+        ("recordedCount", 1),
+        ("scheduleReceipt", {"id": "0", "entryHash": "a" * 64}),
+        ("scheduleReceipt", {"id": "103", "entryHash": "bad"}),
+        ("extra", True),
+    ],
+)
+async def test_strict_retained_bindings_and_proof_fields(field: str, value: Any) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(args, **{field: value})
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+
+
+@pytest.mark.asyncio
+async def test_bad_first_schedule_does_not_starve_next_due_schedule() -> None:
+    client = FakeClient([due_schedule(), due_schedule(id="88888888-8888-4888-8888-888888888888")])
+    client.rpc_script[FIRE] = [RuntimeError("unavailable"), lambda args: fire_reply(args)]
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1, refused=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE, READ, FIRE]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cadence", ["99 * * * *", "9" * 5000 + " * * * *"])
+async def test_invalid_cadence_uses_only_confirmed_day_backoff(cadence: str) -> None:
+    client = FakeClient([due_schedule(cadence=cadence)])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cadence",
+    ["0 0 1-31 * 1", "0 0 */1 * 1", "0 0 1 * 0-6", "*/999999999999999999999 * * * *", "0 0 31 * *"],
+)
+async def test_retained_next_time_matches_existing_utc_cron_semantics(cadence: str) -> None:
+    client = FakeClient([due_schedule(cadence=cadence)])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1)
+
+
+@pytest.mark.asyncio
+async def test_calculation_after_preserves_subminute_precision() -> None:
+    client = FakeClient([due_schedule(next_run_at="2026-09-26T10:30:15.123456+00:00")])
+    server_after = AFTER.replace(second=16, microsecond=654321)
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        calculationAfter=server_after.isoformat(),
+        nextRunAt=next_fire(args["p_expected_cadence"], server_after).isoformat(),
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER.replace(second=17)) == counts(fired=1)
+
+
+@pytest.mark.asyncio
+async def test_old_replay_does_not_compare_next_time_to_current_clock() -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(args, replayed=True)
+    assert await poll_once(SchedulerDb(client), now=AFTER + timedelta(days=30)) == counts(
+        replayed=1
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "readback",
+    [{"missing": True}, {"missing": True, "extra": False}, {}, None, RuntimeError("unavailable")],
+)
+async def test_uncertain_fire_is_not_retried_when_readback_unconfirmed(readback: Any) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = RuntimeError("unknown commit outcome")
+    client.rpc_script[READ] = readback
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE, READ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"recordingOutcome": "failed"},
+        {"failureCode": "probe_failed"},
+        {
+            "observationOutcome": "unwired",
+            "recordingOutcome": "failed",
+            "failureCode": "live_executor_unwired",
+        },
+        {
+            "observationOutcome": "failed",
+            "recordingOutcome": "recorded",
+            "failureCode": "probe_failed",
+        },
+        {
+            "observationOutcome": "failed",
+            "recordingOutcome": "failed",
+            "failureCode": "cadence_invalid",
+        },
+        {"observationOutcome": "drift_detected"},
+        {"detectedCount": 2_147_483_648},
+        {"recordingOutcome": []},
+        {"observationOutcome": {}},
+        {"calculationAfter": "bad"},
+        {"scheduleReceipt": {"id": "9223372036854775808", "entryHash": "a" * 64}},
+        {"scheduleReceipt": {"id": 103, "entryHash": "a" * 64}},
+        {"scheduleReceipt": {"id": "103", "entryHash": "A" * 64}},
+        {"scheduleReceipt": {"id": "103", "entryHash": "a" * 64, "extra": True}},
+    ],
+)
+async def test_outcome_and_proof_contract_cannot_fabricate_completion(
+    changes: dict[str, Any],
+) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(args, **changes)
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event",
+    [
+        None,
+        {},
+        {"eventId": "bad", "id": "101", "entryHash": "b" * 64},
+        {"eventId": "66666666-6666-4666-8666-666666666666", "id": "103", "entryHash": "b" * 64},
+        {"eventId": "66666666-6666-4666-8666-666666666666", "id": "0", "entryHash": "b" * 64},
+        {"eventId": "66666666-6666-4666-8666-666666666666", "id": "101", "entryHash": "bad"},
+    ],
+)
+async def test_event_receipts_must_precede_and_bind_counted_detection(event: Any) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        observationOutcome="drift_detected",
+        detectedCount=1,
+        recordedCount=1,
+        eventReceipts=[event],
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+
+
+@pytest.mark.asyncio
+async def test_same_event_or_ledger_receipt_is_not_counted_twice() -> None:
+    client = FakeClient([due_schedule()])
+    event = {"eventId": "66666666-6666-4666-8666-666666666666", "id": "101", "entryHash": "b" * 64}
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        observationOutcome="drift_detected",
+        detectedCount=2,
+        recordedCount=2,
+        eventReceipts=[event, event],
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+
+
+@pytest.mark.asyncio
+async def test_recorded_detection_metrics_come_from_confirmed_receipts() -> None:
+    client = FakeClient([due_schedule()])
+    events = [
+        {"eventId": "66666666-6666-4666-8666-666666666666", "id": "101", "entryHash": "b" * 64},
+        {"eventId": "77777777-7777-4777-8777-777777777777", "id": "102", "entryHash": "c" * 64},
+    ]
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        observationOutcome="drift_detected",
+        detectedCount=2,
+        recordedCount=2,
+        eventReceipts=events,
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, drift_events=2)
+
+
+@pytest.mark.asyncio
+async def test_positive_partial_claim_is_impossible_under_atomic_sql_contract() -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        observationOutcome="drift_detected",
+        recordingOutcome="failed",
+        failureCode="event_recording_failed",
+        detectedCount=2,
+        recordedCount=1,
+        failedCount=1,
+        eventReceipts=[
+            {"eventId": "66666666-6666-4666-8666-666666666666", "id": "101", "entryHash": "b" * 64}
+        ],
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("probe_code", ["probe_invalid", "probe_failed"])
+async def test_confirmed_failed_probe_is_counted_as_failed_fire(probe_code: str) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args, observationOutcome="failed", recordingOutcome="failed", failureCode=probe_code
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["drift_check", "rediscovery", "reassessment"])
+async def test_no_baseline_is_a_confirmed_honest_state(kind: str) -> None:
+    client = FakeClient([due_schedule(kind=kind)])
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args, observationOutcome="no_baseline", recordingOutcome="recorded", failureCode=None
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    [
+        None,
+        {},
+        "bad",
+        due_schedule(id="bad"),
+        due_schedule(tenant_id=None),
+        due_schedule(estate_id=123),
+        due_schedule(cadence=None),
+        due_schedule(kind=[]),
+        due_schedule(next_run_at=None),
+        due_schedule(next_run_at="bad"),
+        due_schedule(next_run_at="2026-09-26T10:00:00"),
+        due_schedule(next_run_at="2026-09-26T11:00:00+00:00"),
+        {**due_schedule(), "extra": True},
+    ],
+)
+async def test_malformed_due_row_has_no_writes_and_later_row_runs(row: Any) -> None:
+    client = FakeClient([row, due_schedule()])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1, skipped=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data", [None, {}, "bad", [due_schedule()] * 21, RuntimeError("unavailable")]
+)
+async def test_untrusted_due_collection_is_not_a_clean_pass(data: Any) -> None:
+    client = FakeClient(data)
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1)
     assert client.rpc_calls == []
 
 
 @pytest.mark.asyncio
-async def test_uncountable_cadence_records_a_failed_run() -> None:
-    client = FakeClient([due_schedule(cadence="99 * * * *")])
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    runs = recorded_runs(client)
-    assert counts["failed"] == 1
-    assert len(runs) == 1
-    assert runs[0][1]["p_outcome"] == "failed"
-    assert runs[0][1]["p_next_run_at"] == (AFTER + timedelta(days=1)).isoformat()
-    assert is_uuid(runs[0][1]["p_correlation_id"])
-
-
-# ─── rediscovery ────────────────────────────────────────────────────────
+async def test_empty_due_collection_remains_empty_pass() -> None:
+    client = FakeClient([])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts()
+    assert client.rpc_calls == []
 
 
 @pytest.mark.asyncio
-async def test_rediscovery_without_baseline_records_no_baseline() -> None:
-    client = FakeClient([due_schedule(kind="rediscovery")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="no_baseline")
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    runs = recorded_runs(client)
-    assert len(runs) == 1
-    assert runs[0][1]["p_outcome"] == "no_baseline"
-    assert datetime.fromisoformat(runs[0][1]["p_next_run_at"]) > AFTER
-    assert counts["fired"] == 1
-    assert counts["drift_events"] == 0
+async def test_unsupported_kind_is_not_dispatched() -> None:
+    client = FakeClient([due_schedule(kind="future_unknown")])
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(skipped=1)
+    assert client.rpc_calls == []
 
 
 @pytest.mark.asyncio
-async def test_rediscovery_on_ready_estate_refuses_to_improvise() -> None:
-    client = FakeClient([due_schedule(kind="rediscovery")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response()
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    runs = recorded_runs(client)
-    # The live re-enumeration is not held by this runtime: the run is
-    # recorded failed — no invented inventory, no fabricated success.
-    assert runs[0][1]["p_outcome"] == "failed"
-    assert datetime.fromisoformat(runs[0][1]["p_next_run_at"]) > AFTER
-    assert called_fns(client) == {"onboarding_estate_drift", "record_schedule_run"}
-    assert recorded_events(client) == []
-    assert counts["fired"] == 1
-    assert counts["drift_events"] == 0
+@pytest.mark.parametrize("counts_value", [counts(fired=1), counts(), None])
+async def test_loop_preserves_minimum_interval_and_cancellation(
+    monkeypatch: pytest.MonkeyPatch, counts_value: dict[str, int] | None
+) -> None:
+    import asyncio
+
+    import axiom.scheduler as scheduler
+    from axiom.scheduler import SchedulerUnavailable
+
+    async def poll(db: SchedulerDb) -> dict[str, int]:
+        if counts_value is None:
+            raise SchedulerUnavailable
+        return counts_value
+
+    intervals = []
+
+    async def sleep(seconds: int) -> None:
+        intervals.append(seconds)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler, "poll_once", poll)
+    monkeypatch.setattr(scheduler.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await scheduler.scheduler_loop(SchedulerDb(FakeClient([])), 1)
+    assert intervals == [30]
 
 
 @pytest.mark.asyncio
-async def test_rediscovery_unonboarded_estate_records_failed() -> None:
-    client = FakeClient([due_schedule(kind="rediscovery")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="not_onboarded")
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert recorded_runs(client)[0][1]["p_outcome"] == "failed"
-    assert counts["fired"] == 1
-
-
-@pytest.mark.asyncio
-async def test_rediscovery_uncountable_cadence_skips_the_probe() -> None:
-    client = FakeClient([due_schedule(kind="rediscovery", cadence="99 * * * *")])
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    # The cadence gate precedes everything: a failed run is recorded and no
-    # estate probe is spent on a schedule that cannot say when it fires.
-    assert counts["failed"] == 1
-    assert called_fns(client) == {"record_schedule_run"}
-    assert recorded_runs(client)[0][1]["p_outcome"] == "failed"
-
-
-# ─── reassessment ───────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_reassessment_without_baseline_records_no_baseline() -> None:
-    client = FakeClient([due_schedule(kind="reassessment")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="no_baseline")
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    runs = recorded_runs(client)
-    assert len(runs) == 1
-    assert runs[0][1]["p_outcome"] == "no_baseline"
-    assert datetime.fromisoformat(runs[0][1]["p_next_run_at"]) > AFTER
-    assert counts["fired"] == 1
-    assert counts["drift_events"] == 0
-
-
-@pytest.mark.asyncio
-async def test_reassessment_on_ready_estate_refuses_to_improvise() -> None:
-    client = FakeClient([due_schedule(kind="reassessment")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response()
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    runs = recorded_runs(client)
-    # Nothing is scored and nothing is claimed assessed: the live dispatch
-    # needs a human actor and a controller-wrapped input this runtime does
-    # not hold, so the run is recorded failed.
-    assert runs[0][1]["p_outcome"] == "failed"
-    assert datetime.fromisoformat(runs[0][1]["p_next_run_at"]) > AFTER
-    assert called_fns(client) == {"onboarding_estate_drift", "record_schedule_run"}
-    assert recorded_events(client) == []
-    assert counts["fired"] == 1
-
-
-@pytest.mark.asyncio
-async def test_reassessment_unonboarded_estate_records_failed() -> None:
-    client = FakeClient([due_schedule(kind="reassessment")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="not_onboarded")
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert recorded_runs(client)[0][1]["p_outcome"] == "failed"
-    assert counts["fired"] == 1
-
-
-# ─── bookkeeping refusals ───────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_drift_run_refusal_is_counted_never_faked() -> None:
+async def test_recovery_without_replayed_flag_is_not_authoritative_retained_reply() -> None:
     client = FakeClient([due_schedule()])
-    client.rpc_script["onboarding_estate_drift"] = drift_response()
-    client.rpc_script["record_schedule_run"] = {"error": "schedule_not_active"}
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    # The write was attempted and refused; the schedule stays due. It is
-    # counted as refused, not reported fired.
-    assert len(recorded_runs(client)) == 1
-    assert counts["refused"] == 1
-    assert counts["fired"] == 0
+
+    def lose_response(args: dict[str, Any]) -> Any:
+        client.rpc_script[READ] = fire_reply(args)  # A readback must identify its retained nature.
+        raise RuntimeError("lost response")
+
+    client.rpc_script[FIRE] = lose_response
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
+    assert [fn for fn, _ in client.rpc_calls] == [FIRE, READ]
 
 
 @pytest.mark.asyncio
-async def test_rediscovery_run_refusal_is_counted_never_faked() -> None:
-    client = FakeClient([due_schedule(kind="rediscovery")])
-    client.rpc_script["onboarding_estate_drift"] = drift_response(status="no_baseline")
-    client.rpc_script["record_schedule_run"] = {"error": "invalid_run"}
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert len(recorded_runs(client)) == 1
-    assert counts["refused"] == 1
-    assert counts["fired"] == 0
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {
+            "observationOutcome": "drift_detected",
+            "detectedCount": 1,
+            "recordedCount": 1,
+            "eventReceipts": [
+                {
+                    "eventId": "66666666-6666-4666-8666-666666666666",
+                    "id": "101",
+                    "entryHash": "b" * 64,
+                }
+            ],
+        },
+        {
+            "observationOutcome": "failed",
+            "recordingOutcome": "failed",
+            "failureCode": "probe_failed",
+        },
+    ],
+)
+async def test_live_executor_cannot_claim_detected_drift_or_clean_success(
+    changes: dict[str, Any],
+) -> None:
+    client = FakeClient([due_schedule(kind="reassessment")])
+    # Failed probe is legitimate even for an unwired executor; detected events are not.
+    client.rpc_script[FIRE] = lambda args: fire_reply(args, **changes)
+    expected = (
+        counts(fired=1, failed=1)
+        if changes["observationOutcome"] == "failed"
+        else counts(failed=1, refused=1)
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == expected
 
 
 @pytest.mark.asyncio
-async def test_uncountable_cadence_refusal_is_counted_never_faked() -> None:
-    client = FakeClient([due_schedule(cadence="99 * * * *")])
-    client.rpc_script["record_schedule_run"] = {"error": "schedule_not_found"}
-    counts = await poll_once(SchedulerDb(client), now=AFTER)
-    assert counts["failed"] == 1
-    assert counts["refused"] == 1
-    assert counts["fired"] == 0
+async def test_serialized_offsets_are_normalized_for_utc_cron_verification() -> None:
+    client = FakeClient(
+        [due_schedule(cadence="0 3 * * *", next_run_at="2026-09-26T15:30:00+05:30")]
+    )
+    client.rpc_script[FIRE] = lambda args: fire_reply(
+        args,
+        dueAt="2026-09-26T10:00:00Z",
+        calculationAfter="2026-09-26T16:00:00+05:30",
+        nextRunAt="2026-09-27T08:30:00+05:30",
+    )
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1)
 
 
 @pytest.mark.asyncio
-async def test_database_unavailability_skips_the_pass() -> None:
-    class Broken:
-        def from_(self, _t: str) -> Any:
-            raise SchedulerUnavailable()
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"fireId": "00000000-0000-0000-0000-000000000000"},
+        {"correlationId": "00000000-0000-0000-0000-000000000000"},
+        {"detectedCount": 2001},
+        {
+            "observationOutcome": "drift_detected",
+            "recordedCount": 2,
+            "detectedCount": 2,
+            "eventReceipts": [
+                {
+                    "eventId": "66666666-6666-4666-8666-666666666666",
+                    "id": "102",
+                    "entryHash": "b" * 64,
+                },
+                {
+                    "eventId": "77777777-7777-4777-8777-777777777777",
+                    "id": "101",
+                    "entryHash": "c" * 64,
+                },
+            ],
+        },
+    ],
+)
+async def test_sql_bounds_and_receipt_order_are_enforced(changes: dict[str, Any]) -> None:
+    client = FakeClient([due_schedule()])
+    client.rpc_script[FIRE] = lambda args: fire_reply(args, **changes)
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(failed=1, refused=1)
 
-    counts = await poll_once(SchedulerDb(Broken()), now=AFTER)
-    assert counts == {
-        "fired": 0,
-        "drift_events": 0,
-        "failed": 0,
-        "refused": 0,
-        "skipped": 0,
-    }
 
-
-def test_scheduler_db_fail_closed() -> None:
-    class BrokenClient:
-        def from_(self, _t: str) -> Any:
-            raise RuntimeError("down")
-
-    with pytest.raises(SchedulerUnavailable):
-        SchedulerDb(BrokenClient()).due_schedules("2026-09-26T00:00:00+00:00")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("calculated", ["9999-12-30T10:00:00Z", "0001-01-01T00:00:00+05:30"])
+async def test_extreme_timestamp_refused_without_starving_other_schedules(calculated: str) -> None:
+    client = FakeClient([due_schedule(), due_schedule(id="88888888-8888-4888-8888-888888888888")])
+    client.rpc_script[FIRE] = [
+        lambda args: fire_reply(
+            args, calculationAfter=calculated, nextRunAt="9999-12-31T10:00:00Z"
+        ),
+        lambda args: fire_reply(args),
+    ]
+    assert await poll_once(SchedulerDb(client), now=AFTER) == counts(fired=1, failed=1, refused=1)

@@ -153,7 +153,13 @@ it('switches tenant only after the server action verifies membership', async () 
 
 it('requires a confirmed capability-bearing request to engage the kill switch', async () => {
   let engaged = false;
+  let resolveStatus!: (response: Response) => void;
+  const initialStatus = new Promise<Response>((resolve) => {
+    resolveStatus = resolve;
+  });
+  let statusRequests = 0;
   const fetcher = vi.fn((url: string, _init?: RequestInit) => {
+    if (url.includes('kill-switch/status') && statusRequests++ === 0) return initialStatus;
     if (url.includes('kill-switch/engage')) engaged = true;
     return Promise.resolve(
       Response.json(
@@ -170,8 +176,28 @@ it('requires a confirmed capability-bearing request to engage the kill switch', 
   await waitFor(() =>
     expect(fetcher).toHaveBeenCalledWith('/api/bff/v1/kill-switch/status', expect.anything()),
   );
-  fireEvent.click(screen.getByRole('button', { name: /Kill switch/i }));
+  const unavailable = screen.getByRole('button', { name: 'Kill switch status unavailable' });
+  expect(unavailable.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(unavailable);
+  expect(fetcher.mock.calls.some(([url]) => url === '/api/bff/v1/kill-switch/engage')).toBe(false);
+  expect(globalThis.confirm).not.toHaveBeenCalled();
+
+  // A dispatched status request is not yet an authoritative state. Wait for
+  // its response and the rendered enabled control before exercising mutation.
+  await act(async () => {
+    resolveStatus(Response.json({ engaged: false }));
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /^Kill switch$/ }).hasAttribute('disabled')).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^Kill switch$/ }));
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
+  expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+  expect(
+    fetcher.mock.calls.filter(([url]) => url === '/api/bff/v1/kill-switch/engage'),
+  ).toHaveLength(1);
   const mutation = fetcher.mock.calls.find(([url]) => url === '/api/bff/v1/kill-switch/engage');
   expect(mutation?.[1]).toMatchObject({
     method: 'POST',
