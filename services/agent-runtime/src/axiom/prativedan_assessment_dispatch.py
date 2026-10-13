@@ -11,7 +11,7 @@ from uuid import UUID
 from .agents.base import AgentName, RendererDispatchContext
 from .agents.prativedan import PrativedanAgent, PrativedanOutput
 from .canonicalise import canonical_json, sha256_hex
-from .ledger_client import AppendOnlyLedgerClient
+from .prativedan_assessment_controller_capability import PrativedanControllerLedger
 from .prativedan_assessment_draft_codec import (
     AssessmentDraftBinding,
     AssessmentDraftReadbackV2,
@@ -103,7 +103,7 @@ async def invoke_assessment_draft(
     try:
         if (
             type(agent) is not PrativedanAgent
-            or type(agent.ledger) is not AppendOnlyLedgerClient
+            or type(agent.ledger) is not PrativedanControllerLedger
             or agent.ledger._read_client is not None
             or any(
                 UUID(getattr(binding, key)).int == 0
@@ -134,7 +134,12 @@ async def invoke_assessment_draft(
             parse_source_v2(recorded.source_text, recorded.source_sha256)
         )
         input_text = canonical_json(normalized.model_dump(mode="json"))
-        if len(input_text.encode("utf-8")) > 1048576:
+        if (
+            len(input_text.encode("utf-8")) > 1048576
+            or agent.ledger.input_sha256 != sha256_hex(input_text)
+            or agent.ledger._binding != binding
+            or agent.ledger._port is not store._rpc
+        ):
             raise ValueError("Input byte bound refused")
     except Exception as exc:
         raise AssessmentDispatchRefusedError("Assessment dispatch refused") from exc

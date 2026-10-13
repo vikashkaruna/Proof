@@ -1,6 +1,6 @@
 /** Unmounted scoped assessment store. No table/ledger SELECT or service-role fallback. */
 import { z } from 'zod';
-import { createHumanActionWriter, createAgentLedgerWriter } from '@axiom/supabase';
+import { createHumanActionWriter } from '@axiom/supabase';
 import {
   prativedanAssessmentDraftRequestSchema,
   prativedanAssessmentPreviewSchema,
@@ -54,16 +54,20 @@ export type PrativedanAssessmentRuntimeEnvelope = z.infer<
 >;
 export interface PrativedanAssessmentStoreConfig {
   humanWriterFactory?: () => PrativedanAssessmentRpcClient;
-  agentWriterFactory?: () => PrativedanAssessmentRpcClient;
+  /** Required authenticated private-controller adapter; never an agent writer. */
+  controllerCall?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 export class PrativedanAssessmentDraftStore {
   constructor(private readonly config: PrativedanAssessmentStoreConfig = {}) {}
   private async rpc(kind: 'human' | 'agent', name: string, args: Record<string, unknown>) {
     try {
-      const client: PrativedanAssessmentRpcClient =
-        kind === 'human'
-          ? (this.config.humanWriterFactory ?? createHumanActionWriter)()
-          : (this.config.agentWriterFactory ?? createAgentLedgerWriter)();
+      if (kind === 'agent') {
+        if (!this.config.controllerCall) throw new PrativedanAssessmentStoreUnavailable();
+        return await this.config.controllerCall(name, args);
+      }
+      const client: PrativedanAssessmentRpcClient = (
+        this.config.humanWriterFactory ?? createHumanActionWriter
+      )();
       const result = await client.rpc(name, args).abortSignal(AbortSignal.timeout(15000));
       if (result.error) throw new PrativedanAssessmentStoreUnavailable();
       return result.data;

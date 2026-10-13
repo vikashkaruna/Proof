@@ -38,7 +38,7 @@ marker = "-- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim."
 if text.count(marker) != 1:
     raise SystemExit('Source fixture boundary changed; review concurrency fixture')
 text = text.split(marker, 1)[0]
-text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer;', 1)
+text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer,axiom_prativedan_controller;', 1)
 text = text.replace('pg_temp.', 'p123_fixture.')
 text = text.replace('create temporary table ', 'create table ')
 for table in ('issued', 'p123_context'):
@@ -47,9 +47,9 @@ print(text + '\ncommit;')
 PY
 for worker in $(seq 1 8); do
   sql > "$result_dir/$worker.json" <<'SQL' &
-set role agent_ledger_writer;
+do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;
 select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,
- encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text) from p123_fixture.p123_context;
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text,p123_fixture.authority()) from p123_fixture.p123_context;
 SQL
   pids+=("$!")
 done
