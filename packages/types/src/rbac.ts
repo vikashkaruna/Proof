@@ -56,6 +56,12 @@ export const Capability = {
    */
   EXECUTION_RECONCILE: 'execution.reconcile',
 
+  /**
+   * See the breach and incident register. Separate from the emergency stop so
+   * an approver can follow an incident without holding the kill switch.
+   */
+  INCIDENT_READ: 'incident.read',
+
   // Emergency stop
   KILL_SWITCH_ENGAGE_TENANT: 'kill_switch.engage.tenant',
   KILL_SWITCH_ENGAGE_GLOBAL: 'kill_switch.engage.global',
@@ -113,6 +119,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.PLAN_APPROVE,
     Capability.PLAN_REJECT,
     Capability.PLAN_EXECUTE,
+    Capability.INCIDENT_READ,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.KILL_SWITCH_ENGAGE_GLOBAL,
     Capability.KILL_SWITCH_RELEASE_TENANT,
@@ -167,8 +174,11 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     // an agent running has to be able to halt it. Releasing is NOT here —
     // resuming execution against a client estate is the tenant's decision or
     // the founder's, and the asymmetry is deliberate.
+    Capability.INCIDENT_READ,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
-    Capability.WORKBENCH_ACCESS,
+    // No WORKBENCH_ACCESS: the Agent Workbench is the founder's cross-client
+    // cockpit (ARCH-01 §3.1; owner decision 2026-10-12). An analyst works
+    // through each client's own menus, where their membership puts them.
     Capability.ONBOARDING_PREPARE,
   ],
 
@@ -190,6 +200,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.PLAN_APPROVE,
     Capability.PLAN_REJECT,
     Capability.PLAN_EXECUTE,
+    Capability.INCIDENT_READ,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.KILL_SWITCH_RELEASE_TENANT,
     Capability.EXECUTION_RECONCILE,
@@ -221,6 +232,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.PLAN_APPROVE,
     Capability.PLAN_REJECT,
     Capability.PLAN_EXECUTE,
+    Capability.INCIDENT_READ,
     Capability.KILL_SWITCH_ENGAGE_TENANT,
     Capability.ENGAGEMENT_CREATE,
     Capability.TENANT_SETTINGS_WRITE,
@@ -234,6 +246,10 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
    * Approver: exists to approve, and to do so within `approval_scopes`.
    * Cannot create the plan they approve — that separation is BR-1's
    * maker-checker property expressed in roles rather than in prose.
+   *
+   * Follows incidents but does not hold the emergency stop: halting and
+   * resuming a client's automation belongs to the owner and admin (and Axiom's
+   * own operators), not to the role whose job is to decide on plans.
    */
   [UserRole.APPROVER]: [
     Capability.POSTURE_READ,
@@ -245,7 +261,7 @@ const MATRIX: Record<UserRole, readonly Capability[]> = {
     Capability.PLAN_COMMENT,
     Capability.PLAN_APPROVE,
     Capability.PLAN_REJECT,
-    Capability.KILL_SWITCH_ENGAGE_TENANT,
+    Capability.INCIDENT_READ,
   ],
 
   /** Reviewer: reads and comments on agent output. Cannot approve. */

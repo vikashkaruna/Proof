@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   tenantLookup: null as { id: string; name: string; slug: string } | null,
   tenantError: null as Error | null,
   availableCount: undefined as number | null | undefined,
+  role: 'owner' as string,
 }));
 
 vi.mock('@/lib/tenant-context', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/tenant-context', () => ({
     if (state.tenantError) throw state.tenantError;
     return {
       tenantId: 'tenant-a',
+      role: state.role,
       supabase: {
         from: (table: string) => {
           const builder = {
@@ -95,6 +97,15 @@ beforeEach(() => {
   state.tenantLookup = null;
   state.tenantError = null;
   state.availableCount = undefined;
+  state.role = 'owner';
+});
+
+it('refuses a ledger export to a viewer before reading or verifying anything', async () => {
+  state.role = 'viewer';
+  state.tenantLookup = { id: 'tenant-a', name: 'Tenant A', slug: 'tenant-a' };
+  const response = await GET(request('?export=true'));
+  expect(response.status).toBe(403);
+  expect(state.calls.some(([table]) => table === 'audit_ledger')).toBe(false);
 });
 
 it('binds a paginated ledger read to the authenticated tenant and caps its page size', async () => {

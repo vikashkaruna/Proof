@@ -1,4 +1,5 @@
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
+import { can } from '@axiom/types';
 import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
 import { PageHeader } from '@axiom/ui';
 import { VerifyButton } from './verify-button';
@@ -45,13 +46,16 @@ export default async function LedgerPage({
   // W1 · SEC-9/SEC-8: this page read the session directly, so it was gated on
   // being signed in and nothing else — no role check, and, once login MFA
   // landed, no MFA check either.
-  const { supabase, tenantId, tenantName, tenantSlug } = await requireCapabilityContext(
+  const { supabase, tenantId, tenantName, tenantSlug, role } = await requireCapabilityContext(
     Capability.LEDGER_READ,
     resolvedSearchParams.tenant,
   );
   if (resolvedSearchParams.tenant && tenantSlug !== resolvedSearchParams.tenant) {
     throw new Error('Requested ledger tenant is unavailable');
   }
+  // Reading is every client role's; verifying and exporting (which verifies)
+  // is `ledger.verify`, which a viewer does not hold.
+  const canVerify = can(Capability.LEDGER_VERIFY, { role });
   // The ledger is a tenant surface: every client role holds LEDGER_READ, and
   // `audit_ledger_select_member` lets tenant members read their own chain.
   // An older `is_axiom_internal` check here sent every client user who opened
@@ -222,7 +226,7 @@ export default async function LedgerPage({
               runningCount={activeAgentRuns.length}
               initialRefreshedAt={new Date().toISOString()}
             />
-            <VerifyButton tenantId={tenantId} />
+            {canVerify && <VerifyButton tenantId={tenantId} />}
           </>
         }
       />
@@ -243,7 +247,9 @@ export default async function LedgerPage({
           </span>
         </div>
 
-        <ExportLedgerButton tenantId={tenantId} tenantName={tenantName} tenantSlug={tenantSlug} />
+        {canVerify && (
+          <ExportLedgerButton tenantId={tenantId} tenantName={tenantName} tenantSlug={tenantSlug} />
+        )}
       </div>
 
       {/* Contextual Filters Bar */}

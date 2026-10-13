@@ -28,34 +28,14 @@ function computeSlaDays(dueBy: string | null | undefined): number | null {
  * verified active tenant. Nothing is invented when data is missing — no demo
  * tenant, per-slug sample scores, default control counts or baseline deltas.
  */
-export default async function ClientPortalPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tenant?: string }>;
-}) {
-  const { tenant: requested } = await searchParams;
-  // Membership is verified here; the query parameter and cookie are only requests.
-  const ctx = await requireTenantContext(requested);
+export default async function ClientPortalPage() {
+  // One active organisation for the whole app: the verified cookie set by the
+  // header switcher. A `?tenant=` parameter used to override it here only, so
+  // the portal and the header could show two different organisations.
+  const ctx = await requireTenantContext();
   const { supabase, tenantId } = ctx;
   const activeTenant: TenantSummary = { id: tenantId, name: ctx.tenantName, slug: ctx.tenantSlug };
   let loadError = false;
-
-  // RLS lists only tenants this user belongs to (all tenants for Axiom internal).
-  let tenants: TenantSummary[] = [activeTenant];
-  const tenantList = await supabase
-    .from('tenants')
-    .select('id, name, slug, tier, is_sdf')
-    .order('name');
-  if (tenantList.error || !Array.isArray(tenantList.data)) loadError = true;
-  else if (tenantList.data.length)
-    tenants = tenantList.data.map((t) => ({
-      id: t.id,
-      name: t.name,
-      slug: t.slug || t.id,
-      tier: t.tier ?? undefined,
-      is_sdf: t.is_sdf ?? undefined,
-    }));
-  if (!tenants.some((t) => t.id === tenantId)) tenants = [activeTenant, ...tenants];
 
   const [snapshot, plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes] = await Promise.all([
     loadAssessmentSnapshot(supabase, tenantId),
@@ -218,7 +198,6 @@ export default async function ClientPortalPage({
         capabilitiesFor(ctx.role),
         canAccessClosureDossiers(ctx.role, ctx.isAxiomInternal),
       )}
-      tenants={tenants}
       activeTenant={activeTenant}
       engagement={engagement}
       plans={plans}

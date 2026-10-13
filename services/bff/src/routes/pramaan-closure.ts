@@ -15,6 +15,7 @@ import {
   synthesizeDossierInputSchema,
   sealDossierInputSchema,
   listDossiersInputSchema,
+  listSealedDossiersInputSchema,
   dispatchReportEmailInputSchema,
 } from '../services/pramaan-closure.js';
 
@@ -217,6 +218,29 @@ export function pramaanClosureRoutes(
         signal,
       );
       return c.json(result, 200);
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  // Read-only sealed dossiers for every report reader (viewer included).
+  app.get('/dossiers/sealed', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_READ);
+    if (denied) return denied;
+    const parsed = listSealedDossiersInputSchema.safeParse(c.req.query());
+    if (!parsed.success) return invalid(c, 'Invalid list query parameters');
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(15_000)]);
+    try {
+      return c.json(
+        await service().listSealedDossiers(
+          c.get('tenantId'),
+          c.get('user').id,
+          parsed.data,
+          signal,
+        ),
+        200,
+      );
     } catch (cause) {
       return failure(c, cause);
     }

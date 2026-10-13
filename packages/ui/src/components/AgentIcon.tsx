@@ -25,7 +25,8 @@ const SIZE_MAP: Record<'xs' | 'sm' | 'md' | 'lg', { box: number; icon: number }>
   lg: { box: 56, icon: 36 },
 };
 
-const ON_DARK_ACCENTS: Record<string, string> = {
+/** Accents lifted for the indigo sidebar: the base parikshan accent is the sidebar's own indigo. */
+export const ON_DARK_ACCENTS: Record<string, string> = {
   lekha: '#94A3B8', // high-contrast slate on dark background
   drishti: '#0FB5A5',
   vibhaag: '#A78BFA',

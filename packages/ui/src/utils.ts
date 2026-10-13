@@ -14,6 +14,17 @@ export function formatINR(value: number | null | undefined): string {
   return `₹${value}`;
 }
 
+/**
+ * Format rupees in crores with at most three decimals (₹185 Cr, ₹1.875 Cr).
+ * Penalty exposure is read in crores; a full-digit rupee figure is hard to scan.
+ */
+export function formatINRCrore(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const crore = value / 1_00_00_000;
+  if (value > 0 && crore < 0.0005) return '< ₹0.001 Cr';
+  return `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 }).format(crore)} Cr`;
+}
+
 export function formatINRFull(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('en-IN', {
@@ -58,14 +69,16 @@ export function relativeTime(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
   const diffMs = Date.now() - d.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
+  const diffSec = Math.floor(Math.abs(diffMs) / 1000);
   const diffMin = Math.floor(diffSec / 60);
   const diffHr = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHr / 24);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 30) return `${diffDay}d ago`;
+  const label = (value: number, unit: string) =>
+    diffMs < 0 ? `in ${value}${unit}` : `${value}${unit} ago`;
+  if (diffSec < 60) return label(diffSec, 's');
+  if (diffMin < 60) return label(diffMin, 'm');
+  if (diffHr < 24) return label(diffHr, 'h');
+  if (diffDay < 30) return label(diffDay, 'd');
   return formatDate(iso);
 }
 

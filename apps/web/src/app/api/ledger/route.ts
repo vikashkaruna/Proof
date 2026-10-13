@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { Capability, can } from '@axiom/types';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
 
@@ -7,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   // Let the shared session/tenant gate redirect or refuse on its own terms.
   // Catching that control flow below would turn an auth failure into a 500.
-  const { supabase, tenantId } = await requireTenantContext();
+  const { supabase, tenantId, role } = await requireTenantContext();
   try {
     const { searchParams } = new URL(request.url);
     // SEC-3: was `createSupabaseAdmin()`. The service-role key bypasses RLS
@@ -41,6 +42,14 @@ export async function GET(request: NextRequest) {
 
     // ─── AUDITOR EXPORT HANDLER ──────────────────────────────────────────────
     if (isExport) {
+      // The export carries a chain verification, so it needs `ledger.verify`.
+      // A viewer was offered the button and then told verification was unavailable.
+      if (!can(Capability.LEDGER_VERIFY, { role })) {
+        return NextResponse.json(
+          { error: 'Your role cannot export the audit ledger' },
+          { status: 403 },
+        );
+      }
       if (!targetTenant) {
         return NextResponse.json({ error: 'Unable to verify the export tenant' }, { status: 503 });
       }

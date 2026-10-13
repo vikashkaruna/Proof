@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AgentLabel, PageHeader } from '@axiom/ui';
+import { AgentLabel, formatINRCrore, PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import type { AgentName, AssessmentSnapshot } from '@axiom/types';
 import { AssessmentRequestPanel } from './request-panel';
@@ -79,13 +79,7 @@ export function AssessmentClient({
   const hasDeclarations = provenance?.status === 'caller_declared_unverified';
   const totalControlsCount = controls.length;
   const exposure =
-    snapshot?.exposureInr == null
-      ? 'Not assessed'
-      : new Intl.NumberFormat('en-IN', {
-          style: 'currency',
-          currency: 'INR',
-          maximumFractionDigits: 0,
-        }).format(snapshot.exposureInr);
+    snapshot?.exposureInr == null ? 'Not assessed' : formatINRCrore(snapshot.exposureInr);
   const domains = [...new Set(controls.map((control) => control.domain))].map((domain) => {
     const rows = controls.filter((control) => control.domain === domain);
     return {

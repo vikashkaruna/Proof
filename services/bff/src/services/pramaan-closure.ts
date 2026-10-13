@@ -44,6 +44,23 @@ export const listDossiersInputSchema = z
 
 export type ListDossiersInput = z.infer<typeof listDossiersInputSchema>;
 
+export const listSealedDossiersInputSchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict();
+
+export interface SealedDossierSummary {
+  id: string;
+  dossierType: DossierType;
+  title: string;
+  merkleRoot: string;
+  proofSealHash: string;
+  sealedAt: string | null;
+  createdAt: string;
+}
+
 export const dispatchReportEmailInputSchema = z
   .object({
     recipientEmail: z.string().trim().email(),
@@ -321,6 +338,54 @@ export class PramaanClosureService {
       updatedAt: row.updated_at as string,
     }));
 
+    return { dossiers, total: count ?? dossiers.length };
+  }
+
+  /**
+   * Sealed dossiers, read-only, for any member of the tenant who may read
+   * reports. Drafts, approvals and rejections stay with the founder's
+   * historical view; this returns only the sealed record and its hashes, with
+   * no sealer identity, metadata or archive.
+   */
+  async listSealedDossiers(
+    tenantId: string,
+    actorId: string,
+    input: { limit: number; offset: number },
+    signal?: AbortSignal,
+  ): Promise<{ dossiers: SealedDossierSummary[]; total: number }> {
+    await accessFor(this.db, tenantId, actorId, signal);
+    const query = this.db
+      .from('pramaan_dossiers')
+      .select('id, dossier_type, title, merkle_root, proof_seal_hash, sealed_at, created_at', {
+        count: 'exact',
+      })
+      .eq('tenant_id', tenantId)
+      .eq('status', 'sealed')
+      .order('sealed_at', { ascending: false })
+      .range(input.offset, input.offset + input.limit - 1);
+    const queryWithSignal =
+      signal &&
+      typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
+        'function'
+        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
+            signal,
+          )
+        : query;
+    const { data, count, error } = await (queryWithSignal as unknown as Promise<{
+      data: Record<string, unknown>[] | null;
+      count: number | null;
+      error: unknown;
+    }>);
+    if (error) throw new EvidenceError('closure_storage_unavailable', 503);
+    const dossiers = (data ?? []).map((row) => ({
+      id: row.id as string,
+      dossierType: row.dossier_type as DossierType,
+      title: row.title as string,
+      merkleRoot: row.merkle_root as string,
+      proofSealHash: row.proof_seal_hash as string,
+      sealedAt: (row.sealed_at as string) ?? null,
+      createdAt: row.created_at as string,
+    }));
     return { dossiers, total: count ?? dossiers.length };
   }
 

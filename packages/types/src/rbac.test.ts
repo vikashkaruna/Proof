@@ -68,6 +68,27 @@ describe('the kill switch — SEC-4', () => {
     // But they retain authority over their own tenant.
     expect(can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role: UserRole.OWNER })).toBe(true);
   });
+
+  // An approver decides on plans; halting and resuming automation is not theirs.
+  it('keeps the tenant kill switch with the owner, admin and Axiom operators', () => {
+    expect(rolesWith(Capability.KILL_SWITCH_ENGAGE_TENANT)).toEqual([
+      'founder',
+      'axiom_analyst',
+      'owner',
+      'admin',
+    ]);
+    expect(rolesWith(Capability.KILL_SWITCH_RELEASE_TENANT)).toEqual(['founder', 'owner']);
+  });
+
+  it('lets the approver follow incidents without holding the emergency stop', () => {
+    expect(rolesWith(Capability.INCIDENT_READ)).toEqual([
+      'founder',
+      'axiom_analyst',
+      'owner',
+      'admin',
+      'approver',
+    ]);
+  });
 });
 
 describe('approval_scopes — the column defined in migration 0001 and never read', () => {
@@ -130,14 +151,10 @@ describe('tenant isolation and surfaces', () => {
     expect(rolesWith(Capability.MULTI_TENANT_READ).sort()).toEqual(['founder', 'partner'].sort());
   });
 
-  it('grants workbench access to Axiom staff only', () => {
-    // The analyst persona exists for this surface. Before it was added,
-    // WORKBENCH_ACCESS had exactly one holder, so every analyst either worked
-    // as the founder or did not work at all — and the ledger recorded the
-    // founder's identity for work they did not do.
-    expect(rolesWith(Capability.WORKBENCH_ACCESS).sort()).toEqual(
-      ['axiom_analyst', 'founder'].sort(),
-    );
+  it('grants the Agent Workbench to the founder only', () => {
+    // The founder's cross-client cockpit (ARCH-01 §3.1). Analysts and every
+    // client role, the tenant owner included, use their organisation menus.
+    expect(rolesWith(Capability.WORKBENCH_ACCESS)).toEqual(['founder']);
   });
 
   it('grants the partner portal only to a partner', () => {

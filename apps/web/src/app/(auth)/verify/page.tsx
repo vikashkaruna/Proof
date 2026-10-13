@@ -38,7 +38,7 @@ export default async function VerifyPage({ searchParams }: PageProps) {
     !target.includes('\\') &&
     !/[\u0000-\u001f\u007f]/.test(target)
       ? target
-      : '/dashboard';
+      : '/start';
 
   // Someone who reaches this page with no factor cannot satisfy anything here.
   const { data: factors, error: factorsError } = await supabase

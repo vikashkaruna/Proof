@@ -79,7 +79,6 @@ const MENUS: Record<string, string[]> = {
     '/monitoring',
     '/regwatch',
     '/reports',
-    '/workbench',
     '/portal',
     '/policies',
     '/settings',
@@ -235,8 +234,9 @@ describe('the partner persona', () => {
 });
 
 describe('internal surfaces', () => {
-  it('offers the workbench to Axiom staff and to no client role', () => {
+  it('offers the workbench to the founder only', () => {
     const clientRoles = [
+      UserRole.AXIOM_ANALYST,
       UserRole.OWNER,
       UserRole.ADMIN,
       UserRole.APPROVER,
@@ -244,9 +244,7 @@ describe('internal surfaces', () => {
       UserRole.VIEWER,
       UserRole.PARTNER,
     ];
-    for (const role of [UserRole.FOUNDER, UserRole.AXIOM_ANALYST]) {
-      expect(routesFor(role), `${role} should see /workbench`).toContain('/workbench');
-    }
+    expect(routesFor(UserRole.FOUNDER)).toContain('/workbench');
     for (const role of clientRoles) {
       expect(routesFor(role), `${role} should not see /workbench`).not.toContain('/workbench');
     }

@@ -38,6 +38,8 @@ type Access = {
   canExport: boolean;
   canRequestBoard: boolean;
   canManageBoard: boolean;
+  /** Read-only view of sealed Pramaan dossiers (every report reader). */
+  canReadSealed?: boolean;
 };
 
 export function ReportsClient(access: Access) {
@@ -61,10 +63,9 @@ function TenantReportsClient(access: Access) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
+  const showPramaan = access.canRelease || access.canRequestBoard || !!access.canReadSealed;
   const activeTab: 'pramaan' | 'prativedan' =
-    (access.canRelease || access.canRequestBoard) && tabParam === 'pramaan'
-      ? 'pramaan'
-      : 'prativedan';
+    showPramaan && tabParam === 'pramaan' ? 'pramaan' : 'prativedan';
 
   const handleSelectTab = (tab: 'pramaan' | 'prativedan') => {
     setSelectedId(null);
@@ -120,7 +121,7 @@ function TenantReportsClient(access: Access) {
       />
 
       <div className="flex gap-2 border-b border-slate-200" aria-label="Report views">
-        {(access.canRelease || access.canRequestBoard) && (
+        {showPramaan && (
           <button
             type="button"
             onClick={() => handleSelectTab('pramaan')}
@@ -155,6 +156,7 @@ function TenantReportsClient(access: Access) {
           tenantId={tenantId}
           canGenerate={access.canRequestBoard}
           canRelease={access.canRelease}
+          canReadSealed={access.canReadSealed}
         />
       ) : (
         <>
@@ -243,48 +245,50 @@ function TenantReportsClient(access: Access) {
             onChanged={refresh}
           />
 
-          {/* Approval History Export Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">
-                Tenant Approval History Audit Export
-              </h3>
-              <p className="text-xs text-slate-600">
-                Download stored approval tokens for this tenant. Exports over 200 records are
-                refused; use a plan-specific export to narrow the history. This download is not a
-                sealed evidence package or a verification of token signatures.
-              </p>
+          {/* Approval History Export Banner — the BFF requires evidence.export. */}
+          {access.canExport && (
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Tenant Approval History Audit Export
+                </h3>
+                <p className="text-xs text-slate-600">
+                  Download stored approval tokens for this tenant. Exports over 200 records are
+                  refused; use a plan-specific export to narrow the history. This download is not a
+                  sealed evidence package or a verification of token signatures.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`/api/bff/v1/approvals/export?format=pdf`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={`approval-history-${tenantId.slice(0, 8)}.pdf`}
+                  className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm"
+                >
+                  Export PDF
+                </a>
+                <a
+                  href={`/api/bff/v1/approvals/export?format=json`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={`approval-history-${tenantId.slice(0, 8)}.json`}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+                >
+                  Export JSON
+                </a>
+                <a
+                  href={`/api/bff/v1/approvals/export?format=csv`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={`approval-history-${tenantId.slice(0, 8)}.csv`}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+                >
+                  Export CSV
+                </a>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <a
-                href={`/api/bff/v1/approvals/export?format=pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                download={`approval-history-${tenantId.slice(0, 8)}.pdf`}
-                className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm"
-              >
-                Export PDF
-              </a>
-              <a
-                href={`/api/bff/v1/approvals/export?format=json`}
-                target="_blank"
-                rel="noopener noreferrer"
-                download={`approval-history-${tenantId.slice(0, 8)}.json`}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-              >
-                Export JSON
-              </a>
-              <a
-                href={`/api/bff/v1/approvals/export?format=csv`}
-                target="_blank"
-                rel="noopener noreferrer"
-                download={`approval-history-${tenantId.slice(0, 8)}.csv`}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-              >
-                Export CSV
-              </a>
-            </div>
-          </div>
+          )}
           {canPrepare && (
             <details ref={preparation} className="space-y-3">
               <summary className="cursor-pointer rounded-lg border border-slate-200 p-4 font-semibold text-[#1E2A4A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600">

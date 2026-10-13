@@ -51,10 +51,14 @@ describe('proof and status semantics', () => {
   });
 
   it('shows posture verdicts and formats positive statutory exposure', () => {
-    expect(html(<PostureScore score={90} exposureInr={10_00_00_000} />)).toContain('Strong');
-    expect(html(<PostureScore score={70} exposureInr={1_00_000} />)).toContain('Acceptable');
-    expect(html(<PostureScore score={45} exposureInr={1_000} />)).toContain('At Risk');
-    expect(html(<PostureScore score={null} exposureInr={0} />)).toContain('Critical');
+    expect(html(<PostureScore score={90} exposureInr={10_00_00_000} />)).toContain('Good');
+    expect(html(<PostureScore score={90} exposureInr={10_00_00_000} />)).toContain('₹10 Cr');
+    expect(html(<PostureScore score={70} exposureInr={1_00_000} />)).toContain('Moderate');
+    expect(html(<PostureScore score={45} exposureInr={1_000} />)).toContain('Weak');
+    expect(html(<PostureScore score={20} />)).toContain('Critical');
+    // A missing score is unassessed, never a critical verdict.
+    expect(html(<PostureScore score={null} exposureInr={0} />)).toContain('Not assessed');
+    expect(html(<PostureScore score={null} exposureInr={0} />)).not.toContain('Critical');
     expect(html(<PostureScore score={80} variant="compact" />)).not.toContain(
       'Estimated max statutory exposure',
     );

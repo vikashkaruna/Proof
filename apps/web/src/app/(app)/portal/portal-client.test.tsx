@@ -11,7 +11,6 @@ vi.mock('next/navigation', () => ({
 }));
 const tenant = { id: 'tenant-alpha-1234', name: 'Alpha', slug: 'alpha', tier: 'standard' };
 const props: PortalClientProps = {
-  tenants: [tenant],
   activeTenant: tenant,
   engagement: null,
   plans: [],
@@ -47,13 +46,10 @@ it('shows absence and partial-load states without invented compliance figures', 
   expect(document.body.textContent).toContain('Not recorded');
 });
 
-it('switches the active tenant only through a selected tenant slug', () => {
-  const beta = { id: 'tenant-beta-5678', name: 'Beta', slug: 'beta', tier: 'standard' };
-  render(<PortalClient {...props} tenants={[tenant, beta]} />);
-  const selector = screen.getByRole('combobox');
-  fireEvent.change(selector, { target: { value: 'beta' } });
-  expect(push).toHaveBeenCalledWith('/portal?tenant=beta');
-  expect(document.cookie).toContain('axiom_active_tenant=beta');
+it('has no organisation picker of its own; the header switcher is the only one', () => {
+  render(<PortalClient {...props} />);
+  expect(screen.queryByRole('combobox')).toBeNull();
+  expect(screen.queryByText('Organization')).toBeNull();
 });
 
 it('keeps empty approvals, evidence, DSARs and ledger explicitly empty across tabs', () => {
@@ -143,7 +139,8 @@ it('shows saved tenant data in each tab and keeps recorded values distinct from 
     />,
   );
   expect(screen.getByTestId('portal-posture').textContent).toBe('72');
-  expect(document.body.textContent).toContain('₹1.3 Cr');
+  expect(document.body.textContent).toContain('₹1.25 Cr');
+  expect(screen.getByTestId('portal-posture-band').textContent).toBe('Moderate');
   fireEvent.click(screen.getByRole('button', { name: /Pending Approvals/ }));
   expect(document.body.textContent).toContain('Close breach finding');
   fireEvent.click(screen.getByRole('button', { name: /Evidence Records/ }));

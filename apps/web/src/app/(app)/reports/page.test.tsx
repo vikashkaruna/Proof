@@ -41,27 +41,41 @@ it('shows closure dossiers to reporting managers and founder release to internal
   state.internal = true;
   expect(renderToStaticMarkup(await ReportsPage())).toContain('Closure dossiers');
 });
+// Every report reader sees the Pramaan tab: managers to prepare dossiers, the
+// internal founder to seal, and everyone else read-only, sealed dossiers only.
 it.each([
-  [UserRole.FOUNDER, true, true],
-  [UserRole.FOUNDER, false, false],
-  [UserRole.OWNER, false, true],
-  [UserRole.ADMIN, false, true],
-  [UserRole.AXIOM_ANALYST, true, false],
-  [UserRole.APPROVER, false, false],
-  [UserRole.REVIEWER, false, false],
-  [UserRole.VIEWER, false, false],
-  [UserRole.PARTNER, false, false],
-])(
-  'renders the Pramaan tab for %s with internal=%s only when usable',
-  async (role, internal, visible) => {
-    state.role = role;
-    state.internal = internal;
-    state.search = 'tab=pramaan';
-    const html = renderToStaticMarkup(await ReportsPage());
-    expect(html.includes('Closure dossiers')).toBe(visible);
-    expect(html.includes('Working reports and registers')).toBe(true);
-  },
-);
+  [UserRole.FOUNDER, true],
+  [UserRole.FOUNDER, false],
+  [UserRole.OWNER, false],
+  [UserRole.ADMIN, false],
+  [UserRole.AXIOM_ANALYST, true],
+  [UserRole.APPROVER, false],
+  [UserRole.REVIEWER, false],
+  [UserRole.VIEWER, false],
+  [UserRole.PARTNER, false],
+])('renders the Pramaan tab for %s with internal=%s', async (role, internal) => {
+  state.role = role;
+  state.internal = internal;
+  state.search = 'tab=pramaan';
+  const html = renderToStaticMarkup(await ReportsPage());
+  expect(html).toContain('Closure dossiers');
+  expect(html).toContain('Working reports and registers');
+});
+it('gives a viewer no dossier preparation and no approval-history export', async () => {
+  state.role = UserRole.VIEWER;
+  state.search = 'tab=pramaan';
+  const pramaan = renderToStaticMarkup(await ReportsPage());
+  expect(pramaan).not.toContain('Prepare source-bound dossier');
+  state.search = '';
+  const working = renderToStaticMarkup(await ReportsPage());
+  expect(working).not.toContain('Tenant Approval History Audit Export');
+  expect(working).not.toContain('/api/bff/v1/approvals/export');
+});
+it('keeps the approval-history export for a role holding evidence.export', async () => {
+  state.role = UserRole.OWNER;
+  const html = renderToStaticMarkup(await ReportsPage());
+  expect(html).toContain('Tenant Approval History Audit Export');
+});
 it('gives managers a real evidence selector and explicit preparation acknowledgement', async () => {
   const html = renderToStaticMarkup(await ReportsPage());
   expect(html).toContain('Loading available evidence');

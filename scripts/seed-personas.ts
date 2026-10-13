@@ -50,7 +50,11 @@ async function main() {
         }
       : JSON.parse(await readFile(`${stateDir}/status.json`, 'utf8'))
   ) as Record<string, string>;
-  await seedAcceptanceLibrary(status.API_URL!, status.PUBLISHABLE_KEY!, status.SERVICE_ROLE_KEY!);
+  const library = await seedAcceptanceLibrary(
+    status.API_URL!,
+    status.PUBLISHABLE_KEY!,
+    status.SERVICE_ROLE_KEY!,
+  );
   const origin = new URL(status.API_URL!).origin;
   const run = randomUUID().slice(0, 8);
 
@@ -205,20 +209,9 @@ async function main() {
       });
     }
   if (target) await new Promise((resolve) => setTimeout(resolve, 30_500 - (Date.now() % 30_000)));
-  const library = `persona-${run}`;
-  await expectStatus(
-    await api('/rest/v1/control_libraries', 'POST', {
-      version: library,
-      published_at: new Date().toISOString(),
-      published_by: 'persona-fixture',
-      change_log: 'Persona journey fixture only; not an assessment baseline',
-      control_count: 0,
-      is_current: false,
-    }),
-    201,
-    'Control library fixture',
-  );
-
+  // A new persona engagement must reference the complete published library
+  // verified above. With no findings it honestly displays unassessed controls;
+  // a zero-control placeholder is an invalid baseline and fails closed.
   const engagementA = randomUUID();
   const engagementB = randomUUID();
   await expectStatus(

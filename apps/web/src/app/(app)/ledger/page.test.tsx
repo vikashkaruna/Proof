@@ -14,11 +14,12 @@ const state = vi.hoisted(() => ({
   active: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   verification: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   context: vi.fn(),
+  role: 'owner' as string,
   tables: [] as string[],
 }));
 
 vi.mock('@/lib/tenant-context', () => ({
-  Capability: { LEDGER_READ: 'ledger.read' },
+  Capability: { LEDGER_READ: 'ledger.read', LEDGER_VERIFY: 'ledger.verify' },
   requireCapabilityContext: state.context,
 }));
 vi.mock('next/navigation', () => ({
@@ -26,8 +27,10 @@ vi.mock('next/navigation', () => ({
     throw new Error(`REDIRECT ${url}`);
   },
 }));
-vi.mock('./verify-button', () => ({ VerifyButton: () => null }));
-vi.mock('./export-ledger-button', () => ({ ExportLedgerButton: () => null }));
+vi.mock('./verify-button', () => ({ VerifyButton: () => <i data-control="verify" /> }));
+vi.mock('./export-ledger-button', () => ({
+  ExportLedgerButton: () => <i data-control="export" />,
+}));
 vi.mock('./ledger-refresh', () => ({ LedgerRefresh: () => null }));
 vi.mock('./ledger-filters', () => ({ LedgerFilters: () => null }));
 vi.mock('./ledger-pagination', () => ({ LedgerPagination: () => null }));
@@ -62,12 +65,14 @@ beforeEach(() => {
   state.active = { data: [], error: null };
   state.verification = { data: [], error: null };
   state.tables = [];
+  state.role = 'owner';
   state.context.mockReset();
   state.context.mockImplementation(async () => ({
     userId: 'auditor-1',
     tenantId: 'tenant-1',
     tenantName: 'Actual tenant',
     tenantSlug: 'actual',
+    role: state.role,
     supabase: {
       from: (table: string) =>
         state.tables.push(table) && table === 'users'
@@ -165,4 +170,15 @@ it('names Lekha in the header as a static related agent, because no run is claim
   expect(header).toContain('data-testid="related-agents"');
   expect(header).toContain('lekha');
   expect(header).not.toContain('data-state="working"');
+});
+
+it('offers verify and export only to a role holding ledger.verify', async () => {
+  const owner = await renderPage();
+  expect(owner).toContain('data-control="verify"');
+  expect(owner).toContain('data-control="export"');
+  state.role = 'viewer';
+  const viewer = await renderPage();
+  expect(viewer).toContain('0 recorded entries');
+  expect(viewer).not.toContain('data-control="verify"');
+  expect(viewer).not.toContain('data-control="export"');
 });
