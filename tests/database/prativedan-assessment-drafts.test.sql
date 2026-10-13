@@ -172,6 +172,10 @@ select pg_temp.reject(format('select pg_temp.settle(output_text=>%L,response_tex
  (select jsonb_set(output_text::jsonb,'{sections,0}','{}')::text from p123_context),(select jsonb_set(output_text::jsonb,'{sections,0}','{}')::text from p123_context)));
 select pg_temp.reject(format('select pg_temp.settle(response_text=>%L)',(select jsonb_set(output_text::jsonb,'{title}','"Wrong title"')::text from p123_context)));
 reset role;
+-- Execute the real deferred bindings before test-only trigger configuration.
+-- PostgreSQL refuses ALTER TABLE while its insert trigger events are pending.
+set constraints all immediate;
+set constraints all deferred;
 savepoint expired_claim;
 -- Test-only expiry injection on this disposable transaction, never a ledger edit.
 alter table public.prativedan_draft_claims disable trigger draft_immutable;
