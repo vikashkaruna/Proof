@@ -2,7 +2,17 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
@@ -95,7 +105,9 @@ test('symlink root or per-user lock refuses before executing verification', asyn
 
 test('nonprivate fixture root refuses without changing permissions', async () => {
   await fixture(async (_, locks, user) => {
-    await mkdir(locks, { mode: 0o755 });
+    await mkdir(locks, { mode: 0o700 });
+    // Set the owned negative fixture explicitly; mkdir modes depend on umask.
+    await chmod(locks, 0o755);
     await assert.rejects(
       withMfaFixtureLock(locks, user, async () => assert.fail('must not run')),
       /private/,

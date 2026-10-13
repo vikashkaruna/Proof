@@ -121,6 +121,7 @@ async function pendingArchive(
   packId: string,
   member: Awaited<ReturnType<typeof upload>>,
   seal: boolean,
+  creatorId: string,
 ) {
   const endpoint = process.env.AXIOM_STORAGE_ENDPOINT;
   const bucket = process.env.AXIOM_EVIDENCE_BUCKET;
@@ -191,7 +192,7 @@ async function pendingArchive(
     },
     body: JSON.stringify({
       p_tenant_id: state.tenantA.id,
-      p_actor_id: state.accounts.owner.id,
+      p_actor_id: creatorId,
       p_pack_id: packId,
       p_operation_key: operationKey,
       p_correlation_id: crypto.randomUUID(),
@@ -555,7 +556,7 @@ test.describe('retained evidence pack acceptance', () => {
     browser,
   }) => {
     test.setTimeout(180_000);
-    await signInFreshOwner(page, 'evidence-packs.spec-3');
+    const owner = await signInFreshOwner(page, 'evidence-packs.spec-3');
     await selectTenant(page, 'a');
     const member = await upload(page);
     const evidence = await page.request.get(`/api/bff/v1/evidence?q=${member.evidenceId}`);
@@ -586,7 +587,7 @@ test.describe('retained evidence pack acceptance', () => {
             })
           ).status(),
         ).toBe(200);
-        const intent = await pendingArchive(page, pack.id, member, seal);
+        const intent = await pendingArchive(page, pack.id, member, seal, owner.id);
         await assertProviderVersionUnchanged(intent);
         const detail = await openReport(page, title);
         await expect(detail.getByRole('button', { name: 'Build retained archive' })).toHaveCount(0);
