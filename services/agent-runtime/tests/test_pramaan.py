@@ -39,6 +39,9 @@ from axiom.agents.pramaan import (
 )
 from axiom.config import Settings
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000007"
+
 
 class FakeLedger:
     def __init__(self) -> None:
@@ -353,11 +356,11 @@ async def test_pre_boundary_forged_reconciliation_cannot_be_attested(
     with pytest.raises(ValueError, match="reconciliation_statements_required"):
         await pramaan_agent._run(
             correlation_id="id-only",
-            input=PramaanInput(reconciliation_ids=["unverified-historical-row"]),
+            input=PramaanInput(tenant_id=SYNTHETIC_TENANT_ID, reconciliation_ids=["unverified-historical-row"]),
         )
     unverified = await pramaan_agent._run(
         correlation_id="no-reconciliation",
-        input=PramaanInput(dossier_type=DossierType.BOARD_EXECUTIVE),
+        input=PramaanInput(tenant_id=SYNTHETIC_TENANT_ID, dossier_type=DossierType.BOARD_EXECUTIVE),
     )
     maker_checker = next(s for s in unverified.sections if s["type"] == "maker_checker_attestation")
     board = next(s for s in unverified.sections if s["type"] == "board_risk_summary")
@@ -378,6 +381,7 @@ async def test_statutory_exposure_capping_and_posture_calculation(
         for i in range(10)
     ]
     input_data = PramaanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         findings=many_findings,
         dossier_type=DossierType.BOARD_EXECUTIVE,
     )
@@ -392,6 +396,7 @@ async def test_statutory_exposure_capping_and_posture_calculation(
 async def test_html_escaping_of_untrusted_inputs(pramaan_agent: PramaanAgent):
     """Guards against XSS injection into the rendered HTML dossier."""
     input_data = PramaanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         title="<script>alert('xss')</script>",
         findings=[
             {

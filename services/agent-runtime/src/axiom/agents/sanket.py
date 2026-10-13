@@ -33,7 +33,7 @@ class SanketInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     correlation_id: str | None = None  # Accepted legacy BFF wire field; transport binds authority.
     engagement_id: str | None = None
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     sectors: list[str] = Field(default_factory=lambda: ["BFSI", "Healthcare", "SaaS / Tech"])
     geo: str = Field(default="India", max_length=100)
     since: str | None = Field(default=None, max_length=64)  # ISO datetime; default last 14 days

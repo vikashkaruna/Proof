@@ -48,7 +48,7 @@ TAGLINE = "Agents do the work. You approve. The proof is automatic."
 
 
 class PramaanInput(BaseModel):
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     engagement_id: str | None = None
     dossier_type: DossierType | str = DossierType.FULL_CLOSURE
     title: str = "Statutory Closure & Proof Attestation Dossier"

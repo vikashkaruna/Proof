@@ -26,7 +26,7 @@ from .base import AgentName, AutonomyLevel, BaseAgent
 
 
 class KaryaInput(BaseModel):
-    tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    tenant_id: str
     plan_id: str = "00000000-0000-0000-0000-000000000001"
     action_id: str = "00000000-0000-0000-0000-000000000001"
     approval_token: dict[str, Any] | None = Field(
