@@ -18,6 +18,7 @@ import {
   PrativedanDraftRefused,
   preparePrativedanDraftSource,
   prativedanTextHash,
+  parsePrativedanJson,
   type PreparedPrativedanDraftSource,
 } from './prativedan-draft-source.js';
 
@@ -246,11 +247,13 @@ export function verifyPrativedanDraftOutput(
     )
       throw new PrativedanDraftRefused();
     const normalized = prativedanRendererInputSchema.parse(
-      JSON.parse(envelope.normalized_input_text),
+      parsePrativedanJson(envelope.normalized_input_text),
     );
     if (canonicalJson(normalized) !== canonicalJson(prepared.rendererInput))
       throw new PrativedanDraftRefused();
-    const output = prativedanDraftOutputSchema.parse(JSON.parse(envelope.runtime_output_text));
+    const output = prativedanDraftOutputSchema.parse(
+      parsePrativedanJson(envelope.runtime_output_text),
+    );
     if (canonicalJson(output) !== canonicalJson(envelope.output))
       throw new PrativedanDraftRefused();
     const posture = verifyProjection(prepared, output, receipt.agent_version);

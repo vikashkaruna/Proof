@@ -28,6 +28,31 @@ export function prativedanTextHash(text: string): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+/** Validate grammar and reject duplicate decoded member names at every depth.
+ * A valid digest commits bytes, but cannot make ambiguous JSON authoritative.
+ * Callers retain the original bytes and their separate byte commitments.
+ */
+export function parsePrativedanJson(text: string): unknown {
+  const value: unknown = JSON.parse(text);
+  const stack: (Set<string> | null)[] = [];
+  for (const match of text.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\]]/g)) {
+    const token = match[0];
+    if (token === '{' || token === '[') stack.push(token === '{' ? new Set() : null);
+    else if (token === '}' || token === ']') stack.pop();
+    else {
+      const keys = stack.at(-1);
+      let next = match.index + token.length;
+      while (next < text.length && /[\t\n\r ]/.test(text[next]!)) next++;
+      if (keys && text[next] === ':') {
+        const key: unknown = JSON.parse(token);
+        if (typeof key !== 'string' || keys.has(key)) throw new PrativedanDraftRefused();
+        keys.add(key);
+      }
+    }
+  }
+  return value;
+}
+
 const controlsSchema = z
   .array(
     z.object({
@@ -74,7 +99,7 @@ export function preparePrativedanDraftSource(rawWitness: unknown, rawRequest: un
       prativedanTextHash(witness.source_text) !== witness.source_sha256
     )
       throw new PrativedanDraftRefused();
-    const source = prativedanFrozenSourceSchema.parse(JSON.parse(witness.source_text));
+    const source = prativedanFrozenSourceSchema.parse(parsePrativedanJson(witness.source_text));
     if (
       source.request_id !== witness.source_id ||
       source.tenant_id !== witness.tenant_id ||
@@ -88,8 +113,8 @@ export function preparePrativedanDraftSource(rawWitness: unknown, rawRequest: un
       canonicalJson(source.receipts) !== canonicalJson(witness.receipts)
     )
       throw new PrativedanDraftRefused();
-    const rawControls: unknown = JSON.parse(source.controls_text);
-    const rawResult: unknown = JSON.parse(source.result_text);
+    const rawControls: unknown = parsePrativedanJson(source.controls_text);
+    const rawResult: unknown = parsePrativedanJson(source.result_text);
     const controls = controlsSchema.parse(rawControls);
     const result = resultSchema.parse(rawResult);
     if (

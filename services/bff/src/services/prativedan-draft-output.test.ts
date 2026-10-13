@@ -13,6 +13,43 @@ describe('unmounted Prativedan output receipt boundary', () => {
     expect(result.output.review_required).toBe(true);
     expect(result.output.cited_evidence_ids).toEqual([]);
   });
+  it.each(['input', 'output', 'escaped-output', 'nested-output'])(
+    'refuses ambiguous JSON bytes even when trusted hash witnesses match: %s',
+    (mode) => {
+      const f = outputFixture();
+      if (mode === 'input') {
+        f.envelope.normalized_input_text = f.envelope.normalized_input_text.replace(
+          '"posture_score":',
+          '"posture_score":100,"posture_score":',
+        );
+        f.envelope.runtime_normalized_input_sha256 = prativedanTextHash(
+          f.envelope.normalized_input_text,
+        );
+        f.witness.runtime_normalized_input_sha256 = f.envelope.runtime_normalized_input_sha256;
+      } else {
+        if (mode === 'output')
+          f.envelope.runtime_output_text = f.envelope.runtime_output_text.replace(
+            '"review_required":',
+            '"review_required":false,"review_required":',
+          );
+        if (mode === 'escaped-output')
+          f.envelope.runtime_output_text = f.envelope.runtime_output_text.replace(
+            '"review_required":',
+            '"review_\\u0072equired":false,"review_required":',
+          );
+        if (mode === 'nested-output')
+          f.envelope.runtime_output_text = f.envelope.runtime_output_text.replace(
+            '"severity":',
+            '"severity":"low","severity":',
+          );
+        f.envelope.runtime_output_sha256 = prativedanTextHash(f.envelope.runtime_output_text);
+        f.witness.runtime_output_sha256 = f.envelope.runtime_output_sha256;
+      }
+      expect(() => verifyPrativedanDraftOutput(f.prepared, f.envelope, f.witness)).toThrow(
+        'contract_refused',
+      );
+    },
+  );
   it('binds the reviewed renderer manifest independently of five byte commitments', () => {
     const f = outputFixture();
     const result = verifyPrativedanDraftOutput(f.prepared, f.envelope, f.witness);

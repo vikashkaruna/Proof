@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { sourceFixture } from './prativedan-draft.test-fixture.js';
-import { preparePrativedanDraftSource, prativedanTextHash } from './prativedan-draft-source.js';
+import {
+  preparePrativedanDraftSource,
+  prativedanTextHash,
+  parsePrativedanJson,
+} from './prativedan-draft-source.js';
 
 describe('unmounted Prativedan frozen source contract', () => {
   it('preserves exact source bytes and unknown declarations in a bounded source-only input', () => {
@@ -68,6 +72,43 @@ describe('unmounted Prativedan frozen source contract', () => {
       expect(() => preparePrativedanDraftSource(f.witness, f.request)).toThrow('contract_refused');
     },
   );
+  it.each(['source', 'controls', 'result', 'nested-result'])(
+    'refuses duplicate retained JSON keys even with matching byte hashes: %s',
+    (mode) => {
+      const f = sourceFixture();
+      if (mode === 'controls') {
+        f.source.controls_text = f.source.controls_text.replace(
+          '"severity":',
+          '"severity":"low","severity":',
+        );
+        f.source.controls_sha256 = prativedanTextHash(f.source.controls_text);
+        f.witness.controls_sha256 = f.source.controls_sha256;
+        f.result.questionnaire_provenance.source_library_digest = f.source.controls_sha256;
+        f.source.result_text = JSON.stringify(f.result);
+      }
+      if (mode === 'result')
+        f.source.result_text = f.source.result_text.replace(
+          '"posture_score":',
+          '"posture_score":100,"posture_score":',
+        );
+      if (mode === 'nested-result')
+        f.source.result_text = f.source.result_text.replace(
+          '"declaration":',
+          '"declaration":"caller_affirmed","declaration":',
+        );
+      f.source.result_sha256 = prativedanTextHash(f.source.result_text);
+      f.witness.result_sha256 = f.source.result_sha256;
+      f.witness.source_text = JSON.stringify(f.source);
+      if (mode === 'source')
+        f.witness.source_text = f.witness.source_text.replace(
+          '"kind":',
+          '"kind":"foreign","kind":',
+        );
+      f.witness.source_sha256 = prativedanTextHash(f.witness.source_text);
+      f.request.expectedSourceSha256 = f.witness.source_sha256;
+      expect(() => preparePrativedanDraftSource(f.witness, f.request)).toThrow('contract_refused');
+    },
+  );
   it('does not accept extra caller findings, lost source bytes, or lossy UTF-8', () => {
     const f = sourceFixture();
     expect(() => preparePrativedanDraftSource(f.witness, { ...f.request, findings: [] })).toThrow();
@@ -78,5 +119,26 @@ describe('unmounted Prativedan frozen source contract', () => {
       ),
     ).toThrow();
     expect(() => prativedanTextHash('\ud800')).toThrow();
+  });
+});
+
+describe('retained Prativedan JSON interpretation', () => {
+  it('accepts identical keys in distinct objects and ignores structural characters in strings', () => {
+    const text = String.raw`{"rows":[{"key":"braces {} [] and escaped \"key\": 1"},{"key":"same member name, different object"}],"colon ":"not a member: {}"," spaced "
+ : 1}`;
+    expect(parsePrativedanJson(text)).toEqual(JSON.parse(text));
+  });
+  it.each([
+    String.raw`{"a":1,"\u0061":2}`,
+    String.raw`[{"nested":{"a":1,"a" :2}}]`,
+    String.raw`{"a" : {"b":1,"b":1}}`,
+  ])(
+    'rejects decoded duplicate names including equal values and nested array objects: %s',
+    (text) => {
+      expect(() => parsePrativedanJson(text)).toThrow('contract_refused');
+    },
+  );
+  it('still rejects invalid JSON grammar', () => {
+    expect(() => parsePrativedanJson('{"a":1,}')).toThrow();
   });
 });
