@@ -19,7 +19,7 @@ const USER = '00000000-0000-4000-8000-000000000001';
 const ESTATE = '55555555-5555-4555-8555-555555555555';
 const EVENT = '66666666-6666-4666-8666-666666666666';
 
-const db = vi.hoisted(() => ({ current: null as FakeDb | null }));
+const db = vi.hoisted(() => ({ current: null as FakeDb | null, rpc: vi.fn() }));
 
 vi.hoisted(() => {
   process.env.NODE_ENV = 'test';
@@ -29,7 +29,7 @@ vi.hoisted(() => {
   process.env.APPROVAL_SIGNING_KEY = 'k'.repeat(48);
 });
 
-vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }));
+vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ rpc: db.rpc }) }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseAdmin: () => {
     if (!db.current) throw new Error('fake db not installed');
@@ -45,6 +45,7 @@ let fake: FakeDb;
 beforeEach(() => {
   fake = createFakeDb();
   db.current = fake;
+  db.rpc.mockResolvedValue({ data: null, error: null });
   fake.onRpc('acknowledge_drift_event', (args) => {
     expect(args.p_tenant_id).toBe(TENANT);
     return { acknowledged: true, acknowledgedBy: args.p_acknowledged_by };
@@ -57,6 +58,7 @@ async function app(role: UserRole = UserRole.ADMIN) {
   hono.use('*', async (c, next) => {
     c.set('user', { id: USER } as never);
     c.set('tenantId', TENANT as never);
+    c.set('token', 'synthetic-session');
     c.set('role', role);
     await next();
   });
@@ -165,4 +167,57 @@ describe('GET /v1/monitoring/health', () => {
     expect(body.data.drift.unacknowledged).toBe(1);
     expect(body.data.drift.bySeverity.high).toBe(1);
   });
+});
+
+it('health exposes actual failed retained observation independently of future next-run timing', async () => {
+  fake.seed('monitoring_schedules', {
+    id: EVENT,
+    tenant_id: TENANT,
+    estate_id: ESTATE,
+    name: 'Future schedule',
+    kind: 'drift_check',
+    status: 'active',
+    last_run_at: '2026-01-01T00:01:00Z',
+    next_run_at: '2099-01-01T00:00:00Z',
+  });
+  db.rpc.mockResolvedValue({
+    data: {
+      tenantId: TENANT,
+      schedules: [
+        {
+          scheduleId: EVENT,
+          state: 'retained',
+          fire: {
+            fireId: EVENT,
+            estateId: ESTATE,
+            kind: 'drift_check',
+            dueAt: '2026-01-01T00:00:00Z',
+            calculationAfter: '2026-01-01T00:01:00Z',
+            nextRunAt: '2026-01-01T00:15:00Z',
+            correlationId: USER,
+            observationOutcome: 'failed',
+            recordingOutcome: 'failed',
+            failureCode: 'probe_failed',
+            detectedCount: 0,
+            recordedCount: 0,
+            failedCount: 0,
+            scheduleReceipt: { id: '12', entryHash: 'a'.repeat(64) },
+          },
+        },
+      ],
+    },
+    error: null,
+  });
+  const response = await (await app()).request('/v1/monitoring/health');
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      schedules: [{ overdue: false }],
+      outcomes: { status: 'available', schedules: [{ fire: { failureCode: 'probe_failed' } }] },
+    },
+  });
+});
+it('health preserves explicit outcome unavailable on readback outage with no fabricated counts', async () => {
+  const response = await (await app()).request('/v1/monitoring/health');
+  expect(await response.json()).toMatchObject({ data: { outcomes: { status: 'unavailable' } } });
 });
