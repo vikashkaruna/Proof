@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from axiom.agents.base import AgentName, DispatchContext
-from axiom.agents.drishti import DrishtiAgent, DrishtiInput, DrishtiOutput
+from axiom.agents.drishti import DrishtiAgent, DrishtiInput, DrishtiInvocationInput, DrishtiOutput
 from axiom.agents.public_source import (
     MAX_COUNT,
     DrishtiPublicOutput,
@@ -19,6 +19,9 @@ from axiom.agents.public_source import (
 )
 from axiom.agents.vibhaag import VibhaagAgent, VibhaagInput, VibhaagOutput
 from axiom.app import app
+
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000005"
 
 TENANT = "a0000000-0000-4000-8000-000000000001"
 ENGAGEMENT = "b0000000-0000-4000-8000-000000000002"
@@ -224,6 +227,13 @@ async def test_uuid_normalization_matches_envelope_binding_and_actual_ledger_con
     payload["engagement_id"] = ENGAGEMENT.upper()
     payload["source"]["binding"]["check_id"] = CHECK.upper()
     agent = agent_fixture(DrishtiAgent)
+    rejected = await agent.invoke(
+        payload, dispatch_context=DispatchContext(run_id=RUN, request_hash="f" * 64)
+    )
+    assert rejected.status == "failed"
+    assert rejected.error == "validation_failed"
+    agent.ledger.append.assert_not_called()
+    payload["tenant_id"] = TENANT
     result = await agent.invoke(
         payload, dispatch_context=DispatchContext(run_id=RUN, request_hash="f" * 64)
     )
@@ -235,6 +245,18 @@ async def test_uuid_normalization_matches_envelope_binding_and_actual_ledger_con
         assert receipt.target_ref == ENGAGEMENT
         assert receipt.detail["run_id"] == RUN
         assert receipt.detail["request_hash"] == "f" * 64
+
+
+@pytest.mark.asyncio
+async def test_explicit_public_root_model_tenant_remains_supported():
+    agent = agent_fixture(DrishtiAgent)
+    model = DrishtiInvocationInput.model_validate(discovery_input())
+    result = await agent.invoke(model)
+    assert result.status == "succeeded"
+    assert [call.args[0].tenant_id for call in agent.ledger.append.await_args_list] == [
+        TENANT,
+        TENANT,
+    ]
 
 
 @pytest.mark.asyncio
@@ -567,7 +589,7 @@ async def test_maximum_bounded_public_work_and_no_category_or_confidence_claims(
 async def test_explicit_legacy_mode_preserves_existing_wire_output_and_input_hash(
     agent_type, legacy_input, legacy_output
 ):
-    payload = {"tenant_id": "legacy-tenant", "engagement_id": "legacy-engagement"}
+    payload = {"tenant_id": SYNTHETIC_TENANT_ID, "engagement_id": "legacy-engagement"}
     original_agent = agent_fixture(agent_type)
     original = await original_agent.invoke(legacy_input.model_validate(payload))
     explicit_agent = agent_fixture(agent_type)
@@ -769,7 +791,7 @@ async def test_legacy_classification_rules_and_sensitive_category_review_remain_
     agent = agent_fixture(VibhaagAgent)
     result = await agent.invoke(
         {
-            "tenant_id": "legacy-tenant",
+            "tenant_id": SYNTHETIC_TENANT_ID,
             "engagement_id": "legacy-engagement",
             "inventory": [{"name": "Confirmed CRM"}],
             "field_hints": {
@@ -796,7 +818,7 @@ async def test_legacy_classification_rules_and_sensitive_category_review_remain_
     assert output.escalate is True
     inferred = await agent_fixture(VibhaagAgent).invoke(
         {
-            "tenant_id": "legacy-tenant",
+            "tenant_id": SYNTHETIC_TENANT_ID,
             "engagement_id": "legacy-engagement",
             "inventory": [
                 {"name": "Confirmed CRM", "data_categories": ["health", "contact", "unrecognised"]}

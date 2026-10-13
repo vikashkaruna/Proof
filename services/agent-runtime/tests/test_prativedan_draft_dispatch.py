@@ -20,6 +20,9 @@ from axiom.prativedan_draft_dispatch import (
 )
 from axiom.prativedan_renderer_config import renderer_commitment, renderer_config
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000009"
+
 IDS = {
     key: f"47510000-0000-4000-8000-{index:012d}"
     for index, key in enumerate(
@@ -551,7 +554,9 @@ async def test_claimed_config_substitution_never_redispatches(harness, location)
 @pytest.mark.asyncio
 async def test_base_agent_refuses_caller_config_before_any_receipt(harness):
     result = await harness.agent.invoke(
-        PrativedanInput(),
+        PrativedanInput(
+            tenant_id=SYNTHETIC_TENANT_ID,
+        ),
         correlation_id=IDS["operation_key"],
         dispatch_context=RendererDispatchContext(
             run_id=IDS["run_id"],
@@ -568,7 +573,9 @@ async def test_base_agent_refuses_caller_config_before_any_receipt(harness):
 @pytest.mark.asyncio
 async def test_generic_prativedan_receipt_context_shape_remains_unchanged(harness):
     result = await harness.agent.invoke(
-        PrativedanInput(),
+        PrativedanInput(
+            tenant_id=SYNTHETIC_TENANT_ID,
+        ),
         correlation_id=IDS["operation_key"],
         dispatch_context=DispatchContext(run_id=IDS["run_id"], request_hash="a" * 64),
     )

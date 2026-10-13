@@ -11,6 +11,9 @@ from axiom.canonicalise import canonical_json, sha256_hex
 from axiom.config import Settings
 from axiom.ledger_client import AppendResult
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000006"
+
 EV1 = "47470000-0000-4000-8000-000000000011"
 EV2 = "47470000-0000-4000-8000-000000000012"
 REQUIREMENT = "47470000-0000-4000-8000-000000000013"
@@ -46,7 +49,7 @@ def agent():
 
 @pytest.mark.asyncio
 async def test_missing_metrics_remain_unknown_in_sections_and_html(agent):
-    output = await agent._run(correlation_id="synthetic", input=PrativedanInput())
+    output = await agent._run(correlation_id="synthetic", input=PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID))
     assert "Posture score: Unknown (not supplied)." in output.sections[0]["body"]
     assert "Estimated statutory exposure: Unknown (not supplied)." in output.sections[0]["body"]
     assert "0/100" not in output.rendered_html
@@ -73,7 +76,7 @@ async def test_supplied_zero_and_each_independent_metric_are_preserved_as_provis
 ):
     output = await agent._run(
         correlation_id="synthetic",
-        input=PrativedanInput(posture_score=posture, estimated_exposure_inr=exposure),
+        input=PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, posture_score=posture, estimated_exposure_inr=exposure),
     )
     assert expected_posture in output.sections[0]["body"]
     assert expected_exposure in output.sections[0]["body"]
@@ -84,7 +87,7 @@ async def test_supplied_zero_and_each_independent_metric_are_preserved_as_provis
 async def test_library_count_uses_declared_source_set_or_is_unavailable(agent, control_ids):
     output = await agent._run(
         correlation_id="synthetic",
-        input=PrativedanInput(library_version="synthetic-1", library_control_ids=control_ids),
+        input=PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, library_version="synthetic-1", library_control_ids=control_ids),
     )
     text = output.sections[2]["body"]
     assert "synthetic-1" in text
@@ -99,19 +102,19 @@ async def test_library_count_uses_declared_source_set_or_is_unavailable(agent, c
 @pytest.mark.parametrize("ids", [[], ["C1", "C1"], [" C1"], [""], [str(i) for i in range(501)]])
 def test_declared_library_set_rejects_ambiguous_or_unbounded_ids(ids):
     with pytest.raises(ValidationError):
-        PrativedanInput(library_control_ids=ids)
+        PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, library_control_ids=ids)
 
 
 def test_finding_outside_declared_control_set_is_refused():
     with pytest.raises(ValidationError):
-        PrativedanInput(library_control_ids=["C1"], findings=[{"control_id": "C2"}])
+        PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, library_control_ids=["C1"], findings=[{"control_id": "C2"}])
 
 
 @pytest.mark.parametrize("reviewer", [None, "synthetic reviewer", "<script>reviewed</script>"])
 @pytest.mark.asyncio
 async def test_caller_reviewer_never_establishes_recorded_human_review(agent, reviewer):
     output = await agent._run(
-        correlation_id="synthetic", input=PrativedanInput(reviewer_id=reviewer)
+        correlation_id="synthetic", input=PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, reviewer_id=reviewer)
     )
     assert "Pending recorded human review" in output.sections[3]["body"]
     assert "Reviewed by" not in output.rendered_html
@@ -134,7 +137,7 @@ async def test_caller_reviewer_never_establishes_recorded_human_review(agent, re
 )
 def test_invalid_metrics_are_refused_instead_of_fabricated(payload):
     with pytest.raises(ValidationError):
-        PrativedanInput(**payload)
+        PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, **payload)
 
 
 @pytest.mark.asyncio
@@ -200,7 +203,7 @@ async def test_unknown_risk_preserves_source_order_without_claiming_ranking(agen
         {"control_id": "FIRST", "risk_points": unknown},
         {"control_id": "SECOND", "risk_points": 100},
     ]
-    output = await agent._run(correlation_id="synthetic", input=PrativedanInput(findings=findings))
+    output = await agent._run(correlation_id="synthetic", input=PrativedanInput(tenant_id=SYNTHETIC_TENANT_ID, findings=findings))
     section = output.sections[1]
     assert section["title"] == "Findings for review (source order)"
     assert [item["control_id"] for item in section["items"]] == ["FIRST", "SECOND"]
@@ -213,6 +216,7 @@ async def test_present_numeric_risks_can_rank_findings(agent):
     output = await agent._run(
         correlation_id="synthetic",
         input=PrativedanInput(
+            tenant_id=SYNTHETIC_TENANT_ID,
             findings=[
                 {"control_id": "FIRST", "risk_points": 1},
                 {"control_id": "SECOND", "risk_points": 100},
