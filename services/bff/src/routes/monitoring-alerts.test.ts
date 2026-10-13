@@ -96,6 +96,8 @@ describe('GET /v1/monitoring/alerts', () => {
       dispatched_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       metadata: {},
+      acknowledged_at: null,
+      acknowledged_by: null,
     });
 
     const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
@@ -111,6 +113,73 @@ describe('GET /v1/monitoring/alerts', () => {
     expect(body.data.summary.total).toBe(1);
     expect(body.data.summary.unread).toBe(1);
     expect(body.data.summary.critical).toBe(1);
+  });
+
+  it('accepts actual SQL code-point limits for non-BMP alert text', async () => {
+    const title = '🔒'.repeat(200);
+    const summary = '🔒'.repeat(500);
+    const source = '🔒'.repeat(100);
+    fake.seed('monitoring_alerts', {
+      id: ALERT_ID,
+      tenant_id: TENANT,
+      alert_type: 'drift_critical',
+      severity: 'critical',
+      title,
+      summary,
+      source_id: source,
+      source_type: 'drift_event',
+      status: 'unread',
+      dispatched_at: '2026-10-13T00:00:00.123456+00:00',
+      created_at: '2026-10-13T00:00:00+05:30',
+      acknowledged_at: null,
+      acknowledged_by: null,
+      metadata: {},
+    });
+    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
+    expect(res.status).toBe(200);
+    const result = (await res.json()) as {
+      data: { alerts: Array<{ title: string; summary: string; source_id: string }> };
+    };
+    expect(result.data.alerts[0]).toMatchObject({ title, summary, source_id: source });
+  });
+
+  it.each([
+    'empty-row',
+    'null-row',
+    'foreign-tenant',
+    'unknown-severity',
+    'missing-ack',
+    'metadata-array',
+  ])('refuses invalid or cross-tenant list data: %s', async (mode) => {
+    const row: Record<string, unknown> = {
+      id: ALERT_ID,
+      tenant_id: TENANT,
+      alert_type: 'drift_critical',
+      severity: 'critical',
+      title: 'Critical drift',
+      summary: 'Connection lost',
+      source_id: 'src-1',
+      source_type: 'drift_event',
+      status: 'unread',
+      dispatched_at: '2026-10-13T00:00:00+00:00',
+      created_at: '2026-10-13T00:00:00+00:00',
+      acknowledged_at: null,
+      acknowledged_by: null,
+      metadata: {},
+    };
+    if (mode === 'foreign-tenant') row.tenant_id = USER;
+    if (mode === 'unknown-severity') row.severity = 'normal';
+    if (mode === 'missing-ack') delete row.acknowledged_by;
+    if (mode === 'metadata-array') row.metadata = [];
+    const data = [mode === 'empty-row' ? {} : mode === 'null-row' ? null : row];
+    const query: Record<string, unknown> = {};
+    for (const method of ['select', 'eq', 'order', 'limit']) query[method] = () => query;
+    query.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data, error: null }).then(resolve);
+    fake.client.from = () => query;
+    const res = await (await app(UserRole.VIEWER)).request('/v1/monitoring/alerts');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'database_unavailable' } });
   });
 
   it('returns a genuine empty tenant page with zero loaded-page counts', async () => {
@@ -166,6 +235,62 @@ describe('POST /v1/monitoring/alerts/dispatch', () => {
     expect(body.data.highCount).toBe(2);
   });
 
+  it.each([
+    null,
+    {},
+    [],
+    'success',
+    { dispatchedCount: '3', totalUnread: 3, criticalCount: 1, highCount: 2 },
+    { dispatchedCount: -1, totalUnread: 3, criticalCount: 1, highCount: 2 },
+    { dispatchedCount: 0.5, totalUnread: 3, criticalCount: 1, highCount: 2 },
+    { dispatchedCount: 1, totalUnread: 1, criticalCount: 1, highCount: 1 },
+    { dispatchedCount: 1, totalUnread: 3, criticalCount: 1 },
+    { error: { message: 'private diagnostic' } },
+  ])('refuses an unconfirmed or malformed dispatch reply: %j', async (reply) => {
+    fake.onRpc('dispatch_monitoring_alerts', () => reply);
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/dispatch', { method: 'POST' });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'database_unavailable' } });
+  });
+
+  it('accepts genuine zero counts without treating missing counts as zero', async () => {
+    fake.onRpc('dispatch_monitoring_alerts', () => ({
+      dispatchedCount: 0,
+      totalUnread: 0,
+      criticalCount: 0,
+      highCount: 0,
+    }));
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/dispatch', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { dispatchedCount: 0, totalUnread: 0, criticalCount: 0, highCount: 0 },
+    });
+  });
+  it('preserves the actual tenant refusal rather than interpreting it as counts', async () => {
+    fake.onRpc('dispatch_monitoring_alerts', () => ({ error: 'tenant_not_found' }));
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/dispatch', { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: { code: 'tenant_not_found' } });
+  });
+  it('does not retry a dispatch whose reply cannot confirm its outcome', async () => {
+    let calls = 0;
+    fake.onRpc('dispatch_monitoring_alerts', () => {
+      calls++;
+      return null;
+    });
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request('/v1/monitoring/alerts/dispatch', { method: 'POST' });
+    expect(res.status).toBe(503);
+    expect(calls).toBe(1);
+  });
+
   it('refuses users lacking estate manage capability', async () => {
     const res = await (
       await app(UserRole.VIEWER)
@@ -185,6 +310,34 @@ describe('POST /v1/monitoring/alerts/:id/dismiss', () => {
     const body = (await res.json()) as { data: { dismissed: boolean; alertId: string } };
     expect(body.data.dismissed).toBe(true);
     expect(body.data.alertId).toBe(ALERT_ID);
+  });
+
+  it('accepts an uppercase UUID path using the same canonical SQL identity', async () => {
+    const id = 'abcdefab-abcd-4abc-8abc-abcdefabcdef';
+    fake.onRpc('dismiss_monitoring_alert', (args) => {
+      expect(args.p_alert_id).toBe(id);
+      return { dismissed: true, alertId: id, acknowledgedBy: USER };
+    });
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request(`/v1/monitoring/alerts/${id.toUpperCase()}/dismiss`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      data: { dismissed: true, alertId: id, acknowledgedBy: USER },
+    });
+  });
+
+  it('does not retry a dismissal whose reply cannot confirm its outcome', async () => {
+    let calls = 0;
+    fake.onRpc('dismiss_monitoring_alert', () => {
+      calls++;
+      return null;
+    });
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request(`/v1/monitoring/alerts/${ALERT_ID}/dismiss`, { method: 'POST' });
+    expect(res.status).toBe(503);
+    expect(calls).toBe(1);
   });
 
   it('refuses invalid alert UUIDs', async () => {
@@ -210,6 +363,27 @@ describe('POST /v1/monitoring/alerts/:id/dismiss', () => {
       method: 'POST',
     });
     expect(res.status).toBe(409);
+  });
+
+  it.each([
+    null,
+    {},
+    [],
+    { dismissed: 'false', alertId: ALERT_ID, acknowledgedBy: USER },
+    { dismissed: false, alertId: ALERT_ID, acknowledgedBy: USER },
+    { dismissed: true, acknowledgedBy: USER },
+    { dismissed: true, alertId: ALERT_ID },
+    { dismissed: true, alertId: TENANT, acknowledgedBy: USER },
+    { dismissed: true, alertId: ALERT_ID, acknowledgedBy: TENANT },
+    { dismissed: true, alertId: ALERT_ID, acknowledgedBy: USER, error: 'already_dismissed' },
+    { error: 'private diagnostic' },
+  ])('refuses an unconfirmed or wrong-identity dismissal reply: %j', async (reply) => {
+    fake.onRpc('dismiss_monitoring_alert', () => reply);
+    const res = await (
+      await app(UserRole.ADMIN)
+    ).request(`/v1/monitoring/alerts/${ALERT_ID}/dismiss`, { method: 'POST' });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'database_unavailable' } });
   });
 
   it('refuses users lacking estate manage capability', async () => {
