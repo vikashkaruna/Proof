@@ -33,6 +33,9 @@ from axiom.config import Settings
 from axiom.executor import ActionOutcome, ExecutorRefused
 from axiom.verification import reconcile_batch
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000008"
+
 
 class FakeDb:
     def __init__(self) -> None:
@@ -204,6 +207,7 @@ async def test_clean_reconciliation(samadhan_agent: SamadhanAgent) -> None:
 async def test_parameter_drift_detection_from_digests(samadhan_agent: SamadhanAgent) -> None:
     """Detects parameter drift when approved and recomputed digests diverge."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-drift-01",
         request_key="req-drift",
@@ -226,6 +230,7 @@ async def test_parameter_drift_detection_from_digests(samadhan_agent: SamadhanAg
 async def test_parameter_drift_detection_flag(samadhan_agent: SamadhanAgent) -> None:
     """Detects parameter drift when explicit flag is provided."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-drift-02",
         action_ids=["act-1"],
@@ -247,6 +252,7 @@ async def test_parameter_drift_detection_flag(samadhan_agent: SamadhanAgent) -> 
 async def test_swept_unexecuted_actions_marked_skipped(samadhan_agent: SamadhanAgent) -> None:
     """Accounts for swept actions returning to approved."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-swept-01",
         request_key="req-swept",
@@ -270,6 +276,7 @@ async def test_swept_unexecuted_actions_marked_skipped(samadhan_agent: SamadhanA
 async def test_approved_actions_missing_from_outcomes(samadhan_agent: SamadhanAgent) -> None:
     """Accounts for approved actions that never reached outcomes."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-missing-01",
         action_ids=["act-1", "act-2", "act-3"],
@@ -292,6 +299,7 @@ async def test_refusal_of_out_of_scope_execution_raises_when_requested(
 ) -> None:
     """Refuses out-of-scope execution with ExecutorRefused when raise_on_out_of_scope=True."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-rogue-01",
         action_ids=["act-approved-1"],
@@ -314,6 +322,7 @@ async def test_refusal_of_out_of_scope_execution_verdict(
 ) -> None:
     """Evaluates and surfaces out-of-scope verdict when raise_on_out_of_scope=False."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-rogue-02",
         action_ids=["act-approved-1"],
@@ -338,6 +347,7 @@ async def test_db_refusal_cannot_become_signed_caller_prose(samadhan_agent: Sama
     fake_db.script("record_plan_reconciliation", {"error": "out_of_scope_executed"})
 
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-db-refused",
         action_ids=["act-1"],
@@ -364,6 +374,7 @@ async def test_db_facts_override_caller_verdict(samadhan_agent: SamadhanAgent) -
     }
     fake_db.script("prepare_plan_reconciliation", {"statement": json.dumps(facts)})
     input_data = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-real-failure",
         action_ids=["act-1"],
@@ -389,6 +400,7 @@ async def test_failed_verification_prevents_clean_db_verdict(samadhan_agent: Sam
         "content_digest_drift": False,
     })})
     result = await samadhan_agent.reconcile(SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-failed-verification", action_ids=["act-1"],
         outcomes=[{"action_id": "act-1", "outcome": "succeeded"}],
@@ -404,6 +416,7 @@ async def test_failed_verification_prevents_clean_db_verdict(samadhan_agent: Sam
 async def test_hmac_statement_signing_with_settings_key(samadhan_agent: SamadhanAgent) -> None:
     """Signs statement with the configured approval_signing_key."""
     inp = SamadhanInput(
+        tenant_id=SYNTHETIC_TENANT_ID,
         plan_id="11111111-1111-1111-1111-111111111111",
         batch_id="batch-hmac-01",
         action_ids=["act-1"],

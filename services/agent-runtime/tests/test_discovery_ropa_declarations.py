@@ -17,6 +17,9 @@ from axiom.policy_generator import (
 )
 from axiom.ropa_generator import build_ropa_records
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000002"
+
 
 def agent_fixture():
     return DrishtiAgent(
@@ -28,7 +31,7 @@ def agent_fixture():
 
 def payload(system, *, interview=False):
     return {
-        "tenant_id": "synthetic-tenant",
+        "tenant_id": SYNTHETIC_TENANT_ID,
         "engagement_id": "synthetic-engagement",
         **({"interview": {"crm": system}} if interview else {"systems": [system]}),
     }

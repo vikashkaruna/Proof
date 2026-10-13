@@ -11,6 +11,9 @@ from axiom.agents.parikshan import (
 )
 from axiom.control_library_loader import load_default_library
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000004"
+
 
 @pytest.mark.asyncio
 async def test_parikshan_unanswered_questionnaire_is_unverified():
@@ -18,7 +21,7 @@ async def test_parikshan_unanswered_questionnaire_is_unverified():
     # Empty answers — the agent defaults to score 30 (unknown) per control
     out = await agent.invoke(
         ParikshanInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             library_version=load_default_library().version,
             answers={},
@@ -49,7 +52,7 @@ async def test_parikshan_omitted_flags_are_unknown():
     # with the placeholder library, the result is still valid.
     out = await agent.invoke(
         ParikshanInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             library_version=load_default_library().version,
             answers={},
@@ -67,7 +70,7 @@ async def test_parikshan_ignores_unknown_question_ids():
     agent = ParikshanAgent()
     out = await agent.invoke(
         ParikshanInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             library_version=load_default_library().version,
             answers={"DPDPA-GOV-001": {"not-a-question": True}},
@@ -82,7 +85,9 @@ async def test_parikshan_ignores_unknown_question_ids():
 @pytest.mark.asyncio
 async def test_parikshan_refuses_a_different_library_version():
     out = await ParikshanAgent().invoke(
-        ParikshanInput(tenant_id="t1", engagement_id="e1", library_version="unavailable-version")
+        ParikshanInput(
+            tenant_id=SYNTHETIC_TENANT_ID, engagement_id="e1", library_version="unavailable-version"
+        )
     )
     assert out.status == "failed"
     assert out.output is None
@@ -91,7 +96,7 @@ async def test_parikshan_refuses_a_different_library_version():
 @pytest.mark.parametrize("flag", ["sdf_self_attested", "processes_children", "processes_health"])
 @pytest.mark.parametrize("value", [None, False, True])
 def test_parikshan_preserves_nullable_boolean_declarations(flag, value):
-    data = ParikshanInput(tenant_id="t1", engagement_id="e1", **{flag: value})
+    data = ParikshanInput(tenant_id=SYNTHETIC_TENANT_ID, engagement_id="e1", **{flag: value})
     assert getattr(data, flag) is value
 
 
@@ -99,4 +104,4 @@ def test_parikshan_preserves_nullable_boolean_declarations(flag, value):
 @pytest.mark.parametrize("value", ["false", "true", 0, 1])
 def test_parikshan_never_coerces_unknown_declarations(flag, value):
     with pytest.raises(ValidationError):
-        ParikshanInput(tenant_id="t1", engagement_id="e1", **{flag: value})
+        ParikshanInput(tenant_id=SYNTHETIC_TENANT_ID, engagement_id="e1", **{flag: value})

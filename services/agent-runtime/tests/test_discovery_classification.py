@@ -3,12 +3,15 @@ import pytest
 from axiom.agents.drishti import DrishtiAgent, DrishtiInput, DrishtiOutput
 from axiom.agents.vibhaag import VibhaagAgent, VibhaagInput, VibhaagOutput
 
+# Explicit independent synthetic tenant; no default production identity.
+SYNTHETIC_TENANT_ID = "47480000-0000-4000-8000-000000000001"
+
 
 @pytest.mark.asyncio
 async def test_drishti_escalates_case_insensitive_sensitive_categories():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             systems=[{"name": "CRM", "type": "postgres", "data_categories": ["Children"]}],
         )
@@ -21,7 +24,7 @@ async def test_drishti_escalates_case_insensitive_sensitive_categories():
 async def test_vibhaag_accepts_documented_field_hint_shape():
     output = await VibhaagAgent().invoke(
         VibhaagInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             inventory=[{"name": "CRM", "data_categories": []}],
             field_hints={"CRM": {"email": {"category": "contact"}}},
@@ -37,7 +40,7 @@ async def test_vibhaag_accepts_documented_field_hint_shape():
 async def test_drishti_does_not_invent_a_region_for_a_declared_domestic_system():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             systems=[
                 {
@@ -66,7 +69,7 @@ async def test_drishti_does_not_invent_a_region_for_a_declared_domestic_system()
 async def test_drishti_flags_a_foreign_region_indicator_without_overwriting_declarations():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             systems=[
                 {
@@ -97,7 +100,7 @@ async def test_drishti_flags_a_foreign_region_indicator_without_overwriting_decl
 async def test_drishti_detects_explicit_foreign_region_and_warns():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             systems=[
                 {
@@ -123,7 +126,7 @@ async def test_drishti_detects_explicit_foreign_region_and_warns():
 async def test_drishti_recognizes_indian_regions_as_domestic():
     output = await DrishtiAgent().invoke(
         DrishtiInput(
-            tenant_id="t1",
+            tenant_id=SYNTHETIC_TENANT_ID,
             engagement_id="e1",
             systems=[
                 {
