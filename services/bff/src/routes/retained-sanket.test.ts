@@ -170,7 +170,8 @@ beforeEach(async () => {
 function app(mounted = true) {
   const app = new Hono<{ Variables: Variables }>();
   const loginMfa = createMfaService(() => db.client as never, {
-    encryptionKey: 'synthetic-mfa-policy-test-key-at-least-32-characters',
+    // Deliberately non-secret unit-fixture material; never a deployed key.
+    encryptionKey: 'a'.repeat(64),
   });
   // Synthetic context only. Actual GoTrue/Auth transport acceptance is pending
   // coherent parent mount; this fixture does not claim a live login or DB proof.
