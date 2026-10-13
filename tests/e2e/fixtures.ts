@@ -28,17 +28,7 @@ export async function signIn(page: Page, key: PersonaKey): Promise<void> {
   // the same real attestation now; no tenant policy can waive these roles.
   if (['owner', 'approver'].includes(persona(key).role) && persona(key).totpEnrolled) {
     await selectTenant(page, persona(key).membership === 'b' ? 'b' : 'a');
-    await withMfaFixtureLock(
-      join(dirname(personaStatePath), 'login-mfa-locks'),
-      who.id,
-      async () => {
-        // Another worker may have spent the preceding counter. Wait under the
-        // exclusive fixture lock; no replay-defense retry or policy exemption.
-        if (!who.totpSecret) throw new Error('Seeded mandatory persona needs its factor');
-        await freshTotpCode(page, who.totpSecret);
-        await satisfyLoginMfa(page, key);
-      },
-    );
+    await satisfyLoginMfa(page, key);
   }
 }
 
@@ -129,9 +119,18 @@ export async function createApprovablePlan(label: string): Promise<{
  * seeded secret under the harness ring key.
  */
 export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void> {
-  const secret = account(key).totpSecret;
+  const who = account(key);
+  const secret = who.totpSecret;
   if (!secret) throw new Error(`${key} was seeded without a TOTP factor`);
-  await satisfyLoginMfaWithSecret(page, secret);
+  // Every shared seeded identity uses this boundary, including callers that
+  // explicitly verify founder/analyst sessions after choosing their tenant.
+  await withMfaFixtureLock(join(dirname(personaStatePath), 'login-mfa-locks'), who.id, async () => {
+    // Hold the lock while waiting for a genuinely new counter; a different
+    // worker may have spent the previous one. Fresh private accounts use the
+    // secret helper directly and do not acquire this shared-identity lock.
+    await freshTotpCode(page, secret);
+    await satisfyLoginMfaWithSecret(page, secret);
+  });
 }
 
 export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {
