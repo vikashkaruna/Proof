@@ -56,4 +56,5 @@ export async function seedAcceptanceLibrary(url: string, apiKey: string, service
     seed.controls.length,
     'Incomplete report library',
   );
+  return seed.version;
 }

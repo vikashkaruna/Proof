@@ -207,6 +207,32 @@ describe('saved assessment projection', () => {
     fake.rows('control_libraries')[0]!.control_count = 5;
     expect((await request()).status).toBe(503);
   });
+  it('refuses a zero-control placeholder library even when it is marked published', async () => {
+    fake.rows('control_libraries')[0]!.control_count = 0;
+    fake.rows('controls').splice(0);
+    fake.rows('findings').splice(0);
+    const response = await request();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'assessment_unavailable' },
+    });
+  });
+  it('shows an intake on the complete published library as unassessed until findings exist', async () => {
+    fake.rows('engagements').find((row) => row.id === E)!.status = 'intake';
+    fake.rows('findings').splice(0);
+    const response = await request();
+    expect(response.status).toBe(200);
+    const snapshot = AssessmentSnapshotSchema.parse(await response.json());
+    expect(snapshot.engagement).toMatchObject({ status: 'intake', libraryVersion: 'v1' });
+    expect(snapshot.controls).toHaveLength(4);
+    expect(
+      snapshot.controls.every(
+        (control) => control.score === null && control.status === 'unassessed',
+      ),
+    ).toBe(true);
+    expect(snapshot.summary).toMatchObject({ pass: 0, partial: 0, fail: 0, unassessed: 4 });
+    expect(snapshot.provenance?.status).toBe('unavailable');
+  });
   it('refuses a draft library as a published assessment baseline', async () => {
     fake.rows('control_libraries')[0]!.status = 'draft';
     expect((await request()).status).toBe(503);
