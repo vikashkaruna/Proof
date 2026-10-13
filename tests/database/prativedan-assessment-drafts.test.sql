@@ -267,13 +267,16 @@ rollback to kill_engaged;
 -- A SECOND real worker/controller completion carries a null declaration.
 -- The finalized receipt predicate is satisfied; the stricter current declaration
 -- verifier itself must refuse this payload (not merely a stale digest).
-create temporary table null_issued as select (public.delegate_workload_task(pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),'parikshan',pg_temp.id(22),pg_temp.id(21),pg_temp.id(71),repeat('c',64),repeat('d',64),array['control_library.read','findings.write'],clock_timestamp()+interval '10 minutes')->>'run_id')::uuid run_id;
-select public.start_workload_assessment(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(31),repeat('d',64),repeat('c',64),clock_timestamp()+interval '5 minutes');
-select public.complete_workload_assessment(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(31),repeat('d',64),
+-- A finalized engagement cannot be reassessed in place; use a new engagement.
+insert into public.engagements(id,tenant_id,estate_id,library_version,title)
+ values(pg_temp.id(72),pg_temp.id(11),pg_temp.id(22),'prativedan-sql-v2','Null declaration assessment');
+create temporary table null_issued as select (public.delegate_workload_task(pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),'parikshan',pg_temp.id(22),pg_temp.id(72),pg_temp.id(71),repeat('c',64),repeat('d',64),array['control_library.read','findings.write'],clock_timestamp()+interval '10 minutes')->>'run_id')::uuid run_id;
+select pg_temp.ok(public.start_workload_assessment(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(31),repeat('d',64),repeat('c',64),clock_timestamp()+interval '5 minutes') ? 'started_receipt','second assessment actually started');
+select pg_temp.ok(public.complete_workload_assessment(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(31),repeat('d',64),
  (select library_digest from public.workload_assessment_packets where run_id=(select run_id from null_issued)),
- jsonb_set(pg_temp.result(),'{questionnaire_provenance,controls,0,questions,0,declaration}','null'),clock_timestamp()+interval '5 minutes');
-select public.confirm_workload_assessment(pg_temp.id(11),(select run_id from null_issued));
-select pg_temp.ok(public.board_assessment_source_valid(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(21)),'null-declaration case has genuine matching finalized receipt chain');
-select pg_temp.reject(format('select controller_security.prativedan123_input(%L,%L,%L)',pg_temp.id(11),pg_temp.id(21),(select run_id from null_issued)));
+ jsonb_set(pg_temp.result(),'{questionnaire_provenance,controls,0,questions,0,declaration}','null'),clock_timestamp()+interval '5 minutes') ? 'completed_receipt','second assessment actually completed');
+select pg_temp.ok(public.confirm_workload_assessment(pg_temp.id(11),(select run_id from null_issued))->>'status'='succeeded','second assessment actually finalized');
+select pg_temp.ok(public.board_assessment_source_valid(pg_temp.id(11),(select run_id from null_issued),pg_temp.id(72)),'null-declaration case has genuine matching finalized receipt chain');
+select pg_temp.reject(format('select controller_security.prativedan123_input(%L,%L,%L)',pg_temp.id(11),pg_temp.id(72),(select run_id from null_issued)));
 set constraints all immediate;
 rollback;
