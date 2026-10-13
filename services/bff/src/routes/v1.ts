@@ -3602,6 +3602,9 @@ export function v1Routes(deps: Deps) {
   // ─── Ledger ──────────────────────────────────────────────────────
 
   app.post('/ledger/verify', async (c) => {
+    // Every client role reads the ledger; verifying the chain is `ledger.verify`.
+    const verifyRefusal = requireCapability(c, Capability.LEDGER_VERIFY);
+    if (verifyRefusal) return verifyRefusal;
     const tenantId = c.get('tenantId');
     const result = await deps.ledger.verify(tenantId);
     return c.json(result);

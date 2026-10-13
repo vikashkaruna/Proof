@@ -52,8 +52,8 @@ export interface NavGroup {
  *     the approval queue — `plan.approve`; execution — `plan.execute`;
  *   - rights, consent, monitoring and policies — `agent.invoke`: the operators
  *     who run those workflows (founder, analyst, owner, admin);
- *   - breach and incident — `kill_switch.engage.tenant`: anyone who can halt
- *     the platform in an incident, which includes the approver;
+ *   - breach and incident — `incident.read`: the operators and the approver,
+ *     who follows an incident without holding the emergency stop;
  *   - evidence, ledger, reports, the client portal and settings stay open to
  *     every reader, which is what a viewer is for.
  *
@@ -213,8 +213,8 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Breach & Incident',
         hi: 'उल्लंघन',
         phase: 'P3',
-        // Whoever can halt the platform during an incident must see it.
-        capability: Capability.KILL_SWITCH_ENGAGE_TENANT,
+        // The approver follows incidents but no longer holds the kill switch.
+        capability: Capability.INCIDENT_READ,
       },
     ],
   },

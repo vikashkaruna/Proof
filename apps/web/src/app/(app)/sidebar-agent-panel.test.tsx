@@ -237,3 +237,11 @@ it('keeps an ambiguous direct invocation as an error without invented proof', as
   expect(document.body.textContent).not.toContain('Ledger proof:');
   expect(mocks.refresh).not.toHaveBeenCalled();
 });
+
+it('draws every agent in its on-dark accent in the indigo sidebar, so Parikshan stays visible', () => {
+  render(<SidebarAgentPanel transparent />);
+  const icon = screen.getByRole('button', { name: /parikshan/i }).querySelector('svg')!;
+  // Parikshan's base accent is the sidebar's own indigo (#1E2A4A).
+  expect(icon.style.color).toBe('rgb(129, 140, 248)');
+  expect(icon.style.color).not.toBe('rgb(30, 42, 74)');
+});

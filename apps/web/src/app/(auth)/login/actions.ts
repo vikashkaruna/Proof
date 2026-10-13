@@ -23,7 +23,9 @@ async function bootstrapUserProfile(
 export async function loginAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim();
   const password = String(formData.get('password') ?? '');
-  const redirectTo = safeRedirectPath(formData.get('redirect'));
+  // No requested page: /start sends the founder to the Workbench and every
+  // client-organisation user to the Client Portal.
+  const redirectTo = safeRedirectPath(formData.get('redirect'), '/start');
 
   if (!email || !password) {
     redirect(`/login?error=${encodeURIComponent('Email and password are required.')}`);

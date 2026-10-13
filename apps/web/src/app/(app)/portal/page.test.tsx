@@ -56,10 +56,10 @@ beforeEach(() => {
 });
 
 it('renders unavailable assessment without inventing posture or cross-tenant data', async () => {
-  const view = renderToStaticMarkup(
-    await ClientPortalPage({ searchParams: Promise.resolve({ tenant: 'actual' }) }),
-  );
-  expect(state.requestedTenant).toBe('actual');
+  const view = renderToStaticMarkup(await ClientPortalPage());
+  // The portal follows the one verified active organisation; no per-page override.
+  expect(state.requestedTenant).toBeUndefined();
+  expect(view).not.toContain('&quot;tenants&quot;');
   expect(view).toContain('&quot;assessmentUnavailable&quot;:true');
   expect(view).toContain('&quot;engagement&quot;:null');
   expect(view).toContain('Actual tenant');
@@ -80,7 +80,7 @@ it('marks partial source failure and does not convert missing dates into SLA val
       received_at: '2026-10-01',
     },
   ];
-  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  const view = renderToStaticMarkup(await ClientPortalPage());
   expect(view).toContain('&quot;loadError&quot;:true');
   expect(view).toContain('&quot;slaDays&quot;:null');
   expect(view).not.toContain('NaN');
@@ -88,7 +88,7 @@ it('marks partial source failure and does not convert missing dates into SLA val
 
 it('marks successful responses with missing list bodies unavailable rather than empty', async () => {
   state.data.audit_ledger = null;
-  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  const view = renderToStaticMarkup(await ClientPortalPage());
   expect(view).toContain('&quot;loadError&quot;:true');
   expect(view).toContain('&quot;ledger&quot;:[]');
 });
@@ -98,7 +98,7 @@ it('marks missing plan action readback unavailable rather than claiming no actio
     { id: 'plan-1', title: 'Saved plan', status: 'review', version: 1, created_at: '2026-10-01' },
   ];
   state.data.remediation_actions = null;
-  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  const view = renderToStaticMarkup(await ClientPortalPage());
   expect(view).toContain('&quot;loadError&quot;:true');
   expect(view).not.toContain('Saved plan');
 });
@@ -111,7 +111,7 @@ it('reads the exact saved engagement within the tenant and preserves its source 
     controls: [{ id: 'control-1' }],
   };
   state.data.engagements = { posture_score: 0.7, started_at: '2026-10-01' };
-  const view = renderToStaticMarkup(await ClientPortalPage({ searchParams: Promise.resolve({}) }));
+  const view = renderToStaticMarkup(await ClientPortalPage());
   expect(state.calls).toContainEqual(['engagements', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['engagements', 'id', 'eng-1']);
   expect(view).toContain('&quot;postureScore&quot;:0.7');

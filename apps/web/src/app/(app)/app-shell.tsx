@@ -111,6 +111,7 @@ export function AppShell({
     return pathname === itemRoute || (itemRoute !== '/dashboard' && pathname.startsWith(itemRoute));
   };
   const [killState, setKillState] = useState<{ tenantId: string; engaged: boolean } | null>(null);
+  const [killError, setKillError] = useState<string | null>(null);
   const [tenantsOpen, setTenantsOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -149,6 +150,9 @@ export function AppShell({
   // was previously shown this button; the BFF refused, so all it taught them
   // was that the product is broken.
   const canKillSwitch = held.has('kill_switch.engage.tenant');
+  // Releasing is a separate, narrower authority (owner, founder). Offering the
+  // release to a role that can only engage produced a link that did nothing.
+  const canReleaseKill = held.has('kill_switch.release.tenant');
   // Creating another organisation is a commercial act (tenant.create): the
   // founder's and an owner's, not something to advertise to every reader.
   const canCreateTenant = held.has('tenant.create');
@@ -242,6 +246,8 @@ export function AppShell({
 
   async function handleToggleKillSwitch() {
     if (!selectedTenantId || !canKillSwitch || killOn === null) return;
+    if (killOn && !canReleaseKill) return;
+    setKillError(null);
     if (!killOn) {
       if (
         !confirm('ENGAGE KILL SWITCH?\n\nThis halts all in-flight agent execution for this tenant.')
@@ -280,9 +286,15 @@ export function AppShell({
           );
         } else if (res.ok) {
           setKillState(null);
+        } else {
+          const body = await res.json().catch(() => null);
+          setKillError(
+            body?.error?.message ?? `The kill switch could not be released (HTTP ${res.status}).`,
+          );
         }
       } catch (err) {
         setKillState(null);
+        setKillError('The kill switch could not be released. Try again.');
         console.error('Failed to release kill switch:', err);
       }
     }
@@ -299,12 +311,7 @@ export function AppShell({
       // the server renders another is the worst possible failure here.
       const result = await switchTenantAction(t.slug || t.id);
       if (!result.ok) return;
-      const targetSlug = t.slug || t.id;
-      if (pathname === '/portal') {
-        router.push(`/portal?tenant=${targetSlug}`);
-      } else {
-        router.refresh();
-      }
+      router.refresh();
     } finally {
       setSwitching(false);
     }
@@ -749,13 +756,17 @@ export function AppShell({
           {canKillSwitch && (
             <button
               onClick={handleToggleKillSwitch}
-              disabled={!selectedTenantId || killOn === null}
+              disabled={!selectedTenantId || killOn === null || (killOn && !canReleaseKill)}
               className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
                 killOn
                   ? 'border-[#D9534F] bg-[#D9534F] text-white shadow-sm animate-pulse'
                   : 'border-[#e4e8ee] bg-white text-[#D9534F] hover:bg-[#FCEEEC]'
               }`}
-              title="Halt autonomous agent execution for this tenant"
+              title={
+                killOn && !canReleaseKill
+                  ? 'Engaged. Only an owner can release the kill switch.'
+                  : 'Halt autonomous agent execution for this tenant'
+              }
             >
               <svg
                 aria-hidden
@@ -785,14 +796,23 @@ export function AppShell({
               <span className="text-sm">⏻</span>
               <span>KILL SWITCH ENGAGED — in-flight agent execution is halted.</span>
             </div>
-            {canKillSwitch && (
-              <button
-                onClick={handleToggleKillSwitch}
-                className="font-normal underline hover:text-white/80 cursor-pointer"
-              >
-                Disengage
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {killError && (
+                <span role="alert" className="font-normal">
+                  {killError}
+                </span>
+              )}
+              {canReleaseKill ? (
+                <button
+                  onClick={handleToggleKillSwitch}
+                  className="font-normal underline hover:text-white/80 cursor-pointer"
+                >
+                  Disengage
+                </button>
+              ) : (
+                <span className="font-normal text-white/85">Only an owner can release it.</span>
+              )}
+            </div>
           </div>
         )}
 

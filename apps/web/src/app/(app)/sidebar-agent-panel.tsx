@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Capability, type AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
-import { AgentIcon, type AgentIconState, Badge } from '@axiom/ui';
+import { AgentIcon, type AgentIconState, Badge, ON_DARK_ACCENTS } from '@axiom/ui';
 import { agentAccents } from '@axiom/design-tokens';
 
 export interface AgentActionMeta {
@@ -364,7 +364,8 @@ export function SidebarAgentPanel({
         {ALL_AGENTS.map((agent) => {
           const state = getAgentState(agent.name);
           const isSelected = selectedAgent?.name === agent.name;
-          const accent = agentAccents[agent.name] || '#0FB5A5';
+          const accent =
+            (transparent ? ON_DARK_ACCENTS[agent.name] : agentAccents[agent.name]) || '#0FB5A5';
 
           return (
             <button
@@ -389,6 +390,7 @@ export function SidebarAgentPanel({
                 agent={agent.name}
                 state={state}
                 size="sm"
+                variant={transparent ? 'on-dark' : 'default'}
                 showBadge={state === 'working'}
                 className="transition-transform group-hover:scale-105"
               />

@@ -61,8 +61,8 @@ export default async function LoginPage({
               <span>
                 Signed in as <strong>{user.email}</strong>
               </span>
-              <Link href="/portal" className="font-semibold underline hover:text-teal-700">
-                Go to Portal →
+              <Link href="/start" className="font-semibold underline hover:text-teal-700">
+                Continue →
               </Link>
             </div>
           )}

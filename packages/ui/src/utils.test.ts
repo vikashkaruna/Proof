@@ -3,6 +3,7 @@ import {
   cn,
   formatINR,
   formatINRFull,
+  formatINRCrore,
   formatPercent,
   formatDate,
   formatDateTime,
@@ -15,6 +16,18 @@ describe('UI utils', () => {
   describe('cn', () => {
     it('merges class names correctly', () => {
       expect(cn('p-4', 'bg-white', false && 'hidden', undefined, 'p-2')).toBe('bg-white p-2');
+    });
+  });
+
+  describe('formatINRCrore', () => {
+    it('reads rupees in crores with at most three decimals', () => {
+      expect(formatINRCrore(1_85_00_00_000)).toBe('₹185 Cr');
+      expect(formatINRCrore(1_87_50_000)).toBe('₹1.875 Cr');
+      expect(formatINRCrore(1_23_45_678)).toBe('₹1.235 Cr');
+      expect(formatINRCrore(25_00_00_00_000)).toBe('₹2,500 Cr');
+      expect(formatINRCrore(0)).toBe('₹0 Cr');
+      expect(formatINRCrore(1_000)).toBe('< ₹0.001 Cr');
+      expect(formatINRCrore(null)).toBe('—');
     });
   });
 

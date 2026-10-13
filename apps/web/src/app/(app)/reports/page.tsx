@@ -20,6 +20,7 @@ export default async function ReportsPage() {
       canExport={can(Capability.EVIDENCE_EXPORT, { role })}
       canRequestBoard={canViewClosureDossiers && can(Capability.REPORT_GENERATE, { role })}
       canManageBoard={isAxiomInternal && role === UserRole.FOUNDER}
+      canReadSealed
     />
   );
 }

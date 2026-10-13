@@ -1,20 +1,20 @@
 /**
  * E2E: Agent ↔ UI communication.
  *
- * `/workbench` needs `WORKBENCH_ACCESS`, held only by `founder` and
- * `axiom_analyst`, and `ALWAYS_MFA_REQUIRED` holds both at enrolment until a
- * TOTP challenge is satisfied. These were `fixme` for exactly one reason: the
+ * `/workbench` needs `WORKBENCH_ACCESS`, held only by the internal `founder`
+ * (the analyst lost it on 2026-10-12), and `ALWAYS_MFA_REQUIRED` holds the
+ * founder at enrolment until a TOTP challenge is satisfied. These were `fixme` for exactly one reason: the
  * harness did not start a BFF, so there was nothing to satisfy the challenge
  * against. It starts one now, so the analyst signs in, clears the login-MFA
  * gate with a real code, and reaches the workbench the way a person does.
  */
 
 import { test, expect } from '@playwright/test';
-import { signInFreshAnalyst, state } from '../fixtures';
+import { signInFreshAnalyst, signInFreshFounder, state } from '../fixtures';
 
 test.describe('Agent ↔ UI communication', () => {
   test.beforeEach(async ({ page }) => {
-    await signInFreshAnalyst(page, 'workbench');
+    await signInFreshFounder(page, 'workbench');
   });
 
   test('agent progress events update the UI', async ({ page }) => {
@@ -54,7 +54,7 @@ test.describe('Agent ↔ UI communication', () => {
 test('workbench refuses absent/failed statuses and shows only confirmed success', async ({
   page,
 }) => {
-  await signInFreshAnalyst(page, 'workbench-outcomes');
+  await signInFreshFounder(page, 'workbench-outcomes');
   let mode: 'missing' | 'failed' | 'success' = 'missing';
   let sent: Record<string, unknown> = {};
   await page.route('**/api/bff/v1/agents/drishti/run', async (route) => {

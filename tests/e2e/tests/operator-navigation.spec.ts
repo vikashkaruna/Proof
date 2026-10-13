@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { selectTenant, signIn } from '../fixtures';
 
-test('an approver opens the approval queue from the menu; a viewer is offered neither it nor Pramaan', async ({
+test('an approver opens the approval queue but holds no kill switch; a viewer reads sealed Pramaan only', async ({
   page,
 }) => {
   await signIn(page, 'approver');
@@ -14,6 +14,13 @@ test('an approver opens the approval queue from the menu; a viewer is offered ne
   await expect(page).toHaveURL(/\/approval$/);
   await expect(page.getByRole('main')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Approval queue' })).toBeVisible();
+  // Halting and resuming automation is the owner's and admin's, not the approver's.
+  await expect(page.getByRole('button', { name: /Kill switch/i })).toHaveCount(0);
+  await expect(
+    page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', {
+      name: /Breach & Incident/,
+    }),
+  ).toBeVisible();
 
   await page.context().clearCookies();
   await signIn(page, 'viewer');
@@ -22,14 +29,16 @@ test('an approver opens the approval queue from the menu; a viewer is offered ne
   await expect(page.getByRole('link', { name: /Approval Queue/ })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Statutory Proof Dossiers/ })).toHaveCount(0);
   await page.goto('/reports?tab=pramaan');
-  await expect(page.getByRole('button', { name: 'Closure dossiers' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Working reports and registers' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Closure dossiers' })).toHaveAttribute(
     'aria-current',
     'page',
   );
-  await expect(
-    page.locator('header').first().getByText('Working Reports & Registers'),
-  ).toBeVisible();
+  // Read-only: no preparation form and no export of any kind.
+  await expect(page.getByText('Prepare source-bound dossier')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Working reports and registers' }).click();
+  await expect(page.getByText('Tenant Approval History Audit Export')).toHaveCount(0);
+  await page.goto('/ledger');
+  await expect(page.getByRole('button', { name: /Export recorded ledger entries/ })).toHaveCount(0);
 });
 
 test('an owner reaches Pramaan and standalone routes show their own shell titles', async ({

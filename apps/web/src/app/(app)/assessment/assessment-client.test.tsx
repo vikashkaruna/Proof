@@ -201,3 +201,9 @@ it('shows pipeline progress only from a saved finalized declaration snapshot', (
   expect(screen.getByTestId('pipeline-parikshan').getAttribute('data-state')).toBe('completed');
   expect(screen.getByTestId('pipeline-saakshi').getAttribute('data-state')).toBe('not-run');
 });
+
+it('reads the penalty exposure estimate in crores', () => {
+  render(<AssessmentClient snapshot={{ ...declaredSnapshot(), exposureInr: 1_85_00_00_000 }} />);
+  expect(document.body.textContent).toContain('₹185 Cr');
+  expect(document.body.textContent).not.toContain('1,85,00,00,000');
+});

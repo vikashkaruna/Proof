@@ -191,6 +191,19 @@ export async function signInFreshAnalyst(page: Page, label: string): Promise<voi
   await satisfyLoginMfaWithSecret(page, who.totpSecret);
 }
 
+/** A fresh internal founder: the only role that reaches the Agent Workbench. */
+export async function signInFreshFounder(page: Page, label: string): Promise<void> {
+  const who = await createMfaAccount(label, {
+    role: 'founder',
+    withFactor: true,
+    isInternal: true,
+  });
+  if (!who.totpSecret) throw new Error('Founder journey requires an enrolled factor');
+  await signInAs(page, who.email, who.password);
+  await selectTenant(page, 'a');
+  await satisfyLoginMfaWithSecret(page, who.totpSecret);
+}
+
 export const planUrl = (id: string) => `/plans/${id}`;
 
 /**
