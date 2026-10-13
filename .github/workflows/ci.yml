@@ -825,6 +825,12 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/model-gateway
+      - run: uv run ruff check src/model_gateway tests
+        working-directory: services/model-gateway
+      - run: uv run mypy src/model_gateway --strict
+        working-directory: services/model-gateway
+        env:
+          MYPYPATH: ../../packages/offline-license-python
       - run: uv run pytest --cov --cov-report=xml --cov-fail-under=80
         working-directory: services/model-gateway
 

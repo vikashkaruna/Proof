@@ -5,18 +5,20 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
 from axiom_offline_license import verify_offline_license
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from structlog.typing import FilteringBoundLogger
 
 from .config import Settings, get_settings
-from .redaction import redact, redact_variables
-from .router import TaskKind, decide_route
+from .redaction import RedactionSummary, redact, redact_variables
+from .router import RouteDecision, TaskKind, decide_route
 
 # ─── Request / response shapes ───────────────────────────────────────
 
@@ -86,7 +88,7 @@ class ChatCompletionResponse(BaseModel):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     structlog.configure(
         processors=[
@@ -114,7 +116,9 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def require_onprem_license(request: Request, call_next):
+async def require_onprem_license(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     if (
         os.environ.get("ENVIRONMENT") == "onprem"
         and request.url.path != "/health"
@@ -126,12 +130,12 @@ async def require_onprem_license(request: Request, call_next):
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/ready")
-async def ready():
+async def ready() -> dict[str, object]:
     settings: Settings = app.state.settings
     return {
         "status": "ready",
@@ -144,7 +148,7 @@ async def ready():
 
 
 @app.post("/v1/complete", response_model=CompleteResponse)
-async def complete(req: CompleteRequest, request: Request):
+async def complete(req: CompleteRequest, request: Request) -> CompleteResponse:
     settings: Settings = app.state.settings
     log = structlog.get_logger()
     correlation_id = str(uuid.uuid4())
@@ -165,14 +169,17 @@ async def complete(req: CompleteRequest, request: Request):
     decision = decide_route(req.task, req.model, settings)
     must_redact = decision.provider != "self_hosted"
     if settings.pii_redaction_enabled and (req.pii_redact or must_redact):
-        r = redact(req.prompt)
-        redacted_prompt = r.redacted_text
-        pii_redacted = True
-        for k, v in r.redactions.items():
-            redactions[k] = redactions.get(k, 0) + v
-        redacted_variables, var_red = redact_variables(req.variables)
-        for k, v in var_red.items():
-            redactions[k] = redactions.get(k, 0) + v
+        try:
+            r = redact(req.prompt)
+            redacted_prompt = r.redacted_text
+            pii_redacted = True
+            for k, v in r.redactions.items():
+                redactions[k] = redactions.get(k, 0) + v
+            redacted_variables, var_red = redact_variables(req.variables)
+            for k, v in var_red.items():
+                redactions[k] = redactions.get(k, 0) + v
+        except Exception:  # noqa: BLE001 - refuse every initial redactor failure before dispatch
+            raise HTTPException(status_code=503, detail="redaction_unavailable") from None
 
     log.info(
         "model_gateway.route_decision",
@@ -192,19 +199,26 @@ async def complete(req: CompleteRequest, request: Request):
 
     t0 = time.monotonic()
     try:
-        text, input_tokens, output_tokens = await _dispatch(
+        text, input_tokens, output_tokens, transport_redaction = await _dispatch(
             composed_prompt,
             decision,
             req,
             settings,
             log,
         )
-    except Exception as e:
+    except HostedRedactionUnavailable:
+        raise HTTPException(status_code=503, detail="hosted_redaction_unavailable") from None
+    except Exception as e:  # noqa: BLE001 - provider failures are bounded unavailable results
         if settings.environment == "onprem":
             log.error("model_gateway.local_model_unavailable", error_type=type(e).__name__)
             raise HTTPException(status_code=503, detail="local_model_unavailable") from None
-        log.error("model_gateway.dispatched_error", err=str(e))
-        raise HTTPException(status_code=502, detail=f"provider_error: {e}") from e
+        log.error("model_gateway.dispatched_error", error_type=type(e).__name__)
+        raise HTTPException(status_code=503, detail="model_provider_unavailable") from None
+
+    if transport_redaction is not None:
+        pii_redacted = True
+        for kind, count in transport_redaction.redactions.items():
+            redactions[kind] = redactions.get(kind, 0) + count
 
     latency_ms = int((time.monotonic() - t0) * 1000)
     cost_in = settings.cost_per_input_token.get(decision.model, 0)
@@ -228,7 +242,7 @@ async def complete(req: CompleteRequest, request: Request):
 
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(req: ChatCompletionRequest, request: Request):
+async def chat_completions(req: ChatCompletionRequest, request: Request) -> ChatCompletionResponse:
     settings: Settings = app.state.settings
     log = structlog.get_logger()
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -238,6 +252,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         provided = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
         if provided != settings.api_key:
             raise HTTPException(status_code=401, detail="invalid api key")
+
+    if settings.environment != "onprem":
+        # No authenticated canonical demo eligibility exists at this boundary.
+        # Model names and caller-supplied tenant IDs cannot authorize simulation.
+        raise HTTPException(status_code=503, detail="chat_provider_unavailable")
 
     # Extract user prompt from messages
     user_prompts = [m.content for m in req.messages if m.role == "user"]
@@ -273,24 +292,12 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             pii_redact=False,
         )
         try:
-            content, in_tokens, out_tokens = await _dispatch(
+            content, in_tokens, out_tokens, _transport_redaction = await _dispatch(
                 redacted_prompt, decision, completion, settings, log
             )
         except Exception:  # noqa: BLE001 - every local provider failure is an unavailable result
             log.error("model_gateway.local_model_unavailable")
             raise HTTPException(status_code=503, detail="local_model_unavailable") from None
-    elif req.model.startswith("stub"):
-        content = f"Model Gateway received prompt with PII redacted: {redacted_prompt}"
-    else:
-        content = (
-            f"[Model Gateway · {decision.provider}/{decision.model}] "
-            f"Processed prompt with PII redacted: {redacted_prompt}"
-        )
-
-    if settings.environment != "onprem":
-        in_tokens = max(1, len(raw_prompt) // 4)
-        out_tokens = max(1, len(content) // 4)
-
     return ChatCompletionResponse(
         id=completion_id,
         created=int(time.time()),
@@ -312,18 +319,36 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     )
 
 
+class HostedRedactionUnavailable(RuntimeError):
+    """Hosted transport must not proceed without final prompt redaction."""
+
+
+def _redact_hosted_prompt(prompt: str, settings: Settings) -> RedactionSummary:
+    if not settings.pii_redaction_enabled:
+        raise HostedRedactionUnavailable()
+    try:
+        summary = redact(prompt)
+        if not isinstance(summary, RedactionSummary) or not isinstance(summary.redacted_text, str):
+            raise HostedRedactionUnavailable()
+        return summary
+    except Exception:  # noqa: BLE001 - any redactor failure must refuse hosted egress
+        # Redactor exceptions can contain original values. Neither the caller
+        # nor the hosted-provider fallback handler receives their text.
+        raise HostedRedactionUnavailable() from None
+
+
 async def _dispatch(
     prompt: str,
-    decision,
+    decision: RouteDecision,
     req: CompleteRequest,
     settings: Settings,
-    log,
-) -> tuple[str, int, int]:
+    log: FilteringBoundLogger,
+) -> tuple[str, int, int, RedactionSummary | None]:
     """Dispatch through the multi-model fallback chain:
     1. Anthropic (Primary)
     2. OpenAI (Fallback 1)
     3. Gemini (Fallback 2)
-    4. Deterministic synthetic stub (Offline / test resilience)
+    Missing or exhausted providers fail closed; simulation has no authority here.
     """
     if settings.environment == "onprem":
         if not settings.self_hosted_base_url:
@@ -350,6 +375,7 @@ async def _dispatch(
             content,
             int(usage.get("prompt_tokens", max(1, len(prompt) // 4))),
             int(usage.get("completion_tokens", max(1, len(content) // 4))),
+            None,
         )
 
     # Build candidate list based on decision fallback_chain or settings
@@ -394,12 +420,17 @@ async def _dispatch(
     # Try live providers in order
     if candidates:
         for provider_name, model_name, api_key in candidates:
+            # The route decision is not the serving provider. Recheck at each
+            # hosted transport boundary, after template/variable composition.
+            # Refusal is outside provider failover: it cannot become a stub or
+            # another unredacted hosted attempt.
+            transport_redaction = _redact_hosted_prompt(prompt, settings)
             try:
                 import litellm
 
                 response = await litellm.acompletion(
                     model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[{"role": "user", "content": transport_redaction.redacted_text}],
                     api_key=api_key,
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
@@ -414,37 +445,19 @@ async def _dispatch(
                     in_tokens=in_tokens,
                     out_tokens=out_tokens,
                 )
-                return text, in_tokens, out_tokens
+                return text, in_tokens, out_tokens, transport_redaction
             except Exception as e:  # noqa: BLE001 - hosted-provider fallback is existing behavior
                 log.warning(
                     "model_gateway.provider_failover",
                     failed_provider=provider_name,
                     failed_model=model_name,
-                    error=str(e),
+                    error_type=type(e).__name__,
                 )
                 continue
 
-    # Deterministic fallback stub
-    text = _stub_completion(prompt, decision, req)
-    input_tokens = max(1, len(prompt) // 4)
-    output_tokens = max(1, len(text) // 4)
-    return text, input_tokens, output_tokens
-
-
-def _stub_completion(prompt: str, decision, req: CompleteRequest) -> str:
-    # A small, deterministic stub that varies by task. The agent
-    # runtime can be tested end-to-end without a real model.
-    if req.task == "classification":
-        return '{"category": "other", "confidence": 0.5, "rationale": "stub"}'
-    if req.task == "structural":
-        return '{"ok": true}'
-    if req.task == "embedding":
-        # Return 8-dim zero vector as a placeholder
-        return "[" + ",".join(["0.0"] * 8) + "]"
-    return (
-        f"[Model Gateway stub · {decision.provider}/{decision.model} · task={req.task}] "
-        f"Acknowledged. (Phase 0/1 — replace with real LiteLLM call in Phase 2.)"
-    )
+    # An unavailable provider is a failed call in every current environment.
+    # The existing organisation UI demo flag supplies no gateway authority.
+    raise RuntimeError("model_provider_unavailable")
 
 
 def _hash(s: str) -> str:
