@@ -1,0 +1,265 @@
+{
+  "producer": "actual Python 3.14.8 format(value, .0f/.2f)",
+  "cases": [
+    {
+      "value": 0.0,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.0,
+      "places": 2,
+      "expected": "0.00"
+    },
+    {
+      "value": 0.5,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.5,
+      "places": 2,
+      "expected": "0.50"
+    },
+    {
+      "value": 1.5,
+      "places": 0,
+      "expected": "2"
+    },
+    {
+      "value": 1.5,
+      "places": 2,
+      "expected": "1.50"
+    },
+    {
+      "value": 2.5,
+      "places": 0,
+      "expected": "2"
+    },
+    {
+      "value": 2.5,
+      "places": 2,
+      "expected": "2.50"
+    },
+    {
+      "value": 30.125,
+      "places": 0,
+      "expected": "30"
+    },
+    {
+      "value": 30.125,
+      "places": 2,
+      "expected": "30.12"
+    },
+    {
+      "value": 39.5,
+      "places": 0,
+      "expected": "40"
+    },
+    {
+      "value": 39.5,
+      "places": 2,
+      "expected": "39.50"
+    },
+    {
+      "value": 40.5,
+      "places": 0,
+      "expected": "40"
+    },
+    {
+      "value": 40.5,
+      "places": 2,
+      "expected": "40.50"
+    },
+    {
+      "value": 64.5,
+      "places": 0,
+      "expected": "64"
+    },
+    {
+      "value": 64.5,
+      "places": 2,
+      "expected": "64.50"
+    },
+    {
+      "value": 65.5,
+      "places": 0,
+      "expected": "66"
+    },
+    {
+      "value": 65.5,
+      "places": 2,
+      "expected": "65.50"
+    },
+    {
+      "value": 84.5,
+      "places": 0,
+      "expected": "84"
+    },
+    {
+      "value": 84.5,
+      "places": 2,
+      "expected": "84.50"
+    },
+    {
+      "value": 85.5,
+      "places": 0,
+      "expected": "86"
+    },
+    {
+      "value": 85.5,
+      "places": 2,
+      "expected": "85.50"
+    },
+    {
+      "value": 99.5,
+      "places": 0,
+      "expected": "100"
+    },
+    {
+      "value": 99.5,
+      "places": 2,
+      "expected": "99.50"
+    },
+    {
+      "value": 100.0,
+      "places": 0,
+      "expected": "100"
+    },
+    {
+      "value": 100.0,
+      "places": 2,
+      "expected": "100.00"
+    },
+    {
+      "value": 2.675,
+      "places": 0,
+      "expected": "3"
+    },
+    {
+      "value": 2.675,
+      "places": 2,
+      "expected": "2.67"
+    },
+    {
+      "value": 1.005,
+      "places": 0,
+      "expected": "1"
+    },
+    {
+      "value": 1.005,
+      "places": 2,
+      "expected": "1.00"
+    },
+    {
+      "value": 0.125,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.125,
+      "places": 2,
+      "expected": "0.12"
+    },
+    {
+      "value": 0.375,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.375,
+      "places": 2,
+      "expected": "0.38"
+    },
+    {
+      "value": 0.12499999999999999,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.12499999999999999,
+      "places": 2,
+      "expected": "0.12"
+    },
+    {
+      "value": 0.12500000000000003,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.12500000000000003,
+      "places": 2,
+      "expected": "0.13"
+    },
+    {
+      "value": 5e-324,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 5e-324,
+      "places": 2,
+      "expected": "0.00"
+    },
+    {
+      "value": 1e-308,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 1e-308,
+      "places": 2,
+      "expected": "0.00"
+    },
+    {
+      "value": 900719925.4740992,
+      "places": 0,
+      "expected": "900719925"
+    },
+    {
+      "value": 900719925.4740992,
+      "places": 2,
+      "expected": "900719925.47"
+    },
+    {
+      "value": 0.01,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.01,
+      "places": 2,
+      "expected": "0.01"
+    },
+    {
+      "value": 0.005,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.005,
+      "places": 2,
+      "expected": "0.01"
+    },
+    {
+      "value": 0.015,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.015,
+      "places": 2,
+      "expected": "0.01"
+    },
+    {
+      "value": 0.025,
+      "places": 0,
+      "expected": "0"
+    },
+    {
+      "value": 0.025,
+      "places": 2,
+      "expected": "0.03"
+    }
+  ]
+}
