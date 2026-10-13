@@ -13,11 +13,13 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
+import re
 import secrets
 import shutil
-import sys
 import subprocess  # nosec B404 - test harness runs docker and pnpm with argv lists, no shell
+import sys
 import tarfile
 import tempfile
 import time
@@ -27,10 +29,11 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 # http(s) only. A bare urlopen would also accept file: and other schemes; this
 # opener has no handler for them, and the scheme is checked explicitly as well.
-_OPENER = urllib.request.build_opener(urllib.request.HTTPHandler, urllib.request.HTTPSHandler)
+_OPENER = urllib.request.build_opener(
+    urllib.request.HTTPHandler, urllib.request.HTTPSHandler
+)
 
 
 def _open(url, timeout):
@@ -42,9 +45,12 @@ def _open(url, timeout):
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib.ci_fixture_images import fixture_image
+
 COMMIT = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a"
 ARCHIVE_SHA = "45521908307306e925c98d629e1c17d78c8b72b6ee242b1bfb1409f7d8ee5841"
-BUILDER = fixture_image("docker.io/library/golang@sha256:4ed690d6649d63c312b99a6120025ec79ce3b542968a37da53d6236c7c61a848")
+BUILDER = fixture_image(
+    "docker.io/library/golang@sha256:4ed690d6649d63c312b99a6120025ec79ce3b542968a37da53d6236c7c61a848"
+)
 URL = f"https://codeload.github.com/minio/minio/tar.gz/{COMMIT}"
 
 
@@ -131,7 +137,9 @@ def build(directory: Path, run_id: str) -> str:
         return package(directory, source, output, verified_archive)
 
 
-def package(directory: Path, source: Path, output: Path, verified_archive: bytes) -> str:
+def package(
+    directory: Path, source: Path, output: Path, verified_archive: bytes
+) -> str:
     context = directory / "image"
     context.mkdir(exist_ok=True)
     shutil.copy2(output / "minio", context / "minio")
@@ -177,12 +185,18 @@ def owned_provider(directory: Path):
         raise RuntimeError("Fixture ownership mismatch")
     config = json.loads((directory / "private-config.json").read_text())
     endpoint = urlparse(config["endpoint"])
-    if endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or not endpoint.port:
+    if (
+        endpoint.scheme != "http"
+        or endpoint.hostname != "127.0.0.1"
+        or not endpoint.port
+    ):
         raise RuntimeError("Private fixture endpoint is not loopback")
     # Docker Desktop omits NetworkSettings.Ports while a container is paused.
     # Ownership remains provable from its label; verify the live endpoint again
     # immediately after unpause instead of refusing the recovery operation.
-    if not info["State"]["Paused"] and config["endpoint"] != endpoint_for(state["name"]):
+    if not info["State"]["Paused"] and config["endpoint"] != endpoint_for(
+        state["name"]
+    ):
         raise RuntimeError("Private fixture endpoint mismatch")
     return state, info
 
@@ -195,14 +209,60 @@ def resume_provider(directory: Path):
     healthy(endpoint_for(state["name"]))
 
 
+def validate_cold_pdf_measurement(value):
+    """Accept only sanitized observed first-request evidence, never an SLA claim."""
+    expected = {
+        "scope",
+        "artifactRequestElapsedMs",
+        "pdfBytes",
+        "pdfSha256",
+        "downloadSha256",
+        "pdfCreator",
+        "requiredChromiumSourcePath",
+        "osDiskCacheCold",
+        "remoteNfr",
+        "productionTimeoutChanged",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise RuntimeError("Missing or malformed first-PDF evidence")
+    elapsed = value["artifactRequestElapsedMs"]
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise RuntimeError("Invalid first-PDF elapsed measurement")
+    if type(value["pdfBytes"]) is not int or not 500 <= value["pdfBytes"] <= 33554432:
+        raise RuntimeError("Invalid retained PDF byte count")
+    if not isinstance(value["pdfSha256"], str) or not re.fullmatch(
+        r"[a-f0-9]{64}", value["pdfSha256"]
+    ):
+        raise RuntimeError("Invalid retained PDF digest")
+    if value["downloadSha256"] != value["pdfSha256"]:
+        raise RuntimeError("Retained download digest mismatch")
+    if (
+        value["scope"] != "fresh-process-first-artifact-request"
+        or value["pdfCreator"] != "Chromium"
+        or value["requiredChromiumSourcePath"] is not True
+        or value["osDiskCacheCold"] != "unverified"
+        or value["remoteNfr"] != "unverified"
+        or value["productionTimeoutChanged"] is not False
+    ):
+        raise RuntimeError("Unsupported first-PDF evidence claim")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--directory", type=Path, default=ROOT / ".axiom-runtime/evidence-storage")
+    parser.add_argument(
+        "--directory", type=Path, default=ROOT / ".axiom-runtime/evidence-storage"
+    )
     parser.add_argument(
         "--image-id",
         help="Existing source-built fixture image; provenance labels are checked",
     )
     parser.add_argument("--build-only", action="store_true")
+    parser.add_argument(
+        "--cold-pdf",
+        action="store_true",
+        help="Run one first-PDF journey without renderer warm-up",
+    )
     parser.add_argument(
         "--pause-provider",
         action="store_true",
@@ -229,6 +289,14 @@ def main():
         help="Remove only the owned fixture identified by private-fixture.json",
     )
     args = parser.parse_args()
+    if args.cold_pdf and (
+        args.browser
+        or args.stop
+        or args.pause_provider
+        or args.resume_provider
+        or args.build_only
+    ):
+        raise RuntimeError("Cold PDF mode must run separately")
     os.umask(0o077)
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -247,7 +315,7 @@ def main():
             resume_provider(directory)
             print("Owned synthetic evidence provider resumed")
         return
-    if args.browser:
+    if args.browser or args.cold_pdf:
         state, info = owned_provider(directory)
         if (
             info["Config"]["Labels"].get("axiom.fixture.run") != state["runId"]
@@ -257,22 +325,34 @@ def main():
         env = os.environ.copy()
         env.update(
             dict(
-                line.split("=", 1) for line in (directory / "runtime.env").read_text().splitlines()
+                line.split("=", 1)
+                for line in (directory / "runtime.env").read_text().splitlines()
             )
         )
-        # Cold headless Chromium can exceed the renderer's 30 s budget on a fresh
-        # runner; take that cold start (and any missing-binary failure) here, with
-        # the renderer's own explanation, instead of inside the first PDF journey.
-        subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
-            ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
-            cwd=ROOT,
-            env=env,
-            timeout=300,
-            check=True,
-        )
+        # The cold mode runs first on a hosted disposable fixture. Its new BFF
+        # process must receive its first artifact request before any warm-up.
+        if not args.cold_pdf:
+            subprocess.run(  # nosec B603 B607 - fixed pnpm argv, no shell
+                ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
+                cwd=ROOT,
+                env=env,
+                timeout=300,
+                check=True,
+            )
+        measurement = directory / "private-cold-pdf-measurement.json"
+        if args.cold_pdf:
+            measurement.unlink(missing_ok=True)
+            env["AXIOM_COLD_PDF_ACCEPTANCE"] = "true"
+        else:
+            env.pop("AXIOM_COLD_PDF_ACCEPTANCE", None)
         env["AXIOM_EVIDENCE_STORAGE_ACCEPTANCE"] = "true"
         env["AXIOM_EVIDENCE_FIXTURE_DIRECTORY"] = str(directory)
-        raw_report = directory / "private-playwright.json"
+        raw_report = directory / (
+            "private-cold-playwright.json"
+            if args.cold_pdf
+            else "private-playwright.json"
+        )
+        raw_report.unlink(missing_ok=True)
         env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(raw_report)
         summary = {
             "status": "failed",
@@ -282,45 +362,62 @@ def main():
         }
         try:
             result = subprocess.run(  # nosec B603 B607 - fixed pnpm argv, no shell
-                [
-                    "pnpm",
-                    "--filter",
-                    "@axiom/e2e",
-                    "exec",
-                    "playwright",
-                    "test",
-                    "source-bound-formats-provider.spec.ts",
-                    "evidence-ingestion.spec.ts",
-                    "evidence-vault.spec.ts",
-                    "evidence-packs.spec.ts",
-                    "evidence-packs-access.spec.ts",
-                    "board-reports-provider.spec.ts",
-                    "approval-archive-provider.spec.ts",
-                    "--workers=1",
-                    "--retries=0",
-                    "--reporter=line,json",
-                    "--trace=off",
-                ],
+                ["pnpm", "--filter", "@axiom/e2e", "exec", "playwright", "test"]
+                + (
+                    [
+                        "board-reports-provider.spec.ts",
+                        "--grep",
+                        "finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions$",
+                    ]
+                    if args.cold_pdf
+                    else [
+                        "source-bound-formats-provider.spec.ts",
+                        "evidence-ingestion.spec.ts",
+                        "evidence-vault.spec.ts",
+                        "evidence-packs.spec.ts",
+                        "evidence-packs-access.spec.ts",
+                        "board-reports-provider.spec.ts",
+                        "approval-archive-provider.spec.ts",
+                    ]
+                )
+                + ["--workers=1", "--retries=0", "--reporter=line,json", "--trace=off"],
                 cwd=ROOT,
                 env=env,
                 timeout=1800,
+                check=False,
             )
             stats = json.loads(raw_report.read_text()).get("stats", {})
             # Sum of every test() in the seven specs above (ingestion 1, vault 3,
             # packs 3, pack-access 1, board 5, approval archive 1, technical+DPB
             # source-bound formats 2). Refuse a missing or silently skipped spec.
-            expected_browser_tests = 16
+            expected_browser_tests = 1 if args.cold_pdf else 16
             summary["counts"] = {
-                name: stats.get(name) for name in ["expected", "unexpected", "flaky", "skipped"]
+                name: stats.get(name)
+                for name in ["expected", "unexpected", "flaky", "skipped"]
             }
             if (
                 result.returncode
+                or any(
+                    type(stats.get(name)) is not int
+                    for name in ["expected", "unexpected", "flaky", "skipped"]
+                )
                 or stats.get("expected") != expected_browser_tests
-                or any(stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"])
+                or any(
+                    stats.get(name) != 0 for name in ["unexpected", "flaky", "skipped"]
+                )
             ):
                 raise RuntimeError(
                     f"Evidence browser acceptance requires all {expected_browser_tests} tests without skips or retries"
                 )
+            if args.cold_pdf:
+                summary["measurement"] = validate_cold_pdf_measurement(
+                    json.loads(measurement.read_text())
+                )
+                summary["status"] = "passed"
+                summary["outcomes"] = [
+                    "first-source-bound-board-pdf-retained-and-downloaded-without-warmup"
+                ]
+                return
             summary["status"] = "passed"
             summary["outcomes"] = [
                 "real-provider-human-ingestion-and-exact-version-browser-lifecycle",
@@ -351,10 +448,17 @@ def main():
                 summary["cleanup"] = "provider_resume_failed"
                 raise
             finally:
-                (directory / "browser-results.json").write_text(
-                    json.dumps(summary, indent=2) + "\n"
-                )
+                (
+                    directory
+                    / (
+                        "cold-pdf-results.json"
+                        if args.cold_pdf
+                        else "browser-results.json"
+                    )
+                ).write_text(json.dumps(summary, indent=2) + "\n")
                 raw_report.unlink(missing_ok=True)
+                if args.cold_pdf:
+                    measurement.unlink(missing_ok=True)
         return
     if args.stop:
         if not state_file.exists():
@@ -383,7 +487,9 @@ def main():
         print("Owned evidence fixture removed")
         return
     if state_file.exists():
-        raise RuntimeError("An owned fixture already exists; stop it before starting another")
+        raise RuntimeError(
+            "An owned fixture already exists; stop it before starting another"
+        )
     (directory / "report.json").write_text(json.dumps({"status": "running"}) + "\n")
     run_id = uuid.uuid4().hex[:12]
     image = args.image_id or build(directory / "build", run_id)
@@ -445,7 +551,9 @@ def main():
         )
         endpoint = endpoint_for(name)
         healthy(endpoint)
-        state_file.write_text(json.dumps({"name": name, "volume": volume, "runId": run_id}))
+        state_file.write_text(
+            json.dumps({"name": name, "volume": volume, "runId": run_id})
+        )
         config = {
             "endpoint": endpoint,
             "accessKeyId": user,
@@ -479,7 +587,9 @@ def main():
                     timeout=180,
                 )
             )
-            outcomes.extend(json.loads(Path(config["resultPath"]).read_text())["outcomes"])
+            outcomes.extend(
+                json.loads(Path(config["resultPath"]).read_text())["outcomes"]
+            )
         report = {
             "status": "passed",
             "outcomes": outcomes,
@@ -492,7 +602,9 @@ def main():
             "scope": "isolated synthetic loopback provider; not production/cloud retention acceptance",
         }
         (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-        print(f"Evidence storage acceptance: {len(outcomes)} real-provider outcomes passed")
+        print(
+            f"Evidence storage acceptance: {len(outcomes)} real-provider outcomes passed"
+        )
         if args.keep_running:
             command(["docker", "start", name])
             endpoint = endpoint_for(name)

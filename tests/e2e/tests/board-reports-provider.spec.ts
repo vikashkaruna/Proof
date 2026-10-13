@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test, expect, type Page } from '@playwright/test';
@@ -341,9 +343,11 @@ test.describe('real-provider board report lifecycle', () => {
         'approved',
       );
       const operationKey = crypto.randomUUID();
+      const artifactRequestStarted = performance.now();
       const built = await post(founder, `/reports/board/${draft.reportId}/artifacts`, {
         operationKey,
       });
+      const artifactRequestElapsedMs = performance.now() - artifactRequestStarted;
       // The body carries the BFF error code; without it a CI 503 is opaque.
       expect(built.status(), await built.text()).toBe(200);
       const result = (await built.json()) as { buildId: string; status: string };
@@ -392,7 +396,34 @@ test.describe('real-provider board report lifecycle', () => {
         `/api/bff/v1/reports/board/${draft.reportId}/pdf`,
       );
       expect(privatePdf.status()).toBe(200);
-      expect(sha(Buffer.from(await privatePdf.body()))).toBe(pdfVersion.content_hash);
+      const downloadedPdf = Buffer.from(await privatePdf.body());
+      expect(sha(downloadedPdf)).toBe(pdfVersion.content_hash);
+      if (process.env.AXIOM_COLD_PDF_ACCEPTANCE === 'true') {
+        expect(downloadedPdf.length).toBe(pdfVersion.byte_size);
+        expect(downloadedPdf.subarray(0, 5).toString()).toBe('%PDF-');
+        // Observe Chromium's PDF metadata, not an assumed value from requested mode.
+        const creator = /\/Creator \(Chromium\)/.exec(downloadedPdf.toString('latin1'));
+        expect(
+          creator,
+          'First retained PDF must carry the actual Chromium creator metadata',
+        ).not.toBeNull();
+        await writeFile(
+          join(config.directory, 'private-cold-pdf-measurement.json'),
+          JSON.stringify({
+            scope: 'fresh-process-first-artifact-request',
+            artifactRequestElapsedMs,
+            pdfBytes: downloadedPdf.length,
+            pdfSha256: pdfVersion.content_hash,
+            downloadSha256: sha(downloadedPdf),
+            pdfCreator: creator![0].slice('/Creator ('.length, -1),
+            requiredChromiumSourcePath: true,
+            osDiskCacheCold: 'unverified',
+            remoteNfr: 'unverified',
+            productionTimeoutChanged: false,
+          }),
+          { mode: 0o600 },
+        );
+      }
       const viewer = await viewerContext.newPage();
       await signIn(viewer, 'viewer');
       await selectTenant(viewer, 'a');
