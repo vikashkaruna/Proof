@@ -89,7 +89,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --project services/temporal-workers --locked --no-dev --no-editable
       - name: Causal lock comparison regressions
-        run: uv run --project services/temporal-workers --locked --no-dev python -m unittest tests/scripts/test_python_image_lock_parity.py -v
+        run: uv run --project services/temporal-workers --locked --no-dev python -m unittest tests/scripts/test_python_image_lock_parity.py tests/scripts/python_image_lock_parity_integration.py -v
       - name: Build and verify actual Python image dependencies
         run: uv run --project services/temporal-workers --locked --no-dev python scripts/test-python-image-lock-parity.py
 

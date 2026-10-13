@@ -2,10 +2,7 @@
 
 import importlib.util
 import json
-import os
-import shutil
 import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -164,42 +161,6 @@ class ImageLockParityTests(unittest.TestCase):
     def test_unpinned_export_refused(self):
         with self.assertRaisesRegex(ValueError, "exact versions"):
             self.verify(self.fixture(), "httpx>=0.28.1")
-
-    def test_outdated_manifest_refused_without_rewriting_lock(self):
-        root = PATH.parent.parent
-        owned = root / ".axiom-runtime" / "review" / "python-image-lock-parity"
-        owned.mkdir(parents=True, exist_ok=True, mode=0o700)
-        uv = shutil.which("uv")
-        self.assertIsNotNone(uv)
-        with tempfile.TemporaryDirectory(dir=owned) as directory:
-            project = Path(directory)
-            service = root / "services" / "temporal-workers"
-            raw_lock = (service / "uv.lock").read_bytes()
-            (project / "uv.lock").write_bytes(raw_lock)
-            original = (service / "pyproject.toml").read_text()
-            self.assertIn('version = "0.1.0"', original)
-            (project / "pyproject.toml").write_text(
-                original.replace('version = "0.1.0"', 'version = "0.2.0"', 1)
-            )
-            result = subprocess.run(
-                [
-                    uv,
-                    "export",
-                    "--project",
-                    str(project),
-                    "--locked",
-                    "--offline",
-                    "--no-dev",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-                env={**os.environ, "UV_PYTHON_DOWNLOADS": "never"},
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("lockfile", result.stderr.lower())
-            self.assertEqual((project / "uv.lock").read_bytes(), raw_lock)
 
 
 if __name__ == "__main__":
