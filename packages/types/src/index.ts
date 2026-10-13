@@ -29,3 +29,5 @@ export * from './prativedan-drafts';
 export * from './prativedan-renderer-config';
 
 export * from './prativedan-assessment-drafts';
+
+export * from './monitoring-outcomes';
