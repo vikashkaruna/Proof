@@ -1,3 +1,4 @@
+import { loadMonitoringOutcomes } from '@/lib/monitoring-outcomes';
 import { Capability, can } from '@axiom/types';
 import {
   Badge,
@@ -157,6 +158,12 @@ export default async function MonitoringPage() {
   const driftEvents = driftRes.data as unknown as DriftRow[];
   const alerts = alertsRes.data as unknown as AlertRow[];
 
+  const outcomes = await loadMonitoringOutcomes(
+    supabase,
+    tenantId,
+    schedules.map((s) => s.id),
+  );
+  const outcomeBySchedule = new Map(outcomes?.schedules.map((s) => [s.scheduleId, s]));
   const health = computeMonitoringHealth(schedules, driftEvents);
   const unreadAlerts = alerts.filter((a) => a.status === 'unread' || a.status === 'read');
   const criticalAlerts = unreadAlerts.filter((a) => a.severity === 'critical');
@@ -167,12 +174,29 @@ export default async function MonitoringPage() {
       <PageHeader
         module={moduleBarProps('monitoring')}
         title="Continuous Monitoring"
-        description="Registered schedules drive re-discovery, re-assessment and drift checks per estate. Detections and deadlines trigger automated alerts that remain open until acknowledged by a human."
+        description="Registered schedules request re-discovery, re-assessment and drift checks per estate. Retained outcomes show actual observations and recording failures; registration alone does not prove execution."
         actions={
           canManage ? <DispatchAlertsButton tenantId={tenantId} canManage={canManage} /> : undefined
         }
       />
 
+      {!outcomes && (
+        <p role="alert" className="rounded-md border border-ember-500 p-4 text-sm text-ember-700">
+          Recorded schedule outcomes are unavailable. Schedule timing does not prove successful
+          monitoring.
+        </p>
+      )}
+      {outcomes && (
+        <p className="text-sm text-slate-600">
+          {
+            outcomes.schedules.filter(
+              (s) => s.state === 'retained' && s.fire.recordingOutcome === 'failed',
+            ).length
+          }{' '}
+          failed or unwired latest outcomes in the loaded page. Absence of overdue schedules does
+          not prove successful monitoring.
+        </p>
+      )}
       <StatGrid>
         <Stat
           label="Schedules shown"
@@ -302,7 +326,10 @@ export default async function MonitoringPage() {
                       Status
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
-                      Last run
+                      Last recorded attempt
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Latest retained outcome
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
                       Next run
@@ -312,6 +339,7 @@ export default async function MonitoringPage() {
                 <tbody className="divide-y divide-slate-100">
                   {schedules.map((s) => {
                     const isOverdue = isScheduleOverdue(s, health.checkedAt);
+                    const outcome = outcomeBySchedule.get(s.id);
                     return (
                       <tr key={s.id} className={isOverdue ? 'bg-ember-50/50' : undefined}>
                         <td className="px-3 py-2 font-medium text-slate-700">{s.name}</td>
@@ -328,7 +356,40 @@ export default async function MonitoringPage() {
                           <StatusBadge status={s.status as StatusKind} />
                         </td>
                         <td className="px-3 py-2 text-slate-500">
-                          {s.last_run_at ? formatDateTime(s.last_run_at) : 'never'}
+                          {s.last_run_at ? formatDateTime(s.last_run_at) : 'No timestamp recorded'}
+                        </td>
+                        <td className="px-3 py-2">
+                          {!outcome ? (
+                            'Outcome unavailable'
+                          ) : outcome.state === 'never_recorded' ? (
+                            'No retained outcome'
+                          ) : (
+                            <div>
+                              <span
+                                className={
+                                  outcome.fire.recordingOutcome === 'failed'
+                                    ? 'text-ember-700'
+                                    : 'text-slate-700'
+                                }
+                              >
+                                {outcome.fire.observationOutcome.replaceAll('_', ' ')} ·{' '}
+                                {outcome.fire.recordingOutcome === 'failed'
+                                  ? 'recording failed'
+                                  : 'recorded'}
+                              </span>
+                              {outcome.fire.failureCode && (
+                                <p>{outcome.fire.failureCode.replaceAll('_', ' ')}</p>
+                              )}
+                              <p>
+                                Detected {outcome.fire.detectedCount} · recorded{' '}
+                                {outcome.fire.recordedCount} · failed {outcome.fire.failedCount}
+                              </p>
+                              <p>Original due {formatDateTime(outcome.fire.dueAt)}</p>
+                              <p title={outcome.fire.scheduleReceipt.entryHash}>
+                                Ledger receipt #{outcome.fire.scheduleReceipt.id}
+                              </p>
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <span className="text-slate-600">
