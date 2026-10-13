@@ -79,7 +79,8 @@ export const REGULATORY_INSTRUMENTS: readonly RegulatoryInstrument[] = [
     gazetteRef: 'G.S.R. 846(E), Gazette No. 760',
     publishedOn: '2025-11-13',
     status: 'notified',
-    sourceUrl: 'https://dpdprules.org/rules/1',
+    sourceUrl:
+      'https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf',
     verifiedOn: '2026-09-20',
     verifiedBy: 'Axiom Minds · Founder',
     notes:
@@ -94,7 +95,7 @@ export const REGULATORY_INSTRUMENTS: readonly RegulatoryInstrument[] = [
     publishedOn: '2025-12-11',
     status: 'corrigendum',
     amends: 'GSR-846E',
-    sourceUrl: 'https://dpdprules.org/rules/1',
+    sourceUrl: 'https://egazette.gov.in/WriteReadData/2025/268455.pdf',
     verifiedOn: '2026-09-20',
     verifiedBy: 'Axiom Minds · Founder',
     notes:
