@@ -249,7 +249,7 @@ test.describe('revocation and login quarantine', () => {
   test('a quarantined founder enrolls, saves codes, verifies, and can then access the app', async ({
     page,
   }) => {
-    const who = await createMfaAccount('quarantine', { role: 'founder' });
+    const who = await createMfaAccount('quarantine', { role: 'founder', isInternal: true });
     await signInAs(page, who.email, who.password);
     await page.goto('/dashboard');
     await expect(page).toHaveURL(/settings\/security\?enrol=required/);
@@ -272,7 +272,7 @@ test.describe('revocation and login quarantine', () => {
     await expect(page).toHaveURL(/\/verify/);
     await page.fill('#code', codes[0]!);
     await page.getByRole('button', { name: /^Verify$/ }).click();
-    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page).toHaveURL(/\/workbench/);
     expect((await protectedApi()).status()).toBe(200);
     // A second browser session with just the password is still quarantined.
     await page.context().clearCookies();
@@ -287,7 +287,7 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
   page,
   browser,
 }) => {
-  const who = await createMfaAccount('recovery-sessions', { role: 'founder' });
+  const who = await createMfaAccount('recovery-sessions', { role: 'founder', isInternal: true });
   await signInAs(page, who.email, who.password);
   await selectTenant(page, 'a');
   await openSecurity(page);
@@ -321,7 +321,7 @@ test('recovery replacement makes both verified sessions complete MFA again', asy
     );
     await verifyButton.click();
     expect((await response).status()).toBe(200);
-    await expect(target).toHaveURL(/\/dashboard/, { timeout: 20_000 });
+    await expect(target).toHaveURL(/\/workbench/, { timeout: 20_000 });
   };
   const protectedApi = (target: Page) =>
     target.request.get('/api/bff/v1/engagements', { headers: { 'X-Tenant-Id': state.tenantA.id } });
