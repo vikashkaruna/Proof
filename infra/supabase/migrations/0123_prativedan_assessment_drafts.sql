@@ -114,9 +114,9 @@ begin
   if c->>'library_version' is distinct from p.library_version
    or jsonb_typeof(c->'sdf_only') is distinct from 'boolean' or jsonb_typeof(c->'children_only') is distinct from 'boolean'
    or jsonb_typeof(c->'assessment_questions') is distinct from 'array'
-   or not exists(select 1 from public.controls where library_version=p.library_version and id=c->>'id'
-    and title=c->>'title' and severity::text=c->>'severity' and assessment_questions=c->'assessment_questions'
-    and sdf_only=(c->>'sdf_only')::boolean and children_only=(c->>'children_only')::boolean)
+   or not exists(select 1 from public.controls pinned where pinned.library_version=p.library_version and pinned.id=c->>'id'
+    and pinned.title=c->>'title' and pinned.severity::text=c->>'severity' and pinned.assessment_questions=c->'assessment_questions'
+    and pinned.sdf_only=(c->>'sdf_only')::boolean and pinned.children_only=(c->>'children_only')::boolean)
   then raise exception 'pinned control refused' using errcode='42501'; end if;
   select value into d from jsonb_array_elements(prov->'controls') where value->>'control_id'=c->>'id';
   select value into f from jsonb_array_elements(p.result->'findings') where value->>'control_id'=c->>'id';
