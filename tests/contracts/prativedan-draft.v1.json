@@ -1,0 +1,627 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "live_workflow_acceptance": false,
+  "python_version": "3.14.8",
+  "cases": [
+    {
+      "name": "fractional-unicode-html-safe-integer",
+      "request": {
+        "operationKey": "47510000-0000-4000-8000-000000000006",
+        "engagementId": "47510000-0000-4000-8000-000000000002",
+        "assessmentRunId": "47510000-0000-4000-8000-000000000004",
+        "expectedSourceSha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "sourceReviewed": true
+      },
+      "source_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "library_version": "1.0.0",
+        "controls_sha256": "71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9",
+        "result_sha256": "2062bfc88558fa03543c966111d958b876eb8eb21a0280d1b49f55083f4004e6",
+        "receipts": {
+          "started": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "completed": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "finalized": {
+            "id": "3",
+            "entry_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        },
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "title": "प्रारूप <Board & \"review\">",
+        "source_text": "{\"assessment_run_id\":\"47510000-0000-4000-8000-000000000004\",\"completed_at\":\"2026-10-13T00:00:00+00:00\",\"controls_sha256\":\"71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9\",\"controls_text\":\"[{\\\"assessment_questions\\\":[{\\\"id\\\":\\\"Q1\\\",\\\"type\\\":\\\"boolean\\\"}],\\\"children_only\\\":false,\\\"id\\\":\\\"C1\\\",\\\"library_version\\\":\\\"1.0.0\\\",\\\"sdf_only\\\":true,\\\"severity\\\":\\\"high\\\",\\\"title\\\":\\\"सहमति <unknown & \\\\\\\"declaration\\\\\\\">\\\"}]\",\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"finalized_at\":\"2026-10-13T00:01:00+00:00\",\"kind\":\"board_source\",\"library_version\":\"1.0.0\",\"limitations\":[\"Caller declarations unverified.\"],\"receipts\":{\"completed\":{\"entry_hash\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"id\":\"2\"},\"finalized\":{\"entry_hash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"3\"},\"started\":{\"entry_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"id\":\"1\"}},\"request_id\":\"47510000-0000-4000-8000-000000000003\",\"result_sha256\":\"2062bfc88558fa03543c966111d958b876eb8eb21a0280d1b49f55083f4004e6\",\"result_text\":\"{\\\"estimated_exposure_inr\\\":9007199254740991,\\\"findings\\\":[{\\\"control_id\\\":\\\"C1\\\",\\\"rationale\\\":\\\"घोषणा <unverified> & \\\\\\\"unknown\\\\\\\".\\\",\\\"risk_points\\\":5,\\\"score\\\":30.125}],\\\"library_version\\\":\\\"1.0.0\\\",\\\"posture_score\\\":30.125,\\\"questionnaire_provenance\\\":{\\\"applicability\\\":{\\\"processes_children\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null},\\\"processes_health\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null},\\\"sdf_self_attested\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null}},\\\"controls\\\":[{\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unknown\\\",\\\"caller_affirmed_count\\\":0,\\\"caller_denied_count\\\":0,\\\"control_id\\\":\\\"C1\\\",\\\"known_boolean_question_count\\\":1,\\\"questions\\\":[{\\\"declaration\\\":\\\"unknown\\\",\\\"question_id\\\":\\\"Q1\\\"}],\\\"unknown_count\\\":1}],\\\"estimates\\\":\\\"provisional\\\",\\\"review_required\\\":true,\\\"source_library_digest\\\":\\\"71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9\\\",\\\"source_library_version\\\":\\\"1.0.0\\\",\\\"version\\\":1}}\",\"schema_version\":1,\"serialization\":\"postgres-jsonb-text-v1\",\"tenant_id\":\"47510000-0000-4000-8000-000000000001\"}",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d"
+      },
+      "dispatch": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_text": "{\"assessmentRunId\":\"47510000-0000-4000-8000-000000000004\",\"engagementId\":\"47510000-0000-4000-8000-000000000002\",\"expectedSourceSha256\":\"e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d\",\"operationKey\":\"47510000-0000-4000-8000-000000000006\",\"sourceReviewed\":true}",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "invoke_request": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006"
+      },
+      "envelope": {
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "renderer_config_text": "{\"agent\":\"prativedan\",\"agent_version\":\"0.1.0\",\"citation_policy\":\"explicit-canonical-nonzero-uuid-references-unverified\",\"citation_verification\":\"unverified_references\",\"exposure_divisor\":10000000,\"exposure_format\":\".2f\",\"finding_limit\":10,\"finding_order\":\"numeric-finite-nonnegative-risk-desc-otherwise-source-order\",\"html_escape\":\"python-html-escape-quote-true\",\"html_findings_columns\":[\"control_id\",\"title\",\"severity\",\"score\",\"risk_points\"],\"implementation\":\"deterministic-prativedan-sections-html-v1\",\"model_identity\":null,\"model_inference\":false,\"posture_bands\":[[85,\"Strong\"],[65,\"Acceptable\"],[40,\"At Risk\"],[0,\"Critical\"]],\"posture_format\":\".0f\",\"ranked_findings_title\":\"Top findings (by risk-weighted exposure)\",\"renderer_config_version\":\"prativedan-draft-v1\",\"review_required\":true,\"schema_version\":1,\"section_order\":[\"executive_summary\",\"findings_table\",\"library\",\"attribution\"],\"source_findings_title\":\"Findings for review (source order)\",\"source_rationale_suffix\":\" [Draft assessment declaration: answer={answer_state}; applicability={applicability_state}; evidence unverified.]\"}",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "normalized_input_text": "{\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"estimated_exposure_inr\":9007199254740991,\"findings\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"score\":30.125,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"kind\":\"board\",\"library_control_ids\":[\"C1\"],\"library_version\":\"1.0.0\",\"posture_score\":30.125,\"reviewer_id\":null,\"tenant_id\":\"47510000-0000-4000-8000-000000000001\",\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_normalized_input_sha256": "7978d643efc48286025d2dda8b4195f53f630831b492e777ac88e1814c5ac56a",
+        "runtime_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>30.125</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":30.125,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_output_sha256": "d87f0c3412b0d6fa88f05aee94779bfae05cc4f02f1da1cb61ae23b4e862da70",
+        "output": {
+          "title": "प्रारूप <Board & \"review\">",
+          "kind": "board",
+          "sections": [
+            {
+              "type": "executive_summary",
+              "title": "Executive summary",
+              "body": "Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0."
+            },
+            {
+              "type": "findings_table",
+              "title": "Findings for review (source order)",
+              "items": [
+                {
+                  "control_id": "C1",
+                  "title": "सहमति <unknown & \"declaration\">",
+                  "severity": "high",
+                  "score": 30.125,
+                  "risk_points": null,
+                  "rationale": "घोषणा <unverified> & \"unknown\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]"
+                }
+              ]
+            },
+            {
+              "type": "library",
+              "title": "Control library",
+              "body": "Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required."
+            },
+            {
+              "type": "attribution",
+              "title": "Draft attribution and review status",
+              "body": "Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified."
+            }
+          ],
+          "cited_evidence_ids": [],
+          "generated_by_agent": "prativedan",
+          "rendered_html": "<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\n<div class=\"axiom-cover\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\n<h2>Executive summary</h2>\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\n<h2>Findings for review (source order)</h2>\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>30.125</td><td></td></tr></tbody></table>\n<h2>Control library</h2>\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\n<h2>Draft attribution and review status</h2>\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>",
+          "review_required": true,
+          "citation_verification": "unverified_references"
+        },
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "review_required": true,
+        "citation_verification": "unverified_references"
+      },
+      "receipt_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "runtime_normalized_input_sha256": "7978d643efc48286025d2dda8b4195f53f630831b492e777ac88e1814c5ac56a",
+        "runtime_output_sha256": "d87f0c3412b0d6fa88f05aee94779bfae05cc4f02f1da1cb61ae23b4e862da70",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "claim_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "runtime_normalized_input_sha256": "7978d643efc48286025d2dda8b4195f53f630831b492e777ac88e1814c5ac56a",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "claimed": true,
+        "expires_at_ms": 2000
+      },
+      "claim_arguments": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "runtime_normalized_input_sha256": "7978d643efc48286025d2dda8b4195f53f630831b492e777ac88e1814c5ac56a",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "actual_runtime_receipt_details": [
+        {
+          "phase": "started",
+          "run_id": "47510000-0000-4000-8000-000000000005",
+          "request_hash": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+          "renderer_config_version": "prativedan-draft-v1",
+          "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+        },
+        {
+          "phase": "completed",
+          "started_entry": "101",
+          "run_id": "47510000-0000-4000-8000-000000000005",
+          "request_hash": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+          "renderer_config_version": "prativedan-draft-v1",
+          "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+        }
+      ],
+      "response_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>30.125</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":30.125,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+      "readback_proof": {
+        "kind": "prativedan_unpublished_draft",
+        "schema_version": 1,
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "source_sha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+        "request_sha256": "edd8b442e461a176ca0dcf9bbb8dfd10ef1f3cf6d5352004b416d40eda2c7edb",
+        "runtime_normalized_input_sha256": "7978d643efc48286025d2dda8b4195f53f630831b492e777ac88e1814c5ac56a",
+        "runtime_output_sha256": "d87f0c3412b0d6fa88f05aee94779bfae05cc4f02f1da1cb61ae23b4e862da70",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "draft_id": "47510000-0000-4000-8000-000000000900",
+        "actor_id": "47510000-0000-4000-8000-000000000099",
+        "request": {
+          "operationKey": "47510000-0000-4000-8000-000000000006",
+          "engagementId": "47510000-0000-4000-8000-000000000002",
+          "assessmentRunId": "47510000-0000-4000-8000-000000000004",
+          "expectedSourceSha256": "e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d",
+          "sourceReviewed": true
+        },
+        "request_text": "{\"assessmentRunId\":\"47510000-0000-4000-8000-000000000004\",\"engagementId\":\"47510000-0000-4000-8000-000000000002\",\"expectedSourceSha256\":\"e5c5f9da42e1324a93e650a27c5ec0ceee0a230ce0d24274097ae85de8a1300d\",\"operationKey\":\"47510000-0000-4000-8000-000000000006\",\"sourceReviewed\":true}",
+        "renderer_config_text": "{\"agent\":\"prativedan\",\"agent_version\":\"0.1.0\",\"citation_policy\":\"explicit-canonical-nonzero-uuid-references-unverified\",\"citation_verification\":\"unverified_references\",\"exposure_divisor\":10000000,\"exposure_format\":\".2f\",\"finding_limit\":10,\"finding_order\":\"numeric-finite-nonnegative-risk-desc-otherwise-source-order\",\"html_escape\":\"python-html-escape-quote-true\",\"html_findings_columns\":[\"control_id\",\"title\",\"severity\",\"score\",\"risk_points\"],\"implementation\":\"deterministic-prativedan-sections-html-v1\",\"model_identity\":null,\"model_inference\":false,\"posture_bands\":[[85,\"Strong\"],[65,\"Acceptable\"],[40,\"At Risk\"],[0,\"Critical\"]],\"posture_format\":\".0f\",\"ranked_findings_title\":\"Top findings (by risk-weighted exposure)\",\"renderer_config_version\":\"prativedan-draft-v1\",\"review_required\":true,\"schema_version\":1,\"section_order\":[\"executive_summary\",\"findings_table\",\"library\",\"attribution\"],\"source_findings_title\":\"Findings for review (source order)\",\"source_rationale_suffix\":\" [Draft assessment declaration: answer={answer_state}; applicability={applicability_state}; evidence unverified.]\"}",
+        "normalized_input_text": "{\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"estimated_exposure_inr\":9007199254740991,\"findings\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"score\":30.125,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"kind\":\"board\",\"library_control_ids\":[\"C1\"],\"library_version\":\"1.0.0\",\"posture_score\":30.125,\"reviewer_id\":null,\"tenant_id\":\"47510000-0000-4000-8000-000000000001\",\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>30.125</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":30.125,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "response_output_sha256": "d87f0c3412b0d6fa88f05aee94779bfae05cc4f02f1da1cb61ae23b4e862da70",
+        "settled_receipt": {
+          "id": "103",
+          "entry_hash": "52666e799942ebce8e9a876a26fce1523a90d73ddd5628870dce81412047af57"
+        },
+        "state": "unpublished",
+        "publication_allowed": false,
+        "review_required": true,
+        "citation_verification": "unverified_references",
+        "output": {
+          "title": "प्रारूप <Board & \"review\">",
+          "kind": "board",
+          "sections": [
+            {
+              "type": "executive_summary",
+              "title": "Executive summary",
+              "body": "Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0."
+            },
+            {
+              "type": "findings_table",
+              "title": "Findings for review (source order)",
+              "items": [
+                {
+                  "control_id": "C1",
+                  "title": "सहमति <unknown & \"declaration\">",
+                  "severity": "high",
+                  "score": 30.125,
+                  "rationale": "घोषणा <unverified> & \"unknown\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]",
+                  "risk_points": null
+                }
+              ]
+            },
+            {
+              "type": "library",
+              "title": "Control library",
+              "body": "Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required."
+            },
+            {
+              "type": "attribution",
+              "title": "Draft attribution and review status",
+              "body": "Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified."
+            }
+          ],
+          "cited_evidence_ids": [],
+          "generated_by_agent": "prativedan",
+          "rendered_html": "<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\n<div class=\"axiom-cover\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\n<h2>Executive summary</h2>\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\n<h2>Findings for review (source order)</h2>\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>30.125</td><td></td></tr></tbody></table>\n<h2>Control library</h2>\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\n<h2>Draft attribution and review status</h2>\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>",
+          "review_required": true,
+          "citation_verification": "unverified_references"
+        }
+      }
+    },
+    {
+      "name": "tiny-exponent",
+      "request": {
+        "operationKey": "47510000-0000-4000-8000-000000000006",
+        "engagementId": "47510000-0000-4000-8000-000000000002",
+        "assessmentRunId": "47510000-0000-4000-8000-000000000004",
+        "expectedSourceSha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "sourceReviewed": true
+      },
+      "source_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "library_version": "1.0.0",
+        "controls_sha256": "71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9",
+        "result_sha256": "bc3fa0872c309b41b6461877e909077972ec08b25c3d1170afa037ba625f0b90",
+        "receipts": {
+          "started": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "completed": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "finalized": {
+            "id": "3",
+            "entry_hash": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        },
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "title": "प्रारूप <Board & \"review\">",
+        "source_text": "{\"assessment_run_id\":\"47510000-0000-4000-8000-000000000004\",\"completed_at\":\"2026-10-13T00:00:00+00:00\",\"controls_sha256\":\"71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9\",\"controls_text\":\"[{\\\"assessment_questions\\\":[{\\\"id\\\":\\\"Q1\\\",\\\"type\\\":\\\"boolean\\\"}],\\\"children_only\\\":false,\\\"id\\\":\\\"C1\\\",\\\"library_version\\\":\\\"1.0.0\\\",\\\"sdf_only\\\":true,\\\"severity\\\":\\\"high\\\",\\\"title\\\":\\\"सहमति <unknown & \\\\\\\"declaration\\\\\\\">\\\"}]\",\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"finalized_at\":\"2026-10-13T00:01:00+00:00\",\"kind\":\"board_source\",\"library_version\":\"1.0.0\",\"limitations\":[\"Caller declarations unverified.\"],\"receipts\":{\"completed\":{\"entry_hash\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"id\":\"2\"},\"finalized\":{\"entry_hash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"id\":\"3\"},\"started\":{\"entry_hash\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"id\":\"1\"}},\"request_id\":\"47510000-0000-4000-8000-000000000003\",\"result_sha256\":\"bc3fa0872c309b41b6461877e909077972ec08b25c3d1170afa037ba625f0b90\",\"result_text\":\"{\\\"estimated_exposure_inr\\\":9007199254740991,\\\"findings\\\":[{\\\"control_id\\\":\\\"C1\\\",\\\"rationale\\\":\\\"घोषणा <unverified> & \\\\\\\"unknown\\\\\\\".\\\",\\\"risk_points\\\":5,\\\"score\\\":1e-07}],\\\"library_version\\\":\\\"1.0.0\\\",\\\"posture_score\\\":30.125,\\\"questionnaire_provenance\\\":{\\\"applicability\\\":{\\\"processes_children\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null},\\\"processes_health\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null},\\\"sdf_self_attested\\\":{\\\"provenance\\\":\\\"unknown\\\",\\\"value\\\":null}},\\\"controls\\\":[{\\\"answer_state\\\":\\\"unknown\\\",\\\"applicability_state\\\":\\\"unknown\\\",\\\"caller_affirmed_count\\\":0,\\\"caller_denied_count\\\":0,\\\"control_id\\\":\\\"C1\\\",\\\"known_boolean_question_count\\\":1,\\\"questions\\\":[{\\\"declaration\\\":\\\"unknown\\\",\\\"question_id\\\":\\\"Q1\\\"}],\\\"unknown_count\\\":1}],\\\"estimates\\\":\\\"provisional\\\",\\\"review_required\\\":true,\\\"source_library_digest\\\":\\\"71a6a7f894c0921a7fb7d7d7a0575243946fd7759e1644aa3fdb248fdf2333f9\\\",\\\"source_library_version\\\":\\\"1.0.0\\\",\\\"version\\\":1}}\",\"schema_version\":1,\"serialization\":\"postgres-jsonb-text-v1\",\"tenant_id\":\"47510000-0000-4000-8000-000000000001\"}",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b"
+      },
+      "dispatch": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_text": "{\"assessmentRunId\":\"47510000-0000-4000-8000-000000000004\",\"engagementId\":\"47510000-0000-4000-8000-000000000002\",\"expectedSourceSha256\":\"04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b\",\"operationKey\":\"47510000-0000-4000-8000-000000000006\",\"sourceReviewed\":true}",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "invoke_request": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006"
+      },
+      "envelope": {
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "renderer_config_text": "{\"agent\":\"prativedan\",\"agent_version\":\"0.1.0\",\"citation_policy\":\"explicit-canonical-nonzero-uuid-references-unverified\",\"citation_verification\":\"unverified_references\",\"exposure_divisor\":10000000,\"exposure_format\":\".2f\",\"finding_limit\":10,\"finding_order\":\"numeric-finite-nonnegative-risk-desc-otherwise-source-order\",\"html_escape\":\"python-html-escape-quote-true\",\"html_findings_columns\":[\"control_id\",\"title\",\"severity\",\"score\",\"risk_points\"],\"implementation\":\"deterministic-prativedan-sections-html-v1\",\"model_identity\":null,\"model_inference\":false,\"posture_bands\":[[85,\"Strong\"],[65,\"Acceptable\"],[40,\"At Risk\"],[0,\"Critical\"]],\"posture_format\":\".0f\",\"ranked_findings_title\":\"Top findings (by risk-weighted exposure)\",\"renderer_config_version\":\"prativedan-draft-v1\",\"review_required\":true,\"schema_version\":1,\"section_order\":[\"executive_summary\",\"findings_table\",\"library\",\"attribution\"],\"source_findings_title\":\"Findings for review (source order)\",\"source_rationale_suffix\":\" [Draft assessment declaration: answer={answer_state}; applicability={applicability_state}; evidence unverified.]\"}",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "normalized_input_text": "{\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"estimated_exposure_inr\":9007199254740991,\"findings\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"score\":1e-07,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"kind\":\"board\",\"library_control_ids\":[\"C1\"],\"library_version\":\"1.0.0\",\"posture_score\":30.125,\"reviewer_id\":null,\"tenant_id\":\"47510000-0000-4000-8000-000000000001\",\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_normalized_input_sha256": "c074e55fdf876e036fb41136fb9363f1acd45c99f1d7a6cd5c51e5555bf4dccf",
+        "runtime_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>1e-07</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":1e-07,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_output_sha256": "f096c6b1260c6132341c523c6ecd53444c413fd665a96279f1e209ccdb113d1f",
+        "output": {
+          "title": "प्रारूप <Board & \"review\">",
+          "kind": "board",
+          "sections": [
+            {
+              "type": "executive_summary",
+              "title": "Executive summary",
+              "body": "Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0."
+            },
+            {
+              "type": "findings_table",
+              "title": "Findings for review (source order)",
+              "items": [
+                {
+                  "control_id": "C1",
+                  "title": "सहमति <unknown & \"declaration\">",
+                  "severity": "high",
+                  "score": 1e-7,
+                  "risk_points": null,
+                  "rationale": "घोषणा <unverified> & \"unknown\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]"
+                }
+              ]
+            },
+            {
+              "type": "library",
+              "title": "Control library",
+              "body": "Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required."
+            },
+            {
+              "type": "attribution",
+              "title": "Draft attribution and review status",
+              "body": "Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified."
+            }
+          ],
+          "cited_evidence_ids": [],
+          "generated_by_agent": "prativedan",
+          "rendered_html": "<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\n<div class=\"axiom-cover\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\n<h2>Executive summary</h2>\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\n<h2>Findings for review (source order)</h2>\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>1e-07</td><td></td></tr></tbody></table>\n<h2>Control library</h2>\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\n<h2>Draft attribution and review status</h2>\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>",
+          "review_required": true,
+          "citation_verification": "unverified_references"
+        },
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "review_required": true,
+        "citation_verification": "unverified_references"
+      },
+      "receipt_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "runtime_normalized_input_sha256": "c074e55fdf876e036fb41136fb9363f1acd45c99f1d7a6cd5c51e5555bf4dccf",
+        "runtime_output_sha256": "f096c6b1260c6132341c523c6ecd53444c413fd665a96279f1e209ccdb113d1f",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "claim_witness": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "runtime_normalized_input_sha256": "c074e55fdf876e036fb41136fb9363f1acd45c99f1d7a6cd5c51e5555bf4dccf",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "claimed": true,
+        "expires_at_ms": 2000
+      },
+      "claim_arguments": {
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "runtime_normalized_input_sha256": "c074e55fdf876e036fb41136fb9363f1acd45c99f1d7a6cd5c51e5555bf4dccf",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+      },
+      "actual_runtime_receipt_details": [
+        {
+          "phase": "started",
+          "run_id": "47510000-0000-4000-8000-000000000005",
+          "request_hash": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+          "renderer_config_version": "prativedan-draft-v1",
+          "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+        },
+        {
+          "phase": "completed",
+          "started_entry": "101",
+          "run_id": "47510000-0000-4000-8000-000000000005",
+          "request_hash": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+          "renderer_config_version": "prativedan-draft-v1",
+          "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3"
+        }
+      ],
+      "response_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>1e-07</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":1e-7,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+      "readback_proof": {
+        "kind": "prativedan_unpublished_draft",
+        "schema_version": 1,
+        "tenant_id": "47510000-0000-4000-8000-000000000001",
+        "engagement_id": "47510000-0000-4000-8000-000000000002",
+        "source_id": "47510000-0000-4000-8000-000000000003",
+        "assessment_run_id": "47510000-0000-4000-8000-000000000004",
+        "run_id": "47510000-0000-4000-8000-000000000005",
+        "operation_key": "47510000-0000-4000-8000-000000000006",
+        "source_sha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+        "request_sha256": "80c1e3c12c711c0e818dda9f918027718994a9c4f0ad372a19d26c9fcba16e8d",
+        "runtime_normalized_input_sha256": "c074e55fdf876e036fb41136fb9363f1acd45c99f1d7a6cd5c51e5555bf4dccf",
+        "runtime_output_sha256": "f096c6b1260c6132341c523c6ecd53444c413fd665a96279f1e209ccdb113d1f",
+        "renderer_config_version": "prativedan-draft-v1",
+        "renderer_config_sha256": "b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3",
+        "agent": "prativedan",
+        "agent_version": "0.1.0",
+        "correlation_id": "47510000-0000-4000-8000-000000000006",
+        "target_ref": "47510000-0000-4000-8000-000000000002",
+        "requested_receipt": {
+          "id": "100",
+          "entry_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "started_receipt": {
+          "id": "101",
+          "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "completed_receipt": {
+          "id": "102",
+          "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "draft_id": "47510000-0000-4000-8000-000000000901",
+        "actor_id": "47510000-0000-4000-8000-000000000099",
+        "request": {
+          "operationKey": "47510000-0000-4000-8000-000000000006",
+          "engagementId": "47510000-0000-4000-8000-000000000002",
+          "assessmentRunId": "47510000-0000-4000-8000-000000000004",
+          "expectedSourceSha256": "04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b",
+          "sourceReviewed": true
+        },
+        "request_text": "{\"assessmentRunId\":\"47510000-0000-4000-8000-000000000004\",\"engagementId\":\"47510000-0000-4000-8000-000000000002\",\"expectedSourceSha256\":\"04f811fcbb1e76a148cf930b2d64b181f2b7697b8746ddb5bc55c8076f1fd81b\",\"operationKey\":\"47510000-0000-4000-8000-000000000006\",\"sourceReviewed\":true}",
+        "renderer_config_text": "{\"agent\":\"prativedan\",\"agent_version\":\"0.1.0\",\"citation_policy\":\"explicit-canonical-nonzero-uuid-references-unverified\",\"citation_verification\":\"unverified_references\",\"exposure_divisor\":10000000,\"exposure_format\":\".2f\",\"finding_limit\":10,\"finding_order\":\"numeric-finite-nonnegative-risk-desc-otherwise-source-order\",\"html_escape\":\"python-html-escape-quote-true\",\"html_findings_columns\":[\"control_id\",\"title\",\"severity\",\"score\",\"risk_points\"],\"implementation\":\"deterministic-prativedan-sections-html-v1\",\"model_identity\":null,\"model_inference\":false,\"posture_bands\":[[85,\"Strong\"],[65,\"Acceptable\"],[40,\"At Risk\"],[0,\"Critical\"]],\"posture_format\":\".0f\",\"ranked_findings_title\":\"Top findings (by risk-weighted exposure)\",\"renderer_config_version\":\"prativedan-draft-v1\",\"review_required\":true,\"schema_version\":1,\"section_order\":[\"executive_summary\",\"findings_table\",\"library\",\"attribution\"],\"source_findings_title\":\"Findings for review (source order)\",\"source_rationale_suffix\":\" [Draft assessment declaration: answer={answer_state}; applicability={applicability_state}; evidence unverified.]\"}",
+        "normalized_input_text": "{\"engagement_id\":\"47510000-0000-4000-8000-000000000002\",\"estimated_exposure_inr\":9007199254740991,\"findings\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"score\":1e-07,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"kind\":\"board\",\"library_control_ids\":[\"C1\"],\"library_version\":\"1.0.0\",\"posture_score\":30.125,\"reviewer_id\":null,\"tenant_id\":\"47510000-0000-4000-8000-000000000001\",\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "runtime_output_text": "{\"citation_verification\":\"unverified_references\",\"cited_evidence_ids\":[],\"generated_by_agent\":\"prativedan\",\"kind\":\"board\",\"rendered_html\":\"<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\\n<div class=\\\"axiom-cover\\\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\\n<h2>Executive summary</h2>\\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\\n<h2>Findings for review (source order)</h2>\\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>1e-07</td><td></td></tr></tbody></table>\\n<h2>Control library</h2>\\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\\n<h2>Draft attribution and review status</h2>\\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>\",\"review_required\":true,\"sections\":[{\"body\":\"Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.\",\"title\":\"Executive summary\",\"type\":\"executive_summary\"},{\"items\":[{\"control_id\":\"C1\",\"rationale\":\"घोषणा <unverified> & \\\"unknown\\\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]\",\"risk_points\":null,\"score\":1e-07,\"severity\":\"high\",\"title\":\"सहमति <unknown & \\\"declaration\\\">\"}],\"title\":\"Findings for review (source order)\",\"type\":\"findings_table\"},{\"body\":\"Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.\",\"title\":\"Control library\",\"type\":\"library\"},{\"body\":\"Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.\",\"title\":\"Draft attribution and review status\",\"type\":\"attribution\"}],\"title\":\"प्रारूप <Board & \\\"review\\\">\"}",
+        "response_output_sha256": "98bc2dda7b991a1b85c2f35a448e994e2d5e2bf75b51cc5518cf7dec7a06720a",
+        "settled_receipt": {
+          "id": "103",
+          "entry_hash": "376d61cb4771f8a67b28472fa44ec022d51980c3ea70a522b2d961d532b584a3"
+        },
+        "state": "unpublished",
+        "publication_allowed": false,
+        "review_required": true,
+        "citation_verification": "unverified_references",
+        "output": {
+          "title": "प्रारूप <Board & \"review\">",
+          "kind": "board",
+          "sections": [
+            {
+              "type": "executive_summary",
+              "title": "Executive summary",
+              "body": "Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0."
+            },
+            {
+              "type": "findings_table",
+              "title": "Findings for review (source order)",
+              "items": [
+                {
+                  "control_id": "C1",
+                  "title": "सहमति <unknown & \"declaration\">",
+                  "severity": "high",
+                  "score": 1e-7,
+                  "rationale": "घोषणा <unverified> & \"unknown\". [Draft assessment declaration: answer=unknown; applicability=unknown; evidence unverified.]",
+                  "risk_points": null
+                }
+              ]
+            },
+            {
+              "type": "library",
+              "title": "Control library",
+              "body": "Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required."
+            },
+            {
+              "type": "attribution",
+              "title": "Draft attribution and review status",
+              "body": "Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified."
+            }
+          ],
+          "cited_evidence_ids": [],
+          "generated_by_agent": "prativedan",
+          "rendered_html": "<h1>प्रारूप &lt;Board &amp; &quot;review&quot;&gt;</h1>\n<div class=\"axiom-cover\"><p>Posture: <strong>30/100 (Critical; provisional)</strong></p></div>\n<h2>Executive summary</h2>\n<p>Declared posture score: 30/100 (Critical; provisional). Estimated statutory exposure (provisional): ₹900719925.47 Cr. 1 findings included for review. Library version: 1.0.0.</p>\n<h2>Findings for review (source order)</h2>\n<table><thead><tr><th>Control</th><th>Title</th><th>Severity</th><th>Score</th><th>Risk pts</th></tr></thead><tbody><tr><td>C1</td><td>सहमति &lt;unknown &amp; &quot;declaration&quot;&gt;</td><td>high</td><td>1e-07</td><td></td></tr></tbody></table>\n<h2>Control library</h2>\n<p>Referenced library version: 1.0.0. Draft input declares 1 controls; frozen source verification remains required.</p>\n<h2>Draft attribution and review status</h2>\n<p>Generated by Prativedan (v0.1.0). Pending recorded human review. Evidence references are unverified.</p>",
+          "review_required": true,
+          "citation_verification": "unverified_references"
+        }
+      }
+    }
+  ],
+  "receipt_provenance": {
+    "assessment": "synthetic declarations",
+    "requested": "synthetic declaration",
+    "claim": "captured synthetic in-memory exclusive claim; durable SQL is not implemented",
+    "started_completed": "actual Python BaseAgent invocation recorded in synthetic in-memory receipt store",
+    "settled": "synthetic contract-only declaration; durable settlement is not implemented"
+  }
+}

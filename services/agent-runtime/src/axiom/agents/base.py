@@ -62,6 +62,13 @@ class DispatchContext(BaseModel):
     request_hash: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
 
 
+class RendererDispatchContext(DispatchContext):
+    """Dedicated renderer commitment; legacy context serialization stays exact."""
+
+    renderer_config_version: str = Field(strict=True)
+    renderer_config_sha256: str = Field(strict=True, pattern=r"^[a-f0-9]{64}$")
+
+
 class AgentName(QualifiedStringEnum):
     DRISHTI = "drishti"
     VIBHAAG = "vibhaag"
@@ -134,6 +141,10 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         self.model_gateway = model_gateway or ModelGateway(self.settings)
         self.log = structlog.get_logger(agent=self.name.value, version=self.version)
 
+    def renderer_configuration(self) -> tuple[str, str, str] | None:
+        """Only dedicated renderers expose a real versioned configuration."""
+        return None
+
     @abstractmethod
     def input_schema(self) -> type[InputT]: ...
 
@@ -164,10 +175,24 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 else (raw_input or {})
             )
             context = (
-                DispatchContext.model_validate(dispatch_context).model_dump(mode="json")
+                DispatchContext.model_validate(dispatch_context).model_dump(
+                    mode="json", exclude_none=True
+                )
                 if dispatch_context is not None
                 else {}
             )
+            if "renderer_config_version" in context or "renderer_config_sha256" in context:
+                actual = self.renderer_configuration()
+                if (
+                    actual is None
+                    or (
+                        context.get("renderer_config_version"),
+                        context.get("renderer_config_sha256"),
+                    )
+                    != (actual[0], actual[2])
+                    or sha256_hex(actual[1]) != actual[2]
+                ):
+                    raise ValueError("Renderer configuration commitment refused")
             input_obj = self.input_schema().model_validate(payload)
             input_hash = sha256_hex(canonical_json(input_obj.model_dump(mode="json")))
         except Exception:

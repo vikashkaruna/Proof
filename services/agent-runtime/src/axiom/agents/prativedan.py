@@ -2,18 +2,14 @@
 
 "I turn findings into documents."
 
-Prativedan generates Board reports, auditor packs, and DPB-ready
-submissions. Every claim in a report is traceable to a specific
-evidence artifact. The founder reviews and signs off before any
-report reaches a client.
-
-In Phase 0, Prativedan produces structured JSON + an HTML/PDF
-rendering. The agent references the control library + findings
-data and uses the model gateway to draft the prose.
+Prativedan produces deterministic draft sections and escaped HTML from supplied
+findings. It performs no model inference. Evidence references remain unverified,
+and each draft requires recorded human review before client release.
 """
 
 from __future__ import annotations
 
+import math
 from html import escape
 from typing import Annotated, Any, ClassVar, Literal
 from uuid import UUID
@@ -21,6 +17,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from ..enum_types import QualifiedStringEnum
+from ..prativedan_renderer_config import renderer_commitment, renderer_config
 from .base import AgentName, AutonomyLevel, BaseAgent
 
 
@@ -92,6 +89,9 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     default_task_kind: ClassVar[Any] = "report"
     default_pii_redact: ClassVar[bool] = True
 
+    def renderer_configuration(self) -> tuple[str, str, str]:
+        return renderer_commitment()
+
     def input_schema(self) -> type[PrativedanInput]:
         return PrativedanInput
 
@@ -103,26 +103,21 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     ) -> PrativedanOutput:
         # Section: executive summary
         posture = input.posture_score
+        config = renderer_config()
         verdict = (
             "Unknown"
             if posture is None
-            else "Strong"
-            if posture >= 85
-            else "Acceptable"
-            if posture >= 65
-            else "At Risk"
-            if posture >= 40
-            else "Critical"
+            else next(label for threshold, label in config["posture_bands"] if posture >= threshold)
         )
         posture_text = (
             "Posture score: Unknown (not supplied)."
             if posture is None
-            else f"Declared posture score: {posture:.0f}/100 ({verdict}; provisional)."
+            else f"Declared posture score: {posture:{config['posture_format']}}/100 ({verdict}; provisional)."
         )
         exposure_text = (
             "Estimated statutory exposure: Unknown (not supplied)."
             if input.estimated_exposure_inr is None
-            else f"Estimated statutory exposure (provisional): ₹{input.estimated_exposure_inr / 1e7:.2f} Cr."
+            else f"Estimated statutory exposure (provisional): ₹{input.estimated_exposure_inr / config['exposure_divisor']:{config['exposure_format']}} Cr."
         )
         executive_summary = {
             "type": "executive_summary",
@@ -134,11 +129,23 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
             ),
         }
 
-        # Section: top findings (top 10 by risk_points)
-        top = sorted(input.findings, key=lambda f: f.get("risk_points", 0), reverse=True)[:10]
+        # Unknown risk values cannot establish an exposure ranking.
+        ranked = bool(input.findings) and all(
+            type(f.get("risk_points")) in (int, float)
+            and math.isfinite(f["risk_points"])
+            and f["risk_points"] >= 0
+            for f in input.findings
+        )
+        top = (
+            sorted(input.findings, key=lambda f: f["risk_points"], reverse=True)
+            if ranked
+            else input.findings
+        )[: config["finding_limit"]]
         top_section = {
             "type": "findings_table",
-            "title": "Top findings (by risk-weighted exposure)",
+            "title": (
+                config["ranked_findings_title"] if ranked else config["source_findings_title"]
+            ),
             "items": [
                 {
                     "control_id": f.get("control_id"),
@@ -176,12 +183,10 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
             ),
         }
 
-        sections: list[dict[str, Any]] = [
-            executive_summary,
-            top_section,
-            library_section,
-            attribution,
-        ]
+        section_map = {
+            s["type"]: s for s in (executive_summary, top_section, library_section, attribution)
+        }
+        sections: list[dict[str, Any]] = [section_map[key] for key in config["section_order"]]
 
         # Render HTML
         rendered = self._render_html(input.title, sections, posture, verdict)
@@ -192,6 +197,8 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
             sections=sections,
             cited_evidence_ids=self._evidence_ids(input.findings),
             rendered_html=rendered,
+            review_required=config["review_required"],
+            citation_verification=config["citation_verification"],
         )
 
     @staticmethod
@@ -227,6 +234,8 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
     def _render_html(
         self, title: str, sections: list[dict[str, Any]], posture: float | None, verdict: str
     ) -> str:
+        config = renderer_config()
+
         def safe(value: object) -> str:
             return escape(str(value if value is not None else ""), quote=True)
 
@@ -234,7 +243,7 @@ class PrativedanAgent(BaseAgent[PrativedanInput, PrativedanOutput]):
         posture_label = (
             "Unknown (not supplied)"
             if posture is None
-            else f"{posture:.0f}/100 ({verdict}; provisional)"
+            else f"{posture:{config['posture_format']}}/100 ({verdict}; provisional)"
         )
         out.append(
             f'<div class="axiom-cover"><p>Posture: <strong>{safe(posture_label)}</strong></p></div>'
