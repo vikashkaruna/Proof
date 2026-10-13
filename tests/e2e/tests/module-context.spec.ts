@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { selectTenant, signIn, signInFreshFounder } from '../fixtures';
+import { selectTenant, signIn, signInFreshFounder, state } from '../fixtures';
 
 async function captureForReview(page: import('@playwright/test').Page, route: string) {
   const directory = process.env.AXIOM_VISUAL_REVIEW_DIR;
@@ -40,7 +40,7 @@ test('every owner module route renders its context under a page heading', async 
 
   for (const [path, section, phase] of modules) {
     await test.step(path, async () => {
-      await page.goto(path);
+      await page.goto(path === '/assessment' ? `${path}?engagement=${state.engagementA}` : path);
       expect(new URL(page.url()).pathname).toBe(path);
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
       const context = page.getByTestId('module-bar');
@@ -53,6 +53,7 @@ test('every owner module route renders its context under a page heading', async 
         await expect(page.getByTestId('assessment-provenance')).not.toContainText(
           'Saved assessment results are unavailable',
         );
+        await expect(page.getByTestId('assessment-provenance')).toContainText(state.libraryVersion);
         const controls = page.locator('[data-testid^="assessment-control-"]');
         await expect(controls.first()).toBeVisible();
         await expect(controls.first()).toContainText(/unassessed/i);
