@@ -47,6 +47,17 @@ test('every owner module route renders its context under a page heading', async 
       await expect(context).toBeVisible();
       await expect(context).toContainText(section);
       await expect(context).toContainText(phase);
+      if (path === '/assessment') {
+        // A heading alone also renders on503. The seeded persona intake must
+        // load its complete library while keeping every control unassessed.
+        await expect(page.getByTestId('assessment-provenance')).not.toContainText(
+          'Saved assessment results are unavailable',
+        );
+        const controls = page.locator('[data-testid^="assessment-control-"]');
+        await expect(controls.first()).toBeVisible();
+        await expect(controls.first()).toContainText(/unassessed/i);
+        await expect(page.getByTestId('assessment-summary')).toContainText('Not assessed');
+      }
       if (path === '/datamap') {
         await expect(page.getByRole('link', { name: 'Client Portal ↗' })).toHaveAttribute(
           'href',
