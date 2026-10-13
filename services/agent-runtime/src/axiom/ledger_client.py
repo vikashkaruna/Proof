@@ -358,7 +358,14 @@ class LedgerClient:
 
         detail = input.detail or {}
         input_hash = input.input_hash or sha256_hex(_cj({**detail, "_kind": "input"}))
-        output_hash = input.output_hash or sha256_hex(_cj({**detail, "_kind": "output"}))
+        output_hash = (
+            None
+            if input.output_hash is None
+            and input.actor_type == "agent"
+            and input.result == "pending"
+            and detail.get("phase") == "started"
+            else input.output_hash or sha256_hex(_cj({**detail, "_kind": "output"}))
+        )
 
         chain = self._mem_chains.setdefault(input.tenant_id, {"last_seq": 0, "last_hash": None})
         seq = int(chain["last_seq"]) + 1
@@ -376,7 +383,7 @@ class LedgerClient:
                 input.action_type,
                 str(input.target_ref or ""),
                 str(input.input_hash or input_hash),
-                str(input.output_hash or output_hash),
+                str(input.output_hash or output_hash or ""),
                 str(input.approval_token_id or ""),
                 str(input.approver_id or ""),
                 str(input.pre_state_ref or ""),
@@ -421,7 +428,14 @@ class LedgerClient:
 
         # Compute input/output hashes from the canonical detail (if not provided)
         input_hash = input.input_hash or sha256_hex(canonical_json({**detail, "_kind": "input"}))
-        output_hash = input.output_hash or sha256_hex(canonical_json({**detail, "_kind": "output"}))
+        output_hash = (
+            None
+            if input.output_hash is None
+            and input.actor_type == "agent"
+            and input.result == "pending"
+            and detail.get("phase") == "started"
+            else input.output_hash or sha256_hex(canonical_json({**detail, "_kind": "output"}))
+        )
 
         rpc = self._client.rpc(  # type: ignore[union-attr]
             "append_agent_ledger",
