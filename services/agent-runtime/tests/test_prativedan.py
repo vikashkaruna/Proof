@@ -191,3 +191,34 @@ def test_prativedan_html_escapes_untrusted_report_values():
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "&lt;img" in html
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown", [None, True, "9"])
+async def test_unknown_risk_preserves_source_order_without_claiming_ranking(agent, unknown):
+    findings = [
+        {"control_id": "FIRST", "risk_points": unknown},
+        {"control_id": "SECOND", "risk_points": 100},
+    ]
+    output = await agent._run(correlation_id="synthetic", input=PrativedanInput(findings=findings))
+    section = output.sections[1]
+    assert section["title"] == "Findings for review (source order)"
+    assert [item["control_id"] for item in section["items"]] == ["FIRST", "SECOND"]
+    assert section["items"][0]["risk_points"] == unknown
+    assert "by risk-weighted exposure" not in output.rendered_html
+
+
+@pytest.mark.asyncio
+async def test_present_numeric_risks_can_rank_findings(agent):
+    output = await agent._run(
+        correlation_id="synthetic",
+        input=PrativedanInput(
+            findings=[
+                {"control_id": "FIRST", "risk_points": 1},
+                {"control_id": "SECOND", "risk_points": 100},
+            ]
+        ),
+    )
+    section = output.sections[1]
+    assert section["title"] == "Top findings (by risk-weighted exposure)"
+    assert [item["control_id"] for item in section["items"]] == ["SECOND", "FIRST"]
