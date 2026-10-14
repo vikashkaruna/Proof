@@ -6,6 +6,8 @@ image:
   registry: ghcr.io/axiom-minds
   tag: 0.1.0
   pullPolicy: IfNotPresent
+  # Optional immutable per-component digests; mandatory in onprem mode.
+  digests: {}
 
 imagePullSecrets:
   - name: ghcr-axiom-minds
@@ -28,6 +30,11 @@ serviceAccount:
 
 # ─── Service-to-service settings ────────────────────────────────────
 config:
+  environment: production
+  # Existing customer-managed Secrets; never contain private signing keys.
+  offlineLicenseSecretName: ""
+  storageSecretName: ""
+  storageEndpoint: ""
   # All India-residency by default
   awsRegion: ap-south-1
   supabaseUrl: ""

@@ -28,13 +28,17 @@ spec:
         fsGroup: 1000
       containers:
         - name: bff
-          image: "{{ .Values.image.registry }}/axiom-bff:{{ .Values.image.tag }}"
+          image: {{ include "axiom-proof.image" (dict "root" . "component" "bff") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 4000
               protocol: TCP
           env:
+            {{- include "axiom-proof.onpremStorageEnv" . | nindent 12 }}
+            {{- include "axiom-proof.offlineLicenseEnv" . | nindent 12 }}
+            - name: ENVIRONMENT
+              value: {{ include "axiom-proof.environment" . | quote }}
             - name: NODE_ENV
               value: production
             - name: PORT
