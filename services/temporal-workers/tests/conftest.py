@@ -7,6 +7,7 @@ completion evidence: exit_status stays null until all session-finish hooks end.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -17,6 +18,9 @@ from contextlib import suppress
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
+from temporalio.exceptions import TemporalError
+from temporalio.testing import WorkflowEnvironment
 
 _OUTCOMES: dict[str, str] = {}
 _DESTINATION: Path | None = None
@@ -183,3 +187,47 @@ def pytest_sessionfinish(session, exitstatus):
     outcome = yield
     _publish(exit_status=int(session.exitstatus))
     return outcome
+
+
+_NATIVE_SERVER_FAILED = False
+_NATIVE_STARTUP_SECONDS = 60
+_NATIVE_SHUTDOWN_SECONDS = 30
+
+
+@pytest_asyncio.fixture
+async def server():
+    """Real native server with bounded startup/cleanup; never a mock fallback.
+
+    Fence later native fixtures after failed startup or uncertain cleanup.
+    Workflow assertions, replay and result deadlines stay in their tests.
+    """
+    global _NATIVE_SERVER_FAILED
+    if _NATIVE_SERVER_FAILED:
+        raise RuntimeError("temporal_native_server_prior_failure")
+    try:
+        environment = await asyncio.wait_for(
+            WorkflowEnvironment.start_time_skipping(), _NATIVE_STARTUP_SECONDS
+        )
+    except TimeoutError:
+        _NATIVE_SERVER_FAILED = True
+        raise RuntimeError("temporal_native_server_startup_timeout") from None
+    except RuntimeError, OSError, ValueError, TemporalError:
+        _NATIVE_SERVER_FAILED = True
+        raise RuntimeError("temporal_native_server_startup_failed") from None
+    try:
+        yield environment
+    finally:
+        try:
+            await asyncio.wait_for(environment.shutdown(), _NATIVE_SHUTDOWN_SECONDS)
+        except TimeoutError:
+            _NATIVE_SERVER_FAILED = True
+            raise RuntimeError("temporal_native_server_shutdown_timeout") from None
+        except RuntimeError, OSError, ValueError, TemporalError:
+            _NATIVE_SERVER_FAILED = True
+            raise RuntimeError("temporal_native_server_shutdown_failed") from None
+
+
+@pytest.hookimpl
+def pytest_make_parametrize_id(config, val, argname):
+    """Bound terminal IDs too: fixtures must not print raw accounting packets."""
+    return "case-" + hashlib.sha256(repr(val).encode()).hexdigest()

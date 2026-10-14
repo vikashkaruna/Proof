@@ -205,3 +205,120 @@ def test_transient_write_failure_cannot_later_attest_completed(plugin, monkeypat
     finish(module, 0)
     assert destination.read_bytes() == before
     assert json.loads(before)["exit_status"] is None
+
+
+async def test_native_startup_timeout_is_bounded_and_later_fixtures_are_fenced(
+    plugin, monkeypatch
+):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    module, _ = plugin
+    cancelled = False
+
+    async def stalled():
+        nonlocal cancelled
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled = True
+
+    factory = AsyncMock(side_effect=stalled)
+    monkeypatch.setattr(
+        module, "WorkflowEnvironment", SimpleNamespace(start_time_skipping=factory)
+    )
+    monkeypatch.setattr(module, "_NATIVE_STARTUP_SECONDS", 0.01)
+    with pytest.raises(RuntimeError, match="temporal_native_server_startup_timeout"):
+        await anext(module.server.__wrapped__())
+    assert cancelled
+    with pytest.raises(RuntimeError, match="temporal_native_server_prior_failure"):
+        await anext(module.server.__wrapped__())
+    assert factory.await_count == 1
+
+
+async def test_native_fixture_yields_actual_server_and_always_shuts_down(
+    plugin, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    module, _ = plugin
+    environment = SimpleNamespace(shutdown=AsyncMock())
+    monkeypatch.setattr(
+        module,
+        "WorkflowEnvironment",
+        SimpleNamespace(start_time_skipping=AsyncMock(return_value=environment)),
+    )
+    fixture = module.server.__wrapped__()
+    assert await anext(fixture) is environment
+    await fixture.aclose()
+    environment.shutdown.assert_awaited_once_with()
+    assert not module._NATIVE_SERVER_FAILED
+
+
+@pytest.mark.parametrize("phase", ["startup", "shutdown"])
+async def test_native_failure_does_not_expose_private_vendor_error(
+    plugin, monkeypatch, phase
+):
+    from unittest.mock import AsyncMock
+
+    module, _ = plugin
+    environment = SimpleNamespace(shutdown=AsyncMock())
+    factory = AsyncMock(return_value=environment)
+    if phase == "startup":
+        factory.side_effect = RuntimeError("synthetic-private-vendor-credential")
+    else:
+        environment.shutdown.side_effect = RuntimeError(
+            "synthetic-private-vendor-credential"
+        )
+    monkeypatch.setattr(
+        module, "WorkflowEnvironment", SimpleNamespace(start_time_skipping=factory)
+    )
+    fixture = module.server.__wrapped__()
+    with pytest.raises(
+        RuntimeError, match=f"temporal_native_server_{phase}_failed"
+    ) as caught:
+        if phase == "startup":
+            await anext(fixture)
+        else:
+            assert await anext(fixture) is environment
+            await fixture.aclose()
+    assert "synthetic-private-vendor-credential" not in str(caught.value)
+    assert caught.value.__suppress_context__
+    assert module._NATIVE_SERVER_FAILED
+
+
+async def test_native_shutdown_timeout_fences_next_start(plugin, monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    module, _ = plugin
+
+    async def stalled():
+        await asyncio.Event().wait()
+
+    environment = SimpleNamespace(shutdown=AsyncMock(side_effect=stalled))
+    factory = AsyncMock(return_value=environment)
+    monkeypatch.setattr(
+        module, "WorkflowEnvironment", SimpleNamespace(start_time_skipping=factory)
+    )
+    monkeypatch.setattr(module, "_NATIVE_SHUTDOWN_SECONDS", 0.01)
+    fixture = module.server.__wrapped__()
+    assert await anext(fixture) is environment
+    with pytest.raises(RuntimeError, match="temporal_native_server_shutdown_timeout"):
+        await fixture.aclose()
+    with pytest.raises(RuntimeError, match="temporal_native_server_prior_failure"):
+        await anext(module.server.__wrapped__())
+    assert factory.await_count == 1
+
+
+def test_terminal_parameter_identity_is_bounded_and_has_no_raw_packet(plugin):
+    module, _ = plugin
+    value = {"credential": "synthetic-private-marker", "packet": "x" * 100000}
+    identity = module.pytest_make_parametrize_id(None, value, "result")
+    assert len(identity) == 69
+    assert identity.startswith("case-")
+    assert "synthetic-private-marker" not in identity
+    assert identity == module.pytest_make_parametrize_id(None, value, "result")
+    assert identity != module.pytest_make_parametrize_id(
+        None, {"packet": "different"}, "result"
+    )
