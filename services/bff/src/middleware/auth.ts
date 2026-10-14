@@ -104,14 +104,20 @@ export const authMiddleware = createMiddleware<{ Variables: Variables }>(async (
     // token is trustworthy — only what pulls an identifier out of one we have
     // already accepted.
     c.set('sessionId', sessionIdFromAccessToken(token) ?? '');
-    await next();
-  } catch (networkErr: any) {
+  } catch (networkErr: unknown) {
     // SEC-1: likewise — an outage used to grant founder access rather than
     // refuse service. A dependency being down is a 503, not an authorisation.
-    logger.error({ error: networkErr?.message }, 'auth service unavailable');
+    logger.error(
+      { errorType: networkErr instanceof Error ? networkErr.name : typeof networkErr },
+      'auth service unavailable',
+    );
     return c.json(
       { error: { code: 'auth_unavailable', message: 'Auth service unreachable' } },
       503,
     );
   }
+
+  // Authentication has succeeded. Route/error-handler failures belong to the
+  // downstream boundary; they must not be labelled as an identity-provider outage.
+  return next();
 });

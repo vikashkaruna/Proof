@@ -158,3 +158,39 @@ describe('authMiddleware — the happy path still works', () => {
     expect(await res.json()).toEqual({ id: 'aaaaaaaa-0000-0000-0000-000000000009' });
   });
 });
+
+describe('authentication owns only the identity-provider error boundary', () => {
+  it('does not rewrite a failing downstream error handler as an auth outage', async () => {
+    const app = await buildApp(
+      { ENVIRONMENT: 'production' },
+      createSupabaseDouble({ auth: { kind: 'user', id: FOUNDER_ID } }),
+    );
+    app.get('/v1/downstream-failure', () => {
+      throw new Error('synthetic-route-failure');
+    });
+    app.onError(() => {
+      throw new Error('synthetic-error-handler-failure');
+    });
+    await expect(
+      app.request('/v1/downstream-failure', {
+        headers: { authorization: 'Bearer a-valid-jwt' },
+      }),
+    ).rejects.toThrow('synthetic-error-handler-failure');
+  });
+});
+
+it('retains the normal downstream error response after successful authentication', async () => {
+  const app = await buildApp(
+    { ENVIRONMENT: 'production' },
+    createSupabaseDouble({ auth: { kind: 'user', id: FOUNDER_ID } }),
+  );
+  app.get('/v1/downstream-failure', () => {
+    throw new Error('synthetic-route-failure');
+  });
+  app.onError((_error, c) => c.json({ error: { code: 'downstream_failed' } }, 500));
+  const response = await app.request('/v1/downstream-failure', {
+    headers: { authorization: 'Bearer a-valid-jwt' },
+  });
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: 'downstream_failed' } });
+});
