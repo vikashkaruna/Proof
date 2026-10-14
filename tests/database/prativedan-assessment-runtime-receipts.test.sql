@@ -1,6 +1,8 @@
 -- Disposable SQL contract fixtures, NOT live named-agent acceptance.
 -- Uses actual finalized assessment/controller and append_ledger paths.
 begin;
+-- Disposable transaction-only custody; never a production membership grant.
+grant axiom_model_accounting_controller to postgres with set true;
 -- Disposable fixture custody only; rolled back here or destroyed with the owned container.
 -- No SVID/PostgREST/private-channel identity proof is inferred from SET ROLE.
 grant axiom_prativedan_controller to postgres with set true;

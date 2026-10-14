@@ -16,18 +16,24 @@ import json
 import logging
 import os
 import shutil
-import time
 import subprocess  # nosec B404 - fixed read-only git queries; list argv, no shell
+import sys
+import time
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+# This standalone CLI is outside pytest and the service image PYTHONPATH.
+# Admit only the repository-owned flat metadata package, never a credential path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages/model-accounting-python"))
+
+from pydantic import BaseModel
+from supabase import create_client
+
 from axiom.agents.base import AgentName, BaseAgent
 from axiom.config import Settings
 from axiom.ledger_client import LedgerClient
-from pydantic import BaseModel
-from supabase import create_client
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASE = "configuration"

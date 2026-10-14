@@ -1,5 +1,7 @@
 -- Actual PostgreSQL contracts/ACLs/receipts; no live provider or workload proof.
 begin;
+-- Disposable transaction-only custody; never a production membership grant.
+grant axiom_model_accounting_controller to postgres with set true;
 create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('99102800-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m;end if;end$$;
 create function pg_temp.denied(command text,expected text default null) returns boolean language plpgsql as $$begin execute command;return false;exception when others then if sqlstate='42601' then raise;end if;return expected is null or sqlerrm=expected;end$$;
