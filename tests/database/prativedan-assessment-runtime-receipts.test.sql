@@ -46,6 +46,7 @@ insert into public.tenant_users(tenant_id,user_id,role) values(pg_temp.id(11),pg
 create temporary table p123_context(preview jsonb,human_text text,reply jsonb,claim jsonb,proof jsonb,input_text text,output_text text,response_text text,started bigint,completed bigint);
 insert into p123_context values(null,null,null,null,null,null,null,null,null,null);
 grant select,update on p123_context to human_action_writer,agent_ledger_writer;
+grant select on p123_context to axiom_model_accounting_controller;
 grant select on issued to human_action_writer,agent_ledger_writer;
 
 -- Equal-sized distinct sets with a foreign ID must not be joined away.
@@ -161,14 +162,61 @@ select pg_temp.ok(controller_security.prativedan123_output_valid((select input_t
  (select jsonb_set(output_text::jsonb,'{sections,0}','{}') from p123_context)) is false,'missing summary fields must return FALSE not SQL NULL');
 select pg_temp.ok(controller_security.prativedan123_output_valid((select input_text::jsonb from p123_context),
  (select jsonb_set(output_text::jsonb,'{sections,0,body}','null') from p123_context)) is false,'null summary fields must return FALSE');
+-- A colliding parent identity is ambiguous even if both parents physically exist.
+savepoint accounting_parent_collision;
+insert into public.agent_runs(id,tenant_id,agent,correlation_id) select (reply->>'run_id')::uuid,pg_temp.id(11),'prativedan',pg_temp.id(55) from p123_context;
+select pg_temp.reject(format('select controller_security.accounting128_dedicated_dispatch(%L,%L,%L,%L)',pg_temp.id(11),pg_temp.id(55),reply->>'run_id',encode(sha256(convert_to(human_text,'UTF8')),'hex'))) from p123_context;
+rollback to accounting_parent_collision;
 -- Genuine immutable ledger rows through exclusive fixed phase RPCs. Synthetic
 -- declarations test DB binding; they do not attest actual Python invocation.
 set local role axiom_prativedan_controller;
 update p123_context set started=(public.record_prativedan_assessment_phase(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
  encode(sha256(convert_to(human_text,'UTF8')),'hex'),'started',null,pg_temp.authority())->>'id')::bigint;
+select pg_temp.ok((select public.prativedan_load_model_accounting_dispatch(pg_temp.id(11),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),pg_temp.id(55),pg_temp.authority())->>'claimed'='true' from p123_context),'dedicated journal opens only once after authorized phase start');
+select pg_temp.ok((select public.prativedan_load_model_accounting_dispatch(pg_temp.id(11),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),pg_temp.id(55),pg_temp.authority())->>'claimed'='false' from p123_context),'dedicated journal replay never permits invocation');
 update p123_context set completed=(public.record_prativedan_assessment_phase(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
  encode(sha256(convert_to(human_text,'UTF8')),'hex'),'completed',encode(sha256(convert_to(output_text,'UTF8')),'hex'),pg_temp.authority())->>'id')::bigint;
 reset role;
+create function pg_temp.accounting_settle126(output_override text default null) returns jsonb language sql as $$
+ select public.settle_prativedan_assessment_draft(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),encode(sha256(convert_to(input_text,'UTF8')),'hex'),
+ claim#>>'{readback,renderer_config_text}',coalesce(output_override,output_text),response_text,started,completed,pg_temp.authority()) from p123_context $$;
+create function pg_temp.raw_accounting_settle126() returns jsonb language sql security definer as $$
+ select public.settle_prativedan_assessment_draft(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),encode(sha256(convert_to(input_text,'UTF8')),'hex'),
+ claim#>>'{readback,renderer_config_text}',output_text,response_text,started,completed) from p123_context $$;
+create function pg_temp.immediate_accounting_refusal(command text) returns void language plpgsql as $$begin
+ begin execute command;exception when others then if sqlstate='42501' then return;end if;raise;end;
+ raise exception 'Unexpected private accounting sink success before commit';
+end $$;
+set local role axiom_prativedan_controller;
+select pg_temp.reject('select pg_temp.accounting_settle126()');
+select pg_temp.immediate_accounting_refusal('select pg_temp.raw_accounting_settle126()');
+reset role;
+set local role axiom_prativedan_controller;
+select pg_temp.ok((select public.prativedan_seal_model_accounting_run(pg_temp.id(11),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),started::text,completed::text,pg_temp.id(55),pg_temp.authority())->'summary'->>'basis'='no_model' from p123_context),'dedicated actual sealed empty journal establishes no_model');
+select pg_temp.ok((select public.prativedan_read_model_accounting_result(pg_temp.id(11),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),pg_temp.id(55),pg_temp.authority())->>'runtime_output_sha256'=encode(sha256(convert_to(output_text,'UTF8')),'hex') from p123_context),'dedicated expected bytes independently loaded from126 terminal');
+do $$declare x record;begin
+ select * into x from p123_context;
+ raise notice 'ACCOUNTING_DEDICATED_INTEROP=%',jsonb_build_object('expected',public.prativedan_read_model_accounting_result(pg_temp.id(11),(x.reply->>'run_id')::uuid,
+ encode(sha256(convert_to(x.human_text,'UTF8')),'hex'),pg_temp.id(55),pg_temp.authority()),'runtime_output_text',x.output_text);
+end $$;
+select pg_temp.reject(format('select public.prativedan_load_model_accounting_dispatch(%L,%L,%L,%L,pg_temp.authority())',pg_temp.id(11),reply->>'run_id',encode(sha256(convert_to(human_text,'UTF8')),'hex'),pg_temp.id(55))) from p123_context;
+reset role;
+select pg_temp.ok((select origin='prativedan_assessment' and generic_run_id is null and dedicated_run_id=run_id from public.model_accounting_runs),'dedicated real parent FK and origin');
+set local role axiom_model_accounting_controller;
+select pg_temp.reject(format('select public.read_model_accounting_result(%L,%L,%L)',pg_temp.id(11),reply->>'run_id',encode(sha256(convert_to(human_text,'UTF8')),'hex'))) from p123_context;
+reset role;
+savepoint accounting_settlement_success;
+set local role axiom_prativedan_controller;
+select pg_temp.reject($query$select pg_temp.accounting_settle126('{"bad":true}')$query$);
+select pg_temp.ok(pg_temp.accounting_settle126()->>'state'='unpublished','accounted dedicated126 nested atomic settlement retains unpublished output');
+reset role;
+rollback to accounting_settlement_success;
 -- 0124 uses genuine PG receipts with synthetic runtime declarations only.
 create function pg_temp.runtime_witness(started bigint default null,completed bigint default null) returns jsonb language sql as $$
  select public.read_prativedan_assessment_runtime_receipts(pg_temp.id(11),pg_temp.id(55),(x.reply->>'run_id')::uuid,
@@ -211,5 +259,6 @@ reset role;
 update public.users set is_axiom_internal=false where id=pg_temp.id(1);
 set local role axiom_prativedan_controller;
 select pg_temp.reject('select pg_temp.runtime_witness()');
+select pg_temp.reject(format('select public.prativedan_read_model_accounting_result(%L,%L,%L,%L,pg_temp.authority())',pg_temp.id(11),reply->>'run_id',encode(sha256(convert_to(human_text,'UTF8')),'hex'),pg_temp.id(55))) from p123_context;
 reset role;
 rollback;

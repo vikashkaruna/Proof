@@ -33,11 +33,11 @@ packages = ["src/temporal_workers"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src", "../../packages/offline-license-python"]
+pythonpath = ["src", "../../packages/offline-license-python", "../../packages/model-accounting-python"]
 addopts = "-v --tb=short --strict-markers"
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src", "../../packages/model-accounting-python"]
 omit = ["tests/*", "**/__pycache__/*"]
 
 [tool.coverage.report]

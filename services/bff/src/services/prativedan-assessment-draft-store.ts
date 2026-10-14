@@ -149,6 +149,25 @@ export class PrativedanAssessmentDraftStore {
       prepared.reviewedRequestText,
     );
     envelope = parseGuard(prativedanAssessmentRuntimeEnvelopeSchema, envelope);
+    return this.runtimeReceipts(
+      prepared,
+      envelope.started_receipt.id,
+      envelope.completed_receipt.id,
+    );
+  }
+  async runtimeReceipts(
+    prepared: PreparedPrativedanAssessmentDraftSource,
+    started: string,
+    completed: string,
+  ) {
+    prepared = preparePrativedanAssessmentDraftSource(
+      prepared.journal,
+      prepared.reviewedRequestText,
+    );
+    const receiptId =
+      prativedanAssessmentRuntimeReceiptWitnessSchema.shape.started_receipt.shape.id;
+    receiptId.parse(started);
+    receiptId.parse(completed);
     const journal = prepared.journal;
     return parseGuard(
       prativedanAssessmentRuntimeReceiptWitnessSchema,
@@ -157,8 +176,8 @@ export class PrativedanAssessmentDraftStore {
         k: journal.operation_key,
         r: journal.run_id,
         rh: journal.request_sha256,
-        started: envelope.started_receipt.id,
-        completed: envelope.completed_receipt.id,
+        started,
+        completed,
       }),
     );
   }

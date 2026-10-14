@@ -861,10 +861,10 @@ jobs:
       - run: uv sync --extra dev
         working-directory: services/agent-runtime
       - name: Strict runtime source types
-        run: uv run mypy src/axiom
+        run: uv run mypy src/axiom ../../packages/model-accounting-python/axiom_model_accounting.py
         working-directory: services/agent-runtime
       - name: Runtime source lint
-        run: uv run ruff check src/axiom
+        run: uv run ruff check src/axiom ../../packages/model-accounting-python
         working-directory: services/agent-runtime
       - run: uv run pytest --cov --cov-report=xml --cov-fail-under=80
         working-directory: services/agent-runtime

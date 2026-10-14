@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 import { canonicalJson } from '@axiom/ledger';
 import {
+  deriveModelAccounting,
   PRATIVEDAN_RENDERER_CONFIG_VERSION,
   PRATIVEDAN_RENDERER_CONFIG_TEXT,
   PRATIVEDAN_RENDERER_CONFIG_SHA256,
@@ -972,5 +973,102 @@ describe('synthetic CLI mapping/protection only; no actual SQL evidence', () => 
     } finally {
       f.cleanup();
     }
+  });
+});
+
+describe('opt-in independently read accounting composition', () => {
+  function accounting(h: ReturnType<typeof harness>) {
+    const j = h.f.prepared.journal;
+    const binding = {
+      schema_version: 2,
+      tenant_id: j.tenant_id,
+      run_id: j.run_id,
+      correlation_id: j.operation_key,
+      request_sha256: j.request_sha256,
+      agent: 'prativedan',
+      agent_version: '0.1.0',
+    };
+    const seal = {
+      ...binding,
+      serialization: 'postgres-jsonb-text-v1',
+      calls_text: '[]',
+      calls_sha256: prativedanTextHash('[]'),
+      summary: deriveModelAccounting([]),
+      requested_receipt: j.requested_receipt,
+      agent_started_receipt: h.f.envelope.started_receipt,
+      agent_completed_receipt: h.f.envelope.completed_receipt,
+      accounting_receipt: receipt(9),
+    };
+    const expected = {
+      binding,
+      seal,
+      terminal_status: 'succeeded',
+      runtime_output_sha256: h.f.envelope.runtime_output_sha256,
+    };
+    const result = {
+      ...binding,
+      kind: 'accounted_agent_result',
+      status: 'succeeded',
+      latency_ms: 1,
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: '0.000000',
+      error: null,
+      runtime_output_text: h.f.envelope.runtime_output_text,
+      ledger_entry_ids: [seal.agent_started_receipt.id, seal.agent_completed_receipt.id],
+      accounting_reference: { calls_sha256: seal.calls_sha256, receipt: seal.accounting_receipt },
+    };
+    return { expected, result };
+  }
+  it('loads seal and separate original source-phase witness before unpublished settlement', async () => {
+    const h = harness();
+    h.unpublished.settled_receipt = receipt(10);
+    const p = accounting(h);
+    const read = vi.fn(async () => p.expected);
+    const runtime = {
+      invoke: vi.fn(async () => {
+        await h.runtime.invoke();
+        return p.result;
+      }),
+    };
+    const controller = new PrativedanAssessmentDraftController({
+      store: h.store,
+      runtime,
+      authorizeCurrentHuman: h.authorizeCurrentHuman,
+      isKilled: h.isKilled,
+      accountingReader: { call: read },
+    });
+    const result = await controller.generate(h.context, h.f.requestText);
+    expect(result.outcome).toBe('unpublished');
+    expect(read).toHaveBeenCalledOnce();
+    expect(
+      h.calls.filter((c) => c.name === 'read_prativedan_assessment_runtime_receipts').length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(h.calls.some((c) => c.name === 'settle_prativedan_assessment_draft')).toBe(true);
+  });
+  it('missing accounting read cannot reuse caller seal or reach settlement', async () => {
+    const h = harness();
+    const p = accounting(h);
+    const runtime = {
+      invoke: vi.fn(async () => {
+        await h.runtime.invoke();
+        return p.result;
+      }),
+    };
+    const controller = new PrativedanAssessmentDraftController({
+      store: h.store,
+      runtime,
+      authorizeCurrentHuman: h.authorizeCurrentHuman,
+      isKilled: h.isKilled,
+      accountingReader: {
+        call: vi.fn(async () => {
+          throw Error('private-canary');
+        }),
+      },
+    });
+    await expect(controller.generate(h.context, h.f.requestText)).rejects.toThrow(
+      'accounted_result_contract_refused',
+    );
+    expect(h.calls.some((c) => c.name === 'settle_prativedan_assessment_draft')).toBe(false);
   });
 });

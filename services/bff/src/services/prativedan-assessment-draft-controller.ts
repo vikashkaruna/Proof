@@ -1,6 +1,10 @@
 /** Unmounted assessment orchestration. Python exclusively owns the one-shot
  * claim and invocation. Uncertain network outcomes never grant retry authority. */
 import { canonicalJson } from '@axiom/ledger';
+import {
+  readAndVerifyAccountedRuntimeResult,
+  type AccountedResultReadPort,
+} from './accounted-runtime-consumer.js';
 import { prativedanAssessmentDraftRequestSchema } from '@axiom/types';
 import {
   PrativedanAssessmentDraftStore,
@@ -31,6 +35,8 @@ export interface PrativedanAssessmentControllerConfig {
   authorizeCurrentHuman(context: PrativedanAssessmentHumanContext): Promise<void>;
   isKilled(tenantId: string): Promise<boolean>;
   runtime: { invoke(binding: PrativedanAssessmentRuntimeBinding): Promise<unknown> };
+  /** Opt-in trusted scoped read; no caller witness and no implicit live mount. */
+  accountingReader?: AccountedResultReadPort;
 }
 export class PrativedanAssessmentDraftController {
   constructor(private readonly config: PrativedanAssessmentControllerConfig) {}
@@ -135,6 +141,50 @@ export class PrativedanAssessmentDraftController {
       const retained = await this.read(context, reviewedRequestText);
       this.sameFrozen(prepared, retained);
       return { journal: retained.journal, outcome: 'invocation_uncertain' };
+    }
+    if (this.config.accountingReader) {
+      await this.authorize(context);
+      const accountedPrepared = await this.read(context, reviewedRequestText);
+      this.sameFrozen(prepared, accountedPrepared);
+      prepared = accountedPrepared;
+      if (prepared.journal.state === 'requested') throw new PrativedanDraftRefused();
+      const normalizedInputText = prepared.journal.normalized_input_text;
+
+      const binding = {
+        schema_version: 2,
+        tenant_id: journal.tenant_id,
+        run_id: journal.run_id,
+        correlation_id: journal.operation_key,
+        request_sha256: journal.request_sha256,
+        agent: 'prativedan',
+        agent_version: '0.1.0',
+      };
+      const verified = await readAndVerifyAccountedRuntimeResult(
+        rawEnvelope,
+        binding,
+        this.config.accountingReader,
+      );
+      if (
+        verified.result.status !== 'succeeded' ||
+        verified.output === null ||
+        verified.result.runtime_output_text === null
+      )
+        throw new PrativedanDraftRefused();
+      const facts = await this.config.store.runtimeReceipts(
+        prepared,
+        verified.result.ledger_entry_ids[0],
+        verified.result.ledger_entry_ids[1],
+      );
+      await this.authorize(context);
+      rawEnvelope = {
+        ...facts,
+        renderer_config_text: journal.renderer_config_text,
+        normalized_input_text: normalizedInputText,
+        runtime_output_text: verified.result.runtime_output_text,
+        output: verified.output,
+        review_required: true,
+        citation_verification: 'unverified_references',
+      };
     }
     let envelope;
     try {
