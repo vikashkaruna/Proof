@@ -29,7 +29,7 @@ def test_rpc_role_and_literal_escaping_preserve_original_text():
         "claim_prativedan_assessment_draft",
         {"t": "t", "k": "k", "r": "r", "rh": "h", "input_text": body},
     )
-    assert "set role agent_ledger_writer" in sql
+    assert "set role axiom_prativedan_controller" in sql
     assert "set standard_conforming_strings=on" in sql
     assert "single''quote" in sql
     assert "public.claim_prativedan_assessment_draft" in sql
@@ -116,7 +116,7 @@ def test_bridge_only_immutable_id_and_scoped_sql(monkeypatch):
     )
     assert result == "9007199254740993"
     assert call.call_args.args[0][3] == "a" * 64
-    assert "set role agent_ledger_writer" in call.call_args.kwargs["input"]
+    assert "set role axiom_prativedan_controller" in call.call_args.kwargs["input"]
     assert call.call_args.kwargs["timeout"] == 10
 
 

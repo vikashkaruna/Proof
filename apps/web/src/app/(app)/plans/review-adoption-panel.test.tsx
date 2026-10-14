@@ -207,6 +207,13 @@ async function successfulSave() {
   fill();
   fireEvent.click(screen.getByRole('button', { name: 'Save review tasks' }));
   await screen.findByText('Inspect saved review work');
+  // The receipt renders before the outer submit lock releases its busy state.
+  // Archive is actionable only after that lock has completed.
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: /Archive confirmed request/ }).hasAttribute('disabled'),
+    ).toBe(false),
+  );
   return view;
 }
 it('explicit confirmed archive frees pending slot, preserves same-key manual recovery, and permits another proposal', async () => {

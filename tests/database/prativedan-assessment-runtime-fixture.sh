@@ -53,7 +53,7 @@ marker = '-- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim.'
 if text.count(marker) != 1:
     raise SystemExit('Reviewed fixture boundary changed')
 text = text.split(marker, 1)[0]
-text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer;', 1)
+text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer,axiom_prativedan_controller;', 1)
 text = text.replace('pg_temp.', 'p123_fixture.').replace('create temporary table ', 'create table ')
 for table in ('issued', 'p123_context'):
     text = re.sub(rf'\b{table}\b', 'p123_fixture.' + table, text)
@@ -80,8 +80,8 @@ v=json.loads(Path(sys.argv[1]).read_text())
 a={k:v[k] for k in ('tenant_id','operation_key','run_id','request_sha256')}
 a['started']=v['started_receipt']['id'];a['completed']=v['completed_receipt']['id']
 literal="'"+json.dumps(a).replace("'","''")+"'::jsonb"
-print("set standard_conforming_strings=on;set timezone='UTC';set role agent_ledger_writer;")
-print("select public.read_prativedan_assessment_runtime_receipts((v->>'tenant_id')::uuid,(v->>'operation_key')::uuid,(v->>'run_id')::uuid,v->>'request_sha256',(v->>'started')::bigint,(v->>'completed')::bigint) from (select "+literal+" v)a;")
+print("set standard_conforming_strings=on;set timezone='UTC';do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;")
+print("select public.read_prativedan_assessment_runtime_receipts((v->>'tenant_id')::uuid,(v->>'operation_key')::uuid,(v->>'run_id')::uuid,v->>'request_sha256',(v->>'started')::bigint,(v->>'completed')::bigint,p123_fixture.authority()) from (select "+literal+" v)a;")
 PYCODE
 sql > "$output_dir/runtime/pg-runtime-ledger.json" <<'SQL'
 select jsonb_agg(to_jsonb(l)||jsonb_build_object('id',l.id::text) order by l.id) from public.audit_ledger l where tenant_id=p123_fixture.id(11);
@@ -106,8 +106,8 @@ expected={'t':'uuid','k':'uuid','r':'uuid','rh':'text','input_hash':'text','conf
 if set(args)!=set(expected) or args['response_text']!=Path(sys.argv[2]).read_text():
  raise SystemExit('Validated TS settlement handoff refused')
 literal="'"+json.dumps(args,ensure_ascii=False,allow_nan=False).replace("'","''")+"'::jsonb"
-print("set standard_conforming_strings=on;set timezone='UTC';set role agent_ledger_writer;")
-print('select public.settle_prativedan_assessment_draft('+','.join(k+"=>((a.v->>'"+k+"')::"+typ+')' for k,typ in expected.items())+') from (select '+literal+' v)a;')
+print("set standard_conforming_strings=on;set timezone='UTC';do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;")
+print('select public.settle_prativedan_assessment_draft('+','.join(k+"=>((a.v->>'"+k+"')::"+typ+')' for k,typ in expected.items())+',authority=>p123_fixture.authority()) from (select '+literal+' v)a;')
 PYCODE
 sql < "$output_dir/settle.sql" > "$output_dir/runtime/pg-settled.json"
 sql < "$output_dir/settle.sql" > "$output_dir/runtime/pg-settle-replay.json"
