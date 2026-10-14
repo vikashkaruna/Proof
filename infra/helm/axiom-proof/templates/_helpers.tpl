@@ -68,3 +68,72 @@ Service account name
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/* Only reviewed deployed modes; onprem is an explicit offline contract. */}}
+{{- define "axiom-proof.environment" -}}
+{{- $environment := .Values.config.environment -}}
+{{- if not (has $environment (list "production" "onprem")) -}}
+{{- fail "config.environment must be production or onprem" -}}
+{{- end -}}
+{{- $environment -}}
+{{- end -}}
+
+{{/* Default tag behavior is retained; offline images require immutable digests. */}}
+{{- define "axiom-proof.image" -}}
+{{- $root := .root -}}
+{{- $component := .component -}}
+{{- $digest := index ($root.Values.image.digests | default dict) $component | default "" -}}
+{{- if eq (include "axiom-proof.environment" $root) "onprem" -}}
+{{- if ne $root.Values.image.pullPolicy "Never" -}}
+{{- fail "onprem image.pullPolicy must be Never" -}}
+{{- end -}}
+{{- $digest = required (printf "onprem image digest required for %s" $component) $digest -}}
+{{- end -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+{{- fail (printf "invalid immutable image digest for %s" $component) -}}
+{{- end -}}
+{{- printf "%s/axiom-%s@%s" $root.Values.image.registry $component $digest -}}
+{{- else -}}
+{{- printf "%s/axiom-%s:%s" $root.Values.image.registry $component $root.Values.image.tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/* License token and public trust root only. Authority private keys stay external. */}}
+{{- define "axiom-proof.offlineLicenseEnv" -}}
+{{- if eq (include "axiom-proof.environment" .) "onprem" -}}
+{{- $name := required "onprem config.offlineLicenseSecretName is required" .Values.config.offlineLicenseSecretName -}}
+- name: AXIOM_OFFLINE_LICENSE
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: license
+- name: AXIOM_LICENSE_ROOT_PUBLIC_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: root-public-key
+{{- end -}}
+{{- end -}}
+
+{{/* Supported BFF/runtime S3 adapter fields; credentials never reach frontends. */}}
+{{- define "axiom-proof.onpremStorageEnv" -}}
+{{- if eq (include "axiom-proof.environment" .) "onprem" -}}
+{{- $name := required "onprem config.storageSecretName is required" .Values.config.storageSecretName -}}
+{{- $endpoint := required "onprem config.storageEndpoint is required" .Values.config.storageEndpoint -}}
+- name: AXIOM_EVIDENCE_BUCKET
+  value: {{ .Values.config.s3EvidenceBucket | quote }}
+- name: AXIOM_STORAGE_ENDPOINT
+  value: {{ $endpoint | quote }}
+- name: AXIOM_STORAGE_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: access-key-id
+- name: AXIOM_STORAGE_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $name | quote }}
+      key: secret-access-key
+{{- end -}}
+{{- end -}}
