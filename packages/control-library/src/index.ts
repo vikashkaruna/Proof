@@ -47,6 +47,10 @@ export {
   TECH_FRAMEWORKS,
   TECH_SECTOR_PACK,
   ALL_CONTROL_MAPPINGS,
+  ALL_MAPPING_CONTEXTS,
+  MAPPING_CONTEXT_PUBLICATION_VERSION,
+  LEGACY_MAPPING_SCOPE,
+  mappingContextsForSectorControl,
   ALL_FRAMEWORK_CONTROLS,
   ALL_FRAMEWORKS,
   ALL_SECTOR_PACKS,
@@ -65,5 +69,32 @@ export type {
   SectorPackFramework,
   SectorPackFrameworkControl,
   SectorPackMapping,
+  SectorPackMappingContext,
   SectorPackSector,
 } from './sector-packs';
+
+export {
+  mappingContextSchema,
+  mappingContextPacketSchema,
+  mappingContextAuditBindingSchema,
+  mappingContextSourcePacket,
+  verifyMappingContextPublicationProof,
+  publishMappingContextSource,
+  MappingContextPublicationRefused,
+  mappingContextAdoptionBindingSchema,
+  mappingContextAdoptionRequestSchema,
+  verifyMappingContextAdoptionProof,
+  verifyMappingContextReferenceProof,
+  adoptMappingContextPublication,
+} from './mapping-context-publication';
+export type {
+  MappingContextPacket,
+  MappingContextAuditBinding,
+  MappingContextPublicationProof,
+  MappingContextPublicationPorts,
+  MappingContextAdoptionBinding,
+  MappingContextAdoptionRequest,
+  MappingContextAdoptionProof,
+  MappingContextReferenceProof,
+  MappingContextAdoptionPorts,
+} from './mapping-context-publication';

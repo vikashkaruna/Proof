@@ -1086,9 +1086,7 @@ export function validateSectorPacks(): string[] {
       }
     }
     // Pack control subset must be covered by mappings for that pack's frameworks
-    const packMappings = ALL_CONTROL_MAPPINGS.filter((m) =>
-      pack.frameworkCodes.includes(m.frameworkCode),
-    );
+    const packMappings = ALL_MAPPING_CONTEXTS.filter((m) => m.sectorPackCode === pack.code);
     const mappedControls = new Set(packMappings.map((m) => m.controlId));
     for (const id of pack.controlIds) {
       if (!mappedControls.has(id)) {
@@ -1102,10 +1100,35 @@ export function validateSectorPacks(): string[] {
   return errors;
 }
 
+/** Independently versioned source metadata; this does not assert DB publication. */
+export const MAPPING_CONTEXT_PUBLICATION_VERSION = 'mapping-contexts-2026-10-13.v1';
+export const LEGACY_MAPPING_SCOPE = 'legacy_global_unqualified' as const;
+export interface SectorPackMappingContext extends SectorPackMapping {
+  sectorPackCode: string;
+}
+/** Preserve every sector-qualified note; legacy global identity cannot represent these. */
+export const ALL_MAPPING_CONTEXTS: readonly SectorPackMappingContext[] = [
+  ...BFSI_CONTROL_MAPPINGS.map((m) => ({ ...m, sectorPackCode: BFSI_SECTOR_PACK.code })),
+  ...HEALTHCARE_CONTROL_MAPPINGS.map((m) => ({
+    ...m,
+    sectorPackCode: HEALTHCARE_SECTOR_PACK.code,
+  })),
+  ...TECH_CONTROL_MAPPINGS.map((m) => ({ ...m, sectorPackCode: TECH_SECTOR_PACK.code })),
+];
+export function mappingContextsForSectorControl(
+  publicationVersion: string,
+  sectorPackCode: string,
+  controlId: string,
+): readonly SectorPackMappingContext[] {
+  if (publicationVersion !== MAPPING_CONTEXT_PUBLICATION_VERSION) return [];
+  return ALL_MAPPING_CONTEXTS.filter(
+    (m) => m.sectorPackCode === sectorPackCode && m.controlId === controlId,
+  );
+}
+
 // Fail fast on import, matching seed.ts's auto-validation convention.
 const packValidation = validateSectorPacks();
 if (packValidation.length > 0) {
-  // eslint-disable-next-line no-console
   console.error('Sector pack validation failed:', packValidation);
   throw new Error('Sector pack invariants violated');
 }

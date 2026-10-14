@@ -2967,6 +2967,410 @@
         "heading": "Prior permission requirement before disclosing sensitive personal data to third parties"
       }
     ],
+    "legacy_mapping_scope": "legacy_global_unqualified",
+    "mapping_context_publication": {
+      "origin": "reviewed_source_reference",
+      "publicationVersion": "mapping-contexts-2026-10-13.v1",
+      "libraryVersion": "0.1.1",
+      "contexts": [
+        {
+          "frameworkCode": "RBI-MD-ITG",
+          "ref": "it-governance-oversight",
+          "controlId": "DPDPA-GOV-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Both regimes demand board-level accountability — the MD for IT risk, DPDPA s.8 for personal-data fiduciary accountability. Overlap is real but scopes differ; not an equivalence claim.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-MD-ITG",
+          "ref": "it-infosec-controls",
+          "controlId": "DPDPA-SEC-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "The MD's baseline information-security controls satisfy much of DPDPA s.8(5) \"reasonable security\" for a supervised entity, but the MD adds regulator-specific duties DPDPA does not.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-MD-ITG",
+          "ref": "is-audit",
+          "controlId": "DPDPA-AUD-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "An IS audit evidences continuous compliance practice; the DPDPA control wants a timestamped evidence history. A starting point for the coverage map, not a claim.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-NBFC-AA",
+          "ref": "consent-artefact",
+          "controlId": "DPDPA-CNS-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "The AA consent artefact is domain-specific and stricter in shape (structured, signed, revocable) than generic DPDPA consent; satisfying AA does not exhaust s.6, and vice versa.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-NBFC-AA",
+          "ref": "consent-artefact",
+          "controlId": "DPDPA-CNS-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "The artefact's purpose declaration parallels the DPDPA notice's itemised purposes; the mapping needs engagement-level confirmation.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-NBFC-AA",
+          "ref": "aa-data-minimisation",
+          "controlId": "DPDPA-RTN-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "No-storage-beyond-the-consented-purpose parallels erasure on purpose-end. Directionally aligned; the clocks and scope differ.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-NBFC-AA",
+          "ref": "aa-grievance",
+          "controlId": "DPDPA-DAT-003",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "AA grievance duties overlap the DPDPA grievance-redressal mechanism for fiduciaries in the AA ecosystem.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-PAYMENT-DATA",
+          "ref": "domestic-storage",
+          "controlId": "DPDPA-XBR-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Both restrict cross-border flows, but the RBI directive localises payment data outright — strictly stricter than the DPDPA blacklist model. The overlap is real; the obligations are not the same.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "RBI-PAYMENT-DATA",
+          "ref": "foreign-processing-restrictions",
+          "controlId": "DPDPA-XBR-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Documenting the legal basis for a transfer parallels documenting the time-bound foreign-processing window; the mapping informs the coverage map only.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "SEBI-CYBER-RESILIENCE",
+          "ref": "cyber-resilience-baseline",
+          "controlId": "DPDPA-SEC-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Baseline cyber controls overlap \"reasonable security safeguards\" for SEBI-regulated entities; the framework adds market-integrity duties outside DPDPA scope.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "SEBI-CYBER-RESILIENCE",
+          "ref": "monitoring-logging-vapt",
+          "controlId": "DPDPA-SEC-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Framework monitoring/logging duties satisfy much of the DPDPA audit-log control for market-facing systems; scope and retention specifics differ.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "SEBI-CYBER-RESILIENCE",
+          "ref": "monitoring-logging-vapt",
+          "controlId": "DPDPA-SEC-004",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Periodic VAPT appears in both; cadence and scoping must be confirmed per engagement before any stronger label.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "SEBI-CYBER-RESILIENCE",
+          "ref": "incident-reporting-sebi",
+          "controlId": "DPDPA-BRCH-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Both are time-bound breach/incident intimation duties with DIFFERENT recipients and clocks (SEBI/CERT-In vs the Data Protection Board). One report does not substitute for the other.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "IRDAI-CYBER-SECURITY",
+          "ref": "ics-baseline",
+          "controlId": "DPDPA-SEC-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "The insurer information-security baseline overlaps reasonable security for policyholder data; the guideline edition in force must be confirmed per engagement.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "IRDAI-CYBER-SECURITY",
+          "ref": "ics-access-logs",
+          "controlId": "DPDPA-SEC-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Privileged access management overlaps DPDPA least-privilege access; the mapping informs, it does not equate.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "IRDAI-CYBER-SECURITY",
+          "ref": "ics-vendor-outsourcing",
+          "controlId": "DPDPA-GOV-003",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Outsourcing oversight overlaps the DPDPA processor-agreement control; the DPA remains a distinct statutory requirement.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "six-hour-incident-report",
+          "controlId": "DPDPA-BRCH-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "The 6-hour CERT-In clock is stricter than and separate from the DPB intimation duty — different authority, different trigger. Never present one as satisfying the other.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "logs-180-days-india",
+          "controlId": "DPDPA-SEC-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "The Directions mandate a rolling 180-day in-India log retention that exceeds what the DPDPA audit-log control alone requires.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "logs-180-days-india",
+          "controlId": "DPDPA-RTN-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Log-retention schedules must be reconciled so the CERT-In minimum and DPDPA erasure duties do not collide in the retention register.",
+          "sectorPackCode": "BFSI-1"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-consent-manager",
+          "controlId": "DPDPA-CNS-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "ABDM electronic consent manager architecture provides structured patient consent; overlaps DPDPA s.6 consent mechanism with healthcare-specific artifacts.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-consent-manager",
+          "controlId": "DPDPA-CNS-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "ABDM purpose specification parallels DPDPA s.5 itemised notice for health data collection.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-data-minimisation",
+          "controlId": "DPDPA-RTN-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Purpose limitation in health data parallels DPDPA purpose completion erasure; clinical retention rules must be reconciled.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-patient-rights",
+          "controlId": "DPDPA-DAT-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Patient rights under ABDM overlap DPDPA s.11 right to information about processed health data.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-patient-rights",
+          "controlId": "DPDPA-DAT-002",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Clinical correction and rectification rights inform DPDPA s.12 correction/erasure implementation.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-patient-rights",
+          "controlId": "DPDPA-DAT-003",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "ABDM patient grievance redressal parallels DPDPA s.13 grievance redressal officer mechanism.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "NHA-ABDM-HDMP",
+          "ref": "abdm-anonymisation-research",
+          "controlId": "DPDPA-DPF-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Anonymisation standards for medical research inform privacy-by-design architecture under DPDPA s.8(4).",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "MOHFW-EHR-STANDARDS",
+          "ref": "ehr-access-control",
+          "controlId": "DPDPA-SEC-002",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "EHR role-based access control and clinical least privilege satisfy core aspects of DPDPA s.8(5) access controls.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "MOHFW-EHR-STANDARDS",
+          "ref": "ehr-audit-logging",
+          "controlId": "DPDPA-SEC-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Audit logging for EHR modifications directly supports DPDPA s.8(5) audit log maintenance and tamper protection.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "MOHFW-EHR-STANDARDS",
+          "ref": "ehr-storage-encryption",
+          "controlId": "DPDPA-SEC-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "EHR cryptographic standards for data at rest and in transit align with DPDPA reasonable security safeguards.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "MOHFW-EHR-STANDARDS",
+          "ref": "ehr-retention-disposal",
+          "controlId": "DPDPA-RTN-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Clinical retention periods under EHR standards must be codified alongside DPDPA retention schedules.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "six-hour-incident-report",
+          "controlId": "DPDPA-BRCH-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "CERT-In 6-hour reporting clock applies to healthcare critical systems; distinct statutory duty from DPB breach intimation.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "logs-180-days-india",
+          "controlId": "DPDPA-SEC-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "CERT-In 180-day in-India logging mandate applies to hospital networks and patient portal infrastructure.",
+          "sectorPackCode": "IN-HEALTHCARE-2024"
+        },
+        {
+          "frameworkCode": "MEITY-INTERMEDIARY-2021",
+          "ref": "intermediary-privacy-notice",
+          "controlId": "DPDPA-CNS-002",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Intermediary privacy notice requirements overlap DPDPA s.5 itemised notice obligations for digital platforms.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-INTERMEDIARY-2021",
+          "ref": "intermediary-grievance-officer",
+          "controlId": "DPDPA-DAT-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Resident grievance officer requirement under Intermediary Rules satisfies core organizational duties of DPDPA s.13.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-INTERMEDIARY-2021",
+          "ref": "intermediary-data-retention",
+          "controlId": "DPDPA-RTN-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "180-day post-deletion retention duty must be harmonized with DPDPA s.8(7) purpose-completion erasure in retention register.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-INTERMEDIARY-2021",
+          "ref": "intermediary-takedown-reporting",
+          "controlId": "DPDPA-GOV-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Legal compliance and disclosure workflows overlap broader DPDPA data fiduciary governance structure.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "CCPA-ECOMMERCE-2020",
+          "ref": "ecommerce-explicit-consent",
+          "controlId": "DPDPA-CNS-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "Prohibition of pre-ticked consent checkboxes directly aligns with DPDPA s.6 affirmative, clear consent requirements.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "CCPA-ECOMMERCE-2020",
+          "ref": "ecommerce-grievance-mechanism",
+          "controlId": "DPDPA-DAT-003",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "E-commerce consumer grievance ticket tracking overlaps DPDPA grievance redressal mechanism.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "CCPA-ECOMMERCE-2020",
+          "ref": "ecommerce-seller-transparency",
+          "controlId": "DPDPA-GOV-003",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "Marketplace seller and vendor data sharing oversight parallels DPDPA processor agreement controls.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-SPDI-2011",
+          "ref": "spdi-privacy-policy",
+          "controlId": "DPDPA-GOV-001",
+          "mappingStrength": "indicative",
+          "provenance": "reference",
+          "note": "SPDI privacy policy mandate overlaps DPDPA general accountability and policy governance.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-SPDI-2011",
+          "ref": "spdi-security-practices",
+          "controlId": "DPDPA-SEC-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "SPDI reasonable security practices standard (ISO 27001) aligns with DPDPA s.8(5) reasonable security safeguards.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "MEITY-SPDI-2011",
+          "ref": "spdi-disclosure-third-party",
+          "controlId": "DPDPA-CNS-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "SPDI prior permission for third-party disclosure overlaps DPDPA specified purpose consent limitation.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "six-hour-incident-report",
+          "controlId": "DPDPA-BRCH-001",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "CERT-In 6-hour incident report applies to tech intermediaries and cloud services; distinct statutory recipient from DPB.",
+          "sectorPackCode": "IN-TECH-2024"
+        },
+        {
+          "frameworkCode": "CERT-IN-DIRECTIONS-2022",
+          "ref": "logs-180-days-india",
+          "controlId": "DPDPA-SEC-003",
+          "mappingStrength": "partial",
+          "provenance": "reference",
+          "note": "CERT-In 180-day log maintenance in India applies to web apps, cloud servers and API gateways.",
+          "sectorPackCode": "IN-TECH-2024"
+        }
+      ]
+    },
     "control_mappings": [
       {
         "framework_code": "RBI-MD-ITG",
