@@ -17,6 +17,7 @@ import { test, type TestContext } from 'node:test';
 import { generateSecret } from '@axiom/mfa';
 import {
   browserMfaPoolEnabled,
+  mfaPoolFactorReadPath,
   verifyMfaPoolAccountRows,
   BROWSER_MFA_POOL_DEMAND,
   prepareBrowserMfaPool,
@@ -209,7 +210,12 @@ test('catalogue demand includes dynamic roles and formats without sharing identi
     BROWSER_MFA_POOL_DEMAND.reduce((sum, entry) => sum + entry.count, 0),
     73,
   );
-  assert.equal(BROWSER_MFA_POOL_DEMAND.filter((entry) => entry.role === 'axiom_analyst').length, 2);
+  const analysts = BROWSER_MFA_POOL_DEMAND.filter((entry) => entry.role === 'axiom_analyst');
+  assert.equal(
+    analysts.reduce((sum, entry) => sum + entry.count, 0),
+    4,
+  );
+  assert.ok(analysts.every((entry) => entry.internal));
 });
 
 test('live row guard binds actual actor, tenant, role, internal status and active factor', async (context) => {
@@ -368,4 +374,22 @@ test('actual W0 shell scopes the pool marker to CI and preserves ordinary local 
       `${expected}|fixture-archive|fixture-human|fixture-evidence`,
     );
   }
+});
+
+test('live TOTP projection survives retained recovery and revoked factors without accepting either', () => {
+  const actor = randomUUID();
+  const rows = [
+    { user_id: actor, factor_type: 'totp', status: 'active' },
+    { user_id: actor, factor_type: 'recovery_code', status: 'active' },
+    { user_id: actor, factor_type: 'totp', status: 'revoked' },
+  ];
+  const query = new URL(mfaPoolFactorReadPath(actor), 'https://fixture.invalid').searchParams;
+  const projected = rows.filter(
+    (row) =>
+      query.get('user_id') === `eq.${row.user_id}` &&
+      (query.get('factor_type') === null || query.get('factor_type') === `eq.${row.factor_type}`) &&
+      (query.get('status') === null || query.get('status') === `eq.${row.status}`),
+  );
+  assert.deepEqual(projected, [rows[0]]);
+  assert.throws(() => mfaPoolFactorReadPath(actor + '&status=eq.revoked'));
 });

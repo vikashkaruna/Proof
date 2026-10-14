@@ -78,14 +78,13 @@ const manifestSchema = z
 /** Exact catalogue demand: 24 owner helper sites plus the second format and
  * mandatory-owner case; 10 founder sites plus helper calls/loops and matrix;
  * 16 admin sites plus matrix; approval helper has three invocations; analyst
- * noninternal fixture remains distinct. Exhaustion never provisions fallback. */
+ * staff onboarding fixture is internal. Exhaustion never provisions fallback. */
 export const BROWSER_MFA_POOL_DEMAND = Object.freeze([
   { role: 'owner', internal: false, count: 26 },
   { role: 'admin', internal: false, count: 16 },
   { role: 'admin', internal: false, profileCase: 'long-account', count: 1 },
   { role: 'founder', internal: true, count: 17 },
-  { role: 'axiom_analyst', internal: true, count: 3 },
-  { role: 'axiom_analyst', internal: false, count: 1 },
+  { role: 'axiom_analyst', internal: true, count: 4 },
   { role: 'approver', internal: false, count: 9 },
 ] as const);
 
@@ -290,4 +289,11 @@ export async function leaseBrowserMfaAccount(input: {
     return account;
   }
   throw new Error('MFA pool exhausted');
+}
+
+/** Activation also retains recovery/history rows; only the live TOTP is the
+ * authenticator witness. Keep exact actor/type/status projection at the API. */
+export function mfaPoolFactorReadPath(id: string): string {
+  const actor = z.guid().parse(id);
+  return `user_mfa_factors?user_id=eq.${actor}&factor_type=eq.totp&status=eq.active&select=user_id,factor_type,status`;
 }
