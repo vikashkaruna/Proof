@@ -8,7 +8,14 @@ export default class AcceptanceReporter implements Reporter {
       .titlePath()
       .join(' / ')
       .replace(/[\r\n]/g, ' ');
-    console.log(`${result.status}: ${title}`);
+    const duration =
+      typeof result.duration === 'number' &&
+      Number.isFinite(result.duration) &&
+      result.duration >= 0 &&
+      Number.isSafeInteger(Math.floor(result.duration))
+        ? Math.floor(result.duration)
+        : undefined;
+    console.log(`${result.status}: ${title}${duration === undefined ? '' : ` (${duration}ms)`}`);
     if (result.status === 'failed' || result.status === 'timedOut') {
       const locations = new Set(
         result.errors.map((error) => acceptanceErrorLocation(error.location)).filter(Boolean),

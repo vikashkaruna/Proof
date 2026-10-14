@@ -63,6 +63,8 @@ async function buildApp(ctx: {
   app.use('/v1/*', requireSessionMfa(mfa));
   app.get('/v1/plans/:id', (c) => c.json({ ok: true }));
   app.get('/v1/mfa/status', (c) => c.json({ reachable: true }));
+  app.get('/v1/mfa', (c) => c.json({ reachable: true }));
+  app.get('/v1/mfa-export', (c) => c.json({ sensitive: true }));
   return app;
 }
 
@@ -91,6 +93,50 @@ beforeEach(async () => {
 const get = (app: Hono<{ Variables: Variables }>, path: string) => app.request(path);
 
 describe('requireSessionMfa — who it applies to', () => {
+  it.each(['founder', 'axiom_analyst', 'owner', 'admin', 'approver'])(
+    'quarantines %s despite an empty tenant policy until this session verifies',
+    async (role) => {
+      fake.rows('tenants')[0]!.mfa_required_roles = [];
+      const app = await buildApp({ role });
+      const missing = await get(app, '/v1/plans/p1');
+      expect(missing.status).toBe(403);
+      expect(await missing.json()).toMatchObject({ error: { code: 'mfa_enrolment_required' } });
+      const factorId = await enrol();
+      expect((await get(app, '/v1/plans/p1')).status).toBe(401);
+      await mfa.attestSession({ userId: USER, sessionId: OTHER_SESSION, factorId });
+      expect((await get(app, '/v1/plans/p1')).status).toBe(401);
+      await mfa.attestSession({ userId: USER, sessionId: SESSION, factorId });
+      expect((await get(app, '/v1/plans/p1')).status).toBe(200);
+      const current = fake
+        .rows('mfa_session_attestations')
+        .find((row) => row.session_id === SESSION)!;
+      const expiry = current.expires_at;
+      current.expires_at = new Date(Date.now() - 1000).toISOString();
+      expect((await get(app, '/v1/plans/p1')).status).toBe(401);
+      current.expires_at = expiry;
+      for (const row of fake.rows('mfa_session_attestations'))
+        row.revoked_at = new Date().toISOString();
+      expect((await get(app, '/v1/plans/p1')).status).toBe(401);
+    },
+  );
+  it.each(['reviewer', 'viewer', 'partner'])(
+    'retains tenant-controlled MFA for %s',
+    async (role) => {
+      fake.rows('tenants')[0]!.mfa_required_roles = [];
+      const app = await buildApp({ role });
+      expect((await get(app, '/v1/plans/p1')).status).toBe(200);
+      fake.rows('tenants')[0]!.mfa_required_roles = [role];
+      expect((await get(app, '/v1/plans/p1')).status).toBe(403);
+    },
+  );
+  it('rechecks mandatory MFA when the authenticated role changes', async () => {
+    fake.rows('tenants')[0]!.mfa_required_roles = [];
+    const context = { role: 'viewer' };
+    const app = await buildApp(context);
+    expect((await get(app, '/v1/plans/p1')).status).toBe(200);
+    context.role = 'admin';
+    expect((await get(app, '/v1/plans/p1')).status).toBe(403);
+  });
   it('lets a role outside the tenant policy through without a factor', async () => {
     const app = await buildApp({ role: 'viewer' });
     expect((await get(app, '/v1/plans/p1')).status).toBe(200);
@@ -121,6 +167,18 @@ describe('requireSessionMfa — who it applies to', () => {
 });
 
 describe('requireSessionMfa — quarantine', () => {
+  it('exempts exact MFA routes while refusing a sensitive sibling prefix', async () => {
+    const app = await buildApp({ role: 'admin' });
+    expect((await get(app, '/v1/mfa')).status).toBe(200);
+    expect((await get(app, '/v1/mfa/status')).status).toBe(200);
+    const missing = await get(app, '/v1/mfa-export');
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toMatchObject({ error: { code: 'mfa_enrolment_required' } });
+    await enrol();
+    const unverified = await get(app, '/v1/mfa-export');
+    expect(unverified.status).toBe(401);
+    expect(await unverified.json()).toMatchObject({ error: { code: 'mfa_verification_required' } });
+  });
   it('refuses a required role that has no factor, and says to enrol', async () => {
     const app = await buildApp({});
     const res = await get(app, '/v1/plans/p1');

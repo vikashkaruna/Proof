@@ -9,7 +9,7 @@ test('staff proposal requires client admin review before systems enter the estat
     role: 'axiom_analyst',
     withFactor: true,
   });
-  const admin = await createMfaAccount('proposal-admin', { role: 'admin' });
+  const admin = await createMfaAccount('proposal-admin', { role: 'admin', withFactor: true });
   const tenant = crypto.randomUUID();
   const estate = crypto.randomUUID();
   const slug = `proposal-${tenant.slice(0, 8)}`;
@@ -67,7 +67,7 @@ test('staff proposal requires client admin review before systems enter the estat
     await expect(staff.getByRole('button', { name: 'Record review' })).toHaveCount(0);
     await staff.goto('/estate');
     await expect(staff.getByText('Reviewed CRM', { exact: true })).toHaveCount(0);
-    await signInAs(client, admin.email, admin.password);
+    await signInAs(client, admin.email, admin.password, admin.totpSecret!);
     await clientContext.addCookies([tenantCookie(slug)]);
     await client.goto('/estate/onboarding');
     await expect(client.getByText('Original CRM', { exact: false })).toBeVisible();

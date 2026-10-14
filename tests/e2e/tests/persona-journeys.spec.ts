@@ -1,6 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 import { PERSONAS, type PersonaKey } from '../personas';
-import { account, persona, selectTenant, signIn, state } from '../fixtures';
+import {
+  account,
+  persona,
+  selectTenant,
+  signIn,
+  signInAs,
+  satisfyLoginMfa,
+  state,
+} from '../fixtures';
 
 /**
  * W1 — browser persona journeys, against real authentication.
@@ -21,13 +29,18 @@ import { account, persona, selectTenant, signIn, state } from '../fixtures';
  * under it.
  */
 
-/** Personas that reach the app: tenant A has login MFA switched off. */
-const REACHES_APP = PERSONAS.filter((p) => !p.mfaQuarantined);
-/** Personas sent to enrolment instead: founder always, plus tenant B's owner. */
+/** Enrolled mandatory roles reach the app only after real session verification. */
+const REACHES_APP = PERSONAS.filter((p) => !p.mfaQuarantined || p.totpEnrolled);
+/** Password-only mandatory-role sessions stay quarantined even with a factor. */
 const QUARANTINED = PERSONAS.filter((p) => p.mfaQuarantined);
 
-async function openPlanA(page: Page, key: PersonaKey) {
+async function signInVerified(page: Page, key: PersonaKey) {
   await signIn(page, key);
+  if (['founder', 'analyst'].includes(key)) await satisfyLoginMfa(page, key);
+}
+
+async function openPlanA(page: Page, key: PersonaKey) {
+  await signInVerified(page, key);
   await selectTenant(page, 'a');
   await page.goto(`/plans/${state.planA.id}`);
 }
@@ -108,9 +121,9 @@ test.describe('the approve control is role-gated', () => {
 });
 
 test.describe('tenant isolation', () => {
-  for (const p of REACHES_APP) {
+  for (const p of REACHES_APP.filter((p) => p.membership === 'a')) {
     test(`${p.key} cannot read tenant B's plan`, async ({ page }) => {
-      await signIn(page, p.key);
+      await signInVerified(page, p.key);
       await selectTenant(page, 'a');
       await page.goto(`/plans/${state.planB.id}`);
       // Whatever the surface does — refuse, redirect, render "not found" — the
@@ -131,11 +144,12 @@ test.describe('tenant isolation', () => {
 
 test.describe('login MFA quarantine', () => {
   for (const p of QUARANTINED) {
-    test(`${p.key} (${p.role}) is sent to enrolment, not the app`, async ({ page }) => {
-      await signIn(page, p.key);
+    test(`${p.key} (${p.role}) is held at the MFA gate before the app`, async ({ page }) => {
+      const who = account(p.key);
+      await signInAs(page, who.email, who.password);
       await selectTenant(page, p.membership === 'b' ? 'b' : 'a');
       await page.goto(`/plans/${state.planA.id}`);
-      // No active factor, so the gate holds them at enrolment. Reaching the
+      // A factor without session attestation still remains quarantined. Reaching the
       // plan would mean the login-MFA gate is not running.
       await page.waitForURL(/\/(settings\/security|verify)/, { timeout: 30_000 });
       await expect(page.locator('body')).not.toContainText(state.planA.title);
@@ -148,7 +162,8 @@ test.describe('login MFA quarantine', () => {
     // Tenant A sets `mfa_required_roles = '{}'`. A tenant cannot exempt the
     // founder, because that authority is not a tenant's to waive.
     expect(persona('founder').mfaQuarantined).toBe(true);
-    await signIn(page, 'founder');
+    const who = account('founder');
+    await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
     await page.goto('/dashboard');
     await page.waitForURL(/\/(settings\/security|verify)/, { timeout: 30_000 });
@@ -160,7 +175,7 @@ test.describe('surface gating in the navigation', () => {
     test(`${p.key} sees ${p.partnerPortal ? 'the' : 'no'} partner portal link`, async ({
       page,
     }) => {
-      await signIn(page, p.key);
+      await signInVerified(page, p.key);
       await selectTenant(page, 'a');
       await page.goto('/dashboard');
       const partnerLink = page.locator('a[href="/partner"]');

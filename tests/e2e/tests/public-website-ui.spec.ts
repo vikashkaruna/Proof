@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { signIn, selectTenant } from '../fixtures';
+import { signIn, selectTenant, signInFreshOwner } from '../fixtures';
 
 const result = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -46,7 +46,7 @@ async function openConnectors(page: Page) {
 test('owner can audit public content and inspect a recorded result after reload', async ({
   page,
 }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'public-website-ui.spec-1');
   await selectTenant(page, 'a');
   let submitted = false;
   await page.route('**/api/bff/v1/public-website-checks', async (route) => {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { selectTenant, signIn } from '../fixtures';
+import { selectTenant, signIn, signInFreshOwner } from '../fixtures';
 
 test('an approver opens the approval queue but holds no kill switch; a viewer reads sealed Pramaan only', async ({
   page,
@@ -44,7 +44,7 @@ test('an approver opens the approval queue but holds no kill switch; a viewer re
 test('an owner reaches Pramaan and standalone routes show their own shell titles', async ({
   page,
 }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'operator-navigation.spec-1');
   await selectTenant(page, 'a');
   await page.goto('/reports?tab=pramaan');
   await expect(page.getByRole('button', { name: 'Closure dossiers' })).toHaveAttribute(

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { selectTenant, signIn, signInFreshFounder, state } from '../fixtures';
+import { selectTenant, signIn, signInFreshFounder, state, signInFreshOwner } from '../fixtures';
 
 async function captureForReview(page: import('@playwright/test').Page, route: string) {
   const directory = process.env.AXIOM_VISUAL_REVIEW_DIR;
@@ -35,7 +35,7 @@ const modules = [
 
 test('every owner module route renders its context under a page heading', async ({ page }) => {
   test.setTimeout(240_000);
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'module-context.spec-1');
   await selectTenant(page, 'a');
 
   for (const [path, section, phase] of modules) {
