@@ -14,6 +14,7 @@ import { cors } from 'hono/cors';
 import { loadEnv } from '@axiom/config';
 import { authMiddleware } from './middleware/auth.js';
 import { tenantResolver } from './middleware/tenant.js';
+import { requireLiveStaffAuthority } from './middleware/staff-authority.js';
 import {
   boundedJsonBody,
   evidenceBodyLimit,
@@ -136,6 +137,8 @@ export function createApp(
   // Authenticated routes
   app.use('/v1/*', authMiddleware);
   app.use('/v1/*', tenantResolver);
+  // Revoked staff cannot start new mutations or burn an idempotency key.
+  app.use('/v1/*', requireLiveStaffAuthority);
   // Before idempotency, so a quarantined request does not burn a key it will
   // never get to use.
   app.use('/v1/*', requireSessionMfa(mfa));
