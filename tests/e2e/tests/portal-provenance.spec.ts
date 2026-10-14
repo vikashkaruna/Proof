@@ -4,7 +4,7 @@ import { tenantCookie } from '../target';
 
 // C-W0-7: the client portal shows only persisted figures for the verified tenant.
 test('portal shows recorded posture only and never substitutes demo figures', async ({ page }) => {
-  const account = await createMfaAccount('portal-provenance', { role: 'admin' });
+  const account = await createMfaAccount('portal-provenance', { role: 'admin', withFactor: true });
   const tenant = crypto.randomUUID();
   const engagement = crypto.randomUUID();
   const slug = `portal-${tenant.slice(0, 8)}`;
@@ -29,7 +29,7 @@ test('portal shows recorded posture only and never substitutes demo figures', as
     is_sdf: false,
   });
   await seed('tenant_users', { tenant_id: tenant, user_id: account.id, role: 'admin' });
-  await signInAs(page, account.email, account.password);
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await page.context().addCookies([tenantCookie(slug)]);
 
   await page.goto('/portal');

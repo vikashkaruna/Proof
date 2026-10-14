@@ -29,7 +29,7 @@ function createSharedStore() {
   let failReads = false;
 
   const client = {
-    from() {
+    from(table: string) {
       const state: { filters: Array<[string, unknown]>; fields: string[] } = {
         filters: [],
         fields: [],
@@ -54,7 +54,13 @@ function createSharedStore() {
                 resolve,
               );
             }
-            const matched = [...rows.values()].filter((r) =>
+            const sourceRows =
+              table === 'tenant_users'
+                ? [{ tenant_id: TENANT_A, user_id: FOUNDER, role: 'founder' }]
+                : table === 'users'
+                  ? [{ id: FOUNDER, is_axiom_internal: true }]
+                  : [...rows.values()];
+            const matched = sourceRows.filter((r) =>
               state.filters.every(([f, v]) => (r as unknown as Record<string, unknown>)[f] === v),
             );
             const projected = matched.map((row) =>
@@ -118,7 +124,12 @@ describe('kill switch — SEC-4 · shared across replicas', () => {
 
     expect(await replicaB.isActive(TENANT_A)).toBe(false);
 
-    await replicaA.engage({ userId: FOUNDER, reason: 'incident', scope: 'global' });
+    await replicaA.engage({
+      tenantId: TENANT_A,
+      userId: FOUNDER,
+      reason: 'incident',
+      scope: 'global',
+    });
 
     replicaB.invalidate(); // stand in for the TTL expiring
     expect(await replicaB.isActive(TENANT_A)).toBe(true);
@@ -139,7 +150,12 @@ describe('kill switch — SEC-4 · shared across replicas', () => {
 
   it('a global halt stops every tenant', async () => {
     const svc = createKillSwitchService(store.factory);
-    await svc.engage({ userId: FOUNDER, reason: 'platform incident', scope: 'global' });
+    await svc.engage({
+      tenantId: TENANT_A,
+      userId: FOUNDER,
+      reason: 'platform incident',
+      scope: 'global',
+    });
 
     expect(await svc.isActive(TENANT_A)).toBe(true);
     expect(await svc.isActive(TENANT_B)).toBe(true);
@@ -158,7 +174,12 @@ describe('kill switch — SEC-4 · release is scope-aware', () => {
   // everything, so a tenant owner could lift a founder's platform-wide halt.
   it('a tenant release cannot lift a global halt', async () => {
     const svc = createKillSwitchService(store.factory);
-    await svc.engage({ userId: FOUNDER, reason: 'platform incident', scope: 'global' });
+    await svc.engage({
+      tenantId: TENANT_A,
+      userId: FOUNDER,
+      reason: 'platform incident',
+      scope: 'global',
+    });
 
     const result = await svc.release({
       scope: 'tenant',
@@ -172,9 +193,14 @@ describe('kill switch — SEC-4 · release is scope-aware', () => {
 
   it('releases the global halt when the global scope is named', async () => {
     const svc = createKillSwitchService(store.factory);
-    await svc.engage({ userId: FOUNDER, reason: 'platform incident', scope: 'global' });
+    await svc.engage({
+      tenantId: TENANT_A,
+      userId: FOUNDER,
+      reason: 'platform incident',
+      scope: 'global',
+    });
 
-    const result = await svc.release({ scope: 'global', userId: FOUNDER });
+    const result = await svc.release({ scope: 'global', tenantId: TENANT_A, userId: FOUNDER });
 
     expect(result).toEqual({ released: true, scope: 'global' });
     expect(await svc.isActive(TENANT_A)).toBe(false);
@@ -233,12 +259,15 @@ describe('kill switch — fails safe, not open', () => {
     const failing = createKillSwitchService(
       () =>
         ({
-          from: () => ({ upsert: async () => ({ error: { message: 'write failed' } }) }),
+          from: (table: string) =>
+            table === 'kill_switch_state'
+              ? { upsert: async () => ({ error: { message: 'write failed' } }) }
+              : (store.factory() as unknown as { from(table: string): unknown }).from(table),
         }) as never,
     );
 
     await expect(
-      failing.engage({ userId: FOUNDER, reason: 'incident', scope: 'global' }),
+      failing.engage({ tenantId: TENANT_A, userId: FOUNDER, reason: 'incident', scope: 'global' }),
     ).rejects.toThrow(/Failed to engage kill switch/);
     expect(svc).toBeDefined();
   });

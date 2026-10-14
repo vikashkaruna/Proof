@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { selectTenant, state, signInFreshOwner } from '../fixtures';
 
 test('caller-authored statutory claims cannot become agent reports', async ({ page }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'statutory-report-boundary.spec-1');
   await selectTenant(page, 'a');
 
   const response = await page.request.post('/api/bff/v1/reports/statutory/generate', {

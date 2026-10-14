@@ -70,3 +70,57 @@ test('actual reporter exposes only known locations and preserves outcome output'
   ]);
   assert.equal(output.join('\n').includes(secret), false);
 });
+
+test('reporter emits only valid numeric durations and omits private or invalid values', () => {
+  const output: string[] = [];
+  const original = console.log;
+  console.log = (message: string) => output.push(message);
+  try {
+    const reporter = new AcceptanceReporter();
+    const testCase = { titlePath: () => ['static test'] } as Parameters<
+      AcceptanceReporter['onTestEnd']
+    >[0];
+    for (const duration of [
+      0,
+      123.9,
+      undefined,
+      NaN,
+      Infinity,
+      -1,
+      'private-secret',
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      reporter.onTestEnd(testCase, {
+        status: 'passed',
+        errors: [],
+        duration,
+      } as unknown as Parameters<AcceptanceReporter['onTestEnd']>[1]);
+    }
+  } finally {
+    console.log = original;
+  }
+  assert.deepEqual(output, [
+    'passed: static test (0ms)',
+    'passed: static test (123ms)',
+    ...Array<string>(6).fill('passed: static test'),
+  ]);
+});
+
+test('global setup errors expose only fixed categories, never private cause values', (context) => {
+  const messages: string[] = [];
+  context.mock.method(console, 'log', (value: string) => messages.push(value));
+  const reporter = new AcceptanceReporter();
+  reporter.onError({
+    message: 'private-credential MFA pool directory refused other-private-input',
+  });
+  reporter.onError({ message: 'private-credential https://private.example.invalid' });
+  assert.deepEqual(messages, [
+    'Acceptance setup failure: mfa_pool_permissions',
+    'Acceptance setup failure: unclassified_private_error',
+  ]);
+  assert.ok(
+    messages.every(
+      (value) => !value.includes('private-credential') && !value.includes('example.invalid'),
+    ),
+  );
+});
