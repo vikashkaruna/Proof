@@ -591,6 +591,11 @@ jobs:
       - name: Install PyYAML for the rendered-manifest checks
         run: pip install --quiet pyyaml
 
+      - name: Sovereign Helm contract regressions
+        env:
+          AXIOM_REQUIRE_HELM: '1'
+        run: python3 infra/helm/axiom-proof/ci/test_sovereign_contract.py
+
       # Rendering the defaults alone is not coverage: a `{{- with }}` guarding
       # an empty map never executes, which is exactly how the ServiceAccount
       # annotations defect survived — clean on defaults, invalid YAML the
@@ -603,7 +608,7 @@ jobs:
         run: |
           set -euo pipefail
           CHART=infra/helm/axiom-proof
-          VALUE_SETS=("" "-f ${CHART}/values-prod.yaml.example")
+          VALUE_SETS=("" "-f ${CHART}/values-prod.yaml.example" "-f ${CHART}/values-onprem.yaml -f ${CHART}/ci/onprem-inputs.yaml")
           for fixture in "${CHART}"/ci/*-values.yaml; do
             VALUE_SETS+=("-f ${fixture}")
           done
