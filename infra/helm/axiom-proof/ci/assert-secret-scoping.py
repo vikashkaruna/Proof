@@ -68,8 +68,21 @@ for component, deployment in deployments.items():
         for container in deployment["spec"]["template"]["spec"]["containers"]
         for entry in container.get("env", [])
     }
+    # Offline issuance stays outside service pods. Approval signing remains valid.
+    for private_key_name in (
+        "AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY",
+        "AXIOM_LICENSE_ROOT_PRIVATE_KEY",
+        "AXIOM_OFFLINE_LICENSE_PRIVATE_KEY",
+    ):
+        if private_key_name in entries:
+            raise SystemExit(
+                f"{component}: {private_key_name} must stay outside service pods"
+            )
     onprem = entries.get("ENVIRONMENT", {}).get("value") == "onprem"
-    for key in ("AXIOM_OFFLINE_LICENSE", "AXIOM_LICENSE_ROOT_PUBLIC_KEY"):
+    for key, secret_key in (
+        ("AXIOM_OFFLINE_LICENSE", "license"),
+        ("AXIOM_LICENSE_ROOT_PUBLIC_KEY", "root-public-key"),
+    ):
         expected = onprem and component in (
             "bff",
             "agent-runtime",
@@ -80,9 +93,13 @@ for component, deployment in deployments.items():
             raise SystemExit(f"{component}: {key} violates offline license custody")
         if expected:
             ref = entries[key].get("valueFrom", {}).get("secretKeyRef", {})
-            if not ref.get("name") or not ref.get("key") or ref.get("optional"):
+            if (
+                not ref.get("name")
+                or ref.get("key") != secret_key
+                or ref.get("optional")
+            ):
                 raise SystemExit(
-                    f"{component}: {key} must reference a required existing Secret"
+                    f"{component}: {key} must reference required Secret key {secret_key}"
                 )
     for key in ("AXIOM_STORAGE_ACCESS_KEY_ID", "AXIOM_STORAGE_SECRET_ACCESS_KEY"):
         if (key in entries) != (onprem and component in ("bff", "agent-runtime")):

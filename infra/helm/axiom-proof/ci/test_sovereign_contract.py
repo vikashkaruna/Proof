@@ -135,6 +135,77 @@ class SovereignHelmTests(unittest.TestCase):
         )
         self.assertEqual(scoped.returncode, 0, scoped.stderr)
 
+    def test_guard_refuses_wrong_license_secret_key_in_each_backend(self):
+        result = render(True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for component in ("bff", "agent-runtime", "model-gateway", "temporal-worker"):
+            for name in ("AXIOM_OFFLINE_LICENSE", "AXIOM_LICENSE_ROOT_PUBLIC_KEY"):
+                with self.subTest(component=component, name=name):
+                    docs = list(yaml.safe_load_all(result.stdout))
+                    deployment = next(
+                        doc
+                        for doc in docs
+                        if isinstance(doc, dict)
+                        and doc.get("kind") == "Deployment"
+                        and doc["metadata"]["labels"]["app.kubernetes.io/component"]
+                        == component
+                    )
+                    env = next(
+                        entry
+                        for entry in container(deployment)["env"]
+                        if entry["name"] == name
+                    )
+                    env["valueFrom"]["secretKeyRef"]["key"] = "authority-private-key"
+                    guarded = subprocess.run(
+                        ["python3", str(CHART / "ci/assert-secret-scoping.py")],
+                        input=yaml.safe_dump_all(docs),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=30,
+                    )
+                    self.assertNotEqual(guarded.returncode, 0)
+                    self.assertIn(name, guarded.stderr)
+
+    def test_guard_refuses_private_offline_authority_env_without_banning_approval(self):
+        result = render(True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        safe = deployments(result)
+        self.assertEqual(set(safe), set(COMPONENTS))
+        self.assertIn(
+            "APPROVAL_SIGNING_KEY",
+            {entry["name"] for entry in container(safe["bff"])["env"]},
+        )
+        for component in COMPONENTS:
+            for name in (
+                "AXIOM_LICENSE_AUTHORITY_PRIVATE_KEY",
+                "AXIOM_LICENSE_ROOT_PRIVATE_KEY",
+                "AXIOM_OFFLINE_LICENSE_PRIVATE_KEY",
+            ):
+                with self.subTest(component=component, name=name):
+                    docs = list(yaml.safe_load_all(result.stdout))
+                    deployment = next(
+                        doc
+                        for doc in docs
+                        if isinstance(doc, dict)
+                        and doc.get("kind") == "Deployment"
+                        and doc["metadata"]["labels"]["app.kubernetes.io/component"]
+                        == component
+                    )
+                    container(deployment)["env"].append(
+                        {"name": name, "value": "synthetic-unissued-authority-field"}
+                    )
+                    guarded = subprocess.run(
+                        ["python3", str(CHART / "ci/assert-secret-scoping.py")],
+                        input=yaml.safe_dump_all(docs),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=30,
+                    )
+                    self.assertNotEqual(guarded.returncode, 0)
+                    self.assertIn(name, guarded.stderr)
+
     def test_onprem_example_refuses_without_approved_inputs(self):
         result = subprocess.run(
             [
