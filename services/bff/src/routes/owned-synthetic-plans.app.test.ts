@@ -16,6 +16,7 @@ const state = vi.hoisted(() => {
     role: 'owner' as Variables['role'],
     authenticated: true,
     mfa: true,
+    internal: true,
     cache: vi.fn(),
     lookup: vi.fn(),
     source: vi.fn(),
@@ -91,17 +92,22 @@ beforeEach(() => {
   state.role = 'owner';
   state.authenticated = true;
   state.mfa = true;
+  state.internal = true;
   state.cache.mockReset().mockImplementation(() => {
     throw Error('Generic response cache must not replace current owned source');
   });
   state.source
     .mockReset()
     .mockResolvedValue({ tenantId: id(1), actorId: id(2), engagementId: id(5), targets: [] });
-  state.lookup.mockReset().mockImplementation(() => {
+  state.lookup.mockReset().mockImplementation((table: string) => {
     const query = {
       select: () => query,
       eq: () => query,
       single: async () => ({ data: { id: id(99), title: 'Legacy plan' }, error: null }),
+      abortSignal: async () => ({
+        data: table === 'users' ? [{ id: id(2), is_axiom_internal: state.internal }] : [],
+        error: null,
+      }),
     };
     return query;
   });
@@ -194,3 +200,24 @@ it('actual application ingress rejects oversized owned source before even the mi
   expect(state.cache).not.toHaveBeenCalled();
   expect(state.source).not.toHaveBeenCalled();
 });
+
+it.each(['founder', 'axiom_analyst'] as const)(
+  'actual application refuses new mutation for revoked %s before MFA/cache/domain work',
+  async (role) => {
+    state.role = role;
+    state.internal = false;
+    // Revocation must win even when the old session has lost MFA attestation.
+    state.mfa = false;
+    const app = fixture();
+    const response = await app.request('/v1/plans/owned-synthetic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': id(10) },
+      body: '{}',
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: 'staff_authority_required' } });
+    expect(state.lookup).toHaveBeenCalledWith('users');
+    expect(state.cache).not.toHaveBeenCalled();
+    expect(state.source).not.toHaveBeenCalled();
+  },
+);

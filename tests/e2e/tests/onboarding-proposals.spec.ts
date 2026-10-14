@@ -7,6 +7,7 @@ test('staff proposal requires client admin review before systems enter the estat
 }) => {
   const analyst = await createMfaAccount('proposal-staff', {
     role: 'axiom_analyst',
+    isInternal: true,
     withFactor: true,
   });
   const admin = await createMfaAccount('proposal-admin', { role: 'admin', withFactor: true });
