@@ -5,6 +5,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077
 mode=${1:-api-only}
+# Pool authority is CI-only. Ordinary local rehearsals keep their existing
+# fixture path; never pass a CI-only marker to a non-CI invocation.
+run_browser_acceptance() {
+  if [ "${CI:-}" = true ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+    AXIOM_BROWSER_MFA_POOL=isolated-w0 ./scripts/run-deployed-acceptance.sh "$1"
+  else
+    ./scripts/run-deployed-acceptance.sh "$1"
+  fi
+}
 if [ "$mode" != api-only ] && [ "$mode" != --browser ]; then echo 'Usage: test-deployed-http.sh [--browser]' >&2; exit 2; fi
 if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
   echo 'Commit the reviewed changes first: container acceptance must name the source it builds.' >&2
@@ -142,7 +151,7 @@ PY
     SUPABASE_ARCHIVE_WRITER_KEY="$archive_writer_key" \
       SUPABASE_HUMAN_ACTION_WRITER_KEY="$human_writer_key" \
       SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="$evidence_writer_key" \
-      ./scripts/run-deployed-acceptance.sh "$state_dir/$environment.json"
+      run_browser_acceptance "$state_dir/$environment.json"
     unset archive_writer_key human_writer_key evidence_writer_key
     AXIOM_ACCEPTANCE_TARGET="$state_dir/$environment.json" pnpm exec tsx scripts/verify-gap-scan-durability.ts prepare
     # Real process restart, not a second read from the same in-memory cache.

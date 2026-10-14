@@ -6,6 +6,7 @@ import {
   signIn,
   signInAs,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 
 // C-W3-5: the resumable onboarding checklist. Each step is saved server-side,
@@ -44,8 +45,8 @@ async function advance(page: Page, button: string, next: RegExp) {
 test('an admin completes onboarding step by step and can resume between steps', async ({
   page,
 }) => {
-  const admin = await createMfaAccount('setup-admin', { role: 'admin' });
-  await signInAs(page, admin.email, admin.password);
+  const admin = await createMfaAccount('setup-admin', { role: 'admin', withFactor: true });
+  await signInAs(page, admin.email, admin.password, admin.totpSecret!);
   await selectTenant(page, 'a');
   const suffix = crypto.randomUUID().slice(0, 8);
   const estateName = await seedEstate(page, suffix);
@@ -157,7 +158,7 @@ test('an owner re-attests agent access: keep schedules the next review, revoke r
   page,
 }) => {
   const suffix = crypto.randomUUID().slice(0, 8);
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'onboarding-setup.spec-1');
   await selectTenant(page, 'a');
   const estate = (await (
     await page.request.post('/api/bff/v1/estates', {

@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { selectTenant, signIn, state, signInFreshOwner } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
 import { localRoleBearer } from '../local-writer';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
@@ -135,7 +135,7 @@ test.describe('real provider evidence ingestion', () => {
       );
     };
     checkpoint('started');
-    await signIn(page, 'owner');
+    await signInFreshOwner(page, 'evidence-ingestion.spec-1');
     await selectTenant(page, 'a');
     checkpoint('authenticated');
     await page.goto('/evidence');

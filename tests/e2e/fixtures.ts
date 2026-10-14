@@ -1,3 +1,15 @@
+import {
+  browserMfaPoolEnabled,
+  mfaPoolFactorReadPath,
+  verifyMfaPoolAccountRows,
+  leaseBrowserMfaAccount,
+  prepareBrowserMfaPool,
+  type MfaPoolBinding,
+  type MfaPoolIdentity,
+  type MfaPoolAccount,
+} from '../../scripts/lib/browser-mfa-pool';
+import { dirname, join } from 'node:path';
+import { withFreshMfaFixtureCounter } from './fixtures/login-mfa-counter';
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
 import { localRoleBearer } from './local-writer';
 import { insertLocalFixtureRow } from './local-db';
@@ -9,6 +21,75 @@ import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } fro
 
 export const state: PersonaState = JSON.parse(readFileSync(personaStatePath, 'utf8'));
 assertPersonaTarget(state);
+
+export const usesBrowserMfaPool = browserMfaPoolEnabled(acceptanceTarget, {
+  requested: process.env.AXIOM_BROWSER_MFA_POOL,
+  ci: process.env.CI,
+  github: process.env.GITHUB_ACTIONS,
+});
+function poolBinding(): MfaPoolBinding {
+  if (!usesBrowserMfaPool || !acceptanceTarget)
+    throw new Error('Isolated MFA pool authority refused');
+  return {
+    deploymentId: acceptanceTarget.deploymentId,
+    revision: acceptanceTarget.expectedRevision,
+    tenantId: state.tenantA.id,
+    bffUrl: acceptanceTarget.bffUrl,
+    webUrl: acceptanceTarget.webUrl,
+    marketingUrl: acceptanceTarget.marketingUrl,
+    supabaseUrl: acceptanceTarget.supabaseUrl,
+  };
+}
+const poolDirectory = join(dirname(personaStatePath), `fresh-mfa-${state.tenantA.id}`);
+async function verifyPoolAccount(who: MfaPoolAccount): Promise<boolean> {
+  const headers = { apikey: state.publishableKey, Authorization: `Bearer ${state.serviceKey}` };
+  async function read(path: string) {
+    const response = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
+      headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error('MFA pool account readback refused');
+    return response.json() as Promise<unknown>;
+  }
+  const profile = await read(`users?id=eq.${who.id}&select=id,email,is_axiom_internal`);
+  const memberships = await read(`tenant_users?user_id=eq.${who.id}&select=user_id,tenant_id,role`);
+  const factors = await read(mfaPoolFactorReadPath(who.id));
+  return verifyMfaPoolAccountRows(who, poolBinding(), { profile, memberships, factors });
+}
+export async function prepareBrowserMfaAccounts(): Promise<void> {
+  await prepareBrowserMfaPool({
+    directory: poolDirectory,
+    binding: poolBinding(),
+    provision: async (identity: MfaPoolIdentity, index: number) => {
+      let consumedCounter: number | undefined;
+      const who = await provisionMfaAccount(
+        identity.profileCase === 'long-account'
+          ? 'long-organization-operator-layout-verification'
+          : `pool-${index}`,
+        { role: identity.role, isInternal: identity.internal, withFactor: true },
+        {
+          wait: false,
+          activated: (counter) => {
+            consumedCounter = counter;
+          },
+        },
+      );
+      if (!who.totpSecret || consumedCounter === undefined)
+        throw new Error('MFA pool enrollment unconfirmed');
+      const result = {
+        ...who,
+        totpSecret: who.totpSecret,
+        consumedCounter,
+        ...identity,
+        profileCase: identity.profileCase ?? ('ordinary' as const),
+      };
+      if (!(await verifyPoolAccount(result)))
+        throw new Error('MFA pool provision readback refused');
+      return result;
+    },
+  });
+}
 
 export const account = (key: PersonaKey) => state.accounts[key];
 export const persona = personaByKey;
@@ -22,10 +103,21 @@ export const persona = personaByKey;
 export async function signIn(page: Page, key: PersonaKey): Promise<void> {
   const who = account(key);
   await signInAs(page, who.email, who.password);
+  // Founder/analyst journeys already verify explicitly. Client journeys need
+  // the same real attestation now; no tenant policy can waive these roles.
+  if (['owner', 'approver'].includes(persona(key).role) && persona(key).totpEnrolled) {
+    await selectTenant(page, persona(key).membership === 'b' ? 'b' : 'a');
+    await satisfyLoginMfa(page, key);
+  }
 }
 
-/** The same real login, for an account a journey provisioned for itself. */
-export async function signInAs(page: Page, email: string, password: string): Promise<void> {
+/** Password-only unless the caller explicitly supplies its enrolled login factor. */
+export async function signInAs(
+  page: Page,
+  email: string,
+  password: string,
+  loginSecret?: string,
+): Promise<void> {
   await page.goto('/login');
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
@@ -33,6 +125,7 @@ export async function signInAs(page: Page, email: string, password: string): Pro
     page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 }),
     page.click('button[type="submit"]'),
   ]);
+  if (loginSecret) await satisfyLoginMfaWithSecret(page, loginSecret);
 }
 
 /** Point the session at a seeded tenant. The cookie is a preference; membership still decides. */
@@ -105,9 +198,14 @@ export async function createApprovablePlan(label: string): Promise<{
  * seeded secret under the harness ring key.
  */
 export async function satisfyLoginMfa(page: Page, key: PersonaKey): Promise<void> {
-  const secret = account(key).totpSecret;
+  const who = account(key);
+  const secret = who.totpSecret;
   if (!secret) throw new Error(`${key} was seeded without a TOTP factor`);
-  await satisfyLoginMfaWithSecret(page, secret);
+  // Keep independent workers serialized, but do not wait another entire window
+  // when the last successful verification's counter has already expired.
+  await withFreshMfaFixtureCounter(join(dirname(personaStatePath), 'login-mfa-locks'), who.id, () =>
+    satisfyLoginMfaWithSecret(page, secret),
+  );
 }
 
 export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Promise<void> {
@@ -139,8 +237,15 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
   );
   // Record status only, never request bodies, codes, cookies or response payloads.
   const statuses: string[] = [];
+  let verificationConfirmed = false;
   const record = (response: Response) => {
     const path = new URL(response.url()).pathname;
+    if (
+      path.endsWith('/verify') &&
+      path.startsWith('/api/bff/v1/mfa/challenge') &&
+      response.status() === 200
+    )
+      verificationConfirmed = true;
     if (path.startsWith('/api/bff/v1/mfa/challenge'))
       statuses.push(`${path.endsWith('/verify') ? 'verify' : 'issue'}:${response.status()}`);
   };
@@ -166,6 +271,8 @@ export async function satisfyLoginMfaWithSecret(page: Page, secret: string): Pro
       await verifyButton.click({ timeout: 15_000 });
       try {
         await page.waitForURL((url) => !url.pathname.startsWith('/verify'), { timeout: 15_000 });
+        if (!verificationConfirmed)
+          throw new Error('MFA navigation lacked a successful real verification response');
         return;
       } catch {
         if (attempt === 1)
@@ -189,6 +296,15 @@ export async function signInFreshAnalyst(page: Page, label: string): Promise<voi
   await signInAs(page, who.email, who.password);
   await selectTenant(page, 'a');
   await satisfyLoginMfaWithSecret(page, who.totpSecret);
+}
+
+/** Explicit private owner identity: ordinary journeys do not share a one-use factor. */
+export async function signInFreshOwner(page: Page, label: string) {
+  const who = await createMfaAccount(label, { role: 'owner', withFactor: true });
+  if (!who.totpSecret) throw new Error('Owner journey needs its own enrolled factor');
+  await selectTenant(page, 'a');
+  await signInAs(page, who.email, who.password, who.totpSecret);
+  return who;
 }
 
 /** A fresh internal founder: the only role that reaches the Agent Workbench. */
@@ -216,8 +332,8 @@ export const planUrl = (id: string) => `/plans/${id}`;
  * written against a seeded persona passes on a clean database and fails on
  * every rerun — including, silently and permanently, on a CI retry.
  *
- * Tenant A keeps `mfa_required_roles = '{}'`, so an account with no factor
- * signs in and reaches the app instead of landing on the quarantine page.
+ * Tenant A keeps an empty optional MFA policy. The five mandatory human roles
+ * still require enrolment and session verification, independently of that policy.
  *
  * `withFactor` seeds an active TOTP factor encrypted under the harness ring
  * key, exactly as `scripts/seed-personas.ts` does, for journeys that start
@@ -228,8 +344,33 @@ export async function createMfaAccount(
   opts: {
     withFactor?: boolean;
     isInternal?: boolean;
-    role?: 'approver' | 'founder' | 'admin' | 'axiom_analyst';
+    role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
   } = {},
+): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
+  if (usesBrowserMfaPool && opts.withFactor) {
+    return leaseBrowserMfaAccount({
+      directory: poolDirectory,
+      binding: poolBinding(),
+      identity: {
+        role: opts.role ?? 'approver',
+        internal: opts.isInternal ?? false,
+        profileCase:
+          label === 'long-organization-operator-layout-verification' ? 'long-account' : 'ordinary',
+      },
+      verify: verifyPoolAccount,
+    });
+  }
+  return provisionMfaAccount(label, opts);
+}
+
+async function provisionMfaAccount(
+  label: string,
+  opts: {
+    withFactor?: boolean;
+    isInternal?: boolean;
+    role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
+  } = {},
+  readiness?: { wait: boolean; activated: (counter: number) => void },
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;
@@ -239,6 +380,7 @@ export async function createMfaAccount(
     const res = await fetch(`${state.supabaseUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: state.publishableKey,
         Authorization: `Bearer ${state.serviceKey}`,
@@ -289,6 +431,8 @@ export async function createMfaAccount(
       email,
       password,
       tenantId: state.tenantA.id,
+      waitForNextCode: readiness?.wait,
+      onActivated: readiness?.activated,
     });
   } else if (opts.withFactor) {
     totpSecret = generateSecret(20);
@@ -344,4 +488,11 @@ export async function registerWorkload(agent: 'drishti' | 'karya', label: string
     version = body.version;
   }
   return id;
+}
+
+/** Approval/replacement must spend a different counter from successful login MFA. */
+export async function freshTotpCode(page: Page, secret: string): Promise<string> {
+  const counter = Math.floor(Date.now() / 30_000);
+  await page.waitForTimeout((counter + 1) * 30_000 - Date.now() + 100);
+  return generateTotp(secret);
 }

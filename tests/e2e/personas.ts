@@ -60,9 +60,9 @@ export interface Persona {
    */
   totpEnrolled: boolean;
   /**
-   * True when signing in should land on enrolment instead of the app,
-   * because the tenant (or the role, for `founder`) demands a second factor
-   * this account does not hold.
+   * True when password-only signing in should reach an MFA gate instead of the app,
+   * because the tenant or mandatory role demands a second factor or a live
+   * session attestation. An enrolled factor alone does not verify a session.
    */
   mfaQuarantined: boolean;
   /**
@@ -96,7 +96,7 @@ export const PERSONAS: readonly Persona[] = [
     axiomInternal: false,
     totpEnrolled: true,
     canReject: true,
-    mfaQuarantined: false,
+    mfaQuarantined: true,
     approvalScopes: [],
     canApprove: true,
     workbench: false,
@@ -110,7 +110,7 @@ export const PERSONAS: readonly Persona[] = [
     axiomInternal: false,
     totpEnrolled: true,
     canReject: true,
-    mfaQuarantined: false,
+    mfaQuarantined: true,
     canApprove: true,
     workbench: false,
     partnerPortal: false,
@@ -129,9 +129,9 @@ export const PERSONAS: readonly Persona[] = [
     membership: 'a',
     emailPrefix: 'persona-approver-scoped',
     axiomInternal: false,
-    totpEnrolled: false,
+    totpEnrolled: true,
     canReject: true,
-    mfaQuarantined: false,
+    mfaQuarantined: true,
     canApprove: false,
     workbench: false,
     partnerPortal: false,
@@ -218,7 +218,7 @@ export const PERSONAS: readonly Persona[] = [
     workbench: false,
     partnerPortal: false,
     totpEnrolled: true,
-    mfaQuarantined: false,
+    mfaQuarantined: true,
   },
   {
     /**

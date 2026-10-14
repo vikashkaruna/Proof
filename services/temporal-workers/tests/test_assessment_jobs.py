@@ -6,7 +6,10 @@ from uuid import uuid4
 
 import httpx
 import pytest
-import pytest_asyncio
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+from temporalio.worker import Replayer, Worker
+
 from temporal_workers import assessment_activity
 from temporal_workers.assessment_activity import AssessmentControllerActivity
 from temporal_workers.assessment_jobs import (
@@ -14,10 +17,6 @@ from temporal_workers.assessment_jobs import (
     AssessmentJobWorkflow,
     start_assessment_job,
 )
-from temporalio import activity
-from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer, Worker
 
 
 def reference():
@@ -65,12 +64,6 @@ class SyntheticController:
         if self.fault == "private":
             result["input"] = "synthetic-private-marker"
         return result
-
-
-@pytest_asyncio.fixture
-async def server():
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        yield env
 
 
 @pytest.mark.parametrize(

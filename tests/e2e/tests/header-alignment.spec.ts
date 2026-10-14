@@ -25,8 +25,8 @@ test('module pages and report views use the branded header with one accessible p
   page,
 }) => {
   test.setTimeout(5 * 60_000);
-  const account = await createMfaAccount('header-review', { role: 'admin' });
-  await signInAs(page, account.email, account.password);
+  const account = await createMfaAccount('header-review', { role: 'admin', withFactor: true });
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await selectTenant(page, 'a');
 
   await page.goto('/controls');
@@ -238,8 +238,9 @@ test('settings keeps long account identities readable without horizontal page sc
 }) => {
   const account = await createMfaAccount('long-organization-operator-layout-verification', {
     role: 'admin',
+    withFactor: true,
   });
-  await signInAs(page, account.email, account.password);
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await selectTenant(page, 'a');
   await page.goto('/settings');
   await expect(

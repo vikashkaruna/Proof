@@ -171,6 +171,7 @@ test.describe('replacing an authenticator with the one you hold', () => {
 test.describe.serial('replacing an authenticator you have lost', () => {
   let recoveryCodes: string[] = [];
   let credentials: { email: string; password: string };
+  let replacementSecret: string;
 
   test('a recovery code satisfies the replacement step-up', async ({ page }) => {
     const who = await createMfaAccount('recovery');
@@ -190,6 +191,7 @@ test.describe.serial('replacing an authenticator you have lost', () => {
     await submitReplacementCode(page, recoveryCodes[0]!);
 
     const replacement = await readSetupKey(page);
+    replacementSecret = replacement;
     expect(replacement).not.toBe(first);
     await activateWith(page, replacement);
 
@@ -199,7 +201,7 @@ test.describe.serial('replacing an authenticator you have lost', () => {
   });
 
   test('the spent recovery code cannot be used a second time', async ({ page }) => {
-    await signInAs(page, credentials.email, credentials.password);
+    await signInAs(page, credentials.email, credentials.password, replacementSecret);
     await selectTenant(page, 'a');
     await openSecurity(page);
 

@@ -192,6 +192,46 @@ it('quarantines a caller when tenant MFA policy requires a missing factor', asyn
   );
 });
 
+it.each(['founder', 'axiom_analyst', 'owner', 'admin', 'approver'])(
+  'requires enrolment and a live session for %s with an empty tenant policy',
+  async (role) => {
+    state.memberships[0]!.role = role;
+    state.factors = [];
+    await expect(requireTenantContext()).rejects.toThrow(
+      'redirect:/settings/security?enrol=required',
+    );
+    expect((await requireTenantContext(undefined, { allowUnverifiedMfa: true })).role).toBe(role);
+    state.factors = [{ id: 'factor-1' }];
+    state.attestations = [];
+    await expect(requireTenantContext()).rejects.toThrow('redirect:/verify');
+    state.attestations = [{ expires_at: new Date(Date.now() - 60000).toISOString() }];
+    await expect(requireTenantContext()).rejects.toThrow('redirect:/verify');
+    state.attestations = [{ expires_at: new Date(Date.now() + 60000).toISOString() }];
+    await expect(requireTenantContext()).resolves.toMatchObject({ role });
+    state.session = null;
+    await expect(requireTenantContext()).rejects.toThrow('redirect:/verify');
+  },
+);
+
+it.each(['reviewer', 'viewer', 'partner'])('preserves tenant MFA choice for %s', async (role) => {
+  state.memberships[0]!.role = role;
+  state.factors = [];
+  await expect(requireTenantContext()).resolves.toMatchObject({ role });
+  state.policyRoles = [role];
+  await expect(requireTenantContext()).rejects.toThrow(
+    'redirect:/settings/security?enrol=required',
+  );
+});
+
+it('quarantines an existing session after switching into an admin membership', async () => {
+  state.factors = [];
+  await expect(requireTenantContext()).resolves.toMatchObject({ role: 'viewer' });
+  state.memberships[1]!.role = 'admin';
+  await expect(requireTenantContext('beta')).rejects.toThrow(
+    'redirect:/settings/security?enrol=required',
+  );
+});
+
 it('requires a live session-bound MFA attestation', async () => {
   state.policyRoles = ['viewer'];
   state.attestations = [{ expires_at: new Date(Date.now() - 60000).toISOString() }];

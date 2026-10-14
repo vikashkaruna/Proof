@@ -36,7 +36,7 @@ import { logger } from '../lib/logger.js';
  * this list is how a quarantine quietly stops being one, so it is deliberately
  * the smallest set that leaves the state escapable.
  */
-const QUARANTINE_EXEMPT_PREFIXES = ['/v1/mfa/', '/v1/mfa'];
+const QUARANTINE_EXEMPT_ROOT = '/v1/mfa';
 
 /**
  * Resolved once at module load from the single sanctioned switch, exactly as
@@ -51,7 +51,8 @@ export function requireSessionMfa(mfa: MfaService) {
     if (authBypass) return next();
 
     const path = c.req.path;
-    if (QUARANTINE_EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix))) return next();
+    if (path === QUARANTINE_EXEMPT_ROOT || path.startsWith(`${QUARANTINE_EXEMPT_ROOT}/`))
+      return next();
 
     const role = c.get('role');
     const tenantId = c.get('tenantId');

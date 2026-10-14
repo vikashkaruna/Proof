@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect } from '@playwright/test';
-import { signIn, selectTenant } from '../fixtures';
+import { signIn, selectTenant, signInFreshOwner } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
 
 /** Explicit live-site journey; excluded from ordinary CI and container parity. */
@@ -12,7 +12,7 @@ test('owner audits axiomminds.ai, reloads persisted evidence, and viewer reads i
   const reviewDir = resolve(repoRoot, '.axiom-runtime/review/public-website');
   const label = acceptanceTarget?.environment ?? 'local';
   mkdirSync(reviewDir, { recursive: true, mode: 0o700 });
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'public-website-live.spec-1');
   await selectTenant(page, 'a');
   await page.goto('/connectors');
   const website = page.getByRole('region', { name: 'Public website content audit' });
