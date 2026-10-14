@@ -56,8 +56,8 @@ export function KillSwitchButton({
     if (!engaged) {
       if (
         !confirm(
-          'ENGAGE KILL SWITCH?\n\nThis will halt ALL in-flight agent execution globally and ' +
-            'prevent any further mutations until reset. This action is recorded ' +
+          'ENGAGE KILL SWITCH?\n\nThis engages the stop for this tenant. Enforced checks refuse new work. Running work stops at its next enforced checkpoint. ' +
+            'Normal approval checks still apply. This action is recorded ' +
             'in the audit ledger (ADR-1 / ADR-3).',
         )
       ) {
@@ -84,7 +84,7 @@ export function KillSwitchButton({
           return;
         }
         setEngaged(true);
-        setFeedback('Kill switch ENGAGED. All in-flight agent executions halted.');
+        setFeedback('Kill switch ENGAGED. Running work stops at its next enforced checkpoint.');
         window.dispatchEvent(
           new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: true } }),
         );
@@ -98,8 +98,8 @@ export function KillSwitchButton({
     } else {
       if (
         !confirm(
-          'DISENGAGE KILL SWITCH?\n\nThis will reset the kill switch and resume normal ' +
-            'agent operations and remediation execution.',
+          'DISENGAGE KILL SWITCH?\n\nThis removes this tenant stop. Other stops and normal approval checks still apply; interrupted ' +
+            'work does not automatically resume.',
         )
       ) {
         return;
@@ -124,7 +124,9 @@ export function KillSwitchButton({
           return;
         }
         setEngaged(false);
-        setFeedback('Kill switch DISENGAGED. Agent execution resumed.');
+        setFeedback(
+          'Tenant kill switch DISENGAGED. Other stops and normal approval checks still apply.',
+        );
         window.dispatchEvent(
           new CustomEvent('axiom:kill-switch-changed', { detail: { engaged: false } }),
         );
