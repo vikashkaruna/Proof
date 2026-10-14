@@ -145,3 +145,31 @@ describe('Sector packs & multi-regulator frameworks (W7.3/W7.4 · M4.2/M4.8)', (
     }
   });
 });
+
+// Regression: framework membership alone cannot select authoritative sector notes.
+describe('independently versioned sector mapping contexts', () => {
+  it('preserves repeated global identities as three separate exact sector contexts', async () => {
+    const source = await import('./sector-packs');
+    const duplicates = source.ALL_MAPPING_CONTEXTS.filter(
+      (m) =>
+        m.frameworkCode === 'CERT-IN-DIRECTIONS-2022' &&
+        m.ref === 'logs-180-days-india' &&
+        m.controlId === 'DPDPA-SEC-003',
+    );
+    expect(duplicates.map((m) => m.sectorPackCode)).toEqual([
+      'BFSI-1',
+      'IN-HEALTHCARE-2024',
+      'IN-TECH-2024',
+    ]);
+    expect(new Set(duplicates.map((m) => m.note)).size).toBe(3);
+    for (const m of duplicates) {
+      expect(
+        source.mappingContextsForSectorControl(
+          source.MAPPING_CONTEXT_PUBLICATION_VERSION,
+          m.sectorPackCode,
+          m.controlId,
+        ),
+      ).toContainEqual(m);
+    }
+  });
+});
