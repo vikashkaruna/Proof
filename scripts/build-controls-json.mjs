@@ -30,8 +30,15 @@ const { controls, LIBRARY_VERSION } = await import(
 // library so the runtime mirror carries the same cross-walks the portal
 // publishes. Everything is reference-provenance data from the TypeScript
 // source of truth.
-const { ALL_FRAMEWORKS, ALL_FRAMEWORK_CONTROLS, ALL_CONTROL_MAPPINGS, ALL_SECTOR_PACKS } =
-  await import(join(repoRoot, 'packages/control-library/src/sector-packs.ts'));
+const {
+  ALL_FRAMEWORKS,
+  ALL_FRAMEWORK_CONTROLS,
+  ALL_CONTROL_MAPPINGS,
+  ALL_SECTOR_PACKS,
+  ALL_MAPPING_CONTEXTS,
+  MAPPING_CONTEXT_PUBLICATION_VERSION,
+  LEGACY_MAPPING_SCOPE,
+} = await import(join(repoRoot, 'packages/control-library/src/sector-packs.ts'));
 
 const out = {
   version: LIBRARY_VERSION,
@@ -73,6 +80,14 @@ const out = {
       ref: fc.ref,
       heading: fc.heading,
     })),
+    legacy_mapping_scope: LEGACY_MAPPING_SCOPE,
+    // Source metadata only: no database publication/receipt is asserted by this mirror.
+    mapping_context_publication: {
+      origin: 'reviewed_source_reference',
+      publicationVersion: MAPPING_CONTEXT_PUBLICATION_VERSION,
+      libraryVersion: LIBRARY_VERSION,
+      contexts: ALL_MAPPING_CONTEXTS,
+    },
     control_mappings: ALL_CONTROL_MAPPINGS.map((m) => ({
       framework_code: m.frameworkCode,
       ref: m.ref,

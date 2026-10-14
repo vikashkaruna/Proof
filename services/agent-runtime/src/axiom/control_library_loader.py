@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -331,6 +332,21 @@ class ControlMapping:
     mapping_strength: MappingStrength
     provenance: MappingProvenance
     note: str
+    scope: str = "legacy_global_unqualified"
+
+
+@dataclass(frozen=True)
+class MappingContext:
+    publication_version: str
+    library_version: str
+    sector_pack_code: str
+    framework_code: str
+    ref: str
+    control_id: str
+    mapping_strength: MappingStrength
+    provenance: MappingProvenance
+    note: str
+    origin: str = "reviewed_source_reference"
 
 
 @dataclass(frozen=True)
@@ -353,9 +369,21 @@ class SectorPackBundle:
     framework_controls: tuple[FrameworkControl, ...]
     control_mappings: tuple[ControlMapping, ...]
     packs: tuple[SectorPack, ...]
+    mapping_contexts: tuple[MappingContext, ...] = ()
+
+    def for_sector_control(
+        self, publication_version: str, sector_pack_code: str, control_id: str,
+    ) -> tuple[MappingContext, ...]:
+        """Sector-qualified source references; never fall back to global legacy notes.
+
+        Bundled source metadata does not attest database publication or client verification.
+        """
+        return tuple(m for m in self.mapping_contexts if
+                     m.publication_version == publication_version and
+                     m.sector_pack_code == sector_pack_code and m.control_id == control_id)
 
     def for_control(self, control_id: str) -> tuple[ControlMapping, ...]:
-        """Cross-framework coverage for one DPDPA control."""
+        """Legacy unqualified compatibility data; not authoritative sector notes."""
         return tuple(m for m in self.control_mappings if m.control_id == control_id)
 
     def pack_for_sector(self, sector: str) -> SectorPack | None:
@@ -363,6 +391,58 @@ class SectorPackBundle:
             if p.sector == sector:
                 return p
         return None
+
+
+def _context_strings(value: object, fields: dict[str, int]) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != set(fields):
+        raise ValueError("Mapping context shape refused")
+    result: dict[str, str] = {}
+    for key, maximum in fields.items():
+        item = value[key]
+        if not isinstance(item, str) or not 1 <= len(item) <= maximum:
+            raise ValueError("Mapping context value refused")
+        result[key] = item
+    return result
+
+
+def _parse_mapping_contexts(
+    value: object, version: object, packs: tuple[SectorPack, ...],
+    framework_controls: tuple[FrameworkControl, ...],
+) -> tuple[MappingContext, ...]:
+    if value is None:
+        return ()  # Legacy mirror compatibility, with no invented sector authority.
+    if not isinstance(value, dict) or set(value) != {"origin", "publicationVersion", "libraryVersion", "contexts"}:
+        raise ValueError("Mapping context publication shape refused")
+    publication_version = value["publicationVersion"]
+    if (value["origin"] != "reviewed_source_reference" or not isinstance(publication_version, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{2,79}", publication_version)
+            or not isinstance(version, str) or value["libraryVersion"] != version):
+        raise ValueError("Mapping context publication binding refused")
+    raw_contexts = value["contexts"]
+    if not isinstance(raw_contexts, list) or not 1 <= len(raw_contexts) <= 1000:
+        raise ValueError("Mapping context count refused")
+    by_pack = {p.code: p for p in packs}
+    refs = {(f.framework_code, f.ref) for f in framework_controls}
+    seen: set[tuple[str, str, str, str]] = set()
+    contexts: list[MappingContext] = []
+    for raw_context in raw_contexts:
+        m = _context_strings(raw_context, {"sectorPackCode": 64, "frameworkCode": 64, "ref": 300,
+                                          "controlId": 100, "mappingStrength": 20, "provenance": 20, "note": 2000})
+        pack = by_pack.get(m["sectorPackCode"])
+        key = (m["sectorPackCode"], m["frameworkCode"], m["ref"], m["controlId"])
+        strength = MappingStrength(m["mappingStrength"])
+        provenance = MappingProvenance(m["provenance"])
+        if (key in seen or pack is None or m["controlId"] not in pack.control_ids
+                or m["frameworkCode"] not in pack.framework_codes or (m["frameworkCode"], m["ref"]) not in refs
+                or (strength == MappingStrength.EQUIVALENT and provenance == MappingProvenance.REFERENCE)):
+            raise ValueError("Mapping context reference refused")
+        seen.add(key)
+        contexts.append(MappingContext(publication_version, version, m["sectorPackCode"], m["frameworkCode"],
+                                       m["ref"], m["controlId"], strength, provenance, m["note"]))
+    for pack in packs:
+        if {m.control_id for m in contexts if m.sector_pack_code == pack.code} != set(pack.control_ids):
+            raise ValueError("Mapping context pack coverage refused")
+    return tuple(contexts)
 
 
 def load_sector_packs_from_file(path: str | os.PathLike[str]) -> SectorPackBundle:
@@ -421,6 +501,7 @@ def load_sector_packs_from_file(path: str | os.PathLike[str]) -> SectorPackBundl
         framework_controls=framework_controls,
         control_mappings=control_mappings,
         packs=packs,
+        mapping_contexts=_parse_mapping_contexts(raw.get("mapping_context_publication"), data.get("version"), packs, framework_controls),
     )
 
 
