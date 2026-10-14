@@ -263,6 +263,54 @@ export function verifyPrativedanAssessmentRendering(
   }
 }
 
+/** Independently loaded receipts only: verifies frozen journal ancestry and
+ * completion lease, granting no invocation, settlement or publication authority. */
+export function verifyPrativedanAssessmentReceiptWitness(
+  prepared: PreparedPrativedanAssessmentDraftSource,
+  rawIndependentReceiptWitness: unknown,
+) {
+  try {
+    prepared = preparePrativedanAssessmentDraftSource(
+      prepared.journal,
+      prepared.reviewedRequestText,
+    );
+    const journal = prepared.journal;
+    if (journal.state === 'requested') throw new PrativedanDraftRefused();
+    const witness = prativedanAssessmentRuntimeReceiptWitnessSchema.parse(
+      rawIndependentReceiptWitness,
+    );
+    const ids = [
+      prepared.source.receipts.finalized.id,
+      journal.requested_receipt.id,
+      journal.claimed_receipt.id,
+      witness.started_receipt.id,
+      witness.completed_receipt.id,
+    ];
+    if (
+      !ids.every((id, index) => index === 0 || BigInt(ids[index - 1]!) < BigInt(id)) ||
+      witness.tenant_id !== journal.tenant_id ||
+      witness.engagement_id !== journal.engagement_id ||
+      witness.source_id !== journal.source_id ||
+      witness.assessment_run_id !== journal.assessment_run_id ||
+      witness.run_id !== journal.run_id ||
+      witness.operation_key !== journal.operation_key ||
+      witness.correlation_id !== journal.operation_key ||
+      witness.target_ref !== journal.engagement_id ||
+      witness.source_sha256 !== journal.source_sha256 ||
+      witness.request_sha256 !== journal.request_sha256 ||
+      canonicalJson(witness.requested_receipt) !== canonicalJson(journal.requested_receipt) ||
+      canonicalJson(witness.claimed_receipt) !== canonicalJson(journal.claimed_receipt) ||
+      witness.claim_expires_at !== journal.claim_expires_at ||
+      instant(witness.completed_at) > instant(journal.claim_expires_at) ||
+      witness.runtime_normalized_input_sha256 !== journal.runtime_normalized_input_sha256
+    )
+      throw new PrativedanDraftRefused();
+    return witness;
+  } catch {
+    throw new PrativedanDraftRefused();
+  }
+}
+
 export function verifyPrativedanAssessmentDraftOutput(
   prepared: PreparedPrativedanAssessmentDraftSource,
   rawEnvelope: unknown,
@@ -276,35 +324,14 @@ export function verifyPrativedanAssessmentDraftOutput(
     const journal = prepared.journal;
     if (journal.state === 'requested') throw new PrativedanDraftRefused();
     const envelope = prativedanAssessmentRuntimeEnvelopeSchema.parse(rawEnvelope);
-    const witness = prativedanAssessmentRuntimeReceiptWitnessSchema.parse(
+    const witness = verifyPrativedanAssessmentReceiptWitness(
+      prepared,
       rawIndependentReceiptWitness,
     );
     for (const key of Object.keys(binding) as (keyof typeof binding)[])
       if (canonicalJson(envelope[key]) !== canonicalJson(witness[key]))
         throw new PrativedanDraftRefused();
-    const ids = [
-      prepared.source.receipts.finalized.id,
-      journal.requested_receipt.id,
-      journal.claimed_receipt.id,
-      witness.started_receipt.id,
-      witness.completed_receipt.id,
-    ];
     if (
-      !ids.every((id, index) => index === 0 || BigInt(ids[index - 1]!) < BigInt(id)) ||
-      envelope.tenant_id !== journal.tenant_id ||
-      envelope.engagement_id !== journal.engagement_id ||
-      envelope.source_id !== journal.source_id ||
-      envelope.assessment_run_id !== journal.assessment_run_id ||
-      envelope.run_id !== journal.run_id ||
-      envelope.operation_key !== journal.operation_key ||
-      envelope.correlation_id !== journal.operation_key ||
-      envelope.target_ref !== journal.engagement_id ||
-      envelope.source_sha256 !== journal.source_sha256 ||
-      envelope.request_sha256 !== journal.request_sha256 ||
-      canonicalJson(envelope.requested_receipt) !== canonicalJson(journal.requested_receipt) ||
-      canonicalJson(envelope.claimed_receipt) !== canonicalJson(journal.claimed_receipt) ||
-      envelope.claim_expires_at !== journal.claim_expires_at ||
-      instant(witness.completed_at) > instant(journal.claim_expires_at) ||
       envelope.normalized_input_text !== journal.normalized_input_text ||
       prativedanTextHash(envelope.normalized_input_text) !==
         journal.runtime_normalized_input_sha256 ||

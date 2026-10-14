@@ -12,14 +12,34 @@ result_dir=$(mktemp -d "${TMPDIR:-/tmp}/axiom-prativedan123.XXXXXX")
 chmod 700 "$result_dir"
 pids=()
 created=false
+fixture_custody=false
 cleanup() {
+  status=$?
   for pid in "${pids[@]:-}"; do
     if [ -n "$pid" ]; then wait "$pid" 2>/dev/null || true; fi
   done
+  if [ "$fixture_custody" = true ]; then
+    # Membership is cluster-global: dropping the fixture database cannot undo it.
+    # Revoke ONLY this test session's new grantor row; preserve creator ADMIN.
+    if ! python3 - "$result_dir/controller-membership.json" <<'PYRESTORE' | sql >/dev/null
+import json
+from pathlib import Path
+import sys
+snapshot = json.loads(Path(sys.argv[1]).read_text())
+rows = snapshot['memberships']
+if any(str(row['grantor']) == str(snapshot['member']) for row in rows):
+    raise SystemExit('Preexisting fixture grantor custody refused')
+literal = "'" + json.dumps(rows).replace("'", "''") + "'::jsonb"
+print('revoke axiom_prativedan_controller from postgres granted by postgres;')
+print("do $$begin if (select coalesce(jsonb_agg(to_jsonb(m) order by roleid,member,grantor),'[]'::jsonb) from pg_catalog.pg_auth_members m where roleid=(select oid from pg_catalog.pg_roles where rolname='axiom_prativedan_controller')) is distinct from " + literal + " then raise exception 'Fixture controller membership not restored exactly';end if;end$$;")
+PYRESTORE
+    then status=1; fi
+  fi
   if [ "$created" = true ]; then
-    docker exec "$container" dropdb -U postgres --if-exists "$database" >/dev/null
+    if ! docker exec "$container" dropdb -U postgres --if-exists "$database" >/dev/null; then status=1; fi
   fi
   rm -rf "$result_dir"
+  exit "$status"
 }
 trap cleanup EXIT
 sql() { docker exec -i "$container" psql -X -U postgres -d "$database" -v ON_ERROR_STOP=1 -Atq; }
@@ -27,6 +47,29 @@ docker exec "$container" createdb -U postgres "$database"
 created=true
 sql < tests/database/bootstrap.sql
 python3 scripts/migrate-database.py --container "$container" --user postgres --database "$database"
+# Snapshot exact prior cluster authority, including original grantor/OID/options.
+# The fixture will create a separate postgres-granted SET/INHERIT row, never
+# modify the genuine PostgreSQL creator's ADMIN-only membership.
+sql > "$result_dir/controller-membership.json" <<'SQLMEMBERSHIP'
+do $$begin
+ if controller_security.prativedan126_role_safe() is distinct from true
+ then raise exception 'Unsafe preexisting fixture controller custody';end if;
+end$$;
+select jsonb_build_object('member',(select oid from pg_catalog.pg_roles where rolname=current_user),
+ 'memberships',(select coalesce(jsonb_agg(to_jsonb(m) order by roleid,member,grantor),'[]'::jsonb)
+ from pg_catalog.pg_auth_members m where roleid=(select oid from pg_catalog.pg_roles where rolname='axiom_prativedan_controller')));
+SQLMEMBERSHIP
+chmod 600 "$result_dir/controller-membership.json"
+python3 - "$result_dir/controller-membership.json" <<'PYCUSTODY'
+import json
+from pathlib import Path
+import sys
+snapshot = json.loads(Path(sys.argv[1]).read_text())
+if any(str(row['grantor']) == str(snapshot['member']) for row in snapshot['memberships']):
+    raise SystemExit('Refusing preexisting test-grantor membership')
+PYCUSTODY
+# Set BEFORE the commit attempt: transport loss may leave the grant committed.
+fixture_custody=true
 # Reuse the source test's real assessment preparation and reviewed request.
 # This dedicated database permits committed fixtures visible across sessions;
 # no fixtures are written into the parent test database or retained databases.
@@ -38,7 +81,7 @@ marker = "-- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim."
 if text.count(marker) != 1:
     raise SystemExit('Source fixture boundary changed; review concurrency fixture')
 text = text.split(marker, 1)[0]
-text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer;', 1)
+text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer,axiom_prativedan_controller;', 1)
 text = text.replace('pg_temp.', 'p123_fixture.')
 text = text.replace('create temporary table ', 'create table ')
 for table in ('issued', 'p123_context'):
@@ -47,9 +90,9 @@ print(text + '\ncommit;')
 PY
 for worker in $(seq 1 8); do
   sql > "$result_dir/$worker.json" <<'SQL' &
-set role agent_ledger_writer;
+do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;
 select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,
- encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text) from p123_fixture.p123_context;
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text,p123_fixture.authority()) from p123_fixture.p123_context;
 SQL
   pids+=("$!")
 done
