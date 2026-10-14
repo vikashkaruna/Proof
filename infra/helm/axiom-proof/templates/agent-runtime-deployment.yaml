@@ -28,14 +28,16 @@ spec:
         fsGroup: 1000
       containers:
         - name: agent-runtime
-          image: "{{ .Values.image.registry }}/axiom-agent-runtime:{{ .Values.image.tag }}"
+          image: {{ include "axiom-proof.image" (dict "root" . "component" "agent-runtime") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 8000
           env:
+            {{- include "axiom-proof.onpremStorageEnv" . | nindent 12 }}
+            {{- include "axiom-proof.offlineLicenseEnv" . | nindent 12 }}
             - name: ENVIRONMENT
-              value: production
+              value: {{ include "axiom-proof.environment" . | quote }}
             - name: SUPABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -83,15 +85,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-internal
                   key: approval-key
+            - name: TEMPORAL_TLS
+              value: {{ .Values.temporalWorker.env.TEMPORAL_TLS | quote }}
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.config.temporalAddress }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.config.temporalNamespace }}
+            {{- if ne (include "axiom-proof.environment" .) "onprem" }}
             - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-temporal
                   key: api-key
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
