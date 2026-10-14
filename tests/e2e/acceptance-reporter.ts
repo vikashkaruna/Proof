@@ -1,5 +1,14 @@
-import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
-import { acceptanceErrorLocation } from '../../scripts/lib/acceptance-error-location.js';
+import type {
+  FullResult,
+  Reporter,
+  TestCase,
+  TestResult,
+  TestError,
+} from '@playwright/test/reporter';
+import {
+  acceptanceErrorLocation,
+  acceptanceSetupErrorCode,
+} from '../../scripts/lib/acceptance-error-location.js';
 
 /** Publish static test outcomes and allowlisted source locations only. */
 export default class AcceptanceReporter implements Reporter {
@@ -22,6 +31,9 @@ export default class AcceptanceReporter implements Reporter {
       );
       for (const location of locations) console.log(`Acceptance failure location: ${location}`);
     }
+  }
+  onError(error: TestError) {
+    console.log(`Acceptance setup failure: ${acceptanceSetupErrorCode(error.message)}`);
   }
   onEnd(result: FullResult) {
     console.log(`Browser acceptance finished: ${result.status}`);

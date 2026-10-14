@@ -105,3 +105,22 @@ test('reporter emits only valid numeric durations and omits private or invalid v
     ...Array<string>(6).fill('passed: static test'),
   ]);
 });
+
+test('global setup errors expose only fixed categories, never private cause values', (context) => {
+  const messages: string[] = [];
+  context.mock.method(console, 'log', (value: string) => messages.push(value));
+  const reporter = new AcceptanceReporter();
+  reporter.onError({
+    message: 'private-credential MFA pool directory refused other-private-input',
+  });
+  reporter.onError({ message: 'private-credential https://private.example.invalid' });
+  assert.deepEqual(messages, [
+    'Acceptance setup failure: mfa_pool_permissions',
+    'Acceptance setup failure: unclassified_private_error',
+  ]);
+  assert.ok(
+    messages.every(
+      (value) => !value.includes('private-credential') && !value.includes('example.invalid'),
+    ),
+  );
+});

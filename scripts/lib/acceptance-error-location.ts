@@ -54,3 +54,22 @@ export function acceptanceErrorLocation(location: unknown): string | undefined {
   if (!match?.[1] || !knownSpecs.has(match[1])) return undefined;
   return `tests/e2e/tests/${match[1]}:${line}:${column}`;
 }
+
+/** Fixed setup categories only. Never return raw error/stack/input values. */
+export function acceptanceSetupErrorCode(message: unknown): string {
+  if (typeof message !== 'string') return 'unclassified_private_error';
+  const categories = [
+    ['Isolated browser MFA pool authority refused', 'mfa_pool_authority'],
+    ['MFA pool path refused', 'mfa_pool_path'],
+    ['MFA pool directory refused', 'mfa_pool_permissions'],
+    ['MFA pool preparation refused', 'mfa_pool_preparation'],
+    ['MFA pool provision refused', 'mfa_pool_provision'],
+    ['MFA pool manifest refused', 'mfa_pool_manifest'],
+    ['MFA pool target or readiness refused', 'mfa_pool_readiness'],
+    ['MFA pool exhausted', 'mfa_pool_exhausted'],
+    ['MFA pool live account refused', 'mfa_pool_account'],
+    ['Human writer JWT failed', 'human_writer_authority'],
+    ['human action writer JWT is missing', 'human_writer_missing'],
+  ] as const;
+  return categories.find(([text]) => message.includes(text))?.[1] ?? 'unclassified_private_error';
+}

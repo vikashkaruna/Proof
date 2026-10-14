@@ -338,7 +338,7 @@ test('actual W0 shell scopes the pool marker to CI and preserves ordinary local 
   const stub = join(parent, 'scripts/run-deployed-acceptance.sh');
   await writeFile(
     stub,
-    '#!/usr/bin/env bash\nprintf "%s" "${AXIOM_BROWSER_MFA_POOL-unset}" > "$AXIOM_POOL_RESULT"\n',
+    '#!/usr/bin/env bash\nprintf "%s" "${AXIOM_BROWSER_MFA_POOL-unset}|${SUPABASE_ARCHIVE_WRITER_KEY-unset}|${SUPABASE_HUMAN_ACTION_WRITER_KEY-unset}|${SUPABASE_EVIDENCE_INGESTION_WRITER_KEY-unset}" > "$AXIOM_POOL_RESULT"\n',
     { mode: 0o700 },
   );
   const source = await readFile(new URL('../test-deployed-http.sh', import.meta.url), 'utf8');
@@ -351,10 +351,21 @@ test('actual W0 shell scopes the pool marker to CI and preserves ordinary local 
     ['', 'true', 'unset'],
     ['', '', 'unset'],
   ]) {
-    execFileSync('bash', ['-c', wrapper + '\nrun_browser_acceptance fixture'], {
-      cwd: parent,
-      env: { PATH: process.env.PATH, CI: ci, GITHUB_ACTIONS: github, AXIOM_POOL_RESULT: output },
-    });
-    assert.equal(await readFile(output, 'utf8'), expected);
+    execFileSync(
+      'bash',
+      [
+        '-c',
+        wrapper +
+          '\nSUPABASE_ARCHIVE_WRITER_KEY=fixture-archive SUPABASE_HUMAN_ACTION_WRITER_KEY=fixture-human SUPABASE_EVIDENCE_INGESTION_WRITER_KEY=fixture-evidence run_browser_acceptance fixture',
+      ],
+      {
+        cwd: parent,
+        env: { PATH: process.env.PATH, CI: ci, GITHUB_ACTIONS: github, AXIOM_POOL_RESULT: output },
+      },
+    );
+    assert.equal(
+      await readFile(output, 'utf8'),
+      `${expected}|fixture-archive|fixture-human|fixture-evidence`,
+    );
   }
 });
