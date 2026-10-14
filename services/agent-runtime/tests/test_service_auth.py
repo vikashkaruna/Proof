@@ -7,6 +7,7 @@ import json
 
 import httpx
 import pytest
+from test_model_gateway_provenance import receipt
 
 from axiom import service_auth as sa
 from axiom.config import Settings
@@ -116,13 +117,11 @@ async def test_unknown_mode_raises():
 
 def _gateway(handler):
     settings = Settings(model_gateway_url="http://gw.invalid")
-    http = httpx.AsyncClient(
-        base_url="http://gw.invalid", transport=httpx.MockTransport(handler)
-    )
+    http = httpx.AsyncClient(base_url="http://gw.invalid", transport=httpx.MockTransport(handler))
     return ModelGateway(settings, http=http)
 
 
-OK = {"text": "hi", "input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+OK = receipt(model="m")
 
 
 async def test_integration_header_reaches_gateway_when_enabled(monkeypatch):

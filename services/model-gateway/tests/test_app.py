@@ -481,7 +481,7 @@ def test_ordinary_environment_provider_failure_is_bounded(
         response = client.post(
             "/v1/complete",
             headers={"Authorization": "Bearer private"},
-            json={"prompt": "test", "model": "stub-dpdpa-specialist"},
+            json={"prompt": "test", "model": ""},
         )
         assert response.status_code == 503
         assert response.json() == {
@@ -587,3 +587,395 @@ def test_onprem_actual_adapter_success_is_preserved(client, monkeypatch, endpoin
         assert str(seen[0].url) == "http://local-model:8000/v1/chat/completions"
     finally:
         app_mod.app.state.settings = original
+
+
+def test_served_failover_identity_pricing_and_composed_commitment(client, monkeypatch):
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    captured = []
+
+    async def provider(**kwargs):
+        captured.append(kwargs)
+        if len(captured) == 1:
+            raise RuntimeError("synthetic upstream failure")
+        return SimpleNamespace(
+            model="gpt-4o-provider-revision",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))],
+            usage=SimpleNamespace(prompt_tokens=2, completion_tokens=3, total_tokens=5),
+        )
+
+    monkeypatch.setattr("litellm.acompletion", provider)
+    app.state.settings.openai_api_key = "synthetic-fallback-key"
+    app.state.settings.cost_per_input_token = {"openai/gpt-4o": 0.1}
+    app.state.settings.cost_per_output_token = {"openai/gpt-4o": 0.2}
+    response = client.post(
+        "/v1/complete",
+        json={
+            "prompt": "Explain {{item}}",
+            "variables": {"item": "schema"},
+            "prompt_hash": "0" * 64,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["model_id"] == "openai/gpt-4o"
+    assert data["cost_usd"] == pytest.approx(0.8)
+    provenance = data["provenance"]
+    assert provenance["planned"]["provider"] != provenance["serving"]["provider"]
+    assert provenance["serving"]["reported_model"] == "gpt-4o-provider-revision"
+    actual = captured[-1]
+    sha = lambda value: hashlib.sha256(value.encode()).hexdigest()
+    assert data["prompt_hash"] == sha(actual["messages"][0]["content"])
+    assert data["prompt_hash"] != "0" * 64
+    assert provenance["commitments"]["template_sha256"] == sha("Explain {{item}}")
+    assert provenance["commitments"]["composed_sha256"] == sha("Explain schema")
+    assert provenance["commitments"]["sdk_handoff_sha256"] == sha(
+        json.dumps(
+            {k: actual[k] for k in ("model", "messages", "temperature", "max_tokens")},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    )
+    assert provenance["commitments"]["basis"] == "sdk_handoff_not_http_wire"
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        None,
+        {},
+        {"prompt_tokens": True, "completion_tokens": 2},
+        {"prompt_tokens": -1, "completion_tokens": 2},
+        {"prompt_tokens": 2147483647, "completion_tokens": 1},
+        {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 9},
+    ],
+)
+def test_success_with_unavailable_usage_never_fabricates_tokens_or_cost(client, monkeypatch, usage):
+    from types import SimpleNamespace
+
+    async def provider(**_kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))],
+            usage=None if usage is None else SimpleNamespace(**usage),
+        )
+
+    monkeypatch.setattr("litellm.acompletion", provider)
+    response = client.post("/v1/complete", json={"prompt": "hello"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["input_tokens"] is None
+    assert data["output_tokens"] is None
+    assert data["total_tokens"] is None
+    assert data["cost_usd"] is None
+    assert data["provenance"]["usage"]["availability"] == "unavailable"
+
+
+def test_missing_price_is_not_zero_but_configured_zero_is_valid(client):
+    app.state.settings.cost_per_input_token = {}
+    app.state.settings.cost_per_output_token = {}
+    missing = client.post("/v1/complete", json={"prompt": "hello"}).json()
+    assert missing["cost_usd"] is None
+    app.state.settings.cost_per_input_token = {app.state.settings.anthropic_model: 0.0}
+    app.state.settings.cost_per_output_token = {app.state.settings.anthropic_model: 0.0}
+    zero = client.post("/v1/complete", json={"prompt": "hello"}).json()
+    assert zero["cost_usd"] == 0.0
+    assert zero["provenance"]["pricing"]["basis"] == "configuration_estimate"
+
+
+def test_empty_provider_content_refuses_success(client, monkeypatch):
+    from types import SimpleNamespace
+
+    async def provider(**_kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=" "))], usage=None
+        )
+
+    monkeypatch.setattr("litellm.acompletion", provider)
+    response = client.post("/v1/complete", json={"prompt": "hello"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "model_provider_unavailable"}
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/complete", "/v1/chat/completions"])
+def test_onprem_content_success_with_missing_usage_is_explicit(client, monkeypatch, endpoint):
+    import httpx
+
+    seen = []
+    factory = httpx.AsyncClient
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "model": "actual-local-revision",
+                "choices": [{"message": {"content": "local answer"}}],
+            },
+        )
+
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: factory(**kw, transport=httpx.MockTransport(handler))
+    )
+    app.state.settings = Settings(
+        _env_file=None,
+        environment="onprem",
+        api_key="private",
+        self_hosted_base_url="http://local-model:8000",
+        anthropic_api_key=None,
+        openai_api_key=None,
+        gemini_api_key=None,
+    )
+    payload = (
+        {"prompt": "test"}
+        if endpoint.endswith("complete")
+        else {"messages": [{"role": "user", "content": "test"}]}
+    )
+    response = client.post(endpoint, headers={"Authorization": "Bearer private"}, json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["provenance"]["serving"]["reported_model"] == "actual-local-revision"
+    assert data["provenance"]["usage"]["availability"] == "unavailable"
+    if endpoint.endswith("complete"):
+        assert data["input_tokens"] is None and data["cost_usd"] is None
+    else:
+        assert data["model"] == app.state.settings.self_hosted_model
+        assert data["usage"] == {
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+    assert len(seen) == 1
+
+
+def test_final_redacted_sdk_handoff_hash_not_caller_template_hash(client, monkeypatch):
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    captured = []
+
+    async def provider(**kw):
+        captured.append(kw)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))], usage=None
+        )
+
+    monkeypatch.setattr("litellm.acompletion", provider)
+    response = client.post(
+        "/v1/complete",
+        json={
+            "task": "structural",
+            "pii_redact": False,
+            "prompt": "Email {{who}}",
+            "variables": {"who": "customer@example.com"},
+            "prompt_hash": "0" * 64,
+        },
+    )
+    assert response.status_code == 200
+    handoff = captured[0]
+    actual_text = handoff["messages"][0]["content"]
+    assert "customer@example.com" not in actual_text
+    data = response.json()
+    assert data["prompt_hash"] == hashlib.sha256(actual_text.encode()).hexdigest()
+    assert data["prompt_hash"] != data["provenance"]["commitments"]["composed_sha256"]
+    handoff.pop("api_key")
+    assert (
+        data["provenance"]["commitments"]["sdk_handoff_sha256"]
+        == hashlib.sha256(
+            json.dumps(
+                handoff, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            ).encode()
+        ).hexdigest()
+    )
+    assert "customer@example.com" not in json.dumps(data["provenance"])
+
+
+def test_provider_label_model_mismatch_never_attested_or_dispatched(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    mock = AsyncMock()
+    monkeypatch.setattr("litellm.acompletion", mock)
+    app.state.settings.anthropic_model = "openai/foreign-model"
+    response = client.post("/v1/complete", json={"prompt": "test"})
+    assert response.status_code == 503
+    mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"prompt": "test", "temperature": "NaN"},
+        {"prompt": "test", "temperature": "Infinity"},
+        {"prompt": "test", "model": "m" * 301},
+    ],
+)
+def test_invalid_handoff_parameters_refused_before_provider(client, monkeypatch, body):
+    from unittest.mock import AsyncMock
+
+    mock = AsyncMock()
+    monkeypatch.setattr("litellm.acompletion", mock)
+    assert client.post("/v1/complete", json=body).status_code == (400 if "model" in body else 422)
+    mock.assert_not_awaited()
+
+
+def test_onprem_chat_redaction_failure_is_bounded_before_local_call(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    app.state.settings = Settings(
+        _env_file=None,
+        environment="onprem",
+        api_key="private",
+        self_hosted_base_url="http://local-model:8000",
+        anthropic_api_key=None,
+        openai_api_key=None,
+        gemini_api_key=None,
+    )
+    mock = AsyncMock()
+    monkeypatch.setattr("model_gateway.app._dispatch", mock)
+
+    def broken(_prompt):
+        raise RuntimeError("synthetic-sensitive-value")
+
+    monkeypatch.setattr("model_gateway.app.redact", broken)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer private"},
+        json={"messages": [{"role": "user", "content": "test"}]},
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "redaction_unavailable"}
+    mock.assert_not_awaited()
+
+
+def test_incoming_request_commitment_preserves_raw_decoded_numbers_and_all_args(client):
+    import hashlib
+    import json
+
+    base = {
+        "prompt": "test",
+        "temperature": 0,
+        "max_tokens": 2,
+        "task": "structural",
+        "model": "",
+        "variables": {"answer": 7},
+        "response_format": {"type": "json_object"},
+        "pii_redact": True,
+    }
+    integer = client.post("/v1/complete", json=base)
+    floating_body = {**base, "temperature": 0.0}
+    floating = client.post("/v1/complete", json=floating_body)
+    assert integer.status_code == floating.status_code == 200
+
+    def hashed(value):
+        return hashlib.sha256(
+            json.dumps(
+                value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            ).encode()
+        ).hexdigest()
+
+    left = integer.json()["provenance"]["commitments"]
+    right = floating.json()["provenance"]["commitments"]
+    assert left["request_json_sha256"] == hashed(base)
+    assert right["request_json_sha256"] == hashed(floating_body)
+    assert left["request_json_sha256"] != right["request_json_sha256"]
+    assert left["sdk_handoff_sha256"] == right["sdk_handoff_sha256"]
+    assert left["request_json_basis"] == "canonical_decoded_request_not_http_wire"
+
+
+def test_nonfinite_raw_variable_request_refused_before_egress(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    mock = AsyncMock()
+    monkeypatch.setattr("litellm.acompletion", mock)
+    response = client.post(
+        "/v1/complete",
+        content='{"prompt":"test","variables":{"v":NaN}}',
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "request_commitment_invalid"}
+    mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "openai/gpt-4o customer@example.invalid",
+        "openai/gpt-4o/customer-secret",
+        "gpt-999-unconfigured",
+        "x" * 301 + "customer@example.invalid",
+        "openai/gpt-4o\ncanary@example.invalid",
+    ],
+)
+def test_unreviewed_model_selector_refuses_before_provider_or_logging(client, monkeypatch, model):
+    from unittest.mock import AsyncMock
+
+    provider = AsyncMock()
+    from unittest.mock import MagicMock
+
+    logger = MagicMock()
+    monkeypatch.setattr("litellm.acompletion", provider)
+    monkeypatch.setattr("structlog.get_logger", lambda: logger)
+    app.state.settings.openai_api_key = "synthetic-model-selector-key"
+    response = client.post("/v1/complete", json={"prompt": "schema only", "model": model})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "model_selector_unavailable"}
+    provider.assert_not_awaited()
+    assert not logger.mock_calls
+    assert model not in response.text
+
+
+def test_unsafe_reported_model_is_not_exposed(client, monkeypatch):
+    from types import SimpleNamespace
+
+    async def provider(**kwargs):
+        return SimpleNamespace(
+            model="provider customer@example.invalid",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))],
+            usage=None,
+        )
+
+    monkeypatch.setattr("litellm.acompletion", provider)
+    response = client.post("/v1/complete", json={"prompt": "schema only"})
+    assert response.status_code == 200
+    assert response.json()["provenance"]["serving"]["reported_model"] is None
+    assert "customer@example.invalid" not in response.text
+
+
+@pytest.mark.parametrize("selector", ["openai/gpt-4o", "gpt-4o"])
+def test_configured_openai_selector_dispatches_exact_configured_identity(
+    client, monkeypatch, selector
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    provider = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))], usage=None
+        )
+    )
+    monkeypatch.setattr("litellm.acompletion", provider)
+    app.state.settings.openai_api_key = "synthetic-model-selector-key"
+    response = client.post("/v1/complete", json={"prompt": "schema only", "model": selector})
+    assert response.status_code == 200
+    assert provider.await_args.kwargs["model"] == "openai/gpt-4o"
+    assert response.json()["provenance"]["serving"]["model"] == "openai/gpt-4o"
+
+
+def test_mutated_unsafe_config_refuses_without_logging_metadata(client, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    provider, logger = AsyncMock(), MagicMock()
+    monkeypatch.setattr("litellm.acompletion", provider)
+    monkeypatch.setattr("structlog.get_logger", lambda: logger)
+    app.state.settings.anthropic_model = "anthropic/canary@example.invalid"
+    response = client.post("/v1/complete", json={"prompt": "schema only"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "model_configuration_unavailable"}
+    assert "canary@example.invalid" not in response.text
+    provider.assert_not_awaited()
+    assert not logger.mock_calls
