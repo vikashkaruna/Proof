@@ -11,13 +11,14 @@ from test_prativedan_assessment_draft_codec import packet as codec_packet
 
 from axiom.agents.prativedan import PrativedanAgent
 from axiom.canonicalise import canonical_json, sha256_hex
-from axiom.ledger_client import AppendOnlyLedgerClient
+from axiom.prativedan_assessment_controller_capability import PrativedanControllerLedger
 from axiom.prativedan_assessment_dispatch import (
     AssessmentDispatchRefusedError,
     AssessmentInvocationUncertainError,
     invoke_assessment_draft,
     recover_assessment_draft,
 )
+from axiom.prativedan_assessment_draft_codec import parse_source_v2, project_source_v2
 from axiom.prativedan_assessment_store import PrativedanAssessmentStore
 
 NOW = datetime(2026, 10, 13, 10, tzinfo=UTC)
@@ -27,17 +28,7 @@ NOW = datetime(2026, 10, 13, 10, tzinfo=UTC)
 def harness():
     packet = codec_packet.__wrapped__()
     rows = []
-    client = Mock()
-
-    def rpc(name, args):
-        assert name == "append_agent_ledger"
-        identifier = str(9007199254740993 + len(rows))
-        rows.append({"id": identifier, "entry_hash": sha256_hex(canonical_json(args)), **args})
-        return SimpleNamespace(execute=lambda: SimpleNamespace(data=identifier))
-
-    client.rpc.side_effect = rpc
     agent = object.__new__(PrativedanAgent)
-    agent.ledger = AppendOnlyLedgerClient(client)
     agent.log = Mock()
     context = SimpleNamespace(
         packet=packet, rows=rows, calls=[], agent=agent, claimed=False, edit=None, fail=None
@@ -62,6 +53,26 @@ def harness():
                     "readback": journal,
                 }
             )
+        if name == "record_prativedan_assessment_phase":
+            identifier = str(9007199254740993 + len(rows))
+            b = packet["binding"]
+            detail = {
+                "phase": args["phase_name"],
+                "run_id": b.run_id,
+                "request_hash": sha256_hex(b.request_text),
+                "renderer_config_version": "prativedan-draft-v1",
+                "renderer_config_sha256": packet["readback"]["renderer_config_sha256"],
+            }
+            if args["phase_name"] == "completed":
+                detail["started_entry"] = rows[0]["id"]
+            values = {
+                "p_detail": detail,
+                "p_input_hash": claimed(packet)["runtime_normalized_input_sha256"],
+                "p_output_hash": args["output_hash"],
+            }
+            row = {"id": identifier, "entry_hash": sha256_hex(canonical_json(values)), **values}
+            rows.append(row)
+            return {"id": identifier, "entry_hash": row["entry_hash"]}
         assert name == "read_prativedan_assessment_runtime_receipts"
         journal = claimed(packet)
         b = packet["binding"]
@@ -99,7 +110,11 @@ def harness():
             context.edit(w)
         return w
 
-    context.store = PrativedanAssessmentStore(SimpleNamespace(call=call))
+    port = SimpleNamespace(call=call)
+    context.store = PrativedanAssessmentStore(port)
+    source = parse_source_v2(packet["readback"]["source_text"], packet["readback"]["source_sha256"])
+    input_hash = sha256_hex(canonical_json(project_source_v2(source).model_dump(mode="json")))
+    agent.ledger = PrativedanControllerLedger(port, packet["binding"], input_hash)
     return context
 
 
@@ -117,6 +132,8 @@ async def test_actual_base_invoke_and_independent_huge_string_receipts(harness):
     assert [c[0] for c in harness.calls] == [
         "load_prativedan_assessment_dispatch",
         "claim_prativedan_assessment_draft",
+        "record_prativedan_assessment_phase",
+        "record_prativedan_assessment_phase",
         "read_prativedan_assessment_runtime_receipts",
     ]
     assert harness.calls[-1][1]["started"] == "9007199254740993"
@@ -323,65 +340,18 @@ async def test_rpc_output_none_is_never_success(harness):
         )
 
 
-@pytest.mark.parametrize("key", [None, "invalid"])
-def test_scoped_factory_missing_writer_never_falls_back(key, monkeypatch):
-    from axiom import prativedan_assessment_store as store
-
-    factory = Mock()
-    monkeypatch.setattr(store, "create_client", factory)
-    settings = SimpleNamespace(
-        supabase_agent_ledger_writer_key=key,
-        supabase_service_key=None,
-        supabase_url="http://localhost",
-        supabase_anon_key="public",
-    )
-    with pytest.raises((ValueError, RuntimeError)):
+@pytest.mark.parametrize("key", [None, "agent-writer", "service-writer", "controller-writer"])
+def test_production_factory_refuses_all_keys_without_private_channel(key):
+    settings = SimpleNamespace(supabase_agent_ledger_writer_key=key, supabase_service_key=key)
+    with pytest.raises(PermissionError, match="channel is unprovisioned"):
         PrativedanAssessmentStore.from_settings(settings)
-    factory.assert_not_called()
-
-
-def test_scoped_factory_has_no_reader_or_service_client(monkeypatch):
-    import base64
-    import json
-    import time
-
-    from axiom import prativedan_assessment_store as store
-
-    claims = (
-        base64.urlsafe_b64encode(
-            json.dumps({"role": "agent_ledger_writer", "exp": time.time() + 300}).encode()
-        )
-        .decode()
-        .rstrip("=")
-    )
-    writer = "synthetic." + claims + ".synthetic"
-    client = Mock()
-    factory = Mock(return_value=client)
-    monkeypatch.setattr(store, "create_client", factory)
-    settings = SimpleNamespace(
-        supabase_agent_ledger_writer_key=writer,
-        supabase_service_key="different",
-        supabase_url="https://test.invalid",
-        supabase_anon_key="public",
-    )
-    scoped, ledger = PrativedanAssessmentStore.from_settings(settings)
-    assert type(ledger) is AppendOnlyLedgerClient
-    assert ledger._read_client is None
-    assert ledger.in_memory_mode is False
-    assert isinstance(scoped, PrativedanAssessmentStore)
-    assert factory.call_count == 1
-    assert factory.call_args.args == ("https://test.invalid", "public")
 
 
 @pytest.mark.asyncio
-async def test_scoped_rpc_actual_remote_call(harness):
-    from axiom.prativedan_assessment_store import _ScopedRpc
-
-    client = Mock()
-    client.rpc.return_value.execute.return_value = SimpleNamespace(data={"retained": True})
-    result = await _ScopedRpc(client).call("load_prativedan_assessment_dispatch", {"t": "scope"})
-    assert result == {"retained": True}
-    client.rpc.assert_called_once_with("load_prativedan_assessment_dispatch", {"t": "scope"})
+async def test_store_forwards_only_through_explicit_private_port(harness):
+    await harness.store.load(harness.packet["binding"])
+    assert len(harness.calls) == 1
+    assert harness.calls[0][0] == "load_prativedan_assessment_dispatch"
 
 
 @pytest.mark.asyncio

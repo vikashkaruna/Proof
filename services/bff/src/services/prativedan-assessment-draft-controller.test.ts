@@ -281,7 +281,13 @@ function harness() {
   });
   const store = new PrativedanAssessmentDraftStore({
     humanWriterFactory: () => client('human_action_writer'),
-    agentWriterFactory: () => client('agent_ledger_writer'),
+    controllerCall: async (name, args) => {
+      const result = await client('axiom_prativedan_controller')
+        .rpc(name, args)
+        .abortSignal(AbortSignal.timeout(15000));
+      if (result.error) throw result.error;
+      return result.data;
+    },
   });
   const runtime = {
     invoke: vi.fn(async () => {
@@ -365,7 +371,7 @@ describe('unmounted assessment v2 scoped store/controller', () => {
       (c) => c.name === 'read_prativedan_assessment_runtime_receipts',
     );
     expect(receiptCall).toEqual({
-      role: 'agent_ledger_writer',
+      role: 'axiom_prativedan_controller',
       name: 'read_prativedan_assessment_runtime_receipts',
       args: {
         t: h.f.journal.tenant_id,
