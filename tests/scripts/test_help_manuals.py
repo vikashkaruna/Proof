@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -245,6 +247,215 @@ class HelpManualTests(unittest.TestCase):
         rendered = help_manuals.markdown_html(self.root, '<img src=x onerror="alert(1)">')
         self.assertNotIn("<img", rendered)
         self.assertIn("&lt;img", rendered)
+
+
+class TwoRootHelpTests(unittest.TestCase):
+    setUp = HelpManualTests.setUp
+    put = HelpManualTests.put
+    case = staticmethod(HelpManualTests.case)
+
+    def separate_source(self, versioned=False):
+        release = tempfile.TemporaryDirectory()
+        self.addCleanup(release.cleanup)
+        source = Path(release.name)
+        shutil.copytree(self.root, source, dirs_exist_ok=True)
+        shutil.rmtree(source / "docs")
+        if versioned:
+            for args in (("init",), ("config", "user.email", "fixture@example.invalid"),
+                         ("config", "user.name", "Fixture"), ("add", "."),
+                         ("commit", "-m", "Fictional source")):
+                subprocess.run(["git", "-C", str(source), *args], check=True,
+                               capture_output=True, text=True)
+        return source
+
+    def test_separate_roots_read_source_and_write_only_canonical_docs(self):
+        source = self.separate_source(versioned=True)
+        # An unrelated route in the docs checkout must never supply release navigation.
+        self.put("apps/web/src/app/(app)/unreleased/page.tsx", "draft unrelated route")
+        result = help_manuals.sync(source, "Reviewed selected committed source and canonical prose", self.root, True)
+        self.assertEqual(result["sourceBinding"]["watchStatus"], "clean_commit")
+        self.assertEqual(len(result["sourceBinding"]["privateCompanions"]), 5)
+        self.assertFalse((source / "docs").exists())
+        self.assertEqual(help_manuals.check(source, True, self.root, True)["routes"], 2)
+        self.assertEqual(help_manuals.main(["check", "--source-root", str(source),
+                                           "--docs-root", str(self.root), "--require-clean-source",
+                                           "--require-private"]), 0)
+
+    def test_wrong_docs_root_refuses_without_private_fallback(self):
+        source = self.separate_source()
+        with self.assertRaises(help_manuals.HelpError):
+            help_manuals.sync(source, "Review cannot substitute missing canonical docs", source)
+        self.assertFalse((source / "docs").exists())
+
+    def test_wrong_source_root_cannot_use_docs_checkout_code(self):
+        source = self.separate_source()
+        (source / "packages/types/src/rbac.ts").unlink()
+        with self.assertRaises(help_manuals.HelpError):
+            help_manuals.sync(source, "Missing source role map cannot fall back", self.root)
+
+    def test_dirty_watch_is_explicit_and_cannot_claim_exact_commit(self):
+        source = self.separate_source(versioned=True)
+        target = source / "apps/web/src/app/(app)/dashboard/page.tsx"
+        target.write_text(target.read_text() + "// changed released screen\n")
+        result = help_manuals.sync(source, "Review of a draft, not exact source clearance", self.root)
+        self.assertEqual(result["sourceBinding"]["watchStatus"], "draft_dirty")
+        self.assertTrue(result["sourceBinding"]["watchedDirty"])
+        with self.assertRaisesRegex(help_manuals.HelpError, "clean versioned"):
+            help_manuals.check(source, True, self.root, True)
+
+    def test_exact_commit_change_with_identical_tree_refuses(self):
+        source = self.separate_source(versioned=True)
+        help_manuals.sync(source, "Reviewed exact initial source commit identity", self.root, True)
+        subprocess.run(["git", "-C", str(source), "commit", "--allow-empty", "-m", "Different commit"],
+                       check=True, capture_output=True)
+        with self.assertRaisesRegex(help_manuals.HelpError, "commit/tree"):
+            help_manuals.check(source, True, self.root, True)
+
+    def test_unversioned_fixture_never_claims_release_clearance(self):
+        source = self.separate_source()
+        result = help_manuals.sync(source, "Review of explicitly unversioned fictional source", self.root)
+        self.assertEqual(result["sourceBinding"]["watchStatus"], "unversioned")
+        self.assertIsNone(result["sourceBinding"]["commit"])
+        with self.assertRaisesRegex(help_manuals.HelpError, "clean versioned"):
+            help_manuals.sync(source, "Exact source requested without version evidence", self.root, True)
+
+    def test_check_detects_drift_without_silent_sync(self):
+        source = self.separate_source()
+        help_manuals.sync(source, "Reviewed initial source with independent canonical docs", self.root)
+        originals = {name: (self.root / name).read_bytes()
+                     for name in (*help_manuals.MANUALS.values(), help_manuals.INDEX, help_manuals.COVERAGE)}
+        (source / "apps/web/src/app/(app)/dashboard/page.tsx").write_text("changed release screen")
+        with self.assertRaises(help_manuals.HelpError):
+            help_manuals.check(source, True, self.root)
+        self.assertEqual(originals, {name: (self.root / name).read_bytes() for name in originals})
+
+    def test_release_workflow_and_three_python_locks_are_watched(self):
+        source = self.separate_source()
+        paths = [".github/workflows/ci.yml", *[f"services/{service}/uv.lock" for service in
+                 ("agent-runtime", "model-gateway", "temporal-workers")]]
+        for name in paths:
+            target = source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("original fictional reviewed policy")
+        for name in paths:
+            with self.subTest(path=name):
+                result = help_manuals.sync(source, "Reviewed release workflow and locked image source", self.root)
+                self.assertIn(name, result["sources"])
+                target = source / name
+                target.write_text(target.read_text() + "changed")
+                with self.assertRaises(help_manuals.HelpError):
+                    help_manuals.check(source, True, self.root)
+
+    def test_private_parent_symlink_refuses_before_any_sync_write(self):
+        source = self.separate_source()
+        manual_before = (self.root / help_manuals.MANUALS["client"]).read_bytes()
+        index = self.root / help_manuals.INDEX
+        index.unlink()
+        outside = source / "outside-index.json"
+        outside.write_text("do not overwrite")
+        index.symlink_to(outside)
+        with self.assertRaisesRegex(help_manuals.HelpError, "Symlinks"):
+            help_manuals.sync(source, "Must refuse symlink target without partial mutation", self.root)
+        self.assertEqual((self.root / help_manuals.MANUALS["client"]).read_bytes(), manual_before)
+        self.assertEqual(outside.read_text(), "do not overwrite")
+
+    def test_lexical_escape_and_in_root_parent_symlink_refused(self):
+        for name in ("../outside", "/absolute"):
+            with self.assertRaises(help_manuals.HelpError):
+                help_manuals.safe_file(self.root, name)
+        alias = self.root / "alias"
+        alias.symlink_to(self.root / "docs/private-docs", target_is_directory=True)
+        with self.assertRaisesRegex(help_manuals.HelpError, "Symlinks"):
+            help_manuals.safe_file(self.root, "alias/help/HELP-client-manual.md")
+
+    def test_source_watch_directory_symlink_refused(self):
+        source = self.separate_source()
+        shutil.rmtree(source / "packages/types/src")
+        (source / "packages/types/src").symlink_to(self.root / "packages/types/src", target_is_directory=True)
+        with self.assertRaisesRegex(help_manuals.HelpError, "Symlinks"):
+            help_manuals.sources(source, self.root)
+
+    def test_legacy_single_root_receipt_cannot_claim_exact_source_review(self):
+        index = self.root / help_manuals.INDEX
+        stored = json.loads(index.read_text())
+        del stored["sourceBinding"]
+        index.write_text(json.dumps(stored))
+        self.assertFalse(help_manuals.check(self.root, True)["exactSourceReviewed"])
+        with self.assertRaises(help_manuals.HelpError):
+            help_manuals.check(self.root, True, self.root)
+
+    def test_ignored_watched_source_is_dirty_even_when_git_status_default_hides_it(self):
+        source = self.separate_source(versioned=True)
+        (source / ".git/info/exclude").write_text("apps/web/src/ignored.ts\n")
+        (source / "apps/web/src/ignored.ts").write_text("unpublished ignored source")
+        result = help_manuals.sync(source, "Explicit draft includes ignored source differences", self.root)
+        self.assertEqual(result["sourceBinding"]["watchStatus"], "draft_dirty")
+        with self.assertRaises(help_manuals.HelpError):
+            help_manuals.check(source, True, self.root, True)
+
+    def test_deleted_tracked_watched_files_refuse_clean_sync_before_any_write(self):
+        for name in ("services/bff/src/retained-service.ts", "services/agent-runtime/uv.lock"):
+            with self.subTest(path=name):
+                source = self.separate_source(versioned=True)
+                target = source / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("committed source configuration")
+                subprocess.run(["git", "-C", str(source), "add", name], check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(source), "commit", "-m", "Retain watched source"], check=True, capture_output=True)
+                help_manuals.sync(source, "Reviewed committed complete source before deletion", self.root, True)
+                originals = {n: (self.root / n).read_bytes() for n in
+                             (*help_manuals.MANUALS.values(), help_manuals.INDEX, help_manuals.COVERAGE)}
+                target.unlink()
+                with self.assertRaisesRegex(help_manuals.HelpError, "clean versioned"):
+                    help_manuals.sync(source, "Deletion cannot be declared an exact commit review", self.root, True)
+                self.assertEqual(originals, {n: (self.root / n).read_bytes() for n in originals})
+
+    def test_nested_symlink_cannot_disappear_and_claim_clean_inventory(self):
+        source = self.separate_source(versioned=True)
+        alias = source / "apps/web/src/hidden-source"
+        alias.symlink_to(self.root / "apps/web/src", target_is_directory=True)
+        originals = {n: (self.root / n).read_bytes() for n in
+                     (*help_manuals.MANUALS.values(), help_manuals.INDEX, help_manuals.COVERAGE)}
+        with self.assertRaisesRegex(help_manuals.HelpError, "Symlink"):
+            help_manuals.sync(source, "Nested link cannot silently remove source from review", self.root, True)
+        self.assertEqual(originals, {n: (self.root / n).read_bytes() for n in originals})
+
+    def test_deleted_caches_and_private_docs_do_not_dirty_release_watch(self):
+        source = self.separate_source(versioned=True)
+        names = ("apps/web/src/node_modules/cache.py", "services/bff/src/coverage/cache.ts",
+                 "services/bff/src/tests/fixture.ts", "docs/private-docs/private.md")
+        for name in names:
+            target = source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("excluded fictional content")
+            subprocess.run(["git", "-C", str(source), "add", name], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "Excluded fictional fixtures"], check=True, capture_output=True)
+        for name in names:
+            (source / name).unlink()
+        cache_link = source / "apps/web/src/node_modules/alias"
+        cache_link.symlink_to(self.root / "docs/private-docs", target_is_directory=True)
+        result = help_manuals.sync(source, "Excluded caches and private docs are not release source", self.root, True)
+        self.assertEqual(result["sourceBinding"]["watchStatus"], "clean_commit")
+
+    def test_dangling_optional_lock_symlink_refused_before_sync(self):
+        source = self.separate_source(versioned=True)
+        target = source / "services/model-gateway/uv.lock"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(source / "missing-lock")
+        original = (self.root / help_manuals.INDEX).read_bytes()
+        with self.assertRaisesRegex(help_manuals.HelpError, "Symlink"):
+            help_manuals.sync(source, "Missing optional lock link cannot evade source boundary", self.root, True)
+        self.assertEqual((self.root / help_manuals.INDEX).read_bytes(), original)
+
+    def test_hidden_git_watch_flags_cannot_claim_exact_source(self):
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(flag=flag):
+                source = self.separate_source(versioned=True)
+                name = "apps/web/src/app/(app)/dashboard/page.tsx"
+                subprocess.run(["git", "-C", str(source), "update-index", flag, name], check=True, capture_output=True)
+                (source / name).write_text("hidden changed source")
+                with self.assertRaisesRegex(help_manuals.HelpError, "clean versioned"):
+                    help_manuals.sync(source, "Git-hidden changes cannot become exact release review", self.root, True)
 
 
 if __name__ == "__main__":
