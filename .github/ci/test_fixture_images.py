@@ -105,6 +105,75 @@ class FixtureImageTests(unittest.TestCase):
                 )
                 self.assertNotIn(secret, output.getvalue())
 
+    def test_public_startup_reports_transfer_certificate_integrity_and_storage_failures(
+        self,
+    ):
+        secret = "synthetic-private-token /private/path https://secret.example/token"
+        cases = (
+            (
+                "failed to copy: unexpected status from GET request: 502 Bad Gateway",
+                "registry server failed",
+            ),
+            ("unexpected status code: 507", "registry server failed"),
+            ("HTTP/2 503", "registry server failed"),
+            ("unexpected EOF", "registry connection failed"),
+            ("connection reset by peer", "registry connection failed"),
+            ("context deadline exceeded", "registry connection failed"),
+            (
+                "x509: certificate signed by unknown authority",
+                "registry certificate refused",
+            ),
+            ("certificate verify failed", "registry certificate refused"),
+            ("unexpected commit digest", "registry content integrity failed"),
+            ("digest did not match", "registry content integrity failed"),
+            ("digest mismatch", "registry content integrity failed"),
+            ("no space left on device", "image storage unavailable"),
+            ("disk quota exceeded", "image storage unavailable"),
+        )
+        commands = (
+            ["docker", "pull", ALPINE],
+            ["docker", "pull", images._MIRRORS[ALPINE]],
+            [
+                "docker",
+                "run",
+                "--name",
+                secret,
+                "--entrypoint",
+                "sleep",
+                ALPINE,
+                "1200",
+            ],
+        )
+        for message, category in cases:
+            for args in commands:
+                with (
+                    self.subTest(message=message, operation=args[1]),
+                    contextlib.redirect_stderr(io.StringIO()) as output,
+                ):
+                    images.report_public_image_startup(args, message + " " + secret)
+                    self.assertEqual(
+                        output.getvalue(),
+                        "Public fixture Docker preflight refused: " + category + ".\n",
+                    )
+                    self.assertNotIn(secret, output.getvalue())
+
+    def test_status_like_private_text_does_not_become_registry_status(self):
+        for message in (
+            "private receipt 503",
+            "status: 5030",
+            "digest abc502",
+            "HTTP/2 404",
+        ):
+            with (
+                self.subTest(message=message),
+                contextlib.redirect_stderr(io.StringIO()) as output,
+            ):
+                images.report_public_image_startup(["docker", "pull", ALPINE], message)
+                self.assertEqual(
+                    output.getvalue(),
+                    "Public fixture Docker preflight refused: public image startup failed.\n",
+                )
+
     def test_exec_build_token_operations_and_unknown_images_emit_nothing(self):
         commands = [
             ["docker", "exec", "issuer", "token", "generate"],
@@ -118,9 +187,17 @@ class FixtureImageTests(unittest.TestCase):
                 self.subTest(args=args),
                 contextlib.redirect_stderr(io.StringIO()) as output,
             ):
-                images.report_public_image_startup(
-                    args, "toomanyrequests synthetic-secret"
-                )
+                for message in (
+                    "toomanyrequests",
+                    "unexpected status code: 503",
+                    "unexpected EOF",
+                    "x509: refused",
+                    "digest mismatch",
+                    "no space left on device",
+                ):
+                    images.report_public_image_startup(
+                        args, message + " synthetic-secret"
+                    )
                 self.assertEqual(output.getvalue(), "")
 
     def test_all_changed_harnesses_preserve_defaults_and_consume_opt_in(self):
