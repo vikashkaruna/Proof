@@ -336,6 +336,7 @@ export const LedgerActionType = {
   CLOSURE_PRAMAAN_ARCHIVE_SETTLED: 'closure.pramaan.archive_settled',
   CLOSURE_PRAMAAN_SEALED: 'closure.pramaan.sealed',
   REPORT_DISPATCHED_EMAIL: 'report.dispatched.email',
+  CATALOGUE_MAPPING_CONTEXTS_ADOPTED: 'catalogue.mapping_contexts_adopted',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 
