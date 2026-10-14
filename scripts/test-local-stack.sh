@@ -17,7 +17,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 pass() { echo -e "  ${GREEN}✓${NC} $1"; }
-fail() { echo -e "  ${RED}✗${NC} $1"; }
+fail() { echo -e "  ${RED}✗${NC} $1"; exit 1; }
 info() { echo -e "${CYAN}▶${NC} $1"; }
 
 echo -e "\n${BOLD}${BLUE}======================================================${NC}"
@@ -55,42 +55,42 @@ fi
 info "Step 4/5: Running Live HTTP Smoke Tests against Docker services..."
 
 # Check Model Gateway
-if curl -fsS http://localhost:8001/health >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:8001/health >/dev/null 2>&1; then
   pass "Model Gateway live (/health)"
 else
   fail "Model Gateway not responding on http://localhost:8001/health"
 fi
 
 # Check Agent Runtime
-if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:8000/health >/dev/null 2>&1; then
   pass "Agent Runtime live (/health)"
 else
   fail "Agent Runtime not responding on http://localhost:8000/health"
 fi
 
 # Check BFF Health & Ready
-if curl -fsS http://localhost:4000/health >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:4000/health >/dev/null 2>&1; then
   pass "BFF API live (/health)"
 else
   fail "BFF not responding on http://localhost:4000/health"
 fi
 
 # Check Temporal UI
-if curl -fsS http://localhost:8233 >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:8233 >/dev/null 2>&1; then
   pass "Temporal UI live (http://localhost:8233)"
 else
   fail "Temporal UI not responding on http://localhost:8233"
 fi
 
 # Check Web Workbench
-if curl -fsS http://localhost:3001 >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:3001 >/dev/null 2>&1; then
   pass "Web Product Workbench live (http://localhost:3001)"
 else
   fail "Web App not responding on http://localhost:3001"
 fi
 
 # Check Marketing Site
-if curl -fsS http://localhost:3000 >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 5 --max-time 15 http://localhost:3000 >/dev/null 2>&1; then
   pass "Marketing Site live (http://localhost:3000)"
 else
   fail "Marketing site not responding on http://localhost:3000"
@@ -101,7 +101,7 @@ info "Step 5/5: Running Playwright E2E UI tests..."
 if (cd tests/e2e && pnpm test:e2e); then
   pass "Playwright E2E tests passed"
 else
-  echo -e "  ${YELLOW}⚠ Playwright E2E tests completed with notices${NC}"
+  fail "Playwright E2E tests failed"
 fi
 
 echo -e "\n${BOLD}${GREEN}======================================================${NC}"

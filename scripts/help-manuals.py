@@ -13,6 +13,7 @@ import hashlib
 import html
 import json
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 # Local SVGs reject DTD/entities and use a strict element allowlist.
@@ -41,6 +42,16 @@ WATCH = (
     "infra/supabase/migrations", "infra/docker", "infra/helm/axiom-proof",
     "infra/terraform", "infra/workload", "scripts/lib",
 )
+SOURCE_SUFFIXES = {".ts", ".tsx", ".py", ".sql", ".css", ".json", ".yaml", ".yml", ".jinja", ".j2", ".tf", ".tpl", ".sh"}
+EXCLUDED_PARTS = {".terraform", "__pycache__", "node_modules", "dist", "coverage", "tests"}
+OPTIONAL_SOURCE = (
+    ".github/workflows/ci.yml", "services/agent-runtime/uv.lock",
+    "services/model-gateway/uv.lock", "services/temporal-workers/uv.lock",
+    ".dockerignore", "docker-compose.yml", "scripts/bootstrap-onprem.sh",
+    "scripts/build-preprod-images.sh", "scripts/teardown-preprod-gcp.sh",
+    "scripts/deploy-staging.sh", "scripts/deploy-firebase-marketing.sh",
+)
+
 ACTION_LABELS = {
     "POSTURE_READ": "Read organization posture",
     "ENGAGEMENT_CREATE": "Create engagements",
@@ -85,11 +96,78 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def safe_file(root: Path, relative: str) -> Path:
-    path = root / relative
-    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+def safe_path(root: Path, relative: str, *, existing: bool = True) -> Path:
+    """Reject lexical escapes and symlinked parents before any file access."""
+    name = Path(relative)
+    if name.is_absolute() or ".." in name.parts or not name.parts:
+        raise HelpError("Path must stay within its declared root")
+    if root.is_symlink() or not root.is_dir():
+        raise HelpError("Expected a regular declared root")
+    path = root / name
+    current = root
+    for part in name.parts:
+        current = current / part
+        if current.is_symlink():
+            raise HelpError("Symlinks are not accepted in declared roots")
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise HelpError("Path escaped its declared root")
+    if existing and not path.exists():
         raise HelpError(f"Expected an in-repository regular file: {relative}")
     return path
+
+
+def safe_file(root: Path, relative: str) -> Path:
+    path = safe_path(root, relative)
+    if not path.is_file():
+        raise HelpError(f"Expected an in-repository regular file: {relative}")
+    return path
+
+
+def eligible_source_path(name: str, current_paths: set[str]) -> bool:
+    """Same watch classification for retained HEAD entries and existing files."""
+    path = Path(name)
+    if name.startswith("docs/private-") or any(p in EXCLUDED_PARTS for p in path.parts):
+        return False
+    if name in current_paths or name in OPTIONAL_SOURCE:
+        return True
+    if len(path.parts) == 3 and path.parts[0] in {"apps", "services"}:
+        if path.name == ".env.example" or (path.parts[0] == "services" and path.name == "pyproject.toml"):
+            return True
+    return (any(name.startswith(folder + "/") for folder in WATCH)
+            and not any(marker in path.name for marker in (".test.", ".spec.", ".helper."))
+            and (path.suffix in SOURCE_SUFFIXES or path.name.endswith(".example")
+                 or path.name.startswith("Dockerfile")))
+
+
+def source_binding(root: Path, watched: dict[str, str], require_clean: bool = False) -> dict:
+    # Git is local read-only evidence. Never invoke a shell or include private docs.
+    paths = sorted(name for name in watched if not name.startswith("docs/private-"))
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], check=True,
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+    try:
+        if Path(git("rev-parse", "--show-toplevel")).resolve() != root.resolve():
+            raise HelpError("Source root must be the Git checkout root")
+        commit = git("rev-parse", "HEAD")
+        tree = git("rev-parse", "HEAD^{tree}")
+        # Deleted watched files are absent from the filesystem inventory but still
+        # differ from this commit. Include eligible HEAD entries before status.
+        retained = git("ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0")
+        paths = sorted(set(paths) | {name for name in retained if name and eligible_source_path(name, set(paths))})
+        dirty = bool(git("status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching", "--", *paths))
+        # Git can hide changed files marked assume-unchanged or skip-worktree.
+        # Such a checkout cannot establish exact watched-source review.
+        flags = git("ls-files", "-v", "-z", "--", *paths).split("\0")
+        if any(entry and (entry[0].islower() or entry[0] == "S") for entry in flags):
+            dirty = True
+        state = "draft_dirty" if dirty else "clean_commit"
+    except subprocess.CalledProcessError:
+        commit, tree, dirty, state = None, None, None, "unversioned"
+    if require_clean and state != "clean_commit":
+        raise HelpError("Exact commit review requires clean versioned watched source")
+    return {"commit": commit, "tree": tree, "watchStatus": state,
+            "watchedDirty": dirty, "privateCompanions": {
+                name: value for name, value in watched.items() if name.startswith("docs/private-")}}
 
 
 def strip_comments(text: str) -> str:
@@ -140,22 +218,29 @@ def inventory(root: Path) -> dict:
             "matrix": matrix, "navigation": nav}
 
 
-def sources(root: Path) -> dict[str, str]:
+def sources(root: Path, docs_root: Path | None = None) -> dict[str, str]:
+    docs_root = docs_root or root
     paths = set()
     for folder in WATCH:
-        for path in (root / folder).rglob("*"):
-            name = path.name
-            if any(part in {".terraform", "__pycache__", "node_modules", "dist", "coverage", "tests"}
-                   for part in path.relative_to(root).parts):
+        folder_path = safe_path(root, folder, existing=False)
+        for path in folder_path.rglob("*"):
+            relative = path.relative_to(root).as_posix()
+            if any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts):
                 continue
-            if path.is_file() and not any(x in name for x in (".test.", ".spec.", ".helper.")):
-                if path.suffix in {".ts", ".tsx", ".py", ".sql", ".css", ".json", ".yaml", ".yml", ".jinja", ".j2", ".tf", ".tpl", ".sh"} or name.endswith(".example") or name.startswith("Dockerfile"):
-                    paths.add(path.relative_to(root).as_posix())
+            # rglob does not follow directory symlinks. Refuse the entry instead
+            # of quietly reviewing an incomplete source subtree.
+            if path.is_symlink():
+                raise HelpError("Symlink in watched source traversal")
+            if path.is_file() and eligible_source_path(relative, set()):
+                paths.add(relative)
     for pattern in ("apps/*/.env.example", "services/*/.env.example", "services/*/pyproject.toml"):
-        paths.update(path.relative_to(root).as_posix() for path in root.glob(pattern) if path.is_file())
-    for name in (".dockerignore", "docker-compose.yml", "scripts/bootstrap-onprem.sh", "scripts/build-preprod-images.sh",
-                 "scripts/teardown-preprod-gcp.sh", "scripts/deploy-staging.sh", "scripts/deploy-firebase-marketing.sh"):
-        if (root / name).is_file():
+        for path in root.glob(pattern):
+            relative = path.relative_to(root).as_posix()
+            checked = safe_path(root, relative, existing=False)
+            if checked.is_file():
+                paths.add(relative)
+    for name in OPTIONAL_SOURCE:
+        if safe_path(root, name, existing=False).is_file():
             paths.add(name)
     for path in ("scripts/axiom-ops.sh", "scripts/sync-env.sh", "scripts/dev-docker.sh",
                  "scripts/deploy-preprod-gcp.sh", "scripts/run-deployed-acceptance.sh",
@@ -164,7 +249,7 @@ def sources(root: Path) -> dict[str, str]:
                  "scripts/check-private-docs.sh",
                  *["docs/private-docs/help/assets/" + asset for asset in ASSETS]):
         paths.add(path)
-    return {name: digest(safe_file(root, name)) for name in sorted(paths)}
+    return {name: digest(safe_file(docs_root if name.startswith("docs/private-") else root, name)) for name in sorted(paths)}
 
 
 def generated_reference(data: dict, audience: str) -> str:
@@ -267,7 +352,7 @@ def approved_svg(root: Path, name: str) -> bytes:
     return raw
 
 
-def validate_external(root: Path, audience: str, text: str) -> None:
+def validate_external(root: Path, audience: str, text: str, source_root: Path | None = None) -> None:
     if audience not in {"client", "partner"}:
         raise HelpError("Only client and partner manuals may be shared")
     match = FORBIDDEN.search(text)
@@ -275,7 +360,8 @@ def validate_external(root: Path, audience: str, text: str) -> None:
         raise HelpError(f"Confidential content marker in {audience} manual; review locally")
     if re.search(r"(?i)<\s*(script|iframe|object|embed|svg)\b", text):
         raise HelpError("Embedded active content is not allowed in external manuals")
-    route_paths = {item["route"].split("?", 1)[0] for item in inventory(root)["routes"] if not item["route"].startswith("marketing:")}
+    source_root = source_root or root
+    route_paths = {item["route"].split("?", 1)[0] for item in inventory(source_root)["routes"] if not item["route"].startswith("marketing:")}
     for image, target in re.findall(r"(!?)\[[^\]]*\]\(([^)]+)\)", text):
         if image:
             if target not in {f"assets/{name}" for name in ASSETS}:
@@ -288,7 +374,7 @@ def validate_external(root: Path, audience: str, text: str) -> None:
             if target.startswith("//") or parsed.scheme not in {"", "https"} or parsed.netloc not in {"", "app.axiomproof.ai", "axiomproof.ai"} or parsed.username or parsed.password:
                 raise HelpError("External manual link points outside approved product/help scope")
             if parsed.netloc == "axiomproof.ai":
-                allowed = {item["route"].removeprefix("marketing:") for item in inventory(root)["routes"] if item["route"].startswith("marketing:")}
+                allowed = {item["route"].removeprefix("marketing:") for item in inventory(source_root)["routes"] if item["route"].startswith("marketing:")}
             else:
                 allowed = route_paths
             if not parsed.path.startswith("/") or ".." in parsed.path.split("/") or not any(re.fullmatch(re.sub(r"\\\[[^\]]+\\\]", "[^/]+", re.escape(route)), parsed.path) for route in allowed):
@@ -327,25 +413,32 @@ def validate_coverage(root: Path, data: dict) -> dict:
     return raw
 
 
-def sync(root: Path, reason: str) -> dict:
+def sync(root: Path, reason: str, docs_root: Path | None = None, require_clean: bool = False) -> dict:
     if len(reason.strip()) < 12:
         raise HelpError("Record a meaningful review reason for prose/feature readiness")
-    data = inventory(root)
+    source_root = root
+    root = docs_root or root
+    watched = sources(source_root, root)
+    binding = source_binding(source_root, watched, require_clean)
+    data = inventory(source_root)
     cases = validate_cases(root, data)
+    # Validate every destination before the first write; no partial sync on path refusal.
+    for name in (*MANUALS.values(), INDEX, COVERAGE, "docs/private-docs/help/maintenance"):
+        safe_path(root, name, existing=False)
     proposed = {}
     for audience, name in MANUALS.items():
         text = with_reference(safe_file(root, name).read_text(), generated_reference(data, audience))
         if audience != "founder":
-            validate_external(root, audience, text)
+            validate_external(root, audience, text, source_root)
         proposed[name] = text
     for name, text in proposed.items():
-        (root / name).write_text(text)
+        safe_file(root, name).write_text(text)
         if name.startswith("docs/private-docs/"):
-            (root / name).chmod(0o600)
-    maintenance = root / "docs/private-docs/help/maintenance"
+            safe_file(root, name).chmod(0o600)
+    maintenance = safe_path(root, "docs/private-docs/help/maintenance", existing=False)
     maintenance.mkdir(parents=True, exist_ok=True)
-    (root / COVERAGE).write_text(json.dumps(public_coverage(cases), indent=2) + "\n")
-    result = {"schemaVersion": 1, "reviewReason": reason.strip(), "sources": sources(root),
+    safe_path(root, COVERAGE, existing=False).write_text(json.dumps(public_coverage(cases), indent=2) + "\n")
+    result = {"schemaVersion": 1, "reviewReason": reason.strip(), "sources": watched, "sourceBinding": binding,
               "manuals": {name: digest(safe_file(root, name)) for name in
                           [MANUALS["client"], MANUALS["partner"], COVERAGE]},
               "privateReview": {"documents": {
@@ -353,22 +446,34 @@ def sync(root: Path, reason: str) -> dict:
                   "testing": digest(safe_file(root, PRIVATE_TESTING)),
                   "cases": digest(safe_file(root, CASES))}},
               "routes": data["routes"], "roles": data["roles"]}
-    (root / INDEX).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    safe_path(root, INDEX, existing=False).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
+    for name in (INDEX, COVERAGE):
+        safe_file(root, name).chmod(0o600)
+    maintenance.chmod(0o700)
     return result
 
 
-def check(root: Path, require_private: bool = False) -> dict:
+def check(root: Path, require_private: bool = False, docs_root: Path | None = None, require_clean: bool = False) -> dict:
+    source_root = root
+    root = docs_root or root
     # The repository is public: internal prose can never be part of tracked help.
     if not (root / "docs").is_symlink() and (root / "docs/help/internal").exists() and any((root / "docs/help/internal").rglob("*")):
         raise HelpError("Internal help belongs in protected ignored storage, not the public repository")
     if not (root / "docs/private-docs").is_dir() or (root / "docs/private-docs").stat().st_mode & 0o077:
         raise HelpError("Private documentation folder is missing or lacks private permissions")
-    data = inventory(root)
+    data = inventory(source_root)
     cases = validate_coverage(root, data)
     stored = json.loads(safe_file(root, INDEX).read_text())
     if stored.get("schemaVersion") != 1 or not stored.get("reviewReason"):
         raise HelpError("Missing reviewed source index")
-    actual_sources = sources(root)
+    actual_sources = sources(source_root, root)
+    actual_binding = source_binding(source_root, actual_sources, require_clean)
+    # Older single-root receipts remain readable; they cannot establish clean-commit review.
+    if "sourceBinding" not in stored:
+        if docs_root is not None or require_clean:
+            raise HelpError("Missing reviewed source commit/tree binding; explicit review required")
+    elif stored["sourceBinding"] != actual_binding:
+        raise HelpError("Reviewed source commit/tree or private companion binding is stale")
     if stored["sources"] != actual_sources:
         changed = set(stored["sources"]) ^ set(actual_sources)
         changed.update(k for k in set(stored["sources"]) & set(actual_sources)
@@ -393,7 +498,7 @@ def check(root: Path, require_private: bool = False) -> dict:
         expected = generated_reference(data, audience)
         if BEGIN not in text or END not in text or normalized_reference(text.split(BEGIN, 1)[1].split(END, 1)[0]) != normalized_reference(expected.split(BEGIN, 1)[1].split(END, 1)[0]):
             raise HelpError("Generated role/navigation reference is stale")
-        validate_external(root, audience, text)
+        validate_external(root, audience, text, source_root)
     for name in ASSETS:
         approved_svg(root, name)
     if require_private:
@@ -411,7 +516,10 @@ def check(root: Path, require_private: bool = False) -> dict:
         if BEGIN not in text or normalized_reference(text.split(BEGIN, 1)[1].split(END, 1)[0]) != normalized_reference(expected.split(BEGIN, 1)[1].split(END, 1)[0]):
             raise HelpError("Internal generated reference is stale")
     return {"routes": len(data["routes"]), "cases": len(cases["cases"]),
-            "sources": len(actual_sources), "externalManuals": 2, "privateChecked": require_private}
+            "sources": len(actual_sources), "externalManuals": 2, "privateChecked": require_private,
+            "sourceWatchStatus": actual_binding["watchStatus"],
+            "sourceCommit": actual_binding["commit"], "sourceTree": actual_binding["tree"],
+            "exactSourceReviewed": "sourceBinding" in stored and actual_binding["watchStatus"] == "clean_commit"}
 
 
 def inline(root: Path, text: str) -> str:
@@ -488,17 +596,26 @@ def markdown_html(root: Path, text: str) -> str:
     return "\n".join(result)
 
 
-def export(root: Path, audience: str, output: Path) -> Path:
+def export(root: Path, audience: str, output: Path, docs_root: Path | None = None) -> Path:
+    source_root = root
+    root = docs_root or root
+    if root.is_symlink() or source_root.is_symlink():
+        raise HelpError("Declared roots cannot be symlinks")
     root = root.resolve()
     if audience not in {"client", "partner"}:
         raise HelpError("Internal founder/QA manuals cannot be exported by the sharing command")
-    check(root)
+    check(source_root, docs_root=root)
     if output.is_symlink():
         raise HelpError("Sharing output may not be a symlink")
+    for parent in (output, *output.parents):
+        if parent.is_symlink() and any(parent.is_relative_to(base) for base in (root, source_root)):
+            raise HelpError("Sharing output parents cannot be symlinks")
     output = output.resolve()
     if output.exists() and (not output.is_dir() or output.is_symlink()):
         raise HelpError("Sharing output must be a regular directory")
     # Never overwrite source docs or expose manuals under application public assets.
+    if root != source_root.resolve() and output.is_relative_to(source_root.resolve()):
+        raise HelpError("Sharing output cannot overwrite the source checkout")
     if any(output.is_relative_to(root / name) for name in ("docs/shared-docs", "apps", "services", "packages")) or output == root:
         raise HelpError("Share output must be outside source/public trees")
     if output.is_relative_to(root) and not output.is_relative_to(root / "docs/private-docs/help/share"):
@@ -507,7 +624,7 @@ def export(root: Path, audience: str, output: Path) -> Path:
     if any(output.iterdir()):
         raise HelpError("Use a fresh empty share directory; existing files might contain internal content")
     text = safe_file(root, MANUALS[audience]).read_text()
-    validate_external(root, audience, text)
+    validate_external(root, audience, text, source_root)
     body = markdown_html(root, text)
     title = f"Axiom Proof — {audience.title()} Help Manual"
     style = "body{font:16px/1.65 system-ui,sans-serif;color:#1e2a4a;margin:auto;padding:24px;max-width:1100px}h1,h2,h3{line-height:1.25}h2{border-bottom:2px solid #0fb5a5;padding-top:24px}a{color:#087f77}img{width:100%;height:auto;border:1px solid #dbe2ea;border-radius:12px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #dbe2ea;padding:8px;text-align:left;vertical-align:top}th{background:#eff6f7}.table-scroll{overflow:auto}code{background:#f1f5f9;padding:2px 4px}pre{overflow:auto;background:#f1f5f9;padding:16px}@media print{body{max-width:none;padding:0}h2{break-after:avoid}img,tr{break-inside:avoid}}"
@@ -527,16 +644,21 @@ def main(argv: list[str] | None = None) -> int:
     export_parser = sub.add_parser("export")
     export_parser.add_argument("--audience", choices=("client", "partner"), required=True)
     export_parser.add_argument("--output", type=Path, required=True)
+    for command in (check_parser, sync_parser, export_parser):
+        command.add_argument("--source-root", type=Path, default=ROOT)
+        command.add_argument("--docs-root", type=Path)
+    for command in (check_parser, sync_parser):
+        command.add_argument("--require-clean-source", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "sync":
-            result = sync(ROOT, args.review_reason)
+            result = sync(args.source_root, args.review_reason, args.docs_root, args.require_clean_source)
             print(f"Reviewed help synchronized: {len(result['routes'])} routes; generated navigation/role references updated.")
         elif args.command == "check":
-            print("Help checks passed: " + json.dumps(check(ROOT, args.require_private), sort_keys=True))
+            print("Help checks passed: " + json.dumps(check(args.source_root, args.require_private, args.docs_root, args.require_clean_source), sort_keys=True))
         else:
-            print(f"External {args.audience} manual exported: {export(ROOT, args.audience, args.output)}")
-    except (HelpError, OSError, KeyError, TypeError, json.JSONDecodeError, ET.ParseError) as exc:
+            print(f"External {args.audience} manual exported: {export(args.source_root, args.audience, args.output, args.docs_root)}")
+    except (HelpError, OSError, KeyError, TypeError, json.JSONDecodeError, ET.ParseError, subprocess.TimeoutExpired) as exc:
         parser.exit(1, f"Help check refused: {exc}\n")
     return 0
 

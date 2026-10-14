@@ -7,6 +7,7 @@ remains a failure. Production builds/configuration do not import this module.
 
 import os
 import platform
+import re
 import sys
 
 _MIRRORS = {
@@ -67,9 +68,42 @@ def report_public_image_startup(args: list[str], stderr: str) -> None:
         category = "registry manifest unavailable"
     elif "unauthorized" in lower or "access denied" in lower:
         category = "registry access refused"
+    elif "no space left on device" in lower or "disk quota exceeded" in lower:
+        category = "image storage unavailable"
     elif any(
         value in lower
-        for value in ("timeout", "connection refused", "tls handshake", "no such host")
+        for value in (
+            "digest mismatch",
+            "digest did not match",
+            "unexpected commit digest",
+        )
+    ):
+        category = "registry content integrity failed"
+    elif "x509:" in lower or "certificate verify failed" in lower:
+        category = "registry certificate refused"
+    elif re.search(
+        r"(?:status(?: code)?[: ]+|http/\d(?:\.\d)? +)5\d{2}\b", lower
+    ) or any(
+        value in lower
+        for value in (
+            "500 internal server error",
+            "502 bad gateway",
+            "503 service unavailable",
+            "504 gateway timeout",
+        )
+    ):
+        category = "registry server failed"
+    elif any(
+        value in lower
+        for value in (
+            "timeout",
+            "connection refused",
+            "tls handshake",
+            "no such host",
+            "unexpected eof",
+            "connection reset by peer",
+            "context deadline exceeded",
+        )
     ):
         category = "registry connection failed"
     else:
