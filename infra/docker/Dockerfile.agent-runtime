@@ -21,11 +21,12 @@ RUN pip install uv
 COPY services/agent-runtime/pyproject.toml services/agent-runtime/uv.lock ./services/agent-runtime/
 COPY services/agent-runtime/src ./services/agent-runtime/src
 COPY packages/offline-license-python ./packages/offline-license-python
+COPY packages/model-accounting-python ./packages/model-accounting-python
 WORKDIR /app/services/agent-runtime
 RUN uv sync --locked --no-dev --no-editable
 
 ENV PATH="/app/services/agent-runtime/.venv/bin:$PATH" \
-    PYTHONPATH="/app/services/agent-runtime/src:/app/packages/offline-license-python"
+    PYTHONPATH="/app/services/agent-runtime/src:/app/packages/offline-license-python:/app/packages/model-accounting-python"
 WORKDIR /app/services/agent-runtime
 EXPOSE 8000
 

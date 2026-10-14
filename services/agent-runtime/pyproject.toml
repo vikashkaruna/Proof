@@ -61,6 +61,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "PT", "RUF"]
 ignore = ["E501", "UP040", "UP046"]
 
 [tool.mypy]
+mypy_path = "../../packages/model-accounting-python"
 python_version = "3.14"
 strict = true
 ignore_missing_imports = true
@@ -68,7 +69,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src", "../../packages/offline-license-python"]
+pythonpath = ["src", "../../packages/offline-license-python", "../../packages/model-accounting-python"]
 addopts = "-v --tb=short --strict-markers"
 markers = [
   "security: security-sensitive tests (approval engine, RBAC, ledger)",
@@ -78,7 +79,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src", "../../packages/model-accounting-python"]
 omit = ["tests/*", "**/__pycache__/*"]
 
 [tool.coverage.report]

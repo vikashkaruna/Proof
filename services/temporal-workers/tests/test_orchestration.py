@@ -6,11 +6,9 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from temporalio import activity
 from temporalio.client import WorkflowFailureError
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
 from temporal_workers.workflows import ComplianceEngagementWorkflow
@@ -83,12 +81,6 @@ class SyntheticRuntime:
             elif self.fault == "connector":
                 result["output"]["needs_live_connector"] = True
         return result
-
-
-@pytest_asyncio.fixture
-async def server():
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        yield env
 
 
 async def run(server, runtime, data=None):
