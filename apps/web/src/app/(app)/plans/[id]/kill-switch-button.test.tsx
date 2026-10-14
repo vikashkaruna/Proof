@@ -67,6 +67,15 @@ it('reports engagement only when the BFF confirms the exact transition', async (
       headers: expect.objectContaining({ 'X-Tenant-Id': 'tenant-a' }),
     }),
   );
+  expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringContaining('for this tenant'));
+  expect(globalThis.confirm).not.toHaveBeenCalledWith(expect.stringContaining('globally'));
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/bff/v1/kill-switch/engage',
+    expect.objectContaining({
+      body: JSON.stringify({ scope: 'tenant', reason: 'Manual engagement from UI' }),
+    }),
+  );
+  expect(screen.getByText(/Running work stops at its next enforced checkpoint/)).toBeTruthy();
   expect(refresh).toHaveBeenCalledOnce();
 });
 

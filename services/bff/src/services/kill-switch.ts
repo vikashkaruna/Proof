@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
@@ -38,8 +39,8 @@ export type ReleaseResult =
   | { released: false; reason: 'not_engaged' | 'global_halt_active' };
 
 /**
- * Kill switch — per Doc 04 §5.4, halts all in-flight execution immediately,
- * globally or scoped to a tenant. FR-8.6 requires "immediately effective".
+ * Kill switch — shared global or tenant stop state consumed at enforced
+ * execution checkpoints. FR-8.6 requires "immediately effective".
  *
  * SEC-4, defect 1: this was a process-local object. The deployment target is
  * Cloud Run / EKS with multiple replicas, so engaging it halted one instance
@@ -75,15 +76,26 @@ const CACHE_TTL_MS = 2_000;
 
 const GLOBAL_SCOPE_KEY = 'global';
 
-interface CachedRow {
-  scope_key: string;
-  scope: 'global' | 'tenant';
-  tenant_id: string | null;
-  engaged: boolean;
-  reason: string;
-  engaged_by: string | null;
-  engaged_at: string | null;
-}
+const cachedRowSchema = z
+  .object({
+    scope_key: z.string(),
+    scope: z.enum(['global', 'tenant']),
+    tenant_id: z.guid().nullable(),
+    engaged: z.literal(true),
+    reason: z.string(),
+    engaged_by: z.guid().nullable(),
+    engaged_at: z.iso.datetime({ offset: true }).nullable(),
+  })
+  .strict()
+  .refine((row) =>
+    row.scope === 'global'
+      ? row.scope_key === GLOBAL_SCOPE_KEY && row.tenant_id === null
+      : row.tenant_id !== null && row.scope_key === row.tenant_id,
+  );
+const cachedRowsSchema = z
+  .array(cachedRowSchema)
+  .refine((rows) => new Set(rows.map((row) => row.scope_key)).size === rows.length);
+type CachedRow = z.infer<typeof cachedRowSchema>;
 
 export function createKillSwitchService(
   clientFactory: () => SupabaseClient = createSupabaseAdmin,
@@ -102,7 +114,7 @@ export function createKillSwitchService(
         .abortSignal(AbortSignal.timeout(10000))
         .eq('engaged', true);
       if (error) throw new KillSwitchStateUnavailable();
-      cache = { rows: (data ?? []) as CachedRow[], readAt: now };
+      cache = { rows: cachedRowsSchema.parse(data), readAt: now };
       return { rows: cache.rows, unavailable: false };
     } catch {
       // Per-read status avoids a concurrent successful read changing the
@@ -166,7 +178,8 @@ export function createKillSwitchService(
       // The caller may hold `owner` on one tenant; that is not authority over
       // every other tenant's execution.
       if (scope === 'tenant') {
-        const { rows } = await loadEngagedRows();
+        const { rows, unavailable } = await loadEngagedRows();
+        if (unavailable) throw new KillSwitchStateUnavailable();
         if (rows.some((r) => r.scope === 'global')) {
           logger.warn(
             { userId, tenantId },
