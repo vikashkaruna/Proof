@@ -30,10 +30,16 @@ function createSharedStore() {
 
   const client = {
     from() {
-      const state: { filters: Array<[string, unknown]> } = { filters: [] };
+      const state: { filters: Array<[string, unknown]>; fields: string[] } = {
+        filters: [],
+        fields: [],
+      };
       const builder: Record<string, unknown> = {};
 
-      builder.select = () => builder;
+      builder.select = (fields: string) => {
+        state.fields = fields.split(',').map((field) => field.trim());
+        return builder;
+      };
       builder.abortSignal = (signal: AbortSignal) => {
         signal.throwIfAborted();
         return builder;
@@ -51,7 +57,15 @@ function createSharedStore() {
             const matched = [...rows.values()].filter((r) =>
               state.filters.every(([f, v]) => (r as unknown as Record<string, unknown>)[f] === v),
             );
-            return Promise.resolve({ data: matched, error: null }).then(resolve);
+            const projected = matched.map((row) =>
+              Object.fromEntries(
+                state.fields.map((field) => [
+                  field,
+                  (row as unknown as Record<string, unknown>)[field],
+                ]),
+              ),
+            );
+            return Promise.resolve({ data: projected, error: null }).then(resolve);
           },
         });
       };
@@ -336,5 +350,81 @@ describe('kill switch status truthfulness during read outages', () => {
     expect(await first).toBe(true);
     expect((await service.state(TENANT_A)).engaged).toBe(false);
     expect(await service.isActive(TENANT_A)).toBe(false);
+  });
+});
+
+describe('kill switch malformed shared read refusal', () => {
+  const valid = {
+    scope_key: TENANT_A,
+    scope: 'tenant',
+    tenant_id: TENANT_A,
+    engaged: true,
+    reason: 'incident',
+    engaged_by: TENANT_OWNER,
+    engaged_at: '2026-10-13T16:00:00+00:00',
+  };
+  function malformedService(data: unknown) {
+    const update = vi.fn();
+    const chain = {
+      select: () => chain,
+      abortSignal: () => chain,
+      eq: async () => ({ data, error: null }),
+      update,
+    };
+    return { service: createKillSwitchService(() => ({ from: () => chain }) as never), update };
+  }
+  it.each([
+    null,
+    {},
+    [null],
+    [{ ...valid, scope: 'unknown' }],
+    [{ ...valid, engaged: false }],
+    [{ ...valid, engaged: 'true' }],
+    [{ ...valid, tenant_id: null }],
+    [{ ...valid, scope_key: TENANT_B }],
+    [{ ...valid, reason: 12 }],
+    [{ ...valid, engaged_at: 'invalid' }],
+    [{ ...valid, engaged_by: 'invalid' }],
+    [valid, valid],
+    [{ ...valid, scope: 'global', scope_key: 'global' }],
+  ])('halts and withholds status for malformed data %j', async (data) => {
+    const { service } = malformedService(data);
+    expect(await service.isActive(TENANT_A)).toBe(true);
+    await expect(service.state(TENANT_A)).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+  });
+  it.each([null, '2026-10-13T16:00:00.123456+05:30'])(
+    'accepts actual PostgreSQL nullable metadata and offset timestamp %s',
+    async (engagedAt) => {
+      const { service } = malformedService([{ ...valid, engaged_by: null, engaged_at: engagedAt }]);
+      expect(await service.isActive(TENANT_A)).toBe(true);
+      expect(await service.isActive(TENANT_B)).toBe(false);
+      expect(await service.state(TENANT_A)).toMatchObject({
+        engaged: true,
+        scope: 'tenant',
+        engagedAt: engagedAt ?? '',
+      });
+    },
+  );
+  it('refuses a tenant release before any write if the shared read is unavailable', async () => {
+    const { service, update } = malformedService(null);
+    await expect(
+      service.release({ scope: 'tenant', tenantId: TENANT_A, userId: TENANT_OWNER }),
+    ).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+    expect(update).not.toHaveBeenCalled();
+  });
+  it('refuses a tenant release during a transport read outage without clearing its row', async () => {
+    const store = createSharedStore();
+    const service = createKillSwitchService(store.factory);
+    await service.engage({
+      scope: 'tenant',
+      tenantId: TENANT_A,
+      userId: TENANT_OWNER,
+      reason: 'incident',
+    });
+    store.setFailReads(true);
+    await expect(
+      service.release({ scope: 'tenant', tenantId: TENANT_A, userId: TENANT_OWNER }),
+    ).rejects.toBeInstanceOf(KillSwitchStateUnavailable);
+    expect(store.rows.get(TENANT_A)?.engaged).toBe(true);
   });
 });

@@ -250,7 +250,9 @@ export function AppShell({
     setKillError(null);
     if (!killOn) {
       if (
-        !confirm('ENGAGE KILL SWITCH?\n\nThis halts all in-flight agent execution for this tenant.')
+        !confirm(
+          'ENGAGE KILL SWITCH?\n\nThis engages the stop for this tenant. Enforced checks refuse new work. Running work stops at its next enforced checkpoint.',
+        )
       )
         return;
       try {
@@ -272,7 +274,11 @@ export function AppShell({
         console.error('Failed to engage kill switch:', err);
       }
     } else {
-      if (!confirm('DISENGAGE KILL SWITCH?\n\nThis will resume autonomous agent executions.'))
+      if (
+        !confirm(
+          'DISENGAGE KILL SWITCH?\n\nThis removes this tenant stop. Other stops and normal approval checks still apply; interrupted work does not automatically resume.',
+        )
+      )
         return;
       try {
         const res = await fetch('/api/bff/v1/kill-switch/release', {
@@ -764,7 +770,7 @@ export function AppShell({
               }`}
               title={
                 killOn && !canReleaseKill
-                  ? 'Engaged. Only an owner can release the kill switch.'
+                  ? 'Engaged. An authorized owner or founder can release this tenant stop.'
                   : 'Halt autonomous agent execution for this tenant'
               }
             >
@@ -794,7 +800,7 @@ export function AppShell({
           <div className="flex items-center justify-between bg-[#D9534F] px-4 py-2 text-xs font-semibold text-white shadow-inner xl:px-5">
             <div className="flex items-center gap-2">
               <span className="text-sm">⏻</span>
-              <span>KILL SWITCH ENGAGED — in-flight agent execution is halted.</span>
+              <span>KILL SWITCH ENGAGED — Running work stops at its next enforced checkpoint.</span>
             </div>
             <div className="flex items-center gap-3">
               {killError && (
@@ -810,7 +816,9 @@ export function AppShell({
                   Disengage
                 </button>
               ) : (
-                <span className="font-normal text-white/85">Only an owner can release it.</span>
+                <span className="font-normal text-white/85">
+                  An authorized owner or founder can release this tenant stop.
+                </span>
               )}
             </div>
           </div>
