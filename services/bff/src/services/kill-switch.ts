@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UserRole } from '@axiom/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
@@ -8,6 +9,14 @@ export class KillSwitchStateUnavailable extends Error {
   constructor() {
     super('Kill switch status is unavailable');
     this.name = 'KillSwitchStateUnavailable';
+  }
+}
+
+/** Fresh global authority is absent or could not be established. No writes follow. */
+export class KillSwitchAuthorityRefused extends Error {
+  constructor(readonly reason: 'forbidden' | 'unavailable') {
+    super('Global kill switch authority refused');
+    this.name = 'KillSwitchAuthorityRefused';
   }
 }
 
@@ -97,10 +106,85 @@ const cachedRowsSchema = z
   .refine((rows) => new Set(rows.map((row) => row.scope_key)).size === rows.length);
 type CachedRow = z.infer<typeof cachedRowSchema>;
 
+const founderMembershipRows = z
+  .array(
+    z
+      .object({
+        tenant_id: z.guid().transform((value) => value.toLowerCase()),
+        user_id: z.guid().transform((value) => value.toLowerCase()),
+        role: z.enum(UserRole),
+      })
+      .strict(),
+  )
+  .max(1);
+const founderProfileRows = z
+  .array(
+    z
+      .object({
+        id: z.guid().transform((value) => value.toLowerCase()),
+        is_axiom_internal: z.boolean(),
+      })
+      .strict(),
+  )
+  .max(1);
+
 export function createKillSwitchService(
   clientFactory: () => SupabaseClient = createSupabaseAdmin,
 ): KillSwitchService {
   let cache: { rows: CachedRow[]; readAt: number } | null = null;
+
+  async function requireLiveFounder(
+    tenantId: string | undefined,
+    userId: string,
+  ): Promise<SupabaseClient> {
+    const actor = z
+      .object({
+        tenantId: z.guid().transform((value) => value.toLowerCase()),
+        userId: z.guid().transform((value) => value.toLowerCase()),
+      })
+      .safeParse({ tenantId, userId });
+    if (!actor.success) throw new KillSwitchAuthorityRefused('forbidden');
+    try {
+      const supabase = clientFactory();
+      // One bounded deadline across both fresh reads. Never use stop-state cache
+      // or the caller's previously resolved role as proof of founder authority.
+      const signal = AbortSignal.timeout(10000);
+      const membership = await supabase
+        .from('tenant_users')
+        .select('tenant_id, user_id, role')
+        .abortSignal(signal)
+        .eq('tenant_id', actor.data.tenantId)
+        .eq('user_id', actor.data.userId);
+      if (membership.error) throw new KillSwitchAuthorityRefused('unavailable');
+      const rows = founderMembershipRows.parse(membership.data);
+      const member = rows[0];
+      if (
+        member &&
+        (member.tenant_id !== actor.data.tenantId || member.user_id !== actor.data.userId)
+      )
+        throw new KillSwitchAuthorityRefused('unavailable');
+      if (!member || member.role !== UserRole.FOUNDER)
+        throw new KillSwitchAuthorityRefused('forbidden');
+      const profile = await supabase
+        .from('users')
+        .select('id, is_axiom_internal')
+        .abortSignal(signal)
+        .eq('id', actor.data.userId);
+      if (profile.error) throw new KillSwitchAuthorityRefused('unavailable');
+      const profiles = founderProfileRows.parse(profile.data);
+      const user = profiles[0];
+      if (user && user.id !== actor.data.userId)
+        throw new KillSwitchAuthorityRefused('unavailable');
+      if (!user || !user.is_axiom_internal) throw new KillSwitchAuthorityRefused('forbidden');
+      signal.throwIfAborted();
+      // These reads and the following write are separate DB requests. This
+      // bounds stale authority but does not provide atomic revocation/settlement.
+      return supabase;
+    } catch (error) {
+      if (error instanceof KillSwitchAuthorityRefused) throw error;
+      throw new KillSwitchAuthorityRefused('unavailable');
+    }
+  }
 
   async function loadEngagedRows(): Promise<{ rows: CachedRow[]; unavailable: boolean }> {
     const now = Date.now();
@@ -139,7 +223,8 @@ export function createKillSwitchService(
         throw new Error('A tenant-scoped kill switch requires a tenantId');
       }
       const scopeKey = scope === 'global' ? GLOBAL_SCOPE_KEY : tenantId!;
-      const supabase = clientFactory();
+      const supabase =
+        scope === 'global' ? await requireLiveFounder(tenantId, userId) : clientFactory();
 
       const { error } = await supabase.from('kill_switch_state').upsert(
         {
@@ -189,7 +274,8 @@ export function createKillSwitchService(
         }
       }
 
-      const supabase = clientFactory();
+      const supabase =
+        scope === 'global' ? await requireLiveFounder(tenantId, userId) : clientFactory();
       const { data, error } = await supabase
         .from('kill_switch_state')
         .update({

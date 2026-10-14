@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerWorkload, selectTenant, signIn, state } from '../fixtures';
+import { registerWorkload, selectTenant, state, signInFreshOwner } from '../fixtures';
 
 // W3.5: access edges come only from active grants; Sudhaar has none, and the
 // Karya write view shows write authority alone. Grants are seeded directly:
@@ -25,7 +25,7 @@ test('the estate graph derives agent access from grants and isolates Karya write
   page,
 }, testInfo) => {
   const suffix = crypto.randomUUID().slice(0, 8);
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'estate-graph.spec-1');
   await selectTenant(page, 'a');
   const estateName = `Graph estate ${suffix}`;
   const estate = (await (

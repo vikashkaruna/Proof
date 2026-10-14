@@ -5,7 +5,7 @@ import { tenantCookie } from '../target';
 test('custom tenant selection routes real reads and writes and refuses stale membership', async ({
   page,
 }) => {
-  const account = await createMfaAccount('tenant-bridge', { role: 'admin' });
+  const account = await createMfaAccount('tenant-bridge', { role: 'admin', withFactor: true });
   const tenant = crypto.randomUUID();
   const slug = `bridge-${tenant.slice(0, 8)}`;
   const estateName = `Custom estate ${tenant.slice(0, 8)}`;
@@ -25,7 +25,7 @@ test('custom tenant selection routes real reads and writes and refuses stale mem
     });
     expect(response.status).toBe(201);
   }
-  await signInAs(page, account.email, account.password);
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await page.context().addCookies([tenantCookie(slug)]);
   const created = await page.request.post('/api/bff/v1/estates', {
     data: { name: estateName, slug: 'custom-estate' },

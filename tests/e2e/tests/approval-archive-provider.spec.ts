@@ -2,15 +2,16 @@ import { createHash, createHmac } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
-import { generateTotp } from '@axiom/mfa';
 import {
   createApprovablePlan,
   createMfaAccount,
+  freshTotpCode,
   selectTenant,
   signIn,
   signInAs,
   satisfyLoginMfa,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
 
@@ -98,12 +99,12 @@ test.describe('real-provider approval proof archive', () => {
       role: 'approver',
       withFactor: true,
     });
-    await signInAs(page, approver.email, approver.password);
+    await signInAs(page, approver.email, approver.password, approver.totpSecret!);
     await selectTenant(page, 'a');
     await page.goto(`/plans/${plan.id}`);
     await page.getByRole('button', { name: /^Approve \d+ action/ }).click();
     await expect(page.getByText('Confirm with your authenticator')).toBeVisible();
-    await page.fill('#stepUpCode', generateTotp(approver.totpSecret!));
+    await page.fill('#stepUpCode', await freshTotpCode(page, approver.totpSecret!));
     await page.getByRole('button', { name: /Verify and approve/ }).click();
     await expect(page.getByText(/Signed approval token issued/)).toBeVisible();
 
@@ -241,7 +242,7 @@ test.describe('real-provider approval proof archive', () => {
       await expect(founder.getByText('Founder released the verified proof')).toBeVisible();
 
       const owner = await ownerContext.newPage();
-      await signIn(owner, 'owner');
+      await signInFreshOwner(owner, 'approval-archive-provider.spec-1');
       await selectTenant(owner, 'a');
       await owner.goto(`/plans/${plan.id}`);
       await expect(owner.getByRole('link', { name: 'Download exact version' })).toBeVisible();

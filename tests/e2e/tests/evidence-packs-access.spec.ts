@@ -28,7 +28,10 @@ test('real pack access follows current membership and internal authority, includ
   test.setTimeout(240_000);
   if (acceptanceTarget || new URL(state.supabaseUrl).hostname !== '127.0.0.1')
     throw new Error('Isolated local Auth/storage fixture required');
-  const manager = await createMfaAccount('pack-access-manager', { role: 'admin' });
+  const manager = await createMfaAccount('pack-access-manager', {
+    role: 'admin',
+    withFactor: true,
+  });
   const founder = await createMfaAccount('pack-access-founder', {
     role: 'founder',
     isInternal: true,
@@ -80,7 +83,7 @@ test('real pack access follows current membership and internal authority, includ
     }),
   });
   expect(foreignMembership.status).toBe(201);
-  await signInAs(page, manager.email, manager.password);
+  await signInAs(page, manager.email, manager.password, manager.totpSecret!);
   await selectTenant(page, 'a');
   const memberKey = crypto.randomUUID();
   const title = `Pack authority ${memberKey}`;

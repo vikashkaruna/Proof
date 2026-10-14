@@ -2,14 +2,14 @@ import { test, expect } from '@playwright/test';
 import {
   createMfaAccount,
   selectTenant,
-  signIn,
   signInAs,
   satisfyLoginMfaWithSecret,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 
 test('source-free dossier and outbound dispatch refuse after real sign-in', async ({ page }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'pramaan-boundary.spec-1');
   await selectTenant(page, 'a');
   const headers = { 'x-tenant-id': state.tenantA.id };
 

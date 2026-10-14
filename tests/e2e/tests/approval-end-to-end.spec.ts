@@ -1,6 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { generateTotp } from '@axiom/mfa';
-import { account, createApprovablePlan, selectTenant, signIn, state } from '../fixtures';
+import {
+  createMfaAccount,
+  freshTotpCode,
+  createApprovablePlan,
+  selectTenant,
+  signIn,
+  signInAs,
+  state,
+} from '../fixtures';
 
 /**
  * W1 — an approver carries an approval through to a signed token, in a browser.
@@ -30,12 +37,6 @@ test.afterEach(async ({ page }) => {
   ).toEqual([]);
 });
 
-const secretFor = (key: 'approver' | 'approverReplay') => {
-  const secret = account(key).totpSecret;
-  if (!secret) throw new Error(`The ${key} persona was seeded without a TOTP factor`);
-  return secret;
-};
-
 /**
  * Sign in as the approver on a plan created for this journey alone.
  *
@@ -50,11 +51,17 @@ async function openOwnPlanAsApprover(
   who: 'approver' | 'approverReplay' = 'approver',
 ) {
   const plan = await createApprovablePlan(label);
-  await signIn(page, who);
+  // Every journey owns its factor counter, including the login challenge.
+  const identity = await createMfaAccount(`${who}-${label.replaceAll(' ', '-')}`, {
+    role: 'approver',
+    withFactor: true,
+  });
+  if (!identity.totpSecret) throw new Error('Approval journey needs its own factor');
+  await signInAs(page, identity.email, identity.password, identity.totpSecret);
   await selectTenant(page, 'a');
   await page.goto(`/plans/${plan.id}`);
   await expect(page.locator('body')).toContainText(plan.title, { timeout: 30_000 });
-  return plan;
+  return { ...plan, totpSecret: identity.totpSecret };
 }
 
 /** Click "Approve N actions", which opens the step-up panel. */
@@ -65,10 +72,10 @@ async function beginApproval(page: Page) {
 
 test.describe('an approver completes an approval', () => {
   test('a correct code issues a signed approval token', async ({ page }) => {
-    await openOwnPlanAsApprover(page, 'Approve me');
+    const plan = await openOwnPlanAsApprover(page, 'Approve me');
     await beginApproval(page);
 
-    await page.fill('#stepUpCode', generateTotp(secretFor('approver')));
+    await page.fill('#stepUpCode', await freshTotpCode(page, plan.totpSecret));
     await page.getByRole('button', { name: /Verify and approve/ }).click();
 
     // The success message the component sets only after the BFF returns a
@@ -102,7 +109,7 @@ test.describe('an approver completes an approval', () => {
     const plan = await openOwnPlanAsApprover(page, 'Replay', 'approverReplay');
     await beginApproval(page);
 
-    const code = generateTotp(secretFor('approverReplay'));
+    const code = await freshTotpCode(page, plan.totpSecret);
     await page.fill('#stepUpCode', code);
     await page.getByRole('button', { name: /Verify and approve/ }).click();
     await expect(page.getByText(/Signed approval token issued/)).toBeVisible({ timeout: 30_000 });

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { selectTenant, signIn, state, signInFreshOwner } from '../fixtures';
 
 // These journeys use real auth, BFF routes and database writes. Synthetic
 // evidence below proves linkage only, not delivery or locked object storage.
@@ -8,7 +8,7 @@ test('DSAR intake, identity verification, refusal and evidence-bound completion'
 }) => {
   const suffix = crypto.randomUUID();
   const name = `Rights journey ${suffix}`;
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'dsar-workflow.spec-1');
   await selectTenant(page, 'a');
   await page.goto('/dsars');
   await page.getByRole('button', { name: 'Record request', exact: true }).click();
@@ -102,7 +102,7 @@ test('uncertain DSAR intake retains its request key and form for a safe retry', 
   page,
 }) => {
   const suffix = crypto.randomUUID();
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'dsar-workflow.spec-2');
   await selectTenant(page, 'a');
   await page.goto('/dsars');
   await page.getByRole('button', { name: 'Record request', exact: true }).click();

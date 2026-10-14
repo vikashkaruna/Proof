@@ -67,8 +67,8 @@ test('an admin invites a person who accepts after signing in as the invited addr
   page,
   browser,
 }) => {
-  const admin = await createMfaAccount('invite-admin', { role: 'admin' });
-  await signInAs(page, admin.email, admin.password);
+  const admin = await createMfaAccount('invite-admin', { role: 'admin', withFactor: true });
+  await signInAs(page, admin.email, admin.password, admin.totpSecret!);
   await selectTenant(page, 'a');
   const invitee = await authAccount('accept');
   const link = await invite(page, invitee.email);
@@ -103,8 +103,8 @@ test('an invited person can sign up in a separate browser session and accept the
   page,
   browser,
 }) => {
-  const admin = await createMfaAccount('invite-signup', { role: 'admin' });
-  await signInAs(page, admin.email, admin.password);
+  const admin = await createMfaAccount('invite-signup', { role: 'admin', withFactor: true });
+  await signInAs(page, admin.email, admin.password, admin.totpSecret!);
   await selectTenant(page, 'a');
   const email = `invitee-signup-${crypto.randomUUID().slice(0, 8)}@example.invalid`;
   const password = `Pw-${crypto.randomUUID()}`;
@@ -136,8 +136,8 @@ test('another account cannot accept, and a revoked invitation grants nothing', a
   page,
   browser,
 }) => {
-  const admin = await createMfaAccount('invite-revoke', { role: 'admin' });
-  await signInAs(page, admin.email, admin.password);
+  const admin = await createMfaAccount('invite-revoke', { role: 'admin', withFactor: true });
+  await signInAs(page, admin.email, admin.password, admin.totpSecret!);
   await selectTenant(page, 'a');
   const intended = await authAccount('intended');
   const intruder = await authAccount('intruder');
