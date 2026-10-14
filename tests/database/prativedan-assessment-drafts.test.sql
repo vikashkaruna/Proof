@@ -1,6 +1,9 @@
 -- Disposable SQL contract fixtures, NOT live named-agent acceptance.
 -- Uses actual finalized assessment/controller and append_ledger paths.
 begin;
+-- Disposable fixture custody only; rolled back here or destroyed with the owned container.
+-- No SVID/PostgREST/private-channel identity proof is inferred from SET ROLE.
+grant axiom_prativedan_controller to postgres with set true;
 create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('51230000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m; end if; end$$;
 create function pg_temp.reject(q text,code text default '42501') returns void language plpgsql as $$begin begin execute q; execute 'set constraints all immediate'; exception when others then if sqlstate=code then return; end if; raise; end; raise exception 'Unexpected success'; end$$;
@@ -109,18 +112,39 @@ select pg_temp.ok((select count(*)=0 from public.board_report_requests) and (sel
  and (select count(*)=0 from public.reports),'unchanged legacy board authority/state');
 update p123_context set input_text=(select renderer_input_projection::text from public.prativedan_assessment_sources where tenant_id=pg_temp.id(11));
 select pg_temp.ok((select input_text::jsonb#>>'{findings,0,control_id}'='WA-2' and input_text::jsonb#>>'{library_control_ids,0}'='WA-1' from p123_context),'finalized finding order preserved independently of control source order');
+-- Synthetic exclusive service custody, NOT JWT-SVID/PostgREST delivery proof.
+insert into controller_security.prativedan_credentials(id,tenant_id,expires_at)
+ values(pg_temp.id(99),pg_temp.id(11),clock_timestamp()+interval '2 hours');
+insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status)
+ values(pg_temp.id(98),pg_temp.id(11),'prativedan','spiffe://local.axiomproof.test/agent/prativedan','active');
+insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted,activated_at)
+ values(pg_temp.id(97),pg_temp.id(1),'totp','active','synthetic-nonoperational-fixture',clock_timestamp());
+insert into public.mfa_session_attestations(id,user_id,session_id,factor_id,expires_at)
+ values(pg_temp.id(96),pg_temp.id(1),pg_temp.id(95)::text,pg_temp.id(97),clock_timestamp()+interval '1 hour');
+create function pg_temp.authority() returns jsonb language sql as $$select jsonb_build_object(
+ 'actor_id',pg_temp.id(1),'session_id',pg_temp.id(95),'workload_id',pg_temp.id(98),'registration_version',1,
+ 'subject','spiffe://local.axiomproof.test/agent/prativedan','svid_expires_at',clock_timestamp()+interval '4 minutes')$$;
+select set_config('request.jwt.claims',jsonb_build_object('role','axiom_prativedan_controller','sub',pg_temp.id(99),
+ 'tenant_id',pg_temp.id(11),'iat',floor(extract(epoch from clock_timestamp())),
+ 'exp',floor(extract(epoch from clock_timestamp()))+3600)::text,true);
+grant select,update on p123_context to axiom_prativedan_controller;
+
+create function pg_temp.controller_claims() returns text language sql as $$select jsonb_build_object('role','axiom_prativedan_controller','sub',pg_temp.id(99),
+ 'tenant_id',pg_temp.id(11),'iat',floor(extract(epoch from clock_timestamp())),
+ 'exp',floor(extract(epoch from clock_timestamp()))+3600)::text$$;
+
 -- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim.
-set local role agent_ledger_writer;
-select pg_temp.reject(format('select public.claim_prativedan_assessment_draft(%L,%L,%L,%L,%L)',pg_temp.id(11),pg_temp.id(55),
+set local role axiom_prativedan_controller;
+select pg_temp.reject(format('select public.claim_prativedan_assessment_draft(%L,%L,%L,%L,%L,pg_temp.authority())',pg_temp.id(11),pg_temp.id(55),
  (select reply->>'run_id' from p123_context),repeat('f',64),(select input_text from p123_context)));
-select pg_temp.reject(format('select public.claim_prativedan_assessment_draft(%L,%L,%L,%L,%L)',pg_temp.id(11),pg_temp.id(55),
+select pg_temp.reject(format('select public.claim_prativedan_assessment_draft(%L,%L,%L,%L,%L,pg_temp.authority())',pg_temp.id(11),pg_temp.id(55),
  (select reply->>'run_id' from p123_context),(select encode(sha256(convert_to(human_text,'UTF8')),'hex') from p123_context),
  (select jsonb_set(input_text::jsonb,'{posture_score}','99')::text from p123_context)));
 update p123_context set claim=public.claim_prativedan_assessment_draft(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
- encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text);
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text,pg_temp.authority());
 select pg_temp.ok((select claim->'claimed'='true'::jsonb and claim#>>'{readback,state}'='invocation_uncertain' from p123_context),'one-shot claim grants one invocation');
 select pg_temp.ok((select public.claim_prativedan_assessment_draft(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
- encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text)->'claimed'='false'::jsonb from p123_context),'lost claim response/read replay never authorizes redispatch');
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),input_text,pg_temp.authority())->'claimed'='false'::jsonb from p123_context),'lost claim response/read replay never authorizes redispatch');
 reset role;
 
 -- Structural SQL fixture; actual renderer/HTML acceptance is a later codec gate.
@@ -137,23 +161,17 @@ select pg_temp.ok(controller_security.prativedan123_output_valid((select input_t
  (select jsonb_set(output_text::jsonb,'{sections,0}','{}') from p123_context)) is false,'missing summary fields must return FALSE not SQL NULL');
 select pg_temp.ok(controller_security.prativedan123_output_valid((select input_text::jsonb from p123_context),
  (select jsonb_set(output_text::jsonb,'{sections,0,body}','null') from p123_context)) is false,'null summary fields must return FALSE');
--- Genuine immutable ledger rows through scoped append_agent_ledger. Synthetic
+-- Genuine immutable ledger rows through exclusive fixed phase RPCs. Synthetic
 -- declarations test DB binding; they do not attest actual Python invocation.
-set local role agent_ledger_writer;
-update p123_context set started=public.append_agent_ledger(pg_temp.id(11),pg_temp.id(55),'agent','prativedan','0.1.0',null,null,
- 'report.generated',pg_temp.id(21)::text,encode(sha256(convert_to(input_text,'UTF8')),'hex'),null,null,null,null,null,'pending',
- jsonb_build_object('phase','started','run_id',reply->>'run_id','request_hash',encode(sha256(convert_to(human_text,'UTF8')),'hex'),
- 'renderer_config_version','prativedan-draft-v1','renderer_config_sha256','b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3'));
-update p123_context set completed=public.append_agent_ledger(pg_temp.id(11),pg_temp.id(55),'agent','prativedan','0.1.0',null,null,
- 'report.generated',pg_temp.id(21)::text,encode(sha256(convert_to(input_text,'UTF8')),'hex'),encode(sha256(convert_to(output_text,'UTF8')),'hex'),null,null,null,null,'success',
- jsonb_build_object('phase','completed','started_entry',started::text,'run_id',reply->>'run_id','request_hash',encode(sha256(convert_to(human_text,'UTF8')),'hex'),
- 'renderer_config_version','prativedan-draft-v1','renderer_config_sha256','b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3'));
+set local role axiom_prativedan_controller;
+update p123_context set started=(public.record_prativedan_assessment_phase(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),'started',null,pg_temp.authority())->>'id')::bigint;
 reset role;
 create function pg_temp.settle(output_text text default null,response_text text default null,started bigint default null,completed bigint default null,config_text text default null) returns jsonb language sql as $$
  select public.settle_prativedan_assessment_draft(pg_temp.id(11),pg_temp.id(55),(x.reply->>'run_id')::uuid,
  encode(sha256(convert_to(x.human_text,'UTF8')),'hex'),encode(sha256(convert_to(x.input_text,'UTF8')),'hex'),
- coalesce($5,x.claim#>>'{readback,renderer_config_text}'),coalesce($1,x.output_text),coalesce($2,x.response_text),coalesce($3,x.started),coalesce($4,x.completed)) from p123_context x$$;
-set local role agent_ledger_writer;
+ coalesce($5,x.claim#>>'{readback,renderer_config_text}'),coalesce($1,x.output_text),coalesce($2,x.response_text),coalesce($3,x.started),coalesce($4,x.completed),pg_temp.authority()) from p123_context x$$;
+set local role axiom_prativedan_controller;
 select pg_temp.reject('select pg_temp.settle(completed=>1)');
 select pg_temp.reject('select pg_temp.settle(config_text=>''{}'')');
 savepoint invalid_summary_matching_receipt;
@@ -161,12 +179,13 @@ savepoint invalid_summary_matching_receipt;
 -- output validator (rather than an unrelated digest mismatch) can refuse it.
 update p123_context set output_text=jsonb_set(output_text::jsonb,'{sections,0}','{}')::text;
 update p123_context set response_text=output_text;
-update p123_context set completed=public.append_agent_ledger(pg_temp.id(11),pg_temp.id(55),'agent','prativedan','0.1.0',null,null,
- 'report.generated',pg_temp.id(21)::text,encode(sha256(convert_to(input_text,'UTF8')),'hex'),encode(sha256(convert_to(output_text,'UTF8')),'hex'),null,null,null,null,'success',
- jsonb_build_object('phase','completed','started_entry',started::text,'run_id',reply->>'run_id','request_hash',encode(sha256(convert_to(human_text,'UTF8')),'hex'),
- 'renderer_config_version','prativedan-draft-v1','renderer_config_sha256','b6b22a3360126539085f1630cdb390396fc97ca72fc894259c7c4cb7bc3d0ba3'));
+update p123_context set completed=(public.record_prativedan_assessment_phase(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),'completed',encode(sha256(convert_to(output_text,'UTF8')),'hex'),pg_temp.authority())->>'id')::bigint;
 select pg_temp.reject('select pg_temp.settle()');
 rollback to invalid_summary_matching_receipt;
+update p123_context set completed=(public.record_prativedan_assessment_phase(pg_temp.id(11),pg_temp.id(55),(reply->>'run_id')::uuid,
+ encode(sha256(convert_to(human_text,'UTF8')),'hex'),'completed',encode(sha256(convert_to(output_text,'UTF8')),'hex'),pg_temp.authority())->>'id')::bigint;
+
 
 select pg_temp.reject(format('select pg_temp.settle(output_text=>%L,response_text=>%L)',
  (select jsonb_set(output_text::jsonb,'{sections,0}','{}')::text from p123_context),(select jsonb_set(output_text::jsonb,'{sections,0}','{}')::text from p123_context)));
@@ -184,22 +203,22 @@ alter table public.prativedan_draft_claims enable trigger draft_immutable;
 select pg_temp.ok(controller_security.prativedan123_runtime_valid(pg_temp.id(11),pg_temp.id(55),
  (select started from p123_context),(select completed from p123_context),(select encode(sha256(convert_to(output_text,'UTF8')),'hex') from p123_context)),
  'stale transaction-time receipts alone cannot establish unexpired completion');
-set local role agent_ledger_writer;
+set local role axiom_prativedan_controller;
 select pg_temp.reject('select pg_temp.settle()');
 reset role;
 rollback to expired_claim;
-set local role agent_ledger_writer;
+set local role axiom_prativedan_controller;
 reset role;
 create function pg_temp.fail_p123_settlement_append() returns trigger language plpgsql as $$
 begin raise exception 'synthetic mandatory settlement append failure';end $$;
 create trigger p123_settlement_failure before insert on public.audit_ledger for each row when(new.action_type::text='prativedan.draft.settled') execute function pg_temp.fail_p123_settlement_append();
-set local role agent_ledger_writer;
+set local role axiom_prativedan_controller;
 select pg_temp.reject('select pg_temp.settle()','P0001');
 reset role;
 select pg_temp.ok((select count(*)=0 from public.prativedan_draft_outputs) and (select count(*)=1 from public.prativedan_draft_claims)
  and (select count(*)=0 from public.audit_ledger where action_type::text='prativedan.draft.settled'),'mandatory settlement receipt failure preserves uncertain claim without output');
 drop trigger p123_settlement_failure on public.audit_ledger;
-set local role agent_ledger_writer;
+set local role axiom_prativedan_controller;
 update p123_context set proof=pg_temp.settle();
 select pg_temp.ok((select proof->'publication_allowed'='false'::jsonb and proof->>'state'='unpublished'
  and proof->>'runtime_output_sha256'<>proof->>'response_output_sha256' from p123_context),'five raw byte domains retained independently');
@@ -247,8 +266,8 @@ select pg_temp.reject(format('insert into public.prativedan_draft_claims(tenant_
 -- Authority changes refuse new invocation, review AND privileged readback.
 savepoint membership_changed;
 delete from public.tenant_users where tenant_id=pg_temp.id(11) and user_id=pg_temp.id(1);
-set local role agent_ledger_writer;
-select pg_temp.reject(format('select public.load_prativedan_assessment_dispatch(%L,%L,%L,%L)',pg_temp.id(11),pg_temp.id(55),(select reply->>'run_id' from p123_context),(select encode(sha256(convert_to(human_text,'UTF8')),'hex') from p123_context)));
+set local role axiom_prativedan_controller;
+select pg_temp.reject(format('select public.load_prativedan_assessment_dispatch(%L,%L,%L,%L,pg_temp.authority())',pg_temp.id(11),pg_temp.id(55),(select reply->>'run_id' from p123_context),(select encode(sha256(convert_to(human_text,'UTF8')),'hex') from p123_context)));
 reset role;
 rollback to membership_changed;
 savepoint internal_changed;

@@ -49,7 +49,7 @@ marker = '-- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim.'
 if text.count(marker) != 1:
     raise SystemExit('Reviewed fixture boundary changed')
 text = text.split(marker, 1)[0]
-text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer;', 1)
+text = text.replace('begin;', 'begin;\ncreate schema p123_fixture;\ngrant usage on schema p123_fixture to human_action_writer,agent_ledger_writer,axiom_prativedan_controller;', 1)
 text = text.replace('pg_temp.', 'p123_fixture.').replace('create temporary table ', 'create table ')
 for table in ('issued', 'p123_context'):
     text = re.sub(rf'\b{table}\b', 'p123_fixture.' + table, text)
@@ -72,16 +72,16 @@ from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text(encoding='utf-8')
 literal = "'" + text.replace("'", "''") + "'"
-print("set standard_conforming_strings=on; set role agent_ledger_writer;")
-print("select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,encode(sha256(convert_to(human_text,'UTF8')),'hex')," + literal + ") from p123_fixture.p123_context;")
+print("set standard_conforming_strings=on; do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;")
+print("select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,encode(sha256(convert_to(human_text,'UTF8')),'hex')," + literal + ",p123_fixture.authority()) from p123_fixture.p123_context;")
 PY
 python3 - "$output_dir/initial/normalized-input.txt" <<'PY' | sql > "$output_dir/pg-claim-replay.json"
 from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text(encoding='utf-8')
 literal = "'" + text.replace("'", "''") + "'"
-print("set standard_conforming_strings=on; set role agent_ledger_writer;")
-print("select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,encode(sha256(convert_to(human_text,'UTF8')),'hex')," + literal + ") from p123_fixture.p123_context;")
+print("set standard_conforming_strings=on; do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;")
+print("select public.claim_prativedan_assessment_draft(p123_fixture.id(11),p123_fixture.id(55),(reply->>'run_id')::uuid,encode(sha256(convert_to(human_text,'UTF8')),'hex')," + literal + ",p123_fixture.authority()) from p123_fixture.p123_context;")
 PY
 sql > "$output_dir/pg-ledger.json" <<'SQL'
 select jsonb_agg(to_jsonb(l)||jsonb_build_object('id',l.id::text) order by l.id) from public.audit_ledger l where tenant_id=p123_fixture.id(11);
