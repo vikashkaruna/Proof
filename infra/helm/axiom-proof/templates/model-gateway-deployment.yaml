@@ -28,14 +28,15 @@ spec:
         fsGroup: 1000
       containers:
         - name: model-gateway
-          image: "{{ .Values.image.registry }}/axiom-model-gateway:{{ .Values.image.tag }}"
+          image: {{ include "axiom-proof.image" (dict "root" . "component" "model-gateway") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 8001
           env:
+            {{- include "axiom-proof.offlineLicenseEnv" . | nindent 12 }}
             - name: ENVIRONMENT
-              value: production
+              value: {{ include "axiom-proof.environment" . | quote }}
             - name: PII_REDACTION_ENABLED
               value: {{ .Values.modelGateway.env.piiRedactionEnabled | quote }}
             - name: SELF_HOSTED_BASE_URL
@@ -44,7 +45,7 @@ spec:
               value: {{ .Values.modelGateway.env.selfHostedModel | quote }}
             - name: AWS_REGION
               value: {{ .Values.config.awsRegion }}
-            - name: MODEL_GATEWAY_API_KEY
+            - name: API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-internal

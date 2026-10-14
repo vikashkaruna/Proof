@@ -11,10 +11,18 @@
 
 image:
   registry: registry.local/axiom-minds
-  tag: 0.1.0-onprem
-  pullPolicy: IfNotPresent
+  # Supply every enabled component digest after approved offline import.
+  # This example deliberately refuses rendering until digests/Secret names exist.
+  digests: {}
+  pullPolicy: Never
+
+imagePullSecrets: []
 
 config:
+  environment: onprem
+  offlineLicenseSecretName: ""
+  storageSecretName: ""
+  storageEndpoint: ""
   awsRegion: ap-south-1
   supabaseUrl: "http://axiom-supabase.axiom-proof.svc.cluster.local:55321"
   s3EvidenceBucket: "axiom-proof-evidence-onprem"
@@ -69,7 +77,7 @@ modelGateway:
   replicaCount: 2
   env:
     piiRedactionEnabled: "true"
-    selfHostedBaseUrl: "http://vllm.axiom-proof.svc.cluster.local:8000"
+    selfHostedBaseUrl: "http://local-model:8000"
     selfHostedModel: "Qwen/Qwen2.5-32B-Instruct-AWQ"
   autoscaling:
     enabled: false

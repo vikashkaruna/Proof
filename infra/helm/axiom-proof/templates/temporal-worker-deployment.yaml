@@ -38,22 +38,25 @@ spec:
         fsGroup: 1000
       containers:
         - name: temporal-worker
-          image: "{{ .Values.image.registry }}/axiom-temporal-worker:{{ .Values.image.tag }}"
+          image: {{ include "axiom-proof.image" (dict "root" . "component" "temporal-worker") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            {{- include "axiom-proof.offlineLicenseEnv" . | nindent 12 }}
             - name: ENVIRONMENT
-              value: production
+              value: {{ include "axiom-proof.environment" . | quote }}
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.config.temporalAddress }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.config.temporalNamespace }}
             - name: TEMPORAL_TLS
               value: {{ .Values.temporalWorker.env.TEMPORAL_TLS | quote }}
+            {{- if ne (include "axiom-proof.environment" .) "onprem" }}
             - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "axiom-proof.fullname" . }}-temporal
                   key: api-key
+            {{- end }}
             - name: AGENT_RUNTIME_URL
               value: {{ .Values.config.agentRuntimeUrl }}
             - name: AGENT_RUNTIME_INTERNAL_TOKEN
