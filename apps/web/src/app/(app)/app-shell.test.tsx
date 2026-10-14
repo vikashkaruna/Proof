@@ -195,6 +195,10 @@ it('requires a confirmed capability-bearing request to engage the kill switch', 
   fireEvent.click(screen.getByRole('button', { name: /^Kill switch$/ }));
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+  expect(globalThis.confirm).toHaveBeenCalledWith(
+    expect.stringContaining('next enforced checkpoint'),
+  );
+  expect(screen.getByText(/Running work stops at its next enforced checkpoint/)).toBeTruthy();
   expect(
     fetcher.mock.calls.filter(([url]) => url === '/api/bff/v1/kill-switch/engage'),
   ).toHaveLength(1);
@@ -422,7 +426,9 @@ it('offers no Disengage to a role that can engage but not release', async () => 
   render(<AppShell {...props} capabilities={['kill_switch.engage.tenant']} />);
   await waitFor(() => expect(screen.getByText(/KILL SWITCH ENGAGED/)).toBeTruthy());
   expect(screen.queryByRole('button', { name: 'Disengage' })).toBeNull();
-  expect(screen.getByText('Only an owner can release it.')).toBeTruthy();
+  expect(
+    screen.getByText('An authorized owner or founder can release this tenant stop.'),
+  ).toBeTruthy();
   expect(screen.getByRole('button', { name: /Kill switch active/ }).hasAttribute('disabled')).toBe(
     true,
   );
