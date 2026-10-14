@@ -2,30 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Protocol
-
-from supabase import Client, create_client
-from supabase.lib.client_options import SyncClientOptions
 
 from .canonicalise import sha256_hex
 from .config import Settings
-from .ledger_client import AppendOnlyLedgerClient, _validated_writer_key
+from .ledger_client import AppendOnlyLedgerClient
 from .prativedan_assessment_draft_codec import AssessmentDraftBinding
 
 
 class AssessmentRpcPort(Protocol):
     async def call(self, name: str, arguments: dict[str, Any]) -> object: ...
-
-
-class _ScopedRpc:
-    def __init__(self, client: Client) -> None:
-        self.client = client
-
-    async def call(self, name: str, arguments: dict[str, Any]) -> object:
-        # Timeout leaves write outcome unknown. No retry or late success inference.
-        async with asyncio.timeout(10):
-            return await asyncio.to_thread(lambda: self.client.rpc(name, arguments).execute().data)
 
 
 class PrativedanAssessmentStore:
@@ -36,19 +22,10 @@ class PrativedanAssessmentStore:
     def from_settings(
         cls, settings: Settings
     ) -> tuple[PrativedanAssessmentStore, AppendOnlyLedgerClient]:
-        key = _validated_writer_key(
-            settings.supabase_agent_ledger_writer_key, settings.supabase_service_key
-        )
-        if not settings.supabase_url or not settings.supabase_anon_key:
-            raise ValueError("Scoped assessment writer unavailable")
-        client = create_client(
-            settings.supabase_url,
-            settings.supabase_anon_key,
-            options=SyncClientOptions(
-                headers={"Authorization": f"Bearer {key}"}, postgrest_client_timeout=10
-            ),
-        )
-        return cls(_ScopedRpc(client)), AppendOnlyLedgerClient(client)
+        # Dedicated workers never receive controller credentials. A mounted
+        # deployment needs an authenticated private-controller port, not the
+        # generic writer, service key, or a caller-supplied identity assertion.
+        raise PermissionError("Dedicated Prativedan controller channel is unprovisioned")
 
     @staticmethod
     def arguments(binding: AssessmentDraftBinding) -> dict[str, Any]:

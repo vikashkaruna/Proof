@@ -18,15 +18,20 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from prativedan_assessment_interop import protected, read_fixture, write_text
-from supabase import Client
 
 from axiom.agents.prativedan import PrativedanAgent
+from axiom.canonicalise import canonical_json, sha256_hex
 from axiom.config import Settings
 from axiom.evidence_client import EvidenceVault
-from axiom.ledger_client import AppendOnlyLedgerClient
 from axiom.model_gateway import ModelGateway
+from axiom.prativedan_assessment_controller_capability import PrativedanControllerLedger
 from axiom.prativedan_assessment_dispatch import invoke_assessment_draft
-from axiom.prativedan_assessment_draft_codec import AssessmentDraftBinding, parse_readback_v2
+from axiom.prativedan_assessment_draft_codec import (
+    AssessmentDraftBinding,
+    parse_readback_v2,
+    parse_source_v2,
+    project_source_v2,
+)
 from axiom.prativedan_assessment_store import PrativedanAssessmentStore
 
 # No arbitrary function or SQL identifier is ever accepted from an artifact.
@@ -47,24 +52,13 @@ RPC_TYPES: dict[str, dict[str, str]] = {
         "started": "bigint",
         "completed": "bigint",
     },
-    "append_agent_ledger": {
-        "p_tenant_id": "uuid",
-        "p_correlation_id": "uuid",
-        "p_actor_type": "public.actor_type",
-        "p_actor_id": "text",
-        "p_agent_version": "text",
-        "p_model_id": "text",
-        "p_prompt_hash": "text",
-        "p_action_type": "public.ledger_action_type",
-        "p_target_ref": "text",
-        "p_input_hash": "text",
-        "p_output_hash": "text",
-        "p_approval_token_id": "uuid",
-        "p_approver_id": "uuid",
-        "p_pre_state_ref": "text",
-        "p_post_state_ref": "text",
-        "p_result": "public.ledger_result",
-        "p_detail": "jsonb",
+    "record_prativedan_assessment_phase": {
+        "t": "uuid",
+        "k": "uuid",
+        "r": "uuid",
+        "rh": "text",
+        "phase_name": "text",
+        "output_hash": "text",
     },
 }
 
@@ -82,9 +76,9 @@ def rpc_sql(name: str, arguments: dict[str, Any]) -> str:
         for key, typ in types.items()
     )
     return (
-        "set standard_conforming_strings=on; set timezone='UTC'; set role agent_ledger_writer;\n"
+        "set standard_conforming_strings=on; set timezone='UTC'; do $$begin perform set_config('request.jwt.claims',p123_fixture.controller_claims(),false);end$$;set role axiom_prativedan_controller;\n"
         # SQL identifiers are whitelisted; caller values occupy one escaped JSON literal.
-        f"select to_jsonb(public.{name}({args})) from (select {literal} v) a;\n"  # nosec B608
+        f"select to_jsonb(public.{name}({args},authority=>p123_fixture.authority())) from (select {literal} v) a;\n"  # nosec B608
     )
 
 
@@ -215,7 +209,17 @@ async def run_fixture(fixture: dict[str, Any], bridge: PgRpcBridge, output_dir: 
     external = NoExternalCalls()
     agent = PrativedanAgent(
         settings=Settings.model_validate({"environment": "test"}),
-        ledger=AppendOnlyLedgerClient(cast(Client, bridge)),
+        ledger=PrativedanControllerLedger(
+            bridge,
+            binding,
+            sha256_hex(
+                canonical_json(
+                    project_source_v2(
+                        parse_source_v2(requested.source_text, requested.source_sha256)
+                    ).model_dump(mode="json")
+                )
+            ),
+        ),
         evidence=cast(EvidenceVault, external),
         model_gateway=cast(ModelGateway, external),
     )
@@ -237,6 +241,9 @@ async def run_fixture(fixture: dict[str, Any], bridge: PgRpcBridge, output_dir: 
                 "actual_postgres_receipts": True,
                 "postgrest_authentication_proven": False,
                 "workload_admission_proven": False,
+                "private_controller_channel_proven": False,
+                "synthetic_exclusive_controller_custody_fixture": True,
+                "external_trust_session_continuity_proven": False,
                 "deployed_workflow_proven": False,
                 "publication_allowed": False,
                 "settlement_proven": False,
