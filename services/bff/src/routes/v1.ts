@@ -39,7 +39,7 @@ import { dispatchExecution, type DispatchOutcome } from '../services/execution-d
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
 import { invokeGenericAgent } from '../services/generic-agent-invocation.js';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
   IssueApprovalRequestSchema,
@@ -54,7 +54,11 @@ import {
   LedgerResult,
 } from '@axiom/types';
 import type { ApprovalEngine } from '../services/approval.js';
-import { KillSwitchStateUnavailable, type KillSwitchService } from '../services/kill-switch.js';
+import {
+  KillSwitchAuthorityRefused,
+  KillSwitchStateUnavailable,
+  type KillSwitchService,
+} from '../services/kill-switch.js';
 import type { LedgerService } from '../services/ledger.js';
 import type { MfaService } from '../services/mfa.js';
 import { approvalBindingSha256, factorBindingSha256 } from '../services/mfa.js';
@@ -3491,7 +3495,26 @@ export function v1Routes(deps: Deps) {
         'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
     },
   };
-  const handleKillSwitchEngage = async (c: any) => {
+  const globalAuthorityRefusal = (c: Context<{ Variables: Variables }>, error: unknown) => {
+    if (!(error instanceof KillSwitchAuthorityRefused)) return null;
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(
+      {
+        error: {
+          code:
+            error.reason === 'forbidden'
+              ? 'global_kill_switch_authority_required'
+              : 'global_kill_switch_authority_unavailable',
+          message:
+            error.reason === 'forbidden'
+              ? 'Live founder authority is required for a global kill switch.'
+              : 'Global kill switch authority could not be verified. No change was made.',
+        },
+      },
+      error.reason === 'forbidden' ? 403 : 503,
+    );
+  };
+  const handleKillSwitchEngage = async (c: Context<{ Variables: Variables }>) => {
     const engageRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_TENANT);
     if (engageRefusal) return engageRefusal;
 
@@ -3516,12 +3539,18 @@ export function v1Routes(deps: Deps) {
       const globalRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_GLOBAL);
       if (globalRefusal) return globalRefusal;
     }
-    await deps.killSwitch.engage({
-      tenantId: c.get('tenantId'),
-      userId: c.get('user').id,
-      reason,
-      scope,
-    });
+    try {
+      await deps.killSwitch.engage({
+        tenantId: c.get('tenantId'),
+        userId: c.get('user').id,
+        reason,
+        scope,
+      });
+    } catch (error) {
+      const refusal = globalAuthorityRefusal(c, error);
+      if (refusal) return refusal;
+      throw error;
+    }
     await deps.ledger.append({
       tenantId: c.get('tenantId'),
       correlationId: randomUUID(),
@@ -3571,6 +3600,8 @@ export function v1Routes(deps: Deps) {
         userId: c.get('user').id,
       });
     } catch (error) {
+      const refusal = globalAuthorityRefusal(c, error);
+      if (refusal) return refusal;
       if (!(error instanceof KillSwitchStateUnavailable)) throw error;
       c.header('Cache-Control', 'private, no-store');
       return c.json(killSwitchUnavailable, 503);

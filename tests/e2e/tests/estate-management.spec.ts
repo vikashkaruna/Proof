@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { signIn, selectTenant, signInFreshAnalyst, state } from '../fixtures';
+import { signIn, selectTenant, signInFreshAnalyst, state, signInFreshOwner } from '../fixtures';
 
 test('owner declares, edits and archives an estate and system', async ({ page }) => {
   const suffix = crypto.randomUUID().slice(0, 8);
   const name = `India estate ${suffix}`;
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'estate-management.spec-1');
   await selectTenant(page, 'a');
   await page.goto('/estate');
   const create = page.locator('form').filter({ has: page.locator('input[name=slug]') });

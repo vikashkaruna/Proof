@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { signIn, selectTenant, state } from '../fixtures';
+import { signIn, selectTenant, state, signInFreshOwner } from '../fixtures';
 
 test('owner registers a connector without claiming connectivity and manages its lifecycle', async ({
   page,
 }) => {
   const suffix = crypto.randomUUID().slice(0, 8);
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'connector-lifecycle.spec-1');
   await selectTenant(page, 'a');
   await page.goto('/estate');
   const system = await page.evaluate(

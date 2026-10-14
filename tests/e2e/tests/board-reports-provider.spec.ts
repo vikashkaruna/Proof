@@ -11,6 +11,7 @@ import {
   signInAs,
   satisfyLoginMfaWithSecret,
   state,
+  signInFreshOwner,
 } from '../fixtures';
 import { localRoleBearer } from '../local-writer';
 import { acceptanceTarget, repoRoot } from '../target';
@@ -290,8 +291,8 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
-    const manager = await createMfaAccount('board-manager', { role: 'admin' });
-    await signInAs(page, manager.email, manager.password);
+    const manager = await createMfaAccount('board-manager', { role: 'admin', withFactor: true });
+    await signInAs(page, manager.email, manager.password, manager.totpSecret!);
     await selectTenant(page, 'a');
     const assessment = await finalizedAssessment(manager.id);
     const request = await boardRequest(page, assessment);
@@ -591,13 +592,16 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
-    const manager = await createMfaAccount('board-revoked-manager', { role: 'admin' });
+    const manager = await createMfaAccount('board-revoked-manager', {
+      role: 'admin',
+      withFactor: true,
+    });
     const founderAccount = await createMfaAccount('board-revoked-founder', {
       role: 'founder',
       isInternal: true,
       withFactor: true,
     });
-    await signInAs(page, manager.email, manager.password);
+    await signInAs(page, manager.email, manager.password, manager.totpSecret!);
     await selectTenant(page, 'a');
     const assessment = await finalizedAssessment(manager.id);
     const request = await boardRequest(page, assessment);
@@ -649,9 +653,9 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
-    await signIn(page, 'owner');
+    const ownerIdentity = await signInFreshOwner(page, 'board-reports-provider.spec-1');
     await selectTenant(page, 'a');
-    const assessment = await finalizedAssessment(state.accounts.owner.id);
+    const assessment = await finalizedAssessment(ownerIdentity.id);
     const request = await boardRequest(page, assessment);
     const context = await browser.newContext();
     try {
@@ -736,8 +740,11 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
-    const manager = await createMfaAccount('board-browser-manager', { role: 'admin' });
-    await signInAs(page, manager.email, manager.password);
+    const manager = await createMfaAccount('board-browser-manager', {
+      role: 'admin',
+      withFactor: true,
+    });
+    await signInAs(page, manager.email, manager.password, manager.totpSecret!);
     await selectTenant(page, 'a');
     const unsafeText = '<img src=x onerror=alert(1)>';
     const assessment = await finalizedAssessment(manager.id, unsafeText);
@@ -864,8 +871,8 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
-    const manager = await createMfaAccount('auditor-manager', { role: 'admin' });
-    await signInAs(page, manager.email, manager.password);
+    const manager = await createMfaAccount('auditor-manager', { role: 'admin', withFactor: true });
+    await signInAs(page, manager.email, manager.password, manager.totpSecret!);
     await selectTenant(page, 'a');
     const assessment = await finalizedAssessment(manager.id);
     const requestBody = {

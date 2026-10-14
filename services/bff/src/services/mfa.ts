@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
+import { requiresMandatoryHumanMfa } from '@axiom/types';
 import { loadEnv, parseMfaPreviousKeys, BRAND } from '@axiom/config';
 import {
   encryptSecret,
@@ -59,17 +60,6 @@ const DEFAULT_CHALLENGE_TTL_MS = 10 * 60_000;
  * is one code per working day.
  */
 const SESSION_ATTESTATION_TTL_MS = (env.AXIOM_MFA_SESSION_TTL_HOURS ?? 12) * 60 * 60_000;
-
-/**
- * Roles the platform requires a factor from regardless of tenant policy.
- *
- * Both are Axiom Minds staff who reach client estates. `mfa_required_roles` is
- * tenant-owned data, and a client should be able to tighten their own policy —
- * not to exempt OUR people from a second factor on THEIR estate. The analyst
- * is here for the same reason the founder is: the account crosses tenants, so
- * no single tenant gets to decide how strongly it is authenticated.
- */
-const ALWAYS_MFA_REQUIRED: ReadonlySet<string> = new Set(['founder', 'axiom_analyst']);
 
 /** A TOTP code is six digits. Anything else is treated as a recovery code. */
 const TOTP_CODE_PATTERN = /^\d{6}$/;
@@ -753,7 +743,7 @@ export function createMfaService(
     },
 
     async requiresLoginMfa({ tenantId, role }) {
-      if (ALWAYS_MFA_REQUIRED.has(role)) return true;
+      if (requiresMandatoryHumanMfa(role)) return true;
 
       const supabase = clientFactory();
       const { data, error } = await supabase
