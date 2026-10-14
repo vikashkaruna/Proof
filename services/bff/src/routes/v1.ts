@@ -3484,6 +3484,13 @@ export function v1Routes(deps: Deps) {
   });
 
   // ─── Kill switch ─────────────────────────────────────────────────
+  const killSwitchUnavailable = {
+    error: {
+      code: 'kill_switch_status_unavailable',
+      message:
+        'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
+    },
+  };
   const handleKillSwitchEngage = async (c: any) => {
     const engageRefusal = requireCapability(c, Capability.KILL_SWITCH_ENGAGE_TENANT);
     if (engageRefusal) return engageRefusal;
@@ -3556,11 +3563,18 @@ export function v1Routes(deps: Deps) {
       if (globalReleaseRefusal) return globalReleaseRefusal;
     }
 
-    const result = await deps.killSwitch.release({
-      scope,
-      tenantId: c.get('tenantId'),
-      userId: c.get('user').id,
-    });
+    let result: Awaited<ReturnType<KillSwitchService['release']>>;
+    try {
+      result = await deps.killSwitch.release({
+        scope,
+        tenantId: c.get('tenantId'),
+        userId: c.get('user').id,
+      });
+    } catch (error) {
+      if (!(error instanceof KillSwitchStateUnavailable)) throw error;
+      c.header('Cache-Control', 'private, no-store');
+      return c.json(killSwitchUnavailable, 503);
+    }
 
     if (!result.released) {
       const status = result.reason === 'global_halt_active' ? 409 : 200;
@@ -3596,16 +3610,7 @@ export function v1Routes(deps: Deps) {
       return c.json(await deps.killSwitch.state(c.get('tenantId')));
     } catch (error) {
       if (!(error instanceof KillSwitchStateUnavailable)) throw error;
-      return c.json(
-        {
-          error: {
-            code: 'kill_switch_status_unavailable',
-            message:
-              'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
-          },
-        },
-        503,
-      );
+      return c.json(killSwitchUnavailable, 503);
     }
   });
 

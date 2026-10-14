@@ -793,8 +793,42 @@ test.describe('real-provider board report lifecycle', () => {
           name: 'I reviewed the exact content and SHA-256 shown above.',
         })
         .check();
-      await detail.getByRole('button', { name: 'Approve reviewed content' }).click();
-      await expect(detail).toContainText('approved');
+      // The raw draft contains approved_by:null, so a broad text check can pass
+      // before review commits. Hold the real POST to prove draft is not readiness.
+      let releaseReview = () => {};
+      let reviewStarted = () => {};
+      const reviewGate = new Promise<void>((resolve) => {
+        releaseReview = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        reviewStarted = resolve;
+      });
+      const reviewPath = /\/api\/bff\/v1\/reports\/[0-9a-f-]{36}\/review$/;
+      await founder.route(reviewPath, async (route) => {
+        reviewStarted();
+        await reviewGate;
+        await route.continue();
+      });
+      const reviewedResponse = founder.waitForResponse(
+        (response) =>
+          reviewPath.test(new URL(response.url()).pathname) &&
+          response.request().method() === 'POST',
+      );
+      try {
+        await detail.getByRole('button', { name: 'Approve reviewed content' }).click();
+        await started;
+        await expect(detail.getByText(/^draft · [^·]+ · Library /)).toBeVisible();
+        await expect(detail.getByText(/^approved · [^·]+ · Library /)).toHaveCount(0);
+      } finally {
+        releaseReview();
+      }
+      const reviewed = await reviewedResponse;
+      expect(reviewed.status()).toBe(200);
+      expect(((await reviewed.json()) as { data: { status: string } }).data.status).toBe(
+        'approved',
+      );
+      await expect(detail.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+      await founder.unroute(reviewPath);
       await board.getByRole('button', { name: 'Refresh board state' }).click();
       await expect(
         selected.getByRole('button', {

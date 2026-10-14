@@ -16,7 +16,11 @@ vi.hoisted(() => {
   process.env.APPROVAL_SIGNING_KEY = 'k'.repeat(48);
 });
 const tenantId = '11111111-1111-4111-8111-111111111111';
-async function request(service: KillSwitchService, role: UserRole = UserRole.OWNER) {
+async function request(
+  service: KillSwitchService,
+  role: UserRole = UserRole.OWNER,
+  release = false,
+) {
   const { v1Routes } = await import('./v1.js');
   const mutations = {
     engage: vi.spyOn(service, 'engage'),
@@ -40,9 +44,18 @@ async function request(service: KillSwitchService, role: UserRole = UserRole.OWN
       realtime: {} as never,
     }),
   );
-  const response = await app.request('/v1/kill-switch/status');
+  const response = await app.request(
+    release ? '/v1/kill-switch/release' : '/v1/kill-switch/status',
+    release
+      ? {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: 'tenant' }),
+        }
+      : undefined,
+  );
   expect(mutations.engage).not.toHaveBeenCalled();
-  expect(mutations.release).not.toHaveBeenCalled();
+  expect(mutations.release).toHaveBeenCalledTimes(release ? 1 : 0);
   expect(mutations.ledger).not.toHaveBeenCalled();
   return response;
 }
@@ -107,4 +120,33 @@ describe('kill-switch status read boundary', () => {
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain('private adapter values');
   });
+});
+
+describe('kill-switch tenant release read outage', () => {
+  it.each([null, {}])(
+    'returns safe503 without state update or audit success for malformed read %j',
+    async (data) => {
+      const update = vi.fn();
+      const service = createKillSwitchService(
+        () =>
+          ({
+            from: () => ({
+              select: () => ({ abortSignal: () => ({ eq: async () => ({ data, error: null }) }) }),
+              update,
+            }),
+          }) as never,
+      );
+      const response = await request(service, UserRole.OWNER, true);
+      expect(response.status).toBe(503);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(await response.json()).toEqual({
+        error: {
+          code: 'kill_switch_status_unavailable',
+          message:
+            'Kill switch status is unavailable. Execution remains halted until its status can be verified.',
+        },
+      });
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
 });

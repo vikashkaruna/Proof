@@ -969,11 +969,33 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       [
+        deployed-http-acceptance,
+        python-image-lock-parity,
+        evidence-storage,
+        workload-identity,
+        workload-host,
+        workload-runner-host,
+        database-security,
+        prativedan-assessment-interoperability,
+        prativedan-assessment-controller-interoperability,
+        strict-auth-parity,
+        persona-journeys,
+        env-security-gate,
+        tfvars-coverage-gate,
+        helm-render,
+        selfhosted-supabase,
+        control-count-gate,
+        control-library-drift-gate,
+        lint-and-typecheck,
         test-ts,
+        coverage-ts,
+        sql-binding,
+        w9-performance-probe,
+        mysql-binding,
         test-python-runtime,
         test-python-temporal,
         test-python-gateway,
-        python-image-lock-parity,
+        security,
       ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
