@@ -101,3 +101,7 @@ d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json
 d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:669
 d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:670
 d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json:generic-api-key:687
+
+# Named synthetic MFA unit-fixture key in historical commit; current fixture uses repeated test material.
+# Exact finding only: no credential, path or rule-wide exclusion.
+7a71590cc2462708ee62a84ca4c25213f9e2ad1c:services/bff/src/routes/retained-sanket.test.ts:generic-api-key:173

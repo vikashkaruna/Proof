@@ -160,7 +160,7 @@ async function journal(page: Page) {
 async function signedIn(page: Page, role: 'owner' | 'reviewer') {
   await signIn(page, role);
   await selectTenant(page, 'a');
-  // Ordinary CI owner needs no factor; isolated operator fixtures may have one.
+  // Owner sign-in completes mandatory MFA; founder callers still verify explicitly.
   if (new URL(page.url()).pathname === '/verify') await satisfyLoginMfa(page, role);
 }
 async function selectSource(page: Page) {

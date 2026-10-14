@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServerClient, sessionIdFromAccessToken } from '@axiom/supabase';
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Capability, authorize, can, type UserRole } from '@axiom/types';
+import { Capability, authorize, can, requiresMandatoryHumanMfa, type UserRole } from '@axiom/types';
 
 /**
  * The single entry point for tenant-scoped data access in the web app (W1).
@@ -108,7 +108,7 @@ async function enforceLoginMfa(
   tenantId: string,
   role: string,
 ): Promise<void> {
-  let required = ALWAYS_MFA_REQUIRED.has(role);
+  let required = requiresMandatoryHumanMfa(role);
 
   if (!required) {
     const { data: tenant, error } = await supabase
@@ -166,17 +166,6 @@ export interface TenantContextOptions {
    */
   allowUnverifiedMfa?: boolean;
 }
-
-/**
- * Roles the platform requires a factor from regardless of tenant policy —
- * Axiom Minds staff, whose accounts cross tenants, so no single tenant gets to
- * decide how strongly they are authenticated.
- *
- * Mirrors `ALWAYS_MFA_REQUIRED` in the BFF, which is the authoritative gate;
- * this copy exists so the browser is redirected rather than shown a page that
- * will fail every call it makes.
- */
-const ALWAYS_MFA_REQUIRED = new Set<string>(['founder', 'axiom_analyst']);
 
 export async function requireTenantContext(
   requestedSlug?: string,

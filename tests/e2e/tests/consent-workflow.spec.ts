@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { selectTenant, signIn, state } from '../fixtures';
+import { selectTenant, signIn, state, signInFreshOwner } from '../fixtures';
 
 // Real GoTrue session -> browser bridge -> BFF -> RPC-only database writes.
 // These are synthetic principals/notices. Completion records a human attestation;
@@ -19,7 +19,7 @@ function get(page: Page, path: string) {
 test('reviewed bilingual purpose, pinned notice, withdrawal and human completion persist', async ({
   page,
 }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'consent-workflow.spec-1');
   await selectTenant(page, 'a');
   const suffix = crypto.randomUUID();
   const purpose = {
@@ -209,7 +209,7 @@ test('read-only consent access cannot publish or change a lifecycle through the 
 test('consent forms require fresh acknowledgement for the chosen notice and record withdrawal follow-up', async ({
   page,
 }) => {
-  await signIn(page, 'owner');
+  await signInFreshOwner(page, 'consent-workflow.spec-2');
   await selectTenant(page, 'a');
   await page.goto('/consent');
   await expect(page.getByRole('heading', { name: 'Consent Manager', exact: true })).toBeVisible();

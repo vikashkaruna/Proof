@@ -53,7 +53,7 @@ class ArchiveWriterMintTests(unittest.TestCase):
             r'SUPABASE_ARCHIVE_WRITER_KEY="\$archive_writer_key" \\\n\s+'
             r'SUPABASE_HUMAN_ACTION_WRITER_KEY="\$human_writer_key" \\\n\s+'
             r'SUPABASE_EVIDENCE_INGESTION_WRITER_KEY="\$evidence_writer_key" \\\n\s+'
-            r'\./scripts/run-deployed-acceptance\.sh "\$state_dir/\$environment\.json"\n',
+            r'run_browser_acceptance "\$state_dir/\$environment\.json"\n',
         )
         # The API-only path runs the same strict-parity script, which registers
         # workload identities through the human writer; without the key it 401s.

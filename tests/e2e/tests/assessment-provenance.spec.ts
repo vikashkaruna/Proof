@@ -5,7 +5,10 @@ import { tenantCookie } from '../target';
 test('assessment displays owned saved results, missing findings and zero exposure honestly', async ({
   page,
 }) => {
-  const account = await createMfaAccount('assessment-provenance', { role: 'admin' });
+  const account = await createMfaAccount('assessment-provenance', {
+    role: 'admin',
+    withFactor: true,
+  });
   const tenant = crypto.randomUUID();
   const engagement = crypto.randomUUID();
   const old = crypto.randomUUID();
@@ -34,7 +37,7 @@ test('assessment displays owned saved results, missing findings and zero exposur
     is_sdf: false,
   });
   await seed('tenant_users', { tenant_id: tenant, user_id: account.id, role: 'admin' });
-  await signInAs(page, account.email, account.password);
+  await signInAs(page, account.email, account.password, account.totpSecret!);
   await page.context().addCookies([tenantCookie(slug)]);
   await page.goto('/assessment');
   await expect(page.getByTestId('assessment-provenance')).toContainText('No saved assessment');
