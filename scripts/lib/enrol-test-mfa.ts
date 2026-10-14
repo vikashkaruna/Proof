@@ -10,6 +10,7 @@ export async function enrolTestMfa(input: {
   password: string;
   tenantId: string;
   waitForNextCode?: boolean;
+  onActivated?: (consumedCounter: number) => void;
 }): Promise<string> {
   const login = await fetch(`${input.supabaseUrl}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -47,6 +48,7 @@ export async function enrolTestMfa(input: {
     throw new Error(`Fixture MFA activation failed (${activation.status})`);
   // Recovery plaintext is neither needed nor persisted by the harness.
   await activation.arrayBuffer();
+  input.onActivated?.(activationCounter);
   // Activation spends the generated counter. A slow response may already have
   // crossed its boundary; retain the readiness margin without waiting another step.
   const waitMs = (activationCounter + 1) * 30_000 + 500 - Date.now();

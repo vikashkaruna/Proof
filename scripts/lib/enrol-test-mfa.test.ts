@@ -98,3 +98,27 @@ test('lost activation response never becomes successful enrollment', async (cont
   await assert.rejects(enrolTestMfa(f.input), /Synthetic activation transport failure/);
   assert.deepEqual(f.waits, []);
 });
+
+test('pool callback binds the sampled activation counter despite delayed response', async (context) => {
+  const f = fixture(context, { activationDelay: 2_000 });
+  const counters: number[] = [];
+  await enrolTestMfa({
+    ...f.input,
+    waitForNextCode: false,
+    onActivated: (counter) => counters.push(counter),
+  });
+  assert.deepEqual(counters, [0]);
+  assert.deepEqual(f.waits, []);
+});
+test('refused activation cannot publish pool readiness', async (context) => {
+  const f = fixture(context, { activationStatus: 401 });
+  const counters: number[] = [];
+  await assert.rejects(
+    enrolTestMfa({
+      ...f.input,
+      waitForNextCode: false,
+      onActivated: (counter) => counters.push(counter),
+    }),
+  );
+  assert.deepEqual(counters, []);
+});

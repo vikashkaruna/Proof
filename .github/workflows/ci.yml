@@ -22,8 +22,8 @@ jobs:
   deployed-http-acceptance:
     name: Container API/browser acceptance (W0)
     runs-on: ubuntu-latest
-    # Two full target profiles include the expanded real-MFA catalogue.
-    timeout-minutes: 60
+    # Both complete profiles retain original budgets and real MFA assertions.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
       # No daemon registry mirror in the Supabase CLI jobs: since it was added

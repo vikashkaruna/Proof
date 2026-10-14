@@ -51,6 +51,9 @@ export default async function globalSetup() {
       result.error !== 'founder_authority_required'
     )
       throw new Error('Human writer JWT failed the exact PostgREST target and role probe');
+    // Global setup is inside Playwright's original ten-minute aggregate timer.
+    const { usesBrowserMfaPool, prepareBrowserMfaAccounts } = await import('./fixtures');
+    if (usesBrowserMfaPool) await prepareBrowserMfaAccounts();
     return;
   }
 

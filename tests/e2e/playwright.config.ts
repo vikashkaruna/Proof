@@ -184,7 +184,7 @@ export default defineConfig({
   maxFailures: acceptanceTarget ? 3 : undefined,
   // The 128-case catalogue includes real MFA enrolment and fresh factor windows.
   // Individual test deadlines remain bounded; both target profiles run in W0.
-  globalTimeout: acceptanceTarget ? 20 * 60_000 : undefined,
+  globalTimeout: acceptanceTarget ? 10 * 60_000 : undefined,
   // Keep deployed rehearsal concurrency identical to CI, independent of the
   // operator laptop's CPU count. Acceptance remains zero-retry.
   workers: acceptanceTarget || process.env.CI ? 2 : undefined,

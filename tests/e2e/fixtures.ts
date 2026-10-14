@@ -1,3 +1,12 @@
+import {
+  browserMfaPoolEnabled,
+  verifyMfaPoolAccountRows,
+  leaseBrowserMfaAccount,
+  prepareBrowserMfaPool,
+  type MfaPoolBinding,
+  type MfaPoolIdentity,
+  type MfaPoolAccount,
+} from '../../scripts/lib/browser-mfa-pool';
 import { dirname, join } from 'node:path';
 import { withFreshMfaFixtureCounter } from './fixtures/login-mfa-counter';
 import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
@@ -11,6 +20,77 @@ import { HARNESS_MFA_KEY, type PersonaKey, type PersonaState, personaByKey } fro
 
 export const state: PersonaState = JSON.parse(readFileSync(personaStatePath, 'utf8'));
 assertPersonaTarget(state);
+
+export const usesBrowserMfaPool = browserMfaPoolEnabled(acceptanceTarget, {
+  requested: process.env.AXIOM_BROWSER_MFA_POOL,
+  ci: process.env.CI,
+  github: process.env.GITHUB_ACTIONS,
+});
+function poolBinding(): MfaPoolBinding {
+  if (!usesBrowserMfaPool || !acceptanceTarget)
+    throw new Error('Isolated MFA pool authority refused');
+  return {
+    deploymentId: acceptanceTarget.deploymentId,
+    revision: acceptanceTarget.expectedRevision,
+    tenantId: state.tenantA.id,
+    bffUrl: acceptanceTarget.bffUrl,
+    webUrl: acceptanceTarget.webUrl,
+    marketingUrl: acceptanceTarget.marketingUrl,
+    supabaseUrl: acceptanceTarget.supabaseUrl,
+  };
+}
+const poolDirectory = join(dirname(personaStatePath), `fresh-mfa-${state.tenantA.id}`);
+async function verifyPoolAccount(who: MfaPoolAccount): Promise<boolean> {
+  const headers = { apikey: state.publishableKey, Authorization: `Bearer ${state.serviceKey}` };
+  async function read(path: string) {
+    const response = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
+      headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error('MFA pool account readback refused');
+    return response.json() as Promise<unknown>;
+  }
+  const profile = await read(`users?id=eq.${who.id}&select=id,email,is_axiom_internal`);
+  const memberships = await read(`tenant_users?user_id=eq.${who.id}&select=user_id,tenant_id,role`);
+  const factors = await read(
+    `user_mfa_factors?user_id=eq.${who.id}&select=user_id,factor_type,status`,
+  );
+  return verifyMfaPoolAccountRows(who, poolBinding(), { profile, memberships, factors });
+}
+export async function prepareBrowserMfaAccounts(): Promise<void> {
+  await prepareBrowserMfaPool({
+    directory: poolDirectory,
+    binding: poolBinding(),
+    provision: async (identity: MfaPoolIdentity, index: number) => {
+      let consumedCounter: number | undefined;
+      const who = await provisionMfaAccount(
+        identity.profileCase === 'long-account'
+          ? 'long-organization-operator-layout-verification'
+          : `pool-${index}`,
+        { role: identity.role, isInternal: identity.internal, withFactor: true },
+        {
+          wait: false,
+          activated: (counter) => {
+            consumedCounter = counter;
+          },
+        },
+      );
+      if (!who.totpSecret || consumedCounter === undefined)
+        throw new Error('MFA pool enrollment unconfirmed');
+      const result = {
+        ...who,
+        totpSecret: who.totpSecret,
+        consumedCounter,
+        ...identity,
+        profileCase: identity.profileCase ?? ('ordinary' as const),
+      };
+      if (!(await verifyPoolAccount(result)))
+        throw new Error('MFA pool provision readback refused');
+      return result;
+    },
+  });
+}
 
 export const account = (key: PersonaKey) => state.accounts[key];
 export const persona = personaByKey;
@@ -268,6 +348,31 @@ export async function createMfaAccount(
     role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
   } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
+  if (usesBrowserMfaPool && opts.withFactor) {
+    return leaseBrowserMfaAccount({
+      directory: poolDirectory,
+      binding: poolBinding(),
+      identity: {
+        role: opts.role ?? 'approver',
+        internal: opts.isInternal ?? false,
+        profileCase:
+          label === 'long-organization-operator-layout-verification' ? 'long-account' : 'ordinary',
+      },
+      verify: verifyPoolAccount,
+    });
+  }
+  return provisionMfaAccount(label, opts);
+}
+
+async function provisionMfaAccount(
+  label: string,
+  opts: {
+    withFactor?: boolean;
+    isInternal?: boolean;
+    role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
+  } = {},
+  readiness?: { wait: boolean; activated: (counter: number) => void },
+): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;
   const password = `Pw-${crypto.randomUUID()}`;
@@ -276,6 +381,7 @@ export async function createMfaAccount(
     const res = await fetch(`${state.supabaseUrl}${path}`, {
       method: 'POST',
       redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: state.publishableKey,
         Authorization: `Bearer ${state.serviceKey}`,
@@ -326,6 +432,8 @@ export async function createMfaAccount(
       email,
       password,
       tenantId: state.tenantA.id,
+      waitForNextCode: readiness?.wait,
+      onActivated: readiness?.activated,
     });
   } else if (opts.withFactor) {
     totpSecret = generateSecret(20);
