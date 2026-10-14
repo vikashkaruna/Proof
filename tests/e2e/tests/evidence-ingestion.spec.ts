@@ -123,8 +123,21 @@ test.describe('real provider evidence ingestion', () => {
     browser,
   }) => {
     test.setTimeout(240_000);
+    const journeyStarted = Date.now();
+    const checkpoint = (phase: string) => {
+      // Timings only: never emit credentials, requests, provider text or DOM.
+      console.info(
+        JSON.stringify({
+          event: 'evidence_ingestion_checkpoint',
+          phase,
+          elapsedMs: Date.now() - journeyStarted,
+        }),
+      );
+    };
+    checkpoint('started');
     await signIn(page, 'owner');
     await selectTenant(page, 'a');
+    checkpoint('authenticated');
     await page.goto('/evidence');
     await expect(
       page.getByRole('heading', { name: 'Evidence Explorer', exact: true }),
@@ -199,6 +212,7 @@ test.describe('real provider evidence ingestion', () => {
       page.getByText('Evidence stored; its exact-version receipt is recorded.', { exact: true }),
     ).toBeVisible();
 
+    checkpoint('human_upload_settled');
     const headers = { 'x-tenant-id': state.tenantA.id };
     const detailUrl = `/api/bff/v1/evidence/${operation.evidenceId}`;
     const detail = await page.request.get(detailUrl, { headers });
@@ -238,6 +252,7 @@ test.describe('real provider evidence ingestion', () => {
     expect(replayDetail.status()).toBe(200);
     expect((await replayDetail.json()).data.object_version).toEqual(record.object_version);
 
+    checkpoint('durable_replay_verified');
     const filters = page.getByRole('form', { name: 'Evidence filters', exact: true });
     await filters
       .getByLabel('Search description or evidence ID', { exact: true })
@@ -274,10 +289,12 @@ test.describe('real provider evidence ingestion', () => {
     await expect(inspector.getByText(`SHA-256: ${digest}`, { exact: true })).toBeVisible();
     await expect(inspector.getByText(/bytes · Size matches/)).toBeVisible();
 
+    checkpoint('exact_version_download_verified');
     // A real provider outage must replace the previous successful check with
     // an honest refusal. Pause preserves the exact endpoint and stored data.
     try {
       await providerAction('--pause-provider');
+      checkpoint('provider_paused');
       await inspector.getByRole('button', { name: 'Verify provider receipt', exact: true }).click();
       await expect(
         inspector.getByText(/Stored-byte integrity and provider retention verified at/),
@@ -289,20 +306,47 @@ test.describe('real provider evidence ingestion', () => {
         inspector.getByText(/Stored-byte integrity and provider retention verified at/),
       ).toHaveCount(0);
     } finally {
+      checkpoint('provider_resume_requested');
       await providerAction('--resume-provider');
+      checkpoint('provider_resumed');
     }
     await inspector.getByRole('button', { name: 'Verify provider receipt', exact: true }).click();
     await expect(
       inspector.getByText(/Stored-byte integrity and provider retention verified at/),
     ).toContainText(record.object_version.version_id);
 
+    checkpoint('provider_recovery_verified');
     const pending = await pendingEvidence(true);
+    checkpoint('pending_provider_version_created');
+    const retainedPending = await page.request.get(
+      `/api/bff/v1/evidence/ingestions/${pending.operationKey}`,
+      { headers },
+    );
+    expect(retainedPending.status()).toBe(200);
+    expect(await retainedPending.json()).toMatchObject({
+      data: { operationKey: pending.operationKey, status: 'pending', evidenceId: null },
+    });
+    checkpoint('pending_operation_readback_verified');
+    const pendingListResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/bff/v1/evidence/ingestions' &&
+        response.request().method() === 'GET',
+    );
     await page.reload();
+    const pendingList = await pendingListResponse;
+    expect(pendingList.status()).toBe(200);
+    expect(await pendingList.json()).toMatchObject({
+      data: expect.arrayContaining([
+        expect.objectContaining({ operationKey: pending.operationKey, status: 'pending' }),
+      ]),
+    });
+    checkpoint('pending_operation_browser_readback_verified');
     const operationRow = page
       .getByRole('region', { name: 'Upload operations', exact: true })
       .locator('div.rounded')
       .filter({ hasText: pending.operationKey });
     await expect(operationRow).toContainText('pending');
+    checkpoint('pending_operation_rendered');
     await expect(operationRow).not.toContainText('Evidence:');
     const reconciledResponse = page.waitForResponse(
       (response) =>
