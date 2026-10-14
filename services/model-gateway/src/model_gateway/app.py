@@ -13,10 +13,25 @@ import structlog
 from axiom_offline_license import verify_offline_license
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from structlog.typing import FilteringBoundLogger
 
+from .completion_provenance import (
+    Attempt,
+    Commitments,
+    CompletionProvenance,
+    DispatchResult,
+    Provider,
+    RouteIdentity,
+    ServingIdentity,
+    object_hash,
+    price_usage,
+    read_usage,
+    reported_model,
+    text_hash,
+)
 from .config import Settings, get_settings
+from .model_identity import configured_model_identities, safe_model_identity
 from .redaction import RedactionSummary, redact, redact_variables
 from .router import RouteDecision, TaskKind, decide_route
 
@@ -24,23 +39,26 @@ from .router import RouteDecision, TaskKind, decide_route
 
 
 class CompleteRequest(BaseModel):
-    model: str = ""  # optional override
+    model: str = ""  # Bound/review before logging; avoid echoing rejected model in a 422.
     prompt: str
     task: TaskKind = "reasoning"
-    temperature: float = 0.2
-    max_tokens: int = 4096
+    temperature: float = Field(default=0.2, ge=0, le=2, allow_inf_nan=False)
+    max_tokens: int = Field(default=4096, ge=1, le=2147483647)
     variables: dict[str, Any] = {}
     pii_redact: bool = True
     response_format: dict[str, Any] | None = None
-    prompt_hash: str | None = None  # computed by the caller; recorded for the ledger
+    prompt_hash: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$"
+    )  # untrusted caller commitment
 
 
 class CompleteResponse(BaseModel):
+    schema_version: int = 2
     text: str
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
-    cost_usd: float
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    cost_usd: float | None
     latency_ms: int
     model_id: str
     pii_redacted: bool
@@ -48,6 +66,7 @@ class CompleteResponse(BaseModel):
     prompt_hash: str
     route_reason: str
     correlation_id: str
+    provenance: CompletionProvenance
 
 
 class ChatMessage(BaseModel):
@@ -58,8 +77,8 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str = "stub-dpdpa-specialist"
     messages: list[ChatMessage]
-    temperature: float = 0.2
-    max_tokens: int = 4096
+    temperature: float = Field(default=0.2, ge=0, le=2, allow_inf_nan=False)
+    max_tokens: int = Field(default=4096, ge=1, le=2147483647)
     tenant_id: str | None = None
     task: TaskKind = "reasoning"
     pii_redact: bool = True
@@ -82,7 +101,8 @@ class ChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[ChatChoice]
-    usage: dict[str, int]
+    usage: dict[str, int | None]
+    provenance: CompletionProvenance
     pii_redacted: bool
     redactions: dict[str, int] = {}
 
@@ -159,6 +179,8 @@ async def complete(req: CompleteRequest, request: Request) -> CompleteResponse:
         if provided != settings.api_key:
             raise HTTPException(status_code=401, detail="invalid api key")
 
+    request_json_hash = _incoming_request_hash(await request.json())
+
     # PII redaction — applied to the prompt and to all variables. Hosted
     # routes are always redacted even if a caller asks for pii_redact=false;
     # raw personal data must never cross the gateway boundary.
@@ -166,7 +188,12 @@ async def complete(req: CompleteRequest, request: Request) -> CompleteResponse:
     pii_redacted = False
     redacted_prompt = req.prompt
     redacted_variables = req.variables
-    decision = decide_route(req.task, req.model, settings)
+    if not all(safe_model_identity(model) for model in configured_model_identities(settings)):
+        raise HTTPException(status_code=503, detail="model_configuration_unavailable")
+    try:
+        decision = decide_route(req.task, req.model, settings)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="model_selector_unavailable") from None
     must_redact = decision.provider != "self_hosted"
     if settings.pii_redaction_enabled and (req.pii_redact or must_redact):
         try:
@@ -199,7 +226,7 @@ async def complete(req: CompleteRequest, request: Request) -> CompleteResponse:
 
     t0 = time.monotonic()
     try:
-        text, input_tokens, output_tokens, transport_redaction = await _dispatch(
+        dispatched = await _dispatch(
             composed_prompt,
             decision,
             req,
@@ -215,29 +242,36 @@ async def complete(req: CompleteRequest, request: Request) -> CompleteResponse:
         log.error("model_gateway.dispatched_error", error_type=type(e).__name__)
         raise HTTPException(status_code=503, detail="model_provider_unavailable") from None
 
+    transport_redaction = dispatched.redaction
     if transport_redaction is not None:
         pii_redacted = True
         for kind, count in transport_redaction.redactions.items():
             redactions[kind] = redactions.get(kind, 0) + count
 
     latency_ms = int((time.monotonic() - t0) * 1000)
-    cost_in = settings.cost_per_input_token.get(decision.model, 0)
-    cost_out = settings.cost_per_output_token.get(decision.model, 0)
-    cost_usd = input_tokens * cost_in + output_tokens * cost_out
-
+    provenance = _provenance(
+        req.prompt,
+        composed_prompt,
+        req.prompt_hash,
+        decision,
+        dispatched,
+        settings,
+        request_json_hash,
+    )
     return CompleteResponse(
-        text=text,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-        cost_usd=cost_usd,
+        text=dispatched.text,
+        input_tokens=dispatched.usage.input_tokens,
+        output_tokens=dispatched.usage.output_tokens,
+        total_tokens=dispatched.usage.total_tokens,
+        cost_usd=provenance.pricing.cost_usd,
         latency_ms=latency_ms,
-        model_id=decision.model,
+        model_id=dispatched.serving.model,
         pii_redacted=pii_redacted,
         redactions=redactions,
-        prompt_hash=req.prompt_hash or _hash(redacted_prompt),
+        prompt_hash=dispatched.transport_prompt_sha256,
         route_reason=decision.reason,
         correlation_id=correlation_id,
+        provenance=provenance,
     )
 
 
@@ -258,6 +292,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request) -> Chat
         # Model names and caller-supplied tenant IDs cannot authorize simulation.
         raise HTTPException(status_code=503, detail="chat_provider_unavailable")
 
+    request_json_hash = _incoming_request_hash(await request.json())
+
     # Extract user prompt from messages
     user_prompts = [m.content for m in req.messages if m.role == "user"]
     raw_prompt = "\n".join(user_prompts) if user_prompts else ""
@@ -266,13 +302,21 @@ async def chat_completions(req: ChatCompletionRequest, request: Request) -> Chat
     pii_redacted = False
     redacted_prompt = raw_prompt
 
-    decision = decide_route(req.task, req.model, settings)
+    if not all(safe_model_identity(model) for model in configured_model_identities(settings)):
+        raise HTTPException(status_code=503, detail="model_configuration_unavailable")
+    try:
+        decision = decide_route(req.task, req.model, settings)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="model_selector_unavailable") from None
     must_redact = decision.provider != "self_hosted"
     if settings.pii_redaction_enabled and (req.pii_redact or must_redact):
-        r = redact(raw_prompt)
-        redacted_prompt = r.redacted_text
-        pii_redacted = True
-        redactions = dict(r.redactions)
+        try:
+            r = redact(raw_prompt)
+            redacted_prompt = r.redacted_text
+            pii_redacted = True
+            redactions = dict(r.redactions)
+        except Exception:  # noqa: BLE001 - refuse initial chat redactor errors before local dispatch
+            raise HTTPException(status_code=503, detail="redaction_unavailable") from None
 
     log.info(
         "model_gateway.chat_completions",
@@ -292,30 +336,31 @@ async def chat_completions(req: ChatCompletionRequest, request: Request) -> Chat
             pii_redact=False,
         )
         try:
-            content, in_tokens, out_tokens, _transport_redaction = await _dispatch(
-                redacted_prompt, decision, completion, settings, log
-            )
+            dispatched = await _dispatch(redacted_prompt, decision, completion, settings, log)
         except Exception:  # noqa: BLE001 - every local provider failure is an unavailable result
             log.error("model_gateway.local_model_unavailable")
             raise HTTPException(status_code=503, detail="local_model_unavailable") from None
     return ChatCompletionResponse(
         id=completion_id,
         created=int(time.time()),
-        model=decision.model,
+        model=dispatched.serving.model,
         choices=[
             ChatChoice(
                 index=0,
-                message=ChatChoiceMessage(role="assistant", content=content),
+                message=ChatChoiceMessage(role="assistant", content=dispatched.text),
                 finish_reason="stop",
             )
         ],
         usage={
-            "prompt_tokens": in_tokens,
-            "completion_tokens": out_tokens,
-            "total_tokens": in_tokens + out_tokens,
+            "prompt_tokens": dispatched.usage.input_tokens,
+            "completion_tokens": dispatched.usage.output_tokens,
+            "total_tokens": dispatched.usage.total_tokens,
         },
         pii_redacted=pii_redacted,
         redactions=redactions,
+        provenance=_provenance(
+            raw_prompt, redacted_prompt, None, decision, dispatched, settings, request_json_hash
+        ),
     )
 
 
@@ -343,7 +388,7 @@ async def _dispatch(
     req: CompleteRequest,
     settings: Settings,
     log: FilteringBoundLogger,
-) -> tuple[str, int, int, RedactionSummary | None]:
+) -> DispatchResult:
     """Dispatch through the multi-model fallback chain:
     1. Anthropic (Primary)
     2. OpenAI (Fallback 1)
@@ -356,30 +401,42 @@ async def _dispatch(
         import httpx
 
         async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            handoff = {
+                "model": settings.self_hosted_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": req.temperature,
+                "max_tokens": req.max_tokens,
+            }
+            handoff_hash = object_hash(handoff)
             response = await client.post(
                 f"{settings.self_hosted_base_url.rstrip('/')}/v1/chat/completions",
-                json={
-                    "model": settings.self_hosted_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": req.temperature,
-                    "max_tokens": req.max_tokens,
-                },
+                json=handoff,
             )
             response.raise_for_status()
             payload = response.json()
         content = payload["choices"][0]["message"]["content"]
-        if not isinstance(content, str) or not content:
+        if not isinstance(content, str) or not content.strip():
             raise RuntimeError("local_model_unavailable")
-        usage = payload.get("usage") or {}
-        return (
-            content,
-            int(usage.get("prompt_tokens", max(1, len(prompt) // 4))),
-            int(usage.get("completion_tokens", max(1, len(content) // 4))),
-            None,
+        return DispatchResult(
+            text=content,
+            serving=ServingIdentity(
+                provider="self_hosted",
+                model=settings.self_hosted_model,
+                reported_model=reported_model(payload.get("model")),
+            ),
+            usage=read_usage(payload.get("usage")),
+            transport_prompt_sha256=text_hash(prompt),
+            sdk_handoff_sha256=handoff_hash,
+            redaction=None,
+            attempts=(
+                Attempt(
+                    provider="self_hosted", model=settings.self_hosted_model, outcome="succeeded"
+                ),
+            ),
         )
 
     # Build candidate list based on decision fallback_chain or settings
-    candidates: list[tuple[str, str, str | None]] = []
+    candidates: list[tuple[Provider, str, str | None]] = []
 
     # If decision has a fallback chain, use it
     chain = getattr(decision, "fallback_chain", ())
@@ -388,11 +445,11 @@ async def _dispatch(
             if provider_name == "anthropic":
                 key = settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
                 if key:
-                    candidates.append((provider_name, model_name, key))
+                    candidates.append(("anthropic", model_name, key))
             elif provider_name == "openai":
                 key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY")
                 if key:
-                    candidates.append((provider_name, model_name, key))
+                    candidates.append(("openai", model_name, key))
             elif provider_name == "gemini":
                 key = (
                     settings.gemini_api_key
@@ -400,7 +457,7 @@ async def _dispatch(
                     or os.environ.get("GOOGLE_API_KEY")
                 )
                 if key:
-                    candidates.append((provider_name, model_name, key))
+                    candidates.append(("gemini", model_name, key))
     else:
         # Default priority: Anthropic -> OpenAI -> Gemini
         ant_key = settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -417,6 +474,7 @@ async def _dispatch(
         if gem_key:
             candidates.append(("gemini", settings.gemini_model, gem_key))
 
+    attempts: list[Attempt] = []
     # Try live providers in order
     if candidates:
         for provider_name, model_name, api_key in candidates:
@@ -424,29 +482,54 @@ async def _dispatch(
             # hosted transport boundary, after template/variable composition.
             # Refusal is outside provider failover: it cannot become a stub or
             # another unredacted hosted attempt.
+            if not safe_model_identity(model_name):
+                raise HTTPException(status_code=503, detail="model_configuration_unavailable")
             transport_redaction = _redact_hosted_prompt(prompt, settings)
             try:
                 import litellm
 
-                response = await litellm.acompletion(
-                    model=model_name,
-                    messages=[{"role": "user", "content": transport_redaction.redacted_text}],
-                    api_key=api_key,
-                    temperature=req.temperature,
-                    max_tokens=req.max_tokens,
-                )
-                text = response.choices[0].message.content or ""
-                in_tokens = getattr(response.usage, "prompt_tokens", max(1, len(prompt) // 4))
-                out_tokens = getattr(response.usage, "completion_tokens", max(1, len(text) // 4))
+                # Explicit connector prevents a configured label/model prefix mismatch
+                # from being recorded as a different serving provider.
+                if "/" not in model_name:
+                    model_name = f"{provider_name}/{model_name}"
+                if not model_name.startswith(f"{provider_name}/"):
+                    raise ValueError("provider_model_mismatch")
+                handoff = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": transport_redaction.redacted_text}],
+                    "temperature": req.temperature,
+                    "max_tokens": req.max_tokens,
+                }
+                handoff_hash = object_hash(handoff)
+                response = await litellm.acompletion(**handoff, api_key=api_key)
+                text = response.choices[0].message.content
+                if not isinstance(text, str) or not text.strip():
+                    raise RuntimeError("model_provider_unavailable")
+                usage = read_usage(getattr(response, "usage", None))
                 log.info(
                     "model_gateway.llm_dispatched_success",
                     provider=provider_name,
                     model=model_name,
-                    in_tokens=in_tokens,
-                    out_tokens=out_tokens,
+                    usage_availability=usage.availability,
                 )
-                return text, in_tokens, out_tokens, transport_redaction
+                attempts.append(
+                    Attempt(provider=provider_name, model=model_name, outcome="succeeded")
+                )
+                return DispatchResult(
+                    text=text,
+                    serving=ServingIdentity(
+                        provider=provider_name,
+                        model=model_name,
+                        reported_model=reported_model(getattr(response, "model", None)),
+                    ),
+                    usage=usage,
+                    transport_prompt_sha256=text_hash(transport_redaction.redacted_text),
+                    sdk_handoff_sha256=handoff_hash,
+                    redaction=transport_redaction,
+                    attempts=tuple(attempts),
+                )
             except Exception as e:  # noqa: BLE001 - hosted-provider fallback is existing behavior
+                attempts.append(Attempt(provider=provider_name, model=model_name, outcome="failed"))
                 log.warning(
                     "model_gateway.provider_failover",
                     failed_provider=provider_name,
@@ -460,7 +543,41 @@ async def _dispatch(
     raise RuntimeError("model_provider_unavailable")
 
 
-def _hash(s: str) -> str:
-    import hashlib
+def _provenance(
+    template: str,
+    composed: str,
+    caller_hash: str | None,
+    decision: RouteDecision,
+    result: DispatchResult,
+    settings: Settings,
+    request_json_hash: str,
+) -> CompletionProvenance:
+    return CompletionProvenance(
+        planned=RouteIdentity(provider=decision.provider, model=decision.model),
+        serving=result.serving,
+        usage=result.usage,
+        pricing=price_usage(
+            result.serving.model,
+            result.usage,
+            settings.cost_per_input_token,
+            settings.cost_per_output_token,
+        ),
+        commitments=Commitments(
+            request_json_sha256=request_json_hash,
+            template_sha256=text_hash(template),
+            composed_sha256=text_hash(composed),
+            transport_prompt_sha256=result.transport_prompt_sha256,
+            sdk_handoff_sha256=result.sdk_handoff_sha256,
+            caller_prompt_sha256=caller_hash,
+        ),
+        attempts=list(result.attempts),
+    )
 
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def _incoming_request_hash(decoded: object) -> str:
+    # This is the original decoded JSON body, not Pydantic's coerced/defaulted
+    # representation or HTTP-wire bytes. No values are retained beyond a hash.
+    try:
+        return object_hash(decoded)
+    except ValueError, TypeError:
+        raise HTTPException(status_code=422, detail="request_commitment_invalid") from None
