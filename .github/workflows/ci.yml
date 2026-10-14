@@ -876,6 +876,8 @@ jobs:
   test-python-temporal:
     name: Python (temporal workers) tests
     runs-on: ubuntu-latest
+    # Fail closed on stalled test-server startup or tests; never run indefinitely.
+    timeout-minutes: 20
     needs: lint-and-typecheck
     steps:
       - uses: actions/checkout@v5
