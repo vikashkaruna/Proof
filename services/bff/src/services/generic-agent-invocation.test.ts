@@ -85,6 +85,10 @@ function fixture() {
     return { run_id: RUN, created: true, status: 'running' };
   });
   db.onRpc('record_generic_agent_run_finish', (args) => {
+    // PostgREST resolves RPCs by argument names. The public 0119 wrapper
+    // exposes p_error; its private delegate still calls it p_error_code.
+    if (!Object.hasOwn(args, 'p_error') || Object.hasOwn(args, 'p_error_code'))
+      throw new Error('PGRST202: public completion argument signature does not match');
     const row = db.rows('agent_runs')[0];
     if (
       !row ||
@@ -174,7 +178,7 @@ describe('shared proof-bound lifecycle', () => {
           p_correlation_id: CORRELATION,
           p_request_hash: requestHash,
           p_status: 'succeeded',
-          p_error_code: null,
+          p_error: null,
           p_latency_ms: 7,
           p_input_tokens: 2,
           p_output_tokens: 3,
@@ -421,7 +425,7 @@ describe('shared proof-bound lifecycle', () => {
     expect(JSON.stringify(result)).not.toContain('private-');
     expect(f.rpc.mock.calls[1]![1]).toMatchObject({
       p_status: 'failed',
-      p_error_code: 'agent_reported_failure',
+      p_error: 'agent_reported_failure',
       p_started_receipt: null,
       p_completed_receipt: null,
       p_response_hash: null,
@@ -472,7 +476,7 @@ describe('shared proof-bound lifecycle', () => {
       expect(JSON.stringify(f.log.error.mock.calls)).not.toContain('private-');
       expect(f.rpc.mock.calls[1]![1]).toMatchObject({
         p_status: 'failed',
-        p_error_code: 'agent_invocation_failed',
+        p_error: 'agent_invocation_failed',
         p_started_receipt: null,
         p_completed_receipt: null,
         p_response_hash: null,
@@ -512,7 +516,7 @@ function expectNoDispatch(
   ]);
   expect(f.rpc.mock.calls[1]![1]).toMatchObject({
     p_status: 'failed',
-    p_error_code: 'agent_invocation_failed',
+    p_error: 'agent_invocation_failed',
     p_started_receipt: null,
     p_completed_receipt: null,
     p_response_hash: null,
