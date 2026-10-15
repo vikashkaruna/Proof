@@ -920,3 +920,129 @@ it.each(['callback', 'refresh'])(
     expect(document.body.textContent).not.toContain('private-');
   },
 );
+
+it.each([
+  ['network', 401],
+  ['network', 403],
+  ['network', 409],
+  ['response', 401],
+  ['response', 403],
+  ['response', 409],
+  ['malformed', 401],
+  ['malformed', 403],
+  ['malformed', 409],
+])(
+  'retains the original %s-unknown write after a later HTTP %s refusal until positive settlement',
+  async (outcome, status) => {
+    const uuid = vi.fn(() => 'sticky-original-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        if (outcome === 'network') throw new Error('response lost');
+        return outcome === 'response'
+          ? Response.json({ error: { message: 'Unknown write' } }, { status: 503 })
+          : Response.json({ data: {} });
+      })
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'access_refused', message: 'Restore access first.' } },
+          { status: Number(status) },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { id: 'original-estate' } }));
+    vi.stubGlobal('fetch', fetcher);
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByRole('button', { name: 'Retry same request' });
+    const first = fetcher.mock.calls[0]!;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText(/Restore access first/);
+    expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save estate' })).toBeNull();
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText('Saved.');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1]).toEqual(first);
+    expect(fetcher.mock.calls[2]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(onSuccess).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([400, 401, 403, 409])(
+  'permits correction with a fresh key after an initial definite HTTP %s refusal',
+  async (status) => {
+    let key = 0;
+    vi.stubGlobal('crypto', { randomUUID: () => `definite-key-${++key}` });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: 'definite_refusal',
+              message: 'Definitely refused without a prior unknown.',
+            },
+          },
+          { status },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { id: 'corrected-estate' } }));
+    vi.stubGlobal('fetch', fetcher);
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByText('Definitely refused without a prior unknown.');
+    expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Estate name'), {
+      target: { value: 'Corrected after refusal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByText('Saved.');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).toBe('definite-key-1');
+    expect(fetcher.mock.calls[1]![1].headers['Idempotency-Key']).toBe('definite-key-2');
+    expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ name: 'Corrected after refusal' });
+  },
+);
+
+it('does not invoke old save callbacks or refresh after its tenant-keyed form unmounts', async () => {
+  let finish!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi.fn().mockReturnValue(response);
+  vi.stubGlobal('fetch', fetcher);
+  const view = show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  expect(fetcher).toHaveBeenCalledOnce();
+  view.unmount();
+  await act(async () => {
+    finish(Response.json({ data: { id: 'old-tenant-estate' } }));
+  });
+  expect(onSuccess).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('falls back safely when a refused response contains a non-string error message', async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    Response.json(
+      {
+        error: { code: 'invalid_payload', message: { unexpected: 'untrusted-error-detail' } },
+      },
+      { status: 400 },
+    ),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  await screen.findByText('The request could not be completed.');
+  expect(document.body.textContent).not.toContain('untrusted-error-detail');
+  expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Retry same request' })).toBeNull();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(onSuccess).not.toHaveBeenCalled();
+});

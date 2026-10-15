@@ -282,7 +282,7 @@ it('checks a public URL through the tenant-scoped BFF and shows the retrieved co
   expect(JSON.parse(request?.[1]?.body)).toEqual({ url: check.requestedUrl });
 });
 
-it('retries an uncertain check with the same key and body, but clears a controlled refusal', async () => {
+it('retains an uncertain check after a later controlled refusal without a positive receipt', async () => {
   const fetcher = vi
     .fn()
     .mockResolvedValueOnce(Response.json({ data: [] }))
@@ -306,18 +306,19 @@ it('retries an uncertain check with the same key and body, but clears a controll
   );
   fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
   await waitFor(() =>
-    expect(
-      screen.getByText('That address does not resolve to a permitted public website.'),
-    ).toBeTruthy(),
+    expect(screen.getByRole('alert').textContent).toContain(
+      'That address does not resolve to a permitted public website.',
+    ),
   );
   expect(fetcher.mock.calls[1]?.[1]?.headers['Idempotency-Key']).toBe(
     fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key'],
   );
   expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[2]?.[1]?.body);
-  expect(screen.getByRole('button', { name: 'Audit public website' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy();
+  expect((screen.getByLabelText('Public page URL') as HTMLInputElement).disabled).toBe(true);
 });
 
-it('preserves an in-progress request key but releases a completed upstream failure', async () => {
+it('retains an in-progress request key when a later upstream error lacks a positive receipt', async () => {
   const fetcher = vi
     .fn()
     .mockResolvedValueOnce(Response.json({ data: [] }))
@@ -340,14 +341,13 @@ it('preserves an in-progress request key but releases a completed upstream failu
   const firstKey = fetcher.mock.calls[1]?.[1]?.headers['Idempotency-Key'];
   fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
   await waitFor(() =>
-    expect(
-      screen.getByText(
-        'The public website could not be retrieved. Check the address and try again.',
-      ),
-    ).toBeTruthy(),
+    expect(screen.getByRole('alert').textContent).toContain(
+      'The public website could not be retrieved. Check the address and try again.',
+    ),
   );
   expect(fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key']).toBe(firstKey);
-  expect(screen.getByRole('button', { name: 'Audit public website' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy();
+  expect((screen.getByLabelText('Public page URL') as HTMLInputElement).disabled).toBe(true);
 });
 
 it('audits with a secure HTTP UUID fallback and retries the exact pending public check', async () => {
@@ -575,5 +575,99 @@ it.each(['response', 'network', 'malformed'])(
     expect(writes).toHaveLength(2);
     expect(writes[1]).toEqual(first);
     expect(uuid).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([
+  ['network', 401],
+  ['network', 403],
+  ['network', 409],
+  ['response', 401],
+  ['response', 403],
+  ['response', 409],
+  ['malformed', 401],
+  ['malformed', 403],
+  ['malformed', 409],
+])(
+  'retains the original %s-unknown public check after a later HTTP %s refusal until positive settlement',
+  async (outcome, status) => {
+    const uuid = vi.fn(() => 'sticky-public-original-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    let posts = 0;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return Response.json({ data: [] });
+      posts++;
+      if (posts === 1) {
+        if (outcome === 'network') throw new Error('response lost');
+        return outcome === 'response'
+          ? Response.json({ error: { code: 'unknown' } }, { status: 503 })
+          : Response.json({ data: {} });
+      }
+      return posts === 2
+        ? Response.json({ error: { code: 'access_refused' } }, { status: Number(status) })
+        : Response.json({ data: check });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+    fireEvent.change(screen.getByLabelText('Public page URL'), {
+      target: { value: 'https://example.com/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+    await screen.findByRole('button', { name: 'Retry same check' });
+    const first = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+    await screen.findByText(/The website check could not be completed/);
+    expect((screen.getByLabelText('Public page URL') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Audit public website' })).toBeNull();
+    expect(uuid).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+    await screen.findByText('Public website audit recorded.');
+    const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(3);
+    expect(writes[1]).toEqual(first);
+    expect(writes[2]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([400, 401, 403, 409, 502])(
+  'permits a fresh public check after an initial definite HTTP %s refusal without a prior unknown',
+  async (status) => {
+    let key = 0;
+    vi.stubGlobal('crypto', { randomUUID: () => `definite-public-${++key}` });
+    let posts = 0;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return Response.json({ data: [] });
+      return ++posts === 1
+        ? Response.json(
+            { error: { code: status === 502 ? 'unreachable' : 'non_public_target' } },
+            { status },
+          )
+        : Response.json({ data: check });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+    fireEvent.change(screen.getByLabelText('Public page URL'), {
+      target: { value: 'https://example.com/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+    await screen.findByText(
+      status === 502
+        ? 'The public website could not be retrieved. Check the address and try again.'
+        : 'That address does not resolve to a permitted public website.',
+    );
+    expect((screen.getByLabelText('Public page URL') as HTMLInputElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Public page URL'), {
+      target: { value: 'https://example.com/corrected' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+    await screen.findByText('Public website audit recorded.');
+    const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(2);
+    expect(writes[0]![1]?.headers).toMatchObject({ 'Idempotency-Key': 'definite-public-1' });
+    expect(writes[1]![1]?.headers).toMatchObject({ 'Idempotency-Key': 'definite-public-2' });
+    expect(JSON.parse(String(writes[1]![1]?.body))).toEqual({
+      url: 'https://example.com/corrected',
+    });
   },
 );

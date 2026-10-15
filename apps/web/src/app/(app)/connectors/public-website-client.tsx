@@ -205,9 +205,12 @@ export function PublicWebsiteClient({
     checks: [],
   });
   const visibleHistory = history.tenantId === tenantId ? history.checks : [];
-  const currentTenant = useRef(tenantId);
+  const currentTenant = useRef<string | null>(tenantId);
   useLayoutEffect(() => {
     currentTenant.current = tenantId;
+    return () => {
+      currentTenant.current = null;
+    };
   }, [tenantId]);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
@@ -220,6 +223,7 @@ export function PublicWebsiteClient({
     body: string;
     tenantId: string;
     method: 'POST';
+    outcomeUnknown: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -260,6 +264,7 @@ export function PublicWebsiteClient({
           body: JSON.stringify({ url: String(form.get('url') ?? '').trim() }),
           tenantId,
           method: 'POST',
+          outcomeUnknown: false,
         };
       } catch {
         // A preparation error precedes transport: no uncertain operation exists.
@@ -296,10 +301,12 @@ export function PublicWebsiteClient({
         const code = z.object({ error: z.object({ code: z.string() }) }).safeParse(payload);
         const name = code.success ? code.data.error.code : '';
         const outcomeUncertain =
+          attempt.outcomeUnknown ||
           name === 'idempotency_in_progress' ||
           name === 'idempotency_outcome_unknown' ||
           name === 'website_check_record_unavailable' ||
           (response.status >= 500 && !completedCheckErrors.has(name));
+        attempt.outcomeUnknown = outcomeUncertain;
         setUncertain(outcomeUncertain);
         if (!outcomeUncertain) pending.current = null;
         if (!sameScope()) {
@@ -340,6 +347,7 @@ export function PublicWebsiteClient({
       setLoading(false);
       setMessage('Public website audit recorded.');
     } catch {
+      attempt.outcomeUnknown = true;
       setUncertain(true);
       setMessage(
         sameScope()

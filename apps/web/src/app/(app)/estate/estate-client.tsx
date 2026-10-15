@@ -97,10 +97,14 @@ export function MutationForm({
     path: string;
     tenantId: string;
     method: 'POST' | 'PATCH';
+    outcomeUnknown: boolean;
   } | null>(null);
-  const currentScope = useRef({ tenantId, method });
+  const currentScope = useRef({ tenantId, method, active: true });
   useLayoutEffect(() => {
-    currentScope.current = { tenantId, method };
+    currentScope.current = { tenantId, method, active: true };
+    return () => {
+      currentScope.current.active = false;
+    };
   }, [tenantId, method]);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
@@ -126,6 +130,7 @@ export function MutationForm({
           path: typeof path === 'string' ? path : path(form),
           tenantId,
           method,
+          outcomeUnknown: false,
         };
       } catch {
         // No request exists yet. Keep the form editable; uncertainty applies
@@ -140,6 +145,7 @@ export function MutationForm({
     }
     const attempt = pending.current;
     const sameScope = () =>
+      currentScope.current.active &&
       currentScope.current.tenantId === attempt.tenantId &&
       currentScope.current.method === attempt.method;
     const scopeMessage =
@@ -164,8 +170,12 @@ export function MutationForm({
       });
       const result = await res.json();
       if (!res.ok) {
+        const previouslyUnknown = attempt.outcomeUnknown;
         const ambiguous =
-          res.status >= 500 || String(result.error?.code ?? '').startsWith('idempotency_');
+          previouslyUnknown ||
+          res.status >= 500 ||
+          String(result.error?.code ?? '').startsWith('idempotency_');
+        attempt.outcomeUnknown = ambiguous;
         setUncertain(ambiguous);
         if (!ambiguous) pending.current = null;
         if (!sameScope()) {
@@ -176,7 +186,15 @@ export function MutationForm({
           );
           return;
         }
-        setMessage(result.error?.message ?? 'The request could not be completed.');
+        const detail =
+          typeof result.error?.message === 'string'
+            ? result.error.message
+            : 'The request could not be completed.';
+        setMessage(
+          previouslyUnknown
+            ? `The original result remains unknown. Retry this same request after resolving the refusal. ${detail}`
+            : detail,
+        );
         const parsedIssues = validationIssues.safeParse(result.error?.issues);
         if (!ambiguous && parsedIssues.success) {
           setIssues(formatIssues(parsedIssues.data));
@@ -184,6 +202,7 @@ export function MutationForm({
         return;
       }
       if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
+        attempt.outcomeUnknown = true;
         setUncertain(true);
         setMessage(
           sameScope()
@@ -212,6 +231,7 @@ export function MutationForm({
         );
       }
     } catch {
+      attempt.outcomeUnknown = true;
       setUncertain(true);
       setMessage(
         sameScope()
