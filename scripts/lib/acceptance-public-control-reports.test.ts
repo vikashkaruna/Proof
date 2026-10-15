@@ -17,6 +17,7 @@ function fixture() {
     accessKeyId: 'synthetic-fixture-id',
     secretAccessKey: 'synthetic-fixture-secret',
     privateStatePath: `${directory}/private-receipt.json`,
+    resultPath: `${directory}/unavailable.json`,
   };
   return {
     root: '/fixture',
@@ -63,6 +64,15 @@ test('provider guard accepts only the matching owned loopback fixture', () => {
   assert.equal(result.providerId, 'a'.repeat(64));
   assert.equal(result.providerRunId, f.state.runId);
 });
+test('provider guard accepts the completed launchers exact retained configuration contract', () => {
+  const f = fixture();
+  assert.doesNotThrow(() =>
+    validateReportProvider({
+      ...f,
+      config: { ...f.config, resultPath: `${f.directory}/unavailable.json` },
+    }),
+  );
+});
 test('provider guard refuses foreign ownership, credentials, ports, persistence and paths', () => {
   const changes: ((f: ReturnType<typeof fixture>) => void)[] = [
     (f) => {
@@ -73,6 +83,12 @@ test('provider guard refuses foreign ownership, credentials, ports, persistence 
     },
     (f) => {
       f.config.privateStatePath = '/retained/receipt';
+    },
+    (f) => {
+      f.config.resultPath = '/retained/result.json';
+    },
+    (f) => {
+      f.config.resultPath = `${f.directory}/initial.json`;
     },
     (f) => {
       f.environment.AXIOM_REGION = 'us-east-1';
@@ -107,6 +123,12 @@ test('provider guard refuses foreign ownership, credentials, ports, persistence 
     mutate(f);
     assert.throws(() => validateReportProvider(f));
   }
+});
+test('provider guard refuses missing or invented configuration fields', () => {
+  const f = fixture();
+  const { resultPath: _, ...missing } = f.config;
+  assert.throws(() => validateReportProvider({ ...f, config: missing }));
+  assert.throws(() => validateReportProvider({ ...f, config: { ...f.config, extra: 'refused' } }));
 });
 test('browser handoff is strict, bounded and cannot carry authentication material', () => {
   const id = randomUUID();

@@ -41,6 +41,7 @@ const providerConfig = z
     accessKeyId: z.string(),
     secretAccessKey: z.string(),
     privateStatePath: z.string(),
+    resultPath: z.string(),
   })
   .strict();
 export function reportAcceptanceRequested(environment: NodeJS.ProcessEnv = process.env) {
@@ -75,6 +76,7 @@ export function validateReportProvider(input: {
   );
   assert.equal(config.bucket, `evidence-${state.runId}`);
   assert.equal(config.privateStatePath, join(input.directory, 'private-receipt.json'));
+  assert.equal(config.resultPath, join(input.directory, 'unavailable.json'));
   for (const [key, expected] of Object.entries({
     AXIOM_STORAGE_ENDPOINT: config.endpoint,
     AXIOM_EVIDENCE_BUCKET: config.bucket,
@@ -266,6 +268,7 @@ export async function verifyPublicControlReports(deps: {
   anonKey: string;
   onPhase: (phase: string) => void;
 }) {
+  deps.onPhase('provider-preflight');
   const provider = ownedReportProvider();
   const source = sourceProofSchema.parse(deps.source);
   const reportOutcomes: z.infer<typeof publicReportBrowserHandoffSchema>['reports'] = [];
