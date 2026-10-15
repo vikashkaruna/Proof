@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import {
@@ -91,7 +91,17 @@ export function MutationForm({
   schema?: z.ZodType;
 }) {
   const router = useRouter();
-  const pending = useRef<{ key: string; body: string; path: string } | null>(null);
+  const pending = useRef<{
+    key: string;
+    body: string;
+    path: string;
+    tenantId: string;
+    method: 'POST' | 'PATCH';
+  } | null>(null);
+  const currentScope = useRef({ tenantId, method });
+  useLayoutEffect(() => {
+    currentScope.current = { tenantId, method };
+  }, [tenantId, method]);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
@@ -114,6 +124,8 @@ export function MutationForm({
           key: generateUUID(),
           body: JSON.stringify(parsed?.data ?? payload),
           path: typeof path === 'string' ? path : path(form),
+          tenantId,
+          method,
         };
       } catch {
         // No request exists yet. Keep the form editable; uncertainty applies
@@ -126,18 +138,29 @@ export function MutationForm({
         return;
       }
     }
+    const attempt = pending.current;
+    const sameScope = () =>
+      currentScope.current.tenantId === attempt.tenantId &&
+      currentScope.current.method === attempt.method;
+    const scopeMessage =
+      'Return to the original organisation and operation to resolve and retry this same request.';
+    if (!sameScope()) {
+      setUncertain(true);
+      setMessage(scopeMessage);
+      return;
+    }
     setBusy(true);
     setMessage('');
     setIssues([]);
     try {
-      const res = await fetch(`/api/bff/v1${pending.current.path}`, {
-        method,
+      const res = await fetch(`/api/bff/v1${attempt.path}`, {
+        method: attempt.method,
         headers: {
           'Content-Type': 'application/json',
-          'X-Tenant-Id': tenantId,
-          'Idempotency-Key': pending.current.key,
+          'X-Tenant-Id': attempt.tenantId,
+          'Idempotency-Key': attempt.key,
         },
-        body: pending.current.body,
+        body: attempt.body,
       });
       const result = await res.json();
       if (!res.ok) {
@@ -145,6 +168,14 @@ export function MutationForm({
           res.status >= 500 || String(result.error?.code ?? '').startsWith('idempotency_');
         setUncertain(ambiguous);
         if (!ambiguous) pending.current = null;
+        if (!sameScope()) {
+          setMessage(
+            ambiguous
+              ? scopeMessage
+              : 'The request in the original organisation or operation was refused. Return there to review it.',
+          );
+          return;
+        }
         setMessage(result.error?.message ?? 'The request could not be completed.');
         const parsedIssues = validationIssues.safeParse(result.error?.issues);
         if (!ambiguous && parsedIssues.success) {
@@ -155,19 +186,38 @@ export function MutationForm({
       if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
         setUncertain(true);
         setMessage(
-          'The server response did not identify the saved record. Retry the same request before making another change.',
+          sameScope()
+            ? 'The server response did not identify the saved record. Retry the same request before making another change.'
+            : scopeMessage,
         );
         return;
       }
       pending.current = null;
       setUncertain(false);
+      if (!sameScope()) {
+        setMessage(
+          'The request in the original organisation or operation completed. Return there to review it.',
+        );
+        return;
+      }
       setMessage('Saved.');
-      formRef.current?.reset();
-      onSuccess?.();
-      router.refresh();
+      try {
+        formRef.current?.reset();
+        onSuccess?.();
+        router.refresh();
+      } catch {
+        // UI follow-up cannot turn a confirmed save into an unknown write.
+        setMessage(
+          'Saved. The page could not be refreshed; reload to review the confirmed record.',
+        );
+      }
     } catch {
       setUncertain(true);
-      setMessage('The result is unknown. Retry the same request before making another change.');
+      setMessage(
+        sameScope()
+          ? 'The result is unknown. Retry the same request before making another change.'
+          : scopeMessage,
+      );
     } finally {
       setBusy(false);
     }

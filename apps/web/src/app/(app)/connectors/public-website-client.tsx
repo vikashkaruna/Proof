@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from 'react';
 import { z } from 'zod';
 import { publicFormMetadataSchema } from '@axiom/types';
 import { generateUUID } from '@axiom/ui';
@@ -193,14 +200,27 @@ export function PublicWebsiteClient({
   canManage: boolean;
 }) {
   const hydrated = useSyncExternalStore(subscribeHydration, hydratedSnapshot, serverSnapshot);
-  const [history, setHistory] = useState<WebsiteCheck[]>([]);
+  const [history, setHistory] = useState<{ tenantId: string; checks: WebsiteCheck[] }>({
+    tenantId,
+    checks: [],
+  });
+  const visibleHistory = history.tenantId === tenantId ? history.checks : [];
+  const currentTenant = useRef(tenantId);
+  useLayoutEffect(() => {
+    currentTenant.current = tenantId;
+  }, [tenantId]);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
-  const pending = useRef<{ key: string; body: string } | null>(null);
+  const pending = useRef<{
+    key: string;
+    body: string;
+    tenantId: string;
+    method: 'POST';
+  } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -216,7 +236,7 @@ export function PublicWebsiteClient({
         const payload: unknown = await response.json();
         const records = z.object({ data: checkSchema.array() }).parse(payload).data;
         if (!controller.signal.aborted) {
-          setHistory(records);
+          setHistory({ tenantId, checks: records });
           setHistoryError(false);
         }
       } catch {
@@ -238,6 +258,8 @@ export function PublicWebsiteClient({
         pending.current = {
           key: generateUUID(),
           body: JSON.stringify({ url: String(form.get('url') ?? '').trim() }),
+          tenantId,
+          method: 'POST',
         };
       } catch {
         // A preparation error precedes transport: no uncertain operation exists.
@@ -248,17 +270,26 @@ export function PublicWebsiteClient({
         return;
       }
     }
+    const attempt = pending.current;
+    const sameScope = () => currentTenant.current === attempt.tenantId;
+    const scopeMessage =
+      'Return to the original organisation to resolve and retry this same public website check.';
+    if (!sameScope()) {
+      setUncertain(true);
+      setMessage(scopeMessage);
+      return;
+    }
     setBusy(true);
     setMessage('');
     try {
       const response = await fetch('/api/bff/v1/public-website-checks', {
-        method: 'POST',
+        method: attempt.method,
         headers: {
           'Content-Type': 'application/json',
-          'X-Tenant-Id': tenantId,
-          'Idempotency-Key': pending.current.key,
+          'X-Tenant-Id': attempt.tenantId,
+          'Idempotency-Key': attempt.key,
         },
-        body: pending.current.body,
+        body: attempt.body,
       });
       const payload: unknown = await response.json();
       if (!response.ok) {
@@ -271,6 +302,14 @@ export function PublicWebsiteClient({
           (response.status >= 500 && !completedCheckErrors.has(name));
         setUncertain(outcomeUncertain);
         if (!outcomeUncertain) pending.current = null;
+        if (!sameScope()) {
+          setMessage(
+            outcomeUncertain
+              ? scopeMessage
+              : 'The public check in the original organisation was refused. Return there to review it.',
+          );
+          return;
+        }
         const detail =
           errorText[name] ??
           'The website check could not be completed. Review the URL and try again.';
@@ -282,16 +321,30 @@ export function PublicWebsiteClient({
       const check = z.object({ data: checkSchema }).parse(payload).data;
       pending.current = null;
       setUncertain(false);
-      setHistory((existing) =>
-        [check, ...existing.filter((row) => row.id !== check.id)].slice(0, 20),
-      );
+      if (!sameScope()) {
+        setMessage(
+          'The public check in the original organisation completed. Return there to review it.',
+        );
+        return;
+      }
+      setHistory((existing) => ({
+        tenantId: attempt.tenantId,
+        checks: [
+          check,
+          ...(existing.tenantId === attempt.tenantId ? existing.checks : []).filter(
+            (row) => row.id !== check.id,
+          ),
+        ].slice(0, 20),
+      }));
       setHistoryError(false);
       setLoading(false);
       setMessage('Public website audit recorded.');
     } catch {
       setUncertain(true);
       setMessage(
-        'The check result is unknown. Retry the same request before starting another check.',
+        sameScope()
+          ? 'The check result is unknown. Retry the same request before starting another check.'
+          : scopeMessage,
       );
     } finally {
       setBusy(false);
@@ -367,14 +420,14 @@ export function PublicWebsiteClient({
             </button>
           </div>
         )}
-        {!loading && !historyError && history.length === 0 && (
+        {!loading && !historyError && visibleHistory.length === 0 && (
           <p className="text-sm text-slate-600">
             No public website checks recorded for this organization.
           </p>
         )}
-        {!loading && !historyError && history.length > 0 && (
+        {!loading && !historyError && visibleHistory.length > 0 && (
           <ol className="space-y-2">
-            {history.map((check) => (
+            {visibleHistory.map((check) => (
               <li key={check.id}>
                 <CheckResult check={check} />
               </li>

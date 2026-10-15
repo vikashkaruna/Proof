@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PublicWebsiteClient } from './public-website-client';
 import type { PublicFormMetadata } from '@axiom/types';
@@ -422,3 +422,158 @@ it('keeps a public check editable and sends no POST when secure randomness is un
   expect(writes).toHaveLength(1);
   expect(JSON.parse(String(writes[0]![1]?.body))).toEqual({ url: 'https://example.com/corrected' });
 });
+
+it('blocks an unknown public check retry in another organisation and replays exactly on return', async () => {
+  const uuid = vi.fn(() => 'public-scope-1');
+  vi.stubGlobal('crypto', { randomUUID: uuid });
+  let posts = 0;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    if (++posts === 1) throw new Error('lost response');
+    return Response.json({ data: check });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+  fireEvent.change(screen.getByLabelText('Public page URL'), {
+    target: { value: 'https://example.com/' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await screen.findByRole('button', { name: 'Retry same check' });
+  const first = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  view.rerender(<PublicWebsiteClient tenantId="tenant-B" canManage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await screen.findByText(/Return to the original organisation/);
+  expect(posts).toBe(1);
+  expect(uuid).toHaveBeenCalledOnce();
+  expect((screen.getByLabelText('Public page URL') as HTMLInputElement).disabled).toBe(true);
+  view.rerender(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await screen.findByText('Public website audit recorded.');
+  const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(first);
+  expect(uuid).toHaveBeenCalledOnce();
+});
+
+it('allows a fresh public check in a new organisation after a definite refusal', async () => {
+  let key = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `public-fresh-${++key}` });
+  let posts = 0;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    return ++posts === 1
+      ? Response.json({ error: { code: 'invalid_url' } }, { status: 400 })
+      : Response.json({ data: check });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+  fireEvent.change(screen.getByLabelText('Public page URL'), {
+    target: { value: 'https://example.com/' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await screen.findByText('Enter a valid public HTTP or HTTPS URL.');
+  view.rerender(<PublicWebsiteClient tenantId="tenant-B" canManage />);
+  fireEvent.change(screen.getByLabelText('Public page URL'), {
+    target: { value: 'https://example.com/corrected' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await screen.findByText('Public website audit recorded.');
+  const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(writes).toHaveLength(2);
+  expect(writes[1]![1]?.headers).toMatchObject({
+    'X-Tenant-Id': 'tenant-B',
+    'Idempotency-Key': 'public-fresh-2',
+  });
+  expect(JSON.parse(String(writes[1]![1]?.body))).toEqual({ url: 'https://example.com/corrected' });
+});
+
+it('never shows an old organisation check when its in-flight success arrives during new history loading', async () => {
+  let finishPost!: (response: Response) => void;
+  let finishHistory!: (response: Response) => void;
+  const oldPost = new Promise<Response>((resolve) => {
+    finishPost = resolve;
+  });
+  const newHistory = new Promise<Response>((resolve) => {
+    finishHistory = resolve;
+  });
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') return oldPost;
+    return (init?.headers as Record<string, string>)['X-Tenant-Id'] === 'tenant-B'
+      ? newHistory
+      : Response.json({ data: [{ ...check, title: 'A-only retained check' }] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+  await screen.findByText('A-only retained check');
+  fireEvent.change(screen.getByLabelText('Public page URL'), {
+    target: { value: 'https://example.com/' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  view.rerender(<PublicWebsiteClient tenantId="tenant-B" canManage />);
+  expect(screen.queryByText('A-only retained check')).toBeNull();
+  await act(async () => {
+    finishPost(Response.json({ data: { ...check, title: 'A-only completed check' } }));
+  });
+  await screen.findByText(/original organisation completed/);
+  expect(screen.queryByText('A-only completed check')).toBeNull();
+  expect(screen.queryByText('A-only retained check')).toBeNull();
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  await act(async () => {
+    finishHistory(
+      Response.json({
+        data: [
+          { ...check, id: '22222222-2222-4222-8222-222222222222', title: 'B-only retained check' },
+        ],
+      }),
+    );
+  });
+  await screen.findByText('B-only retained check');
+  expect(screen.queryByText('A-only completed check')).toBeNull();
+});
+
+it.each(['response', 'network', 'malformed'])(
+  'retains a %s public-check outcome that becomes unknown after the organisation changes',
+  async (outcome) => {
+    let finish!: (response: Response) => void;
+    let fail!: (error: Error) => void;
+    const response = new Promise<Response>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+    let posts = 0;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return Response.json({ data: [] });
+      return ++posts === 1 ? response : Response.json({ data: check });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const uuid = vi.fn(() => 'public-deferred-scope-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    const view = render(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+    fireEvent.change(screen.getByLabelText('Public page URL'), {
+      target: { value: 'https://example.com/' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+    const first = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+    view.rerender(<PublicWebsiteClient tenantId="tenant-B" canManage />);
+    await act(async () => {
+      if (outcome === 'network') fail(new Error('private-network-detail'));
+      else
+        finish(
+          outcome === 'response'
+            ? Response.json({ error: { code: 'unknown' } }, { status: 503 })
+            : Response.json({ data: {} }),
+        );
+    });
+    await screen.findByText(/Return to the original organisation/);
+    expect(posts).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+    expect(posts).toBe(1);
+    view.rerender(<PublicWebsiteClient tenantId="tenant-A" canManage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+    await screen.findByText('Public website audit recorded.');
+    const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+  },
+);
