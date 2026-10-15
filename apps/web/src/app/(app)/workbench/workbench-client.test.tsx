@@ -193,3 +193,13 @@ it.each(['success', 'failure'])(
     expect(invoke).toHaveBeenCalledOnce();
   },
 );
+
+it('routes Parikshan to the assessment workflow without a generic invocation', () => {
+  render(<AgentWorkbenchClient {...props} />);
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'parikshan' } });
+  expect(screen.getByRole('link', { name: 'Open parikshan workflow' }).getAttribute('href')).toBe(
+    '/assessment',
+  );
+  expect(screen.queryByRole('button', { name: 'Run parikshan' })).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
+});

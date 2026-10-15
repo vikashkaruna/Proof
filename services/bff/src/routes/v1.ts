@@ -4176,6 +4176,19 @@ export function v1Routes(deps: Deps) {
       return c.json({ error: { code: 'validation_failed', message: 'Invalid agent input.' } }, 400);
     }
     const body = parsed.data;
+    // Parikshan's runtime schema requires an engagement. Refuse incomplete
+    // input before recording a request that the runtime cannot validate.
+    if (name === 'parikshan' && !body.engagement_id) {
+      return c.json(
+        {
+          error: {
+            code: 'validation_failed',
+            message: 'Parikshan requires an engagement from the assessment workflow.',
+          },
+        },
+        400,
+      );
+    }
     // PostgreSQL UUIDs have canonical lower-case text; runtime string schemas
     // otherwise retain valid upper-case IDs in ledger target references.
     for (const key of ['tenant_id', 'tenantId', 'engagement_id', 'correlation_id'] as const) {
