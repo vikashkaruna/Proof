@@ -17,6 +17,7 @@ import type { AssessmentRequestProducer } from '../workloads/assessment-producer
 import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
+import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
@@ -252,6 +253,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
+  app.route('/', catalogueReferenceRoutes());
   app.route('/', publicWebsiteCheckRoutes());
   app.route('/', publicSourceBindingRoutes());
   app.route('/', publicSourceReadRoutes());

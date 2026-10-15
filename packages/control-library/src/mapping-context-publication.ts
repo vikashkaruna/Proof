@@ -271,20 +271,20 @@ export async function publishMappingContextSource(
     throw new MappingContextPublicationRefused(mayHaveCommitted);
   }
 }
-const referenceProofSchema = z.strictObject({
+export const mappingContextReferenceProofSchema = z.strictObject({
   publicationVersion: bounded(80),
   libraryVersion: bounded(100),
   contextCount: z.number().int().min(1).max(1000),
   packetText: bounded(1048576),
   packetSha256: sha,
 });
-export type MappingContextReferenceProof = z.infer<typeof referenceProofSchema>;
+export type MappingContextReferenceProof = z.infer<typeof mappingContextReferenceProofSchema>;
 export async function verifyMappingContextReferenceProof(
   value: unknown,
   request: MappingContextAdoptionRequest,
 ): Promise<MappingContextReferenceProof> {
   request = mappingContextAdoptionRequestSchema.parse(request);
-  const proof = referenceProofSchema.parse(value);
+  const proof = mappingContextReferenceProofSchema.parse(value);
   const packet = mappingContextPacketSchema.parse(JSON.parse(proof.packetText));
   if (
     proof.publicationVersion !== request.publicationVersion ||
