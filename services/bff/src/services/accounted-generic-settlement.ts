@@ -49,7 +49,7 @@ export async function settleAccountedGenericResult(
       p_correlation_id: binding.correlation_id,
       p_request_hash: binding.request_sha256,
       p_status: result.status,
-      p_error_code: result.status === 'succeeded' ? null : 'agent_reported_failure',
+      p_error: result.status === 'succeeded' ? null : 'agent_reported_failure',
       p_latency_ms: result.latency_ms,
       p_input_tokens: result.input_tokens,
       p_output_tokens: result.output_tokens,

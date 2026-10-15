@@ -17,10 +17,18 @@ for (const p of cases)
   it(`settles ${p.name} only after independent read`, async () => {
     const reader = { call: vi.fn().mockResolvedValue(p.expected) };
     const settlement = {
-      call: vi.fn().mockResolvedValue({
-        run_id: p.expected.binding.run_id,
-        status: p.expected.terminal_status,
-        replayed: false,
+      call: vi.fn(async (name: string, args: Readonly<Record<string, unknown>>) => {
+        if (
+          name !== 'record_generic_agent_run_finish' ||
+          !Object.hasOwn(args, 'p_error') ||
+          Object.hasOwn(args, 'p_error_code')
+        )
+          throw new Error('PGRST202: public completion argument signature does not match');
+        return {
+          run_id: p.expected.binding.run_id,
+          status: p.expected.terminal_status,
+          replayed: false,
+        };
       }),
     };
     const actual = await settleAccountedGenericResult(
@@ -34,6 +42,9 @@ for (const p of cases)
     );
     expect(actual.accounting_status).toBe('sealed_observed_journal');
     const args = settlement.call.mock.calls[0]![1] as Record<string, unknown>;
+    expect(args.p_error).toBe(
+      actual.result.status === 'succeeded' ? null : 'agent_reported_failure',
+    );
     expect(args.p_input_tokens).toBe(actual.result.input_tokens);
     expect(args.p_cost_usd).toBe(
       actual.result.cost_usd === null ? null : Number(actual.result.cost_usd),

@@ -54,12 +54,21 @@ declare r public.agent_runs; result jsonb; prior text:=current_user;
 begin
  select * into strict r from public.agent_runs where id=run_id;
  set local role human_action_writer;
+ -- Match the named PostgREST boundary; positional SQL would conceal name drift.
  begin result:=public.record_generic_agent_run_finish(
-  coalesce((o->>'tenant')::uuid,r.tenant_id),coalesce((o->>'actor')::uuid,pg_temp.id(1)),r.id,
-  coalesce(o->>'agent',r.agent),case when o?'engagement' then (o->>'engagement')::uuid else r.engagement_id end,
-  coalesce((o->>'correlation')::uuid,r.correlation_id),coalesce(o->>'hash',r.input_redacted_hash),coalesce(o->>'status','succeeded'),o->>'error',
-  coalesce((o->>'latency')::int,12),coalesce((o->>'input_tokens')::int,1),coalesce((o->>'output_tokens')::int,2),coalesce((o->>'cost')::numeric,0),
-  receipts->>'started',receipts->>'completed',case when o?'response_hash' then o->>'response_hash' else repeat('d',64) end);
+  p_tenant_id => coalesce((o->>'tenant')::uuid,r.tenant_id),
+  p_actor_id => coalesce((o->>'actor')::uuid,pg_temp.id(1)),p_run_id => r.id,
+  p_agent => coalesce(o->>'agent',r.agent),
+  p_engagement_id => case when o?'engagement' then (o->>'engagement')::uuid else r.engagement_id end,
+  p_correlation_id => coalesce((o->>'correlation')::uuid,r.correlation_id),
+  p_request_hash => coalesce(o->>'hash',r.input_redacted_hash),
+  p_status => coalesce(o->>'status','succeeded'),p_error => o->>'error',
+  p_latency_ms => coalesce((o->>'latency')::int,12),
+  p_input_tokens => coalesce((o->>'input_tokens')::int,1),
+  p_output_tokens => coalesce((o->>'output_tokens')::int,2),
+  p_cost_usd => coalesce((o->>'cost')::numeric,0),
+  p_started_receipt => receipts->>'started',p_completed_receipt => receipts->>'completed',
+  p_response_hash => case when o?'response_hash' then o->>'response_hash' else repeat('d',64) end);
  exception when others then execute format('set local role %I',prior);raise;end;
  execute format('set local role %I',prior);return result;
 end$$;
