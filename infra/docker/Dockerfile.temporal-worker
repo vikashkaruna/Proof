@@ -26,4 +26,8 @@ WORKDIR /app/services/temporal-workers
 RUN useradd --create-home --shell /bin/bash axiom
 USER axiom
 
+ARG AXIOM_RELEASE_SHA
+ENV AXIOM_RELEASE_SHA=$AXIOM_RELEASE_SHA
+LABEL org.opencontainers.image.revision=$AXIOM_RELEASE_SHA
+
 CMD ["python", "-m", "temporal_workers.worker"]
