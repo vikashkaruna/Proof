@@ -23,7 +23,12 @@ const responseSchema = z
   })
   .strict();
 type Result = z.infer<typeof responseSchema>['data'];
-type Props = { tenantId: string; engagementId: string; checkId: string };
+type Props = {
+  tenantId: string;
+  engagementId: string;
+  checkId: string;
+  recaptureContent?: React.ReactNode;
+};
 type Evidence = PublicControlAssessmentV2['controls'][number]['questions'][number]['evidence'];
 const stateLabels: Record<Evidence['state'], string> = {
   public_candidate: 'Static public observation; human verification needed',
@@ -62,7 +67,7 @@ function Disposition({ value }: { value: Evidence }) {
 export function PublicControlReview(props: Props) {
   return <Review key={`${props.tenantId}/${props.engagementId}/${props.checkId}`} {...props} />;
 }
-function Review({ tenantId, engagementId, checkId }: Props) {
+function Review({ tenantId, engagementId, checkId, recaptureContent }: Props) {
   const helpId = useId();
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -114,7 +119,7 @@ function Review({ tenantId, engagementId, checkId }: Props) {
       ) {
         setRecapture(true);
         setError(
-          'This saved check has no richer public evidence capture. Audit the website again from Connectors, then select the new saved check. Earlier evidence remains unchanged.',
+          'This saved check has no richer public evidence capture. Capture fresh evidence for the selected website below, or use Connectors and select the new saved check. Earlier evidence remains unchanged.',
         );
       } else
         setError(
@@ -160,11 +165,12 @@ function Review({ tenantId, engagementId, checkId }: Props) {
           {error}
         </p>
       )}
-      {recapture && (
-        <Link href="/connectors" className="text-sm text-teal-700 underline">
-          Audit website again in Connectors
-        </Link>
-      )}
+      {recapture &&
+        (recaptureContent ?? (
+          <Link href="/connectors" className="text-sm text-teal-700 underline">
+            Audit website again in Connectors
+          </Link>
+        ))}
       {result && manifest && (
         <>
           <p className="font-medium text-indigo-900">

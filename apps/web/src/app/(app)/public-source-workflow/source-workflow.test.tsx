@@ -586,3 +586,59 @@ it('explains a review-storage lock even after the chosen bound preview loads', a
   expect(actionStatus('Preview saved source').action.disabled).toBe(false);
   expect(f.fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
 });
+
+it('recaptures the selected website in its engagement without binding or changing the historical check', async () => {
+  const f = await fixture();
+  const original = f.fetcher;
+  const newId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.includes('/control-review'))
+      return Response.json({ error: { code: 'website_recapture_required' } }, { status: 409 });
+    if (input.endsWith('/public-website-checks') && init?.method === 'POST')
+      return Response.json(
+        {
+          data: {
+            id: newId,
+            requestedUrl: 'https://axiomminds.ai/',
+            finalUrl: 'https://axiomminds.ai/',
+            checkedAt: timestamp,
+            status: 'checked',
+            bytes: 12,
+            contentSha256: rootSha,
+            title: 'Fresh',
+            headings: [],
+            publicLinks: [],
+            auditPages: [],
+            observations: [],
+          },
+        },
+        { status: 201 },
+      );
+    return original(input, init);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicSourceWorkflow tenantId={TENANT} actorId={ACTOR} canInvoke canCapture />);
+  await selectSource();
+  fireEvent.click(screen.getByRole('button', { name: 'Review website against DPDPA controls' }));
+  const capture = await screen.findByRole('button', { name: 'Audit public website' });
+  expect(screen.getByLabelText('Public page URL')).toHaveProperty(
+    'value',
+    'https://axiomminds.ai/',
+  );
+  expect(document.body.textContent).toContain('Estate: Unassigned');
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  await waitFor(() => expect(capture).toHaveProperty('disabled', false));
+  fireEvent.click(capture);
+  await waitFor(() =>
+    expect(screen.getByLabelText('Saved public website check')).toHaveProperty('value', newId),
+  );
+  expect(
+    screen.getByRole('option', { name: /https:\/\/axiomminds.ai\//, selected: false }),
+  ).toBeTruthy();
+  const posts = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(posts).toHaveLength(1);
+  expect(posts[0]?.[0]).toContain('/public-website-checks');
+  expect(posts[0]?.[1]?.body).toBe(JSON.stringify({ url: 'https://axiomminds.ai/' }));
+  expect(document.body.textContent).toContain('Earlier checks and bindings remain unchanged');
+  expect(loadSourceOperation(localStorage, TENANT, ACTOR)).toBeNull();
+});

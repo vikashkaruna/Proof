@@ -99,6 +99,7 @@ it.each(assessmentRoles)(
       expect(state.workflow).toHaveBeenLastCalledWith({
         tenantId: '11111111-1111-4111-8111-111111111111',
         actorId: '22222222-2222-4222-8222-222222222222',
+        canCapture: [UserRole.OWNER, UserRole.ADMIN].includes(role as 'owner' | 'admin'),
         canReview:
           can(Capability.ASSESSMENT_RUN, { role }) &&
           ![UserRole.FOUNDER, UserRole.AXIOM_ANALYST].includes(role as 'founder' | 'axiom_analyst'),
@@ -184,3 +185,26 @@ it('gives a reviewer structural review permission independently of agent invocat
     expect.objectContaining({ canInvoke: false, canReview: true }),
   );
 });
+
+// Capturing public source is a separate privilege from invoking/reviewing agents.
+it.each([
+  [UserRole.OWNER, false, true],
+  [UserRole.ADMIN, false, true],
+  [UserRole.FOUNDER, false, false],
+  [UserRole.FOUNDER, true, true],
+  [UserRole.AXIOM_ANALYST, true, false],
+  [UserRole.REVIEWER, false, false],
+] as const)(
+  'passes independent capture authority for %s (internal=%s)',
+  async (role, internal, expected) => {
+    state.role = role;
+    state.internal = internal;
+    for (const page of [DiscoveryPage, ClassificationPage]) {
+      const view = render(await page());
+      expect(state.workflow).toHaveBeenLastCalledWith(
+        expect.objectContaining({ canCapture: expected }),
+      );
+      view.unmount();
+    }
+  },
+);

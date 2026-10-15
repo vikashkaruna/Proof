@@ -28,6 +28,7 @@ import {
 } from './source-request';
 import { SourceProjectionView, SourceResultView } from './source-result';
 import { SourceReview } from './source-review';
+import { PublicWebsiteClient } from '../connectors/public-website-client';
 import { PublicControlReview } from './public-control-review';
 
 const checksSchema = z.object({
@@ -55,6 +56,7 @@ export function PublicSourceWorkflow(props: {
   actorId: string;
   canInvoke: boolean;
   canReview?: boolean;
+  canCapture?: boolean;
 }) {
   return <Workflow key={`${props.tenantId}/${props.actorId}`} {...props} />;
 }
@@ -63,14 +65,17 @@ function Workflow({
   actorId,
   canInvoke,
   canReview = false,
+  canCapture = false,
 }: {
   tenantId: string;
   actorId: string;
   canInvoke: boolean;
   canReview?: boolean;
+  canCapture?: boolean;
 }) {
   const helpId = useId();
   const [reviewLocked, setReviewLocked] = useState(true);
+  const [captureLocked, setCaptureLocked] = useState(false);
   const [choices, setChoices] = useState<Choices | null>(null);
   const [checks, setChecks] = useState<Checks>([]);
   const [engagementId, setEngagement] = useState('');
@@ -395,12 +400,14 @@ function Workflow({
         );
     });
   }
-  const locked = busy || pending !== null;
-  const lockedReason = busy
-    ? 'Loading recorded state. Wait for the current action to finish.'
-    : pending
-      ? 'Reconcile the retained request before starting another action.'
-      : undefined;
+  const locked = busy || pending !== null || captureLocked;
+  const lockedReason = captureLocked
+    ? 'Resolve the fresh website capture before starting another action.'
+    : busy
+      ? 'Loading recorded state. Wait for the current action to finish.'
+      : pending
+        ? 'Reconcile the retained request before starting another action.'
+        : undefined;
   const writeReason =
     lockedReason ??
     (!storageReady
@@ -488,9 +495,10 @@ function Workflow({
           <select
             className={field}
             value={engagementId}
-            disabled={locked}
+            disabled={busy || pending !== null}
             aria-describedby={`${helpId}-choices`}
             onChange={(event) => {
+              setCaptureLocked(false);
               setEngagement(event.target.value);
               setSelectedEngagement(
                 engagementChoices.find((row) => row.id === event.target.value) ?? null,
@@ -521,8 +529,9 @@ function Workflow({
             aria-label="Saved public website check"
             aria-describedby={`source-check-help ${helpId}-choices`}
             value={checkId}
-            disabled={locked}
+            disabled={busy || pending !== null}
             onChange={(event) => {
+              setCaptureLocked(false);
               setCheck(event.target.value);
               setPreview(null);
               setHistory(null);
@@ -599,7 +608,65 @@ function Workflow({
         </p>
       </div>
       {preview && <SourceProjectionView preview={preview} />}
-      <PublicControlReview tenantId={tenantId} engagementId={engagementId} checkId={checkId} />
+      {selectedChoice && !selectedChoice.estate && (
+        <p className="text-sm">
+          This engagement has no assigned estate. No estate association is established by capturing
+          fresh evidence or recording its source binding. To establish estate context,{' '}
+          <Link href="/engagements" className="underline">
+            create an assessment for the intended estate
+          </Link>
+          , or{' '}
+          <Link href="/estate" className="underline">
+            assign an unassigned, unstarted intake assessment from Estate
+          </Link>
+          . Existing assessment history cannot be moved automatically.
+        </p>
+      )}
+      <PublicControlReview
+        tenantId={tenantId}
+        engagementId={engagementId}
+        checkId={checkId}
+        recaptureContent={
+          selectedChoice && checks.find((row) => row.id === checkId) ? (
+            <PublicWebsiteClient
+              tenantId={tenantId}
+              canManage={canCapture}
+              context={{
+                id: `${tenantId}/${engagementId}/${checkId}`,
+                actorId,
+                url: checks.find((row) => row.id === checkId)!.finalUrl,
+                engagementTitle: selectedChoice.title,
+                estateName: selectedChoice.estate?.name ?? null,
+              }}
+              disabledReason={
+                busy || pending
+                  ? 'Reconcile the retained request or wait for the current action before capturing fresh evidence.'
+                  : !storageReady
+                    ? 'Restore browser request storage before capturing fresh evidence.'
+                    : reviewLocked
+                      ? 'Wait for human-review state to load, or reconcile a retained review shown below.'
+                      : undefined
+              }
+              onOperationStateChange={setCaptureLocked}
+              onRecorded={(record) => {
+                setChecks((existing) => [
+                  record,
+                  ...existing.filter((row) => row.id !== record.id),
+                ]);
+                setCheck(record.id);
+                setPreview(null);
+                setHistory(null);
+                setObservation(null);
+                setSelectedDrishti(null);
+                setCaptureLocked(false);
+                setNotice(
+                  'Fresh website evidence saved. Earlier checks and bindings remain unchanged. Preview this new check before explicitly recording its source binding.',
+                );
+              }}
+            />
+          ) : undefined
+        }
+      />
       {pending && (
         <section
           aria-label="Retained request"
