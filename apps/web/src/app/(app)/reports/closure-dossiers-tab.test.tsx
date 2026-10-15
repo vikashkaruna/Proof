@@ -5,7 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
 import { readReleasedArchive, reportRequest } from './report-request';
 
-vi.mock('./report-request', () => ({ reportRequest: vi.fn(), readReleasedArchive: vi.fn() }));
+vi.mock('./report-request', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./report-request')>()),
+  reportRequest: vi.fn(),
+  readReleasedArchive: vi.fn(),
+}));
 const request = vi.mocked(reportRequest);
 const readArchive = vi.mocked(readReleasedArchive);
 const tenant = '11111111-1111-4111-8111-111111111111';
@@ -70,7 +74,10 @@ beforeEach(() => {
   request.mockReset();
   readArchive.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 it('loads nothing and claims nothing for a role that can neither generate nor release', async () => {
   render(<ClosureDossiersTab tenantId={tenant} canGenerate={false} canRelease={false} />);
@@ -352,4 +359,20 @@ it('shows an unreadable record as an alert and keeps the modal closed', async ()
   fireEvent.click(await screen.findByRole('button', { name: 'View record' }));
   expect((await screen.findByText('record unavailable')).getAttribute('role')).toBe('alert');
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('refuses an archive GET before download when secure hashing is unavailable', async () => {
+  routes({
+    '/dossiers?': () => Response.json({ dossiers: [dossier()] }),
+    [`/dossiers/${rid(900)}`]: () => Response.json(dossier()),
+  });
+  vi.stubGlobal('crypto', {});
+  render(<ClosureDossiersTab tenantId={tenant} canGenerate={false} canRelease />);
+  fireEvent.click(await screen.findByRole('button', { name: 'View record' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Download verified archive' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('HTTPS');
+  expect(request.mock.calls.some(([, path]) => path === `/dossiers/${rid(900)}/archive`)).toBe(
+    false,
+  );
+  expect(readArchive).not.toHaveBeenCalled();
 });

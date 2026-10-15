@@ -1,4 +1,5 @@
 'use client';
+import { generateUUID } from '@axiom/ui';
 import React, {
   useCallback,
   useEffect,
@@ -150,7 +151,15 @@ function RequestPanel({
           actorId,
           libraryVersion,
           request: AssessmentRequestSchema.parse({
-            operationKey: crypto.randomUUID(),
+            operationKey: (() => {
+              try {
+                return generateUUID();
+              } catch {
+                throw new Error(
+                  'Request not sent. Secure browser randomness is unavailable. Use a supported browser and retry.',
+                );
+              }
+            })(),
             engagementId,
             ...(intake && reviewed
               ? {

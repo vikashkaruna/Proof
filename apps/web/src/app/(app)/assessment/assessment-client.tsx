@@ -176,8 +176,11 @@ export function AssessmentClient({
       >
         {!snapshot ? (
           <p role="alert">
-            Saved assessment results are unavailable for this selection. Check the assessment or try
-            again.
+            Saved assessment results are unavailable for this selection. Refresh to try again, or{' '}
+            <Link href="/engagements" className="font-semibold text-teal-700 underline">
+              {canCreate ? 'Choose or create an assessment' : 'Choose an assessment'}
+            </Link>
+            . Existing assessment history is preserved.
           </p>
         ) : !snapshot.engagement ? (
           <p>

@@ -10,7 +10,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock('./report-request', () => ({ reportRequest: vi.fn() }));
+vi.mock('./report-request', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./report-request')>()),
+  reportRequest: vi.fn(),
+}));
 vi.mock('./pack-preparation', () => ({ PackPreparation: () => null }));
 vi.mock('./closure-dossiers-tab', () => ({ ClosureDossiersTab: () => null }));
 const request = vi.mocked(reportRequest);

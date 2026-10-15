@@ -207,3 +207,11 @@ it('reads the penalty exposure estimate in crores', () => {
   expect(document.body.textContent).toContain('₹185 Cr');
   expect(document.body.textContent).not.toContain('1,85,00,00,000');
 });
+
+it('offers explicit choose or create recovery for an unreadable selected assessment', () => {
+  render(<AssessmentClient snapshot={null} canCreate />);
+  expect(
+    screen.getByRole('link', { name: /choose or create an assessment/i }).getAttribute('href'),
+  ).toBe('/engagements');
+  expect(screen.queryByRole('button', { name: 'Submit reviewed questionnaire' })).toBeNull();
+});
