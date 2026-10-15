@@ -76,7 +76,7 @@ export const publicEvidenceFacetV2Schema = z.enum([
   'privacy_contact',
   'accountability_statement',
 ]);
-const pageKind = z.enum(['root', 'privacy', 'contact', 'terms']);
+const pageKind = z.enum(['root', 'privacy', 'contact', 'terms', 'consent']);
 export const publicCoverageReasonV2Schema = z.enum([
   'unsupported_foreign_markup',
   'node_budget',
@@ -163,7 +163,7 @@ export const publicControlPayloadV2Schema = z
   .object({
     version: z.literal(2),
     extractorVersion: z.string().regex(/^[a-z0-9][a-z0-9.-]{0,63}$/),
-    pages: z.array(page).min(1).max(4),
+    pages: z.array(page).min(1).max(5),
     candidates: z.array(publicEvidenceCandidateV2Schema).max(128),
     candidatesTruncated: z.boolean(),
     scope: z.literal('bounded_public_pages'),

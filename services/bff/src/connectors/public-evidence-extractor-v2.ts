@@ -9,7 +9,7 @@ import {
 } from '@axiom/types';
 import { parsePublicHtml } from './public-form-metadata.js';
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const pageKind = z.enum(['root', 'privacy', 'contact', 'terms']);
+const pageKind = z.enum(['root', 'privacy', 'contact', 'terms', 'consent']);
 const inputSchema = z
   .object({
     pages: z
@@ -28,7 +28,7 @@ const inputSchema = z
         ]),
       )
       .min(1)
-      .max(4),
+      .max(5),
   })
   .strict();
 type Coverage = Pick<PublicControlPayloadV2['pages'][number], 'truncated' | 'coverageReasons'>;

@@ -36,16 +36,16 @@ type DeepReadonly<T> = T extends readonly (infer Item)[]
     : T;
 type Disposition = PublicControlAssessmentV2['controls'][number]['questions'][number]['evidence'];
 type PageKind = PublicControlSourceV2['pages'][number]['page'];
-const noticePages: readonly PageKind[] = ['root', 'privacy', 'terms'];
-const formPages: readonly PageKind[] = ['root', 'contact'];
+const noticePages: readonly PageKind[] = ['root', 'privacy', 'terms', 'consent'];
+const formPages: readonly PageKind[] = ['root', 'contact', 'consent'];
 const relevantPages: Readonly<Record<string, readonly PageKind[]>> = {
   privacy_notice: ['root', 'privacy'],
   consent_ui: formPages,
-  notice_at_collection: ['root', 'privacy', 'contact'],
+  notice_at_collection: ['root', 'privacy', 'contact', 'consent'],
   parental_consent_ui: formPages,
-  privacy_contact: ['root', 'privacy', 'contact'],
-  grievance_contact: ['root', 'privacy', 'contact'],
-  dpo_contact: ['root', 'privacy', 'contact'],
+  privacy_contact: ['root', 'privacy', 'contact', 'consent'],
+  grievance_contact: ['root', 'privacy', 'contact', 'consent'],
+  dpo_contact: ['root', 'privacy', 'contact', 'consent'],
 };
 
 function disposition(source: PublicControlSourceV2, facets: readonly string[]): Disposition {
@@ -87,11 +87,13 @@ function freeze(value: unknown): void {
   }
 }
 
-/** Pure, unmounted evaluator. The SECOND parameter must come from a trusted
+/** Pure deterministic evaluator. The SECOND parameter must come from a trusted
  * server publication verifier, never a client assertion. This function compares
  * exact bytes/hash but does not authenticate publication custody or source hashes.
  * The caller must authenticate the tenant-owned retained check/projection and
- * publication before calling, and durably settle/review before exposing results.
+ * publication before calling. A read-only control-evidence preview must remain
+ * explicitly unreviewed; an agent result or released assessment additionally
+ * requires its own durable settlement and human review workflow.
  * Validation failures are sanitized: no supplied notice text or secret is echoed.
  */
 export function evaluatePublicEvidenceV2(
