@@ -316,7 +316,8 @@ export type ConsumeChallengeResult =
         | 'challenge_not_satisfied'
         | 'challenge_expired'
         | 'challenge_already_consumed'
-        | 'binding_mismatch';
+        | 'binding_mismatch'
+        | 'factor_changed';
       detail?: string;
     };
 
@@ -1131,12 +1132,16 @@ export function createMfaService(
         return { ok: false, reason: 'binding_mismatch' };
       }
 
-      // Catalogue authority remains tied to the factor that actually satisfied
-      // this challenge. Enrollment with replacement B cannot revive factor A.
-      if (opts.purpose === 'catalogue_adoption') {
+      // New interactive authority remains tied to the factor that actually
+      // satisfied the challenge. Replacement B cannot revive factor A.
+      // Existing signed approval tokens keep their normal expiry/revocation.
+      if (opts.purpose === 'catalogue_adoption' || opts.purpose === 'approval_issuance') {
         const activeFactor = await activeTotpFactor(opts.userId);
         if (!challenge.factor_id || activeFactor?.id !== challenge.factor_id)
-          return { ok: false, reason: 'binding_mismatch' };
+          return {
+            ok: false,
+            reason: opts.purpose === 'approval_issuance' ? 'factor_changed' : 'binding_mismatch',
+          };
       }
 
       // Atomic single use — the same conditional-update pattern the execution
