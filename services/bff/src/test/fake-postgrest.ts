@@ -250,6 +250,34 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     const actionIds = (args['p_action_ids'] as string[]) ?? [];
     const approverId = args['p_approver_id'] as string;
 
+    const reviewedChallenge = (tables['mfa_challenges'] ?? []).find(
+      (r) => r['id'] === args['p_challenge_id'],
+    );
+    const challengedFactor = (tables['user_mfa_factors'] ?? []).find(
+      (r) =>
+        r['id'] === reviewedChallenge?.['factor_id'] &&
+        r['user_id'] === approverId &&
+        r['factor_type'] === 'totp' &&
+        r['status'] === 'active',
+    );
+    const mfaDetail = (args['p_mfa_detail'] as Row | null)?.['mfa'] as Row | undefined;
+    if (
+      !reviewedChallenge ||
+      !challengedFactor ||
+      reviewedChallenge['user_id'] !== approverId ||
+      reviewedChallenge['tenant_id'] !== tenantId ||
+      reviewedChallenge['purpose'] !== 'approval_issuance' ||
+      reviewedChallenge['bound_resource_ref'] !== planId ||
+      !reviewedChallenge['satisfied_at'] ||
+      !reviewedChallenge['consumed_at'] ||
+      reviewedChallenge['consumed_for'] !== planId ||
+      Date.parse(String(reviewedChallenge['expires_at'])) <= Date.now() ||
+      mfaDetail?.['challengeId'] !== reviewedChallenge['id'] ||
+      mfaDetail?.['binding'] !== reviewedChallenge['bound_payload_sha256'] ||
+      mfaDetail?.['satisfiedAt'] !== reviewedChallenge['satisfied_at']
+    )
+      return { decision: 'fresh_mfa_required' };
+
     if (actionIds.length === 0 || new Set(actionIds).size !== actionIds.length) {
       return { decision: 'invalid_actions' };
     }

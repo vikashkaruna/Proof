@@ -361,6 +361,35 @@ describe('consumeChallenge — the approval step-up', () => {
       boundPayloadSha256: approvalBinding(actionIds),
     });
 
+  it('rejects a retired-factor challenge without changing previously signed approval validity', async () => {
+    const issued = await satisfied();
+    const { ApprovalEngine, generateTestSecret } = await import('@axiom/approval-engine');
+    const engine = new ApprovalEngine(generateTestSecret());
+    const token = await engine.issue(TENANT, {
+      planId: PLAN,
+      actionIds: [ACTION_A],
+      approverId: USER,
+      mode: 'batch',
+      concurrency: 1,
+      stopOnFailure: true,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    for (const factor of db.rows('user_mfa_factors'))
+      if (factor['factor_type'] === 'totp') factor['status'] = 'revoked';
+    db.seed('user_mfa_factors', {
+      id: OTHER_USER,
+      user_id: USER,
+      factor_type: 'totp',
+      status: 'active',
+    });
+    expect(await mfa.isEnrolled(USER)).toBe(true);
+    expect(await consume(issued.challengeId)).toMatchObject({
+      ok: false,
+      reason: 'factor_changed',
+    });
+    expect(await engine.verify(TENANT, token)).toMatchObject({ valid: true });
+  });
+
   it('spends a satisfied, correctly bound challenge', async () => {
     const issued = await satisfied();
     expect(await consume(issued.challengeId)).toMatchObject({ ok: true });

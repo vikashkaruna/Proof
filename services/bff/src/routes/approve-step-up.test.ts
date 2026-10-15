@@ -127,7 +127,11 @@ const post = (app: Hono<{ Variables: Variables }>, path: string, body: string) =
   });
 
 /** Enrol, open an approval challenge, satisfy it. Returns the challenge id. */
-async function freshStepUp(app: Hono<{ Variables: Variables }>, actionIds = [ACTION_A, ACTION_B]) {
+async function freshStepUp(
+  app: Hono<{ Variables: Variables }>,
+  actionIds = [ACTION_A, ACTION_B],
+  planId = PLAN,
+) {
   const begun = await mfa.beginTotpEnrolment({ userId: USER, accountName: 'a@example.com' });
   const activated = await mfa.activateTotpEnrolment({
     userId: USER,
@@ -139,7 +143,7 @@ async function freshStepUp(app: Hono<{ Variables: Variables }>, actionIds = [ACT
   const challengeRes = await post(
     app,
     '/v1/mfa/challenge',
-    JSON.stringify({ purpose: 'approval_issuance', planId: PLAN, actionIds, mode: 'batch' }),
+    JSON.stringify({ purpose: 'approval_issuance', planId, actionIds, mode: 'batch' }),
   );
   expect(challengeRes.status).toBe(201);
   const { challengeId } = (await challengeRes.json()) as { challengeId: string };
@@ -195,6 +199,25 @@ describe('POST /v1/plans/approve — MFA step-up', () => {
     const challenge = fake.rows('mfa_challenges').find((r) => r.id === challengeId);
     expect(challenge?.consumed_at).toBeTruthy();
     expect(challenge?.consumed_for).toBe(fake.rows('approval_tokens')[0]?.id);
+  });
+
+  it('accepts a consistently reviewed uppercase UUID without normalizing its MFA digest', async () => {
+    const app = await buildApp();
+    const uppercasePlan = 'ABCDEFAB-1234-4234-8234-ABCDEFABCDEF';
+    fake.rows('remediation_plans')[0]!['id'] = uppercasePlan;
+    for (const action of fake.rows('remediation_actions')) action['plan_id'] = uppercasePlan;
+    const challengeId = await freshStepUp(app, [ACTION_A, ACTION_B], uppercasePlan);
+    const digest = fake.rows('mfa_challenges').find((r) => r['id'] === challengeId)![
+      'bound_payload_sha256'
+    ];
+    const res = await post(
+      app,
+      '/v1/plans/approve',
+      approveBody({ planId: uppercasePlan, mfaChallengeId: challengeId }),
+    );
+    expect(res.status).toBe(201);
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+    expect(fake.rows('audit_ledger')[0]!['detail']).toMatchObject({ mfa: { binding: digest } });
   });
 
   it('binds approval conditions into the signed token scope', async () => {
@@ -569,6 +592,46 @@ describe('POST /v1/plans/approve — the binding covers action content', () => {
     expect(fake.rows('approval_tokens')).toHaveLength(1);
   });
 
+  it.each(['before consumption', 'after consumption'])(
+    'refuses a retired-factor approval challenge %s while replacement is enrolled',
+    async (when) => {
+      const app = await buildApp();
+      const challengeId = await freshStepUp(app);
+      const replace = () => {
+        for (const f of fake.rows('user_mfa_factors'))
+          if (f['factor_type'] === 'totp') f['status'] = 'revoked';
+        fake.seed('user_mfa_factors', {
+          id: '99999999-0000-4000-8000-000000000001',
+          user_id: USER,
+          factor_type: 'totp',
+          status: 'active',
+        });
+      };
+      if (when === 'before consumption') replace();
+      else {
+        const consume = mfa.consumeChallenge.bind(mfa);
+        vi.spyOn(mfa, 'consumeChallenge').mockImplementation(async (opts) => {
+          const result = await consume(opts);
+          replace();
+          return result;
+        });
+      }
+      const res = await post(
+        app,
+        '/v1/plans/approve',
+        approveBody({ mfaChallengeId: challengeId }),
+      );
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({
+        error: { code: when === 'before consumption' ? 'factor_changed' : 'fresh_mfa_required' },
+      });
+      expect(fake.rows('approval_tokens')).toHaveLength(0);
+      expect(ledgerAppend).toHaveBeenCalledWith(
+        expect.objectContaining({ actionType: 'mfa.challenge.failed', result: 'failure' }),
+      );
+      expect(await mfa.isEnrolled(USER)).toBe(true);
+    },
+  );
   it('refuses a plan revision changed after MFA consumption', async () => {
     const app = await buildApp();
     const challengeId = await freshStepUp(app);

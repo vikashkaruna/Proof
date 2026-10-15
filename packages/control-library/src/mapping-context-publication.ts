@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseCatalogueJson } from './catalogue-json';
 import { LIBRARY_VERSION } from './controls';
 import {
   ALL_MAPPING_CONTEXTS,
@@ -195,8 +196,14 @@ export async function verifyMappingContextPublicationProof(
     new TextEncoder().encode(reviewedRequestText).byteLength > 1048576 ||
     proof.packetSha256 !== (await digest(proof.packetText)) ||
     proof.requestSha256 !== (await digest(reviewedRequestText)) ||
-    !same(mappingContextPacketSchema.parse(JSON.parse(proof.packetText)), packet) ||
-    !same(mappingContextPacketSchema.parse(JSON.parse(reviewedRequestText)), packet)
+    !same(
+      mappingContextPacketSchema.parse(parseCatalogueJson(proof.packetText, 1048576)),
+      packet,
+    ) ||
+    !same(
+      mappingContextPacketSchema.parse(parseCatalogueJson(reviewedRequestText, 1048576)),
+      packet,
+    )
   )
     throw new MappingContextPublicationRefused(true);
   return proof;
@@ -220,7 +227,10 @@ export async function publishMappingContextSource(
         .parse(await ports.authorizeCurrentHuman(binding));
       if (
         !same(human.binding, binding) ||
-        !same(mappingContextPacketSchema.parse(JSON.parse(human.reviewedRequestText)), packet) ||
+        !same(
+          mappingContextPacketSchema.parse(parseCatalogueJson(human.reviewedRequestText, 1048576)),
+          packet,
+        ) ||
         new TextEncoder().encode(human.reviewedRequestText).byteLength > 1048576 ||
         (reviewedRequestText !== undefined && human.reviewedRequestText !== reviewedRequestText)
       )
@@ -285,7 +295,7 @@ export async function verifyMappingContextReferenceProof(
 ): Promise<MappingContextReferenceProof> {
   request = mappingContextAdoptionRequestSchema.parse(request);
   const proof = mappingContextReferenceProofSchema.parse(value);
-  const packet = mappingContextPacketSchema.parse(JSON.parse(proof.packetText));
+  const packet = mappingContextPacketSchema.parse(parseCatalogueJson(proof.packetText, 1048576));
   if (
     proof.publicationVersion !== request.publicationVersion ||
     proof.packetSha256 !== request.expectedPacketSha256 ||
@@ -331,7 +341,10 @@ export async function verifyMappingContextAdoptionProof(
     proof.requestText !== reviewedRequestText ||
     new TextEncoder().encode(reviewedRequestText).byteLength > 4096 ||
     proof.requestSha256 !== (await digest(reviewedRequestText)) ||
-    !same(mappingContextAdoptionRequestSchema.parse(JSON.parse(reviewedRequestText)), request)
+    !same(
+      mappingContextAdoptionRequestSchema.parse(parseCatalogueJson(reviewedRequestText, 4096)),
+      request,
+    )
   )
     throw new MappingContextPublicationRefused(true);
   return proof;
@@ -356,7 +369,9 @@ export async function adoptMappingContextPublication(
       if (
         !same(human.binding, binding) ||
         !same(
-          mappingContextAdoptionRequestSchema.parse(JSON.parse(human.reviewedRequestText)),
+          mappingContextAdoptionRequestSchema.parse(
+            parseCatalogueJson(human.reviewedRequestText, 4096),
+          ),
           request,
         ) ||
         new TextEncoder().encode(human.reviewedRequestText).byteLength > 4096 ||

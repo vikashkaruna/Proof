@@ -42,9 +42,14 @@ update public.remediation_actions
        dry_run_expires_at = now() + interval '1 hour',
        dry_run_result = jsonb_build_object('recordsAffected', 12);
 
+insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) values
+ ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000a9','totp','active','fixture-only');
 insert into public.mfa_challenges(id, user_id, tenant_id, purpose, expires_at)
 values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000a9',
-        '00000000-0000-0000-0000-0000000000c1', 'approval_issuance', now() + interval '10 minutes');
+        '00000000-0000-0000-0000-0000000000c1', 'approval_issuance', now() + interval '5 minutes');
+update public.mfa_challenges set factor_id='00000000-0000-0000-0000-0000000000e1',
+ bound_resource_ref='00000000-0000-0000-0000-0000000000c3',bound_payload_sha256=repeat('a',64),
+ satisfied_at=clock_timestamp(),consumed_at=clock_timestamp(),consumed_for='00000000-0000-0000-0000-0000000000c3';
 
 create function pg_temp.previous_digest(
   p_tenant_id uuid,
@@ -91,19 +96,24 @@ create temporary table reviewed_snapshot as select jsonb_agg(to_jsonb(a)) as act
  public.action_set_content_digest('00000000-0000-0000-0000-0000000000c1',
  '00000000-0000-0000-0000-0000000000c3', array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[]) as digest
  from public.remediation_actions a;
+-- This temporary snapshot belongs only to this rollback-scoped test session.
+-- Let the explicit API-role assertion read its fixture input, without granting
+-- access to any production table, function, schema or credential.
+grant select on reviewed_snapshot to service_role;
 select pg_temp.assert_eq((select digest from reviewed_snapshot),
  pg_temp.previous_digest('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3',
  array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[]),
  'existing signed digests survive the migration');
 select pg_temp.assert_eq(public.reviewed_action_content_digest((select actions from reviewed_snapshot)),
  (select digest from reviewed_snapshot), 'reviewed rows and live rows use identical canonicalization');
-create function pg_temp.issue_reviewed(v integer default 1) returns text language sql as $$
+create function pg_temp.issue_reviewed(v integer default 1,c uuid default '00000000-0000-0000-0000-0000000000f1') returns text language sql as $$
  select public.issue_reviewed_plan_approval(
  '00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000c3',
  array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[],
  '00000000-0000-0000-0000-0000000000a9','batch',1,true,'sig',
  jsonb_build_object('contentDigest',(select digest from reviewed_snapshot)), gen_random_uuid()::text,
- now() + interval '1 hour',null,'{}',null,(select digest from reviewed_snapshot),null,gen_random_uuid(),v)->>'decision';
+ now() + interval '1 hour',null,'{}',c,(select digest from reviewed_snapshot),
+ jsonb_build_object('mfa',jsonb_build_object('challengeId',c,'satisfiedAt',(select satisfied_at from public.mfa_challenges where id=c),'binding',repeat('a',64))),gen_random_uuid(),v)->>'decision';
 $$;
 update public.remediation_actions set parameters = '{"edited":true}';
 select pg_temp.assert_eq(pg_temp.issue_reviewed(), 'content_changed', 'old reviewed rows cannot approve new live content');
@@ -116,10 +126,55 @@ update public.remediation_plans set version = 1, status = 'executing';
 select pg_temp.assert_eq(pg_temp.issue_reviewed(), 'plan_not_approvable', 'plan eligibility is checked under lock');
 select pg_temp.assert_true((select count(*) = 0 from public.approval_tokens), 'refusals leave no token');
 update public.remediation_plans set status = 'review';
+set local role service_role;
+select pg_temp.assert_eq(pg_temp.issue_reviewed(1,null),'fresh_mfa_required','API has no NULL-challenge bypass');
+reset role;
+insert into auth.users(id,email) values('00000000-0000-0000-0000-0000000000a8','other-approval@test.invalid');
+insert into public.users(id,email) values('00000000-0000-0000-0000-0000000000a8','other-approval@test.invalid');
+update public.mfa_challenges set user_id='00000000-0000-0000-0000-0000000000a8';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','a challenge belongs to its original actor');
+update public.mfa_challenges set user_id='00000000-0000-0000-0000-0000000000a9';
+-- Interactive authority must still refer to the original live factor.
+update public.user_mfa_factors set status='revoked';
+insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) values
+ ('00000000-0000-0000-0000-0000000000e2','00000000-0000-0000-0000-0000000000a9','totp','active','replacement-only');
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','replacement enrollment cannot revive the old challenge');
+update public.user_mfa_factors set status='revoked' where id='00000000-0000-0000-0000-0000000000e2';
+update public.user_mfa_factors set status='active' where id='00000000-0000-0000-0000-0000000000e1';
+update public.mfa_challenges set bound_payload_sha256=repeat('b',64);
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','retained binding must match the reviewed MFA detail');
+update public.mfa_challenges set bound_payload_sha256=repeat('a',64),purpose='login';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','login challenge is not approval authority');
+update public.mfa_challenges set purpose='approval_issuance',consumed_for='already-linked-token';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','a linked challenge cannot issue another token');
+update public.mfa_challenges set consumed_for='00000000-0000-0000-0000-0000000000c3',bound_resource_ref='different-plan';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','challenge resource must be the exact plan');
+update public.mfa_challenges set bound_resource_ref='00000000-0000-0000-0000-0000000000c3',tenant_id=null;
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','challenge tenant must be the named tenant');
+update public.mfa_challenges set tenant_id='00000000-0000-0000-0000-0000000000c1';
+select pg_temp.assert_true((select count(*)=0 from public.approval_tokens),'MFA refusals leave zero authority');
 select pg_temp.assert_eq(pg_temp.issue_reviewed(), 'issued', 'unchanged review issues successfully');
 select pg_temp.assert_true((select count(*) = 1 from public.audit_ledger where action_type='approval.token.issued'), 'issuance retains atomic ledger');
 select pg_temp.assert_true(not has_function_privilege('service_role',
  'public.issue_plan_approval(uuid,uuid,uuid[],uuid,text,integer,boolean,text,jsonb,text,timestamptz,text,jsonb,uuid,text,jsonb,uuid)', 'execute'), 'API cannot bypass the reviewed entrypoint');
 select pg_temp.assert_true(not has_function_privilege('authenticated',
  'public.issue_reviewed_plan_approval(uuid,uuid,uuid[],uuid,text,integer,boolean,text,jsonb,text,timestamptz,text,jsonb,uuid,text,jsonb,uuid,integer)', 'execute'), 'clients cannot issue approvals');
+select pg_temp.assert_eq(pg_temp.issue_reviewed(),'fresh_mfa_required','success links the challenge and prevents repeated issuance');
+update public.user_mfa_factors set status='revoked';
+select pg_temp.assert_true((select count(*)=1 from public.approval_tokens where status='issued' and expires_at>clock_timestamp()),'factor retirement does not revoke already-issued token authority');
+select pg_temp.assert_true(not has_function_privilege('service_role','controller_security.issue_reviewed_plan_approval_0130(uuid,uuid,uuid[],uuid,text,integer,boolean,text,jsonb,text,timestamptz,text,jsonb,uuid,text,jsonb,uuid,integer)','execute'),'API cannot bypass the human guard through owner helper');
+select pg_temp.assert_true(not has_function_privilege('human_action_writer','public.issue_reviewed_plan_approval(uuid,uuid,uuid[],uuid,text,integer,boolean,text,jsonb,text,timestamptz,text,jsonb,uuid,text,jsonb,uuid,integer)','execute'),'no new human writer issuance grant');
+-- UUID identity is case-insensitive in PG and accepted by the existing HTTP
+-- schemas. Preserve exact bound payload hashes while accepting equivalent UUID
+-- resource spelling; whitespace and other non-UUID text remain refusals.
+update public.user_mfa_factors set status='active',revoked_at=null where id='00000000-0000-0000-0000-0000000000e1';
+insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,expires_at,satisfied_at,consumed_at,consumed_for)
+ values('00000000-0000-0000-0000-0000000000f2','00000000-0000-0000-0000-0000000000a9','00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000e1','approval_issuance',
+ '00000000-0000-0000-0000-0000000000C3',repeat('a',64),clock_timestamp()+interval '5 minutes',clock_timestamp(),clock_timestamp(),'00000000-0000-0000-0000-0000000000C3');
+update public.mfa_challenges set bound_resource_ref='00000000-0000-0000-0000-0000000000C3 ' where id='00000000-0000-0000-0000-0000000000f2';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(1,'00000000-0000-0000-0000-0000000000f2'),'fresh_mfa_required','resource whitespace is not normalized');
+update public.mfa_challenges set bound_resource_ref='00000000-0000-0000-0000-0000000000C3',bound_payload_sha256=repeat('b',64) where id='00000000-0000-0000-0000-0000000000f2';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(1,'00000000-0000-0000-0000-0000000000f2'),'fresh_mfa_required','UUID case compatibility never changes the exact reviewed digest');
+update public.mfa_challenges set bound_payload_sha256=repeat('a',64) where id='00000000-0000-0000-0000-0000000000f2';
+select pg_temp.assert_eq(pg_temp.issue_reviewed(1,'00000000-0000-0000-0000-0000000000f2'),'issued','accepted uppercase UUID resource and consumption references still issue');
 rollback;
