@@ -739,3 +739,37 @@ it('retains original cancellation and explicit archive when the page current lib
   expect(finalized).not.toHaveBeenCalled();
   expect(crypto.randomUUID).not.toHaveBeenCalled();
 });
+
+it.each([true, false])(
+  'prepares assessment safely when native UUID is absent (secure bytes=%s)',
+  async (secureBytes) => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(7);
+      return bytes;
+    });
+    vi.stubGlobal('crypto', secureBytes ? { getRandomValues } : {});
+    fetchMock
+      .mockResolvedValueOnce(Response.json(questionnaire()))
+      .mockResolvedValueOnce(Response.json(accepted(), { status: 202 }));
+    render(panel());
+    await reviewKnownAnswers();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed questionnaire' }));
+    if (secureBytes) {
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      const body = JSON.parse(fetchMock.mock.calls[1]![1].body);
+      expect(body.operationKey).toMatch(
+        /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+      );
+    } else {
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('not sent'));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+      expect(
+        screen
+          .getByRole('button', { name: 'Submit reviewed questionnaire' })
+          .hasAttribute('disabled'),
+      ).toBe(false);
+    }
+  },
+);

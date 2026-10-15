@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentLabel } from '@axiom/ui';
 import { z } from 'zod';
 import { detailSchema, type ReportDetail } from './report-contract';
-import { reportRequest } from './report-request';
+import { prepareReportOperationKey, reportRequest } from './report-request';
 import { button, field, panel, failure } from './report-ui';
 
 const uuid = z.uuid();
@@ -182,12 +182,14 @@ function TenantBoardWorkflow({
     return () => controller.abort();
   }, [tenantId, canManage, selected?.reportId, revision]);
 
-  async function act(path: string, body: unknown) {
+  async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await reportRequest(tenantId, path, { body });
+      const response = await reportRequest(tenantId, path, {
+        body: typeof body === 'function' ? body() : body,
+      });
       const result = await response.json();
       setMessage(
         response.status === 202
@@ -239,12 +241,14 @@ function TenantBoardWorkflow({
         onSubmit={(event) => {
           event.preventDefault();
           if (!chosen || !confirmed || !title.trim()) return;
-          requestKey.current ??= crypto.randomUUID();
-          void act('/reports/board/request', {
-            engagementId: chosen.engagementId,
-            assessmentRunId: chosen.assessmentRunId,
-            title: title.trim(),
-            operationKey: requestKey.current,
+          void act('/reports/board/request', () => {
+            requestKey.current ??= prepareReportOperationKey();
+            return {
+              engagementId: chosen.engagementId,
+              assessmentRunId: chosen.assessmentRunId,
+              title: title.trim(),
+              operationKey: requestKey.current,
+            };
           }).then((result) => {
             if (!result) return;
             requestKey.current = null;
@@ -472,9 +476,9 @@ function TenantBoardWorkflow({
                   className={button}
                   disabled={busy}
                   onClick={() => {
-                    buildKey.current ??= crypto.randomUUID();
-                    void act(`/reports/board/${selected.reportId}/artifacts`, {
-                      operationKey: buildKey.current,
+                    void act(`/reports/board/${selected.reportId}/artifacts`, () => {
+                      buildKey.current ??= prepareReportOperationKey();
+                      return { operationKey: buildKey.current };
                     });
                   }}
                 >

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { z } from 'zod';
 import { evidenceRowSchema, pageMetaSchema, type EvidenceRow } from '../evidence/evidence-contract';
-import { preparePackBody, reportRequest } from './report-request';
+import { prepareReportOperationKey, preparePackBody, reportRequest } from './report-request';
 import { button, field, panel, failure } from './report-ui';
 import { EngagementPicker } from './engagement-picker';
 const evidenceList = z.object({ data: z.array(evidenceRowSchema), meta: pageMetaSchema });
@@ -66,7 +66,7 @@ export function PackPreparation({
     event.preventDefault();
     setError('');
     try {
-      operationKey.current ??= crypto.randomUUID();
+      operationKey.current ??= prepareReportOperationKey();
       const body = preparePackBody(
         new FormData(event.currentTarget),
         Object.keys(selected),

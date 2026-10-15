@@ -135,3 +135,36 @@ describe('report requests', () => {
     );
   });
 });
+
+describe('browser cryptography preparation', () => {
+  it('uses secure random bytes when native UUID is unavailable', async () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(7);
+      return bytes;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+    const request = vi.fn().mockResolvedValue(Response.json({}));
+    vi.stubGlobal('fetch', request);
+    await reportRequest(id, '/reports', { body: {} });
+    expect(getRandomValues).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0]![1].headers['idempotency-key']).toMatch(
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    );
+  });
+  it.each([undefined, {}])(
+    'refuses before POST without a secure random source (%s)',
+    async (cryptoValue) => {
+      vi.stubGlobal('crypto', cryptoValue);
+      const request = vi.fn();
+      vi.stubGlobal('fetch', request);
+      await expect(reportRequest(id, '/reports', { body: {} })).rejects.toThrow('not sent');
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses archive verification before reading response bytes if digest is unavailable', async () => {
+    vi.stubGlobal('crypto', {});
+    const response = new Response('archive');
+    await expect(readReleasedArchive(response, 7, 'a'.repeat(64))).rejects.toThrow('HTTPS');
+    expect(response.bodyUsed).toBe(false);
+  });
+});

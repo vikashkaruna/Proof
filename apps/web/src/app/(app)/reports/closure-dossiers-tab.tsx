@@ -2,7 +2,12 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { PramaanDossier } from '@axiom/types';
-import { reportRequest, readReleasedArchive } from './report-request';
+import {
+  prepareReportOperationKey,
+  reportRequest,
+  readReleasedArchive,
+  requireArchiveVerification,
+} from './report-request';
 import { SOURCE_REPORT_PAGE_SIZE, listSchema, type ReportSummary } from './report-contract';
 import { DossierViewerModal } from './dossier-viewer-modal';
 
@@ -180,7 +185,7 @@ export function ClosureDossiersTab({
                     : 'board_executive',
             reportId,
             title: title.trim(),
-            operationKey: crypto.randomUUID(),
+            operationKey: prepareReportOperationKey(),
           },
         },
       );
@@ -267,6 +272,7 @@ export function ClosureDossiersTab({
     setBusy(true);
     setActionError('');
     try {
+      requireArchiveVerification();
       const response = await reportRequest(tenantId, `/dossiers/${dossier.id}/archive`);
       const blob = await readReleasedArchive(response, dossier.archiveBytes, dossier.archiveHash);
       const url = URL.createObjectURL(blob);
