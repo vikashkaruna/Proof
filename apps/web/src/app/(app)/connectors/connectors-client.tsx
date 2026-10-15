@@ -231,9 +231,10 @@ export function ConnectorsClient({
         <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-sm">
           <strong className="block text-indigo-900">Public website audit · self-service</strong>
           <p className="mt-1 text-slate-700">
-            Checks a public HTML page and up to three same-site privacy, contact and terms pages.
-            Owners and admins can run it; tenant members with posture access can read the history.
-            It reports only retrieved public content and does not certify compliance.
+            Checks a public HTML page and up to four same-site privacy, contact, terms and optional
+            consent pages (five pages maximum). Owners and admins can run it; tenant members with
+            posture access can read the history. It reports only retrieved public content and does
+            not certify compliance.
           </p>
           <p className="mt-1 text-slate-700">
             Requires permitted outbound access to the public website.

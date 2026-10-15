@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   useEffect,
   useLayoutEffect,
@@ -82,6 +83,12 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
       <p className="text-slate-600">
         Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
       </p>
+      <Link
+        href={`/discovery?checkId=${check.id}`}
+        className="inline-block font-medium text-teal-700 underline"
+      >
+        Review this saved website evidence
+      </Link>
       <PublicFormFacts metadata={check.formMetadata} pageLabel="Starting page" />
       {check.observations && (
         <div>

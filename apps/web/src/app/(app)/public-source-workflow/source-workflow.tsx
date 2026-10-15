@@ -57,8 +57,11 @@ export function PublicSourceWorkflow(props: {
   canInvoke: boolean;
   canReview?: boolean;
   canCapture?: boolean;
+  initialCheckId?: string;
 }) {
-  return <Workflow key={`${props.tenantId}/${props.actorId}`} {...props} />;
+  return (
+    <Workflow key={`${props.tenantId}/${props.actorId}/${props.initialCheckId ?? ''}`} {...props} />
+  );
 }
 function Workflow({
   tenantId,
@@ -66,12 +69,14 @@ function Workflow({
   canInvoke,
   canReview = false,
   canCapture = false,
+  initialCheckId,
 }: {
   tenantId: string;
   actorId: string;
   canInvoke: boolean;
   canReview?: boolean;
   canCapture?: boolean;
+  initialCheckId?: string;
 }) {
   const helpId = useId();
   const [reviewLocked, setReviewLocked] = useState(true);
@@ -80,6 +85,7 @@ function Workflow({
   const [checks, setChecks] = useState<Checks>([]);
   const [engagementId, setEngagement] = useState('');
   const [checkId, setCheck] = useState('');
+  const [lookupCheckId, setLookupCheckId] = useState(initialCheckId ?? '');
   const [selectedEngagement, setSelectedEngagement] = useState<Choices['data'][number] | null>(
     null,
   );
@@ -127,20 +133,38 @@ function Workflow({
       throw new SourceWorkflowError('Engagement choices do not match this tenant.');
     if (active.current) setChoices(parsed);
   }
-  async function readChecks() {
-    const parsed = checksSchema.parse(await sourceRequest(tenantId, '/public-website-checks'));
-    if (active.current) setChecks(parsed.data);
+  async function readChecks(id?: string) {
+    const parsed = checksSchema.parse(
+      await sourceRequest(
+        tenantId,
+        `/public-website-checks${id ? `?id=${encodeURIComponent(id)}` : ''}`,
+      ),
+    );
+    if (id && (parsed.data.length !== 1 || parsed.data[0]!.id !== id))
+      throw new SourceWorkflowError('This saved check is unavailable in the current organisation.');
+    if (active.current)
+      setChecks((current) => {
+        const retained = id ? parsed.data[0] : current.find((row) => row.id === checkId);
+        return retained
+          ? [retained, ...parsed.data, ...current]
+              .filter((row, index, all) => all.findIndex((item) => item.id === row.id) === index)
+              .slice(0, 20)
+          : parsed.data;
+      });
+    return parsed.data;
   }
   useEffect(() => {
     active.current = true;
     void Promise.resolve().then(async () => {
       if (!active.current) return;
       let journalError = false;
+      let retainedRequest = false;
       try {
         const retained = loadSourceOperation(localStorage, tenantId, actorId);
         setPending(retained);
         setStorageReady(true);
         if (retained) {
+          retainedRequest = true;
           setEngagement(retained.engagementId);
           setCheck(retained.checkId);
           setNotice('A retained request needs reconciliation before another action.');
@@ -152,7 +176,9 @@ function Workflow({
         );
       }
       try {
-        await Promise.all([readChoices(), readChecks()]);
+        const requested = !journalError && !retainedRequest ? initialCheckId : undefined;
+        await Promise.all([readChoices(), readChecks(requested)]);
+        if (requested && active.current) setCheck(requested);
       } catch {
         if (active.current && !journalError)
           setError('Source choices could not be loaded. Refresh choices to retry.');
@@ -551,9 +577,47 @@ function Workflow({
             ))}
           </select>
           <span id="source-check-help" className="mt-1 block text-xs text-slate-600">
-            Latest 20 saved checks. Source HTML is never fetched from this screen.
+            Latest 20 saved checks, with any selected older check retained. Load an earlier check by
+            its saved identifier below. Source HTML is never fetched from this screen.
           </span>
         </label>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-sm">
+          Earlier saved website check identifier
+          <input
+            className={field}
+            value={lookupCheckId}
+            maxLength={36}
+            disabled={locked}
+            onChange={(event) => setLookupCheckId(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className={button}
+          disabled={locked}
+          onClick={() =>
+            void task(async () => {
+              const id = z.uuid().safeParse(lookupCheckId.trim());
+              if (!id.success)
+                throw new SourceWorkflowError('Enter the saved website check identifier.');
+              const canonicalId = id.data.toLowerCase();
+              await readChecks(canonicalId);
+              if (!active.current) return;
+              setCheck(canonicalId);
+              setPreview(null);
+              setHistory(null);
+              setObservation(null);
+              setSelectedDrishti(null);
+              setNotice(
+                'Saved website check selected. Choose an engagement and preview its source.',
+              );
+            })
+          }
+        >
+          Load saved check
+        </button>
       </div>
       <div className="flex flex-wrap gap-2">
         <button

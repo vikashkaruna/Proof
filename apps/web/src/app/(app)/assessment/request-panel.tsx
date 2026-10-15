@@ -611,6 +611,9 @@ function RequestPanel({
                 </Link>
                 .
               </p>
+              <Link href="/reports" className="inline-block text-teal-700 underline">
+                Continue to Reports
+              </Link>
               <button
                 type="button"
                 onClick={archive}
