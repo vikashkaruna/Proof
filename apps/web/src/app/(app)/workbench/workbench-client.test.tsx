@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { AgentInvocationError } from '@/lib/invoke-agent';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentWorkbenchClient } from './workbench-client';
 import { moduleMeta } from '@/lib/module-meta';
@@ -16,6 +17,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 const props = {
+  tenantId: '10000000-0000-4000-8000-000000000001',
   userEmail: 'operator@example.com',
   ledgerTodayCount: null,
   awaitingReviewCount: null,
@@ -25,7 +27,9 @@ const props = {
   environment: 'local',
   loadError: true,
 };
-beforeEach(() => invoke.mockReset());
+beforeEach(() => {
+  invoke.mockReset();
+});
 afterEach(cleanup);
 
 it('shows unavailable metrics without fictional health, redaction, or reconciled plans', () => {
@@ -70,7 +74,9 @@ it('invokes a supported read-only agent and shows only returned proof references
   await waitFor(() =>
     expect(screen.getByRole('status').textContent).toContain('Execution completed'),
   );
-  expect(invoke).toHaveBeenCalledWith('drishti', { scope: 'workbench' });
+  expect(invoke).toHaveBeenCalledWith('drishti', '10000000-0000-4000-8000-000000000001', {
+    scope: 'workbench',
+  });
   expect(screen.getByRole('link', { name: /Ledger entry #ledger-1/ }).getAttribute('href')).toBe(
     '/ledger?q=ledger-1',
   );
@@ -107,4 +113,93 @@ it('routes Sudhaar to the source-bound plans workflow with no generic invocation
     '/plans',
   );
   expect(screen.queryByRole('button', { name: 'Run sudhaar' })).toBeNull();
+});
+
+it.each(['success', 'failure'])(
+  'suppresses a late workbench %s after a tenant change',
+  async (outcome) => {
+    let resolve!: (value: unknown) => void;
+    const deferred = new Promise<unknown>((yes) => {
+      resolve = yes;
+    });
+    invoke.mockImplementation(async () => {
+      const value = await deferred;
+      if (outcome === 'failure') throw new Error('tenant-A-error');
+      return value;
+    });
+    const view = render(<AgentWorkbenchClient {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run drishti' }));
+
+    view.rerender(
+      <AgentWorkbenchClient {...props} tenantId="20000000-0000-4000-8000-000000000002" />,
+    );
+    resolve({ status: 'succeeded', latency_ms: 9, ledger_entry_ids: ['tenant-A-receipt'] });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Run drishti' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    expect(invoke.mock.calls[0]).toEqual(['drishti', props.tenantId, { scope: 'workbench' }]);
+    expect(screen.queryByText(/Execution completed/)).toBeNull();
+    expect(document.body.textContent).not.toContain('tenant-A-receipt');
+    expect(screen.queryByText('Could not confirm the agent outcome.')).toBeNull();
+  },
+);
+it('hides a completed workbench receipt after switching organisations', async () => {
+  invoke.mockResolvedValue({
+    status: 'succeeded',
+    latency_ms: 9,
+    ledger_entry_ids: ['tenant-A-receipt'],
+  });
+  const view = render(<AgentWorkbenchClient {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Run drishti' }));
+  await screen.findByText(/Execution completed/);
+  view.rerender(
+    <AgentWorkbenchClient {...props} tenantId="20000000-0000-4000-8000-000000000002" />,
+  );
+  expect(screen.queryByText(/Execution completed/)).toBeNull();
+  expect(document.body.textContent).not.toContain('tenant-A-receipt');
+});
+
+it.each(['success', 'failure'])(
+  'ignores a deferred workbench %s after unmount',
+  async (outcome) => {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: Error) => void;
+    invoke.mockReturnValue(
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      }),
+    );
+    const observed = vi.fn(() => 9);
+    const error = new AgentInvocationError('original-tenant');
+    Object.defineProperty(error, 'message', { get: observed });
+    const value = {
+      status: 'succeeded',
+      get latency_ms() {
+        return observed();
+      },
+      ledger_entry_ids: ['old-receipt'],
+    };
+    const view = render(<AgentWorkbenchClient {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run drishti' }));
+    view.unmount();
+    await act(async () => {
+      if (outcome === 'success') resolve(value);
+      else reject(error);
+    });
+    expect(observed).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+  },
+);
+
+it('routes Parikshan to the assessment workflow without a generic invocation', () => {
+  render(<AgentWorkbenchClient {...props} />);
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'parikshan' } });
+  expect(screen.getByRole('link', { name: 'Open parikshan workflow' }).getAttribute('href')).toBe(
+    '/assessment',
+  );
+  expect(screen.queryByRole('button', { name: 'Run parikshan' })).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
 });

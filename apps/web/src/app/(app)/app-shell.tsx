@@ -460,7 +460,12 @@ export function AppShell({
               ▾
             </span>
           </summary>
-          <SidebarAgentPanel capabilities={capabilities} transparent className="border-t-0 pt-0" />
+          <SidebarAgentPanel
+            tenantId={selectedTenantId}
+            capabilities={capabilities}
+            transparent
+            className="border-t-0 pt-0"
+          />
         </details>
       )}
       {/* User Profile Bar */}

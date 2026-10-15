@@ -5,7 +5,7 @@
  * (the analyst lost it on 2026-10-12), and `ALWAYS_MFA_REQUIRED` holds the
  * founder at enrolment until a TOTP challenge is satisfied. These were `fixme` for exactly one reason: the
  * harness did not start a BFF, so there was nothing to satisfy the challenge
- * against. It starts one now, so the analyst signs in, clears the login-MFA
+ * against. It starts one now, so the founder signs in, clears the login-MFA
  * gate with a real code, and reaches the workbench the way a person does.
  */
 
@@ -38,6 +38,11 @@ test.describe('Agent ↔ UI communication', () => {
     await expect(page.locator('option[value="parikshan"]')).toContainText(/Parikshan/i);
     await expect(page.locator('option[value="sudhaar"]')).toContainText(/Sudhaar/i);
     await expect(page.locator('option[value="karya"]')).toContainText(/Karya/i);
+    await page.getByRole('main').getByRole('combobox').selectOption('parikshan');
+    await expect(
+      page.getByRole('link', { name: 'Open parikshan workflow', exact: true }),
+    ).toHaveAttribute('href', '/assessment');
+    await expect(page.getByRole('button', { name: 'Run parikshan', exact: true })).toHaveCount(0);
   });
 
   test('the workbench renders the autonomy badges', async ({ page }) => {
@@ -57,8 +62,10 @@ test('workbench refuses absent/failed statuses and shows only confirmed success'
   await signInFreshFounder(page, 'workbench-outcomes');
   let mode: 'missing' | 'failed' | 'success' = 'missing';
   let sent: Record<string, unknown> = {};
+  let sentTenant = '';
   await page.route('**/api/bff/v1/agents/drishti/run', async (route) => {
     sent = route.request().postDataJSON() as Record<string, unknown>;
+    sentTenant = route.request().headers()['x-tenant-id'] ?? '';
     await route.fulfill({
       status: 200,
       json: {
@@ -78,6 +85,8 @@ test('workbench refuses absent/failed statuses and shows only confirmed success'
   await expect(page.getByRole('main').getByRole('alert')).toContainText('could not be confirmed');
   await expect(page.getByText(/Execution completed/)).toHaveCount(0);
   expect(sent.scope).toBe('workbench');
+  expect(sent.tenant_id).toBe(state.tenantA.id);
+  expect(sentTenant).toBe(state.tenantA.id);
   expect(sent.correlation_id).toEqual(expect.any(String));
   mode = 'failed';
   await run.click();

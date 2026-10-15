@@ -278,3 +278,65 @@ it('does not offer another revocation after a confirmed revoke with an unreadabl
   fireEvent.click(screen.getByRole('button', { name: 'Revoke authenticator' }));
   expect(fetcher).toHaveBeenCalledTimes(4);
 });
+
+it.each([
+  ['Replace authenticator', 'enrolment', 'mfa-replace-step-up'],
+  ['Revoke authenticator', 'factor_revocation', 'mfa-revoke-step-up'],
+])(
+  'uses fresh secure HTTP keys for %s with the exact live factor binding',
+  async (label, purpose, panel) => {
+    let entropy = 0;
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(++entropy);
+      return bytes;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+    const fetcher = vi
+      .fn()
+      .mockImplementation(async () => Response.json({ challengeId: 'challenge-http' }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<MfaEnrolment {...base} initialStatus={active} />);
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await screen.findByTestId(panel);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await screen.findByTestId(panel);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetcher.mock.calls) {
+      expect(url).toBe('/api/bff/v1/mfa/challenge');
+      expect(init.headers).toMatchObject({
+        'X-Tenant-Id': 'tenant-1',
+        'Idempotency-Key': expect.stringMatching(
+          /^mfa-challenge-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+        ),
+      });
+      expect(JSON.parse(init.body)).toEqual({ purpose, factorId: 'factor-1' });
+    }
+    expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).not.toBe(
+      fetcher.mock.calls[1]![1].headers['Idempotency-Key'],
+    );
+    expect(getRandomValues).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each([
+  ['Replace authenticator', 'mfa-replace-step-up'],
+  ['Revoke authenticator', 'mfa-revoke-step-up'],
+])(
+  'keeps %s recoverable without sending a challenge when secure randomness is absent',
+  async (label, panel) => {
+    vi.stubGlobal('crypto', {});
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ challengeId: 'challenge-restored' }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<MfaEnrolment {...base} initialStatus={active} />);
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await screen.findByText(/could not be prepared.*Nothing was sent/);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(panel)).toBeNull();
+    expect((screen.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false);
+    vi.stubGlobal('crypto', { randomUUID: () => 'restored-factor' });
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await screen.findByTestId(panel);
+    expect(fetcher).toHaveBeenCalledOnce();
+  },
+);

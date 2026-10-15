@@ -106,7 +106,9 @@ describe('every challenge caller supplies its own key', () => {
 
     // And that key must vary per attempt. One file builds it inline and the
     // other through a named helper, so this asserts the module generates a
-    // fresh value somewhere rather than pinning one spelling of it.
-    expect(source).toContain('randomUUID');
+    // fresh value through the shared CSPRNG helper; behavioral component tests
+    // also prove distinct per-attempt keys when randomUUID is unavailable.
+    expect(source).toContain('generateUUID');
+    expect(source).not.toContain('crypto.randomUUID(');
   });
 });

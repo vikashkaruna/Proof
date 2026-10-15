@@ -119,6 +119,20 @@ export function ApprovalActions({
       setError('Select at least one action to approve.');
       return;
     }
+    let challengeKey: string;
+    let requestText: string;
+    try {
+      challengeKey = `mfa-challenge-${generateUUID()}`;
+      requestText = JSON.stringify({
+        purpose: 'approval_issuance',
+        planId,
+        actionIds: Array.from(selected),
+        mode: 'batch',
+      });
+    } catch {
+      setError('The verification request could not be prepared. Nothing was sent. Try again.');
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch('/api/bff/v1/mfa/challenge', {
@@ -130,14 +144,9 @@ export function ApprovalActions({
         headers: {
           'Content-Type': 'application/json',
           'X-Tenant-Id': tenantId,
-          'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
+          'Idempotency-Key': challengeKey,
         },
-        body: JSON.stringify({
-          purpose: 'approval_issuance',
-          planId,
-          actionIds: Array.from(selected),
-          mode: 'batch',
-        }),
+        body: requestText,
       });
       if (!res.ok) {
         const { code, message } = await readError(res, 'Could not start verification');
