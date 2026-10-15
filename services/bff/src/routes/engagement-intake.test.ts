@@ -11,6 +11,21 @@ vi.mock('@axiom/supabase', () => ({
 const actor = '11111111-1111-4111-8111-111111111111';
 const tenant = '22222222-2222-4222-8222-222222222222';
 const id = '33333333-3333-4333-8333-333333333333';
+const metadata = {
+  tenant_id: tenant,
+  estate_id: id,
+  library_version: '0.1.1',
+  title: 'Reviewed intake',
+  status: 'intake',
+  posture_score: null,
+  estimated_exposure_inr: null,
+  lead_reviewer_id: actor,
+  started_at: '2026-10-16T00:00:00Z',
+  completed_at: null,
+  created_at: '2026-10-16T00:00:00Z',
+  updated_at: '2026-10-16T00:00:00Z',
+};
+
 function app(role: UserRole = UserRole.OWNER) {
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {
@@ -50,7 +65,7 @@ beforeEach(() => {
     }),
   });
   state.rpc.mockResolvedValue({
-    data: { id, receipt: '13', legacy: false, replayed: false },
+    data: { ...metadata, id, receipt: '13', legacy: false, replayed: false },
     error: null,
   });
 });
@@ -93,7 +108,7 @@ it('refuses viewer, malformed input and changed actor before invoking the writer
 });
 it('supports legacy callers without a body request key and truthful historical readback', async () => {
   state.rpc.mockResolvedValue({
-    data: { id, receipt: null, legacy: true, replayed: true },
+    data: { ...metadata, id, receipt: null, legacy: true, replayed: true },
     error: null,
   });
   const response = await send(UserRole.OWNER, {
@@ -138,6 +153,34 @@ it.each([
   { id, receipt: '0', legacy: false, replayed: false },
   { id, receipt: '9223372036854775808', legacy: false, replayed: false },
 ])('withholds creation confirmation for a mismatched or incoherent readback %#', async (data) => {
-  state.rpc.mockResolvedValue({ data, error: null });
+  state.rpc.mockResolvedValue({ data: { ...metadata, ...data }, error: null });
+  expect((await send()).status).toBe(503);
+});
+
+it('preserves estate and saved metadata fields required by existing API consumers', async () => {
+  const r = await send();
+  expect(r.status).toBe(201);
+  expect(await r.json()).toMatchObject({
+    ...metadata,
+    id,
+    receipt: '13',
+    legacy: false,
+    replayed: false,
+  });
+});
+it('returns truthful current metadata on exact replay after lifecycle changes', async () => {
+  state.rpc.mockResolvedValue({
+    data: { ...metadata, id, status: 'assessment', receipt: '13', legacy: false, replayed: true },
+    error: null,
+  });
+  const r = await send();
+  expect(r.status).toBe(200);
+  expect(await r.json()).toMatchObject({ status: 'assessment', estate_id: id });
+});
+it('rejects a foreign-tenant engagement readback even with a plausible receipt', async () => {
+  state.rpc.mockResolvedValue({
+    data: { ...metadata, tenant_id: id, id, receipt: '13', legacy: false, replayed: false },
+    error: null,
+  });
   expect((await send()).status).toBe(503);
 });

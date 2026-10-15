@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { Capability } from '@axiom/types';
+import { Capability, EngagementStatus } from '@axiom/types';
 import { createHumanActionWriter } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
@@ -16,6 +16,18 @@ const input = z.object({
 const receipt = z
   .object({
     id: z.uuid(),
+    tenant_id: z.uuid(),
+    estate_id: z.uuid().nullable(),
+    library_version: z.string().min(1).max(200),
+    title: z.string(),
+    status: z.enum(EngagementStatus),
+    posture_score: z.number().min(0).max(100).nullable(),
+    estimated_exposure_inr: z.number().nonnegative().nullable(),
+    lead_reviewer_id: z.uuid().nullable(),
+    started_at: z.iso.datetime({ offset: true }),
+    completed_at: z.iso.datetime({ offset: true }).nullable(),
+    created_at: z.iso.datetime({ offset: true }),
+    updated_at: z.iso.datetime({ offset: true }),
     receipt: z
       .string()
       .regex(/^[1-9][0-9]{0,18}$/)
@@ -32,6 +44,30 @@ const receipt = z
     )
       ctx.addIssue({ code: 'custom', message: 'Intake receipt refused' });
   });
+/** Confirm the actual saved row and atomic receipt before acknowledging creation. */
+export function verifyEngagementIntakeReceipt(
+  value: unknown,
+  scope: { tenantId: string; actorId: string; request: z.infer<typeof input> },
+) {
+  const result = receipt.parse(value);
+  if (result.tenant_id.toLowerCase() !== scope.tenantId.toLowerCase())
+    throw new Error('intake_tenant_mismatch');
+  if (
+    !result.replayed &&
+    (result.title !== scope.request.title ||
+      result.library_version !== scope.request.libraryVersion ||
+      result.estate_id !== (scope.request.estateId ?? null) ||
+      result.lead_reviewer_id !== scope.actorId ||
+      result.status !== 'intake')
+  )
+    throw new Error('intake_context_mismatch');
+  if (
+    scope.request.requestKey &&
+    result.id.toLowerCase() !== scope.request.requestKey.toLowerCase()
+  )
+    throw new Error('intake_reference_mismatch');
+  return result;
+}
 export function engagementIntakeRoutes() {
   const app = new Hono<{ Variables: Variables }>();
   app.use('/engagements', boundedJsonBody(4096));
@@ -120,12 +156,11 @@ export function engagementIntakeRoutes() {
                   : 'The request was refused. Check the original recorded request before changing its intent.';
         return c.json({ error: { code, message } }, status);
       }
-      const result = receipt.parse(data);
-      if (
-        parsed.data.requestKey &&
-        result.id.toLowerCase() !== parsed.data.requestKey.toLowerCase()
-      )
-        throw new Error('intake_reference_mismatch');
+      const result = verifyEngagementIntakeReceipt(data, {
+        tenantId: c.get('tenantId'),
+        actorId: c.get('user').id,
+        request: parsed.data,
+      });
       return c.json(result, result.replayed ? 200 : 201);
     } catch {
       return c.json(

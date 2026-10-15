@@ -11,6 +11,9 @@ create function pg_temp.create_intake(k text default 'operation-135',id uuid def
  select public.create_engagement_intake('01350000-0000-4000-8000-000000000011','01350000-0000-4000-8000-000000000001',k,id,title,lib,estate,gen_random_uuid());$$;
 do $$declare r jsonb;again jsonb;before_count bigint;role_name text;begin
  r:=pg_temp.create_intake();
+ perform pg_temp.ok(r->>'estate_id'='01350000-0000-4000-8000-000000000021' and r->>'tenant_id'='01350000-0000-4000-8000-000000000011'
+  and r->>'library_version'='intake-135' and r->>'title'='Reviewed intake' and r->>'status'='intake'
+  and r ? 'created_at' and r ? 'started_at' and r ? 'posture_score','existing full engagement response contract preserved');
  perform pg_temp.ok(r->>'legacy'='false' and r->>'replayed'='false' and r->>'receipt' is not null,'new intake audited');
  again:=pg_temp.create_intake();
  perform pg_temp.ok(again->>'id'=r->>'id' and again->>'receipt'=r->>'receipt' and again->>'replayed'='true','lost response replay returns original receipt');
@@ -20,6 +23,10 @@ do $$declare r jsonb;again jsonb;before_count bigint;role_name text;begin
  perform pg_temp.ok(pg_temp.create_intake('alternate-header','01350000-0000-4000-8000-000000000039')->>'error'='request_key_conflict','alternate header cannot authorize another intent');
  perform pg_temp.ok((select count(*)=1 from public.audit_ledger where action_type='engagement.created'),'one creation event');
  perform pg_temp.ok(pg_temp.create_intake('operation-135','01350000-0000-4000-8000-000000000031','Changed title')->>'error'='request_key_conflict','changed body refused');
+ -- Replays return truthful saved lifecycle metadata, not fabricated intake state.
+ update public.engagements set status='assessment' where id='01350000-0000-4000-8000-000000000031';
+ again:=pg_temp.create_intake();
+ perform pg_temp.ok(again->>'status'='assessment' and again->>'receipt'=r->>'receipt','current metadata and original receipt on replay');
  -- Immutable accepted intent remains replayable after mutable lifecycle changes.
  update public.estates set status='archived' where id='01350000-0000-4000-8000-000000000021';
  update public.control_libraries set is_current=false where version='intake-135';
@@ -74,4 +81,5 @@ set constraints all immediate;
 select pg_temp.ok(has_function_privilege('human_action_writer','public.create_engagement_intake(uuid,uuid,text,uuid,text,text,uuid,uuid)','execute'),'human writer RPC');
 select pg_temp.ok(not has_function_privilege('service_role','public.create_engagement_intake(uuid,uuid,text,uuid,text,text,uuid,uuid)','execute'),'generic reader cannot create');
 select pg_temp.ok(not has_table_privilege('human_action_writer','public.engagement_intake_receipts','insert'),'no raw receipt write');
+select pg_temp.ok(not has_function_privilege('human_action_writer','controller_security.create_engagement_intake_before_0136(uuid,uuid,text,uuid,text,text,uuid,uuid)','execute'),'private inner intake inaccessible to caller');
 rollback;

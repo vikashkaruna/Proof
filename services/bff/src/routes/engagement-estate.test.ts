@@ -70,7 +70,7 @@ beforeEach(() => {
       return existing.title === args.p_title &&
         existing.library_version === args.p_library_version &&
         existing.estate_id === args.p_estate_id
-        ? { id: existing.id, receipt: '1', legacy: false, replayed: true }
+        ? { ...existing, receipt: '1', legacy: false, replayed: true }
         : { error: 'request_key_conflict' };
     if (
       !fake
@@ -87,8 +87,16 @@ beforeEach(() => {
       estate_id: args.p_estate_id,
       library_version: args.p_library_version,
       title: args.p_title,
+      lead_reviewer_id: args.p_actor_id,
+      status: 'intake',
+      posture_score: null,
+      estimated_exposure_inr: null,
+      started_at: '2026-10-16T00:00:00Z',
+      completed_at: null,
+      created_at: '2026-10-16T00:00:00Z',
+      updated_at: '2026-10-16T00:00:00Z',
     });
-    return { id: row.id, receipt: '1', legacy: false, replayed: false };
+    return { ...row, receipt: '1', legacy: false, replayed: false };
   });
   db.current = fake;
 });
