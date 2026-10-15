@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EstateClient, MutationForm } from './estate-client';
 import { CreateEstateRequestSchema } from '@axiom/types';
@@ -704,3 +704,345 @@ it.each(['rng', 'body', 'path'])(
     view.unmount();
   },
 );
+
+it.each(['tenant', 'method'])(
+  'retains an uncertain intent but refuses replay under a changed %s',
+  async (change) => {
+    const uuid = vi.fn(() => 'scope-request-1');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('lost response'))
+      .mockResolvedValueOnce(Response.json({ data: { id: 'estate-original' } }));
+    vi.stubGlobal('fetch', fetcher);
+    const form = (tenantId: string, method: 'POST' | 'PATCH') => (
+      <MutationForm
+        tenantId={tenantId}
+        method={method}
+        path="/estates"
+        label="Save scoped estate"
+        body={(data) => ({ name: String(data.get('name')) })}
+      >
+        <label>
+          Scoped name
+          <input name="name" defaultValue="Original intent" />
+        </label>
+      </MutationForm>
+    );
+    const view = render(form('tenant-A', 'POST'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save scoped estate' }));
+    await screen.findByText(/result is unknown/);
+    const first = fetcher.mock.calls[0]!;
+    view.rerender(
+      form(change === 'tenant' ? 'tenant-B' : 'tenant-A', change === 'method' ? 'PATCH' : 'POST'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText(/Return to the original organisation and operation/);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Scoped name').closest('fieldset')?.disabled).toBe(true);
+    view.rerender(form('tenant-A', 'POST'));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText('Saved.');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+  },
+);
+
+it('allows a fresh organisation and method only after a definite refusal clears the old intent', async () => {
+  let counter = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `scope-new-${++counter}` });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ error: { message: 'Definitely refused' } }, { status: 400 }),
+    )
+    .mockResolvedValueOnce(Response.json({ data: { id: 'estate-B' } }));
+  vi.stubGlobal('fetch', fetcher);
+  const form = (tenantId: string, method: 'POST' | 'PATCH') => (
+    <MutationForm
+      tenantId={tenantId}
+      method={method}
+      path="/estates"
+      label="Save scoped estate"
+      body={() => ({ name: tenantId })}
+    >
+      <input name="name" />
+    </MutationForm>
+  );
+  const view = render(form('tenant-A', 'POST'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save scoped estate' }));
+  await screen.findByText('Definitely refused');
+  view.rerender(form('tenant-B', 'PATCH'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save scoped estate' }));
+  await screen.findByText('Saved.');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1]![1]).toMatchObject({
+    method: 'PATCH',
+    headers: { 'X-Tenant-Id': 'tenant-B', 'Idempotency-Key': 'scope-new-2' },
+  });
+  expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ name: 'tenant-B' });
+});
+
+it.each(['tenant', 'method'])(
+  'does not reset or invoke success callbacks in a changed %s after an old success settles',
+  async (change) => {
+    let finish!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const fetcher = vi.fn().mockReturnValue(response);
+    vi.stubGlobal('fetch', fetcher);
+    const originalSuccess = vi.fn();
+    const nextSuccess = vi.fn();
+    const form = (tenantId: string, method: 'POST' | 'PATCH', success: () => void) => (
+      <MutationForm
+        tenantId={tenantId}
+        method={method}
+        path="/estates"
+        label="Save scoped estate"
+        body={(data) => ({ name: String(data.get('name')) })}
+        onSuccess={success}
+      >
+        <label>
+          Scoped name
+          <input name="name" defaultValue="Original intent" />
+        </label>
+      </MutationForm>
+    );
+    const view = render(form('tenant-A', 'POST', originalSuccess));
+    fireEvent.click(screen.getByRole('button', { name: 'Save scoped estate' }));
+    expect(fetcher).toHaveBeenCalledOnce();
+    view.rerender(
+      form(
+        change === 'tenant' ? 'tenant-B' : 'tenant-A',
+        change === 'method' ? 'PATCH' : 'POST',
+        nextSuccess,
+      ),
+    );
+    fireEvent.change(screen.getByLabelText('Scoped name'), {
+      target: { value: 'New scope input' },
+    });
+    await act(async () => {
+      finish(Response.json({ data: { id: 'estate-A' } }));
+    });
+    await screen.findByText(/original organisation or operation completed/);
+    expect((screen.getByLabelText('Scoped name') as HTMLInputElement).value).toBe(
+      'New scope input',
+    );
+    expect(originalSuccess).not.toHaveBeenCalled();
+    expect(nextSuccess).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Retry same request' })).toBeNull();
+  },
+);
+
+it.each(['response', 'network', 'malformed'])(
+  'retains a %s outcome that becomes unknown after the organisation changes',
+  async (outcome) => {
+    let finish!: (response: Response) => void;
+    let fail!: (error: Error) => void;
+    const response = new Promise<Response>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+    const fetcher = vi
+      .fn()
+      .mockReturnValueOnce(response)
+      .mockResolvedValueOnce(Response.json({ data: { id: 'estate-A' } }));
+    vi.stubGlobal('fetch', fetcher);
+    const uuid = vi.fn(() => 'deferred-scope-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    const form = (tenantId: string) => (
+      <MutationForm
+        tenantId={tenantId}
+        method="POST"
+        path="/estates"
+        label="Save scoped estate"
+        body={() => ({ name: 'Original' })}
+        onSuccess={onSuccess}
+      >
+        <input name="name" />
+      </MutationForm>
+    );
+    const view = render(form('tenant-A'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save scoped estate' }));
+    const first = fetcher.mock.calls[0]!;
+    view.rerender(form('tenant-B'));
+    await act(async () => {
+      if (outcome === 'network') fail(new Error('private-network-detail'));
+      else
+        finish(
+          outcome === 'response'
+            ? Response.json({ error: { code: 'unknown' } }, { status: 503 })
+            : Response.json({ data: {} }),
+        );
+    });
+    await screen.findByText(/Return to the original organisation and operation/);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    expect(fetcher).toHaveBeenCalledOnce();
+    view.rerender(form('tenant-A'));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText('Saved.');
+    expect(fetcher.mock.calls[1]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(onSuccess).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(['callback', 'refresh'])(
+  'keeps a confirmed save settled when its %s UI follow-up throws',
+  async (failure) => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ data: { id: 'saved-estate' } }));
+    vi.stubGlobal('fetch', fetcher);
+    const uuid = vi.fn(() => 'confirmed-save-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    if (failure === 'callback')
+      onSuccess.mockImplementation(() => {
+        throw new Error('private-callback-detail');
+      });
+    else
+      refresh.mockImplementation(() => {
+        throw new Error('private-refresh-detail');
+      });
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByText(/Saved.*reload to review/);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Retry same request' })).toBeNull();
+    expect(screen.queryByText(/Keep this form open/)).toBeNull();
+    expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('private-');
+  },
+);
+
+it.each([
+  ['network', 401],
+  ['network', 403],
+  ['network', 409],
+  ['response', 401],
+  ['response', 403],
+  ['response', 409],
+  ['malformed', 401],
+  ['malformed', 403],
+  ['malformed', 409],
+])(
+  'retains the original %s-unknown write after a later HTTP %s refusal until positive settlement',
+  async (outcome, status) => {
+    const uuid = vi.fn(() => 'sticky-original-key');
+    vi.stubGlobal('crypto', { randomUUID: uuid });
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        if (outcome === 'network') throw new Error('response lost');
+        return outcome === 'response'
+          ? Response.json({ error: { message: 'Unknown write' } }, { status: 503 })
+          : Response.json({ data: {} });
+      })
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'access_refused', message: 'Restore access first.' } },
+          { status: Number(status) },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { id: 'original-estate' } }));
+    vi.stubGlobal('fetch', fetcher);
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByRole('button', { name: 'Retry same request' });
+    const first = fetcher.mock.calls[0]!;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText(/Restore access first/);
+    expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save estate' })).toBeNull();
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
+    await screen.findByText('Saved.');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls[1]).toEqual(first);
+    expect(fetcher.mock.calls[2]).toEqual(first);
+    expect(uuid).toHaveBeenCalledOnce();
+    expect(onSuccess).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([400, 401, 403, 409])(
+  'permits correction with a fresh key after an initial definite HTTP %s refusal',
+  async (status) => {
+    let key = 0;
+    vi.stubGlobal('crypto', { randomUUID: () => `definite-key-${++key}` });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: 'definite_refusal',
+              message: 'Definitely refused without a prior unknown.',
+            },
+          },
+          { status },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { id: 'corrected-estate' } }));
+    vi.stubGlobal('fetch', fetcher);
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByText('Definitely refused without a prior unknown.');
+    expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Estate name'), {
+      target: { value: 'Corrected after refusal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+    await screen.findByText('Saved.');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).toBe('definite-key-1');
+    expect(fetcher.mock.calls[1]![1].headers['Idempotency-Key']).toBe('definite-key-2');
+    expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual({ name: 'Corrected after refusal' });
+  },
+);
+
+it('does not invoke old save callbacks or refresh after its tenant-keyed form unmounts', async () => {
+  let finish!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi.fn().mockReturnValue(response);
+  vi.stubGlobal('fetch', fetcher);
+  const view = show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  expect(fetcher).toHaveBeenCalledOnce();
+  view.unmount();
+  await act(async () => {
+    finish(Response.json({ data: { id: 'old-tenant-estate' } }));
+  });
+  expect(onSuccess).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('falls back safely when a refused response contains a non-string error message', async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    Response.json(
+      {
+        error: { code: 'invalid_payload', message: { unexpected: 'untrusted-error-detail' } },
+      },
+      { status: 400 },
+    ),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save estate' }));
+  await screen.findByText('The request could not be completed.');
+  expect(document.body.textContent).not.toContain('untrusted-error-detail');
+  expect(screen.getByLabelText('Estate name').closest('fieldset')?.disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Retry same request' })).toBeNull();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(onSuccess).not.toHaveBeenCalled();
+});

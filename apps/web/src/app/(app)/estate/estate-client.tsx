@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import {
@@ -91,7 +91,21 @@ export function MutationForm({
   schema?: z.ZodType;
 }) {
   const router = useRouter();
-  const pending = useRef<{ key: string; body: string; path: string } | null>(null);
+  const pending = useRef<{
+    key: string;
+    body: string;
+    path: string;
+    tenantId: string;
+    method: 'POST' | 'PATCH';
+    outcomeUnknown: boolean;
+  } | null>(null);
+  const currentScope = useRef({ tenantId, method, active: true });
+  useLayoutEffect(() => {
+    currentScope.current = { tenantId, method, active: true };
+    return () => {
+      currentScope.current.active = false;
+    };
+  }, [tenantId, method]);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
@@ -114,6 +128,9 @@ export function MutationForm({
           key: generateUUID(),
           body: JSON.stringify(parsed?.data ?? payload),
           path: typeof path === 'string' ? path : path(form),
+          tenantId,
+          method,
+          outcomeUnknown: false,
         };
       } catch {
         // No request exists yet. Keep the form editable; uncertainty applies
@@ -126,26 +143,58 @@ export function MutationForm({
         return;
       }
     }
+    const attempt = pending.current;
+    const sameScope = () =>
+      currentScope.current.active &&
+      currentScope.current.tenantId === attempt.tenantId &&
+      currentScope.current.method === attempt.method;
+    const scopeMessage =
+      'Return to the original organisation and operation to resolve and retry this same request.';
+    if (!sameScope()) {
+      setUncertain(true);
+      setMessage(scopeMessage);
+      return;
+    }
     setBusy(true);
     setMessage('');
     setIssues([]);
     try {
-      const res = await fetch(`/api/bff/v1${pending.current.path}`, {
-        method,
+      const res = await fetch(`/api/bff/v1${attempt.path}`, {
+        method: attempt.method,
         headers: {
           'Content-Type': 'application/json',
-          'X-Tenant-Id': tenantId,
-          'Idempotency-Key': pending.current.key,
+          'X-Tenant-Id': attempt.tenantId,
+          'Idempotency-Key': attempt.key,
         },
-        body: pending.current.body,
+        body: attempt.body,
       });
       const result = await res.json();
       if (!res.ok) {
+        const previouslyUnknown = attempt.outcomeUnknown;
         const ambiguous =
-          res.status >= 500 || String(result.error?.code ?? '').startsWith('idempotency_');
+          previouslyUnknown ||
+          res.status >= 500 ||
+          String(result.error?.code ?? '').startsWith('idempotency_');
+        attempt.outcomeUnknown = ambiguous;
         setUncertain(ambiguous);
         if (!ambiguous) pending.current = null;
-        setMessage(result.error?.message ?? 'The request could not be completed.');
+        if (!sameScope()) {
+          setMessage(
+            ambiguous
+              ? scopeMessage
+              : 'The request in the original organisation or operation was refused. Return there to review it.',
+          );
+          return;
+        }
+        const detail =
+          typeof result.error?.message === 'string'
+            ? result.error.message
+            : 'The request could not be completed.';
+        setMessage(
+          previouslyUnknown
+            ? `The original result remains unknown. Retry this same request after resolving the refusal. ${detail}`
+            : detail,
+        );
         const parsedIssues = validationIssues.safeParse(result.error?.issues);
         if (!ambiguous && parsedIssues.success) {
           setIssues(formatIssues(parsedIssues.data));
@@ -153,21 +202,42 @@ export function MutationForm({
         return;
       }
       if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
+        attempt.outcomeUnknown = true;
         setUncertain(true);
         setMessage(
-          'The server response did not identify the saved record. Retry the same request before making another change.',
+          sameScope()
+            ? 'The server response did not identify the saved record. Retry the same request before making another change.'
+            : scopeMessage,
         );
         return;
       }
       pending.current = null;
       setUncertain(false);
+      if (!sameScope()) {
+        setMessage(
+          'The request in the original organisation or operation completed. Return there to review it.',
+        );
+        return;
+      }
       setMessage('Saved.');
-      formRef.current?.reset();
-      onSuccess?.();
-      router.refresh();
+      try {
+        formRef.current?.reset();
+        onSuccess?.();
+        router.refresh();
+      } catch {
+        // UI follow-up cannot turn a confirmed save into an unknown write.
+        setMessage(
+          'Saved. The page could not be refreshed; reload to review the confirmed record.',
+        );
+      }
     } catch {
+      attempt.outcomeUnknown = true;
       setUncertain(true);
-      setMessage('The result is unknown. Retry the same request before making another change.');
+      setMessage(
+        sameScope()
+          ? 'The result is unknown. Retry the same request before making another change.'
+          : scopeMessage,
+      );
     } finally {
       setBusy(false);
     }
