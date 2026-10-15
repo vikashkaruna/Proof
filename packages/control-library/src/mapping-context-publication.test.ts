@@ -519,3 +519,124 @@ describe('independent global reference packet is mandatory before adoption', () 
     expect(p.adopt).not.toHaveBeenCalled();
   });
 });
+
+describe('exact catalogue JSON boundaries reject ambiguous decoded keys', () => {
+  const packetFaults = ['root', 'escaped', 'nested'] as const;
+  function ambiguousPacket(kind: (typeof packetFaults)[number]) {
+    const original = JSON.stringify(mappingContextSourcePacket());
+    if (kind === 'nested') return original.replace('"note":', '"note":"conflict","note":');
+    const key = kind === 'escaped' ? 'publication\\u0056ersion' : 'publicationVersion';
+    return '{"' + key + '":"conflicting-version",' + original.slice(1);
+  }
+  function ambiguousRequest(escaped: boolean) {
+    const key = escaped ? 'operation\\u004bey' : 'operationKey';
+    return '{"' + key + '":"conflicting-operation",' + JSON.stringify(adoptionRequest).slice(1);
+  }
+  it.each(packetFaults)(
+    'refuses %s duplicate packet keys even with an exact byte hash',
+    async (kind) => {
+      const packetText = ambiguousPacket(kind);
+      const value = {
+        ...(await referenceProof()),
+        packetText,
+        packetSha256: await digest(packetText),
+      };
+      await expect(
+        verifyMappingContextReferenceProof(value, {
+          ...adoptionRequest,
+          expectedPacketSha256: value.packetSha256,
+        }),
+      ).rejects.toThrow();
+    },
+  );
+  it.each(packetFaults)(
+    'refuses %s duplicate publication proof keys after a possible write',
+    async (kind) => {
+      const p = await ports();
+      p.publish.mockResolvedValue({ data: await proof(ambiguousPacket(kind)), error: null });
+      await expect(publishMappingContextSource(p, binding)).rejects.toMatchObject({
+        publicationMayHaveCommitted: true,
+      });
+      expect(p.publish).toHaveBeenCalledTimes(1);
+      expect(p.readProof).not.toHaveBeenCalled();
+    },
+  );
+  it.each(packetFaults)(
+    'refuses %s duplicate reviewed publication keys before writing',
+    async (kind) => {
+      const p = await ports();
+      p.authorizeCurrentHuman.mockResolvedValue({
+        binding,
+        reviewedRequestText: ambiguousPacket(kind),
+      });
+      await expect(publishMappingContextSource(p, binding)).rejects.toMatchObject({
+        publicationMayHaveCommitted: false,
+      });
+      expect(p.publish).not.toHaveBeenCalled();
+    },
+  );
+  it.each([false, true])(
+    'refuses duplicate reviewed adoption keys (escaped=%s) before writing',
+    async (escaped) => {
+      const p = await adoptionPorts();
+      p.authorizeCurrentHuman.mockResolvedValue({
+        binding: adoptionBinding,
+        reviewedRequestText: ambiguousRequest(escaped),
+      });
+      await expect(
+        adoptMappingContextPublication(p, adoptionBinding, adoptionRequest),
+      ).rejects.toMatchObject({ publicationMayHaveCommitted: false });
+      expect(p.adopt).not.toHaveBeenCalled();
+      expect(p.readPublication).not.toHaveBeenCalled();
+    },
+  );
+  it.each([false, true])(
+    'refuses duplicate exact reviewed adoption proof keys (escaped=%s)',
+    async (escaped) => {
+      const requestText = ambiguousRequest(escaped);
+      const value = {
+        ...(await adoptionProof()),
+        requestText,
+        requestSha256: await digest(requestText),
+      };
+      await expect(
+        verifyMappingContextAdoptionProof(
+          value,
+          adoptionBinding,
+          adoptionRequest,
+          requestText,
+          await referenceProof(),
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it('refuses duplicate exact reviewed publication proof keys independently of retained packet bytes', async () => {
+    const requestText = ambiguousPacket('escaped');
+    const value = { ...(await proof()), requestText, requestSha256: await digest(requestText) };
+    await expect(
+      verifyMappingContextPublicationProof(
+        value,
+        binding,
+        mappingContextSourcePacket(),
+        requestText,
+      ),
+    ).rejects.toThrow();
+  });
+  it('keeps valid whitespace and Unicode source bytes without normalizing the hash', async () => {
+    const packet = mappingContextSourcePacket();
+    packet.contexts[0]!.note += ' — हिंदी { "note": 1 }';
+    const packetText = JSON.stringify(packet, null, 2);
+    const value = {
+      ...(await referenceProof()),
+      packetText,
+      packetSha256: await digest(packetText),
+    };
+    expect(
+      await verifyMappingContextReferenceProof(value, {
+        ...adoptionRequest,
+        expectedPacketSha256: value.packetSha256,
+      }),
+    ).toEqual(value);
+    expect(value.packetSha256).not.toBe(await digest(JSON.stringify(packet)));
+  });
+});
