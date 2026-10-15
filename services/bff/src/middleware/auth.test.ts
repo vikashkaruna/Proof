@@ -17,6 +17,9 @@ import { applyEnv, createSupabaseDouble, FOUNDER_ID } from '../test/harness.js';
  *   SEC-13 preprod must behave exactly as production
  */
 
+const authLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+vi.mock('../lib/logger.js', () => ({ logger: authLog }));
+
 const supabase = vi.hoisted(() => ({
   current: null as ReturnType<typeof createSupabaseDouble> | null,
 }));
@@ -124,6 +127,38 @@ describe('authMiddleware — SEC-1 · fail closed on service failure', () => {
     });
     expect(res.status).toBe(503);
     expect(await res.text()).not.toContain(FOUNDER_ID);
+  });
+
+  it('does not inspect untrusted auth error fields while reporting an outage', async () => {
+    const double = createSupabaseDouble({});
+    const client = double.createClient();
+    const failure = new Error('private-provider-detail');
+    Object.defineProperty(failure, 'name', {
+      get: () => {
+        throw new Error('private-error-name');
+      },
+    });
+    double.createClient.mockReturnValue({
+      ...client,
+      auth: {
+        getUser: async () => {
+          throw failure;
+        },
+      },
+    });
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    authLog.error.mockClear();
+    const response = await app.request('/v1/whoami', {
+      headers: { authorization: 'Bearer a-valid-jwt' },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: 'auth_unavailable', message: 'Auth service unreachable' },
+    });
+    expect(authLog.error).toHaveBeenCalledExactlyOnceWith(
+      { errorType: 'identity_provider_failure' },
+      'auth service unavailable',
+    );
   });
 
   it.each([
