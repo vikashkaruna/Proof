@@ -17,6 +17,9 @@ import { applyEnv, createSupabaseDouble, FOUNDER_ID } from '../test/harness.js';
  *   SEC-13 preprod must behave exactly as production
  */
 
+const authLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+vi.mock('../lib/logger.js', () => ({ logger: authLog }));
+
 const supabase = vi.hoisted(() => ({
   current: null as ReturnType<typeof createSupabaseDouble> | null,
 }));
@@ -126,6 +129,38 @@ describe('authMiddleware — SEC-1 · fail closed on service failure', () => {
     expect(await res.text()).not.toContain(FOUNDER_ID);
   });
 
+  it('does not inspect untrusted auth error fields while reporting an outage', async () => {
+    const double = createSupabaseDouble({});
+    const client = double.createClient();
+    const failure = new Error('private-provider-detail');
+    Object.defineProperty(failure, 'name', {
+      get: () => {
+        throw new Error('private-error-name');
+      },
+    });
+    double.createClient.mockReturnValue({
+      ...client,
+      auth: {
+        getUser: async () => {
+          throw failure;
+        },
+      },
+    });
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    authLog.error.mockClear();
+    const response = await app.request('/v1/whoami', {
+      headers: { authorization: 'Bearer a-valid-jwt' },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: 'auth_unavailable', message: 'Auth service unreachable' },
+    });
+    expect(authLog.error).toHaveBeenCalledExactlyOnceWith(
+      { errorType: 'identity_provider_failure' },
+      'auth service unavailable',
+    );
+  });
+
   it.each([
     { status: 0, name: 'AuthApiError' },
     { status: 504, name: 'AuthApiError' },
@@ -157,4 +192,40 @@ describe('authMiddleware — the happy path still works', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: 'aaaaaaaa-0000-0000-0000-000000000009' });
   });
+});
+
+describe('authentication owns only the identity-provider error boundary', () => {
+  it('does not rewrite a failing downstream error handler as an auth outage', async () => {
+    const app = await buildApp(
+      { ENVIRONMENT: 'production' },
+      createSupabaseDouble({ auth: { kind: 'user', id: FOUNDER_ID } }),
+    );
+    app.get('/v1/downstream-failure', () => {
+      throw new Error('synthetic-route-failure');
+    });
+    app.onError(() => {
+      throw new Error('synthetic-error-handler-failure');
+    });
+    await expect(
+      app.request('/v1/downstream-failure', {
+        headers: { authorization: 'Bearer a-valid-jwt' },
+      }),
+    ).rejects.toThrow('synthetic-error-handler-failure');
+  });
+});
+
+it('retains the normal downstream error response after successful authentication', async () => {
+  const app = await buildApp(
+    { ENVIRONMENT: 'production' },
+    createSupabaseDouble({ auth: { kind: 'user', id: FOUNDER_ID } }),
+  );
+  app.get('/v1/downstream-failure', () => {
+    throw new Error('synthetic-route-failure');
+  });
+  app.onError((_error, c) => c.json({ error: { code: 'downstream_failed' } }, 500));
+  const response = await app.request('/v1/downstream-failure', {
+    headers: { authorization: 'Bearer a-valid-jwt' },
+  });
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: 'downstream_failed' } });
 });

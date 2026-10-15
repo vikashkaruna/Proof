@@ -85,6 +85,7 @@ export {
   mappingContextAdoptionRequestSchema,
   verifyMappingContextAdoptionProof,
   verifyMappingContextReferenceProof,
+  mappingContextReferenceProofSchema,
   adoptMappingContextPublication,
 } from './mapping-context-publication';
 export type {
