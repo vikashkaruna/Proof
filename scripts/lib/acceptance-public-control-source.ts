@@ -65,15 +65,35 @@ export async function verifyPublicControlSourceThroughController(deps: {
   libraryVersion: string;
   execute: (jobId: string) => Promise<void>;
   launchCount: () => number;
+  onPhase: (phase: string) => void;
 }) {
   z.uuid().parse(deps.tenantId);
   z.uuid().parse(deps.actorId);
+  deps.onPhase('fixture-library-current');
+  // Only this engineering-owned disposable parity fixture is selected by the
+  // guard. Published controls/metadata stay unchanged; intake needs a current
+  // library, while the shared report seed deliberately leaves it noncurrent.
+  assert.equal(
+    guardedParitySql(
+      `do $$begin
+    if exists(select 1 from public.control_libraries where is_current and version<>'0.1.1')
+      or not exists(select 1 from public.control_libraries where version='0.1.1' and status='published' and control_count=46)
+      or (select count(*) from public.controls where library_version='0.1.1')<>46
+    then raise exception 'owned fixture catalogue selection refused'; end if;
+    update public.control_libraries set is_current=true where version='0.1.1' and status='published' and control_count=46;
+  end$$;
+  select count(*)=1 and bool_and(version='0.1.1' and control_count=46 and status='published') from public.control_libraries where is_current;`,
+      'postgres',
+    ).trim(),
+    't',
+  );
   const engagementId = randomUUID();
   const post = (body: unknown, key: string = randomUUID()): RequestInit => ({
     method: 'POST',
     headers: { ...deps.headers, 'content-type': 'application/json', 'idempotency-key': key },
     body: JSON.stringify(body),
   });
+  deps.onPhase('estate-create');
   const estate = z
     .object({ data: z.object({ id: z.uuid(), tenant_id: z.uuid(), slug: z.string() }) })
     .parse(
@@ -91,6 +111,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     ).data;
   assert.equal(estate.tenant_id, deps.tenantId);
   const estateId = estate.id;
+  deps.onPhase('system-create');
   const system = z
     .object({ data: z.object({ id: z.uuid(), estate_id: z.uuid(), tenant_id: z.uuid() }) })
     .parse(
@@ -110,6 +131,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     ).data;
   assert.equal(system.tenant_id, deps.tenantId);
   assert.equal(system.estate_id, estateId);
+  deps.onPhase('inventory-readback');
   const inventory = z
     .object({
       data: z.object({
@@ -132,6 +154,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     title: 'Synthetic reviewed-source controller assessment',
   };
   const intakeKey = randomUUID();
+  deps.onPhase('intake-create');
   const saved = verifyEngagementIntakeReceipt(
     await (await deps.request('/v1/engagements', 201, post(intake, intakeKey))).json(),
     { tenantId: deps.tenantId, actorId: deps.actorId, request: intake },
@@ -140,13 +163,17 @@ export async function verifyPublicControlSourceThroughController(deps: {
   assert.equal(saved.legacy, false);
   assert.equal(saved.replayed, false);
   assert(saved.receipt);
-  // The real idempotency middleware may return its retained 201 response. This
-  // proves HTTP replay without fabricating a second intake or creation receipt.
+  // Intake bypasses generic response caching: replay returns the current full
+  // saved row and original atomic creation receipt with replayed=true.
+  deps.onPhase('intake-replay');
   const replayedIntake = verifyEngagementIntakeReceipt(
-    await (await deps.request('/v1/engagements', 201, post(intake, intakeKey))).json(),
+    await (await deps.request('/v1/engagements', 200, post(intake, intakeKey))).json(),
     { tenantId: deps.tenantId, actorId: deps.actorId, request: intake },
   );
-  assert.deepEqual(replayedIntake, saved);
+  assert.equal(replayedIntake.replayed, true);
+  assert.equal(replayedIntake.legacy, false);
+  assert.deepEqual({ ...replayedIntake, replayed: false }, saved);
+  deps.onPhase('creation-receipts');
   for (const [action, target] of [
     ['estate.created', estateId],
     ['estate.system.created', system.id],
@@ -164,6 +191,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     assert.equal(receipt.data?.[0]?.actor_type, 'human');
     if (action === 'engagement.created') assert.equal(String(receipt.data?.[0]?.id), saved.receipt);
   }
+  deps.onPhase('capture');
   const captured = z
     .object({ data: z.object({ id: z.uuid() }) })
     .parse(
@@ -176,6 +204,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
       ).json(),
     );
   const checkId = captured.data.id;
+  deps.onPhase('capture-review-read');
   const retained = z
     .object({
       data: z.object({ assessment: publicControlAssessmentV2Schema, captureReceipt: z.string() }),
@@ -189,6 +218,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
         )
       ).json(),
     ).data;
+  deps.onPhase('questionnaire-read');
   const questionnaire = AssessmentQuestionnaireSchema.parse(
     await (
       await deps.request(`/v1/assessment/questionnaire?engagementId=${engagementId}`, 200, {
@@ -226,6 +256,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
       rationale: 'Synthetic human has no internal applicability evidence.',
     },
   });
+  deps.onPhase('human-review-save');
   const reviewReply = await deps.request('/v1/public-control-review-sets', 201, {
     ...post(request, request.operationKey),
     body: canonicalJson(request),
@@ -257,6 +288,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     },
   };
   const before = deps.launchCount();
+  deps.onPhase('request-source');
   const accepted = AssessmentRequestReceiptSchema.parse(
     await (await deps.request('/v1/assessment/jobs', 202, post(intent, jobId))).json(),
   );
@@ -267,6 +299,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     .eq('run_id', accepted.runId);
   assert.equal(beforePackets.error, null);
   assert.deepEqual(beforePackets.data, []);
+  deps.onPhase('forged-digest-refusal');
   const forgedId = randomUUID();
   const forged = await deps.request(
     '/v1/assessment/jobs',
@@ -287,8 +320,10 @@ export async function verifyPublicControlSourceThroughController(deps: {
     'assessment_request_unconfirmed',
   );
   assert.equal(deps.launchCount(), before);
+  deps.onPhase('controller-finalize');
   await deps.execute(jobId);
   assert.equal(deps.launchCount(), before + 1);
+  deps.onPhase('finalized-http-readback');
   const final = z
     .object({
       status: z.literal('finalization_recorded'),
@@ -316,6 +351,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     snapshot.controls.reduce((n, c) => n + (c.answerCounts?.unknown ?? 0), 0),
     64,
   );
+  deps.onPhase('immutable-source-provenance');
   // Source sidecars deliberately have no service-role SELECT grant. Inspect only
   // through the existing disposable-fixture guarded SQL observer, never add a grant.
   const sourceSql = () =>
@@ -348,6 +384,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
   assert.equal(packet.error, null);
   assert.equal(packet.data?.result_digest, final.finalization.resultDigest);
   assert(packet.data?.finalized_receipt);
+  deps.onPhase('source-replay');
   const replay = AssessmentRequestReceiptSchema.parse(
     await (await deps.request('/v1/assessment/jobs', 202, post(intent, jobId))).json(),
   );
@@ -361,6 +398,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
     ).trim(),
     't',
   );
+  deps.onPhase('final-receipts-chain');
   const requests = await deps.db
     .from('audit_ledger')
     .select('id')
@@ -390,5 +428,47 @@ export async function verifyPublicControlSourceThroughController(deps: {
     requestedReceipt: source.requested_receipt,
     network: 'synthetic-dns-and-page-bytes',
     kms: 'fixture-only-no-cloud-iam-proof',
+  };
+}
+
+/** Allowlisted diagnostics only: never retain assertion actual/expected, raw
+ * exception text, payload values or arbitrary schema property names. */
+export function publicControlAcceptanceFailure(error: unknown) {
+  if (error instanceof z.ZodError) {
+    const fields = new Set([
+      'data',
+      'id',
+      'tenant_id',
+      'estate_id',
+      'receipt',
+      'legacy',
+      'replayed',
+      'review',
+      'snapshot_text',
+      'source',
+      'controls',
+      'finalization',
+      'resultDigest',
+      'request_sha256',
+      'snapshot_sha256',
+      'input_text',
+      'input_sha256',
+    ]);
+    return {
+      kind: 'schema' as const,
+      path:
+        error.issues[0]?.path.map((key) =>
+          typeof key === 'number' ? 'index' : fields.has(String(key)) ? String(key) : 'field',
+        ) ?? [],
+    };
+  }
+  return {
+    kind:
+      error instanceof assert.AssertionError
+        ? ('assertion' as const)
+        : error instanceof Error
+          ? ('error' as const)
+          : ('non_error' as const),
+    path: [],
   };
 }

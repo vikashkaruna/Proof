@@ -1,6 +1,7 @@
 import {
   acceptancePublicWebsiteCapture,
   verifyPublicControlSourceThroughController,
+  publicControlAcceptanceFailure,
 } from './lib/acceptance-public-control-source.js';
 /** Real UID-attested worker → private Hono tools → real PostgREST transactions.
  * Only synthetic fixtures in the isolated local parity project. No private
@@ -1438,6 +1439,9 @@ except Exception as error:
       libraryVersion: acceptanceLibrary.version,
       execute: executeNormalJob,
       launchCount: () => jobNames.length,
+      onPhase: (value) => {
+        phase = `normal-auth-public-source-${value}`;
+      },
     });
     outcomes['normal-auth-real-capture-human-review-source-controller-finalization'] = true;
     finalizedHttpProof = {
@@ -2369,6 +2373,14 @@ main().catch((error: unknown) => {
     error instanceof Error &&
     /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
   if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
+  if (phase.startsWith('normal-auth-public-source-')) {
+    mkdirSync('.axiom-runtime/review/all-agent-acceptance', { recursive: true, mode: 0o700 });
+    writeFileSync(
+      `.axiom-runtime/review/all-agent-acceptance/public-source-failure-${Date.now()}.private.json`,
+      JSON.stringify({ phase, ...publicControlAcceptanceFailure(error), accepted: false }) + '\n',
+      { mode: 0o600 },
+    );
+  }
   if (httpFailure) {
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const directory = '.axiom-runtime/review/all-agent-acceptance';
