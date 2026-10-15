@@ -109,6 +109,8 @@ beforeEach(() => {
     return { run_id: row.id, created: true, status: 'running' };
   });
   state.db.onRpc('record_generic_agent_run_finish', (args) => {
+    if (!Object.hasOwn(args, 'p_error') || Object.hasOwn(args, 'p_error_code'))
+      throw new Error('PGRST202: public completion argument signature does not match');
     const row = state
       .db!.rows('agent_runs')
       .find(
@@ -121,7 +123,7 @@ beforeEach(() => {
       );
     if (!row) return { error: 'terminal_conflict' };
     row.status = args.p_status;
-    row.error = args.p_error_code;
+    row.error = args.p_error;
     row.output_redacted_hash = args.p_status === 'succeeded' ? 'c'.repeat(64) : null;
     row.response_output_hash = args.p_response_hash;
     return { run_id: row.id, status: row.status, replayed: false };
