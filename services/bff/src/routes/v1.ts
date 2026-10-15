@@ -1165,16 +1165,18 @@ export function v1Routes(deps: Deps) {
       });
 
       const message =
-        stepUp.reason === 'binding_mismatch'
-          ? 'That challenge was satisfied for a different plan, action set, or action content. ' +
-            'If an action was edited after you reviewed it, re-read it and request a fresh challenge.'
-          : stepUp.reason === 'challenge_already_consumed'
-            ? 'That challenge has already authorised an approval. Each step-up authorises exactly one.'
-            : stepUp.reason === 'challenge_expired'
-              ? 'That challenge has expired. Request a fresh one.'
-              : stepUp.reason === 'challenge_not_satisfied'
-                ? 'That challenge has not been satisfied yet.'
-                : 'No usable step-up challenge for this approval.';
+        stepUp.reason === 'factor_changed'
+          ? 'Your authenticator changed after this challenge. Review the action and request a fresh MFA challenge.'
+          : stepUp.reason === 'binding_mismatch'
+            ? 'That challenge was satisfied for a different plan, action set, or action content. ' +
+              'If an action was edited after you reviewed it, re-read it and request a fresh challenge.'
+            : stepUp.reason === 'challenge_already_consumed'
+              ? 'That challenge has already authorised an approval. Each step-up authorises exactly one.'
+              : stepUp.reason === 'challenge_expired'
+                ? 'That challenge has expired. Request a fresh one.'
+                : stepUp.reason === 'challenge_not_satisfied'
+                  ? 'That challenge has not been satisfied yet.'
+                  : 'No usable step-up challenge for this approval.';
       return c.json({ error: { code: stepUp.reason, message } }, 401);
     }
 
@@ -1258,6 +1260,33 @@ export function v1Routes(deps: Deps) {
       token_id?: string;
       expires_at?: string;
     } | null;
+
+    if (issued?.decision === 'fresh_mfa_required') {
+      await deps.ledger.append({
+        tenantId,
+        correlationId,
+        actorType: 'human',
+        actorId: user.id,
+        actionType: LedgerActionType.MFA_CHALLENGE_FAILED,
+        targetRef: input.planId,
+        result: 'failure',
+        detail: {
+          purpose: 'approval_issuance',
+          reason: 'fresh_mfa_required',
+          challengeId: stepUp.challengeId,
+        },
+      });
+      return c.json(
+        {
+          error: {
+            code: 'fresh_mfa_required',
+            message:
+              'Your authentication changed or expired while this approval was being issued. Review the action and request a fresh MFA challenge.',
+          },
+        },
+        401,
+      );
+    }
 
     if (issued?.decision !== 'issued') {
       // The step-up has already been spent by this point, deliberately:

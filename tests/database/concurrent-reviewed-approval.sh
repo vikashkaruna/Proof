@@ -21,7 +21,8 @@ for kind in content plan; do
     array['10000000-0000-0000-0000-0000000000d1']::uuid[],
     '10000000-0000-0000-0000-0000000000a9','batch',1,true,'sig',
     jsonb_build_object('contentDigest','$digest'),'race-$kind',now()+interval '1 hour',
-    null,'{}',null,'$digest',null,gen_random_uuid(),1)->>'decision'" "$result_dir/writer" "$result_dir/issuer"
+    null,'{}','10000000-0000-0000-0000-0000000000f1','$digest',
+    jsonb_build_object('mfa',jsonb_build_object('challengeId','10000000-0000-0000-0000-0000000000f1','satisfiedAt',(select satisfied_at from public.mfa_challenges where id='10000000-0000-0000-0000-0000000000f1'),'binding',repeat('a',64))),gen_random_uuid(),1)->>'decision'" "$result_dir/writer" "$result_dir/issuer"
   [ "$(cat "$result_dir/issuer")" = "$expected" ] || { cat "$result_dir/issuer"; exit 1; }
 done
 [ "$(sql -c "select count(*) from public.approval_tokens where tenant_id='10000000-0000-0000-0000-0000000000c1'")" = 0 ]
