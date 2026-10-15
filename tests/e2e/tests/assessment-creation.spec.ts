@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { expect, test } from '@playwright/test';
 import { createMfaAccount, selectTenant, signIn, signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
@@ -85,9 +86,27 @@ test('an assessment creator can start an intake and open its saved assessment', 
     page.getByRole('button', { name: 'Request unknown-answer assessment' }),
   ).toBeDisabled();
   await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
-  await expect(
-    page.getByRole('button', { name: 'Request unknown-answer assessment' }),
-  ).toBeEnabled();
+  const configurationResponse = await page.request.get('/api/bff/v1/assessment/configuration', {
+    headers: { 'X-Tenant-Id': tenantId },
+  });
+  expect(configurationResponse.status()).toBe(200);
+  const configuration = z
+    .object({
+      tenantId: z.uuid(),
+      configuration: z.enum(['configured', 'unconfigured', 'unknown']),
+      executionReadiness: z.literal('not_verified'),
+    })
+    .parse(await configurationResponse.json());
+  expect(configuration.tenantId).toBe(tenantId);
+  const requestButton = page.getByRole('button', { name: 'Request unknown-answer assessment' });
+  if (configuration.configuration === 'unconfigured') {
+    await expect(requestButton).toBeDisabled();
+    await expect(
+      page.getByText(/Assessment requests are not configured for this organisation\./),
+    ).toBeVisible();
+  } else {
+    await expect(requestButton).toBeEnabled();
+  }
   const createdId = new URL(page.url()).searchParams.get('engagement');
   expect(createdId).toBe(posted.requestKey);
   const replay = await page.request.post('/api/bff/v1/engagements', {

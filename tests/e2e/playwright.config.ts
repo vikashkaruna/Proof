@@ -220,7 +220,9 @@ export default defineConfig({
           // The BFF. Every authorisation the product makes is decided here,
           // so an approval journey that does not reach it is only testing a
           // page.
-          command: 'pnpm --filter @axiom/bff dev',
+          // Local-only scoped metadata fixture; real Auth/MFA/middleware remain.
+          // Its producer always refuses actual requests. Deployed servers do not use it.
+          command: 'pnpm exec tsx tests/e2e/local-bff.ts',
           port: Number(BFF_PORT),
           cwd: repoRoot,
           env: bffEnv,
