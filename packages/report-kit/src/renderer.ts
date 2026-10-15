@@ -116,7 +116,25 @@ export function findChromiumExecutable(): string | null {
 
   const home = process.env.HOME || '';
   const candidates = [
-    // Playwright standard cache paths
+    // Playwright 1.64's pinned headless shell. Prefer the shell over system
+    // Chrome so retained-PDF renderer behavior does not change with host updates.
+    join(
+      home,
+      'Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell',
+    ),
+    join(
+      home,
+      '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux/chrome-headless-shell',
+    ),
+    // Retain earlier supported installations for rollback and developer hosts.
     join(
       home,
       'Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell',
