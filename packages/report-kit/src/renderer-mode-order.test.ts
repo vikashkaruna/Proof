@@ -1,11 +1,44 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { findChromiumExecutable, renderHtmlToPdf } from './renderer';
 
+const ownedFixtureDirectories: string[] = [];
+function fixtureDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  ownedFixtureDirectories.push(directory);
+  return directory;
+}
+afterEach(() => {
+  for (const directory of ownedFixtureDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  'Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+  '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell',
+  '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell',
+  '.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux/chrome-headless-shell',
+])('selects the new pinned headless shell at %s before system Chrome', (relative) => {
+  const home = fixtureDirectory('playwright-shell-');
+  const shell = join(home, relative);
+  mkdirSync(dirname(shell), { recursive: true });
+  writeFileSync(shell, '');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('CHROME_PATH', '');
+  vi.stubEnv('PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH', '');
+  try {
+    expect(findChromiumExecutable()).toBe(shell);
+  } finally {
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 it('selects the pinned Playwright Linux headless shell before system Chrome', () => {
-  const home = mkdtempSync(join(tmpdir(), 'playwright-shell-'));
+  const home = fixtureDirectory('playwright-shell-');
   const shell = join(
     home,
     '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell',
@@ -19,12 +52,13 @@ it('selects the pinned Playwright Linux headless shell before system Chrome', ()
     expect(findChromiumExecutable()).toBe(shell);
   } finally {
     vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
 /** A stand-in browser: logs the headless mode it was given, then fails or writes a PDF. */
 function fakeChrome(failModes: string[]) {
-  const dir = mkdtempSync(join(tmpdir(), 'fake-chrome-'));
+  const dir = fixtureDirectory('fake-chrome-');
   const log = join(dir, 'calls.log');
   const bin = join(dir, 'chrome');
   writeFileSync(
@@ -46,7 +80,7 @@ describe('renderHtmlToPdf waits for the browser, not for helpers holding its pip
   afterEach(() => vi.unstubAllEnvs());
 
   it('returns as soon as the browser exits even if a helper keeps stderr open', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'fake-chrome-'));
+    const dir = fixtureDirectory('fake-chrome-');
     const bin = join(dir, 'chrome');
     writeFileSync(
       bin,
