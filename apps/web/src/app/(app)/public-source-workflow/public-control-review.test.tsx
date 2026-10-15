@@ -7,6 +7,7 @@ import {
   PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
   publicControlCatalogueV2Manifest,
 } from '@axiom/control-library';
+import { reviewFixture } from './control-review-fixture.test-helper';
 import { PublicControlReview } from './public-control-review';
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -286,4 +287,34 @@ it('connects a qualified control disposition to its exact retained evidence ordi
     ),
   ).toBeTruthy();
   expect(screen.getByText('A public consent statement; implementation unverified.')).toBeTruthy();
+});
+
+it('mounts human review only after verified evidence with current actor and review permission', async () => {
+  const f = reviewFixture();
+  const fetcher = vi.fn((url: string, _options?: RequestInit) =>
+    Promise.resolve(
+      Response.json(
+        url.includes('/public-control-review-sets/current')
+          ? { data: f.head }
+          : {
+              data: {
+                assessment: f.assessment,
+                catalogueManifestText: PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+                captureReceipt: '42',
+              },
+            },
+      ),
+    ),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicControlReview {...props} actorId={f.operation.actorId} canReview />);
+  click();
+  await screen.findByRole('region', { name: 'Human control review' });
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('button', { name: 'Record human control review' })).toBeTruthy();
+  expect(
+    fetcher.mock.calls.every(
+      ([, options]) => !options || (options as RequestInit).method !== 'POST',
+    ),
+  ).toBe(true);
 });

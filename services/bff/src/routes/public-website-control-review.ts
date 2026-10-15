@@ -54,6 +54,66 @@ const retained = z
   })
   .strict();
 
+export const retainedPublicWebsiteReviewSchema = retained;
+
+/** Shared server-only verification; RPC output is never a trusted browser claim. */
+export function decodeRetainedPublicWebsiteReview(
+  value: unknown,
+  scope: { tenantId: string; engagementId: string; checkId: string },
+) {
+  const data = retained.parse(value);
+  if (
+    data.tenantId !== scope.tenantId.toLowerCase() ||
+    data.engagementId !== scope.engagementId ||
+    data.checkId !== scope.checkId
+  )
+    throw new Error('scope');
+  const seed = buildLibrarySeed();
+  if (
+    data.libraryVersion !== seed.version ||
+    data.library.published_by !== seed.publishedBy ||
+    data.library.change_log !== seed.changeLog ||
+    Date.parse(data.library.published_at) !== Date.parse(seed.publishedAt) ||
+    canonicalJson([...data.controls].sort((a, b) => String(a.id).localeCompare(String(b.id)))) !==
+      canonicalJson([...seed.controls].sort((a, b) => a.id.localeCompare(b.id)))
+  )
+    throw new Error('catalogue');
+  const source = readPublicEvidenceV2(
+    {
+      codec: data.codec,
+      payloadBytes: new TextEncoder().encode(data.payloadText),
+      payloadSha256: data.payloadSha256,
+    },
+    {
+      tenantId: data.tenantId,
+      engagementId: data.engagementId,
+      checkId: data.checkId,
+      assessmentDate: new Date(data.checkedAt).toISOString().slice(0, 10),
+    },
+  ).source;
+  if (
+    source.pages[0]?.contentSha256 !== data.rootContentSha256 ||
+    new Set(data.pageSources.map((p) => p.page)).size !== 5
+  )
+    throw new Error('source');
+  for (const p of source.pages) {
+    const provenance = data.pageSources.find((v) => v.page === p.page);
+    if (
+      !provenance ||
+      provenance.state !== p.state ||
+      (provenance.contentSha256 ?? undefined) !== p.contentSha256
+    )
+      throw new Error('source');
+  }
+  const text = PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT;
+  const sha256 = hash(text);
+  const assessment = evaluatePublicEvidenceV2(
+    { source, catalogueManifestText: text, catalogueManifestSha256: sha256 },
+    { text, sha256 },
+  );
+  return { assessment, catalogueManifestText: text, captureReceipt: data.captureReceipt };
+}
+
 /** Read-only, deterministic evidence disposition. Does not issue an agent result,
  * persist an assessment decision, change scores, or release a client report. */
 export function publicWebsiteControlReviewRoutes() {
@@ -80,59 +140,12 @@ export function publicWebsiteControlReviewRoutes() {
         return c.json({ error: { code: 'website_recapture_required' } }, 409);
       if (['forbidden', 'context_refused', 'source_refused'].includes(result.data?.error))
         return c.json({ error: { code: 'website_review_context_refused' } }, 404);
-      const data = retained.parse(result.data);
-      if (
-        data.tenantId !== c.get('tenantId').toLowerCase() ||
-        data.engagementId !== engagement.data ||
-        data.checkId !== check.data
-      )
-        throw new Error('scope');
-      const seed = buildLibrarySeed();
-      if (
-        data.libraryVersion !== seed.version ||
-        data.library.published_by !== seed.publishedBy ||
-        data.library.change_log !== seed.changeLog ||
-        Date.parse(data.library.published_at) !== Date.parse(seed.publishedAt) ||
-        canonicalJson(
-          [...data.controls].sort((a, b) => String(a.id).localeCompare(String(b.id))),
-        ) !== canonicalJson([...seed.controls].sort((a, b) => a.id.localeCompare(b.id)))
-      )
-        throw new Error('catalogue');
-      const source = readPublicEvidenceV2(
-        {
-          codec: data.codec,
-          payloadBytes: new TextEncoder().encode(data.payloadText),
-          payloadSha256: data.payloadSha256,
-        },
-        {
-          tenantId: data.tenantId,
-          engagementId: data.engagementId,
-          checkId: data.checkId,
-          assessmentDate: new Date(data.checkedAt).toISOString().slice(0, 10),
-        },
-      ).source;
-      if (
-        source.pages[0]?.contentSha256 !== data.rootContentSha256 ||
-        new Set(data.pageSources.map((p) => p.page)).size !== 5
-      )
-        throw new Error('source');
-      for (const p of source.pages) {
-        const provenance = data.pageSources.find((v) => v.page === p.page);
-        if (
-          !provenance ||
-          provenance.state !== p.state ||
-          (provenance.contentSha256 ?? undefined) !== p.contentSha256
-        )
-          throw new Error('source');
-      }
-      const text = PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT;
-      const sha256 = hash(text);
-      const assessment = evaluatePublicEvidenceV2(
-        { source, catalogueManifestText: text, catalogueManifestSha256: sha256 },
-        { text, sha256 },
-      );
       return c.json({
-        data: { assessment, catalogueManifestText: text, captureReceipt: data.captureReceipt },
+        data: decodeRetainedPublicWebsiteReview(result.data, {
+          tenantId: c.get('tenantId'),
+          engagementId: engagement.data,
+          checkId: check.data,
+        }),
       });
     } catch {
       return c.json({ error: { code: 'website_control_review_unavailable' } }, 503);

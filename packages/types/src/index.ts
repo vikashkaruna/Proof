@@ -36,3 +36,5 @@ export * from './monitoring-outcomes';
 export * from './model-call-accounting';
 
 export * from './public-control-assessment-v2';
+
+export * from './public-control-review-set';
