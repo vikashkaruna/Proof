@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   pathname: '/dashboard',
   search: '',
   panelCapabilities: [] as readonly string[],
+  panelTenantId: null as string | null,
   linkOptions: [] as { href: string; prefetch: boolean | 'auto' | null | undefined }[],
 }));
 vi.mock('next/link', async () => {
@@ -61,7 +62,14 @@ vi.mock('@/lib/tenant-context', () => {
   };
 });
 vi.mock('./sidebar-agent-panel', () => ({
-  SidebarAgentPanel: ({ capabilities }: { capabilities: readonly string[] }) => {
+  SidebarAgentPanel: ({
+    capabilities,
+    tenantId,
+  }: {
+    capabilities: readonly string[];
+    tenantId: string | null;
+  }) => {
+    state.panelTenantId = tenantId;
     state.panelCapabilities = capabilities;
     return null;
   },
@@ -853,4 +861,9 @@ it('shows the agent launcher only to a persona that runs agents', () => {
   cleanup();
   render(<AppShell {...props} capabilities={['posture.read', 'agent.invoke']} />);
   expect(screen.getAllByText('Agents').length).toBeGreaterThan(0);
+});
+
+it('passes the rendered selected tenant to the sidebar rather than deriving it from a browser cookie', () => {
+  render(<AppShell {...props} capabilities={['agent.invoke']} />);
+  expect(state.panelTenantId).toBe('tenant-alpha');
 });

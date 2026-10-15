@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AgentIcon, AgentLabel, PageHeader } from '@axiom/ui';
 import type { AgentName } from '@axiom/types';
@@ -26,6 +26,7 @@ interface PendingPlan {
 }
 
 interface WorkbenchClientProps {
+  tenantId: string;
   userEmail: string;
   /** Ledger entries recorded today; null when the count could not be read. */
   ledgerTodayCount: number | null;
@@ -144,6 +145,7 @@ const WORKFLOW_HREF: Partial<Record<AgentName, string>> = {
 };
 
 export function AgentWorkbenchClient({
+  tenantId,
   userEmail,
   ledgerTodayCount,
   awaitingReviewCount,
@@ -154,29 +156,48 @@ export function AgentWorkbenchClient({
   dataResidencyRegion,
 }: WorkbenchClientProps) {
   const [selectedAgent, setSelectedAgent] = useState<AgentName>('drishti');
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [runResult, setRunResult] = useState<{
+  const currentTenant = useRef<string | null>(tenantId);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    currentTenant.current = tenantId;
+    return () => {
+      mounted.current = false;
+      currentTenant.current = null;
+    };
+  }, [tenantId]);
+  const [executingTenant, setExecutingTenant] = useState<string | null>(null);
+  const busy = executingTenant !== null;
+  const isExecuting = busy && executingTenant === tenantId;
+  const [recordedResult, setRunResult] = useState<{
+    tenantId: string;
     status: string;
     latency_ms?: number;
     ledgerIds?: string[];
     message?: string;
   } | null>(null);
+  const runResult = recordedResult?.tenantId === tenantId ? recordedResult : null;
   const workflowHref = WORKFLOW_HREF[selectedAgent];
 
   const handleRun = async () => {
-    if (isExecuting || WORKFLOW_HREF[selectedAgent]) return;
-    setIsExecuting(true);
+    if (busy || WORKFLOW_HREF[selectedAgent]) return;
+    const attemptTenant = tenantId;
+    setExecutingTenant(attemptTenant);
     setRunResult(null);
 
     try {
-      const data = await invokeAgent(selectedAgent, { scope: 'workbench' });
+      const data = await invokeAgent(selectedAgent, attemptTenant, { scope: 'workbench' });
+      if (currentTenant.current !== attemptTenant) return;
       setRunResult({
+        tenantId: attemptTenant,
         status: data.status,
         latency_ms: data.latency_ms,
         ledgerIds: data.ledger_entry_ids,
       });
     } catch (error) {
+      if (currentTenant.current !== attemptTenant) return;
       setRunResult({
+        tenantId: attemptTenant,
         status: 'failed',
         message:
           error instanceof AgentInvocationError
@@ -184,7 +205,7 @@ export function AgentWorkbenchClient({
             : 'Could not confirm the agent outcome.',
       });
     } finally {
-      setIsExecuting(false);
+      if (mounted.current) setExecutingTenant(null);
     }
   };
 
@@ -340,7 +361,7 @@ export function AgentWorkbenchClient({
             <div className="flex flex-wrap items-center gap-3">
               <select
                 value={selectedAgent}
-                disabled={isExecuting}
+                disabled={busy}
                 onChange={(e) => setSelectedAgent(e.target.value as AgentName)}
                 className="h-9 rounded-lg border border-[#e4e8ee] bg-white px-3 text-xs font-semibold text-[#1E2A4A] focus:outline-none focus:ring-2 focus:ring-[#0FB5A5]"
               >
@@ -362,7 +383,7 @@ export function AgentWorkbenchClient({
                 <button
                   type="button"
                   onClick={handleRun}
-                  disabled={isExecuting}
+                  disabled={busy}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#0FB5A5] px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#0a8d80] transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isExecuting ? `Running ${selectedAgent}…` : `Run ${selectedAgent}`}
@@ -459,7 +480,7 @@ export function AgentWorkbenchClient({
                   <button
                     type="button"
                     onClick={handleRun}
-                    disabled={isExecuting}
+                    disabled={busy}
                     className="inline-flex items-center rounded-lg bg-[#0FB5A5] px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                   >
                     Run selected agent

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { AgentInvocationError } from '@/lib/invoke-agent';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GenericModuleView, type GenericModuleMeta } from './generic-module-view';
 
@@ -64,6 +65,7 @@ it('runs only the selected read-only agent and shows a returned ledger reference
   state.invoke.mockResolvedValue({ latency_ms: 12, ledger_entry_ids: ['ledger-1'] });
   render(
     <GenericModuleView
+      tenantId={'10000000-0000-4000-8000-000000000001'}
       canInvokeAgent
       meta={{
         ...meta,
@@ -77,7 +79,9 @@ it('runs only the selected read-only agent and shows a returned ledger reference
   );
   fireEvent.click(screen.getByRole('button', { name: /Run discovery/ }));
   await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
-  expect(state.invoke).toHaveBeenCalledWith('drishti', { scope: 'manual_trigger' });
+  expect(state.invoke).toHaveBeenCalledWith('drishti', '10000000-0000-4000-8000-000000000001', {
+    scope: 'manual_trigger',
+  });
   expect(screen.getByRole('link', { name: '#ledger-1' }).getAttribute('href')).toBe(
     '/ledger?q=ledger-1',
   );
@@ -87,6 +91,7 @@ it('leaves an ambiguous invocation unconfirmed without proof', async () => {
   state.invoke.mockRejectedValue(new Error('network interrupted'));
   render(
     <GenericModuleView
+      tenantId={'10000000-0000-4000-8000-000000000001'}
       canInvokeAgent
       meta={{
         ...meta,
@@ -111,6 +116,7 @@ it('keeps related agents static and shows run state only while a run is in fligh
   state.invoke.mockReturnValue(new Promise((r) => (finish = r)));
   render(
     <GenericModuleView
+      tenantId={'10000000-0000-4000-8000-000000000001'}
       canInvokeAgent
       meta={{
         ...meta,
@@ -151,4 +157,145 @@ it('keeps discovery readable without offering invocation to a viewer', () => {
   );
   expect(screen.getByTestId('module-bar')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Run discovery/ })).toBeNull();
+});
+
+it.each(['success', 'failure'])(
+  'keeps a late %s from the original tenant out of the newly selected tenant',
+  async (outcome) => {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: Error) => void;
+    state.invoke.mockReturnValue(
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      }),
+    );
+    const invocationMeta = {
+      ...meta,
+      agentKey: 'drishti',
+      actionHref: undefined,
+      actionLabel: 'Run discovery',
+      cards: [],
+    };
+    const view = render(
+      <GenericModuleView
+        meta={invocationMeta}
+        canInvokeAgent
+        tenantId="10000000-0000-4000-8000-000000000001"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Run discovery/ }));
+    expect(state.invoke).toHaveBeenCalledWith('drishti', '10000000-0000-4000-8000-000000000001', {
+      scope: 'manual_trigger',
+    });
+    view.rerender(
+      <GenericModuleView
+        meta={invocationMeta}
+        canInvokeAgent
+        tenantId="20000000-0000-4000-8000-000000000002"
+      />,
+    );
+    expect(screen.queryByText('Invoking agent…')).toBeNull();
+    await act(async () => {
+      if (outcome === 'success') resolve({ latency_ms: 9, ledger_entry_ids: ['tenant-A-receipt'] });
+      else reject(new Error('tenant-A-error'));
+    });
+    expect(document.body.textContent).not.toContain('tenant-A-receipt');
+    expect(document.body.textContent).not.toContain('Could not confirm the agent outcome');
+    expect(state.refresh).not.toHaveBeenCalled();
+  },
+);
+it('never invokes an enabled generic agent without an explicit rendered tenant', () => {
+  render(
+    <GenericModuleView
+      meta={{ ...meta, agentKey: 'drishti', actionHref: undefined, actionLabel: 'Run discovery' }}
+      canInvokeAgent
+    />,
+  );
+  const button = screen.getByRole('button', { name: /Run discovery/ });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(button);
+  expect(state.invoke).not.toHaveBeenCalled();
+});
+it('hides a completed generic result immediately when the rendered tenant changes', async () => {
+  state.invoke.mockResolvedValue({ latency_ms: 9, ledger_entry_ids: ['tenant-A-receipt'] });
+  const invocationMeta = {
+    ...meta,
+    agentKey: 'drishti',
+    actionHref: undefined,
+    actionLabel: 'Run discovery',
+    cards: [],
+  };
+  const view = render(
+    <GenericModuleView
+      meta={invocationMeta}
+      canInvokeAgent
+      tenantId="10000000-0000-4000-8000-000000000001"
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Run discovery/ }));
+  await screen.findByRole('link', { name: '#tenant-A-receipt' });
+  view.rerender(
+    <GenericModuleView
+      meta={invocationMeta}
+      canInvokeAgent
+      tenantId="20000000-0000-4000-8000-000000000002"
+    />,
+  );
+  expect(screen.queryByRole('link', { name: '#tenant-A-receipt' })).toBeNull();
+});
+
+it.each(['success', 'failure'])('ignores a deferred generic %s after unmount', async (outcome) => {
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: Error) => void;
+  state.invoke.mockReturnValue(
+    new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    }),
+  );
+  const observed = vi.fn(() => 9);
+  const error = new AgentInvocationError('original-tenant');
+  Object.defineProperty(error, 'message', { get: observed });
+  const value = {
+    get latency_ms() {
+      return observed();
+    },
+    ledger_entry_ids: ['old-receipt'],
+  };
+  const view = render(
+    <GenericModuleView
+      tenantId="10000000-0000-4000-8000-000000000001"
+      canInvokeAgent
+      meta={{ ...meta, agentKey: 'drishti', actionHref: undefined, actionLabel: 'Run discovery' }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Run discovery/ }));
+  view.unmount();
+  await act(async () => {
+    if (outcome === 'success') resolve(value);
+    else reject(error);
+  });
+  expect(observed).not.toHaveBeenCalled();
+  expect(state.refresh).not.toHaveBeenCalled();
+  expect(state.invoke).toHaveBeenCalledOnce();
+});
+it('keeps a confirmed generic receipt when page refresh throws without issuing another request', async () => {
+  state.invoke.mockResolvedValue({ latency_ms: 9, ledger_entry_ids: ['confirmed-receipt'] });
+  state.refresh.mockImplementation(() => {
+    throw new Error('private-refresh-error');
+  });
+  render(
+    <GenericModuleView
+      tenantId="10000000-0000-4000-8000-000000000001"
+      canInvokeAgent
+      meta={{ ...meta, agentKey: 'drishti', actionHref: undefined, actionLabel: 'Run discovery' }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Run discovery/ }));
+  await screen.findByRole('link', { name: '#confirmed-receipt' });
+  expect(document.body.textContent).toContain('Agent drishti completed.');
+  expect(document.body.textContent).not.toContain('Could not confirm the agent outcome.');
+  expect(document.body.textContent).not.toContain('private-refresh-error');
+  expect(state.invoke).toHaveBeenCalledOnce();
 });

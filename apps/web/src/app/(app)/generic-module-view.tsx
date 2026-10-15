@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel, DataPlaceholder, PageHeader } from '@axiom/ui';
@@ -57,6 +57,7 @@ export function GenericModuleView({
   meta,
   isDemo = false,
   canInvokeAgent = false,
+  tenantId = null,
   children,
 }: {
   meta: GenericModuleMeta;
@@ -73,11 +74,25 @@ export function GenericModuleView({
    */
   isDemo?: boolean;
   canInvokeAgent?: boolean;
+  tenantId?: string | null;
   children?: React.ReactNode;
 }) {
   const router = useRouter();
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [runResult, setRunResult] = useState<{
+  const currentTenant = useRef<string | null>(tenantId);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    currentTenant.current = tenantId;
+    return () => {
+      mounted.current = false;
+      currentTenant.current = null;
+    };
+  }, [tenantId]);
+  const [executingTenant, setExecutingTenant] = useState<string | null>(null);
+  const busy = executingTenant !== null;
+  const isExecuting = busy && executingTenant === tenantId;
+  const [recordedResult, setRunResult] = useState<{
+    tenantId: string;
     success: boolean;
     status?: string;
     message: string;
@@ -85,23 +100,34 @@ export function GenericModuleView({
     ledgerIds?: string[];
   } | null>(null);
 
+  const runResult = recordedResult?.tenantId === tenantId ? recordedResult : null;
+
   const handleRunAgent = async () => {
-    if (!meta.agentKey || !canInvokeAgent || isExecuting) return;
-    setIsExecuting(true);
+    if (!meta.agentKey || !canInvokeAgent || !tenantId || busy) return;
+    const attemptTenant = tenantId;
+    setExecutingTenant(attemptTenant);
     setRunResult(null);
 
     try {
-      const data = await invokeAgent(meta.agentKey, { scope: 'manual_trigger' });
+      const data = await invokeAgent(meta.agentKey, attemptTenant, { scope: 'manual_trigger' });
+      if (currentTenant.current !== attemptTenant) return;
       setRunResult({
+        tenantId: attemptTenant,
         success: true,
         status: 'succeeded',
         message: `Agent ${meta.agentKey} completed.`,
         latency_ms: data.latency_ms,
         ledgerIds: data.ledger_entry_ids,
       });
-      router.refresh();
+      try {
+        router.refresh();
+      } catch {
+        // A page refresh failure cannot invalidate the confirmed agent receipt.
+      }
     } catch (error) {
+      if (currentTenant.current !== attemptTenant) return;
       setRunResult({
+        tenantId: attemptTenant,
         success: false,
         status: 'failed',
         message:
@@ -110,7 +136,7 @@ export function GenericModuleView({
             : 'Could not confirm the agent outcome.',
       });
     } finally {
-      setIsExecuting(false);
+      if (mounted.current) setExecutingTenant(null);
     }
   };
 
@@ -148,7 +174,7 @@ export function GenericModuleView({
             <button
               type="button"
               onClick={handleRunAgent}
-              disabled={isExecuting}
+              disabled={busy || !tenantId}
               data-primary
               className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md bg-[#0FB5A5] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0C9184] disabled:opacity-60"
             >
