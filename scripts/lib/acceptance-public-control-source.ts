@@ -264,7 +264,9 @@ export async function verifyPublicControlSourceThroughController(deps: {
   const review = z
     .object({
       data: z.object({
-        review: publicControlReviewSetRowSchema,
+        review: publicControlReviewSetRowSchema.extend({
+          snapshot: publicControlReviewSetSnapshotSchema,
+        }),
         isCurrent: z.literal(true),
         contextCurrent: z.literal(true),
       }),
@@ -273,6 +275,7 @@ export async function verifyPublicControlSourceThroughController(deps: {
   const reviewSnapshot = publicControlReviewSetSnapshotSchema.parse(
     JSON.parse(review.snapshot_text),
   );
+  assert.deepEqual(review.snapshot, reviewSnapshot);
   assert.equal(reviewSnapshot.normalizedAnswers['DPDPA-GOV-001']?.Q1, true);
   assert.equal(reviewSnapshot.captureReceipt, retained.captureReceipt);
   const jobId = randomUUID();
