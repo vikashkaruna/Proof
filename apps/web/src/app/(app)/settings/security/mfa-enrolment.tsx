@@ -13,6 +13,7 @@ import {
   Input,
   Label,
   Badge,
+  generateUUID,
 } from '@axiom/ui';
 
 interface Props {
@@ -212,6 +213,15 @@ export function MfaEnrolment({
       return;
     }
     setError(null);
+    let challengeKey: string;
+    let requestText: string;
+    try {
+      challengeKey = `mfa-challenge-${generateUUID()}`;
+      requestText = JSON.stringify({ purpose, factorId });
+    } catch {
+      setError('The verification request could not be prepared. Nothing was sent. Try again.');
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch('/api/bff/v1/mfa/challenge', {
@@ -223,9 +233,9 @@ export function MfaEnrolment({
           // for this fixed body is the same key for this user forever. The
           // second replacement would replay a spent challenge. See
           // `apps/web/src/app/api/bff/idempotency-key.test.ts`.
-          'Idempotency-Key': `mfa-challenge-${crypto.randomUUID()}`,
+          'Idempotency-Key': challengeKey,
         },
-        body: JSON.stringify({ purpose, factorId }),
+        body: requestText,
       });
       if (!res.ok) {
         const { message } = await readError(res, 'Could not start verification');

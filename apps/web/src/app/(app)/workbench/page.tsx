@@ -38,6 +38,7 @@ export default async function WorkbenchPage() {
 
   return (
     <AgentWorkbenchClient
+      tenantId={tenantId}
       userEmail={email ?? ''}
       ledgerTodayCount={todayRes.error ? null : (todayRes.count ?? null)}
       awaitingReviewCount={plansRes.error ? null : (plansRes.count ?? null)}

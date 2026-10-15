@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Button, Input, Label } from '@axiom/ui';
+import { Button, Input, Label, generateUUID } from '@axiom/ui';
 import { navigateAfterVerifiedMfa } from './verified-navigation';
 
 interface Props {
@@ -38,7 +38,7 @@ interface Props {
  * must not run twice. They are wrong here, so this caller supplies its own.
  */
 function freshChallengeKey(): string {
-  return `mfa-challenge-${crypto.randomUUID()}`;
+  return `mfa-challenge-${generateUUID()}`;
 }
 
 export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
@@ -55,11 +55,18 @@ export function VerifyForm({ redirectTo, tenantId, accountEmail }: Props) {
 
   async function verify() {
     setError(null);
+    let challengeKey: string;
+    try {
+      challengeKey = freshChallengeKey();
+    } catch {
+      setError('The verification request could not be prepared. Nothing was sent. Try again.');
+      return;
+    }
     setBusy(true);
     try {
       const opened = await fetch('/api/bff/v1/mfa/challenge', {
         method: 'POST',
-        headers: { ...headers, 'Idempotency-Key': freshChallengeKey() },
+        headers: { ...headers, 'Idempotency-Key': challengeKey },
         body: JSON.stringify({ purpose: 'login' }),
       });
       if (!opened.ok) {

@@ -12,13 +12,27 @@ export class AgentInvocationError extends Error {
 }
 
 /** Presentation contract only. Authority, execution and scoring stay in BFF. */
-export async function invokeAgent(agent: string, input: Record<string, unknown> = {}) {
+export async function invokeAgent(
+  agent: string,
+  tenantId: string,
+  input: Record<string, unknown> = {},
+) {
   const name = z.nativeEnum(AgentName).parse(agent);
   let correlationId: string;
   let requestText: string;
+  let boundTenantId: string;
   try {
+    boundTenantId = z.uuid().parse(tenantId).toLowerCase();
+    for (const key of ['tenant_id', 'tenantId'] as const) {
+      if (input[key] !== undefined && z.uuid().parse(input[key]).toLowerCase() !== boundTenantId)
+        throw new Error('Tenant binding mismatch');
+    }
     correlationId = generateUUID();
-    requestText = JSON.stringify({ ...input, correlation_id: correlationId });
+    requestText = JSON.stringify({
+      ...input,
+      tenant_id: boundTenantId,
+      correlation_id: correlationId,
+    });
   } catch {
     throw new AgentInvocationError('The agent request could not be prepared. Nothing was sent.');
   }
@@ -27,7 +41,7 @@ export async function invokeAgent(agent: string, input: Record<string, unknown> 
   try {
     response = await fetch(`/api/bff/v1/agents/${name}/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': boundTenantId },
       body: requestText,
       redirect: 'error',
     });

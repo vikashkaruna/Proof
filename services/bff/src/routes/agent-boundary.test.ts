@@ -160,6 +160,48 @@ describe('agent invocation authority', () => {
     );
     expect(transport).not.toHaveBeenCalled();
   });
+  it('rejects Parikshan without an engagement before database access or dispatch', async () => {
+    const rpc = vi.spyOn(state.db!.client, 'rpc');
+    const response = await request(UserRole.FOUNDER, 'parikshan', { scope: 'workbench' });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: 'validation_failed' } });
+    expect(state.adminCalls).toBe(0);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(state.db!.rows('agent_runs')).toHaveLength(0);
+    expect(state.db!.rows('ledger_entries')).toHaveLength(0);
+    expect(transport).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+  it('dispatches Parikshan with an owned engagement and retains its binding', async () => {
+    state.db!.seed('engagements', { id: ENGAGEMENT, tenant_id: A });
+    transport.mockImplementation(
+      async (_url, init) => new Response(JSON.stringify(success(init, { agent: 'parikshan' }))),
+    );
+    const response = await request(UserRole.OWNER, 'parikshan', { engagement_id: ENGAGEMENT });
+    expect(response.status).toBe(200);
+    expect(transport).toHaveBeenCalledOnce();
+    const call = transport.mock.calls[0]!;
+    expect(JSON.parse(String(call[1]?.body)).input).toMatchObject({
+      tenant_id: A,
+      engagement_id: ENGAGEMENT,
+    });
+    expect(state.db!.rows('agent_runs')[0]).toMatchObject({
+      agent: 'parikshan',
+      tenant_id: A,
+      engagement_id: ENGAGEMENT,
+      status: 'succeeded',
+    });
+  });
+  it('rejects a foreign Parikshan engagement before recording or dispatch', async () => {
+    state.db!.seed('engagements', { id: ENGAGEMENT, tenant_id: B });
+    const rpc = vi.spyOn(state.db!.client, 'rpc');
+    expect((await request(UserRole.OWNER, 'parikshan', { engagement_id: ENGAGEMENT })).status).toBe(
+      404,
+    );
+    expect(rpc).not.toHaveBeenCalled();
+    expect(state.db!.rows('agent_runs')).toHaveLength(0);
+    expect(transport).not.toHaveBeenCalled();
+  });
   it('cannot invoke Karya even as founder', async () => {
     expect((await request(UserRole.FOUNDER, 'karya', {})).status).toBe(403);
     expect(transport).not.toHaveBeenCalled();

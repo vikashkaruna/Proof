@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useLayoutEffect, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { z } from 'zod';
 import { Capability, type AgentName } from '@axiom/types';
 import { invokeAgent, AgentInvocationError } from '@/lib/invoke-agent';
 import { AgentIcon, type AgentIconState, Badge, ON_DARK_ACCENTS } from '@axiom/ui';
@@ -196,6 +197,7 @@ export const ALL_AGENTS: AgentActionMeta[] = [
 const DIRECT_AGENT_NAMES = new Set<AgentName>(['lekha']);
 
 export interface SidebarAgentPanelProps {
+  tenantId?: string | null;
   transparent?: boolean;
   systemMessage?: string;
   className?: string;
@@ -204,6 +206,7 @@ export interface SidebarAgentPanelProps {
 }
 
 export function SidebarAgentPanel({
+  tenantId = null,
   transparent = false,
   systemMessage,
   className = '',
@@ -211,15 +214,34 @@ export function SidebarAgentPanel({
   capabilities = [],
 }: SidebarAgentPanelProps = {}) {
   const router = useRouter();
-  const [activeAgentNames, setActiveAgentNames] = useState<Set<string> | null>(null);
-  const [activeRunCount, setActiveRunCount] = useState(0);
+  const [activity, setActivity] = useState<{
+    tenantId: string;
+    names: Set<string> | null;
+    count: number;
+  } | null>(null);
+  const activeAgentNames = activity?.tenantId === tenantId ? activity.names : null;
+  const activeRunCount = activity?.tenantId === tenantId ? activity.count : 0;
   const [selectedAgent, setSelectedAgent] = useState<AgentActionMeta | null>(null);
   const canUseWorkbench = capabilities.includes(Capability.WORKBENCH_ACCESS);
+  const hasTenant = z.uuid().safeParse(tenantId).success;
   const canInvokeDirect = canUseWorkbench && capabilities.includes(Capability.AGENT_INVOKE);
 
   // Execution state tracking
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [lastRunResult, setLastRunResult] = useState<{
+  const currentTenant = useRef<string | null>(tenantId);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    currentTenant.current = tenantId;
+    return () => {
+      mounted.current = false;
+      currentTenant.current = null;
+    };
+  }, [tenantId]);
+  const [executingTenant, setExecutingTenant] = useState<string | null>(null);
+  const busy = executingTenant !== null;
+  const isExecuting = busy && executingTenant === tenantId;
+  const [recordedResult, setLastRunResult] = useState<{
+    tenantId: string;
     success: boolean;
     status?: string;
     message: string;
@@ -243,21 +265,26 @@ export function SidebarAgentPanel({
 
   // Poll for live active agent runs every 4 seconds
   useEffect(() => {
+    const parsedTenant = z.uuid().safeParse(tenantId);
+    if (!parsedTenant.success) return;
+    const pollTenantId = parsedTenant.data;
     let isMounted = true;
+    const mayRelease = () => isMounted && currentTenant.current === tenantId;
 
     async function fetchActive() {
       try {
-        const res = await fetch('/api/bff/v1/agents/runs/active');
+        const res = await fetch('/api/bff/v1/agents/runs/active', {
+          headers: { 'X-Tenant-Id': pollTenantId.toLowerCase() },
+        });
         if (!res.ok) {
-          if (isMounted) {
-            setActiveAgentNames(null);
-            setActiveRunCount(0);
+          if (mayRelease()) {
+            setActivity({ tenantId: pollTenantId, names: null, count: 0 });
           }
           return;
         }
         const data = await res.json();
         if (
-          isMounted &&
+          mayRelease() &&
           Array.isArray(data?.active_runs) &&
           data.active_runs.every(
             (run: unknown) =>
@@ -274,16 +301,13 @@ export function SidebarAgentPanel({
           for (const run of data.active_runs) {
             names.add(run.agent.toLowerCase());
           }
-          setActiveAgentNames(names);
-          setActiveRunCount(data.active_runs.length);
-        } else if (isMounted) {
-          setActiveAgentNames(null);
-          setActiveRunCount(0);
+          setActivity({ tenantId: pollTenantId, names, count: data.active_runs.length });
+        } else if (mayRelease()) {
+          setActivity({ tenantId: pollTenantId, names: null, count: 0 });
         }
       } catch {
-        if (isMounted) {
-          setActiveAgentNames(null);
-          setActiveRunCount(0);
+        if (mayRelease()) {
+          setActivity({ tenantId: pollTenantId, names: null, count: 0 });
         }
       }
     }
@@ -294,30 +318,42 @@ export function SidebarAgentPanel({
       isMounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [tenantId]);
 
   const getAgentState = (name: string): AgentIconState => {
     return activeAgentNames?.has(name) ? 'working' : 'idle';
   };
 
+  const lastRunResult = recordedResult?.tenantId === tenantId ? recordedResult : null;
+
   // Run agent action via BFF API
   const handleRunAgent = async (agent: AgentActionMeta) => {
-    if (isExecuting || !DIRECT_AGENT_NAMES.has(agent.name) || !canInvokeDirect) return;
-    setIsExecuting(true);
+    if (busy || !tenantId || !hasTenant || !DIRECT_AGENT_NAMES.has(agent.name) || !canInvokeDirect)
+      return;
+    const attemptTenant = tenantId;
+    setExecutingTenant(attemptTenant);
     setLastRunResult(null);
 
     try {
-      const data = await invokeAgent(agent.name, { scope: 'manual_trigger' });
+      const data = await invokeAgent(agent.name, attemptTenant, { scope: 'manual_trigger' });
+      if (currentTenant.current !== attemptTenant) return;
       setLastRunResult({
+        tenantId: attemptTenant,
         success: true,
         status: 'succeeded',
         message: `Agent ${agent.name} completed.`,
         latency_ms: data.latency_ms,
         ledgerIds: data.ledger_entry_ids,
       });
-      router.refresh();
+      try {
+        router.refresh();
+      } catch {
+        // A page refresh failure cannot invalidate the confirmed agent receipt.
+      }
     } catch (error) {
+      if (currentTenant.current !== attemptTenant) return;
       setLastRunResult({
+        tenantId: attemptTenant,
         success: false,
         status: 'failed',
         message:
@@ -326,7 +362,7 @@ export function SidebarAgentPanel({
             : 'Could not confirm the agent outcome.',
       });
     } finally {
-      setIsExecuting(false);
+      if (mounted.current) setExecutingTenant(null);
     }
   };
 
@@ -555,7 +591,7 @@ export function SidebarAgentPanel({
               <button
                 type="button"
                 onClick={() => handleRunAgent(selectedAgent)}
-                disabled={isExecuting}
+                disabled={busy || !hasTenant}
                 className="w-full rounded-md bg-[#0FB5A5] hover:bg-[#0da294] disabled:opacity-60 text-white text-[11px] font-semibold py-1.5 px-2.5 flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
               >
                 <span>⚡</span>
