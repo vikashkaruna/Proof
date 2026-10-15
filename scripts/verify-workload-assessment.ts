@@ -1,4 +1,10 @@
 import {
+  reportAcceptanceRequested,
+  clearPublicReportBrowserHandoff,
+  verifyPublicControlReports,
+  writePublicReportBrowserHandoff,
+} from './lib/acceptance-public-control-reports.js';
+import {
   acceptancePublicWebsiteCapture,
   verifyPublicControlSourceThroughController,
   publicControlAcceptanceFailure,
@@ -76,8 +82,11 @@ import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.j
 let phase = 'setup';
 const outcomes: Record<string, boolean> = {};
 let finalizedHttpProof: Record<string, unknown> | undefined;
+let publicReportProof: Awaited<ReturnType<typeof verifyPublicControlReports>> | undefined;
 let httpFailure: ReturnType<typeof acceptanceHttpFailure> | undefined;
 async function main() {
+  const withPublicReports = reportAcceptanceRequested();
+  if (withPublicReports) clearPublicReportBrowserHandoff();
   const input = z
     .object({
       containerName: z.string().regex(/^axiom-spire-test-[a-f0-9]{12}$/),
@@ -926,7 +935,11 @@ except Exception as error:
   // synthetic port, never evidence of cloud IAM/KMS or all-agent clearance.
   phase = 'normal-auth-assessment-http';
   const roleKey = (
-    role: 'human_action_writer' | 'evidence_ingestion_writer' | 'agent_ledger_writer',
+    role:
+      | 'human_action_writer'
+      | 'evidence_ingestion_writer'
+      | 'agent_ledger_writer'
+      | 'statutory_proof_writer',
   ) =>
     mintLocalPostgrestRoleKey({
       role,
@@ -943,6 +956,9 @@ except Exception as error:
     SUPABASE_HUMAN_ACTION_WRITER_KEY: roleKey('human_action_writer'),
     SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: roleKey('evidence_ingestion_writer'),
     SUPABASE_AGENT_LEDGER_WRITER_KEY: roleKey('agent_ledger_writer'),
+    ...(withPublicReports
+      ? { SUPABASE_STATUTORY_PROOF_WRITER_KEY: roleKey('statutory_proof_writer') }
+      : {}),
     APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
     AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
     AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
@@ -1444,6 +1460,26 @@ except Exception as error:
       },
     });
     outcomes['normal-auth-real-capture-human-review-source-controller-finalization'] = true;
+    if (withPublicReports) {
+      publicReportProof = await verifyPublicControlReports({
+        request,
+        db,
+        tenantId,
+        foreignTenantId,
+        ownerHeaders,
+        viewerHeaders,
+        source: reviewedSourceProof,
+        authUrl: url.origin,
+        anonKey: status.PUBLISHABLE_KEY ?? status.ANON_KEY!,
+        onPhase: (value) => {
+          phase = `normal-auth-public-report-${value}`;
+        },
+      });
+      outcomes[
+        'normal-auth-reviewed-source-board3-auditor3-mfa-human-review-exact-provider-release-download'
+      ] = true;
+    }
+
     finalizedHttpProof = {
       reviewedSourceProof,
       kind: 'isolated-normal-auth-finalized-assessment',
@@ -2349,6 +2385,10 @@ print('parent-death-clean')`;
     { mode: 0o600 },
   );
 
+  if (withPublicReports) {
+    assert(publicReportProof);
+    writePublicReportBrowserHandoff(publicReportProof);
+  }
   mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
   writeFileSync(
     '.axiom-runtime/workload-assessment/results.json',
