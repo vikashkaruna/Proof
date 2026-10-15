@@ -141,6 +141,13 @@ test.describe('replacing an authenticator with the one you hold', () => {
 
   test('the current code replaces it, and retires the old one', async ({ page }) => {
     const who = await createMfaAccount('replace-totp', { withFactor: true });
+    // Use actual browser secure randomness without the optional randomUUID API.
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: undefined,
+        configurable: true,
+      });
+    });
     await signInAs(page, who.email, who.password);
     await selectTenant(page, 'a');
     await openSecurity(page);
@@ -232,6 +239,13 @@ test.describe('revocation and login quarantine', () => {
     page,
   }) => {
     const who = await createMfaAccount('revoke');
+    // Use actual browser secure randomness without the optional randomUUID API.
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: undefined,
+        configurable: true,
+      });
+    });
     await signInAs(page, who.email, who.password);
     await openSecurity(page);
     await page.getByRole('button', { name: /^Enrol an authenticator$/ }).click();
