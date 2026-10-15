@@ -152,11 +152,13 @@ function RegistrationFields({ row }: { row?: ConnectorRow }) {
 export function ConnectorsClient({
   tenantId,
   canManage,
+  canOpenDiscovery = canManage,
   connectors,
   systems,
 }: {
   tenantId: string;
   canManage: boolean;
+  canOpenDiscovery?: boolean;
   connectors: ConnectorRow[];
   systems: ConnectorSystem[];
 }) {
@@ -225,7 +227,11 @@ export function ConnectorsClient({
           separately reviewed integration before use.
         </p>
       </section>
-      <PublicWebsiteClient tenantId={tenantId} canManage={canManage} />
+      <PublicWebsiteClient
+        tenantId={tenantId}
+        canManage={canManage}
+        canOpenDiscovery={canOpenDiscovery}
+      />
       <section aria-label="Available connector options" className="space-y-3">
         <h2 className="text-lg font-semibold text-indigo-900">Available connector options</h2>
         <div className="rounded-lg border border-teal-300 bg-teal-50 p-4 text-sm">

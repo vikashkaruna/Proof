@@ -72,7 +72,13 @@ const subscribeHydration = () => () => {};
 const hydratedSnapshot = () => true;
 const serverSnapshot = () => false;
 
-function CheckResult({ check }: { check: WebsiteCheck }) {
+function CheckResult({
+  check,
+  canOpenDiscovery,
+}: {
+  check: WebsiteCheck;
+  canOpenDiscovery: boolean;
+}) {
   return (
     <article className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -83,12 +89,14 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
       <p className="text-slate-600">
         Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
       </p>
-      <Link
-        href={`/discovery?checkId=${check.id}`}
-        className="inline-block font-medium text-teal-700 underline"
-      >
-        Review this saved website evidence
-      </Link>
+      {canOpenDiscovery && (
+        <Link
+          href={`/discovery?checkId=${check.id}`}
+          className="inline-block font-medium text-teal-700 underline"
+        >
+          Review this saved website evidence
+        </Link>
+      )}
       <PublicFormFacts metadata={check.formMetadata} pageLabel="Starting page" />
       {check.observations && (
         <div>
@@ -208,6 +216,7 @@ const completedCheckErrors = new Set([
 export function PublicWebsiteClient({
   tenantId,
   canManage,
+  canOpenDiscovery = canManage,
   context,
   disabledReason,
   onRecorded,
@@ -215,6 +224,7 @@ export function PublicWebsiteClient({
 }: {
   tenantId: string;
   canManage: boolean;
+  canOpenDiscovery?: boolean;
   context?: {
     id: string;
     actorId: string;
@@ -651,7 +661,7 @@ export function PublicWebsiteClient({
           <ol className="space-y-2">
             {visibleHistory.map((check) => (
               <li key={check.id}>
-                <CheckResult check={check} />
+                <CheckResult check={check} canOpenDiscovery={canOpenDiscovery} />
               </li>
             ))}
           </ol>

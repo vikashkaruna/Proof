@@ -4,9 +4,11 @@ import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { ConnectorsClient, type ConnectorRow, type ConnectorSystem } from './connectors-client';
+import { routeCapability } from '@/app/(app)/nav';
 export const dynamic = 'force-dynamic';
 export default async function ConnectorsPage() {
   const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
+  const canOpenDiscovery = can(routeCapability('/discovery'), { role: ctx.role });
   const [connectors, systems] = await Promise.all([
     ctx.supabase
       .from('connectors')
@@ -37,22 +39,24 @@ export default async function ConnectorsPage() {
         fetches public HTML only; private credentials, live access grants and transport verification
         remain separate steps.
       </p>
-      <section
-        aria-label="Continue a saved public check"
-        className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4"
-      >
-        <h2 className="font-semibold text-[#1E2A4A]">Continue with saved public HTML</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Select an engagement and retained check in Discovery, then review the source-bound Drishti
-          and Vibhaag results.
-        </p>
-        <Link
-          href="/discovery"
-          className="mt-2 inline-block text-sm font-medium text-teal-700 underline"
+      {canOpenDiscovery && (
+        <section
+          aria-label="Continue a saved public check"
+          className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4"
         >
-          Open public website agent workflow
-        </Link>
-      </section>
+          <h2 className="font-semibold text-[#1E2A4A]">Continue with saved public HTML</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Select an engagement and retained check in Discovery, then review the source-bound
+            Drishti and Vibhaag results.
+          </p>
+          <Link
+            href="/discovery"
+            className="mt-2 inline-block text-sm font-medium text-teal-700 underline"
+          >
+            Open public website agent workflow
+          </Link>
+        </section>
+      )}
       {connectors.error ||
       systems.error ||
       !Array.isArray(connectors.data) ||
@@ -63,6 +67,7 @@ export default async function ConnectorsPage() {
           key={ctx.tenantId}
           tenantId={ctx.tenantId}
           canManage={can(Capability.CONNECTOR_MANAGE, { role: ctx.role })}
+          canOpenDiscovery={canOpenDiscovery}
           connectors={connectors.data ?? []}
           systems={systems.data ?? []}
         />

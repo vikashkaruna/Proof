@@ -2,8 +2,10 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import ConnectorsPage from './page';
+import { UserRole } from '@axiom/types';
 
 const state = vi.hoisted(() => ({
+  role: 'viewer' as UserRole,
   errors: {} as Record<string, Error | null>,
   rows: {} as Record<string, unknown>,
   calls: [] as Array<[string, string, unknown]>,
@@ -11,7 +13,7 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/tenant-context', () => ({
   requireCapabilityContext: async () => ({
     tenantId: 'tenant-1',
-    role: 'viewer',
+    role: state.role,
     supabase: {
       from: (table: string) => {
         const query = {
@@ -40,6 +42,7 @@ vi.mock('./connectors-client', () => ({
   ),
 }));
 beforeEach(() => {
+  state.role = UserRole.VIEWER;
   state.errors = {};
   state.rows = {};
   state.calls = [];
@@ -51,7 +54,18 @@ it('binds both inventories to the active tenant and keeps a viewer read-only', a
   expect(state.calls).toContainEqual(['connectors', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['estate_systems', 'tenant_id', 'tenant-1']);
   expect(view).toContain('Private system connector execution is not yet available');
+  expect(view).not.toContain('Open public website agent workflow');
 });
+
+it.each([UserRole.OWNER, UserRole.REVIEWER])(
+  'offers permitted Discovery navigation to %s',
+  async (role) => {
+    state.role = role;
+    expect(renderToStaticMarkup(await ConnectorsPage())).toContain(
+      'Open public website agent workflow',
+    );
+  },
+);
 
 it('refuses to render a partial inventory when either query fails', async () => {
   state.errors.estate_systems = new Error('read failed');
