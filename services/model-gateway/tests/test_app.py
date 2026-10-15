@@ -56,6 +56,95 @@ def test_ready_endpoint(client):
     assert "redaction_enabled" in data
 
 
+def test_ready_region_only_has_no_executable_provider(client, monkeypatch):
+    settings = app.state.settings
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+    monkeypatch.setattr(settings, "aws_region", "ap-south-1")
+    response = client.get("/ready")
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "not_ready"
+    assert data["providers"]["bedrock"] is False
+    assert not any(data["providers"].values())
+    assert data["provider_status"]["bedrock"] == {
+        "implemented": False,
+        "configured": False,
+        "enabled": False,
+        "availability": "unavailable",
+    }
+    assert client.get("/health").json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai", "gemini"])
+def test_ready_configured_hosted_transport_is_not_a_verified_call(client, monkeypatch, provider):
+    settings = app.state.settings
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+    monkeypatch.setattr(settings, provider + "_api_key", "synthetic-readiness-key")
+    with patch("litellm.acompletion") as invoke:
+        response = client.get("/ready")
+    invoke.assert_not_called()
+    assert response.status_code == 200
+    data = response.json()
+    assert data["providers"][provider] is True
+    assert data["providers"]["bedrock"] is False
+    assert data["provider_status"][provider] == {
+        "implemented": True,
+        "configured": True,
+        "enabled": True,
+        "availability": "unverified",
+    }
+    assert "synthetic-readiness-key" not in response.text
+
+
+@pytest.mark.parametrize("environment,expected", [("development", 503), ("onprem", 200)])
+def test_ready_self_hosted_matches_dispatch_environment(client, monkeypatch, environment, expected):
+    settings = app.state.settings
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+    monkeypatch.setattr(settings, "environment", environment)
+    monkeypatch.setattr(settings, "self_hosted_base_url", "http://local-model:8000")
+    response = client.get("/ready")
+    assert response.status_code == expected
+    data = response.json()
+    assert data["providers"]["self_hosted"] is (environment == "onprem")
+    assert data["provider_status"]["self_hosted"]["configured"] is True
+    assert data["provider_status"]["self_hosted"]["availability"] == (
+        "unverified" if environment == "onprem" else "unavailable"
+    )
+    assert "http://local-model" not in response.text
+
+
+@pytest.mark.parametrize(
+    "key,provider",
+    [
+        ("ANTHROPIC_API_KEY", "anthropic"),
+        ("OPENAI_API_KEY", "openai"),
+        ("GEMINI_API_KEY", "gemini"),
+        ("GOOGLE_API_KEY", "gemini"),
+    ],
+)
+def test_ready_recognises_dispatch_environment_credential_fallback(
+    client, monkeypatch, key, provider
+):
+    monkeypatch.setattr(app.state.settings, "anthropic_api_key", None)
+    monkeypatch.setenv(key, "synthetic-environment-key")
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json()["providers"][provider] is True
+    assert response.json()["readiness_basis"] == "configuration_only"
+    assert "synthetic-environment-key" not in response.text
+
+
+def test_ready_onprem_does_not_count_hosted_credentials(client, monkeypatch):
+    monkeypatch.setattr(app.state.settings, "environment", "onprem")
+    monkeypatch.setattr(app.state.settings, "self_hosted_base_url", None)
+    response = client.get("/ready")
+    assert response.status_code == 503
+    data = response.json()
+    assert data["provider_status"]["anthropic"]["configured"] is True
+    assert data["provider_status"]["anthropic"]["enabled"] is False
+    assert not any(data["providers"].values())
+
+
 def test_complete_classification_task(client):
     payload = {
         "prompt": "Classify this data table: user records",
