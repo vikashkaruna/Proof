@@ -349,3 +349,76 @@ it('preserves an in-progress request key but releases a completed upstream failu
   expect(fetcher.mock.calls[2]?.[1]?.headers['Idempotency-Key']).toBe(firstKey);
   expect(screen.getByRole('button', { name: 'Audit public website' })).toBeTruthy();
 });
+
+it('audits with a secure HTTP UUID fallback and retries the exact pending public check', async () => {
+  const getRandomValues = vi.fn((bytes: Uint8Array) => {
+    bytes.fill(31);
+    return bytes;
+  });
+  vi.stubGlobal('crypto', { getRandomValues });
+  let posts = 0;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    posts++;
+    if (posts === 1) throw new Error('lost response');
+    return Response.json({ data: check }, { status: 201 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+  await waitFor(() =>
+    expect(screen.queryByText('Loading recent public website checks…')).toBeNull(),
+  );
+  const url = screen.getByLabelText('Public page URL') as HTMLInputElement;
+  fireEvent.change(url, { target: { value: 'https://example.com/' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Retry same check' })).toBeTruthy(),
+  );
+  expect(url.disabled).toBe(true);
+  // Pending intent is immutable even if disabled DOM values change programmatically.
+  fireEvent.change(url, { target: { value: 'https://different.example/' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() => expect(screen.getByText('Public website audit recorded.')).toBeTruthy());
+  const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[0]![0]).toBe('/api/bff/v1/public-website-checks');
+  expect(JSON.parse(String(writes[0]![1]?.body))).toEqual({ url: 'https://example.com/' });
+  expect(writes[0]![1]?.headers).toMatchObject({
+    'X-Tenant-Id': 'tenant-1',
+    'Idempotency-Key': expect.stringMatching(
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    ),
+  });
+  expect(getRandomValues).toHaveBeenCalledOnce();
+  expect(url.disabled).toBe(false);
+});
+
+it('keeps a public check editable and sends no POST when secure randomness is unavailable', async () => {
+  vi.stubGlobal('crypto', {});
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) =>
+    Response.json({ data: init?.method === 'POST' ? check : [] }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage />);
+  await waitFor(() =>
+    expect(screen.queryByText('Loading recent public website checks…')).toBeNull(),
+  );
+  const url = screen.getByLabelText('Public page URL') as HTMLInputElement;
+  fireEvent.change(url, { target: { value: 'https://example.com/' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await waitFor(() =>
+    expect(screen.getByRole('status').textContent).toContain('could not be prepared'),
+  );
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  expect(url.disabled).toBe(false);
+  expect(url.value).toBe('https://example.com/');
+  expect(screen.queryByRole('button', { name: 'Retry same check' })).toBeNull();
+  vi.stubGlobal('crypto', { randomUUID: () => 'request-prepared-website' });
+  fireEvent.change(url, { target: { value: 'https://example.com/corrected' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await waitFor(() => expect(screen.getByText('Public website audit recorded.')).toBeTruthy());
+  const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]![1]?.body))).toEqual({ url: 'https://example.com/corrected' });
+});

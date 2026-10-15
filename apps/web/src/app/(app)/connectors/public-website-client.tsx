@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { z } from 'zod';
 import { publicFormMetadataSchema } from '@axiom/types';
+import { generateUUID } from '@axiom/ui';
 import { PublicFormFacts } from './public-form-facts';
 
 const checkSchema = z
@@ -232,11 +233,20 @@ export function PublicWebsiteClient({
     event.preventDefault();
     if (busy) return;
     if (!pending.current) {
-      const form = new FormData(event.currentTarget);
-      pending.current = {
-        key: crypto.randomUUID(),
-        body: JSON.stringify({ url: String(form.get('url') ?? '').trim() }),
-      };
+      try {
+        const form = new FormData(event.currentTarget);
+        pending.current = {
+          key: generateUUID(),
+          body: JSON.stringify({ url: String(form.get('url') ?? '').trim() }),
+        };
+      } catch {
+        // A preparation error precedes transport: no uncertain operation exists.
+        setUncertain(false);
+        setMessage(
+          'The website check could not be prepared. Nothing was sent. Check the form and try again.',
+        );
+        return;
+      }
     }
     setBusy(true);
     setMessage('');

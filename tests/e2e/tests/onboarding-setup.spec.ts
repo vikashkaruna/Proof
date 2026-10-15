@@ -51,6 +51,14 @@ test('an admin completes onboarding step by step and can resume between steps', 
   const suffix = crypto.randomUUID().slice(0, 8);
   const estateName = await seedEstate(page, suffix);
 
+  // Keep normal real-MFA sign-in, then exercise actual wizard submissions
+  // with the browser capability available on non-localhost HTTP origins.
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+    });
+  });
   await page.goto('/estate/setup');
   const wizard = page.getByTestId('setup-wizard');
   await expect(wizard).toBeVisible();

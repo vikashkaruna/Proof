@@ -142,8 +142,9 @@ function RegistrationFields({ row }: { row?: ConnectorRow }) {
         />
       </label>
       <p className="text-sm text-slate-600">
-        Use a non-secret identifier such as primary_crm. Connection addresses and credentials are
-        configured separately.
+        Use a non-secret identifier such as primary_crm: start with a lowercase letter, then use
+        lowercase letters, digits, underscores or hyphens, up to 80 characters. Never enter a URL,
+        password or token here. This reference does not connect the system.
       </p>
     </>
   );
@@ -192,7 +193,12 @@ export function ConnectorsClient({
         aria-label="Connection setup"
         className="space-y-4 rounded-lg border border-slate-200 bg-white p-5"
       >
-        <h2 className="text-lg font-semibold text-indigo-900">Set up a connection path</h2>
+        <h2 className="text-lg font-semibold text-indigo-900">Continue your assessment setup</h2>
+        <p className="text-sm text-slate-700">
+          Public website audits are available below. Private system connections are not available in
+          this deployment. Connector registrations save setup records only; they do not connect a
+          system or grant agent access.
+        </p>
         <ol className="list-inside list-decimal space-y-2 text-sm text-slate-700">
           <li>
             <Link href="/estate" className="text-teal-700 underline">
@@ -200,23 +206,24 @@ export function ConnectorsClient({
             </Link>
             .
           </li>
-          <li>Choose a reviewed descriptor and register a non-secret endpoint reference below.</li>
+          <li>Finish the company profile, estate and system inventory in estate setup.</li>
           <li>
-            Have the operator configure the private endpoint and broker credential for that
-            reference. Never enter a connection URL, password, token, or secret here.
-          </li>
-          <li>
-            Enable the registration, then{' '}
-            <Link href="/estate/setup" className="text-teal-700 underline">
-              review agent access in estate setup
-            </Link>
-            . A grant is a separate recorded human action.
-          </li>
-          <li>
-            Use “Check setup status” on the registration to inspect recorded configuration. A live
-            transport check needs the private workload and broker.
+            In the Connection path step, mark unconnected systems “assess manually” and record the
+            connection path. Continue through Access grant review and Readiness. Manual assessment
+            uses evidence you provide; it does not read the private system.
           </li>
         </ol>
+        <Link
+          href="/estate/setup"
+          className="inline-block rounded-md bg-teal-700 px-4 py-2 font-medium text-white"
+        >
+          Continue with manual evidence
+        </Link>
+        <p className="text-sm text-slate-600">
+          You can continue without registering a private connector. Creating or enabling a
+          registration below does not test a connection. Live private connectivity requires a
+          separately reviewed integration before use.
+        </p>
       </section>
       <PublicWebsiteClient tenantId={tenantId} canManage={canManage} />
       <section aria-label="Available connector options" className="space-y-3">
@@ -253,7 +260,7 @@ export function ConnectorsClient({
                 <span className="block">
                   {descriptor.transport.toUpperCase()} ·{' '}
                   {descriptor.targetBinding === 'production'
-                    ? 'Production · operator setup required'
+                    ? 'Production descriptor · registration only'
                     : 'Reference only'}{' '}
                   · {descriptor.auth.replaceAll('_', ' ')}
                 </span>
@@ -261,7 +268,7 @@ export function ConnectorsClient({
                   {descriptor.provenance === 'vendor-verified'
                     ? 'Vendor verified'
                     : descriptor.targetBinding === 'production'
-                      ? 'Requires private network, broker credential and workload verification before use.'
+                      ? 'A setup record only; live connectivity is not available in this deployment.'
                       : 'Reference descriptor; not proof of vendor connectivity'}
                 </span>
               </li>
@@ -280,6 +287,10 @@ export function ConnectorsClient({
       {canManage && availableSystems.length > 0 && catalogue && (
         <section aria-label="Register connector" className="space-y-3 rounded border p-5">
           <h2 className="font-semibold">Register connector</h2>
+          <p className="text-sm text-slate-600">
+            Optional setup record. Choose a reviewed descriptor and a non-secret endpoint reference.
+            This does not connect the system or enable an agent to access it.
+          </p>
           <MutationForm
             tenantId={tenantId}
             path="/connectors"
@@ -347,6 +358,10 @@ export function ConnectorsClient({
             </p>
             <p className="text-sm">
               Endpoint reference: {row.endpoint_ref} · Assurance policy: {row.assurance}
+            </p>
+            <p className="text-sm text-slate-600">
+              Setup record only. An enabled registration does not establish live connectivity or
+              grant agent access.
             </p>
             <p className="text-sm">
               Health: {latest ? `${latest.status} (recorded ${latest.checked_at})` : 'Not checked'}

@@ -1,7 +1,23 @@
 'use client';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from '@axiom/ui';
+import { z } from 'zod';
+import {
+  CreateEstateRequestSchema,
+  UpdateEstateRequestSchema,
+  CreateEstateSystemRequestSchema,
+  UpdateEstateSystemRequestSchema,
+} from '@axiom/types';
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  generateUUID,
+} from '@axiom/ui';
 
 export interface EstateRow {
   id: string;
@@ -27,6 +43,32 @@ export interface IntakeRow {
   title: string;
 }
 const fieldClass = 'w-full rounded-md border border-input bg-background p-2 text-sm';
+const validationIssues = z.array(
+  z.object({
+    path: z.array(z.union([z.string(), z.number()])),
+    message: z.string(),
+  }),
+);
+const fieldLabels: Record<string, string> = {
+  slug: 'Estate slug',
+  name: 'Name',
+  description: 'Description',
+  systemKind: 'System kind',
+  externalRef: 'External reference',
+  dataCategories: 'Declared categories',
+  status: 'Status',
+  expectedVersion: 'Record version',
+  estateId: 'Estate',
+  confirmed: 'Scope confirmation',
+};
+
+function formatIssues(issues: { path: PropertyKey[]; message: string }[]): string[] {
+  return issues.map((issue) => {
+    const field = fieldLabels[String(issue.path[0])] ?? 'Request fields';
+    const item = typeof issue.path[1] === 'number' ? ` (item ${issue.path[1] + 1})` : '';
+    return `${field}${item}: ${issue.message}`;
+  });
+}
 
 /** Keeps the exact intent/key after a lost response. A retry cannot silently duplicate it. */
 export function MutationForm({
@@ -37,6 +79,7 @@ export function MutationForm({
   children,
   label,
   onSuccess,
+  schema,
 }: {
   tenantId: string;
   path: string | ((form: FormData) => string);
@@ -45,26 +88,47 @@ export function MutationForm({
   children: ReactNode;
   label: string;
   onSuccess?: () => void;
+  schema?: z.ZodType;
 }) {
   const router = useRouter();
   const pending = useRef<{ key: string; body: string; path: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
+  const [issues, setIssues] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     if (!pending.current) {
-      const form = new FormData(event.currentTarget);
-      pending.current = {
-        key: crypto.randomUUID(),
-        body: JSON.stringify(body(form)),
-        path: typeof path === 'string' ? path : path(form),
-      };
+      try {
+        const form = new FormData(event.currentTarget);
+        const payload = body(form);
+        const parsed = schema?.safeParse(payload);
+        if (parsed && !parsed.success) {
+          setMessage('Check the listed fields before saving.');
+          setIssues(formatIssues(parsed.error.issues));
+          return;
+        }
+        pending.current = {
+          key: generateUUID(),
+          body: JSON.stringify(parsed?.data ?? payload),
+          path: typeof path === 'string' ? path : path(form),
+        };
+      } catch {
+        // No request exists yet. Keep the form editable; uncertainty applies
+        // only once a prepared intent has actually been handed to transport.
+        setUncertain(false);
+        setIssues([]);
+        setMessage(
+          'The request could not be prepared. Nothing was sent. Check the form and try again.',
+        );
+        return;
+      }
     }
     setBusy(true);
     setMessage('');
+    setIssues([]);
     try {
       const res = await fetch(`/api/bff/v1${pending.current.path}`, {
         method,
@@ -82,6 +146,10 @@ export function MutationForm({
         setUncertain(ambiguous);
         if (!ambiguous) pending.current = null;
         setMessage(result.error?.message ?? 'The request could not be completed.');
+        const parsedIssues = validationIssues.safeParse(result.error?.issues);
+        if (!ambiguous && parsedIssues.success) {
+          setIssues(formatIssues(parsedIssues.data));
+        }
         return;
       }
       if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
@@ -117,6 +185,13 @@ export function MutationForm({
           {message}
         </p>
       )}
+      {issues.length > 0 && (
+        <ul role="alert" className="text-sm text-destructive">
+          {issues.map((issue, index) => (
+            <li key={index}>{issue}</li>
+          ))}
+        </ul>
+      )}
       {uncertain && <p className="text-sm">Keep this form open until the outcome is resolved.</p>}
     </form>
   );
@@ -127,18 +202,36 @@ function Field({
   value = '',
   required = false,
   maxLength = 4000,
+  pattern,
+  hint,
 }: {
   label: string;
   name: string;
   value?: string;
   required?: boolean;
   maxLength?: number;
+  pattern?: string;
+  hint?: string;
 }) {
   const id = useId();
   return (
     <div className="space-y-1">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} name={name} defaultValue={value} required={required} maxLength={maxLength} />
+      <Input
+        id={id}
+        name={name}
+        defaultValue={value}
+        required={required}
+        maxLength={maxLength}
+        pattern={pattern}
+        title={hint}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+      />
+      {hint && (
+        <p id={`${id}-hint`} className="text-sm text-muted-foreground">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -171,6 +264,7 @@ function SystemForm({
       path={system ? `/estate-systems/${system.id}` : `/estates/${estateId}/systems`}
       method={system ? 'PATCH' : 'POST'}
       label={system ? 'Save system' : 'Add system'}
+      schema={system ? UpdateEstateSystemRequestSchema : CreateEstateSystemRequestSchema}
       body={(f) => ({
         name: text(f, 'name'),
         systemKind: text(f, 'systemKind'),
@@ -208,6 +302,8 @@ function SystemForm({
       />
       <Field
         label="Declared categories (comma-separated lowercase keys)"
+        maxLength={8198}
+        hint="Enter up to 100 unique keys, each at most 80 characters, using lowercase letters, numbers and single hyphens. For example: identity, financial."
         name="dataCategories"
         value={system?.system_data_categories
           .filter((c) => c.source === 'declared')
@@ -244,6 +340,7 @@ export function EstateClient({
               path="/estates"
               method="POST"
               label="Create estate"
+              schema={CreateEstateRequestSchema}
               body={(f) => ({
                 name: text(f, 'name'),
                 slug: text(f, 'slug'),
@@ -254,6 +351,8 @@ export function EstateClient({
               <Field
                 label="Estate slug (lowercase words with hyphens)"
                 name="slug"
+                pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                hint="Use lowercase letters and numbers separated by single hyphens, for example production-india."
                 required
                 maxLength={80}
               />
@@ -283,6 +382,7 @@ export function EstateClient({
                   path={`/estates/${estate.id}`}
                   method="PATCH"
                   label="Save estate"
+                  schema={UpdateEstateRequestSchema}
                   body={(f) => ({
                     name: text(f, 'name'),
                     description: text(f, 'description'),
