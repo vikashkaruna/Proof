@@ -623,6 +623,8 @@ function Workflow({
         </p>
       )}
       <PublicControlReview
+        actorId={actorId}
+        canReview={canReview}
         tenantId={tenantId}
         engagementId={engagementId}
         checkId={checkId}

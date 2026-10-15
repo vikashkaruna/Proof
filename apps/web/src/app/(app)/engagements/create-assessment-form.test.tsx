@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
+import { z } from 'zod';
 import { renderToString } from 'react-dom/server';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -9,18 +10,32 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const CREATED = '22222222-2222-4222-8222-222222222222';
 const ESTATE = '33333333-3333-4333-8333-333333333333';
 const REQUEST = '44444444-4444-4444-8444-444444444444';
+function createdResponse(_url: string, init: RequestInit) {
+  const body: unknown = JSON.parse(String(init.body));
+  const { requestKey } = z.object({ requestKey: z.uuid() }).parse(body);
+  return Promise.resolve(Response.json({ id: requestKey }, { status: 201 }));
+}
 
+function immutableIntent(call: readonly unknown[]) {
+  const [url, init] = call as [string, RequestInit];
+  const { signal, ...intent } = init;
+  expect(signal).toBeInstanceOf(AbortSignal);
+  return [url, intent];
+}
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal('crypto', { randomUUID: () => REQUEST });
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-function form() {
+async function form() {
   const view = render(
     <CreateAssessmentForm
+      actorId={CREATED}
       tenantId={TENANT}
       libraryVersion="0.1.1"
       estates={[{ id: ESTATE, name: 'Primary estate' }]}
@@ -32,26 +47,35 @@ function form() {
   fireEvent.change(screen.getByRole('combobox', { name: 'Assessment estate (optional)' }), {
     target: { value: ESTATE },
   });
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Create assessment' }).hasAttribute('disabled') &&
+        !screen.queryByText(/Nothing will be sent/),
+    ).toBe(false),
+  );
   return view;
 }
 
 it('does not permit a native submit before hydration', () => {
   const html = renderToString(
-    <CreateAssessmentForm tenantId={TENANT} libraryVersion="0.1.1" estates={[]} />,
+    <CreateAssessmentForm
+      actorId={CREATED}
+      tenantId={TENANT}
+      libraryVersion="0.1.1"
+      estates={[]}
+    />,
   );
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Create assessment<\/button>/);
 });
 
 it('creates a scoped assessment and links to that saved engagement', async () => {
-  const fetcher = vi
-    .fn()
-    .mockResolvedValue(new Response(JSON.stringify({ id: CREATED }), { status: 201 }));
+  const fetcher = vi.fn().mockImplementation(createdResponse);
   vi.stubGlobal('fetch', fetcher);
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() =>
     expect(screen.getByRole('link', { name: 'Open saved assessment' }).getAttribute('href')).toBe(
-      `/assessment?engagement=${CREATED}`,
+      `/assessment?engagement=${REQUEST}`,
     ),
   );
   const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
@@ -74,9 +98,9 @@ it('creates and retries the exact request using secure randomness when randomUUI
   const fetcher = vi
     .fn()
     .mockRejectedValueOnce(new Error('lost response'))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ id: CREATED }), { status: 200 }));
+    .mockImplementationOnce(createdResponse);
   vi.stubGlobal('fetch', fetcher);
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unconfirmed'));
   vi.stubGlobal('crypto', undefined);
@@ -85,7 +109,7 @@ it('creates and retries the exact request using secure randomness when randomUUI
   expect(getRandomValues).toHaveBeenCalledOnce();
   expect(fetcher).toHaveBeenCalledTimes(2);
   const first = fetcher.mock.calls[0] as [string, RequestInit];
-  expect(fetcher.mock.calls[1]).toEqual(first);
+  expect(immutableIntent(fetcher.mock.calls[1]!)).toEqual(immutableIntent(first!));
   const body = JSON.parse(String(first[1].body));
   expect(body.requestKey).toMatch(
     /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
@@ -114,7 +138,7 @@ it.each(['unavailable', 'missing_methods', 'randomUUID_error', 'getRandomValues_
     );
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    form();
+    await form();
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toContain('Nothing was sent'),
@@ -130,7 +154,7 @@ it.each(['unavailable', 'missing_methods', 'randomUUID_error', 'getRandomValues_
       target: { value: 'Corrected review' },
     });
     vi.stubGlobal('crypto', { randomUUID: () => REQUEST });
-    fetcher.mockResolvedValue(new Response(JSON.stringify({ id: CREATED }), { status: 201 }));
+    fetcher.mockImplementation(createdResponse);
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     await screen.findByRole('link', { name: 'Open saved assessment' });
     expect(fetcher).toHaveBeenCalledOnce();
@@ -142,9 +166,9 @@ it('retries an uncertain outcome with the same request key and links the replaye
   const fetcher = vi
     .fn()
     .mockRejectedValueOnce(new Error('connection lost'))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ id: CREATED }), { status: 200 }));
+    .mockImplementationOnce(createdResponse);
   vi.stubGlobal('fetch', fetcher);
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unconfirmed'));
   expect(
@@ -153,7 +177,7 @@ it('retries an uncertain outcome with the same request key and links the replaye
   fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
   await waitFor(() =>
     expect(screen.getByRole('link', { name: 'Open saved assessment' }).getAttribute('href')).toBe(
-      `/assessment?engagement=${CREATED}`,
+      `/assessment?engagement=${REQUEST}`,
     ),
   );
   expect(fetcher).toHaveBeenCalledTimes(2);
@@ -174,7 +198,7 @@ it('shows a definitive validation refusal without trapping the form in retry mod
       ),
     ),
   );
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() =>
     expect(screen.getByRole('status').textContent).toContain('current published'),
@@ -195,7 +219,7 @@ it('keeps the same key when a claimed request is still in progress', async () =>
     ),
   );
   vi.stubGlobal('fetch', fetcher);
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unconfirmed'));
   fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
@@ -217,7 +241,7 @@ it('allows a new attempt after a definitive library lookup failure', async () =>
       ),
     ),
   );
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await waitFor(() =>
     expect(screen.getByRole('status').textContent).toContain('Library unavailable'),
@@ -229,6 +253,7 @@ const OTHER_TENANT = '55555555-5555-4555-8555-555555555555';
 function scoped(tenantId = TENANT, libraryVersion = '0.1.1') {
   return (
     <CreateAssessmentForm
+      actorId={CREATED}
       tenantId={tenantId}
       libraryVersion={libraryVersion}
       estates={[{ id: ESTATE, name: 'Primary estate' }]}
@@ -242,9 +267,9 @@ it.each(['tenant', 'library'])(
     const fetcher = vi
       .fn()
       .mockRejectedValueOnce(new Error('lost'))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: CREATED }), { status: 200 }));
+      .mockImplementationOnce(createdResponse);
     vi.stubGlobal('fetch', fetcher);
-    const view = form();
+    const view = await form();
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     await screen.findByRole('alert');
     view.rerender(
@@ -252,11 +277,17 @@ it.each(['tenant', 'library'])(
     );
     fireEvent.submit(screen.getByRole('form', { name: 'Create assessment' }));
     expect(fetcher).toHaveBeenCalledOnce();
-    expect(document.body.textContent).toContain('original organisation and control library');
+    expect(document.body.textContent).toContain(
+      scope === 'library'
+        ? 'earlier-library intake remains unconfirmed'
+        : 'original organisation and control library',
+    );
     view.rerender(scoped());
     fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
     await screen.findByRole('link', { name: 'Open saved assessment' });
-    expect(fetcher.mock.calls[1]).toEqual(fetcher.mock.calls[0]);
+    expect(immutableIntent(fetcher.mock.calls[1]!)).toEqual(
+      immutableIntent(fetcher.mock.calls[0]!),
+    );
   },
 );
 
@@ -271,13 +302,13 @@ it.each(['success', 'failure'])(
         }),
     );
     vi.stubGlobal('fetch', fetcher);
-    const view = form();
+    const view = await form();
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     view.rerender(scoped(OTHER_TENANT));
     await act(async () => {
       settle(
         outcome === 'success'
-          ? new Response(JSON.stringify({ id: CREATED }), { status: 201 })
+          ? new Response(JSON.stringify({ id: REQUEST }), { status: 201 })
           : new Response(JSON.stringify({ error: { message: 'Original tenant refusal' } }), {
               status: 422,
             }),
@@ -303,7 +334,7 @@ it('preserves an unknown outcome when a replay receives a definitive refusal', a
       new Response(JSON.stringify({ error: { message: 'Permission changed' } }), { status: 403 }),
     );
   vi.stubGlobal('fetch', fetcher);
-  form();
+  await form();
   fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
   await screen.findByRole('alert');
   fireEvent.click(screen.getByRole('button', { name: 'Retry same request' }));
@@ -327,13 +358,13 @@ it.each(['success', 'failure'])(
         }),
     );
     vi.stubGlobal('fetch', fetcher);
-    const view = form();
+    const view = await form();
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     view.unmount();
     await act(async () => {
       settle(
         outcome === 'success'
-          ? new Response(JSON.stringify({ id: CREATED }), { status: 201 })
+          ? new Response(JSON.stringify({ id: REQUEST }), { status: 201 })
           : new Response('{}', { status: 500 }),
       );
     });
@@ -356,13 +387,13 @@ it.each(['before switch', 'after switch'])(
             settle = resolve;
           }),
       )
-      .mockResolvedValue(new Response(JSON.stringify({ id: CREATED }), { status: 201 }));
+      .mockImplementation(createdResponse);
     vi.stubGlobal('fetch', fetcher);
-    const view = form();
+    const view = await form();
     fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
     if (timing === 'after switch') view.rerender(scoped(OTHER_TENANT));
     await act(async () => {
-      settle(new Response(JSON.stringify({ id: CREATED }), { status: 201 }));
+      settle(new Response(JSON.stringify({ id: REQUEST }), { status: 201 }));
     });
     if (timing === 'before switch') view.rerender(scoped(OTHER_TENANT));
     expect(screen.queryByRole('link', { name: 'Open saved assessment' })).toBeNull();
@@ -390,3 +421,228 @@ it.each(['before switch', 'after switch'])(
     });
   },
 );
+
+it('restores a lost-response request after reload and explicitly replays exactly once without fresh randomness', async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('committed response lost'))
+    .mockImplementationOnce(createdResponse);
+  vi.stubGlobal('fetch', fetcher);
+  const view = await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('alert');
+  const first = fetcher.mock.calls[0];
+  view.unmount();
+  vi.stubGlobal('crypto', undefined);
+  render(
+    <CreateAssessmentForm
+      actorId={CREATED}
+      tenantId={TENANT}
+      libraryVersion="0.1.1"
+      estates={[{ id: ESTATE, name: 'Primary estate' }]}
+    />,
+  );
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry same request' }));
+  await screen.findByRole('link', { name: 'Open saved assessment' });
+  expect(immutableIntent(fetcher.mock.calls[1]!)).toEqual(immutableIntent(first!));
+  expect(localStorage.length).toBe(0);
+});
+it('keeps an earlier unknown journal across a later refusal and another reload', async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('lost'))
+    .mockResolvedValueOnce(
+      Response.json(
+        { error: { code: 'forbidden', message: 'Authority revoked' } },
+        { status: 403 },
+      ),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const view = await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('alert');
+  view.unmount();
+  const saved = localStorage.getItem(localStorage.key(0)!);
+  render(
+    <CreateAssessmentForm
+      actorId={CREATED}
+      tenantId={TENANT}
+      libraryVersion="0.1.1"
+      estates={[]}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry same request' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('unconfirmed'));
+  expect(localStorage.getItem(localStorage.key(0)!)).toBe(saved);
+});
+it('refuses unreadable browser storage before sending any mutation', async () => {
+  localStorage.setItem(`axiom:engagement-intake:v1:${CREATED}:${TENANT}:${REQUEST}`, '{}');
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('private storage detail');
+  });
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  await form();
+  expect(screen.getByRole('button', { name: 'Create assessment' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Nothing will be sent');
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('keeps confirmed creation truth if recovery storage cannot be cleared', async () => {
+  const fetcher = vi.fn().mockImplementation(createdResponse);
+  vi.stubGlobal('fetch', fetcher);
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('link', { name: 'Open saved assessment' });
+  expect(screen.getByRole('status').textContent).toContain('confirmed assessment remains saved');
+  expect(screen.queryByRole('button', { name: 'Retry same request' })).toBeNull();
+});
+
+it('separates account journals and ignores an old account response while the new account has a request', async () => {
+  let resolveA: (value: Response) => void = () => {};
+  let resolveB: (value: Response) => void = () => {};
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((r) => {
+          resolveA = r;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((r) => {
+          resolveB = r;
+        }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const view = await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  const otherActor = '55555555-5555-4555-8555-555555555555';
+  view.rerender(
+    <CreateAssessmentForm
+      actorId={otherActor}
+      tenantId={TENANT}
+      libraryVersion="0.1.1"
+      estates={[]}
+    />,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Create assessment' })).toHaveProperty(
+      'disabled',
+      false,
+    ),
+  );
+  fireEvent.change(screen.getByRole('textbox', { name: 'Assessment title' }), {
+    target: { value: 'New account intent' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  await act(async () => resolveA(Response.json({ id: REQUEST })));
+  expect(screen.queryByRole('link', { name: 'Open saved assessment' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Checking assessment…' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  await act(async () => resolveB(Response.json({ id: REQUEST })));
+  expect(
+    (await screen.findByRole('link', { name: 'Open saved assessment' })).getAttribute('href'),
+  ).toContain(REQUEST);
+  expect(localStorage.length).toBe(0);
+});
+
+it('requires fresh explicit confirmation to reconcile an old library and then allows a distinct current-library intake', async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('lost'))
+    .mockImplementationOnce(createdResponse)
+    .mockImplementationOnce(createdResponse);
+  vi.stubGlobal('fetch', fetcher);
+  const view = await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('alert');
+  const original = fetcher.mock.calls[0];
+  view.unmount();
+  vi.stubGlobal('crypto', { randomUUID: () => '66666666-6666-4666-8666-666666666666' });
+  render(
+    <CreateAssessmentForm
+      actorId={CREATED}
+      tenantId={TENANT}
+      libraryVersion="0.1.2"
+      estates={[]}
+    />,
+  );
+  const check = await screen.findByRole('button', { name: 'Check retained request' });
+  expect(check).toHaveProperty('disabled', true);
+  expect(screen.getByRole('region', { name: 'Retained intake recovery' })).toBeTruthy();
+  expect(screen.getByText('October review', { selector: 'dd' })).toBeTruthy();
+  expect(screen.getByText(REQUEST, { selector: 'dd' })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this retained intent/ }));
+  fireEvent.click(check);
+  await screen.findByRole('link', { name: 'Open recovered assessment (library 0.1.1)' });
+  expect(immutableIntent(fetcher.mock.calls[1]!)).toEqual(immutableIntent(original!));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Assessment title' }), {
+    target: { value: 'Current-library assessment' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('link', { name: 'Open saved assessment' });
+  expect(JSON.parse(fetcher.mock.calls[2]![1].body)).toMatchObject({
+    libraryVersion: '0.1.2',
+    requestKey: '66666666-6666-4666-8666-666666666666',
+  });
+});
+it('retains old-library uncertainty after refusal and requires renewed confirmation before another check', async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('lost'))
+    .mockResolvedValueOnce(
+      Response.json(
+        { error: { code: 'forbidden', message: 'Authority changed' } },
+        { status: 403 },
+      ),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const view = await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('alert');
+  view.rerender(
+    <CreateAssessmentForm
+      actorId={CREATED}
+      tenantId={TENANT}
+      libraryVersion="0.1.2"
+      estates={[]}
+    />,
+  );
+  fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this retained intent/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('checkbox', { name: /I reviewed this retained intent/ }),
+    ).toHaveProperty('disabled', false),
+  );
+  expect(screen.getByRole('button', { name: 'Check retained request' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(localStorage.length).toBe(1);
+});
+
+it('preserves the exact request when a successful response names another assessment', async () => {
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ id: CREATED }));
+  vi.stubGlobal('fetch', fetcher);
+  await form();
+  fireEvent.click(screen.getByRole('button', { name: 'Create assessment' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('link', { name: 'Open saved assessment' })).toBeNull();
+  expect(localStorage.length).toBe(1);
+  expect(await screen.findByRole('button', { name: 'Retry same request' })).toBeTruthy();
+});

@@ -22,6 +22,10 @@ vi.hoisted(() => {
 
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }));
 vi.mock('@axiom/supabase', () => ({
+  createHumanActionWriter: () => {
+    if (!db.current) throw new Error('fake db not installed');
+    return db.current.client;
+  },
   createSupabaseAdmin: () => {
     if (!db.current) throw new Error('fake db not installed');
     return db.current.client;
@@ -49,7 +53,7 @@ async function buildApp(role: UserRole = UserRole.OWNER) {
     c.set('tenantId', TENANT as never);
     c.set('role', role as never);
     c.set('approvalScopes', [] as never);
-    c.set('idempotencyKey', 'idem-1' as never);
+    c.set('idempotencyKey', 'intake-operation' as never);
     await next();
   });
   app.route('/v1', routes);
@@ -59,6 +63,32 @@ async function buildApp(role: UserRole = UserRole.OWNER) {
 beforeEach(() => {
   fake = createFakeDb({
     control_libraries: [{ version: 'v1', status: 'published', is_current: true }],
+  });
+  fake.onRpc('create_engagement_intake', (args) => {
+    const existing = fake.rows('engagements').find((row) => row.id === args.p_request_key);
+    if (existing)
+      return existing.title === args.p_title &&
+        existing.library_version === args.p_library_version &&
+        existing.estate_id === args.p_estate_id
+        ? { id: existing.id, receipt: '1', legacy: false, replayed: true }
+        : { error: 'request_key_conflict' };
+    if (
+      !fake
+        .rows('control_libraries')
+        .some(
+          (row) =>
+            row.version === args.p_library_version && row.status === 'published' && row.is_current,
+        )
+    )
+      return { error: 'invalid_library' };
+    const row = fake.seed('engagements', {
+      ...(args.p_request_key ? { id: args.p_request_key } : {}),
+      tenant_id: args.p_tenant_id,
+      estate_id: args.p_estate_id,
+      library_version: args.p_library_version,
+      title: args.p_title,
+    });
+    return { id: row.id, receipt: '1', legacy: false, replayed: false };
   });
   db.current = fake;
 });

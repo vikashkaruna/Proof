@@ -8,6 +8,7 @@ import {
 import { discoveryRoutes } from './routes/discovery.js';
 import type { DiscoveryService } from './connectors/discovery.js';
 import { Hono } from 'hono';
+import { PUBLIC_CONTROL_REVIEW_MAX_BYTES } from '@axiom/types';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { cors } from 'hono/cors';
@@ -160,6 +161,17 @@ export function createApp(
     '/v1/plans/owned-synthetic/outcome',
   ])
     app.use(path, boundedJsonBody(16384));
+  app.use('/v1/engagements', boundedJsonBody(4096));
+  app.use('/v1/public-control-review-sets', boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES));
+  app.use('/v1/public-control-review-sets/*', async (c, next) => {
+    if (
+      /^\/v1\/public-control-review-sets\/operations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      )
+    )
+      return boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES + 8192)(c, next);
+    return next();
+  });
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);

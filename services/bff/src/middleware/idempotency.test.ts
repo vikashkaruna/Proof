@@ -43,6 +43,9 @@ async function buildApp(
   app.use('/v1/*', idempotency);
   app.post('/v1/execute', (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
   for (const path of [
+    '/v1/engagements',
+    '/v1/engagements-extra',
+    '/v1/engagements/extra',
     '/v1/plans/owned-synthetic',
     '/v1/plans/owned-synthetic/cancel',
     '/v1/plans/owned-synthetic/outcome',
@@ -283,4 +286,17 @@ it.each([
   });
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ error: { code: 'idempotency_unavailable' } });
+});
+
+it('lets only exact intake POST reach live atomic replay without a generic cached claim', async () => {
+  const double = createSupabaseDouble({});
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ NODE_ENV: 'test' }, double);
+  const response = await app.request('/v1/engagements', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': 'opaque-operation' },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(double.createClient).not.toHaveBeenCalled();
 });
