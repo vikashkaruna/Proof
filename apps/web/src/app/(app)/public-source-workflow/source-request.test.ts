@@ -3,6 +3,7 @@ import { webcrypto } from 'node:crypto';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import {
+  SourceWorkflowError,
   clearSourceOperation,
   loadSourceOperation,
   operationStorageKey,
@@ -246,4 +247,78 @@ it('refuses private facts or falsely completed human review in an otherwise shap
   const value = await result();
   value.data.output.observation.requires_human_review = false;
   await expect(validateSourceObservation(value, expected)).rejects.toThrow();
+});
+
+it('preserves only the allowlisted GET recapture refusal and never reflects server messages', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { error: { code: 'website_recapture_required', message: 'PRIVATE_SERVER_DETAIL' } },
+          { status: 409 },
+        ),
+      ),
+  );
+  try {
+    await sourceRequest(
+      TENANT,
+      '/public-website-checks/' + CHECK + '/control-review?engagementId=' + ENGAGEMENT,
+    );
+    throw new Error('expected refusal');
+  } catch (error) {
+    expect(error).toBeInstanceOf(SourceWorkflowError);
+    expect((error as SourceWorkflowError).readRefusal).toEqual({
+      status: 409,
+      code: 'website_recapture_required',
+    });
+    expect(String(error)).not.toContain('PRIVATE_SERVER_DETAIL');
+  }
+});
+it.each([403, 503])(
+  'does not grant recapture semantics to an untrusted %i error',
+  async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ error: { code: 'website_recapture_required' } }, { status }),
+        ),
+    );
+    const refusal = await sourceRequest(TENANT, '/read').catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(SourceWorkflowError);
+    expect((refusal as SourceWorkflowError).readRefusal).toBeUndefined();
+  },
+);
+
+it('preserves mutation and reconciliation refusals even if the server sends the read-only recapture code', async () => {
+  const fetcher = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json(
+        { error: { code: 'website_recapture_required', message: 'PRIVATE_SERVER_MESSAGE' } },
+        { status: 409 },
+      ),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  const write = await sourceRequest(
+    TENANT,
+    `/public-source-bindings/${BINDING}/agents/drishti/run`,
+    {
+      operation: operation(),
+    },
+  ).catch((error: unknown) => error);
+  expect(write).toBeInstanceOf(SourceWorkflowError);
+  expect((write as SourceWorkflowError).message).toBe(
+    'The action was not confirmed. Reconcile the retained request before continuing.',
+  );
+  expect((write as SourceWorkflowError).readRefusal).toBeUndefined();
+  const read = await sourceRequest(TENANT, '/request', { requestKey: KEY }).catch(
+    (error: unknown) => error,
+  );
+  expect(read).toBeInstanceOf(SourceWorkflowError);
+  expect((read as SourceWorkflowError).message).toBe('The recorded state could not be loaded.');
+  expect((read as SourceWorkflowError).readRefusal).toBeUndefined();
 });

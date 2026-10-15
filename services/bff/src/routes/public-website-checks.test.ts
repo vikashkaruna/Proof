@@ -40,7 +40,59 @@ vi.mock('@axiom/supabase', () => ({
   createSupabaseAdmin: () => db.current!.client,
   createHumanActionWriter: () => db.current!.client,
 }));
+import { validateFreshPublicCapture } from '../connectors/public-capture-validation-v2.js';
+import { encodePublicEvidencePayloadV2 } from '../connectors/public-evidence-codec-v2.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
+
+function captureFixture(result: WebsiteCheck) {
+  const pages = (['root', 'privacy', 'contact', 'terms', 'consent'] as const).map((page) => {
+    const audit = result.auditPages.find((p) => p.kind === page);
+    return {
+      page,
+      state:
+        page === 'root' || audit?.status === 'checked'
+          ? ('examined' as const)
+          : ('unexamined' as const),
+      ...(page === 'root'
+        ? { contentSha256: result.contentSha256 }
+        : audit?.contentSha256
+          ? { contentSha256: audit.contentSha256 }
+          : {}),
+      truncated: false,
+      coverageReasons: [],
+    };
+  });
+  const encoded = encodePublicEvidencePayloadV2({
+    version: 2,
+    extractorVersion: 'public-static-evidence-1',
+    pages,
+    candidates: [],
+    candidatesTruncated: false,
+    scope: 'bounded_public_pages',
+    requiresHumanReview: true,
+  });
+  return {
+    check: result,
+    evidence: {
+      codec: encoded.codec,
+      payloadText: encoded.payloadText,
+      payloadSha256: encoded.payloadSha256,
+      pageSources: pages.map((p) => ({
+        page: p.page,
+        state: p.state,
+        contentSha256: p.contentSha256 ?? null,
+        requestedUrl:
+          p.page === 'root'
+            ? result.requestedUrl
+            : (result.auditPages.find((a) => a.kind === p.page)?.requestedUrl ?? null),
+        finalUrl:
+          p.page === 'root'
+            ? result.finalUrl
+            : (result.auditPages.find((a) => a.kind === p.page)?.finalUrl ?? null),
+      })),
+    },
+  };
+}
 
 let fake: FakeDb;
 let recorded: Record<string, unknown>[];
@@ -60,7 +112,7 @@ beforeEach(() => {
   });
   db.current = fake;
   recorded = [];
-  fake.onRpc('record_public_website_check', (args) => {
+  fake.onRpc('record_public_website_control_capture', (args) => {
     recorded.push(args);
     return { id: 'new-check' };
   });
@@ -73,7 +125,10 @@ function app(role: UserRole, probe = async () => check) {
     c.set('role', role);
     await next();
   });
-  app.route('/v1', publicWebsiteCheckRoutes({ check: probe }));
+  app.route(
+    '/v1',
+    publicWebsiteCheckRoutes({ capture: async () => captureFixture(await probe()) }),
+  );
   return app;
 }
 const post = (role: UserRole, probe?: () => Promise<WebsiteCheck>) =>
@@ -111,7 +166,6 @@ describe('public website check API', () => {
     expect(recorded[0]).toMatchObject({
       p_tenant_id: TENANT,
       p_actor_id: USER,
-      p_status: 'checked',
       p_requested_url: check.requestedUrl,
       p_final_url: check.finalUrl,
       p_result: check,
@@ -161,7 +215,7 @@ describe('public website check API', () => {
   });
 
   it('fails closed when the human audit writer is unavailable', async () => {
-    fake.failNextRpc('record_public_website_check');
+    fake.failNextRpc('record_public_website_control_capture');
     const response = await post(UserRole.OWNER);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: { code: 'website_check_record_unavailable' } });
@@ -254,4 +308,44 @@ describe('versioned public form metadata storage boundary', () => {
     expect(response.status).toBe(503);
     expect(recorded).toHaveLength(0);
   });
+});
+
+describe('fresh evidence atomic capture boundary', () => {
+  it('sends canonical evidence and provenance to the same atomic record RPC', async () => {
+    expect((await post(UserRole.OWNER)).status).toBe(201);
+    const args = recorded[0]!;
+    expect(args.p_codec).toBe('axiom-public-evidence-v2-canonical-json-1');
+    expect(args.p_payload_sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(args.p_page_sources).toHaveLength(5);
+    expect(JSON.parse(String(args.p_payload_text)).pages[0].contentSha256).toBe(
+      check.contentSha256,
+    );
+    expect(args.p_result).toEqual(check);
+  });
+});
+
+it.each([
+  'hash',
+  'bytes',
+  'root',
+  'foreign_origin',
+  'missing_page',
+  'duplicate_page',
+  'unexamined_url',
+  'final_url',
+])('refuses invalid fresh evidence provenance before any write: %s', (kind) => {
+  const capture = captureFixture(check);
+  expect(validateFreshPublicCapture(capture)).toBe(true);
+  if (kind === 'hash') capture.evidence.payloadSha256 = 'f'.repeat(64);
+  if (kind === 'bytes') capture.evidence.payloadText += ' ';
+  if (kind === 'root') capture.check = { ...check, contentSha256: 'f'.repeat(64) };
+  if (kind === 'foreign_origin')
+    capture.evidence.pageSources[1]!.finalUrl = 'https://foreign.org/privacy';
+  if (kind === 'missing_page') capture.evidence.pageSources.pop();
+  if (kind === 'duplicate_page') capture.evidence.pageSources[2]!.page = 'root';
+  if (kind === 'unexamined_url')
+    capture.evidence.pageSources[4]!.requestedUrl = 'https://public.org/consent';
+  if (kind === 'final_url')
+    capture.evidence.pageSources[0]!.finalUrl = 'https://public.org/changed';
+  expect(validateFreshPublicCapture(capture)).toBe(false);
 });

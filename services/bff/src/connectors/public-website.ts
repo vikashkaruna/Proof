@@ -12,6 +12,9 @@ import {
   type PublicFormMetadata,
 } from './public-form-metadata.js';
 
+import { extractPublicEvidenceV2 } from './public-evidence-extractor-v2.js';
+import { encodePublicEvidencePayloadV2 } from './public-evidence-codec-v2.js';
+
 const MAX_BYTES = 512 * 1024;
 const TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 3;
@@ -249,14 +252,23 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+type WebsiteDeps = {
+  resolve4?: (host: string) => Promise<string[]>;
+  fetchPage?: (url: URL, address: string, signal: AbortSignal) => Promise<WebsitePage>;
+};
+type CapturePage = (
+  kind: 'root' | AuditKind,
+  body: Buffer,
+  digest: string,
+  finalUrl: string,
+) => void;
+
 async function checkSinglePage(
   requested: URL,
   signal: AbortSignal,
-  deps: {
-    resolve4?: (host: string) => Promise<string[]>;
-    fetchPage?: (url: URL, address: string, signal: AbortSignal) => Promise<WebsitePage>;
-  },
+  deps: WebsiteDeps,
   allowedOrigin?: string,
+  capture?: (body: Buffer, digest: string, finalUrl: string) => void,
 ): Promise<Omit<WebsiteCheck, 'auditPages' | 'observations'>> {
   let current = requested;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
@@ -290,7 +302,7 @@ async function checkSinglePage(
     if (page.body.length > MAX_BYTES) throw new PublicWebsiteRefused('response_too_large');
     const document = parsePublicHtml(page.body.toString('utf8'));
     const contentSha256 = createHash('sha256').update(page.body).digest('hex');
-    return {
+    const result: Omit<WebsiteCheck, 'auditPages' | 'observations'> = {
       requestedUrl: requested.href,
       finalUrl: current.href,
       checkedAt: new Date().toISOString(),
@@ -301,20 +313,26 @@ async function checkSinglePage(
       formMetadata: extractPublicFormMetadata(document, contentSha256),
       ...extract(document, current),
     };
+    capture?.(page.body, contentSha256, current.href);
+    return result;
   }
   throw new PublicWebsiteRefused('redirect_refused');
 }
 
 /** Check the starting page and at most one same-origin public page per notice kind. */
-export async function checkPublicWebsite(
+async function collectPublicWebsite(
   rawUrl: string,
   signal: AbortSignal,
-  deps: {
-    resolve4?: (host: string) => Promise<string[]>;
-    fetchPage?: (url: URL, address: string, signal: AbortSignal) => Promise<WebsitePage>;
-  } = {},
+  deps: WebsiteDeps,
+  capture?: CapturePage,
 ): Promise<WebsiteCheck> {
-  const root = await checkSinglePage(parsePublicUrl(rawUrl), signal, deps);
+  const root = await checkSinglePage(
+    parsePublicUrl(rawUrl),
+    signal,
+    deps,
+    undefined,
+    capture ? (body, digest, finalUrl) => capture('root', body, digest, finalUrl) : undefined,
+  );
   const origin = new URL(root.finalUrl).origin;
   const auditPages: AuditPage[] = [];
   const observations: AuditObservation[] = [];
@@ -341,7 +359,13 @@ export async function checkPublicWebsite(
     const url = parsePublicUrl(candidate.url);
     seen.add(url.href);
     try {
-      const page = await checkSinglePage(url, signal, deps, origin);
+      const page = await checkSinglePage(
+        url,
+        signal,
+        deps,
+        origin,
+        capture ? (body, digest, finalUrl) => capture(kind, body, digest, finalUrl) : undefined,
+      );
       auditPages.push({
         kind,
         requestedUrl: url.href,
@@ -364,4 +388,145 @@ export async function checkPublicWebsite(
     }
   }
   return { ...root, auditPages, observations };
+}
+
+/** Legacy capture remains root plus at most three notice pages and returns only
+ * the original v1 shape. No evidence capture, consent fetch or new hash codec. */
+export function checkPublicWebsite(
+  rawUrl: string,
+  signal: AbortSignal,
+  deps: WebsiteDeps = {},
+): Promise<WebsiteCheck> {
+  return collectPublicWebsite(rawUrl, signal, deps);
+}
+
+function consentTarget(body: Buffer, base: URL, seen: ReadonlySet<string>): URL | undefined {
+  const elements = [...publicHtmlElements(parsePublicHtml(body.toString('utf8')), true)];
+  let documentBase = base;
+  const baseHref = elements
+    .find((element) => element.tagName === 'base')
+    ?.attrs.find((attr) => attr.name === 'href')?.value;
+  if (baseHref) {
+    try {
+      documentBase = new URL(baseHref, base);
+    } catch {
+      /* Same bounded base handling as legacy. */
+    }
+  }
+  for (const element of elements) {
+    if (element.tagName !== 'a') continue;
+    const href = element.attrs.find((attr) => attr.name === 'href')?.value;
+    if (!href) continue;
+    try {
+      const target = parsePublicUrl(new URL(href, documentBase).href);
+      if (
+        target.origin === base.origin &&
+        target.href.length <= 512 &&
+        !seen.has(target.href) &&
+        /consent/i.test(publicHtmlText(element) + ' ' + target.pathname)
+      )
+        return target;
+    } catch {
+      /* Only ordinary same-origin public navigation is eligible. */
+    }
+  }
+  return undefined;
+}
+
+/** Fresh v2 evidence is extracted from the same accepted response bytes before
+ * discarding them, never by rereading or enriching historical v1 checks. Only
+ * v2 adds one separately linked same-origin Consent page (five pages maximum).
+ * No tenant, engagement, check ID or date is fabricated here. The caller owns
+ * authentication, real scope binding and durable/recoverable settlement.
+ */
+export async function checkPublicWebsiteEvidenceV2(
+  rawUrl: string,
+  signal: AbortSignal,
+  deps: WebsiteDeps = {},
+) {
+  type Kind = 'root' | AuditKind | 'consent';
+  const captured = new Map<Kind, { body: Buffer; contentSha256: string; finalUrl: string }>();
+  try {
+    const check = await collectPublicWebsite(
+      rawUrl,
+      signal,
+      deps,
+      (kind, body, contentSha256, finalUrl) => {
+        // Maximum five accepted pages of 512KiB each, retained only in this call.
+        captured.set(kind, { body: Buffer.from(body), contentSha256, finalUrl });
+      },
+    );
+    if (signal.aborted) throw new PublicWebsiteRefused('timeout');
+    const root = captured.get('root');
+    if (!root) throw new PublicWebsiteRefused('evidence_unavailable');
+    const seen = new Set([
+      check.finalUrl,
+      ...check.auditPages.flatMap((page) => [
+        page.requestedUrl,
+        ...(page.finalUrl ? [page.finalUrl] : []),
+      ]),
+    ]);
+    const origin = new URL(check.finalUrl).origin;
+    const consent = consentTarget(root.body, new URL(check.finalUrl), seen);
+    let consentUnavailable = false;
+    if (consent) {
+      try {
+        await checkSinglePage(consent, signal, deps, origin, (body, contentSha256, finalUrl) => {
+          captured.set('consent', { body: Buffer.from(body), contentSha256, finalUrl });
+        });
+      } catch {
+        if (signal.aborted) throw new PublicWebsiteRefused('timeout');
+        consentUnavailable = true;
+      }
+    }
+    if (signal.aborted) throw new PublicWebsiteRefused('timeout');
+    const pages = (['root', 'privacy', 'contact', 'terms', 'consent'] as const).map((kind) => {
+      const page = captured.get(kind);
+      if (page)
+        return {
+          page: kind,
+          state: 'examined' as const,
+          html: page.body,
+          contentSha256: page.contentSha256,
+        };
+      const unavailable =
+        kind === 'consent'
+          ? consentUnavailable
+          : check.observations.some(
+              (observation) => observation.kind === kind && observation.status === 'unavailable',
+            );
+      return {
+        page: kind,
+        state: unavailable ? ('unavailable' as const) : ('unexamined' as const),
+      };
+    });
+    const encoded = encodePublicEvidencePayloadV2(extractPublicEvidenceV2({ pages }));
+    const pageSources = pages.map((page) => {
+      const accepted = captured.get(page.page);
+      const requestedUrl =
+        page.page === 'root'
+          ? check.requestedUrl
+          : page.page === 'consent'
+            ? (consent?.href ?? null)
+            : (check.auditPages.find((audit) => audit.kind === page.page)?.requestedUrl ?? null);
+      return {
+        page: page.page,
+        requestedUrl: page.state === 'unexamined' ? null : requestedUrl,
+        finalUrl: accepted?.finalUrl ?? null,
+        state: page.state,
+        contentSha256: accepted?.contentSha256 ?? null,
+      };
+    });
+    return {
+      check,
+      evidence: {
+        codec: encoded.codec,
+        payloadText: encoded.payloadText,
+        payloadSha256: encoded.payloadSha256,
+        pageSources,
+      },
+    };
+  } finally {
+    captured.clear();
+  }
 }

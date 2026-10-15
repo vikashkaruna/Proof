@@ -248,6 +248,7 @@ export const LedgerActionType = {
   CONNECTOR_REGISTERED: 'connector.registered',
   CONNECTOR_UPDATED: 'connector.updated',
   CONNECTOR_WEBSITE_CHECKED: 'connector.website.checked',
+  CONNECTOR_WEBSITE_EVIDENCE_CAPTURED: 'connector.website.evidence_captured',
   CONNECTOR_CREDENTIAL_CHANGED: 'connector.credential_changed',
   CONNECTOR_TOKEN_REQUESTED: 'connector.token_requested',
   CONNECTOR_TOKEN_ACQUIRED: 'connector.token_acquired',

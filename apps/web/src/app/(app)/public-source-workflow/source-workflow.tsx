@@ -28,6 +28,7 @@ import {
 } from './source-request';
 import { SourceProjectionView, SourceResultView } from './source-result';
 import { SourceReview } from './source-review';
+import { PublicControlReview } from './public-control-review';
 
 const checksSchema = z.object({
   data: z
@@ -598,6 +599,7 @@ function Workflow({
         </p>
       </div>
       {preview && <SourceProjectionView preview={preview} />}
+      <PublicControlReview tenantId={tenantId} engagementId={engagementId} checkId={checkId} />
       {pending && (
         <section
           aria-label="Retained request"

@@ -18,6 +18,7 @@ import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
+import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
@@ -255,6 +256,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
   app.route('/', publicWebsiteCheckRoutes());
+  app.route('/', publicWebsiteControlReviewRoutes());
   app.route('/', publicSourceBindingRoutes());
   app.route('/', publicSourceReadRoutes());
   app.route('/', publicSourceReviewRoutes());

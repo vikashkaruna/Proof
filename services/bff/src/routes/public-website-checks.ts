@@ -3,9 +3,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { Capability } from '@axiom/types';
-import { checkPublicWebsite, PublicWebsiteRefused } from '../connectors/public-website.js';
+import {
+  checkPublicWebsiteEvidenceV2,
+  PublicWebsiteRefused,
+} from '../connectors/public-website.js';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
+import { validateFreshPublicCapture } from '../connectors/public-capture-validation-v2.js';
 import { publicFormMetadataSchema } from '../connectors/public-form-metadata.js';
 
 const bodySchema = z.object({ url: z.string().trim().min(1).max(2048) }).strict();
@@ -82,8 +86,8 @@ const statusByCode: Record<string, 400 | 422 | 502 | 504> = {
   http_status: 502,
 };
 
-type Check = typeof checkPublicWebsite;
-export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
+type Capture = typeof checkPublicWebsiteEvidenceV2;
+export function publicWebsiteCheckRoutes(deps: { capture?: Capture } = {}) {
   const app = new Hono<{ Variables: Variables }>();
   app.get('/public-website-checks', async (c) => {
     const denied = requireCapability(c, Capability.POSTURE_READ);
@@ -127,9 +131,9 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
       return c.json({ error: { code: 'rate_limited' } }, 429);
     }
     const correlationId = randomUUID();
-    let result: Awaited<ReturnType<Check>>;
+    let result: Awaited<ReturnType<Capture>>;
     try {
-      result = await (deps.check ?? checkPublicWebsite)(
+      result = await (deps.capture ?? checkPublicWebsiteEvidenceV2)(
         parsed.data.url,
         AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]),
       );
@@ -138,21 +142,26 @@ export function publicWebsiteCheckRoutes(deps: { check?: Check } = {}) {
       const status = statusByCode[code] ?? 502;
       return c.json({ error: { code } }, status);
     }
-    if (!checkSchema.safeParse(result).success)
+    if (!checkSchema.safeParse(result.check).success || !validateFreshPublicCapture(result))
       return c.json({ error: { code: 'website_check_invalid_result' } }, 503);
-    const { data, error } = await createHumanActionWriter().rpc('record_public_website_check', {
-      p_tenant_id: c.get('tenantId'),
-      p_actor_id: c.get('user').id,
-      p_correlation_id: correlationId,
-      p_requested_url: result.requestedUrl,
-      p_final_url: result.finalUrl,
-      p_status: 'checked',
-      p_result: result,
-      p_error_code: null,
-    });
+    const { data, error } = await createHumanActionWriter().rpc(
+      'record_public_website_control_capture',
+      {
+        p_tenant_id: c.get('tenantId'),
+        p_actor_id: c.get('user').id,
+        p_correlation_id: correlationId,
+        p_requested_url: result.check.requestedUrl,
+        p_final_url: result.check.finalUrl,
+        p_result: result.check,
+        p_codec: result.evidence.codec,
+        p_payload_text: result.evidence.payloadText,
+        p_payload_sha256: result.evidence.payloadSha256,
+        p_page_sources: result.evidence.pageSources,
+      },
+    );
     if (error || !data?.id)
       return c.json({ error: { code: 'website_check_record_unavailable' } }, 503);
-    return c.json({ data: { id: data.id, ...result } }, 201);
+    return c.json({ data: { id: data.id, ...result.check } }, 201);
   });
   return app;
 }
