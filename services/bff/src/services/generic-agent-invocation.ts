@@ -438,7 +438,7 @@ export async function invokeGenericAgent(
               p_correlation_id: correlationId,
               p_request_hash: requestHash,
               p_status: terminalStatus,
-              p_error_code: succeeded ? null : failureCode,
+              p_error: succeeded ? null : failureCode,
               p_latency_ms: result?.latency_ms ?? null,
               p_input_tokens: result?.input_tokens ?? null,
               p_output_tokens: result?.output_tokens ?? null,

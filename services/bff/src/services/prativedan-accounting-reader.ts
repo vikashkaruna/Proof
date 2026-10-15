@@ -16,7 +16,7 @@ export function prativedanAccountingReader(
   dispatch: unknown,
   port: PrativedanAccountingControllerPort,
 ): AccountedResultReadPort {
-  const binding = modelAccountingBindingSchema.parse(dispatch);
+  const binding = Object.freeze(modelAccountingBindingSchema.parse(dispatch));
   if (binding.agent !== 'prativedan' || binding.agent_version !== '0.1.0')
     throw new AccountedResultRefused();
   return {
@@ -26,12 +26,16 @@ export function prativedanAccountingReader(
         args.t !== binding.tenant_id ||
         args.r !== binding.run_id ||
         args.rh !== binding.request_sha256 ||
-        Object.keys(args).length !== 3
+        Object.keys(args).length !== 3 ||
+        Object.keys(args).some((key) => key !== 't' && key !== 'r' && key !== 'rh')
       )
         throw new AccountedResultRefused();
       const authority = await port.verifiedContext(binding);
       return port.call('prativedan_read_model_accounting_result', {
-        ...args,
+        // Never forward the caller's mutable object after the authority await.
+        t: binding.tenant_id,
+        r: binding.run_id,
+        rh: binding.request_sha256,
         k: binding.correlation_id,
         authority,
       });
