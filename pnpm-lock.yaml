@@ -555,6 +555,9 @@ importers:
 
   tests/e2e:
     devDependencies:
+      '@hono/node-server':
+        specifier: 2.1.4
+        version: 2.1.4(hono@4.13.13)
       '@playwright/test':
         specifier: ^1.64.0
         version: 1.64.0
