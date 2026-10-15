@@ -83,6 +83,7 @@ it('binds all activity and review reads to the internal tenant', async () => {
   expect(state.calls.every(([, key, value]) => key !== 'tenant_id' || value === 'tenant-1')).toBe(
     true,
   );
+  expect(view).toContain('&quot;tenantId&quot;:&quot;tenant-1&quot;');
   expect(view).toContain('&quot;ledgerTodayCount&quot;:1');
   expect(view).toContain('&quot;awaitingReviewCount&quot;:1');
   expect(view).toContain('Saved plan');

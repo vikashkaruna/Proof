@@ -81,3 +81,72 @@ it('does not treat a bad code as successful login', async () => {
   await waitFor(() => expect(screen.getByText('Invalid code')).toBeTruthy());
   expect(navigation.replace).not.toHaveBeenCalled();
 });
+
+it('uses distinct secure HTTP fallback keys for login attempts and preserves the verification flow', async () => {
+  let entropy = 0;
+  const getRandomValues = vi.fn((bytes: Uint8Array) => {
+    bytes.fill(++entropy);
+    return bytes;
+  });
+  vi.stubGlobal('crypto', { getRandomValues });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ error: { message: 'Retry verification' } }, { status: 503 }),
+    )
+    .mockResolvedValueOnce(Response.json({ challengeId: 'challenge-http' }))
+    .mockResolvedValueOnce(Response.json({ verified: true }));
+  vi.stubGlobal('fetch', fetcher);
+  renderForm();
+  fireEvent.change(screen.getByLabelText('Authentication code'), { target: { value: ' 123456 ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+  await screen.findByText('Retry verification');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+  await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('/dashboard'));
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+    '/api/bff/v1/mfa/challenge',
+    '/api/bff/v1/mfa/challenge',
+    '/api/bff/v1/mfa/challenge/challenge-http/verify',
+  ]);
+  const attempts = fetcher.mock.calls.slice(0, 2);
+  for (const [, init] of attempts) {
+    expect(init.headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-1',
+      'Idempotency-Key': expect.stringMatching(
+        /^mfa-challenge-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+      ),
+    });
+    expect(JSON.parse(init.body)).toEqual({ purpose: 'login' });
+  }
+  expect(attempts[0]![1].headers['Idempotency-Key']).not.toBe(
+    attempts[1]![1].headers['Idempotency-Key'],
+  );
+  expect(JSON.parse(fetcher.mock.calls[2]![1].body)).toEqual({ code: '123456' });
+  expect(getRandomValues).toHaveBeenCalledTimes(2);
+});
+
+it('keeps login verification recoverable and sends nothing without secure randomness', async () => {
+  vi.stubGlobal('crypto', {});
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json({ error: { message: 'Challenge unavailable' } }, { status: 503 }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  renderForm();
+  const code = screen.getByLabelText('Authentication code') as HTMLInputElement;
+  fireEvent.change(code, { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+  await screen.findByText(/could not be prepared.*Nothing was sent/);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(code.value).toBe('123456');
+  expect((screen.getByRole('button', { name: 'Verify' }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  vi.stubGlobal('crypto', { randomUUID: () => 'restored-login' });
+  fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+  await screen.findByText('Challenge unavailable');
+  expect(fetcher).toHaveBeenCalledOnce();
+});

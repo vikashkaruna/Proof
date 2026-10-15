@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentInvocationError, invokeAgent } from './invoke-agent';
+const TENANT = '10000000-0000-4000-8000-000000000001';
 const transport = vi.fn<typeof fetch>();
 function result(init?: RequestInit, changes: Record<string, unknown> = {}) {
   const input = JSON.parse(String(init?.body)) as { correlation_id: string };
@@ -21,7 +22,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 it('sends JSON with a fresh correlation and accepts only the matching confirmed result', async () => {
   transport.mockImplementation(async (_url, init) => new Response(JSON.stringify(result(init))));
-  const reply = await invokeAgent('drishti', {
+  const reply = await invokeAgent('drishti', TENANT, {
     correlation_id: 'caller-value',
     scope: 'workbench',
   });
@@ -41,7 +42,7 @@ it.each([400, 401, 403, 500, 502, 503])(
     transport.mockImplementation(
       async (_url, init) => new Response(JSON.stringify(result(init)), { status }),
     );
-    await expect(invokeAgent('drishti')).rejects.toThrow(AgentInvocationError);
+    await expect(invokeAgent('drishti', TENANT)).rejects.toThrow(AgentInvocationError);
   },
 );
 it.each([
@@ -58,7 +59,7 @@ it.each([
   transport.mockImplementation(
     async (_url, init) => new Response(JSON.stringify(result(init, change))),
   );
-  await expect(invokeAgent('drishti')).rejects.toThrow(AgentInvocationError);
+  await expect(invokeAgent('drishti', TENANT)).rejects.toThrow(AgentInvocationError);
 });
 it('displays the bounded public BFF explanation for an unconfirmed persisted outcome', async () => {
   transport.mockResolvedValue(
@@ -66,16 +67,20 @@ it('displays the bounded public BFF explanation for an unconfirmed persisted out
       status: 503,
     }),
   );
-  await expect(invokeAgent('drishti')).rejects.toThrow('Inspect this run before retrying.');
+  await expect(invokeAgent('drishti', TENANT)).rejects.toThrow('Inspect this run before retrying.');
 });
 it('sanitizes network and malformed response errors', async () => {
   transport.mockRejectedValueOnce(new Error('private-network-detail'));
-  await expect(invokeAgent('drishti')).rejects.toThrow('The agent outcome could not be confirmed.');
+  await expect(invokeAgent('drishti', TENANT)).rejects.toThrow(
+    'The agent outcome could not be confirmed.',
+  );
   transport.mockResolvedValueOnce(new Response('private-invalid-json'));
-  await expect(invokeAgent('drishti')).rejects.toThrow('The agent outcome could not be confirmed.');
+  await expect(invokeAgent('drishti', TENANT)).rejects.toThrow(
+    'The agent outcome could not be confirmed.',
+  );
 });
 it('rejects invalid agent paths before dispatch', async () => {
-  await expect(invokeAgent('../admin')).rejects.toThrow();
+  await expect(invokeAgent('../admin', TENANT)).rejects.toThrow();
   expect(transport).not.toHaveBeenCalled();
 });
 
@@ -86,7 +91,7 @@ it('invokes using a secure UUID fallback when HTTP does not expose randomUUID', 
   });
   vi.stubGlobal('crypto', { getRandomValues });
   transport.mockImplementation(async (_url, init) => Response.json(result(init)));
-  const reply = await invokeAgent('drishti');
+  const reply = await invokeAgent('drishti', TENANT);
   expect(reply.correlation_id).toMatch(
     /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
   );
@@ -99,9 +104,39 @@ it.each(['rng', 'serialization'])(
     vi.stubGlobal('crypto', failure === 'rng' ? {} : { randomUUID: () => 'correlation-test' });
     const input: Record<string, unknown> = {};
     if (failure === 'serialization') input.self = input;
-    await expect(invokeAgent('drishti', input)).rejects.toThrow(
+    await expect(invokeAgent('drishti', TENANT, input)).rejects.toThrow(
       'The agent request could not be prepared. Nothing was sent.',
     );
+    expect(transport).not.toHaveBeenCalled();
+  },
+);
+
+it('binds dispatch to the explicit rendered tenant rather than a later cookie selection', async () => {
+  transport.mockImplementation(async (_url, init) => Response.json(result(init)));
+  await invokeAgent('drishti', '10000000-0000-4000-8000-000000000001', { scope: 'manual_trigger' });
+  expect(transport.mock.calls[0]![1]?.headers).toMatchObject({
+    'X-Tenant-Id': '10000000-0000-4000-8000-000000000001',
+  });
+  expect(JSON.parse(String(transport.mock.calls[0]![1]?.body))).toMatchObject({
+    tenant_id: '10000000-0000-4000-8000-000000000001',
+    scope: 'manual_trigger',
+  });
+});
+it.each([undefined, '', 'not-a-tenant'])(
+  'refuses missing or invalid tenant %s before dispatch',
+  async (tenant) => {
+    await expect(invokeAgent('drishti', tenant as string)).rejects.toThrow();
+    expect(transport).not.toHaveBeenCalled();
+  },
+);
+it.each(['tenant_id', 'tenantId'])(
+  'refuses a conflicting input %s before dispatch',
+  async (key) => {
+    await expect(
+      invokeAgent('drishti', '10000000-0000-4000-8000-000000000001', {
+        [key]: '20000000-0000-4000-8000-000000000002',
+      }),
+    ).rejects.toThrow();
     expect(transport).not.toHaveBeenCalled();
   },
 );

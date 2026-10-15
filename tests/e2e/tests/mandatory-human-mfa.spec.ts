@@ -36,6 +36,16 @@ for (const role of MANDATORY_ROLES) {
       isInternal: role === 'founder' || role === 'axiom_analyst',
     });
     if (!who.totpSecret) throw new Error('The enrolled journey needs its own factor');
+    // Exercise the admin's real login-MFA path when randomUUID is unavailable.
+    // No enrolment, challenge, verification or session assertion is bypassed.
+    if (role === 'admin') {
+      await page.addInitScript(() => {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: undefined,
+          configurable: true,
+        });
+      });
+    }
     await selectTenant(page, 'a');
     await signInAs(page, who.email, who.password);
     await page.goto('/dashboard');

@@ -280,3 +280,68 @@ it('does not claim plan rejection from a successful HTTP response lacking confir
   expect(screen.queryByText('Plan rejected. Actions have been marked as skipped.')).toBeNull();
   expect(refresh).toHaveBeenCalledOnce();
 });
+
+it('uses distinct secure HTTP challenge keys without broadening eligible approval scope', async () => {
+  let entropy = 0;
+  const getRandomValues = vi.fn((bytes: Uint8Array) => {
+    bytes.fill(++entropy);
+    return bytes;
+  });
+  vi.stubGlobal('crypto', { getRandomValues });
+  const fetcher = vi
+    .fn()
+    .mockImplementation(async () =>
+      Response.json({ challengeId: 'challenge-http', expiresAt: '2026-10-15T00:00:00Z' }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  render(<ApprovalActions {...props} canApprove />);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  await screen.findByLabelText(/6-digit code/);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  await screen.findByLabelText(/6-digit code/);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  for (const [url, init] of fetcher.mock.calls) {
+    expect(url).toBe('/api/bff/v1/mfa/challenge');
+    expect(init.headers).toMatchObject({
+      'X-Tenant-Id': 'tenant-1',
+      'Idempotency-Key': expect.stringMatching(
+        /^mfa-challenge-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+      ),
+    });
+    expect(JSON.parse(init.body)).toEqual({
+      purpose: 'approval_issuance',
+      planId: 'plan-1',
+      actionIds: ['action-1'],
+      mode: 'batch',
+    });
+  }
+  expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).not.toBe(
+    fetcher.mock.calls[1]![1].headers['Idempotency-Key'],
+  );
+  expect(getRandomValues).toHaveBeenCalledTimes(2);
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('keeps an approval request recoverable and sends nothing without secure randomness', async () => {
+  vi.stubGlobal('crypto', {});
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(
+      Response.json({ challengeId: 'challenge-restored', expiresAt: '2026-10-15T00:00:00Z' }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  render(<ApprovalActions {...props} canApprove />);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  await screen.findByText(/could not be prepared.*Nothing was sent/);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText(/6-digit code/)).toBeNull();
+  expect(
+    (screen.getByRole('button', { name: 'Approve 1 action' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+  expect(refresh).not.toHaveBeenCalled();
+  vi.stubGlobal('crypto', { randomUUID: () => 'restored-approval' });
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  await screen.findByLabelText(/6-digit code/);
+  expect(fetcher).toHaveBeenCalledOnce();
+});
