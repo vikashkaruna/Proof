@@ -155,16 +155,46 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/ready")
-async def ready() -> dict[str, object]:
+async def ready() -> JSONResponse:
     settings: Settings = app.state.settings
-    return {
-        "status": "ready",
-        "providers": {
-            "self_hosted": bool(settings.self_hosted_base_url),
-            "bedrock": bool(settings.aws_region),
-        },
-        "redaction_enabled": settings.pii_redaction_enabled,
+    # Configuration eligibility only: this endpoint performs no provider calls.
+    # Keep this aligned with _dispatch: only on-prem uses the local transport,
+    # hosted candidates require a key, and no Bedrock transport exists here.
+    hosted = settings.environment != "onprem"
+    configured = {
+        "self_hosted": bool(settings.self_hosted_base_url),
+        "bedrock": False,
+        "anthropic": bool(settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")),
+        "openai": bool(settings.openai_api_key or os.environ.get("OPENAI_API_KEY")),
+        "gemini": bool(
+            settings.gemini_api_key
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+        ),
     }
+    enabled = {
+        name: value and (not hosted if name == "self_hosted" else hosted)
+        for name, value in configured.items()
+    }
+    eligible = any(enabled.values())
+    return JSONResponse(
+        status_code=200 if eligible else 503,
+        content={
+            "status": "ready" if eligible else "not_ready",
+            "readiness_basis": "configuration_only",
+            "providers": enabled,
+            "provider_status": {
+                name: {
+                    "implemented": name != "bedrock",
+                    "configured": value,
+                    "enabled": enabled[name],
+                    "availability": "unverified" if enabled[name] else "unavailable",
+                }
+                for name, value in configured.items()
+            },
+            "redaction_enabled": settings.pii_redaction_enabled,
+        },
+    )
 
 
 @app.post("/v1/complete", response_model=CompleteResponse)
